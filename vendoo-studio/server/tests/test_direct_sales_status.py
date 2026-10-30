@@ -351,3 +351,22 @@ def test_invalid_sales_are_refused(env, change):
     item(env.db, "coat")
     assert mark_sold(env, "coat", **change).status_code in (400, 422)
     assert env.db.query(MarketplaceSale).count() == 0
+
+
+def test_analytics_counts_a_sold_item_once_however_many_sales_it_had(env):
+    item(env.db, "tees", quantity=2)
+    line(env.db, "tees", quantity=1, order="a")
+    line(env.db, "tees", quantity=1, order="b")
+    payload = inventory_analytics(env.db, range_id="all")
+    assert payload["sales"]["count"] == 2
+    assert payload["inventory"]["sold"] == 1
+    assert payload["inventory"]["active"] == 0
+
+
+def test_analytics_counts_a_partly_sold_item_as_active_not_sold(env):
+    item(env.db, "tees", quantity=3)
+    line(env.db, "tees", quantity=1)
+    payload = inventory_analytics(env.db, range_id="all")
+    assert payload["sales"]["count"] == 1
+    assert payload["inventory"]["active"] == 1
+    assert payload["inventory"]["sold"] == 0
