@@ -527,15 +527,13 @@ def gaps(listing: dict, market: str) -> list[dict]:
             # is said, not refused.
             found.append(gap(path, f"{row.get('label') or path}: {error}",
                              blocking=not account_resolved(row)))
-        elif (item_field(row, market) and not borrowed and value not in (None, "", [], {})
+        elif (row.get("required") and item_field(row, market) and not borrowed and value not in (None, "", [], {})
               and not is_locked(listing, path)):
             proof = _evidence(listing, path)
             if proof.get("value") != value or not proof.get("quote"):
-                # A required answer with no proof would be sent on the model's
-                # word alone, so it holds the listing. An optional one is only
-                # noted: dropping it changes nothing the marketplace demands.
+                # Required product facts still need evidence before listing.
                 found.append(gap(path, f"{row.get('label') or path}: Check this answer against photo or seller evidence before listing.",
-                                 blocking=bool(row.get("required"))))
+                                 blocking=True))
     return found
 
 
