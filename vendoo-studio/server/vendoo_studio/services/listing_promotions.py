@@ -224,6 +224,8 @@ async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_p
         return
     low, high = facts.get("minimum_discount_percent"), facts.get("maximum_discount_percent")
     if facts.get("offer_price_cents") is None:
+        if low is None or high is None:
+            raise PromotionError(409, f"{name}'s offer limits leave no discount to send on this listing.")
         raise PromotionError(409, f"{name} needs offers to likers between {low}% and {high}% off.")
     row.offer_price_cents = int(facts["offer_price_cents"])
     row.shipping_options = [

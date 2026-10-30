@@ -168,6 +168,11 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertIn("Nobody has liked", self.preview(action="offer", discount_percent=20, floors={self.conv.id: "1"})["note"])
         self.check = {**self.check, "like_count": 3, "offer_price_cents": None}
         self.assertIn("between 10% and 79%", self.preview(action="offer", discount_percent=5)["note"])
+        # A marketplace whose limits leave no valid discount says so instead of "None%".
+        self.check = {**self.check, "minimum_discount_percent": None, "maximum_discount_percent": None}
+        note = self.preview(action="offer", discount_percent=5)["note"]
+        self.assertIn("leave no discount", note)
+        self.assertNotIn("None", note)
 
     def test_lost_reply_is_unknown_blocks_offers_and_check_only_reads(self):
         row = self.preview(action="offer", discount_percent=20, floors={self.conv.id: "30"})
