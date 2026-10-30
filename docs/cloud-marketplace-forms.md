@@ -2,7 +2,9 @@
 
 The first supported marketplace is Poshmark. In a cloud draft, choose
 **Poshmark preview**, then **Load Poshmark form**. Bridge 0.2.39 or later must
-be installed and the current Chrome tab connected. Sign in to Poshmark in the
+be installed and the current Chrome tab connected. Local-app users must update
+Anteroom and use its managed Bridge; a standalone web-test ZIP is incompatible
+with local marketplace actions. Sign in to Poshmark in the
 same Chrome profile when asked.
 
 The preview uses the draft's current General field values, including unsaved

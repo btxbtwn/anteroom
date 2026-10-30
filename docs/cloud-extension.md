@@ -7,7 +7,11 @@ start a marketplace job.
 
 ## Connect
 
-1. Install/load Anteroom Bridge 0.2.38 or later in desktop Chrome. For an
+1. If you use the local app, update Anteroom and use its **Connect Chrome** to
+   install the matching managed Bridge. Standalone web-test ZIPs are for
+   web-only testing; they lack the local app’s build stamp and are rejected
+   by local marketplace actions. The app and Bridge must be updated together.
+   For web-only use, install/load Bridge 0.2.38 or later in desktop Chrome. For an
    unpacked installation, reload the extension in `chrome://extensions` after
    updating its folder, then reload the hosted page. Keep only one Bridge copy
    enabled; disable the older copy if you load a separately extracted folder.
@@ -76,3 +80,19 @@ marketplace actions or touch listings.
 Bridge 0.2.39 adds a strictly bounded read-only General-field payload and native
 form response for Poshmark previews. The original connection protocol remains
 unchanged; no cloud credential is added. See [form previews](cloud-marketplace-forms.md).
+
+
+## Restore the local app after loading a standalone web-test ZIP
+
+Disable the downloaded Bridge in `chrome://extensions`. Choose **Connect Chrome**
+in the local Anteroom app. In Chrome's extensions page, enable Developer mode and
+load the managed folder `~/Library/Application Support/Anteroom/vendoo-extension`
+with **Load unpacked**, or re-enable/reload that managed copy if it is already
+listed. Keep only the managed copy enabled. Local Connect Chrome installs a
+worker with the exact build stamp expected by that app; a standalone ZIP has no
+such stamp. Repeatedly reloading the standalone folder cannot repair that mismatch.
+
+Do not copy a stamp from one build onto another or relax the marketplace build
+check. New cloud features become available to local-app users when the app's
+matching bundled Bridge includes them. A web-only test ZIP is not a substitute
+for an app-and-extension update.
