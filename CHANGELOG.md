@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.542 — 2026-10-29
+
+- Send eBay offers across all current and future listings with one discount and an optional minimum price.
+
 ## 0.1.541 — 2026-10-30
 
 - Protect cloud database setup information and verify its encrypted connection before online sync is enabled.

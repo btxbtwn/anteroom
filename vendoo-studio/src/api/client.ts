@@ -497,6 +497,9 @@ export const api = {
     enable: (attemptIds: string[]) => request<OkResponse>("/ebay-offers/enable", {
       method: "POST", body: JSON.stringify({ attempt_ids: attemptIds, confirm: true }),
     }),
+    enableAll: (discountPercent: number, minimumPrice: string) => request<OkResponse>("/ebay-offers/enable-all", {
+      method: "POST", body: JSON.stringify({ discount_percent: discountPercent, minimum_price: minimumPrice || null, confirm: true }),
+    }),
     pause: (ruleId?: string) => request<OkResponse>(ruleId ? `/ebay-offers/rules/${ruleId}/pause` : "/ebay-offers/pause", { method: "POST" }),
     checked: (attemptId: string) => request<OkResponse>(`/ebay-offers/attempts/${attemptId}/checked`, {
       method: "POST", body: JSON.stringify({ confirm: true }),

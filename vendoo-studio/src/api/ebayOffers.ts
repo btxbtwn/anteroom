@@ -28,6 +28,7 @@ export interface EbayOffer {
 
 export interface EbayOffersStatus {
   connected: boolean;
+  allListings: { enabled: boolean; discountPercent: number; minimumPrice: string };
   listings: EbayOfferListing[];
   history: EbayOffer[];
   checkIntervalMinutes: number;
