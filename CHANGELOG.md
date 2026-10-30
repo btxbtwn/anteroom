@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.537 — 2026-10-30
+
+- Make stalled-send recovery checks reliable by testing background database work with separate connections, as the app does.
+
 ## 0.1.536 — 2026-10-29
 
 - Start loading listing photo thumbnails when you hover, focus, or touch a listing, so they can appear sooner when you open it.

@@ -2,15 +2,16 @@
 
 import asyncio
 import threading
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy import create_engine, update
+from sqlalchemy import update
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from vendoo_studio.database import Base
+from vendoo_studio.database import Base, make_engine
 from vendoo_studio.models.job import ABANDONED_SEND, AUTO_RETRY_EVENT, Job, JobEvent
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.routes.extension import ExtensionManager, dispatch_queued_jobs
@@ -26,15 +27,21 @@ class _ConnectedManager(ExtensionManager):
     connected = True
 
 
-def _sessions():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+def _sessions(test):
+    # The watchdog and dispatcher open sessions on worker threads. StaticPool
+    # would hand them the test session's live SQLite connection, allowing
+    # concurrent cursor/transaction use and occasionally crashing the worker.
+    directory = TemporaryDirectory(prefix="watchdog-test-")
+    test.addCleanup(directory.cleanup)
+    engine = make_engine(f"sqlite:///{Path(directory.name) / 'watchdog.db'}")
+    test.addCleanup(engine.dispose)
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine)
 
 
 class FailStalledJobsTest(unittest.TestCase):
     def setUp(self):
-        self.db = _sessions()()
+        self.db = _sessions(self)()
         self.manager = _ConnectedManager()
         p = patch("vendoo_studio.routes.extension.extension_manager", self.manager)
         p.start()
@@ -133,8 +140,20 @@ class FailStalledJobsTest(unittest.TestCase):
 
 
 class SweepTest(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_session_does_not_reuse_a_live_connection(self):
+        sessions = _sessions(self)
+        with sessions() as db:
+            connection = db.connection().connection.driver_connection
+
+            def worker_connection():
+                with sessions() as worker:
+                    return worker.connection().connection.driver_connection
+
+            other = await asyncio.to_thread(worker_connection)
+            self.assertIsNot(connection, other)
+
     async def test_database_work_runs_off_the_loop_and_waits_are_cancelled_on_it(self):
-        sessions = _sessions()
+        sessions = _sessions(self)
         db = sessions()
         self.addCleanup(db.close)
         manager = _ConnectedManager()
@@ -173,7 +192,7 @@ class QueueAfterStallTest(unittest.IsolatedAsyncioTestCase):
     """One job at a time: a stalled send frees the slot for the next approved one."""
 
     def setUp(self):
-        self.sessions = _sessions()
+        self.sessions = _sessions(self)
         self.db = self.sessions()
         self.tasks = []
         self.manager = _ConnectedManager()
