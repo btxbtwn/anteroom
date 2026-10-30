@@ -53,13 +53,32 @@ def _decode(data_url: str) -> tuple[str | None, bytes]:
     return match.group(1), contents
 
 
-def save_attachment(name: str, data_url: str) -> dict[str, Any]:
+def save_attachment(name: str, data_url: str, *, collection_id: str | None = None) -> dict[str, Any]:
     """Store one attached image and return the record its message keeps."""
     content_type, contents = _decode(data_url)
     if not contents:
         raise ValueError("That image is empty.")
     if len(contents) > MAX_ATTACHMENT_BYTES:
         raise ValueError(f"{name or 'That image'} is larger than {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB.")
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        if not collection_id:
+            raise ValueError('Hosted attachments require a conversation')
+        from vendoo_studio.services.hosted_photos import normalize
+        contents, width, height = normalize(contents)
+        attachment_id = context.photos.new_key(collection_id, '.jpg')
+        try:
+            context.photos.put(attachment_id, contents)
+        except Exception:
+            # A response can fail after Storage accepted the object.
+            try:
+                context.photos.delete(attachment_id)
+            except Exception:
+                pass
+            raise
+        return {'id': attachment_id, 'name': (name or 'image').strip()[:200] or 'image',
+                'mime_type': 'image/jpeg', 'size_bytes': len(contents), 'width': width, 'height': height}
     try:
         mime = _normalize_mime(content_type, contents)
     except ValueError as exc:
@@ -85,14 +104,14 @@ def save_attachment(name: str, data_url: str) -> dict[str, Any]:
     }
 
 
-def save_attachments(items: list[tuple[str, str]]) -> list[dict[str, Any]]:
+def save_attachments(items: list[tuple[str, str]], *, collection_id: str | None = None) -> list[dict[str, Any]]:
     """Store every image of one message, or none of them when one is refused."""
     if len(items) > MAX_ATTACHMENTS:
         raise ValueError(f"Attach at most {MAX_ATTACHMENTS} images to one message.")
     saved: list[dict[str, Any]] = []
     try:
         for name, data_url in items:
-            saved.append(save_attachment(name, data_url))
+            saved.append(save_attachment(name, data_url, collection_id=collection_id))
     except Exception:
         delete_attachments(saved)
         raise
@@ -111,7 +130,12 @@ def attachment_thumbnail(path: Path, size: int) -> Path:
 
 
 def delete_attachments(attachments: list[dict[str, Any]] | None) -> None:
+    from vendoo_studio.services.service_context import current
+    context = current()
     for attachment in attachments or []:
+        if context is not None:
+            context.photos.delete(str(attachment.get('id') or ''))
+            continue
         path = attachment_path(str(attachment.get("id") or ""))
         if path is None:
             continue
@@ -122,6 +146,10 @@ def delete_attachments(attachments: list[dict[str, Any]] | None) -> None:
 
 def attachment_path(attachment_id: str) -> Path | None:
     """The stored file for an id, or None for anything that is not one."""
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        return context.photos.local_path(attachment_id)
     if not ATTACHMENT_ID.match(attachment_id):
         return None
     return attachments_dir() / attachment_id

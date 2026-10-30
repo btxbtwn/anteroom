@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.576 — 2026-10-30
+
+- Attach images to listing chat in the web app. Images stay private, remain with the conversation after reload, and are removed when you delete the draft.
+
 ## 0.1.575 — 2026-10-30
 
 - Depop offer rounds now say "Nobody who liked this Depop listing can get an offer right now" for listings without likes, or whose likers cannot get an offer, instead of "HTTP 400" or "Anteroom needs an update".
