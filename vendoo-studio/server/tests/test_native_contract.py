@@ -315,6 +315,26 @@ class NativeContractTest(unittest.TestCase):
                                     evidence="Tag reads 100% cotton.")
         self.assertEqual(accepted[path][0], "cotton")
 
+    def test_unrelated_edit_preserves_answers_while_category_snapshot_is_stale(self):
+        previous = seed()
+        previous["direct_category_ids"]["mercari"] = "13"
+        previous["mercari_specifics"]["material"] = "cotton"
+        updated = copy.deepcopy(previous)
+        updated["title"] = "Updated pants title"
+        contract.invalidate_dependents(previous, updated)
+        self.assertEqual(updated["mercari_specifics"]["material"], "cotton")
+        # The stale schema still blocks sending until it is actually refreshed.
+        self.assertIn("changed", contract.gaps(updated, "mercari")[0]["message"])
+
+    def test_returning_to_snapshot_category_clears_previous_category_answers(self):
+        previous = seed()
+        previous["direct_category_ids"]["mercari"] = "13"
+        previous["mercari_specifics"]["material"] = "cotton"
+        updated = copy.deepcopy(previous)
+        updated["direct_category_ids"]["mercari"] = "12"
+        contract.invalidate_dependents(previous, updated)
+        self.assertNotIn("material", updated["mercari_specifics"])
+
     def test_prompt_contains_only_the_captured_paths_and_choices(self):
         text = contract.prompt(seed()[contract.KEY])
         self.assertIn("mercari_specifics.material", text)

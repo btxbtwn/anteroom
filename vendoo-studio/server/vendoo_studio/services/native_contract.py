@@ -619,7 +619,9 @@ def invalidate_dependents(previous: dict, listing: dict) -> None:
     """Clear carried answers when a category or a declared controlling field changes."""
     for market, contract in (previous.get(KEY) or {}).items():
         fields = contract.get("fields") or []
-        changed = changed_inputs(listing, market, fields, contract.get("inputs"))
+        # Invalidate for this edit, even if the saved form is still stale from
+        # an earlier edit. Form freshness is checked separately by gaps().
+        changed = changed_inputs(listing, market, fields, inputs(previous, market, fields))
         if not changed:
             continue
         category_changed = any("categor" in path.casefold() for path in changed)

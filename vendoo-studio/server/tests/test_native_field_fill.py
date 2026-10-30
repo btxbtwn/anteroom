@@ -328,6 +328,31 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
         after = {**before, "depop_specifics": {"type": "Chinos"}}
         self.assertEqual(native_field_fill.changed_categories(before, after), {"depop"})
 
+    async def test_unrelated_saves_do_not_repeat_a_fill_for_a_stale_form(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"fields": [row("depop_specifics.type", "Type", ["Jeans", "Chinos"],
+                               clears=["depop_specifics.attributes"])]}
+        listing = {**self.base, "depop_specifics": {"type": "Jeans"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
+        self.repo.save_revision(self.conv.id, listing, source="native_schema")
+        listing["depop_specifics"]["type"] = "Chinos"
+        self.repo.save_revision(self.conv.id, listing, source="user_form")
+        await self.settle()
+        self.assertEqual(self.fills, [{"depop"}])
+
+        # The form refresh may be unavailable or still in flight. Later edits
+        # must compare with the preceding revision, not that old form snapshot.
+        listing["title"] = "Updated jeans title"
+        self.repo.save_revision(self.conv.id, listing, source="user_form")
+        await self.settle()
+        self.assertEqual(self.fills, [{"depop"}])
+
+        listing["depop_specifics"]["type"] = "Jeans"
+        self.repo.save_revision(self.conv.id, listing, source="user_form")
+        await self.settle()
+        self.assertEqual(self.fills, [{"depop"}, {"depop"}])
+
     async def test_its_own_revision_and_generation_do_not_start_a_fill(self):
         self.save({"depop": "menswear_trousers"}, source="native_fields")
         self.save({"ebay": "57989"}, source="generation_finalize")
