@@ -324,8 +324,12 @@ function poshmarkCategory(catalog, listing) {
   // A stored id that already names the leaf wins. An older sub-category value
   // only fills in when that id stopped at the parent category.
   if (fromDirect?.leaf && fromDirect.leaf !== fromDirect.category.id) return fromDirect;
-  const found = fromDirect
-    || poshmarkFromIds(catalog, listing.form?.overrides?.categoryV2?.path || listing.marketplace_category_objects?.poshmark?.path)
+  // A stored id that resolved against the live catalog is authoritative even
+  // when it names a parent: the seller chose that category, so keep it. Falling
+  // through to a name match here used to swap in a different leaf — one with no
+  // size sets — and every size the seller picked was then refused.
+  if (fromDirect) return poshmarkWithSubcategory(catalog, fromDirect, listing.poshmark_specifics?.subcategory);
+  const found = poshmarkFromIds(catalog, listing.form?.overrides?.categoryV2?.path || listing.marketplace_category_objects?.poshmark?.path)
     || poshmarkByName(catalog, poshmarkNames(listing));
   return found && poshmarkWithSubcategory(catalog, found, listing.poshmark_specifics?.subcategory);
 }
@@ -339,6 +343,27 @@ function poshmarkWithSubcategory(catalog, found, wanted) {
   if (/^none$/i.test(name)) return poshmarkFromIds(catalog, ids);
   const feature = (found.category.category_features || []).find(entry => poshmarkKey(entry.display) === poshmarkKey(name));
   return feature ? poshmarkFromIds(catalog, [...ids, feature.id]) : found;
+}
+
+// The label the Poshmark tab shows for a size set. Its picker offers this text
+// but stores the set's id, so a value coming back as this text is the same set.
+function poshmarkSetLabel(set) {
+  return String(set?.name || (set?.tags || []).join(' / ') || set?.id || '');
+}
+
+// The size set a stored sizeSetId names. The seller picks it from a list that
+// shows the set's label and stores its id, but older drafts and imported rows
+// carry the label itself. Match either, so a chosen group is never "missing".
+function poshmarkSizeSet(sets, wanted) {
+  const name = String(wanted ?? '').trim();
+  if (!name) return null;
+  const exact = sets.find(set => String(set.id) === name);
+  if (exact) return exact;
+  const key = poshmarkKey(name);
+  return sets.find(set => poshmarkKey(poshmarkSetLabel(set)) === key)
+    || sets.find(set => poshmarkKey(set.display) === key)
+    || sets.find(set => poshmarkKey(set.id) === key)
+    || null;
 }
 
 const POSHMARK_FIT_LABELS = { petite: 'Petite', plus: 'Plus', 'big_&_tall': 'Big & Tall', maternity: 'Maternity', juniors: 'Juniors' };
@@ -356,7 +381,7 @@ function poshmarkSize(category, listing, { kids = false, leaf = category.id } = 
   const all = sets.flatMap(set => sizesOf(set).map(size => ({ set, size })));
   if (all.length && all.every(entry => entry.size.id === 'OS')) return { ...all[0], quantity: true };
   if (Object.hasOwn(specifics, 'sizeSetId')) {
-    const selected = sets.find(set => set.id === specifics.sizeSetId);
+    const selected = poshmarkSizeSet(sets, specifics.sizeSetId);
     if (!selected) return { problem: 'a size group Poshmark offers in this category' };
     const wanted = String(specifics.nativeSizeId || '').trim();
     const found = sizesOf(selected).find(size => size.id === wanted)

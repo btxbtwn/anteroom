@@ -259,7 +259,7 @@ export const api = {
       request<{ forms: Record<string, Record<string, string[]>> }>("/catalog/dropdown-options"),
     searchCategories: (q: string, marketplace: string) =>
       request<{ results: { kind: string; marketplace: string; id: string; path: string; label: string }[] }>(
-        `/catalog/search?${new URLSearchParams({ q, marketplace, kind: "category", top_k: "15" })}`),
+        `/catalog/search?${new URLSearchParams({ q, marketplace, kind: "category", top_k: "50" })}`),
     categories: (marketplace: string) =>
       request<{ coverage: string; complete: boolean; nodes: {
         id?: string; parent_id?: string; path: string; label: string; is_leaf?: boolean; has_children?: boolean;

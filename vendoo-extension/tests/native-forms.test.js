@@ -158,6 +158,31 @@ test('explicit Poshmark group and native size beat the old imported size, withou
   assert.ok(call(c, 'poshmarkSize', category.category, listing).problem);
 });
 
+// The Poshmark tab shows a size set's label but stores its id. A draft that
+// kept the label (Standard) still names the same set, so the size the seller
+// paired with it must be accepted instead of reporting a missing size group.
+test('a size group saved as its label still names that group', () => {
+  const c = loadWorker();
+  for (const sizeSetId of ['standard', 'Standard']) {
+    const listing = { ...POSH_LISTING, poshmark_specifics: { sizeSetId, nativeSizeId: 'XL' } };
+    const category = call(c, 'poshmarkCategory', POSH, listing);
+    const picked = call(c, 'poshmarkSize', category.category, listing, { leaf: 'tees' });
+    assert.equal(picked.size?.id, 'XL', `sizeSetId ${sizeSetId}`);
+    assert.equal(picked.problem, undefined, `sizeSetId ${sizeSetId}`);
+  }
+});
+
+// A stored direct category id that resolves in the live catalog is the
+// seller's choice; a shallower leaf must not be swapped for a name match,
+// which returned a category with no size sets and refused every size.
+test('a stored Poshmark category that stops at the parent is kept, not replaced by name', () => {
+  const c = loadWorker();
+  const listing = { ...POSH_LISTING, title: 'Shirts', direct_category_ids: { poshmark: 'men/shirts' } };
+  const category = call(c, 'poshmarkCategory', POSH, listing);
+  assert.equal(category.category.id, 'shirts');
+  assert.deepEqual(category.category.size_sets.map(set => set.id), ['standard', 'tall']);
+});
+
 test('changing Poshmark category replaces the size list and refuses the previous group', () => {
   const c = loadWorker();
   const listing = { ...POSH_LISTING, direct_category_ids: { poshmark: 'men/shoes' }, poshmark_specifics: { sizeSetId: 'standard', nativeSizeId: 'XL' } };

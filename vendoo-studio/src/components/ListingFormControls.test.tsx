@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CategoryTreeSelect, DependentSelectPair, groupedChoices, SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
+import { categoryPathOptions, CategoryTreeSelect, DependentSelectPair, groupedChoices, SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
 
 describe("marketplace choice controls", () => {
   it("identifies an unsupported saved choice without silently clearing it", () => {
@@ -143,6 +143,20 @@ describe("dependent category dropdowns", () => {
     const html = renderToStaticMarkup(<DependentSelectPair id="category" value="women/kilts" departments={departments} onChange={() => {}} />);
     expect(html).toContain("Women → Global &amp; Traditional Wear → Kilts");
     expect(html).not.toContain("<select");
+  });
+});
+
+describe("categoryPathOptions", () => {
+  it("collapses the same category searched under differently cased paths", () => {
+    expect(categoryPathOptions("", ["Men", "men", "Kids", "kids", "Women"])).toEqual(["Men", "Kids", "Women"]);
+  });
+
+  it("keeps the saved category first so it round-trips", () => {
+    expect(categoryPathOptions("Kids > Shirts", ["Men > Shirts", "kids > shirts"])).toEqual(["Kids > Shirts", "Men > Shirts"]);
+  });
+
+  it("drops blank paths and keeps distinct categories apart", () => {
+    expect(categoryPathOptions("", ["", "  ", "Men > Jeans", "Men > Shirts"])).toEqual(["Men > Jeans", "Men > Shirts"]);
   });
 });
 

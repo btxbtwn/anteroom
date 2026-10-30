@@ -466,6 +466,25 @@ export function EbayCategorySelect({ id, value, onChange, disabled }: {
   </div>;
 }
 
+/**
+ * The category paths to offer for a saved value and a search result.
+ *
+ * The search endpoint can return one category under differently cased paths,
+ * and a plain Set on the path kept both — the picker listed "men" and "Men" as
+ * two rows. Collapse on the case-folded path, and keep the saved value first so
+ * it always round-trips whatever the search returned.
+ */
+export function categoryPathOptions(value: string, paths: readonly string[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const path of [value, ...paths]) {
+    const label = String(path || "").trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, label);
+  }
+  return [...byKey.values()];
+}
+
 /** A final category from one of Anteroom's synced category trees (the shared tree or Depop's). */
 export function TreeCategorySelect({ id, marketplace, name, value, onChange, disabled }: {
   id: string; marketplace: "general" | "depop"; name: string; value: string; onChange: (id: string, path: string) => void; disabled?: boolean;
@@ -481,8 +500,15 @@ export function TreeCategorySelect({ id, marketplace, name, value, onChange, dis
   const choices = (result.data?.results || []).filter((row) => row.kind === "category" && row.marketplace === marketplace);
   return <div>
     <SearchableSelect id={id} fieldKey={`category.${marketplace}`} value={value} disabled={disabled}
-      options={[...new Set([value, ...choices.map((row) => row.path)].filter(Boolean))]} onSearch={setQuery}
-      onChange={(label) => { const choice = choices.find((row) => row.path === label); if (choice) onChange(choice.id, choice.path); }} />
+      options={categoryPathOptions(value, choices.map((row) => row.path))} onSearch={setQuery}
+      onChange={(label) => {
+        // An empty label is the seller clearing the field, not a failed lookup.
+        if (!label) { if (value) onChange("", ""); return; }
+        const key = label.toLowerCase();
+        const choice = choices.find((row) => row.path === label)
+          || choices.find((row) => row.path.toLowerCase() === key);
+        if (choice) onChange(choice.id, choice.path);
+      }} />
     <p role="status" className="mt-1 text-xs text-muted-foreground">{result.isError ? `${name} category search failed. Sync categories in Settings and try again.`
       : result.isFetching ? `Searching ${name} categories…` : search.length >= 3 && search !== value
         ? `${choices.length} ${name} categories found.` : `Type at least 3 characters to search ${name} categories.`}</p>
