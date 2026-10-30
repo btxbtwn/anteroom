@@ -3,6 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/vendoo-studio/server
 WORKDIR /app
+COPY deploy/fly/supabase-prod-ca-2021.crt /app/supabase-prod-ca-2021.crt
 COPY vendoo-studio/pyproject.toml vendoo-studio/VERSION /app/vendoo-studio/
 COPY vendoo-studio/server/vendoo_studio/ /app/vendoo-studio/server/vendoo_studio/
 RUN pip install --no-cache-dir '/app/vendoo-studio[hosted]' \

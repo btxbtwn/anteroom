@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.540 — 2026-10-30
+
+- Protect cloud database setup information and verify its encrypted connection before online sync is enabled.
+
 ## 0.1.539 — 2026-10-29
 
 - Manage eBay automatic offers from Automations alongside the other marketplaces.
