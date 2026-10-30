@@ -72,15 +72,13 @@ Supabase's default mail service is limited; public onboarding requires the
 project's production email delivery setup.
 
 Signed-in sellers can create a draft, edit its title and notes, explicitly save,
-and reopen it. The list shows the 100 most recently updated draft shells. Saves
+and reopen it. Inventory starts with the 100 most recently updated drafts and supports search and Load more. Saves
 include the last server timestamp; a stale edit returns 409 and retains the
 unsaved text until the seller reloads. Non-draft records are not exposed.
 
-This increment uses only the already-owned `conversations` table. The request
+Draft text uses the seller-owned `conversations` table; General fields and photos use the canonical listing revisions and photo metadata. The request
 contract accepts no owner, client-selected record ID, status, parent ID, file
-path, history pointer or marketplace action. It does not read settings, photos,
-listing history or operational JSON, and starts no timers. The remaining file
-and historical-reference audit still gates those later capabilities.
+path, history pointer or marketplace action. It starts no timers and does not expose settings or operational JSON. Only the current, same-owner, same-draft revision is used for General values. The remaining file and historical-reference audit still gates other capabilities.
 
 The container's runtime directory is under the non-root user's home, not the
 root-owned application source. It holds only ephemeral runtime directories in

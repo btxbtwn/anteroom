@@ -6,8 +6,8 @@ The hosted session-verification foundation is described in
 [hosted-auth.md](hosted-auth.md). The
 [seller ownership schema](seller-ownership.md) assigns ownership to existing
 and new records. [Hosted database isolation](seller-isolation.md) adds restricted
-seller sessions and row policies; seller-specific constraints, file scoping and
-account linking remain before hosted listing routes open.
+seller sessions and row policies; seller-specific constraints protect draft routes. Photos now have private Storage
+scoping; account linking/import and other file-backed services remain separate work.
 
 ## Goal
 
