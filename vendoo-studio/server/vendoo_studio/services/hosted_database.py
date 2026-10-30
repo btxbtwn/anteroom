@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request
 from sqlalchemy import event, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.ownership import LOCAL_USER_ID, SellerOwned
@@ -33,8 +34,14 @@ def get_seller_db(request: Request):
         raise HTTPException(status_code=401, detail="A verified seller session is required")
     from vendoo_studio.database import engine
 
+    if engine.dialect.name != "postgresql":
+        raise HTTPException(status_code=503, detail="The cloud database is not configured")
     with SellerDatabaseSession(user_id=identity.user_id, bind=engine) as db:
-        yield db
+        try:
+            yield db
+        except SQLAlchemyError:
+            db.rollback()
+            raise HTTPException(status_code=503, detail="Cloud data is temporarily unavailable") from None
 
 
 @event.listens_for(SellerDatabaseSession, "after_begin")

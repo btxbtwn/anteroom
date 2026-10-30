@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.543 — 2026-10-30
+
+- Sign in on the web to create, save, and reopen private drafts with a title and notes. Changes made on another device are protected from accidental overwrites.
+
 ## 0.1.542 — 2026-10-29
 
 - Send eBay offers across all current and future listings with one discount and an optional minimum price.

@@ -71,5 +71,6 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    ...(process.env.ANTEROOM_HOSTED_BUILD === "1" ? { rollupOptions: { input: resolve(ROOT, "cloud.html") } } : {}),
   },
 });

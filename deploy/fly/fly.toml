@@ -9,6 +9,9 @@ primary_region = 'iad'
 [build]
   dockerfile = 'Dockerfile'
 
+  [build.args]
+    VITE_SUPABASE_URL = 'https://ytoqdgtzvutdltfkpxbu.supabase.co'
+
 [env]
   SUPABASE_URL = 'https://ytoqdgtzvutdltfkpxbu.supabase.co'
 

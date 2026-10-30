@@ -11,7 +11,19 @@ vendoo-studio/server/*
 !deploy/
 !deploy/fly/
 !deploy/fly/**
+# Public cloud UI source and build metadata (never local data or settings).
+!vendoo-studio/package.json
+!vendoo-studio/package-lock.json
+!vendoo-studio/cloud.html
+!vendoo-studio/index.html
+!vendoo-studio/vite.config.ts
+!vendoo-studio/tsconfig.json
+!vendoo-studio/src/
+!vendoo-studio/src/**
+# Keep private/runtime files excluded after every source allow rule.
 **/__pycache__/
 **/*.pyc
 **/.env*
 **/*.db*
+**/*.key
+**/*.pem
