@@ -4,7 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 import { AutomationsPage } from "./AutomationsPage";
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [], isLoading: false, error: null }),
+  useQuery: ({ queryKey }: { queryKey: string[] }) => ({
+    data: queryKey[0] === "ebay-offers"
+      ? { connected: true, listings: [], history: [], lastCheck: null, lastError: null }
+      : [],
+    isLoading: false,
+    error: null,
+  }),
   useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -22,5 +28,8 @@ describe("AutomationsPage", () => {
     expect(html).toContain("No automations yet.");
     expect(html).toContain("Waiting for approval");
     expect(html).toContain("Nothing is waiting for approval.");
+    expect(html).toContain('aria-label="eBay offers"');
+    expect(html).toContain("Automatic offers check every 30 minutes");
+    expect(html).toContain("No unsold listings with eBay links");
   });
 });

@@ -14,6 +14,7 @@ import { Input } from "./ui/input";
 import { Spinner } from "./ui/spinner";
 import { Textarea } from "./ui/textarea";
 import { MarketplaceAutomations } from "./MarketplaceAutomations";
+import { EbayOffersSettings } from "./settings/EbayOffersSettings";
 import { PageHeader, WorkspacePage } from "./WorkspacePage";
 import {
   AUTOMATION_MARKETPLACES,
@@ -181,7 +182,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
     <WorkspacePage>
       <PageHeader
         title="Automations"
-        description="Schedule local draft preparation and price edits. Listing, delisting and relisting wait for your review of each item and named marketplace."
+        description="Manage automatic offers, sharing, draft preparation and price edits. Listing, delisting and relisting wait for your review of each item and named marketplace."
       />
 
       <section className="rounded-xl border border-border bg-card p-4">
@@ -446,6 +447,11 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
           ))}
         </ul>
       )}
+
+      <section aria-label="eBay offers" className="rounded-xl border border-border bg-card p-4">
+        <h2 className="mb-3 font-medium">eBay offers</h2>
+        <EbayOffersSettings />
+      </section>
 
       <MarketplaceAutomations />
     </WorkspacePage>

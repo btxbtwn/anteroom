@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.539 — 2026-10-29
+
+- Manage eBay automatic offers from Automations alongside the other marketplaces.
+
 ## 0.1.538 — 2026-10-30
 
 - Keep each seller’s photos, listing history, sales links, and automation records tied to their own account as we prepare online sync.
