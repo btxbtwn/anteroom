@@ -104,3 +104,10 @@ The complete Postgres run passed 3,826 tests and 1,424 subtests (49 skips).
 Import test fixtures now pass the destination conversation ID required by
 owned photo storage. No production migration, deployment or plan upgrade was
 performed during this verification.
+
+Provider settings UI is connected on `feat/hosted-provider-settings`: API-key
+providers and MiMo use the shared controls with account Vault storage. The web
+settings sidebar currently exposes Providers; other sections remain pending
+their service integrations. Existing SDK provider preferences remain visible,
+with a Mac-worker notice rather than hosted sign-in/terminal controls. Generation
+and chat UI remain disabled until their request contracts are fully connected.

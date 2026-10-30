@@ -79,7 +79,7 @@ def listing_response(db, identity):
 @router.get('/runtime')
 def runtime():
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits'],
-            'views': ['listings', 'analytics'], 'marketplace_forms': ['poshmark']}
+            'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark']}
 
 
 @router.get('/status')

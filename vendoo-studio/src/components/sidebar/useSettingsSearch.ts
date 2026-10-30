@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useWorkspaceRuntime } from "../../app/runtime";
 import { useVendooEnabled } from "../../vendooMode";
 import { searchSettings, settingsSearchItemsForMode, type SettingsSearchItem } from "../settingsNav";
 
@@ -16,10 +17,11 @@ export function useSettingsSearch(
   const [settingsQuery, setSettingsQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
   const settingsSearchRef = useRef<HTMLInputElement>(null);
+  const { hosted } = useWorkspaceRuntime();
   const vendooOn = useVendooEnabled();
   const settingsResults = useMemo(
-    () => searchSettings(settingsQuery, settingsSearchItemsForMode(vendooOn)),
-    [settingsQuery, vendooOn],
+    () => searchSettings(settingsQuery, settingsSearchItemsForMode(vendooOn).filter((item) => !hosted || (item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)))),
+    [settingsQuery, vendooOn, hosted],
   );
   const isSettingsSearching = settingsQuery.trim().length > 0;
 

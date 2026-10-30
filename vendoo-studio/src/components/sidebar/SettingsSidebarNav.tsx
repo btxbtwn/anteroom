@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../../app/runtime";
 import type { ComponentType } from "react";
 import { BotIcon, CircleHelpIcon, DatabaseIcon, Link2Icon, MessageSquareTextIcon, ScrollTextIcon, Settings2Icon, TagIcon, TerminalIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -32,6 +33,7 @@ export function SettingsSidebarNav({
   settingsSection: SettingsSectionId;
   onSettingsSectionChange: (section: SettingsSectionId) => void;
 }) {
+  const { hosted } = useWorkspaceRuntime();
   const { activeResultIndex, setActiveResultIndex, settingsResults, isSettingsSearching, handleSettingsResult } = search;
 
   return (
@@ -75,7 +77,7 @@ export function SettingsSidebarNav({
         </div>
       ) : (
         <nav aria-label="Settings sections" className="flex flex-col gap-1">
-          {SETTINGS_NAV_ITEMS.map((item) => {
+          {SETTINGS_NAV_ITEMS.filter((item) => !hosted || item.id === "providers").map((item) => {
             const Icon = SECTION_ICONS[item.id];
             return (
               <button

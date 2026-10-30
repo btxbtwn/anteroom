@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../app/runtime";
 import { useEffect } from "react";
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -45,6 +46,8 @@ export function SettingsPage({
   onTargetHandled?: () => void;
   onOpenSetupGuide?: () => void;
 }) {
+  const { hosted } = useWorkspaceRuntime();
+  if (hosted) section = "providers";
   useEffect(() => {
     if (!targetId) return;
     const frame = window.requestAnimationFrame(() => {

@@ -119,7 +119,7 @@ export function App() {
   const shell = useRef<"listings" | "assistant">(listingFromUrl || runtime.hosted ? "listings" : "assistant");
   const viewBeforeSettings = useRef<WorkspaceView>(listingFromUrl || runtime.hosted ? "listings" : "assistant");
   const [pickedThreadId, setPickedThreadId] = useState<string | null>(null);
-  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(DEFAULT_SETTINGS_SECTION);
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(runtime.hosted ? "providers" : DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<"workspace" | "editor" | "browser">(runtime.hosted ? "editor" : "workspace");
   // On mobile the listings start open only when a listing link opened the app; home is the assistant.
@@ -347,7 +347,7 @@ export function App() {
   const openSettings = () => {
     if (!runtime.views.has("settings")) return;
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
-    setSettingsSection(DEFAULT_SETTINGS_SECTION);
+    setSettingsSection(runtime.hosted ? "providers" : DEFAULT_SETTINGS_SECTION);
     setSettingsTargetId(null);
     setActiveView("settings");
     setMobilePane(runtime.hosted ? "editor" : "workspace");
