@@ -35,8 +35,8 @@ class NativeEditorTest(unittest.TestCase):
             data = json.loads(asyncio.run(forms_prompt(self.db, self.conv.id)).split('\n')[-1])
         posh = {row["path"]: row for row in data["poshmark"]["fields"]}
         depop = {row["path"]: row for row in data["depop"]["fields"]}
-        self.assertEqual(len(posh["direct_category_ids.poshmark"]["options"]), 747)
-        self.assertEqual(len(depop["direct_category_ids.depop"]["option_values"]), 281)
+        self.assertEqual(posh["direct_category_ids.poshmark"]["options_lookup"]["count"], 747)
+        self.assertEqual(depop["direct_category_ids.depop"]["options_lookup"]["count"], 281)
         self.assertIn("Cotton", depop["depop_specifics.attributes.material"]["options"])
         _, saved = apply_listing_payload(self.db, self.conv.id, json.dumps({"fields": [
             {"path": "depop_specifics.attributes.material", "value": ["Cotton"]},

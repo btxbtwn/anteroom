@@ -61,7 +61,7 @@ class NativeContractTest(unittest.TestCase):
         self.assertLess(len(text), 20000)
         self.assertEqual(contracts, before)
 
-    def test_large_brand_catalog_stays_in_editor_but_only_known_brand_enters_prompt(self):
+    def test_large_brand_catalog_stays_in_editor_and_is_searchable_in_prompt(self):
         from vendoo_studio.services import depop_form
 
         for brand in ("nike", "", "Not a native brand"):
@@ -71,11 +71,30 @@ class NativeContractTest(unittest.TestCase):
             text = contract.prompt(contracts)
             projected = json.loads(text[text.index("{"):])
             field = next(row for row in projected["depop"]["fields"] if row["path"] == "depop_specifics.brand")
-            self.assertEqual(field["options"], ["Nike"] if brand == "nike" else [])
+            self.assertNotIn("options", field)
+            self.assertEqual(field["options_lookup"]["count"], 21697)
             self.assertEqual(contracts, before)
             self.assertLess(len(json.dumps(field)), 500)
             self.assertEqual(len(next(row for row in contracts["depop"]["fields"]
                                       if row["path"] == "depop_specifics.brand")["options"]), 21697)
+
+    def test_large_aspect_catalog_is_narrowed_without_changing_validation(self):
+        labels = [f"Player {i}" for i in range(5000)] + ["Tony Stewart"]
+        row = {"path": "ebay_specifics.player", "label": "Player", "options": labels,
+               "option_values": {label: str(i) for i, label in enumerate(labels)},
+               "value_constraints": {label: [{"parentName": "Sport", "parentValue": "Racing"}]
+                                     for label in labels}, "selection_only": True}
+        contracts = {"ebay": {"inputs": {}, "fields": [row]}}
+        before = copy.deepcopy(contracts)
+        text = contract.prompt(contracts)
+        field = json.loads(text[text.index("{"):])["ebay"]["fields"][0]
+        self.assertNotIn("options", field)
+        self.assertNotIn("option_values", field)
+        self.assertNotIn("value_constraints", field)
+        self.assertEqual(field["options_lookup"]["count"], 5001)
+        self.assertLess(len(text), 12000)
+        self.assertEqual(contracts, before)
+        self.assertIsNone(contract.value_error(row, "Player 4999"))
 
     def test_marketplace_overrides_do_not_make_the_saved_form_stale(self):
         from vendoo_studio.services.seller_overrides import apply_marketplace_overrides

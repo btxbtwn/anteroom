@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.562 — 2026-10-30
+
+- Let the listing assistant search large marketplace dropdowns on demand when writing or refining a draft.
+
 ## 0.1.561 — 2026-10-30
 
 - Open cloud inventory reliably after the server wakes from sleep.

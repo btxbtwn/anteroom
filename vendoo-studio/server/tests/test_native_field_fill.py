@@ -60,12 +60,12 @@ class FillableRowsTest(unittest.TestCase):
         # Filled (Body fit), locked (Fit), sale rows (price, package) and brand are left alone.
         self.assertEqual(paths, ["depop_specifics.attributes.bottom-fit", "depop_specifics.age"])
 
-    def test_a_row_locked_by_the_form_or_with_too_many_choices_is_skipped(self):
+    def test_locked_rows_are_skipped_but_large_catalogs_are_searchable(self):
         form = {"fields": [row("ebay_specifics.Color", "Color", [str(n) for n in range(400)]),
                            row("ebay_specifics.Style", "Style", ["Jeans"], locked=True),
                            row("ebay_specifics.donationPercent", "Percentage", ["10%", "100%"]),
                            row("ebay_specifics.Fit", "Fit", ["Slim"])]}
-        self.assertEqual([r["path"] for r in fillable_rows(form, "ebay", {})], ["ebay_specifics.Fit"])
+        self.assertEqual([r["path"] for r in fillable_rows(form, "ebay", {})], ["ebay_specifics.Color", "ebay_specifics.Fit"])
 
 
 class ValidatedValuesTest(unittest.TestCase):
@@ -112,6 +112,32 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
     def _current(self):
         saved = self.repo.get_current(self.conv.id)
         return self.repo.get_revision(saved.current_revision_id)
+
+    async def test_large_dropdown_lookup_saves_native_id_and_evidence_end_to_end(self):
+        from test_option_lookup import Provider
+        from vendoo_studio.services import native_contract
+
+        labels = [f"Player {n}" for n in range(5000)] + ["Tony Stewart"]
+        form = {"category_id": "12", "fields": [
+            row("ebay_specifics.Player", "Player", labels, required=True,
+                option_values={label: str(i) for i, label in enumerate(labels)}, category_specific=True)]}
+        listing = {"title": "Racing tank", "direct_category_ids": {"ebay": "12"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        evidence = "Graphic reads Tony Stewart."
+        provider = Provider([
+            json.dumps({"_option_search": [{"marketplace": "ebay", "field": "ebay_specifics.Player",
+                                           "query": "Tony Stewart", "offset": 0}]}),
+            json.dumps({"fields": {"ebay_specifics.Player": {"value": "5000", "evidence": evidence}}}),
+        ])
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})):
+            await fill_native_fields(self.db, self.conv.id, provider, evidence=evidence, markets={"ebay"})
+        saved = self._current().listing_json
+        self.assertEqual(saved["ebay_specifics"]["Player"], "5000")
+        self.assertEqual(saved[native_contract.EVIDENCE_KEY]["ebay_specifics.Player"]["quote"], evidence)
+        self.assertEqual(len(saved[native_contract.KEY]["ebay"]["fields"][0]["options"]), 5001)
+        self.assertNotIn("Player 4999", provider.messages[0][1]["content"])
+        self.assertEqual(len(provider.messages), 2)
 
     async def test_depop_refill_removes_obsolete_fields_and_keeps_evidence_with_native_answers(self):
         from vendoo_studio.services import native_contract

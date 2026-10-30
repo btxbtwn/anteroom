@@ -385,13 +385,17 @@ FINALIZE_GAPS_PROMPT = (
 MAX_REPAIR_CHARS = 14000
 
 
-async def collect_provider_text(provider, messages: list[dict], *, quick: bool = False, output_schema: dict | None = None) -> str:
+async def collect_provider_text(provider, messages: list[dict], *, quick: bool = False, output_schema: dict | None = None, option_catalog=None) -> str:
     """Collect visible reply text. quick=True uses the provider's no-reasoning path when it has one."""
     from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
 
     quick_chat = getattr(provider, "quick_chat", None) if quick else None
     structured_chat = getattr(provider, "structured_chat", None)
-    if output_schema is not None and callable(structured_chat):
+    if option_catalog is not None:
+        from vendoo_studio.services.option_lookup import chat_with_options
+
+        stream = chat_with_options(provider, messages, option_catalog, stream=False)
+    elif output_schema is not None and callable(structured_chat):
         stream = structured_chat(messages, output_schema)
     else:
         stream = quick_chat(messages) if callable(quick_chat) else provider.chat(messages, stream=False)

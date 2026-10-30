@@ -105,7 +105,7 @@ class SendMessageStreamTest(unittest.TestCase):
             async def chat(self, messages, stream=True):
                 yield "Done."
 
-        async def build(conv_id, db, text):
+        async def build(conv_id, db, text, option_catalog=None):
             return [{"role": "user", "content": text}]
 
         response = self.send(build, Provider())
@@ -115,7 +115,7 @@ class SendMessageStreamTest(unittest.TestCase):
     def test_a_failed_photo_analysis_ends_the_stream_with_an_error(self):
         from vendoo_studio.services.listing_generate import PhotoAnalysisError
 
-        async def build(conv_id, db, text):
+        async def build(conv_id, db, text, option_catalog=None):
             raise PhotoAnalysisError("Photo analysis failed. Retry to analyze the photos again.")
 
         response = self.send(build, object())
