@@ -226,8 +226,8 @@ test('Mercari check reads eligibility and Mercari’s own offer range, in whole 
     await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'mercari', action: 'offer',
       listing_id: ITEM, discount_percent: percent } });
   }
-  // $25.50 to $40.50 in cents becomes $26 to $40: 20% to 48% off $50.
-  assert.deepEqual(check.results[0], { ok: true, price_cents: 5000, like_count: 4, minimum_discount_percent: 20, maximum_discount_percent: 48,
+  // $25.50 to $40.50 in cents becomes $26 to $40: 19% to 48% off $50 after rounding.
+  assert.deepEqual(check.results[0], { ok: true, price_cents: 5000, like_count: 4, minimum_discount_percent: 19, maximum_discount_percent: 48,
     shipping_discounts: [], offer_price_cents: null });
   assert.equal(check.results[1].offer_price_cents, 4000);
   assert.equal(check.results[2].offer_price_cents, null);
@@ -256,6 +256,23 @@ test('Mercari offer preflight declares the required item ID as non-null', async 
   } });
   assert.equal(check.results[0].ok, true);
   assert.ok(!check.requests.some(r => r.key === OFFER_SEND));
+});
+
+test('Mercari accepts a 10% rule when whole-dollar rounding meets its actual bounds', async () => {
+  const run = offerWorker('mercari', mercariAnswers({
+    'POST www.mercari.com/v1/api sellFetchItemsDetails': mercariItem({ price: 1700 }),
+    'POST www.mercari.com/v1/api offerToLikerable': mercariLikerable(true, { price: 1700 }),
+    'POST www.mercari.com/v1/api offerToLikerInit': mercariBounds(100, 1500),
+  }));
+  for (const percent of [5, 10]) {
+    await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: {
+      marketplace: 'mercari', action: 'offer', listing_id: ITEM, discount_percent: percent,
+    } });
+  }
+  assert.equal(run.results[0].offer_price_cents, null);
+  assert.equal(run.results[1].offer_price_cents, 1500);
+  assert.equal(run.results[1].minimum_discount_percent, 6);
+  assert.ok(!run.requests.some(r => r.key === OFFER_SEND));
 });
 
 test('Mercari sends createOfferToLikers once, in cents, and answers a repeat from the journal', async () => {
@@ -365,6 +382,23 @@ test('Depop offer previews read the current product pricing currency and still r
     const run = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, product] }));
     await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer', listing_id: SLUG, discount_percent: 5 } });
     assert.equal(run.results[0].ok, currency === 'USD');
+    assert.ok(run.requests.every(r => r.key.startsWith('GET')));
+  }
+});
+
+test('Depop verifies USD across product and preview without assuming missing currencies', async () => {
+  for (const [productCurrency, previewCurrency, ok] of [
+    ['USD', undefined, true], [undefined, 'USD', true],
+    [undefined, undefined, false], ['GBP', 'USD', false], ['USD', 'GBP', false],
+  ]) {
+    const run = offerWorker('depop', depopAnswers({
+      [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, { ...depopProduct, price_currency: productCurrency }],
+      [DEPOP_PREVIEW]: [200, depopPreview({ price_currency: previewCurrency })],
+    }));
+    await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: {
+      marketplace: 'depop', action: 'offer', listing_id: SLUG, discount_percent: 10,
+    } });
+    assert.equal(run.results[0].ok, ok);
     assert.ok(run.requests.every(r => r.key.startsWith('GET')));
   }
 });
