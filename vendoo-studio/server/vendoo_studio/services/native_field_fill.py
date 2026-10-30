@@ -34,7 +34,8 @@ FILL_RULES = (
     "You fill a resale listing's marketplace form fields. For selection-only fields, choose values only "
     "from that field's listed choices, spelled exactly as listed. For free-text fields, the listed "
     "choices are suggestions: custom text is allowed within the field's limits. Answer only when "
-    "the photos analysis, listing or notes show it. Leave out any field you cannot tell. Never guess a measurement, material "
+    "the photos analysis, listing or notes show it. Complete required fields first. For a required free-text field, "
+    "use a short supported description when the suggestions do not fit. Leave out any field you cannot tell. Never guess a measurement, material "
     "or fit that the evidence does not show. Reply with one JSON object and nothing else: "
     '{"fields": {"<field path>": "<choice>" or ["<choice>", ...]}}. '
     "Use a list only where a field allows more than one choice, and never more than its limit."
@@ -118,12 +119,13 @@ def forms_prompt(rows_by_market: dict[str, list[dict]], forms: dict[str, dict]) 
             if row.get("max_length") is not None:
                 mode += f"; max length {row['max_length']}"
             label = str(row.get("label") or "").removesuffix(" *")
+            requirement = "required" if row.get("required") else "optional"
             from vendoo_studio.services.option_lookup import project_row
 
             projected = project_row(row)
             choices = (json.dumps({"options_lookup": projected["options_lookup"]}) if projected.get("options_lookup")
                        else "; ".join(row.get("options") or []) or f"{row.get('input_type') or 'text'}; max length {row.get('max_length') or 'unspecified'}")
-            lines.append(f"- {_path(row)} | {label} | {mode} | {pick} | choices: " + choices)
+            lines.append(f"- {_path(row)} | {label} | {requirement} | {mode} | {pick} | choices: " + choices)
         blocks.append(f"### {NAMES[market]} (category {category})\n" + "\n".join(lines))
     return "\n\n".join(blocks)
 
@@ -223,16 +225,26 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
     if strict:
         await record_forms(db, conv_id, markets)
     fields = None
+    required_only = False
     for _round in range(3 if strict else 1):
         saved = repo.get_current(conv_id)
         before = repo.get_revision(saved.current_revision_id).listing_json if saved else {}
-        fields = await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets, categories=False)
+        fields = await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets,
+                                          categories=False, required_only=required_only)
         dependencies_changed = fields is not None and any(
             native_contract.inputs(before, market, contract.get("fields") or [])
             != native_contract.inputs(fields, market, contract.get("fields") or [])
             for market, contract in (before.get(native_contract.KEY) or {}).items())
-        if not strict or fields is None or not dependencies_changed:
+        if not strict or fields is None:
             break
+        required_paths = {_path(row) for market, contract in (fields.get(native_contract.KEY) or {}).items()
+                          if market in markets for row in contract.get("fields") or []
+                          if row.get("required") and native_contract.item_field(row, market)}
+        missing_required = any(gap["field"] in required_paths for market in markets
+                               for gap in native_contract.gaps(fields, market))
+        if not dependencies_changed and not missing_required:
+            break
+        required_only = not dependencies_changed
         await record_forms(db, conv_id, markets)
     if strict:
         await record_forms(db, conv_id, markets)
@@ -284,8 +296,8 @@ async def record_forms(db: Session, conv_id: str, markets, *, reset_evidence: bo
 
 
 async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: str,
-                              markets: Iterable[str], categories: bool) -> dict | None:
-    """Save the agent's picks for empty category fields. None when nothing was filled."""
+                              markets: Iterable[str], categories: bool, required_only: bool = False) -> dict | None:
+    """Save picks; a valid strict check returns its snapshot even when unchanged."""
     from vendoo_studio.services.listing_generate import collect_provider_text, photo_fingerprint
 
     if provider is None:
@@ -301,6 +313,9 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
     forms = await load_forms(db, conv_id, markets)
     rows_by_market = {market: rows for market, form in forms.items()
                       if (rows := category_rows(form, listing) if categories else fillable_rows(form, market, listing, evidence=evidence))}
+    if required_only:
+        rows_by_market = {market: required_rows for market, rows in rows_by_market.items()
+                          if (required_rows := [row for row in rows if row.get("required")])}
     if not rows_by_market:
         return None
     rows = {_path(row): row for market_rows in rows_by_market.values() for row in market_rows}
@@ -400,7 +415,7 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
             updated.setdefault(native_contract.EVIDENCE_KEY, {})[path] = {
                 "value": copy.deepcopy(value), "quote": reply["fields"][path]["evidence"]}
     if updated == listing:
-        return None
+        return updated if strict else None
     listing_repo.save_revision(conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision.id, expected_revision_id=revision.id)
     ConversationRepo(db).add_message(conv_id, "system", filled_message(accepted, rows), provider="system", model="")
     return updated

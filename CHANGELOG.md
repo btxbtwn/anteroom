@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.592 — 2026-10-30
+
+- The listing agent now sees which marketplace fields are required and rechecks remaining required answers before finishing. It still leaves unsupported facts blank for review.
+- Changing another marketplace's price no longer adds optional Etsy answers, including on vintage items. Empty optional Etsy fields no longer block a draft.
+
 ## 0.1.591 — 2026-10-30
 
 - Review and save field, tag and label changes across multiple items on the web, with stale-review and queued-work checks before each save.

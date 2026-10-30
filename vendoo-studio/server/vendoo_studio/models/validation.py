@@ -39,7 +39,6 @@ from vendoo_studio.models.etsy_fields import (
     ETSY_OPTIONAL_DNA_KEYS,
     VALID_ETSY_WHAT,
     VALID_ETSY_WHO,
-    ensure_etsy_category_optionals,
     etsy_listing_type,
     etsy_what_raw,
     etsy_eligible,
@@ -427,8 +426,6 @@ def normalize_listing_dropdowns(listing: dict) -> bool:
                 changed = True
 
     if ensure_ebay_category_optionals(listing):
-        changed = True
-    if etsy_eligible(listing) and ensure_etsy_category_optionals(listing):
         changed = True
     if ensure_depop_category_optionals(listing):
         changed = True
@@ -830,9 +827,7 @@ def validate_listing(
                         continue
                 value = ebay_optional_raw(etsy, key)
                 if ebay_optional_blank(value):
-                    # Empty is the answer for a row that does not apply to the item.
-                    if key not in ETSY_OPTIONAL_DNA_KEYS:
-                        add_issue(result, f"etsy_specifics.{key}", f"Etsy optional '{key}' must be filled")
+                    # Optional answers stay empty until the seller or agent supplies evidence.
                     continue
                 text = text_value(value) if not isinstance(value, (list, tuple)) else ",".join(str(v) for v in value)
                 is_dna = text.casefold() in {

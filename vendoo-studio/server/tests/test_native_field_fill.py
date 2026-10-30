@@ -91,9 +91,9 @@ class ValidatedValuesTest(unittest.TestCase):
         free = row(path, "Style", ["Casual", "Vintage"], selection_only=False, required=True, max_length=30)
         selection = row("ebay_specifics.Fit", "Fit", ["Slim", "Regular"], selection_only=True)
         prompt = native_field_fill.forms_prompt({"ebay": [free, selection]}, {"ebay": {"category_id": "11483"}})
-        self.assertIn("Style | free-text; custom text allowed", prompt)
+        self.assertIn("Style | required | free-text; custom text allowed", prompt)
         self.assertIn("max length 30", prompt)
-        self.assertIn("Fit | selection-only", prompt)
+        self.assertIn("Fit | optional | selection-only", prompt)
         evidence = "The tag says relaxed straight."
         reply = {"fields": {path: {"value": "Relaxed straight", "evidence": "relaxed straight"}}}
         self.assertEqual(validated_values(reply, {path: free}, evidence=evidence)[path][0], "Relaxed straight")
@@ -142,6 +142,42 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
     def _current(self):
         saved = self.repo.get_current(self.conv.id)
         return self.repo.get_revision(saved.current_revision_id)
+
+    async def test_required_gap_gets_a_focused_evidence_checked_repair(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "11483", "fields": [
+            row("ebay_specifics.Style", "Style", ["Casual"], required=True, selection_only=False),
+            row("ebay_specifics.Model", "Model", [], selection_only=False),
+        ]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "11483"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        replies = ['{"fields":{}}', json.dumps({"fields": {"ebay_specifics.Style": {
+            "value": "Relaxed straight", "evidence": "Sawyer relaxed straight"}}})]
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)) as ask:
+            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="Tag: Sawyer relaxed straight")
+        self.assertEqual(ask.await_count, 2)
+        repair_prompt = ask.call_args_list[1].args[1][1]["content"]
+        self.assertIn("Style | required | free-text", repair_prompt)
+        self.assertNotIn("ebay_specifics.Model |", repair_prompt)
+        self.assertEqual(saved["ebay_specifics"]["Style"], "Relaxed straight")
+        self.assertEqual(native_contract.gaps(saved, "ebay"), [])
+
+    async def test_required_repair_is_bounded_and_never_fabricates_unknown_answers(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "11483", "fields": [
+            row("ebay_specifics.Style", "Style", ["Casual"], required=True, selection_only=False)]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "11483"}, "ebay_specifics": {"Style": ""}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields":{}}')) as ask:
+            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="No style evidence")
+        self.assertEqual(ask.await_count, 3)
+        self.assertTrue(any(gap["field"] == "ebay_specifics.Style" for gap in native_contract.gaps(saved, "ebay")))
 
     async def test_large_dropdown_lookup_saves_native_id_and_evidence_end_to_end(self):
         from test_option_lookup import Provider
@@ -284,7 +320,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         first_prompt = ask.call_args_list[0].args[1][1]["content"]
         second_prompt = ask.call_args_list[1].args[1][1]["content"]
         self.assertNotIn("ebay_specifics.Size |", first_prompt)
-        self.assertIn("Size | selection-only | pick one | choices: M", second_prompt)
+        self.assertIn("Size | required | selection-only | pick one | choices: M", second_prompt)
 
     async def test_saves_valid_picks_and_reports_them(self):
         reply = json.dumps({"fields": {"depop_specifics.attributes.bottom-fit": ["Ripped", "Torn"], "ebay_specifics.Rise": "High"}})
@@ -292,7 +328,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
             updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Ripped knees, high rise")
         prompt = ask.call_args.args[1][1]["content"]
-        self.assertIn("depop_specifics.attributes.bottom-fit | Type | selection-only | pick up to 2 | choices: Ripped; Faded; Acid-washed", prompt)
+        self.assertIn("depop_specifics.attributes.bottom-fit | Type | optional | selection-only | pick up to 2 | choices: Ripped; Faded; Acid-washed", prompt)
         self.assertNotIn("Package size", prompt)
         self.assertEqual(updated["depop_specifics"]["attributes"]["bottom-fit"], ["ripped"])
         self.assertEqual(updated["ebay_specifics"]["Rise"], "High")
