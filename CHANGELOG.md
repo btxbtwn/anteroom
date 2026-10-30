@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.540 — 2026-10-30
+## 0.1.541 — 2026-10-30
 
 - Protect cloud database setup information and verify its encrypted connection before online sync is enabled.
+
+## 0.1.540 — 2026-10-29
+
+- Open listings and switch marketplace forms faster, keep editing while changes save, and switch inventory filters without loading every thread on screen.
 
 ## 0.1.539 — 2026-10-29
 

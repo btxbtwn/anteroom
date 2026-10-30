@@ -1111,18 +1111,24 @@ class ListingIntegrityRouteTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
-    def test_listing_reads_and_saves_repair_repeated_size_once(self):
+    def test_listing_saves_repair_repeated_size_and_reads_do_not_write(self):
         listing = {
             **copy.deepcopy(VALID_LISTING),
             "title": "Maliparmi IT 42 IT 42 IT 42 Bohemian Camisole Red Regular",
             "brand": "Maliparmi",
             "size": "IT 42",
         }
-        ListingRepo(self.db).save_revision(self.conv.id, listing, source="user_form")
+        original = ListingRepo(self.db).save_revision(self.conv.id, listing, source="user_form")
         url = f"/api/conversations/{self.conv.id}/listing"
         expected = "Maliparmi IT 42 Bohemian Camisole Red Regular"
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["listing"]["title"], listing["title"])
+        self.assertEqual(response.json()["current_revision_id"], original.id)
+        response = self.client.put(url, json={"expected_revision_id": original.id, "listing": listing})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["listing"]["title"], expected)
+        response = self.client.get(url)
         initial = response.json()
         self.assertEqual(initial["listing"]["title"], expected)
         for _ in range(3):

@@ -47,6 +47,27 @@ def test_head_revision_is_resolvable():
     assert schema_migrations.migrations_dir().is_dir()
 
 
+def test_quantity_history_upgrade_backfills_without_rewriting_listings(engine, snapshots):
+    import json
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "a4a9eee52599")
+    bodies = {"before": {"quantity": 3, "title": "Keep saved copy"}, "after": {"quantity": "5"},
+              "empty": {}, "invalid": {"quantity": "unknown"}, "zero": {"quantity": 0}}
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO conversations (id, title) VALUES ('c1', 'Keep me')"))
+        for revision_id, body in bodies.items():
+            connection.execute(text("INSERT INTO listing_revisions (id, conversation_id, listing_json, source) "
+                                    "VALUES (:id, 'c1', :body, 'test')"), {"id": revision_id, "body": json.dumps(body)})
+    command.upgrade(config, "head")
+    with engine.connect() as connection:
+        rows = connection.execute(text("SELECT id, listing_json, inventory_quantity FROM listing_revisions")).all()
+    assert {row.id: row.inventory_quantity for row in rows} == {"before": 3, "after": 5, "empty": None, "invalid": None, "zero": None}
+    assert {row.id: json.loads(row.listing_json) for row in rows} == bodies
+    assert inspect_database(engine.url.database).clean
+
+
 def test_photo_fingerprint_upgrade_preserves_existing_messages(engine, snapshots):
     from alembic import command
     from sqlalchemy import text

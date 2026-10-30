@@ -8,7 +8,8 @@ import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, face
 import { StructuredEditor } from "./ListingEditor";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
-vi.mock("@tanstack/react-query", () => ({
+vi.mock("@tanstack/react-query", async original => ({
+  ...await original<typeof import("@tanstack/react-query")>(),
   useQuery, useMutation, useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
 }));
 
