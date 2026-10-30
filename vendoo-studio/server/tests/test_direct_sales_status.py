@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation
+from vendoo_studio.models.job import Job
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
@@ -77,6 +78,46 @@ def test_a_direct_sale_turns_a_vendoo_active_item_sold(env):
     assert status(env.db, "coat").status == "active"
     line(env.db, "coat")
     assert status(env.db, "coat").status == "sold"
+    ConversationRepo(env.db).reconcile_job_statuses()
+    assert env.db.get(Conversation, "coat").status == "sold"
+
+
+def test_a_vendoo_sale_record_is_not_a_detected_sale(env):
+    """An imported claim waits for the marketplace itself; Anteroom records no sale from Vendoo."""
+    when = datetime.now(UTC) - timedelta(days=1)
+    item(env.db, "depop", notes={
+        "vendooStatus": "active",
+        "vendooMarketplaces": ["depop"],
+        "vendooSale": {"marketplace": "depop", "soldAt": when.isoformat(), "price": 38, "fees": 4},
+        "vendooDates": {"soldByMarketplace": {"depop": when.isoformat()}},
+    })
+    result = status(env.db, "depop")
+    assert (result.status, result.units_sold) == ("active", 0)
+    ConversationRepo(env.db).reconcile_job_statuses()
+    assert env.db.get(Conversation, "depop").status == "active"
+    assert env.db.query(MarketplaceSale).count() == 0
+
+
+def test_a_failed_send_does_not_hide_a_sale(env):
+    item(env.db, "coat")
+    line(env.db, "coat")
+    now = datetime.now(UTC)
+    env.db.add(Job(conversation_id="coat", approved_revision_id="rev", listing_snapshot={"title": "Coat"},
+                   status="failed", created_at=now, updated_at=now))
+    env.db.commit()
+    ConversationRepo(env.db).reconcile_job_statuses()
+    assert env.db.get(Conversation, "coat").status == "sold"
+
+
+def test_an_old_send_does_not_keep_a_sale_active(env):
+    item(env.db, "coat")
+    line(env.db, "coat")
+    conv = env.db.get(Conversation, "coat")
+    conv.updated_at = datetime.now(UTC)
+    older = datetime.now(UTC) - timedelta(hours=1)
+    env.db.add(Job(conversation_id="coat", approved_revision_id="rev", listing_snapshot={"title": "Coat"},
+                   status="completed", created_at=older, updated_at=older))
+    env.db.commit()
     ConversationRepo(env.db).reconcile_job_statuses()
     assert env.db.get(Conversation, "coat").status == "sold"
 

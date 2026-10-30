@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.543 — 2026-10-30
+
+- Opening an item reads its own live listings, so a sale shows while you look at it instead of waiting for that shop's next check. Anteroom detects sales on the marketplaces themselves and no longer counts Vendoo's sale records, so a claim from an import is checked live instead of believed. Every sale Anteroom finds is attached to the item it read, and that listing is then left alone: it cannot be delisted, updated or listed again, and Delist the other marketplaces still skips it. A sale also outranks an earlier failed send, which no longer hides it.
+
 ## 0.1.542 — 2026-10-29
 
 - Send eBay offers across all current and future listings with one discount and an optional minimum price.

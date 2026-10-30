@@ -106,7 +106,9 @@ class FacebookListingTest(unittest.TestCase):
         with patch.object(chrome_sales, "record_reported_sales", return_value=["sale-1"]) as record, \
                 patch.object(marketplace_accounts, "announce_sales", new_callable=AsyncMock) as announce:
             body = self.client.post(f"{self.base}/facebook/check").json()
-        record.assert_called_once_with("facebook", ["1234567890123456"])
+        # The item is named, so the sale protects the listing even if its link is odd.
+        record.assert_called_once_with("facebook", ["1234567890123456"],
+                                       conversation_ids={"1234567890123456": self.conv.id})
         announce.assert_awaited_once_with(["sale-1"])
         self.assertTrue(body["sale_recorded"])
 
@@ -167,7 +169,7 @@ class FacebookSaleCheckTest(unittest.TestCase):
             conv = ConversationRepo(db).create(title="coat")
             conv.notes = json.dumps({"vendooListingUrls": {"facebook": FACEBOOK}})
             db.commit()
-        self.assertEqual(chrome_sales.live_listing_ids("facebook", session_factory=self.Session), ["1234567890123456"])
+        self.assertEqual(list(chrome_sales.live_listing_ids("facebook", session_factory=self.Session)), ["1234567890123456"])
 
     def test_each_check_reads_the_next_few_listings_in_turn(self):
         ids = [str(1000000 + index) for index in range(14)]
@@ -187,7 +189,7 @@ class FacebookSaleCheckTest(unittest.TestCase):
     def test_facebook_is_not_checked_until_the_seller_turns_it_on(self):
         bridge = AsyncMock(return_value={"ok": True, "sales": []})
         with patch("vendoo_studio.services.browser_bridge.request", bridge), \
-                patch.object(chrome_sales, "live_listing_ids", return_value=["1234567890123456"]):
+                patch.object(chrome_sales, "live_listing_ids", return_value={"1234567890123456": "conv"}):
             self.assertTrue(asyncio.run(chrome_sales.check_marketplace("facebook")))
             bridge.assert_not_called()
             user_settings.set_sale_detection("facebook", True)
