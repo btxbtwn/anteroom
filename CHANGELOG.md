@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.563 — 2026-10-30
+
+- Vinted and Sellwild stay signed in after you quit Anteroom: the next time a listing needs their categories or account choices, Anteroom reuses your saved sign-in and loads them without asking you to sign in again. Signing out on the marketplace's own page still signs Anteroom out.
+
 ## 0.1.562 — 2026-10-30
 
 - Refilling marketplace fields keeps answers already verified from your photos or notes. An empty or broken AI reply no longer wipes existing answers, and unchanged forms no longer create extra saves.
