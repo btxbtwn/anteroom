@@ -104,6 +104,14 @@ must cover a configured account generating from photos, assistant edits, an
 interrupted connection followed by Reconnect, Stop, and refresh of the saved
 listing without submitting duplicate work. No test or app flow publishes.
 
+## Local sandbox and UI tests
+
+See [agent sandboxes](../docs/agent-sandboxes.md). Run `./sandbox.sh --hosted`
+from the repo root, then launch Debug with
+`ANTEROOM_SANDBOX_URL=http://localhost:4320` in the Xcode scheme environment.
+Release ignores this variable. `./anteroom-ios/test-sandbox.sh` starts the local
+hosted backend and runs the draft creation/relaunch UI test without accounts.
+
 ## Desktop visual alignment
 
 The General editor uses the desktop inspector's Listing, Pricing, Condition,

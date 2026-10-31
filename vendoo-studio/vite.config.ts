@@ -26,6 +26,16 @@ const stamp = buildStamp();
 export default defineConfig({
   define: { __STUDIO_BUILD__: JSON.stringify(stamp) },
   plugins: [
+    {
+      name: "hosted-development-entry",
+      configureServer(server) {
+        if (process.env.VITE_ANTEROOM_SANDBOX !== "1") return;
+        server.middlewares.use((request, _response, next) => {
+          if (request.url === "/") request.url = "/cloud.html";
+          next();
+        });
+      },
+    },
     react(),
     tailwindcss(),
     {

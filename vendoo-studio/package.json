@@ -1,7 +1,7 @@
 {
   "name": "vendoo-studio",
   "private": true,
-  "version": "0.1.609",
+  "version": "0.1.610",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,8 @@
     "setup": "bash scripts/setup.sh",
     "doctor": "bash scripts/doctor.sh",
     "start": "bash scripts/dev.sh",
-    "sandbox": "bash scripts/sandbox.sh"
+    "sandbox": "bash scripts/sandbox.sh",
+    "e2e:hosted": "playwright test --config playwright.hosted.config.ts"
   },
   "engines": {
     "node": ">=20"

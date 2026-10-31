@@ -26,7 +26,17 @@ final class SessionStore {
             state = .missingConfiguration
             return
         }
-        let client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key)
+        let client: SupabaseClient
+#if DEBUG
+        if AppConfig.sandboxURL != nil {
+            client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key,
+                                    options: .init(auth: .init(storage: SandboxAuthStorage())))
+        } else {
+            client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key)
+        }
+#else
+        client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key)
+#endif
         self.client = client
         api = AnteroomAPI(baseURL: AppConfig.apiBaseURL) {
             try await client.auth.session.accessToken
@@ -41,6 +51,18 @@ final class SessionStore {
     /// Follows sign-in, refresh and sign-out events for the life of the app.
     func start() async {
         guard let client else { return }
+#if DEBUG
+        if AppConfig.sandboxURL != nil {
+            do {
+                let local = try await client.auth.signIn(email: "alice@sandbox.test", password: "sandbox")
+                state = .signedIn(email: local.user.email)
+            } catch {
+                signInError = "The local sandbox is unavailable. Start ./sandbox.sh --hosted and relaunch."
+                state = .signedOut
+            }
+            return
+        }
+#endif
         for await (event, session) in client.auth.authStateChanges {
             switch event {
             case .initialSession:

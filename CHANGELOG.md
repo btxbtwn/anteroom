@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.610 — 2026-10-31
+
+- Try the hosted web workspace and iPhone drafts safely on local sample accounts, with no cloud account or keys. Automatic tests now check the hosted workspace and the packaged Mac app before release.
+
 ## 0.1.609 — 2026-10-31
 
 - Pants and jeans no longer get a Size or Size Type on Sellwild, or a Size Type on Vinted, since those forms have no such fields. Listings that already had one are cleaned up, so the "This field is not provided by the selected marketplace form" warning goes away.

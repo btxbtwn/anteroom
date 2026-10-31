@@ -5,6 +5,8 @@ on:
     paths:
       - "anteroom-ios/**"
       - ".github/workflows/ios.yml"
+      - "vendoo-studio/server/**"
+      - "vendoo-studio/pyproject.toml"
   push:
     branches: [main]
     paths:
@@ -48,6 +50,36 @@ jobs:
             -scheme Anteroom \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO
+
+  sandbox-tests:
+    name: iPhone sandbox tests
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Prepare disposable hosted API and simulator project
+        run: |
+          brew install xcodegen
+          cd vendoo-studio
+          python -m venv .venv
+          .venv/bin/pip install -e ".[dev]"
+      - name: Create and reopen a draft through the hosted sandbox
+        run: |
+          set -o pipefail
+          xcodebuild -downloadPlatform iOS
+          SIMULATOR_ID="$(xcrun simctl create 'Anteroom sandbox tests' 'com.apple.CoreSimulator.SimDeviceType.iPhone-17')"
+          ANTEROOM_TEST_DESTINATION="platform=iOS Simulator,id=$SIMULATOR_ID" \
+            ANTEROOM_TEST_RESULTS="$RUNNER_TEMP/sandbox.xcresult" ./anteroom-ios/test-sandbox.sh
+      - name: Keep simulator results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iphone-sandbox-results
+          path: |
+            ${{ runner.temp }}/sandbox.xcresult
+            ${{ runner.temp }}/sandbox.log
 
   testflight:
     name: Upload to TestFlight
