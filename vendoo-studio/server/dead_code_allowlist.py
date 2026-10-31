@@ -16,3 +16,7 @@ BaseHTTPRequestHandler.log_message
 Handler.handleError
 # keyring backends: keyring calls this.
 delete_password
+
+# PyJWT calls the local sandbox key provider through its virtual fetch_data method.
+from jwt import PyJWKClient
+PyJWKClient.fetch_data

@@ -15,7 +15,6 @@ targets:
   Anteroom:
     type: application
     platform: iOS
-    scheme: {}
     sources:
       - path: Sources
         excludes:
@@ -33,6 +32,8 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         NSCameraUsageDescription: Take photos of the items you are listing.
         SupabasePublishableKey: $(SUPABASE_PUBLISHABLE_KEY)
         CFBundleURLTypes:
@@ -49,3 +50,21 @@ targets:
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         ENABLE_PREVIEWS: YES
+  AnteroomUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: Anteroom
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Anteroom:
+    build:
+      targets:
+        Anteroom: all
+        AnteroomUITests: [test]
+    test:
+      targets: [AnteroomUITests]

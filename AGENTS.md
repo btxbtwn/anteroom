@@ -99,12 +99,14 @@ The sandbox does not cover:
 - real marketplace forms (form sweeps, below);
 - real model quality (`vendoo-studio/scripts/evaluate-generation.py`, see
   `docs/listing-generation-evaluations.md`);
-- the hosted web app (backend tests cover it with Postgres and minted
-  sessions);
-- the packaged Mac app (the macOS workflow).
+- live Supabase services (the local hosted sandbox supplies protocol stand-ins).
 
-There is no iPhone app yet; the phone layout of the web app is what the phone
-browser tests cover.
+`./sandbox.sh --hosted` runs the hosted API and web UI on throwaway Postgres,
+with signed local sessions, private photo storage and the fake provider. The
+native iPhone Debug app connects to that API; XCUITest runs on macOS. The
+packaged Mac app also has a sandbox smoke check. See
+[`docs/agent-sandboxes.md`](docs/agent-sandboxes.md) for commands, ports and
+staging preparation. No paid staging resources are provisioned automatically.
 
 Never point a test, script or sandbox at the seller's real data folder
 (`vendoo-studio/data/` or `~/Library/Application Support/Anteroom`).

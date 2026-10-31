@@ -55,7 +55,15 @@ if changed '^vendoo-studio/'; then
   run "Anteroom code health" bash -c "cd vendoo-studio && npm run knip && '$BIN/lint-imports' && '$PY' scripts/check-dead-code.py"
   run "Anteroom types" bash -c "cd vendoo-studio && '$PY' -m basedpyright"
   if [[ "$FAST" == "0" ]]; then
-    run "Anteroom browser tests (sandbox)" bash -c "cd vendoo-studio && npm run e2e"
+    run "Anteroom browser tests (sandbox)" bash -c "cd vendoo-studio && npm run e2e && npm run e2e:hosted"
+  fi
+fi
+
+if changed '^anteroom-ios/'; then
+  if [[ "$(uname)" == "Darwin" ]]; then
+    run "iPhone sandbox UI tests" ./anteroom-ios/test-sandbox.sh
+  else
+    echo "iPhone sandbox UI tests require macOS and run in CI; unavailable on this machine."
   fi
 fi
 

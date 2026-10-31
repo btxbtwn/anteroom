@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.608 — 2026-10-31
+
+- Try the hosted web workspace and iPhone drafts safely on local sample accounts, with no cloud account or keys. Automatic tests now check the hosted workspace and the packaged Mac app before release.
+
 ## 0.1.607 — 2026-10-31
 
 - Improve checks that catch data-handling mistakes before an app update.

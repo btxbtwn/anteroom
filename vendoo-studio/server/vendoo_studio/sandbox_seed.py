@@ -101,6 +101,32 @@ def seed(base_url: str) -> list[str]:
         return created
 
 
+def seed_hosted(base_url: str) -> list[str]:
+    """Build sample drafts through the same hosted routes as the web/iPhone."""
+    with httpx.Client(base_url=base_url, timeout=30) as client:
+        if client.get('/api/health').raise_for_status().json().get('sandbox') is not True:
+            raise RuntimeError('Refusing to seed a server that is not a local sandbox')
+        session = client.post('/local/auth/v1/token?grant_type=password', json={
+            'email': 'alice@sandbox.test', 'password': 'sandbox',
+        }).raise_for_status().json()
+        client.headers['Authorization'] = 'Bearer ' + session['access_token']
+        created = []
+        for sample in SAMPLES:
+            listing = sample['listing'] or {}
+            draft = client.post('/api/drafts', json={
+                'title': listing.get('title') or sample['title'],
+            }).raise_for_status().json()
+            client.post(f"/api/drafts/{draft['id']}/photos", content=_photo(sample['title'], sample['color'], 1),
+                        headers={'Content-Type': 'image/jpeg'}).raise_for_status()
+            if listing:
+                client.patch(f"/api/drafts/{draft['id']}", json={
+                    'title': listing['title'], 'notes': '', 'expected_updated_at': draft['updated_at'],
+                    'fields': {key: value for key, value in listing.items() if key != 'title'},
+                }).raise_for_status()
+            created.append(draft['id'])
+        return created
+
+
 def main() -> None:
     base_url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:4319"
     ids = seed(base_url)

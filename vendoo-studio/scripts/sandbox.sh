@@ -18,6 +18,7 @@ KEEP=0
 SEED=1
 for arg in "$@"; do
   case "$arg" in
+    --hosted) exec "$ROOT/scripts/hosted-sandbox.sh" ;;
     --keep) KEEP=1 ;;
     --empty) SEED=0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;

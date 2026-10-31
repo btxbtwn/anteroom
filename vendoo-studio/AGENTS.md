@@ -97,3 +97,12 @@ add to a record to make a check pass.
 - Generation is slow in the sandbox as well (20 to 30 seconds), because every
   real pass runs and only the model is fake. Give browser tests that generate
   a long timeout instead of sleeping.
+
+## Hosted and native sandboxes
+
+`../sandbox.sh --hosted` runs the actual hosted API on temporary Postgres and
+the cloud UI with two locally signed sample sellers. `npm run e2e:hosted`
+checks desktop/phone hosted flows. The iPhone Debug app uses the same API;
+`../anteroom-ios/test-sandbox.sh` runs its XCUITest on a Mac. See
+`../docs/agent-sandboxes.md`. Never deploy `hosted_sandbox` or point a sandbox
+at an existing seller database. Staging preparation creates no paid resources.

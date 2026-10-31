@@ -3,10 +3,9 @@
 A native SwiftUI app on the hosted Anteroom API (`vendoo_studio.hosted:app`)
 and Supabase, step 5 of [`docs/cloud-architecture.md`](../docs/cloud-architecture.md).
 
-What works now: email-link sign-in, draft inventory with search, editing a
+The app supports email-link sign-in, draft inventory with search, editing a
 draft's title, notes and General fields, and adding photos from the camera or
-library. It does what the hosted API allows and nothing more: no generation,
-marketplace tabs or publishing.
+library. Publishing is not exposed by the native app.
 
 ## Interface
 
@@ -70,3 +69,11 @@ repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_P8`; Xcode
 creates and renews the certificate and profile with it. The publishable key
 comes from the repository variable `SUPABASE_PUBLISHABLE_KEY`. Pull requests
 never run the upload job.
+
+## Local sandbox and UI tests
+
+See [agent sandboxes](../docs/agent-sandboxes.md). Run `./sandbox.sh --hosted`
+from the repo root, then launch Debug with
+`ANTEROOM_SANDBOX_URL=http://localhost:4320` in the Xcode scheme environment.
+Release ignores this variable. `./anteroom-ios/test-sandbox.sh` starts the local
+hosted backend and runs the draft creation/relaunch UI test without accounts.

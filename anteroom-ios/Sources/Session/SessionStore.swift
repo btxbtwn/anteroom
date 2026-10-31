@@ -41,6 +41,18 @@ final class SessionStore {
     /// Follows sign-in, refresh and sign-out events for the life of the app.
     func start() async {
         guard let client else { return }
+#if DEBUG
+        if AppConfig.sandboxURL != nil {
+            do {
+                let local = try await client.auth.signIn(email: "alice@sandbox.test", password: "sandbox")
+                state = .signedIn(email: local.user.email)
+            } catch {
+                signInError = "The local sandbox is unavailable. Start ./sandbox.sh --hosted and relaunch."
+                state = .signedOut
+            }
+            return
+        }
+#endif
         for await (event, session) in client.auth.authStateChanges {
             switch event {
             case .initialSession:
