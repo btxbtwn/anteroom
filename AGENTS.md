@@ -159,7 +159,7 @@ mix it with a fix or a feature.
 - Keep skill instructions in canonical `SKILL.md` files; keep browser-specific logic in the corresponding extension content script.
 - Keep frontend API calls under `vendoo-studio/src/api/`; keep backend routes thin and place domain behavior in services and repositories.
 - A direct marketplace tab (eBay, Poshmark, Mercari, Depop, Sellwild) is a 1:1 replica of that marketplace's own listing form: the same fields, labels and order, no more and no fewer, under the same section headings and row layout (each native field carries the page's `section`, and `width: "half"` where the page puts fields side by side). Its rows come only from the native form the server or extension builds; the editor never adds reference, hand-kept or fallback rows to it. A field the marketplace has goes into that native form builder, not the editor.
-- Maintain the JSON listing contract across skills, Anteroom, and the extension. The extension expects the structure documented in `README.md`.
+- Maintain the JSON listing contract across skills, Anteroom, and the extension. The extension expects the structure documented in `docs/json-contract.md`.
 
 ## Database schema
 
