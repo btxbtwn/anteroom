@@ -179,6 +179,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["changelog", "release notes", "history", "changes", "what changed"],
   },
   {
+    id: "previous-versions",
+    title: "Previous versions",
+    section: "general",
+    targetId: "about",
+    searchTerms: ["rollback", "roll back", "downgrade", "older version", "revert", "broken update"],
+  },
+  {
     id: "listing-ai",
     title: "Listing AI",
     section: "providers",

@@ -53,6 +53,7 @@ def test_destructive_rules_cover_publish_and_leave_reads_alone():
     assert is_destructive("POST", "/api/conversations/c/native-marketplaces/ebay/update", set())
     assert is_destructive("POST", "/api/conversations/c/price-drop", set())
     assert is_destructive("POST", "/api/updates/apply", set())
+    assert is_destructive("POST", "/api/updates/versions/install", set())
     assert is_destructive("GET", "/api/health", set()) is None
     assert is_destructive("POST", "/api/conversations/c/price-drop/preview", set()) is None
     assert is_destructive("POST", "/api/conversations", set()) is None

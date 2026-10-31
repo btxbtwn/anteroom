@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
@@ -98,6 +99,36 @@ async def reinstall_app(db: Session = Depends(get_db)):
     cancelled_jobs = _cancel_leftover_jobs(db)
     try:
         result = update_service.reinstall_app()
+    except UpdateBlocked as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return await _after_app_replace(result, cancelled_jobs)
+
+
+class InstallVersionRequest(BaseModel):
+    tag: str
+    snapshot: str | None = None
+
+
+@router.get("/versions")
+async def published_versions():
+    return await asyncio.to_thread(update_service.list_versions)
+
+
+@router.get("/versions/{tag}/plan")
+async def version_plan(tag: str):
+    try:
+        return await asyncio.to_thread(update_service.version_plan, tag)
+    except UpdateBlocked as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/versions/install")
+async def install_version(payload: InstallVersionRequest, db: Session = Depends(get_db)):
+    cancelled_jobs = _cancel_leftover_jobs(db)
+    try:
+        result = await asyncio.to_thread(update_service.install_version, payload.tag, payload.snapshot)
     except UpdateBlocked as exc:
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:

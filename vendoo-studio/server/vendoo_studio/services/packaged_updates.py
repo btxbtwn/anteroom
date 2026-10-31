@@ -24,6 +24,9 @@ GITHUB_API = os.environ.get("VENDOO_STUDIO_GITHUB_API", "https://api.github.com"
 GITHUB_DOWNLOAD = os.environ.get("VENDOO_STUDIO_GITHUB_DOWNLOAD", "https://github.com")
 GITHUB_REPO = os.environ.get("VENDOO_STUDIO_GITHUB_REPO", "btxbtwn/list-this-vendoo-suite")
 RELEASE_TAG = os.environ.get("VENDOO_STUDIO_RELEASE_TAG", "studio-macos")
+# Every build is also published under its own tag, "studio-macos-v<version>-<sha>",
+# so a build that turns out broken can be swapped for an earlier one.
+VERSIONED_TAG_PREFIX = f"{RELEASE_TAG}-v"
 ZIP_NAME = "Anteroom-macos.zip"
 INFO_NAME = "build_info.json"
 APP_BUNDLE_NAME = f"{APP_NAME}.app"
@@ -79,9 +82,9 @@ def installed_app_path() -> Path:
     return Path.home() / "Applications" / APP_BUNDLE_NAME
 
 
-def release_asset_url(name: str) -> str:
+def release_asset_url(name: str, tag: str = RELEASE_TAG) -> str:
     """Stable public download URL that does not consume the GitHub REST rate limit."""
-    return f"{GITHUB_DOWNLOAD.rstrip('/')}/{GITHUB_REPO}/releases/download/{RELEASE_TAG}/{name}"
+    return f"{GITHUB_DOWNLOAD.rstrip('/')}/{GITHUB_REPO}/releases/download/{tag}/{name}"
 
 
 def release_page_url() -> str:
@@ -177,15 +180,16 @@ def _normalize_build_info(payload: dict) -> dict:
         "short_sha": payload.get("short_sha") or (sha[:7] if isinstance(sha, str) and sha else None),
         "ref": payload.get("ref"),
         "zip_sha256": zip_sha or None,
+        "schema_revision": str(payload.get("schema_revision") or "").strip() or None,
         "title": title,
         "pull_requests": pull_requests,
         "commits": commits,
     }
 
 
-def fetch_remote_build_info(client: httpx.Client | None = None) -> dict:
+def fetch_remote_build_info(client: httpx.Client | None = None, tag: str = RELEASE_TAG) -> dict:
     """Load the published build stamp from the release asset CDN (no REST quota)."""
-    url = release_asset_url(INFO_NAME)
+    url = release_asset_url(INFO_NAME, tag)
     own_client = client is None
     http = client or httpx.Client(timeout=30.0, headers=_headers(), follow_redirects=True)
     try:
@@ -493,7 +497,13 @@ def _extract_app(archive: Path, destination: Path) -> Path:
     return app
 
 
-def _write_replacer(app_path: Path, new_app: Path, pid: int) -> Path:
+def _write_replacer(
+    app_path: Path,
+    new_app: Path,
+    pid: int,
+    *,
+    restore_database: tuple[Path, Path] | None = None,
+) -> Path:
     script = user_data_root() / "updates" / "replace-app.sh"
     script.parent.mkdir(parents=True, exist_ok=True)
     # Install under the bundle's own name. An app installed before the rename
@@ -506,6 +516,17 @@ def _write_replacer(app_path: Path, new_app: Path, pid: int) -> Path:
     staged = target.with_name(f"{target.name}.updating")
     retired = app_path.with_name(f"{app_path.name}.previous")
     app, target_q, staged_q, retired_q = (shlex.quote(str(p)) for p in (app_path, target, staged, retired))
+    # Going back to a build with an older database layout puts a snapshot from
+    # that layout in place. It has to happen after this process exits, or the
+    # -wal it still holds would be replayed onto the restored file.
+    database_lines: list[str] = []
+    if restore_database:
+        staged_db, live_db = restore_database
+        live_q = shlex.quote(str(live_db))
+        database_lines = [
+            f"/bin/rm -f {live_q}-wal {live_q}-shm",
+            f"/bin/mv {shlex.quote(str(staged_db))} {live_q}",
+        ]
     script.write_text(
         "\n".join(
             [
@@ -521,6 +542,7 @@ def _write_replacer(app_path: Path, new_app: Path, pid: int) -> Path:
                 *([f"/bin/rm -rf {target_q}"] if target != app_path else []),
                 f"/bin/mv {staged_q} {target_q}",
                 f"/bin/rm -rf {retired_q}",
+                *database_lines,
                 f"/usr/bin/open {target_q}",
                 "",
             ]
@@ -529,6 +551,23 @@ def _write_replacer(app_path: Path, new_app: Path, pid: int) -> Path:
     )
     script.chmod(0o755)
     return script
+
+
+def _stage_app(download_url: str, expected_digest: str | None, report, progress_callback=None) -> tuple[Path, Path]:
+    """Download a release zip, check its digest and signature, and unpack it."""
+    staging = Path(tempfile.mkdtemp(prefix="anteroom-update-"))
+    archive = staging / ZIP_NAME
+    report(DOWNLOAD_PROGRESS_FLOOR)
+    with httpx.Client(timeout=120.0, headers=_headers(), follow_redirects=True) as client:
+        _download(client, download_url, archive, progress_callback)
+    report(91.0)
+    _verify_archive_digest(archive, expected_digest)
+    report(94.0)
+    new_app = _extract_app(archive, staging / "unpacked")
+    report(97.0)
+    _verify_app_signature(new_app)
+    _prepare_app_bundle(new_app, clear_quarantine=True)
+    return staging, new_app
 
 
 def prepare_packaged_update(*, force: bool = False, progress_callback=None) -> dict:
@@ -555,20 +594,9 @@ def prepare_packaged_update(*, force: bool = False, progress_callback=None) -> d
         raise PackagedUpdateError(f"Cannot replace {app_path} because that app is missing.")
 
     expected_digest = status.get("sha256")
-    staging = Path(tempfile.mkdtemp(prefix="anteroom-update-"))
-    archive = staging / ZIP_NAME
     if not expected_digest:
         expected_digest = _resolve_zip_digest({"zip_sha256": None})
-    report(DOWNLOAD_PROGRESS_FLOOR)
-    with httpx.Client(timeout=120.0, headers=_headers(), follow_redirects=True) as client:
-        _download(client, download_url, archive, progress_callback)
-    report(91.0)
-    _verify_archive_digest(archive, expected_digest)
-    report(94.0)
-    new_app = _extract_app(archive, staging / "unpacked")
-    report(97.0)
-    _verify_app_signature(new_app)
-    _prepare_app_bundle(new_app, clear_quarantine=True)
+    staging, new_app = _stage_app(download_url, expected_digest, report, progress_callback)
     prepared = {
         "app_path": app_path,
         "new_app": new_app,
@@ -637,3 +665,98 @@ def apply_packaged_update(*, force: bool = False) -> dict:
 def reinstall_packaged_app() -> dict:
     """Download the published Mac zip and replace the installed app, even if already current."""
     return apply_packaged_update(force=True)
+
+
+def _parse_versioned_tag(tag: str) -> tuple[str, str] | None:
+    """"studio-macos-v0.1.594-abc1234" -> ("0.1.594", "abc1234")."""
+    if not tag.startswith(VERSIONED_TAG_PREFIX):
+        return None
+    version, _, short_sha = tag[len(VERSIONED_TAG_PREFIX):].rpartition("-")
+    if not version or not short_sha:
+        return None
+    return version, short_sha
+
+
+def list_published_versions(client: httpx.Client | None = None) -> list[dict]:
+    """Every build still published under its own tag, newest first."""
+    url = f"{GITHUB_API.rstrip('/')}/repos/{GITHUB_REPO}/releases"
+    own_client = client is None
+    http = client or httpx.Client(timeout=30.0, headers=_headers(api=True), follow_redirects=True)
+    try:
+        response = http.get(url, params={"per_page": 100})
+        limited = _rate_limit_message(response)
+        if limited:
+            raise PackagedUpdateError(limited)
+        response.raise_for_status()
+        releases = response.json()
+    except httpx.HTTPError as exc:
+        raise PackagedUpdateError(f"Could not reach GitHub releases: {exc}") from exc
+    finally:
+        if own_client:
+            http.close()
+
+    local_sha = str(local_build_info().get("sha") or "")
+    versions = []
+    for release in releases if isinstance(releases, list) else []:
+        tag = str(release.get("tag_name") or "")
+        parsed = _parse_versioned_tag(tag)
+        if not parsed or release.get("draft"):
+            continue
+        version, short_sha = parsed
+        versions.append({
+            "tag": tag,
+            "version": version,
+            "short_sha": short_sha,
+            "title": str(release.get("name") or "").strip(),
+            "published_at": release.get("published_at") or release.get("created_at"),
+            "url": release.get("html_url"),
+            "installed": bool(local_sha) and local_sha.startswith(short_sha),
+        })
+    versions.sort(key=lambda item: item["published_at"] or "", reverse=True)
+    return versions
+
+
+def fetch_version_build_info(tag: str) -> dict:
+    if not _parse_versioned_tag(tag):
+        raise PackagedUpdateError(f"{tag} is not a published Anteroom build.")
+    return fetch_remote_build_info(tag=tag)
+
+
+def install_packaged_version(
+    tag: str,
+    remote: dict,
+    *,
+    restore_database: tuple[Path, Path] | None = None,
+    progress_callback=None,
+) -> dict:
+    """Download the build published under ``tag`` and arm the swap to it."""
+
+    def report(percent: float) -> None:
+        if progress_callback:
+            progress_callback(min(100.0, max(0.0, float(percent))))
+
+    app_path = installed_app_path()
+    if not app_path.exists():
+        raise PackagedUpdateError(f"Cannot replace {app_path} because that app is missing.")
+    if not remote.get("zip_sha256"):
+        raise PackagedUpdateError("That build does not include a SHA-256 digest for the Mac zip.")
+    _staging, new_app = _stage_app(
+        release_asset_url(ZIP_NAME, tag), remote["zip_sha256"], report, progress_callback
+    )
+    script = _write_replacer(app_path, new_app, os.getpid(), restore_database=restore_database)
+    subprocess.Popen(
+        [str(script)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    report(100.0)
+    return {
+        "ok": True,
+        "updated": True,
+        "sha": remote.get("sha"),
+        "version": remote.get("version"),
+        "packaged": True,
+        "relaunch": True,
+        "database_restored": restore_database is not None,
+    }
