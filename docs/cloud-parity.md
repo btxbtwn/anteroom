@@ -241,3 +241,11 @@ On `feat/hosted-usage`, the Usage view uses the canonical usage-limits handler.
 Its cache is keyed by seller, and on the web the Claude row reports that
 sign-in usage is shown in the Mac app instead of probing a CLI login on the
 server.
+
+On `feat/hosted-assistant`, the Assistant view mounts the canonical assistant
+routes. Answers stay in-process like desktop, but the run key and its thread
+are per seller, so one account never blocks or follows another's answer.
+Images are stored under the seller's own assistant thread and readable only by
+its owner; deleting a thread releases them. Applying proposed changes takes the
+item's row lock first. The shop summary skips the Mac's local sourcing file,
+which the web app does not have yet. Answers do not survive an API restart.

@@ -165,6 +165,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(suggestions.router)
     from vendoo_studio.routes.hosted_prices import router as prices_router
     app.include_router(prices_router)
+    from vendoo_studio.routes import assistant
+    app.include_router(assistant.router)
     from vendoo_studio.routes.hosted_bulk_edit import router as bulk_edit_router
     app.include_router(bulk_edit_router)
     from vendoo_studio.routes.hosted_bulk_delete import router as bulk_delete_router
