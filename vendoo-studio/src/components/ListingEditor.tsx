@@ -608,7 +608,7 @@ export function ListingEditor({
             tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
             target={fieldTarget}
             onAskChat={askChat}
-            disabled={runtime.hosted && reviewTab === "forms" && editTab !== "general"}
+            disabled={runtime.hosted && reviewTab === "forms" && editTab !== "general" && !runtime.marketplaceForms.has(editTab)}
             saving={unsaved}
             agentLocks={activity?.locked_fields}
             onChange={edits.save}

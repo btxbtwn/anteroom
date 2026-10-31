@@ -40,9 +40,11 @@ def make_engine(url: str):
         )
         event.listen(sqlite_engine, "connect", enable_wal)
         return sqlite_engine
-    # Postgres connections are not cheap, so the pool is capped. pre_ping
-    # replaces connections a hosted database dropped while idle.
-    return create_engine(url, pool_size=10, max_overflow=20, pool_pre_ping=True, echo=False, hide_parameters=True)
+    # Supabase's session pool allows 15 connections per login. Keep request
+    # bursts below that limit, with room for an overlapping release or operator
+    # connection. Excess requests wait for a checkout instead of failing at
+    # Supabase. pre_ping replaces connections dropped while idle.
+    return create_engine(url, pool_size=5, max_overflow=0, pool_pre_ping=True, echo=False, hide_parameters=True)
 
 
 def enable_wal(dbapi_connection, _connection_record):

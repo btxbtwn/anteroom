@@ -64,6 +64,67 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("DELETE", "api/drafts/\(draftID)/photos/\(photoID)"))
     }
 
+    // MARK: Shared workspace and durable draft tasks
+
+    func capabilities() async throws -> WorkspaceCapabilities {
+        try await decode(request("GET", "api/runtime"))
+    }
+
+    func workspaceStatus() async throws -> WorkspaceStatus {
+        try await decode(request("GET", "api/status"))
+    }
+
+    func messages(_ id: String) async throws -> [ListingMessage] {
+        try await decode(request("GET", "api/conversations/\(id)/messages"))
+    }
+
+    func activity(_ id: String) async throws -> ListingActivity {
+        try await decode(request("GET", "api/conversations/\(id)/activity"))
+    }
+
+    func stopTask(_ id: String) async throws {
+        _ = try await send(request("POST", "api/conversations/\(id)/stop"))
+    }
+
+    /// Disconnecting this stream never cancels or retries server work. Only
+    /// reconnect uses resume=true; it can observe work but cannot enqueue it.
+    func runAssistant(_ id: String, action: AssistantAction,
+                      receive: @MainActor @Sendable (StreamFrame) -> Void) async throws {
+        var upload: URLRequest
+        switch action {
+        case .generate:
+            upload = try await request("POST", "api/conversations/\(id)/generate")
+        case .message(let text):
+            upload = try await request("POST", "api/conversations/\(id)/messages", json: ["text": text])
+        case .reconnect:
+            upload = try await request("POST", "api/conversations/\(id)/generate",
+                                       query: [URLQueryItem(name: "resume", value: "true")])
+        }
+        upload.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        upload.timeoutInterval = 300
+        let (bytes, response) = try await session.bytes(for: upload)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError(status: 0, message: "Anteroom didn't answer. Reconnect to check your draft.")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            var data = Data()
+            for try await byte in bytes {
+                if data.count >= 65536 { break }
+                data.append(byte)
+            }
+            throw APIError(status: http.statusCode, message: Self.message(from: data, status: http.statusCode))
+        }
+        var frames = StreamFrames()
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard let frame = frames.accept(line) else { continue }
+            if frame.event == "error" { throw APIError(status: 0, message: frame.data) }
+            if frame.data == "[DONE]" { return }
+            await receive(frame)
+        }
+        throw APIError(status: 0, message: "The connection ended. Reconnect to check your draft before trying again.")
+    }
+
     // MARK: Transport
 
     private func request(_ method: String, _ path: String, query: [URLQueryItem] = []) async throws -> URLRequest {

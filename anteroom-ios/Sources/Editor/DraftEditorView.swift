@@ -5,6 +5,7 @@ struct DraftEditorView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var model: DraftEditorModel
     @State private var confirmDiscard = false
+    @State private var showingAssistant = false
     private let onSaved: (Draft) -> Void
 
     init(api: AnteroomAPI, draft: Draft, onSaved: @escaping (Draft) -> Void) {
@@ -32,6 +33,15 @@ struct DraftEditorView: View {
                 .font(.subheadline)
                 .padding(.horizontal, 4)
 
+                WorkspaceSection("Listing assistant") {
+                    Button("Generate or edit with Anteroom", systemImage: "sparkles") { showingAssistant = true }
+                        .frame(minHeight: 44)
+                        .disabled(model.hasChanges || model.isLoading || model.loadError != nil || model.isSaving)
+                    if model.hasChanges {
+                        Text("Save your changes before opening the assistant.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
                 WorkspaceSection("Photos") {
                     PhotoStrip(api: model.api, draftID: model.draftID)
                 }
@@ -116,6 +126,15 @@ struct DraftEditorView: View {
             Button("Keep editing", role: .cancel) {}
         } message: {
             Text("Reloading shows the latest version and drops your edits here.")
+        }
+        .sheet(isPresented: $showingAssistant, onDismiss: {
+            Task {
+                guard !model.hasChanges else { return }
+                await model.load()
+                if model.loadError == nil { onSaved(model.summary) }
+            }
+        }) {
+            ListingAssistantView(api: model.api, listingID: model.draftID)
         }
         .task { await model.load() }
     }
