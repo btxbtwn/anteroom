@@ -9,7 +9,7 @@ LEGACY_ZIP="$ROOT/release/List-This-Studio-macos.zip"
 INFO="$ROOT/release/build_info.json"
 TAG="${VENDOO_STUDIO_RELEASE_TAG:-studio-macos}"
 DEFAULT_TITLE="Anteroom (macOS)"
-GITHUB_REPO="${VENDOO_STUDIO_GITHUB_REPO:-btxbtwn/list-this-vendoo-suite}"
+GITHUB_REPO="${VENDOO_STUDIO_GITHUB_REPO:-btxbtwn/anteroom}"
 
 for archive in "$ZIP" "$LEGACY_ZIP"; do
   if [[ ! -f "$archive" ]]; then
