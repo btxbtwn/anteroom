@@ -236,3 +236,13 @@ requests, and hosted lookups never build it inline: a background build publishes
 it while search uses the verified lexical fallback. The Machine has 2 GB for that
 build. The index is still per seller; a shared category index is needed before
 many sellers use the web app.
+
+On `feat/hosted-usage`, the Usage view uses the canonical usage-limits handler.
+Its cache is keyed by seller, and on the web the Claude row reports that
+sign-in usage is shown in the Mac app instead of probing a CLI login on the
+server.
+
+On `feat/hosted-mercari-form`, the Mercari tab uses the canonical native form
+builder through the same owned, revision-checked route as Poshmark and Depop.
+Its only outbound read is Mercari's anonymous public shipping quote; a failed
+quote leaves every product field available with a note.

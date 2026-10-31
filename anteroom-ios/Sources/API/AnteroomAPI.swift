@@ -11,8 +11,6 @@ struct APIError: LocalizedError, Sendable {
 /// Client for the hosted Anteroom API (`vendoo_studio.hosted:app`). Every
 /// request carries the seller's current Supabase access token.
 final class AnteroomAPI: Sendable {
-    static let pageSize = 100
-
     private let baseURL: URL
     private let accessToken: @Sendable () async throws -> String
     private let session = URLSession(configuration: .ephemeral)
@@ -22,42 +20,67 @@ final class AnteroomAPI: Sendable {
         self.accessToken = accessToken
     }
 
-    // MARK: Drafts
+    // MARK: Listings (the shared workspace contract the desktop and web use)
 
-    func drafts(offset: Int, search: String) async throws -> [Draft] {
-        var query = [URLQueryItem(name: "offset", value: String(offset))]
-        if !search.isEmpty { query.append(URLQueryItem(name: "search", value: search)) }
-        return try await decode(request("GET", "api/drafts", query: query))
+    /// The whole inventory; like the desktop sidebar, the phone filters and
+    /// sorts it locally.
+    func listings() async throws -> [ListingSummary] {
+        try await decode(request("GET", "api/conversations"))
     }
 
-    func createDraft(title: String, notes: String = "") async throws -> Draft {
-        try await decode(request("POST", "api/drafts", json: ["title": title, "notes": notes]))
+    func createListing(title: String) async throws -> ListingSummary {
+        try await decode(request("POST", "api/conversations", json: ["title": title]))
     }
 
-    func draft(_ id: String) async throws -> DraftDetail {
-        try await decode(request("GET", "api/drafts/\(id)"))
+    func conversation(_ id: String) async throws -> ConversationDetail {
+        try await decode(request("GET", "api/conversations/\(id)"))
     }
 
-    func save(_ id: String, _ body: DraftSave) async throws -> DraftDetail {
-        try await decode(request("PATCH", "api/drafts/\(id)", json: body))
+    func listing(_ id: String) async throws -> ListingDocument {
+        try await decode(request("GET", "api/conversations/\(id)/listing"))
+    }
+
+    func saveListing(_ id: String, _ body: ListingSave) async throws -> ListingSaveResult {
+        try await decode(request("PUT", "api/conversations/\(id)/listing", json: body))
+    }
+
+    func saveNotes(_ id: String, notes: String) async throws {
+        _ = try await send(request("PATCH", "api/conversations/\(id)", json: ["notes": notes]))
+    }
+
+    func rename(_ id: String, title: String) async throws {
+        _ = try await send(request("PATCH", "api/conversations/\(id)", json: ["title": title]))
+    }
+
+    /// The server only deletes listings that were never sent anywhere.
+    func deleteListing(_ id: String) async throws {
+        _ = try await send(request("DELETE", "api/conversations/\(id)"))
+    }
+
+    /// Settings → Listings → Where you list, in the seller's order.
+    func selectedMarketplaces() async throws -> [String] {
+        struct Payload: Decodable { let selected: [String] }
+        let payload: Payload = try await decode(request("GET", "api/settings/marketplaces"))
+        return payload.selected
     }
 
     // MARK: Photos
 
-    func photos(draftID: String) async throws -> [DraftPhoto] {
-        try await decode(request("GET", "api/drafts/\(draftID)/photos"))
+    func photos(listingID: String) async throws -> [ListingPhoto] {
+        try await decode(request("GET", "api/conversations/\(listingID)/photos"))
     }
 
-    /// Uploads JPEG bytes. The server re-encodes, strips metadata and limits size.
-    func uploadPhoto(draftID: String, jpeg: Data) async throws -> DraftPhoto {
-        var upload = try await request("POST", "api/drafts/\(draftID)/photos")
+    /// Uploads JPEG bytes. The server re-encodes, strips metadata and limits
+    /// size. Like the hosted web app, uploads go to drafts only.
+    func uploadPhoto(listingID: String, jpeg: Data) async throws -> ListingPhoto {
+        var upload = try await request("POST", "api/drafts/\(listingID)/photos")
         upload.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
         upload.httpBody = jpeg
         return try await decode(upload)
     }
 
-    func photoData(draftID: String, photoID: String) async throws -> Data {
-        try await send(request("GET", "api/drafts/\(draftID)/photos/\(photoID)"))
+    func photoData(listingID: String, photoID: String) async throws -> Data {
+        try await send(request("GET", "api/conversations/\(listingID)/photos/\(photoID)/bytes"))
     }
 
     func photoThumbnailData(photoID: String, size: Int) async throws -> Data {
@@ -65,8 +88,8 @@ final class AnteroomAPI: Sendable {
                                query: [URLQueryItem(name: "size", value: String(size))]))
     }
 
-    func deletePhoto(draftID: String, photoID: String) async throws {
-        _ = try await send(request("DELETE", "api/drafts/\(draftID)/photos/\(photoID)"))
+    func deletePhoto(listingID: String, photoID: String) async throws {
+        _ = try await send(request("DELETE", "api/conversations/\(listingID)/photos/\(photoID)"))
     }
 
     // MARK: Shared workspace and durable draft tasks

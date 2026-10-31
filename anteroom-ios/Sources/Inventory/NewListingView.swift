@@ -3,7 +3,7 @@ import SwiftUI
 /// A self-contained creation task. Dismissing before Create writes nothing.
 struct NewListingView: View {
     let api: AnteroomAPI
-    let onCreated: (Draft) -> Void
+    let onCreated: (ListingSummary) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var creating = false
@@ -64,8 +64,8 @@ struct NewListingView: View {
         Task {
             defer { creating = false }
             do {
-                let draft = try await api.createDraft(title: value)
-                onCreated(draft)
+                let listing = try await api.createListing(title: value)
+                onCreated(listing)
                 dismiss()
             } catch {
                 self.error = error.localizedDescription

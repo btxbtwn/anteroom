@@ -1,19 +1,21 @@
 import PhotosUI
 import SwiftUI
 
-/// The draft's photos in a horizontal row, with buttons to add from the camera
-/// or library. Photos save as soon as they upload, separately from Save.
+/// The listing's photos, with buttons to add from the camera or library.
+/// Photos save as soon as they upload, separately from Save. Like the hosted
+/// web app, new photos can be added while the listing is a draft.
 struct PhotoStrip: View {
     let api: AnteroomAPI
-    let draftID: String
+    let listingID: String
+    var canAdd = true
 
-    @State private var photos: [DraftPhoto] = []
+    @State private var photos: [ListingPhoto] = []
     @State private var picked: [PhotosPickerItem] = []
     @State private var uploading = 0
     @State private var showingCamera = false
     @State private var error: String?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var photoToDelete: DraftPhoto?
+    @State private var photoToDelete: ListingPhoto?
 
     private static let limit = 30
     @State private var showAll = false
@@ -23,9 +25,11 @@ struct PhotoStrip: View {
             if photos.isEmpty && uploading == 0 {
                 VStack(spacing: 10) {
                     Image(systemName: "photo.on.rectangle.angled").font(.title2)
-                    Text("Add photos of your item").font(.subheadline.weight(.medium))
-                    Text("Use the camera or choose photos from your library.")
-                        .font(.footnote).multilineTextAlignment(.center)
+                    Text(canAdd ? "Add photos of your item" : "No photos").font(.subheadline.weight(.medium))
+                    if canAdd {
+                        Text("Use the camera or choose photos from your library.")
+                            .font(.footnote).multilineTextAlignment(.center)
+                    }
                 }
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 144)
@@ -35,7 +39,7 @@ struct PhotoStrip: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 8)], spacing: 8) {
                     ForEach(showAll ? photos : Array(photos.prefix(6))) { photo in
-                        RemotePhoto(api: api, draftID: draftID, photoID: photo.id, maxPixels: 300)
+                        RemotePhoto(api: api, photoID: photo.id, maxPixels: 300)
                             .frame(height: 104)
                             .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -61,6 +65,7 @@ struct PhotoStrip: View {
             let controlsLayout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                 : AnyLayout(HStackLayout(spacing: 12))
+            if canAdd {
             controlsLayout {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     Button { showingCamera = true } label: {
@@ -80,6 +85,11 @@ struct PhotoStrip: View {
                     .foregroundStyle(.secondary)
             }
             .disabled(remaining == 0)
+            } else {
+                Text("New photos can be added while this listing is a draft.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
             if let error {
                 Text(error)
@@ -116,7 +126,7 @@ struct PhotoStrip: View {
 
     private func load() async {
         do {
-            photos = try await api.photos(draftID: draftID)
+            photos = try await api.photos(listingID: listingID)
         } catch {
             self.error = error.localizedDescription
         }
@@ -151,17 +161,17 @@ struct PhotoStrip: View {
             return
         }
         do {
-            photos.append(try await api.uploadPhoto(draftID: draftID, jpeg: jpeg))
+            photos.append(try await api.uploadPhoto(listingID: listingID, jpeg: jpeg))
             error = nil
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private func delete(_ photo: DraftPhoto) {
+    private func delete(_ photo: ListingPhoto) {
         Task {
             do {
-                try await api.deletePhoto(draftID: draftID, photoID: photo.id)
+                try await api.deletePhoto(listingID: listingID, photoID: photo.id)
                 photos.removeAll { $0.id == photo.id }
             } catch {
                 self.error = error.localizedDescription
@@ -173,7 +183,6 @@ struct PhotoStrip: View {
 /// Loads a photo with the seller's token; the photo URLs are not public.
 struct RemotePhoto: View {
     let api: AnteroomAPI
-    let draftID: String
     let photoID: String
     let maxPixels: Int
 

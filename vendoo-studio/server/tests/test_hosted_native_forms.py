@@ -13,9 +13,18 @@ from vendoo_studio.services.hosted_database import SellerDatabaseSession
 from vendoo_studio.services.native_editor import editor_form
 from vendoo_studio.services.service_context import use
 
+MARKETS = ('poshmark', 'depop', 'mercari')
 
-def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(cloud, signing_keys):  # noqa: F811
+
+def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(cloud, signing_keys, monkeypatch):  # noqa: F811
     client, engine = cloud
+    from vendoo_studio.services import mercari_api
+
+    async def no_quotes(*_args):
+        raise OSError('offline')
+
+    # Mercari's anonymous shipping quote is the form's only outbound read.
+    monkeypatch.setattr(mercari_api, 'shipping_quotes', no_quotes)
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
     identity = client.post('/api/conversations', headers=alice, json={'title': 'Private coat'}).json()['id']
     path = '/api/conversations/' + identity
@@ -26,7 +35,7 @@ def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(c
     assert saved.status_code == 200, saved.text
     saved = saved.json()
     revision = saved['revision_id']
-    for market in ('poshmark', 'depop'):
+    for market in MARKETS:
         url = path + '/native-marketplaces/' + market + '/form'
         assert client.get(url).status_code == 401
         assert client.get(url, headers=bob).status_code == 404
@@ -50,13 +59,13 @@ def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(c
         assert client.get(url + '?revision_id=stale', headers=alice).status_code == 409
         assert client.post(path + '/native-marketplaces/' + market + '/list', headers=alice,
                            json={'confirm': True}).status_code == 404
-    assert client.get(path + '/native-marketplaces/mercari/form', headers=alice).status_code == 422
+    assert client.get(path + '/native-marketplaces/sellwild/form', headers=alice).status_code == 422
     bob_id = client.post('/api/conversations', headers=bob, json={'title': 'Bob coat'}).json()['id']
     bob_path = '/api/conversations/' + bob_id
     assert client.put(bob_path + '/listing', headers=bob, json={
         'listing': {'title': 'Bob coat', 'description': 'Bob private description'}, 'expected_revision_id': '',
     }).status_code == 200
-    for market in ('poshmark', 'depop'):
+    for market in MARKETS:
         answer = client.get(bob_path + '/native-marketplaces/' + market + '/form', headers=bob)
         assert answer.status_code == 200, answer.text
         field = next(row for row in answer.json()['fields'] if row['path'] == market + '_specifics.description')
@@ -65,7 +74,7 @@ def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(c
     with Session(engine) as db:
         assert db.scalar(select(func.count()).select_from(Job)) == 0
         assert db.scalar(select(func.count()).select_from(ListingRevision).where(
-            ListingRevision.conversation_id == identity)) == 3
+            ListingRevision.conversation_id == identity)) == len(MARKETS) + 1
 
     other = client.post('/api/conversations', headers=alice, json={'title': 'Other coat'}).json()['id']
     response = client.put('/api/conversations/' + other + '/listing', headers=alice,
@@ -74,7 +83,7 @@ def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(c
     with Session(engine) as db:
         db.get(Listing, identity).current_revision_id = response.json()['revision_id']
         db.commit()
-    for market in ('poshmark', 'depop'):
+    for market in MARKETS:
         refused = client.get(path + '/native-marketplaces/' + market + '/form', headers=alice)
         assert refused.status_code == 409
         assert 'Other private copy' not in refused.text
