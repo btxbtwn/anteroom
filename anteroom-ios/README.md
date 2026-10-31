@@ -153,3 +153,23 @@ The iOS workflow runs executable seller-note preservation tests and the hosted
 sandbox UI test that saves seller inputs, switches garments, relaunches the app
 and checks the saved values. Screenshots are exported from XCTest results into
 the `iphone-sandbox-results` workflow artifact, on success as well as failure.
+
+## Shared appearance
+
+Settings → Appearance offers the same `dark`, `light` and `system` choices as
+the hosted workspace. The signed-in app loads `/api/settings/ui` and sends a
+partial update containing only `theme`. It applies acknowledged responses,
+keeps the current appearance after a failed save, and offers Reload appearance
+rather than automatically replaying writes. Draft editing stays available if
+loading preferences fails.
+
+The signed-in workspace refreshes the account preference when the app becomes
+active. System removes the forced color scheme so iOS controls the appearance.
+There is no account-independent theme cache; signing out removes this state.
+This shares the hosted account preference, not a standalone Mac installation's
+local settings file. Mac-local settings remain separate until account migration.
+It is foreground refresh, not instant cross-device Realtime synchronization.
+
+The contract test checks response decoding and theme-only update payloads.
+The hosted simulator test selects Light, Dark and System, relaunches for each,
+and records screenshots in the `iphone-sandbox-results` artifact.
