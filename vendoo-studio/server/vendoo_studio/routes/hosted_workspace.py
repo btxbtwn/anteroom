@@ -78,10 +78,13 @@ def listing_response(db, identity):
 
 
 @router.get('/runtime')
-def runtime(request: Request):
+def runtime(request: Request, db=Depends(get_seller_db)):
+    from vendoo_studio.services.category_tree import categories_ready
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
-    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions'] + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else []),
+    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions']
+            + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
+            + (['catalog_categories'] if categories_ready(db) else []),
             'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark', 'depop']}
 
 

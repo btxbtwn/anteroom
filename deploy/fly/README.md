@@ -17,7 +17,7 @@ The Dockerfile path is relative to the configuration directory; the build
 context is the repository root. The allowlist in `.dockerignore` excludes
 local data, photos, databases, credentials, tests and the extension.
 
-The configuration uses one shared CPU, 512 MB memory, HTTPS, a health check,
+The configuration uses one shared CPU, 2 GB memory, HTTPS, a health check,
 automatic start and stop, and zero minimum running Machines. Supabase's project
 URL is public configuration. No database password, service-role key, provider
 key or seller data is needed for this first deployment. Later hosted data
@@ -26,6 +26,28 @@ routes require the remaining cloud work in `docs/cloud-architecture.md`.
 The root URL and built `/assets/` files serve the public sign-in UI. All data
 routes require bearer authentication. Open `/api/health` to check the service.
 The cloud build is a separate entry point, not the desktop interface.
+
+## Shared category trees
+
+The six category trees are shared reference data, not seller rows. The runtime
+role can only read them. Load or refresh them from the bundled seed with the
+migration login, after migrations and whenever `data/category-trees-seed.json.gz`
+changes:
+
+```sh
+export ANTEROOM_MIGRATION_DATABASE_URL='<migration login session-pooler URI>'
+cd vendoo-studio && ./scripts/category-trees.sh import --database-url-env ANTEROOM_MIGRATION_DATABASE_URL
+```
+
+The command takes the URL from that variable so it never appears in arguments or
+output. It replaces both tables in one transaction. The web app offers category
+pickers only once all six trees are complete.
+
+Each seller's category search index is built in the background on first use and
+kept in memory (about 250 MB on disk and up to roughly 575 MB while building).
+Until it is ready, search uses the verified whole-word fallback. The Machine has
+2 GB for this. One shared category index is needed before many sellers use the
+web app at once.
 
 ## Postgres connection
 

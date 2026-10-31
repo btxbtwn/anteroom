@@ -14,6 +14,17 @@ from vendoo_studio.services.category_tree_seed import (
 )
 
 
+def _postgres(name: str):
+    import os
+
+    from vendoo_studio.database import make_engine
+
+    url = os.environ.get(name, "").strip()
+    if not url.startswith(("postgresql://", "postgresql+psycopg://")):
+        raise RuntimeError(f"{name} must hold a Postgres URL")
+    return make_engine(url)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Export or import Anteroom category_trees / category_tree_nodes only.",
@@ -38,11 +49,18 @@ def main(argv: list[str] | None = None) -> int:
         "import",
         help="Replace category trees in an Anteroom SQLite DB from the seed",
     )
-    import_parser.add_argument(
+    target = import_parser.add_mutually_exclusive_group()
+    target.add_argument(
         "--db",
         type=Path,
         default=default_db_path(),
         help=f"Target SQLite path (default: {default_db_path()})",
+    )
+    target.add_argument(
+        "--database-url-env",
+        metavar="NAME",
+        help="Environment variable holding a Postgres URL with the migration login. "
+             "The URL never appears in arguments or output.",
     )
     import_parser.add_argument(
         "--seed",
@@ -56,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "export":
             db = args.db or default_db_path()
             result = export_seed(db, args.out)
+        elif args.database_url_env:
+            result = import_seed(_postgres(args.database_url_env), args.seed)
+            result["db"] = args.database_url_env
         else:
             result = import_seed(args.db, args.seed)
     except Exception as error:
