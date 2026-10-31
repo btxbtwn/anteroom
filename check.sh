@@ -31,6 +31,7 @@ changed() {
 
 PY="$ROOT/vendoo-studio/.venv/bin/python"
 [[ -x "$PY" ]] || PY="$(command -v python3)"
+BIN="$(dirname "$PY")"
 
 FAILED=()
 run() {
@@ -51,6 +52,7 @@ if changed '^vendoo-studio/'; then
   run "Anteroom version and changelog" bash -c "'$PY' vendoo-studio/scripts/check-version-sync.py && '$PY' vendoo-studio/scripts/check-changelog.py"
   run "Anteroom frontend" bash -c "cd vendoo-studio && npm run lint && npm test && npm run build"
   run "Anteroom backend" bash -c "cd vendoo-studio && '$PY' -m ruff check server && VENDOO_STUDIO_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
+  run "Anteroom code health" bash -c "cd vendoo-studio && npm run knip && '$PY' -m basedpyright && '$BIN/lint-imports' && '$PY' scripts/check-dead-code.py"
   if [[ "$FAST" == "0" ]]; then
     run "Anteroom browser tests (sandbox)" bash -c "cd vendoo-studio && npm run e2e"
   fi
