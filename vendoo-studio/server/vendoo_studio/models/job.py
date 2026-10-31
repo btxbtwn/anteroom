@@ -1,10 +1,22 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, Column, String, Text, DateTime, ForeignKey, JSON, Integer
+from datetime import datetime
+
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 ACTIVE_JOB_STATUSES = ("queued", "awaiting_extension", "dispatched")
 DISPATCHABLE_JOB_STATUSES = ("queued", "awaiting_extension")
@@ -37,18 +49,18 @@ class Job(SellerOwned, Base):
             name="fk_jobs_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
-    approved_revision_id = Column(String, nullable=False)
-    listing_snapshot = Column(JSON, nullable=False)
-    status = Column(String, default="queued")
-    current_step = Column(String, nullable=True)
-    vendoo_item_id = Column(String, nullable=True)
-    vendoo_url = Column(String, nullable=True)
-    attempt_count = Column(Integer, default=0)
-    last_error = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=utcnow)
-    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    approved_revision_id: Mapped[str] = mapped_column(String, nullable=False)
+    listing_snapshot: Mapped[object] = mapped_column(JSON, nullable=False)
+    status: Mapped[str | None] = mapped_column(String, default="queued", nullable=True)
+    current_step: Mapped[str | None] = mapped_column(String, nullable=True)
+    vendoo_item_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    vendoo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    attempt_count: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 
 
 class JobEvent(SellerOwned, Base):
@@ -58,13 +70,13 @@ class JobEvent(SellerOwned, Base):
             name="fk_job_events_seller_job_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    job_id = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
-    sequence = Column(Integer, nullable=False, default=0)
-    event_type = Column(String, nullable=False)
-    step = Column(String, nullable=True)
-    payload = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    step: Mapped[str | None] = mapped_column(String, nullable=True)
+    payload: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
 
 
 class VendooDraftCache(SellerOwned, Base):
@@ -82,10 +94,10 @@ class VendooDraftCache(SellerOwned, Base):
             name="fk_vendoo_draft_cache_seller_job_id", deferrable=True, initially="DEFERRED"),
     )
 
-    job_id = Column(String, ForeignKey("jobs.id"), primary_key=True)
-    item_id = Column(String, nullable=True)
-    url = Column(String, nullable=True)
-    source = Column(String, nullable=True)
-    step = Column(String, nullable=True)
-    payload = Column(JSON, nullable=True)
-    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), primary_key=True, nullable=False)
+    item_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    url: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    step: Mapped[str | None] = mapped_column(String, nullable=True)
+    payload: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)

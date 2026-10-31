@@ -1,5 +1,20 @@
 """Durable draft-only work. Marketplace mutations never enter this queue."""
-from sqlalchemy import Column, DateTime, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import new_id, utcnow
@@ -15,16 +30,16 @@ class BackgroundTask(SellerOwned, Base):
         Index('ix_background_tasks_pending', 'status', 'created_at'),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, nullable=False, index=True)
-    kind = Column(String(32), nullable=False)
-    status = Column(String(20), nullable=False, default='queued')
-    payload = Column(JSON, nullable=False, default=dict)
-    lease_token = Column(String(36))
-    leased_until = Column(DateTime(timezone=True))
-    error = Column(Text)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='queued')
+    payload: Mapped[object] = mapped_column(JSON, nullable=False, default=dict)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    leased_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class BackgroundTaskEvent(SellerOwned, Base):
@@ -34,7 +49,7 @@ class BackgroundTaskEvent(SellerOwned, Base):
                              name='fk_background_task_events_seller_task', deferrable=True, initially='DEFERRED'),
         UniqueConstraint('task_id', 'sequence', name='uq_background_task_event_sequence'),
     )
-    id = Column(String, primary_key=True, default=new_id)
-    task_id = Column(String, nullable=False, index=True)
-    sequence = Column(Integer, nullable=False)
-    data = Column(Text, nullable=False)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    task_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[str] = mapped_column(Text, nullable=False)

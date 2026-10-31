@@ -1,9 +1,22 @@
 """Seller corrections and sale observations, separate from editable listings."""
-from sqlalchemy import ForeignKeyConstraint, Column, DateTime, ForeignKey, JSON, String, UniqueConstraint
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class ListingCorrection(SellerOwned, Base):
@@ -13,14 +26,14 @@ class ListingCorrection(SellerOwned, Base):
             name="fk_listing_corrections_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
-    revision_id = Column(String, nullable=False)
-    source = Column(String, nullable=False, default="user_form")
-    category_path = Column(String, nullable=False)
-    brand = Column(String, nullable=False)
-    changes = Column(JSON, nullable=False)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    revision_id: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="user_form")
+    category_path: Mapped[str] = mapped_column(String, nullable=False)
+    brand: Mapped[str] = mapped_column(String, nullable=False)
+    changes: Mapped[object] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
 class SaleSnapshot(SellerOwned, Base):
@@ -31,10 +44,10 @@ class SaleSnapshot(SellerOwned, Base):
             name="fk_sale_snapshots_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
-    sale_key = Column(String, nullable=False)
-    listing = Column(JSON, nullable=False)
-    source = Column(String, nullable=False)
-    observed_at = Column(DateTime, nullable=False, default=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    sale_key: Mapped[str] = mapped_column(String, nullable=False)
+    listing: Mapped[object] = mapped_column(JSON, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 

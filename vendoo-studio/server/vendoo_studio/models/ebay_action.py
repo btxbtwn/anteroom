@@ -1,9 +1,15 @@
 """Receipts and fingerprints only; no buyer details or message bodies."""
-from sqlalchemy import Column, DateTime, Index, String, text
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import DateTime, Index, String, text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class EbayAction(SellerOwned, Base):
@@ -17,12 +23,12 @@ class EbayAction(SellerOwned, Base):
         ),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    account_id = Column(String, nullable=False)
-    kind = Column(String, nullable=False)
-    resource_id = Column(String, nullable=False)
-    fingerprint = Column(String, nullable=False)
-    state = Column(String, nullable=False, default="preview")
-    receipt_id = Column(String, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    expires_at = Column(DateTime, nullable=False)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    account_id: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    resource_id: Mapped[str] = mapped_column(String, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="preview")
+    receipt_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

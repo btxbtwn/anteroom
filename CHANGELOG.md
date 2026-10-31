@@ -1,3 +1,7 @@
+## 0.1.605 — 2026-10-31
+
+- Improve checks that catch data-handling mistakes before an app update.
+
 # Changelog
 
 Every change to Anteroom, newest first. Anteroom bumps its patch version

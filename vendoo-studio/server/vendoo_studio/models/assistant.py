@@ -1,10 +1,15 @@
 """The business assistant's conversations, apart from any listing's chat."""
 
-from sqlalchemy import JSON, Column, DateTime, String, Text
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import JSON, DateTime, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 NEW_THREAD_TITLE = "New thread"
 
@@ -17,10 +22,10 @@ class AssistantThread(SellerOwned, Base):
 
     __tablename__ = "assistant_threads"
 
-    id = Column(String, primary_key=True, default=new_id)
-    title = Column(String, nullable=False, default=NEW_THREAD_TITLE)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    updated_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False, default=NEW_THREAD_TITLE)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, index=True)
 
 
 class AssistantMemory(SellerOwned, Base):
@@ -32,10 +37,10 @@ class AssistantMemory(SellerOwned, Base):
 
     __tablename__ = "assistant_memories"
 
-    id = Column(String, primary_key=True, default=new_id)
-    text = Column(Text, nullable=False)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    updated_at = Column(DateTime, nullable=False, default=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
 class AssistantMessage(SellerOwned, Base):
@@ -47,16 +52,16 @@ class AssistantMessage(SellerOwned, Base):
 
     __tablename__ = "assistant_messages"
 
-    id = Column(String, primary_key=True, default=new_id)
-    thread_id = Column(String, nullable=False, index=True)
-    role = Column(String, nullable=False)  # user | assistant
-    text = Column(Text, nullable=False)
-    provider = Column(String, nullable=True)
-    model = Column(String, nullable=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    thread_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String, nullable=False)  # user | assistant
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
     # {"status": proposed | applied | dismissed, "items": [...]}; see services/assistant_changes.py.
-    changes = Column(JSON, nullable=True)
+    changes: Mapped[object | None] = mapped_column(JSON, nullable=True)
     # {"status": proposed | confirmed | dismissed, "proposal": {...}}; see services/automations.py.
-    automation = Column(JSON, nullable=True)
+    automation: Mapped[object | None] = mapped_column(JSON, nullable=True)
     # Images attached to a question; see services/chat_attachments.py.
-    attachments = Column(JSON, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=utcnow, index=True)
+    attachments: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, index=True)

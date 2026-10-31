@@ -8,11 +8,24 @@ here are what make a retry reuse the same listing instead of creating another.
 """
 from __future__ import annotations
 
-from sqlalchemy import ForeignKeyConstraint, JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 # not_saved and draft are resting states the seller can List from; published
 # and pending_review are live; the rest mean an action is running or its result
@@ -32,63 +45,63 @@ class MarketplaceListing(SellerOwned, Base):
             name="fk_marketplace_listings_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
-    marketplace = Column(String, nullable=False)
-    state = Column(String, nullable=False, default="not_saved")
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    marketplace: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="not_saved")
     # The last action and the job that ran it. Not a foreign key: Clear keeps
     # the jobs these rows name, and deleting the item deletes both.
-    action = Column(String, nullable=True)
-    job_id = Column(String, nullable=True, index=True)
+    action: Mapped[str | None] = mapped_column(String, nullable=True)
+    job_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     # The id Chrome journals the action under; each step of a List has its own.
-    operation_id = Column(String, nullable=True)
-    revision_id = Column(String, nullable=True)
-    previous_revision_id = Column(String, nullable=True)
-    draft_url = Column(String, nullable=True)
-    listing_url = Column(String, nullable=True)
+    operation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    previous_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    draft_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    listing_url: Mapped[str | None] = mapped_column(String, nullable=True)
     # The live listing an Update writes onto.
-    listing_id = Column(String, nullable=True)
+    listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    error = Column(Text, nullable=True)
-    error_code = Column(String, nullable=True)
-    error_fields = Column(JSON, nullable=True)
-    marketplace_message = Column(Text, nullable=True)
-    retry_after = Column(DateTime, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    error_fields: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    marketplace_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    ebay_sku = Column(String, nullable=True)
-    ebay_offer_id = Column(String, nullable=True)
-    ebay_listing_id = Column(String, nullable=True)
+    ebay_sku: Mapped[str | None] = mapped_column(String, nullable=True)
+    ebay_offer_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    ebay_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # Set before the inventory item is first written: from then on the SKU is this item's.
-    ebay_inventory_written = Column(Boolean, nullable=True)
+    ebay_inventory_written: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # [{"photo_id", "checksum", "url"}] in listing order.
-    ebay_images = Column(JSON, nullable=True)
+    ebay_images: Mapped[object | None] = mapped_column(JSON, nullable=True)
     # A listing with variations: its inventory item group, and {variation SKU: offer ID}.
-    ebay_group_key = Column(String, nullable=True)
-    ebay_variant_offers = Column(JSON, nullable=True)
+    ebay_group_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    ebay_variant_offers: Mapped[object | None] = mapped_column(JSON, nullable=True)
 
-    etsy_shop_id = Column(String, nullable=True)
-    etsy_pending_write = Column(String, nullable=True)
-    etsy_photo_ids = Column(JSON, nullable=True)
+    etsy_shop_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    etsy_pending_write: Mapped[str | None] = mapped_column(String, nullable=True)
+    etsy_photo_ids: Mapped[object | None] = mapped_column(JSON, nullable=True)
     # {photo_id: listing_image_id}
-    etsy_image_ids = Column(JSON, nullable=True)
+    etsy_image_ids: Mapped[object | None] = mapped_column(JSON, nullable=True)
     # {photo_id: checksum} of each uploaded file, so an edited photo is uploaded again.
-    etsy_image_checksums = Column(JSON, nullable=True)
-    etsy_photos_complete = Column(Boolean, nullable=True)
-    etsy_shipping_profile_id = Column(String, nullable=True)
-    etsy_readiness_state_id = Column(String, nullable=True)
+    etsy_image_checksums: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    etsy_photos_complete: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    etsy_shipping_profile_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    etsy_readiness_state_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    storage = Column(String, nullable=True)
-    local_draft_id = Column(String, nullable=True)
-    photo_ids = Column(JSON, nullable=True)
-    sellwild_category_id = Column(Integer, nullable=True)
-    sellwild_condition_id = Column(Integer, nullable=True)
+    storage: Mapped[str | None] = mapped_column(String, nullable=True)
+    local_draft_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    photo_ids: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    sellwild_category_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sellwild_condition_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Latest verified direct inventory read; listing identity and read-start time
     # keep a later sale or replacement link from reusing stale stock.
-    inventory_observation = Column(JSON, nullable=True)
+    inventory_observation: Mapped[object | None] = mapped_column(JSON, nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
 # The fields services read and write as a plain dict.
