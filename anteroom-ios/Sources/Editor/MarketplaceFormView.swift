@@ -88,9 +88,24 @@ struct MarketplaceFormView: View {
             return shown("poshmark_specifics.smartSell.enabled", form) == "true"
         case "poshmark_specifics.makeAvailableAt":
             return shown("poshmark_specifics.availability", form) == "coming_soon"
+        case "mercari_specifics.smartPricing.minimumPrice":
+            return shown("mercari_specifics.smartPricing.enabled", form) == "true"
         default:
-            return true
+            break
         }
+        // Mercari shows the label, its package questions and the free-shipping
+        // choice only with Prepaid label; the sides only for a package that does
+        // not fit a shoebox, unless the seller skips them.
+        if marketplace == "mercari" && (["mercari_specifics.shippingClassId", "mercari_specifics.shippingPayerId"].contains(field.key)
+                                        || field.key.hasPrefix("mercari_specifics.package.")) {
+            if shown("mercari_specifics.shippingMethod", form) == "SOYO" { return false }
+            let notShoebox = shown("mercari_specifics.package.fitsShoebox", form) == "no"
+            if field.key == "mercari_specifics.package.skipDimensions" { return notShoebox }
+            if ["mercari_specifics.package.length", "mercari_specifics.package.width", "mercari_specifics.package.height"].contains(field.key) {
+                return notShoebox && shown("mercari_specifics.package.skipDimensions", form) != "true"
+            }
+        }
+        return true
     }
 
     private func shown(_ key: String, _ form: NativeForm) -> String {
