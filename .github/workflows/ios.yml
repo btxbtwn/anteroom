@@ -46,6 +46,10 @@ jobs:
         run: |
           xcrun swiftc Sources/Inputs/SellerInputs.swift Tests/SellerInputsTests.swift -o "$RUNNER_TEMP/seller-input-tests"
           "$RUNNER_TEMP/seller-input-tests"
+      - name: Test appearance preference contract
+        run: |
+          xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"
+          "$RUNNER_TEMP/appearance-tests"
       - name: Build
         run: |
           set -o pipefail
