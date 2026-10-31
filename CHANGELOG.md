@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.613 — 2026-10-31
+
+- Keep listing-rule loading from freezing the app and make category searches use less memory.
+
 ## 0.1.612 — 2026-10-31
 
 - Keep draft preparation and sales suggestions safe when a saved version, sale price or weekday recommendation is missing.
