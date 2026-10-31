@@ -13,60 +13,72 @@ struct DraftEditorView: View {
 
     var body: some View {
         @Bindable var model = model
-        Form {
-            if let loadError = model.loadError {
-                Section {
-                    Label(loadError, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.red)
-                    Button("Try again") { Task { await model.load() } }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let loadError = model.loadError {
+                    WorkspaceSection("Couldn't load listing") {
+                        Text(loadError).foregroundStyle(.red)
+                        Button("Try again") { Task { await model.load() } }
+                    }
+                }
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.pencil")
+                    Text("General").fontWeight(.semibold)
+                    Spacer()
+                    Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved draft")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 4)
+
+                WorkspaceSection("Photos") {
+                    PhotoStrip(api: model.api, draftID: model.draftID)
+                }
+                WorkspaceSection("Listing details") {
+                    WorkspaceField("Title") {
+                        TextField("Title", text: $model.form.title, axis: .vertical).lineLimit(1...3)
+                    }
+                    WorkspaceField("Description") {
+                        TextField("Describe your item", text: $model.form.fields.description, axis: .vertical)
+                            .lineLimit(5...16)
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 12) {
+                            NumberField("Price", text: $model.form.price, prefix: "$")
+                            NumberField("Cost", text: $model.form.cost, prefix: "$")
+                        }
+                        VStack(spacing: 12) {
+                            NumberField("Price", text: $model.form.price, prefix: "$")
+                            NumberField("Cost", text: $model.form.cost, prefix: "$")
+                        }
+                    }
+                    WorkspaceField("Quantity") {
+                        TextField("1", text: $model.form.quantity).keyboardType(.numberPad)
+                    }
+                    TextRow("Brand", text: $model.form.fields.brand)
+                    TextRow("Condition", text: $model.form.fields.condition)
+                    TextRow("Primary Color", text: $model.form.fields.primaryColor)
+                    TextRow("Secondary Color", text: $model.form.fields.secondaryColor)
+                    TextRow("Size", text: $model.form.fields.size)
+                    TextRow("SKU", text: $model.form.fields.sku)
+                    TextRow("Inventory location", text: $model.form.fields.zipCode)
+                    TextRow("Category", text: $model.form.fields.categoryPath)
+                    TextRow("Department", text: $model.form.fields.department)
+                    NumberField("Package Weight (oz)", text: $model.form.weightOz)
+                    TextRow("Package Dimensions (LxWxH in)", text: $model.form.fields.packageDimensionsIn)
+                }
+                WorkspaceSection("Organization") {
+                    TextRow("Labels", text: $model.form.labels)
+                    WorkspaceField("Private notes") {
+                        TextField("Notes about this item", text: $model.form.notes, axis: .vertical).lineLimit(3...10)
+                    }
                 }
             }
-
-            Section("Photos") {
-                PhotoStrip(api: model.api, draftID: model.draftID)
-            }
-
-            Section("Listing") {
-                TextField("Title", text: $model.form.title, axis: .vertical)
-                    .lineLimit(1...3)
-                TextField("Description", text: $model.form.fields.description, axis: .vertical)
-                    .lineLimit(4...12)
-            }
-
-            Section("Price") {
-                NumberField("Price", text: $model.form.price, prefix: "$")
-                NumberField("Cost", text: $model.form.cost, prefix: "$")
-                LabeledContent("Quantity") {
-                    TextField("1", text: $model.form.quantity)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                }
-            }
-
-            Section("Details") {
-                TextRow("Brand", text: $model.form.fields.brand)
-                TextRow("Condition", text: $model.form.fields.condition)
-                TextRow("Size", text: $model.form.fields.size)
-                TextRow("Primary color", text: $model.form.fields.primaryColor)
-                TextRow("Secondary color", text: $model.form.fields.secondaryColor)
-                TextRow("Department", text: $model.form.fields.department)
-                TextRow("Category", text: $model.form.fields.categoryPath)
-                TextRow("SKU", text: $model.form.fields.sku)
-                TextRow("Labels", text: $model.form.labels)
-            }
-
-            Section("Shipping") {
-                NumberField("Weight (oz)", text: $model.form.weightOz)
-                TextRow("Package (in)", text: $model.form.fields.packageDimensionsIn)
-                TextRow("ZIP code", text: $model.form.fields.zipCode)
-                    .keyboardType(.numbersAndPunctuation)
-            }
-
-            Section("Notes") {
-                TextField("Private notes", text: $model.form.notes, axis: .vertical)
-                    .lineLimit(3...10)
-            }
+            .padding(16)
         }
+        .background(WorkspaceStyle.background)
+        .toolbarBackground(WorkspaceStyle.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .scrollDismissesKeyboard(.interactively)
         .disabled(model.isLoading && model.loadError == nil)
         .overlay { if model.isLoading { ProgressView() } }
@@ -138,9 +150,8 @@ private struct TextRow: View {
     }
 
     var body: some View {
-        LabeledContent(label) {
-            TextField(label, text: $text, prompt: Text("—"))
-                .multilineTextAlignment(.trailing)
+        WorkspaceField(label) {
+            TextField(label, text: $text)
         }
     }
 }
@@ -157,16 +168,13 @@ private struct NumberField: View {
     }
 
     var body: some View {
-        LabeledContent(label) {
+        WorkspaceField(label) {
             HStack(spacing: 2) {
-                Spacer()
                 if let prefix, !text.isEmpty {
                     Text(prefix).foregroundStyle(.secondary)
                 }
                 TextField("0", text: $text)
                     .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .fixedSize()
             }
         }
     }

@@ -15,21 +15,32 @@ struct InventoryView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                ForEach(model.drafts) { draft in
-                    NavigationLink(value: draft) {
-                        DraftRow(draft: draft)
+                Section {
+                    ForEach(model.drafts) { draft in
+                        NavigationLink(value: draft) {
+                            DraftRow(draft: draft)
+                        }
                     }
-                }
-                if model.canLoadMore {
-                    Button("Load more") {
-                        Task { await model.loadMore(search: search) }
+                    if model.canLoadMore {
+                        Button("Load more") {
+                            Task { await model.loadMore(search: search) }
+                        }
+                        .disabled(model.isLoading)
                     }
-                    .disabled(model.isLoading)
+                } header: {
+                    Text(search.isEmpty ? "Drafts" : "Search results")
+                        .font(.caption.weight(.semibold))
+                        .textCase(nil)
                 }
             }
             .listStyle(.plain)
             .overlay { emptyState }
-            .navigationTitle("Drafts")
+            .navigationTitle("Inventory")
+            .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
+            .background(WorkspaceStyle.sidebar)
+            .toolbarBackground(WorkspaceStyle.sidebar, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .searchable(text: $search, prompt: "Search titles")
             .refreshable { await model.reload(search: search) }
             .task(id: search) {
@@ -44,13 +55,13 @@ struct InventoryView: View {
                     accountMenu
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("New draft", systemImage: "plus") {
+                    Button("New listing", systemImage: "plus") {
                         newTitle = ""
                         isNaming = true
                     }
                 }
             }
-            .alert("New draft", isPresented: $isNaming) {
+            .alert("New listing", isPresented: $isNaming) {
                 TextField("Title", text: $newTitle)
                 Button("Cancel", role: .cancel) {}
                 Button("Create") { create() }
@@ -74,9 +85,9 @@ struct InventoryView: View {
         if model.drafts.isEmpty && model.hasLoaded {
             if search.isEmpty {
                 ContentUnavailableView(
-                    "No drafts yet",
+                    "Your inventory starts here",
                     systemImage: "tag",
-                    description: Text("Tap + to start a listing.")
+                    description: Text("Create a listing, add your photos, and keep your draft ready to edit.")
                 )
             } else {
                 ContentUnavailableView.search(text: search)
@@ -118,16 +129,24 @@ private struct DraftRow: View {
     let draft: Draft
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(draft.displayTitle)
-                .font(.body)
-                .lineLimit(2)
-            if let updated = draft.updatedDate {
-                Text(updated, format: .relative(presentation: .named))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            Image(systemName: "tag")
+                .foregroundStyle(.secondary)
+                .frame(width: 40, height: 44)
+                .background(WorkspaceStyle.background, in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(draft.displayTitle).font(.body).lineLimit(2)
+                HStack(spacing: 6) {
+                    Text("Draft")
+                    if let updated = draft.updatedDate {
+                        Text("·").accessibilityHidden(true)
+                        Text(updated, format: .relative(presentation: .named))
+                    }
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 8)
     }
 }

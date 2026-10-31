@@ -8,6 +8,17 @@ draft's title, notes and General fields, and adding photos from the camera or
 library. It does what the hosted API allows and nothing more: no generation,
 marketplace tabs or publishing.
 
+## Interface
+
+The native screens follow the workspace's neutral light/dark surfaces, blue
+accent, compact inventory rows, and bordered General editor fields. Sign-in
+uses the hosted workspace's wording. General fields follow the canonical
+`skills/list-this/references/listing-editor-fields.json` order and labels.
+Photos, labels and private notes remain available alongside them.
+
+This is the first visual alignment pass, not desktop feature parity. The
+hosted API still does not expose generation or the full marketplace workflow.
+
 ## Build on a Mac
 
 Needs Xcode 16 or newer and [XcodeGen](https://github.com/yonaskolb/XcodeGen).

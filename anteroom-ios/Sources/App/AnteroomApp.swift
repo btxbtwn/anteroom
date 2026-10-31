@@ -8,6 +8,7 @@ struct AnteroomApp: App {
         WindowGroup {
             RootView()
                 .environment(session)
+                .tint(WorkspaceStyle.accent)
                 .task { await session.start() }
                 .onOpenURL { url in
                     Task { await session.completeSignIn(from: url) }
