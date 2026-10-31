@@ -739,3 +739,34 @@ def test_hosted_preferences_upgrade_preserves_previous_release_database(engine, 
         assert connection.scalar(text('SELECT count(*) FROM user_preferences')) == 0
     from sqlalchemy import inspect
     assert any(constraint['column_names'] == ['user_id', 'key'] for constraint in inspect(engine).get_unique_constraints('user_preferences'))
+
+
+def test_size_cleanup_drops_only_fields_sellwild_and_vinted_forms_lack(engine, snapshots):
+    import json
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "56b5ee7250ec")
+    bodies = {
+        "stray": {"title": "Keep", "sizeType": "Regular",
+                  "ebay_specifics": {"sizeType": "Regular"}, "poshmark_specifics": {"sizeType": "Regular"},
+                  "sellwild_specifics": {"sizeType": "Regular", "size": "8", "nativeCategoryId": "273"},
+                  "vinted_specifics": {"sizeType": "Petite", "size": "S / 8"}},
+        "clean": {"title": "Untouched", "sellwild_specifics": {"nativeCategoryId": "1"}},
+        "empty": {},
+    }
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO conversations (id, title) VALUES ('c1', 'Keep me')"))
+        for revision_id, body in bodies.items():
+            connection.execute(text("INSERT INTO listing_revisions (id, conversation_id, listing_json, source) "
+                                    "VALUES (:id, 'c1', :body, 'test')"), {"id": revision_id, "body": json.dumps(body)})
+    command.upgrade(config, "head")
+    with engine.connect() as connection:
+        saved = {row.id: json.loads(row.listing_json)
+                 for row in connection.execute(text("SELECT id, listing_json FROM listing_revisions"))}
+    assert saved["stray"] == {"title": "Keep", "sizeType": "Regular",
+                              "ebay_specifics": {"sizeType": "Regular"}, "poshmark_specifics": {"sizeType": "Regular"},
+                              "sellwild_specifics": {"nativeCategoryId": "273"}, "vinted_specifics": {"size": "S / 8"}}
+    assert saved["clean"] == bodies["clean"]
+    assert saved["empty"] == {}
+    assert inspect_database(engine.url.database).clean
