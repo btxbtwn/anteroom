@@ -75,6 +75,8 @@ jobs:
           .venv/bin/pip install -e ".[dev]"
       - name: Initialize Xcode simulator components
         run: sudo xcodebuild -runFirstLaunch
+      - name: Connect to CoreSimulator before runtime discovery
+        run: xcrun simctl list
       - name: Install the iOS simulator runtime
         run: xcodebuild -downloadPlatform iOS
       - name: Create and reopen a draft through the hosted sandbox
