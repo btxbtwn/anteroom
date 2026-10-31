@@ -1,0 +1,94 @@
+name: iPhone app
+
+on:
+  pull_request:
+    paths:
+      - "anteroom-ios/**"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [main]
+    paths:
+      - "anteroom-ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build for Simulator
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: anteroom-ios
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Anteroom.xcodeproj \
+            -scheme Anteroom \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
+
+  testflight:
+    name: Upload to TestFlight
+    # Pull requests (including forks) never reach the signing key.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: anteroom-ios
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Write the App Store Connect key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          umask 077
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc.p8"
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen
+      # Archive unsigned: development signing would need a registered device.
+      # The export below signs for App Store distribution with the API key.
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project Anteroom.xcodeproj \
+            -scheme Anteroom \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Anteroom.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            SUPABASE_PUBLISHABLE_KEY=${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+      - name: Upload
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Anteroom.xcarchive" \
+            -exportOptionsPlist Config/ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc.p8"
