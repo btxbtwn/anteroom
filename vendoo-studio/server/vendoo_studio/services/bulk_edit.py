@@ -141,7 +141,7 @@ def basis(conv: Conversation, revision_id: str) -> str:
     return digest([revision_id, conv.notes, conv.status, conv.settled_at, conv.box_id])
 
 
-def _leaf(db: Session, marketplace: str, category_id: str, name: str) -> dict:
+def verified_leaf(db: Session, marketplace: str, category_id: str, name: str) -> dict:
     node = db.get(CategoryTreeNode, (marketplace, category_id))
     if node is None or not node.is_leaf or node.has_children:
         raise HTTPException(400, f"Choose a {name} category from the list. Anteroom could not find that one as a final category.")
@@ -155,9 +155,9 @@ def resolve_categories(db: Session, edits: Edits) -> dict:
         return {}
     resolved: dict = {}
     if chosen.general:
-        resolved["general"] = _leaf(db, "general", chosen.general, "shared")
+        resolved["general"] = verified_leaf(db, "general", chosen.general, "shared")
     if chosen.depop:
-        resolved["depop"] = _leaf(db, "depop", chosen.depop, "Depop")
+        resolved["depop"] = verified_leaf(db, "depop", chosen.depop, "Depop")
     if chosen.ebay:
         resolved["ebay"] = {"id": chosen.ebay.id, "path": chosen.ebay.path.strip()}
     return resolved

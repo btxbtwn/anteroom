@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.601 — 2026-10-31
+
+- On the web, Edit fields can now change the shared, eBay and Depop categories of several listings at once, picked from Anteroom's category lists, and drafts generated on the web get the same category matching as the Mac app.
+
 ## 0.1.600 — 2026-10-31
 
 - Changing the general category now sets each marketplace tab's category from that marketplace's own list. When a marketplace has no match, its old category is cleared so you pick one there, instead of it keeping the category from before.

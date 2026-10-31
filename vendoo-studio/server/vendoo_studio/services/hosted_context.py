@@ -187,6 +187,17 @@ class HostedPhotoStore:
             return path
 
 
+_CATALOG_STATES: dict = {}
+_CATALOG_STATES_LOCK = threading.Lock()
+
+
+def catalog_state(owner):
+    """The seller's catalog index state, kept across requests so the index is built once."""
+    from vendoo_studio.services.catalog_index import CatalogIndexState
+    with _CATALOG_STATES_LOCK:
+        return _CATALOG_STATES.setdefault(owner, CatalogIndexState())
+
+
 def for_seller(user_id, token=None, *, task_lease=None):
     from vendoo_studio import database
     owner = str(uuid.UUID(user_id))
@@ -198,7 +209,6 @@ def for_seller(user_id, token=None, *, task_lease=None):
             session.info['background_lease'] = task_lease
         return session
     from vendoo_studio.services.hosted_provider import provider_for
-    from vendoo_studio.services.catalog_index import CatalogIndexState
     return ServiceContext(owner, sessions, HostedSettingsStore(sessions),
                           VaultSecretStore(sessions, owner), HostedPhotoStore(owner, token),
-                          catalog=CatalogIndexState(), provider_factory=provider_for)
+                          catalog=catalog_state(owner), provider_factory=provider_for)

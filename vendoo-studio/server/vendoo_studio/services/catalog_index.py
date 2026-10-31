@@ -608,9 +608,16 @@ def ensure_catalog_index(db: Session) -> dict[str, Any]:
             _state().checked_at = time.monotonic()
     if not needs:
         return {"ok": True, "rebuilt": False, "fingerprint": fp}
+    from vendoo_studio.services.service_context import current
+    # A hosted request or draft task never waits minutes for a seller's index;
+    # search uses the lexical fallback until the background build publishes.
+    hosted = current() is not None
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        if hosted:
+            _kick_rebuild()
+            return {"ok": True, "rebuilt": False, "fingerprint": fp}
         result = rebuild_catalog_index(db)
         result["rebuilt"] = True
         return result

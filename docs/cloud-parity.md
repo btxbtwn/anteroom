@@ -225,3 +225,14 @@ submission row lock. Bulk Regenerate is offered only when the draft worker is
 running, and its generate stream uses the authenticated transport. Items with
 a Send or marketplace record stay excluded until imported inventory and
 marketplace actions are ported.
+
+On `feat/hosted-catalog-categories`, the shared category trees are loaded into
+Postgres by the operator command in `deploy/fly/README.md`, using the migration
+login. The web app mounts the canonical category tree and search handlers and
+reports `catalog_categories` only when all six trees are complete. Bulk category
+writes then use the verified leaves; a hosted eBay pick must also be a synced eBay
+leaf with the same path. Each seller's catalog index state now persists across
+requests, and hosted lookups never build it inline: a background build publishes
+it while search uses the verified lexical fallback. The Machine has 2 GB for that
+build. The index is still per seller; a shared category index is needed before
+many sellers use the web app.
