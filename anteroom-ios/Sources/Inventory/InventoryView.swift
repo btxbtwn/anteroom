@@ -9,6 +9,9 @@ struct InventoryView: View {
     @State private var renaming: ListingSummary?
     @State private var newTitle = ""
     @State private var deleting: ListingSummary?
+    @State private var selecting = false
+    @State private var selected: Set<String> = []
+    @State private var bulk: BulkAction?
 
     init(api: AnteroomAPI) {
         _model = State(initialValue: InventoryModel(api: api))
@@ -19,7 +22,7 @@ struct InventoryView: View {
         let counts = model.counts(search: search)
         let rows = model.rows(search: search)
         NavigationStack(path: $path) {
-            List {
+            List(selection: $selected) {
                 ForEach(rows) { listing in
                     NavigationLink(value: listing) {
                         ListingRow(api: model.api, listing: listing)
@@ -40,11 +43,13 @@ struct InventoryView: View {
                             newTitle = listing.title ?? ""
                             renaming = listing
                         }
+                        Button("Copy listing", systemImage: "doc.on.doc") { bulk = .copy([listing.id]) }
                         Button("Delete", systemImage: "trash", role: .destructive) { deleting = listing }
                     }
                 }
             }
             .listStyle(.plain)
+            .environment(\.editMode, .constant(selecting ? .active : .inactive))
             .safeAreaInset(edge: .top, spacing: 0) {
                 StatusTabs(tabs: model.tabs(counts: counts), counts: counts, selection: $model.filters.status)
             }
@@ -62,6 +67,32 @@ struct InventoryView: View {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     filterMenu
                     sortMenu
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(selecting ? "Done" : "Select") {
+                        selecting.toggle()
+                        selected = []
+                    }
+                    .frame(minHeight: 44)
+                    .disabled(model.listings.isEmpty)
+                }
+                if selecting {
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        let visible = Set(rows.map(\.id))
+                        Button(visible.isSubset(of: selected) && !visible.isEmpty ? "Deselect all" : "Select all") {
+                            selected = visible.isSubset(of: selected) ? [] : visible
+                        }
+                        Spacer()
+                        Text("\(selected.count) selected").font(.footnote).foregroundStyle(.secondary)
+                        Spacer()
+                        Menu("Actions") {
+                            Button("Edit fields", systemImage: "square.and.pencil") { bulk = .edit(ordered(rows)) }
+                            Button("Copy items", systemImage: "doc.on.doc") { bulk = .copy(ordered(rows)) }
+                            Button("Mark down prices", systemImage: "tag") { bulk = .markdown(ordered(rows)) }
+                            Button("Delete", systemImage: "trash", role: .destructive) { bulk = .delete(ordered(rows)) }
+                        }
+                        .disabled(selected.isEmpty || selected.count > 300)
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("New listing", systemImage: "plus") { showingNewListing = true }
@@ -94,6 +125,18 @@ struct InventoryView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(model.error ?? "")
+            }
+            .sheet(item: $bulk) { action in
+                switch action {
+                case .edit(let ids):
+                    BulkEditView(api: model.api, ids: ids) { finishBulk() }
+                case .delete(let ids):
+                    BulkDeleteView(api: model.api, ids: ids) { finishBulk() }
+                case .copy(let ids):
+                    BulkCopyView(api: model.api, ids: ids) { finishBulk() }
+                case .markdown(let ids):
+                    BulkMarkdownView(api: model.api, ids: ids) { finishBulk() }
+                }
             }
             .navigationDestination(for: ListingSummary.self) { listing in
                 ListingEditorView(api: model.api, listing: listing) { Task { await model.reload() } }
@@ -205,6 +248,17 @@ struct InventoryView: View {
 
     private var deleteTitle: String {
         "Delete \"\(deleting?.displayTitle ?? "")\"?"
+    }
+
+    /// The selection in the order the list shows it.
+    private func ordered(_ rows: [ListingSummary]) -> [String] {
+        rows.map(\.id).filter(selected.contains)
+    }
+
+    private func finishBulk() {
+        selecting = false
+        selected = []
+        Task { await model.reload() }
     }
 
     private func openCreatedListing() {
@@ -323,6 +377,19 @@ struct ListingRowContent<Thumbnail: View>: View {
         case "sold": WorkspaceStyle.accent
         case "failed": .red
         default: .secondary
+        }
+    }
+}
+
+private enum BulkAction: Identifiable {
+    case edit([String]), delete([String]), copy([String]), markdown([String])
+
+    var id: String {
+        switch self {
+        case .edit(let ids): "edit-" + ids.joined(separator: ",")
+        case .delete(let ids): "delete-" + ids.joined(separator: ",")
+        case .copy(let ids): "copy-" + ids.joined(separator: ",")
+        case .markdown(let ids): "markdown-" + ids.joined(separator: ",")
         }
     }
 }
