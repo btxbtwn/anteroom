@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.605 — 2026-10-31
+
+- Pants and jeans no longer get a Size or Size Type on Sellwild, or a Size Type on Vinted, since those forms have no such fields. Listings that already had one are cleaned up, so the "This field is not provided by the selected marketplace form" warning goes away.
+- The Sellwild tab no longer shows a "Reload Sellwild choices" link. Your address, discounts and packages still load on their own after you sign in.
+
 ## 0.1.604 — 2026-10-31
 
 - Behind the scenes: new automatic checks catch type mistakes, code that nothing uses any more, and code in the wrong layer before a change ships. Nothing changes in the app.
