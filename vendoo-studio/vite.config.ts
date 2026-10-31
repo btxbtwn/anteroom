@@ -43,7 +43,7 @@ export default defineConfig({
     },
   ],
   server: {
-    port: 5173,
+    port: Number(process.env.VENDOO_STUDIO_WEB_PORT || 5173),
     // Runtime files (the database, logs, settings) live under data/. Watching
     // them reloads the page on every API call, which never lets the form settle.
     watch: {

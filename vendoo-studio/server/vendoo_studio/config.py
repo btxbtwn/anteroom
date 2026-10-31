@@ -121,6 +121,8 @@ HOST = os.environ.get("VENDOO_STUDIO_HOST", "127.0.0.1")
 if HOST != "127.0.0.1":
     raise ValueError("The local Anteroom app must bind to 127.0.0.1. Use private Tailscale Serve for remote access.")
 PORT = int(os.environ.get("VENDOO_STUDIO_PORT", "4318"))
+# The Vite dev server's port; scripts/dev.sh and vite.config.ts read the same variable.
+WEB_PORT = int(os.environ.get("VENDOO_STUDIO_WEB_PORT", "5173"))
 
 MAX_PHOTO_COUNT = 20
 MAX_PHOTO_SIZE_MB = 20
@@ -128,7 +130,7 @@ ALLOWED_PHOTO_MIME = {"image/jpeg", "image/png", "image/webp", "image/heic", "im
 
 CORS_ORIGINS = [
     f"http://{HOST}:{PORT}",
-    f"http://{HOST}:5173",
+    f"http://{HOST}:{WEB_PORT}",
     f"http://localhost:{PORT}",
-    "http://localhost:5173",
+    f"http://localhost:{WEB_PORT}",
 ]
