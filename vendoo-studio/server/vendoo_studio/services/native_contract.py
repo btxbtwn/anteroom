@@ -90,8 +90,7 @@ def _raw_inputs(listing: dict, market: str, fields: list[dict]) -> dict:
             name = path.split(".", 1)[1]
             result[path] = copy.deepcopy(next((answer for key, answer in aspects.items()
                                                if _fold(key) == _fold(name) and answer not in (None, "", [], {})), value))
-    result["category_id"] = str(get_path(listing, f"direct_category_ids.{market}")
-                                or get_path(listing, f"marketplace_category_ids.{market}") or "")
+    result["category_id"] = str(get_path(listing, f"direct_category_ids.{market}") or "")
     # Posting maps the shared path to the leaf its category picker names. Compare
     # the mapped path, so a path recorded before preparation is not a change.
     result["category_path"] = _category_path(result.get("category_path"), listing)

@@ -98,6 +98,7 @@ def listing_snapshot(info: dict) -> dict:
             "condition": ListingSchema.validate_condition(info.get("condition") or None),
             "category_path": category, "marketplace_categories": {"ebay": category},
             "marketplace_category_ids": {"ebay": info.get("categoryId")},
+            "direct_category_ids": {"ebay": str(info.get("categoryId") or ""), "ebay_path": category},
             "ebay_specifics": {**specifics, **({"conditionDescription": info["conditionDescription"]} if info.get("conditionDescription") else {})}}
 
 

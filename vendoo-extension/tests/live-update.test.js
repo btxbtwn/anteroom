@@ -31,7 +31,7 @@ const mercariItem = () => ({
   shippingPackageDimension: null, seller: { id: 7, zipCode: '70125' }, isAutoPriceDrop: false, minPriceForAutoPriceDrop: 0,
 });
 const mercariListing = { title: 'Test jacket', description: 'Private description', price: 25, condition: 'Pre-Owned - Good',
-  marketplace_category_ids: { mercari: '303' }, zipCode: '70125', weight_lb: 0, weight_oz: 10,
+  direct_category_ids: { mercari: '303' }, zipCode: '70125', weight_lb: 0, weight_oz: 10,
   form: { specifics: { shipping: { payerId: 1, carrierId: '2509' } } } };
 
 function mercari({ item = mercariItem(), keep = true, edit } = {}) {

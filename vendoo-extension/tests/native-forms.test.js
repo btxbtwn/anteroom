@@ -291,7 +291,7 @@ test('explicit Depop choices stay on their canonical fields and category changes
 
 test('Mercari shows the seller’s brand and offers a category with subcategories the way its picker does', () => {
   const c = loadWorker();
-  const listing = { brand: 'GB girls', form: { overrides: { brand: '30138', categoryV2: {
+  const listing = { brand: 'GB girls', direct_category_ids: { mercari: '1877' }, form: { overrides: { brand: '30138', categoryV2: {
     id: '1877', displayPath: ['Kids', 'Girls tops & t-shirts'], hasChildren: true,
   } } } };
   const form = clean(call(c, 'mercariEditorForm', listing, MERCARI));
@@ -304,7 +304,10 @@ test('Mercari shows the seller’s brand and offers a category with subcategorie
   assert.deepEqual(form.fields.find(row => row.label === 'Category').options,
     ['Tees', 'Kids > Girls tops & t-shirts > Girls (4+)', 'Kids > Girls tops & t-shirts']);
   assert.ok(!call(c, 'mercariCategory', listing).parent);
-  assert.ok(call(c, 'mercariCategory', { form: { overrides: { categoryV2: { id: '3', displayPath: ['Kids'], hasChildren: true } } } }).parent);
+  assert.ok(call(c, 'mercariCategory', { direct_category_ids: { mercari: '3' },
+    form: { overrides: { categoryV2: { id: '3', displayPath: ['Kids'], hasChildren: true } } } }).parent);
+  // Vendoo's draft form alone names no Mercari category.
+  assert.equal(call(c, 'mercariCategory', { form: { overrides: { categoryV2: { id: '3', displayPath: ['Kids'], hasChildren: true } } } }), null);
 });
 
 // Mercari's sell page, read 2026-10-27: its sections, field names and order, and the size group headings.

@@ -43,7 +43,8 @@ describe("native form structure", () => {
       ...listing,
       ebay_specifics: { ...listing.ebay_specifics, variations: { rows: [{ values: { Size: "M" } }] } },
     }, "ebay")).toBe(nativeFormStructureKey(listing, "ebay"));
-    expect(nativeFormStructureKey({ ebay_specifics: { categoryId: "15709" } }, "ebay")).toBe("15709");
+    // Vendoo's eBay category is not the eBay tab's.
+    expect(nativeFormStructureKey({ marketplace_category_ids: { ebay: "15709" }, ebay_specifics: { categoryId: "15709" } }, "ebay")).toBe("");
   });
 
   it("reloads Mercari for a new category or package, as its label picker does", () => {

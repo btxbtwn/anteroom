@@ -1,0 +1,6 @@
+Anteroom.xcodeproj/
+Sources/Info.plist
+Config/Local.xcconfig
+build/
+DerivedData/
+xcuserdata/
