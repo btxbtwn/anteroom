@@ -36,7 +36,7 @@ struct PhotoViewer: View {
                     Spacer()
                     Button("Rotate right", systemImage: "rotate.right") { rotate(90) }
                     Spacer()
-                    Button("Adjust", systemImage: "slider.horizontal.3") { adjusting = current }
+                    Button("Edit", systemImage: "slider.horizontal.3") { adjusting = current }
                     Spacer()
                     Menu("More", systemImage: "ellipsis.circle") {
                         Button("Revert to original", systemImage: "arrow.uturn.backward") { reset() }
@@ -144,19 +144,27 @@ private struct FullPhoto: View {
     }
 }
 
-/// Straighten, exposure, brightness and contrast, previewed by the server
-/// from the original upload before anything is saved.
+/// The desktop photo editor (PhotoEditor.tsx): Crop, Adjust and Background,
+/// previewed by the server from the original upload before anything is saved.
 struct PhotoAdjustSheet: View {
     let api: AnteroomAPI
     let listingID: String
     let photo: ListingPhoto
     let onSaved: (ListingPhoto) -> Void
 
+    private static let backgrounds: [(color: String, label: String)] = [
+        ("#ffffff", "White"), ("#f4f4f5", "Light grey"), ("#e8e0d5", "Linen"), ("#000000", "Black"),
+    ]
+
     @Environment(\.dismiss) private var dismiss
     @State private var edits: PhotoEdits
+    @State private var tool = "crop"
+    @State private var aspectID = "free"
     @State private var preview: UIImage?
+    @State private var rendering = false
     @State private var saving = false
     @State private var error: String?
+    @State private var dragStart: PhotoEdits.CropBox?
 
     init(api: AnteroomAPI, listingID: String, photo: ListingPhoto, onSaved: @escaping (ListingPhoto) -> Void) {
         self.api = api
@@ -170,31 +178,28 @@ struct PhotoAdjustSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    ZStack {
-                        Color.black
-                        if let preview {
-                            Image(uiImage: preview).resizable().scaledToFit()
-                        } else {
-                            ProgressView().tint(.white)
-                        }
-                    }
-                    .frame(height: 260)
-                    .listRowInsets(EdgeInsets())
-                    .accessibilityLabel("Preview")
+                    previewArea
+                        .frame(height: 280)
+                        .listRowInsets(EdgeInsets())
                 }
                 Section {
-                    slider("Straighten", value: $edits.straighten, range: -45...45, unit: "°")
-                    slider("Exposure", value: $edits.exposure, range: -2...2, unit: "")
-                    slider("Brightness", value: $edits.brightness, range: -100...100, unit: "")
-                    slider("Contrast", value: $edits.contrast, range: -100...100, unit: "")
-                } footer: {
-                    Text("Edits always start from your original photo, so you can revert at any time.")
+                    Picker("Tool", selection: $tool) {
+                        Text("Crop").tag("crop")
+                        Text("Adjust").tag("adjust")
+                        Text("Background").tag("background")
+                    }
+                    .pickerStyle(.segmented)
+                }
+                switch tool {
+                case "crop": cropControls
+                case "background": backgroundControls
+                default: adjustControls
                 }
                 if let error {
                     Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Adjust")
+            .navigationTitle("Edit photo")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
@@ -206,15 +211,204 @@ struct PhotoAdjustSheet: View {
                     }
                 }
             }
-            .task(id: edits) {
-                // Wait for the slider to settle before asking for a new render.
+            .task(id: "\(tool == "crop")|\(renderKey)") {
+                // Wait for a slider or drag to settle before asking for a new render.
                 do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-                if let data = try? await api.previewPhotoEdits(listingID: listingID, photoID: photo.id, edits: edits) {
+                rendering = true
+                defer { rendering = false }
+                do {
+                    let data = try await api.previewPhotoEdits(listingID: listingID, photoID: photo.id, edits: renderEdits, crop: tool != "crop")
                     preview = UIImage(data: data)
+                    error = nil
+                } catch is CancellationError {
+                } catch {
+                    self.error = error.localizedDescription
                 }
             }
         }
         .interactiveDismissDisabled(saving)
+    }
+
+    /// While cropping, the whole frame is rendered and the crop is drawn on it.
+    private var renderEdits: PhotoEdits {
+        guard tool == "crop" else { return edits }
+        var whole = edits
+        whole.crop = nil
+        return whole
+    }
+
+    private var renderKey: String {
+        let e = renderEdits
+        return "\(e.rotate)|\(e.straighten)|\(e.exposure)|\(e.brightness)|\(e.contrast)|\(e.background ?? "")|\(String(describing: e.crop))"
+    }
+
+    @ViewBuilder
+    private var previewArea: some View {
+        ZStack {
+            Color.black
+            if let preview {
+                GeometryReader { geometry in
+                    let fitted = fit(preview.size, in: geometry.size)
+                    ZStack(alignment: .topLeading) {
+                        Image(uiImage: preview).resizable().scaledToFit()
+                            .frame(width: fitted.width, height: fitted.height)
+                        if tool == "crop" { cropOverlay(size: fitted) }
+                    }
+                    .frame(width: fitted.width, height: fitted.height)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                }
+            } else {
+                ProgressView().tint(.white)
+            }
+            if rendering && preview != nil {
+                Text(edits.background != nil && tool == "background" ? "Cutting out the item…" : "Updating…")
+                    .font(.caption).padding(6).background(.regularMaterial, in: Capsule())
+                    .frame(maxHeight: .infinity, alignment: .bottom).padding(8)
+            }
+        }
+        .accessibilityLabel("Preview")
+    }
+
+    private func fit(_ image: CGSize, in box: CGSize) -> CGSize {
+        guard image.width > 0, image.height > 0 else { return box }
+        let scale = min(box.width / image.width, box.height / image.height)
+        return CGSize(width: image.width * scale, height: image.height * scale)
+    }
+
+    private var frameAspect: Double {
+        guard let preview, preview.size.height > 0 else { return 1 }
+        return preview.size.width / preview.size.height
+    }
+
+    private var aspect: Double? { CropMath.aspects.first { $0.id == aspectID }?.aspect ?? nil }
+
+    private func cropOverlay(size: CGSize) -> some View {
+        let box = edits.crop ?? CropMath.full
+        let rect = CGRect(x: box.x * size.width, y: box.y * size.height, width: box.width * size.width, height: box.height * size.height)
+        return ZStack(alignment: .topLeading) {
+            Path { path in
+                path.addRect(CGRect(origin: .zero, size: size))
+                path.addRect(rect)
+            }
+            .fill(Color.black.opacity(0.5), style: FillStyle(eoFill: true))
+            Rectangle().stroke(Color.white, lineWidth: 2)
+                .frame(width: rect.width, height: rect.height)
+                .contentShape(Rectangle())
+                .offset(x: rect.minX, y: rect.minY)
+                .gesture(dragGesture(.move, size: size))
+            ForEach(Array([(CropMath.Handle.nw, rect.minX, rect.minY), (.ne, rect.maxX, rect.minY),
+                           (.sw, rect.minX, rect.maxY), (.se, rect.maxX, rect.maxY)].enumerated()), id: \.offset) { _, corner in
+                Circle().fill(Color.white).frame(width: 22, height: 22)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                    .offset(x: corner.1 - 22, y: corner.2 - 22)
+                    .gesture(dragGesture(corner.0, size: size))
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Crop area")
+        .accessibilityValue(edits.crop == nil ? "Whole photo" : "Cropped")
+    }
+
+    private func dragGesture(_ handle: CropMath.Handle, size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                let start = dragStart ?? (edits.crop ?? CropMath.full)
+                if dragStart == nil { dragStart = start }
+                edits.crop = CropMath.drag(start, handle, dx: value.translation.width / size.width,
+                                           dy: value.translation.height / size.height, aspect: aspect, frameAspect: frameAspect)
+            }
+            .onEnded { _ in dragStart = nil }
+    }
+
+    @ViewBuilder
+    private var cropControls: some View {
+        Section {
+            Picker("Aspect", selection: Binding(get: { aspectID }, set: { id in
+                aspectID = id
+                if let next = CropMath.aspects.first(where: { $0.id == id })?.aspect {
+                    edits.crop = CropMath.centered(next, frameAspect: frameAspect)
+                }
+            })) {
+                ForEach(CropMath.aspects, id: \.id) { Text($0.label).tag($0.id) }
+            }
+            .pickerStyle(.segmented)
+            HStack {
+                Button("Rotate left", systemImage: "rotate.left") { turn(-90) }
+                Spacer()
+                Button("Rotate right", systemImage: "rotate.right") { turn(90) }
+            }
+            .buttonStyle(.borderless)
+            if edits.crop != nil {
+                Button("Clear crop") {
+                    edits.crop = nil
+                    aspectID = "free"
+                }
+            }
+        } footer: {
+            Text("Drag the box or its corners. Edits always start from your original photo, so you can revert at any time.")
+        }
+    }
+
+    @ViewBuilder
+    private var adjustControls: some View {
+        Section {
+            slider("Straighten", value: $edits.straighten, range: -45...45, unit: "°")
+            slider("Exposure", value: $edits.exposure, range: -2...2, unit: "")
+            slider("Brightness", value: $edits.brightness, range: -100...100, unit: "")
+            slider("Contrast", value: $edits.contrast, range: -100...100, unit: "")
+        } footer: {
+            Text("Edits always start from your original photo, so you can revert at any time.")
+        }
+    }
+
+    @ViewBuilder
+    private var backgroundControls: some View {
+        Section {
+            Button {
+                edits.background = nil
+            } label: {
+                HStack {
+                    Text("Original").foregroundStyle(.primary)
+                    Spacer()
+                    if edits.background == nil { Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent) }
+                }
+            }
+            ForEach(Self.backgrounds, id: \.color) { option in
+                Button {
+                    edits.background = option.color
+                } label: {
+                    HStack {
+                        RoundedRectangle(cornerRadius: 4).fill(Color(hex: option.color))
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(WorkspaceStyle.border))
+                            .frame(width: 22, height: 22)
+                        Text(option.label).foregroundStyle(.primary)
+                        Spacer()
+                        if edits.background == option.color { Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent) }
+                    }
+                }
+                .accessibilityLabel("\(option.label) background")
+            }
+            ColorPicker("Other colour", selection: Binding(
+                get: { Color(hex: edits.background ?? "#ffffff") },
+                set: { edits.background = $0.hexString }
+            ), supportsOpacity: false)
+        } header: {
+            Text("Behind the item")
+        } footer: {
+            Text("Cuts out the item and puts a plain colour behind it.")
+        }
+    }
+
+    private func turn(_ degrees: Int) {
+        edits.rotate = ((edits.rotate + degrees) % 360 + 360) % 360
+        // The crop turns with the picture (PhotoEdits.turned on the server).
+        if var crop = edits.crop {
+            let turns = ((degrees / 90) % 4 + 4) % 4
+            for _ in 0..<turns {
+                crop = .init(x: max(0, 1 - crop.y - crop.height), y: crop.x, width: crop.height, height: crop.width)
+            }
+            edits.crop = crop
+        }
     }
 
     private func slider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>, unit: String) -> some View {
@@ -243,6 +437,23 @@ struct PhotoAdjustSheet: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+}
+
+extension Color {
+    /// `#rrggbb`.
+    init(hex: String) {
+        let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0xFFFFFF
+        self.init(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
+    }
+
+    /// `#rrggbb` for the server's background colour.
+    var hexString: String {
+        let resolved = UIColor(self)
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        func byte(_ value: CGFloat) -> Int { Int((max(0, min(1, value)) * 255).rounded()) }
+        return String(format: "#%02x%02x%02x", byte(red), byte(green), byte(blue))
     }
 }
 

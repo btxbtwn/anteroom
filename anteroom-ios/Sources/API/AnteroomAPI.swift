@@ -454,8 +454,12 @@ final class AnteroomAPI: Sendable {
     }
 
     /// A smaller JPEG of unsaved edits, rendered by the server.
-    func previewPhotoEdits(listingID: String, photoID: String, edits: PhotoEdits) async throws -> Data {
-        try await send(request("POST", "api/conversations/\(listingID)/photos/\(photoID)/edits/preview", json: edits))
+    /// `crop: false` leaves the frame whole so the crop can be drawn on it.
+    func previewPhotoEdits(listingID: String, photoID: String, edits: PhotoEdits, crop: Bool = true) async throws -> Data {
+        var preview = try await request("POST", "api/conversations/\(listingID)/photos/\(photoID)/edits/preview",
+                                        json: edits)
+        if !crop, let url = preview.url { preview.url = url.appending(queryItems: [URLQueryItem(name: "crop", value: "false")]) }
+        return try await send(preview)
     }
 
     // MARK: Shared workspace and durable draft tasks
