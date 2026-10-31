@@ -6,6 +6,7 @@ struct DraftEditorView: View {
     @State private var model: DraftEditorModel
     @State private var confirmDiscard = false
     @State private var showingAssistant = false
+    @State private var showingHistory = false
     private let onSaved: (Draft) -> Void
 
     init(api: AnteroomAPI, draft: Draft, onSaved: @escaping (Draft) -> Void) {
@@ -100,6 +101,12 @@ struct DraftEditorView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button("Listing history", systemImage: "clock.arrow.circlepath") { showingHistory = true }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .disabled(model.hasChanges || model.isLoading || model.isSaving || model.loadError != nil)
+                    .accessibilityHint("Save changes first to preview and restore earlier versions")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 if model.isSaving {
                     ProgressView()
                 } else {
@@ -135,6 +142,15 @@ struct DraftEditorView: View {
             }
         }) {
             ListingAssistantView(api: model.api, listingID: model.draftID)
+        }
+        .sheet(isPresented: $showingHistory, onDismiss: {
+            Task {
+                guard !model.hasChanges else { return }
+                await model.load()
+                if model.loadError == nil { onSaved(model.summary) }
+            }
+        }) {
+            ListingHistoryView(api: model.api, listingID: model.draftID)
         }
         .task { await model.load() }
     }

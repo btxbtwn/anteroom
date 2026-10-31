@@ -90,14 +90,14 @@ reconnection remain to be ported. Generation requires server deployment with
 the background worker and a configured provider; compilation does not verify
 those production settings.
 
-| Workflow | iPhone status |
-| --- | --- |
-| Sign-in, drafts, General editing, camera/library | Implemented |
-| Native Inventory/Settings navigation and account | Implemented |
-| Hosted generation and text assistant | Implemented; device/integration verification pending |
-| Full inventory states, filtering, history/restore | Still to port |
-| Provider setup, preferences, analytics, sourcing | Still to port |
-| Marketplace forms and seller-approved actions | Still to port; browser connection required where applicable |
+The complete feature-by-feature tracker is
+[`docs/iphone-parity.md`](../docs/iphone-parity.md). It separates native
+implementation, hosted backend availability and device verification.
+
+Listing history uses the existing shared revisions API: browse saved versions,
+preview General details and restore the full server snapshot with the current
+revision ID as a conflict guard. Unsaved edits must be saved first. Restore
+creates a new revision; it does not restore photos/private notes or publish.
 
 Swift stream framing tests run in the iOS build workflow. Device verification
 must cover a configured account generating from photos, assistant edits, an
