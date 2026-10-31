@@ -11,6 +11,11 @@ routers it mounts (paths are relative to `vendoo-studio/`). The native source
 is `anteroom-ios/Sources/`. Backend availability below describes code, not a
 verified production deployment. Recheck `/api/runtime` on the deployed server.
 
+The built-desktop visual/code reference is
+[`desktop-ui-reference.md`](desktop-ui-reference.md). Use its source map,
+observed screen hierarchy and acceptance criteria before further UI changes.
+It records where the native form still differs from the desktop workflow.
+
 ## Completion rule
 
 For every row, verify its seller-scoped backend contract, native interface,
