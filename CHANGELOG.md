@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.604 — 2026-10-31
+
+- Behind the scenes: new automatic checks catch type mistakes, code that nothing uses any more, and code in the wrong layer before a change ships. Nothing changes in the app.
+
 ## 0.1.603 — 2026-10-31
 
 - On the web, Edit fields can now change the shared, eBay and Depop categories of several listings at once, picked from Anteroom's category lists, and drafts generated on the web get the same category matching as the Mac app.
