@@ -221,6 +221,13 @@ export function MarketplacesLayout({
   const native = useQuery({ queryKey: nativeKey, queryFn: () => api.nativeMarketplaces.status(convId),
     refetchInterval: (query) => Object.values(query.state.data ?? {}).some((draft) => isRunning(draft)) ? 1500 : false });
   const live = useQuery({ queryKey: liveKey, queryFn: () => api.marketplaceListings.get(convId) });
+  // A save can fix the fields a failed List asked for, which clears that error on the server.
+  const seenRevision = useRef(revisionId);
+  useEffect(() => {
+    if (seenRevision.current === revisionId) return;
+    seenRevision.current = revisionId;
+    void queryClient.invalidateQueries({ queryKey: nativeKey });
+  });
   // Opening an item reads its own live listings once, so a sale shows while the
   // seller looks at it instead of waiting for that shop's next turn. Each shop
   // keeps its own gap between reads, so browsing items stays light.
