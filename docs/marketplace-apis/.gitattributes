@@ -1,0 +1,2 @@
+# Preserve downloaded contracts byte-for-byte so sources.json hashes survive checkout.
+specs/* -text
