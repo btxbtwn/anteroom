@@ -23,6 +23,9 @@ struct InventoryView: View {
         let rows = model.rows(search: search)
         NavigationStack(path: $path) {
             List(selection: $selected) {
+                if !selecting {
+                    SuggestionsSection(api: model.api, suggestions: model.suggestions) { bulk = .markdown($0) }
+                }
                 ForEach(rows) { listing in
                     NavigationLink(value: listing) {
                         ListingRow(api: model.api, listing: listing)
