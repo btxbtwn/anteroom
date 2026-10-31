@@ -103,3 +103,44 @@ Swift stream framing tests run in the iOS build workflow. Device verification
 must cover a configured account generating from photos, assistant edits, an
 interrupted connection followed by Reconnect, Stop, and refresh of the saved
 listing without submitting duplicate work. No test or app flow publishes.
+
+## Local sandbox and UI tests
+
+See [agent sandboxes](../docs/agent-sandboxes.md). Run `./sandbox.sh --hosted`
+from the repo root, then launch Debug with
+`ANTEROOM_SANDBOX_URL=http://localhost:4320` in the Xcode scheme environment.
+Release ignores this variable. `./anteroom-ios/test-sandbox.sh` starts the local
+hosted backend and runs the draft creation/relaunch UI test without accounts.
+=======
+## Shared backend port
+
+The iPhone is a native client of the hosted FastAPI backend. It never embeds
+Python, stores provider credentials, or talks to the desktop HTTP server.
+Generation and chat use the existing seller-authenticated workspace contracts:
+`GET /api/runtime`, `/api/status`, conversation messages/activity, streaming
+`POST /generate` and `/messages`, explicit `/stop`, and `resume=true` to observe
+existing work without submitting it again. The server saves generated revisions;
+the native editor reloads on return from the assistant. Unsaved local edits must
+be saved first. Disconnecting never cancels or automatically retries work.
+
+The first functional port adds native generation, a saved text transcript,
+progress, stop, and explicit reconnect. Provider setup currently remains in the
+web app. Chat attachments, live token rendering, and automatic foreground
+reconnection remain to be ported. Generation requires server deployment with
+the background worker and a configured provider; compilation does not verify
+those production settings.
+
+| Workflow | iPhone status |
+| --- | --- |
+| Sign-in, drafts, General editing, camera/library | Implemented |
+| Native Inventory/Settings navigation and account | Implemented |
+| Hosted generation and text assistant | Implemented; device/integration verification pending |
+| Full inventory states, filtering, history/restore | Still to port |
+| Provider setup, preferences, analytics, sourcing | Still to port |
+| Marketplace forms and seller-approved actions | Still to port; browser connection required where applicable |
+
+Swift stream framing tests run in the iOS build workflow. Device verification
+must cover a configured account generating from photos, assistant edits, an
+interrupted connection followed by Reconnect, Stop, and refresh of the saved
+listing without submitting duplicate work. No test or app flow publishes.
+>>>>>>> origin/main

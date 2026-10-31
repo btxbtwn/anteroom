@@ -77,7 +77,7 @@ class AccountResponse(BaseModel):
     user_id: str
 
 
-def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) -> FastAPI:
+def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, session_verifier: SessionVerifier | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # ORM relationship names must resolve before a route constructs its
@@ -88,7 +88,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
         configure_mappers()
         # Fail startup if the operator has not selected a project. No service
         # role key, shared signing secret or database password is needed here.
-        app.state.session_verifier = SessionVerifier(
+        app.state.session_verifier = session_verifier or SessionVerifier(
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
         app.state.chat_upload_slots = asyncio.Semaphore(1)

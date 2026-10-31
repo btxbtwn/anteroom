@@ -96,6 +96,18 @@ function SignIn({ client }: { client: SupabaseClient }) {
     } catch { setMessage("Could not reach sign-in. Please try again."); }
     finally { setPending(false); }
   }
+  if (import.meta.env.DEV && import.meta.env.VITE_ANTEROOM_SANDBOX === "1"
+      && new URL(url).hostname === "127.0.0.1") {
+    return <main className="sign-in"><h1>Local sandbox</h1><p>Choose a sample seller. Drafts stay on this machine.</p>
+      {["alice", "bob"].map(name => <button key={name} disabled={pending} onClick={() => {
+        setPending(true); setMessage("");
+        void client.auth.signInWithPassword({ email: `${name}@sandbox.test`, password: "sandbox" })
+          .then(({ error }) => { if (error) setMessage("Could not open the sandbox account."); })
+          .catch(() => setMessage("Could not reach the local sandbox."))
+          .finally(() => setPending(false));
+      }}>Sign in as {name === "alice" ? "Alice" : "Bob"}</button>)}
+      {message && <p role="alert">{message}</p>}</main>;
+  }
   return <main className="sign-in"><p className="eyebrow">YOUR LISTING WORKSPACE</p><h1>A place to start.</h1><p>Sign in to keep your drafts together, wherever you work.</p>
     <form onSubmit={event => void submit(event)}><label htmlFor="email">Email address</label><input id="email" type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} disabled={pending}/><button className="primary" disabled={pending}>{pending ? "Sending…" : "Email me a sign-in link"}</button></form>
     {message && <p role="status">{message}</p>}
