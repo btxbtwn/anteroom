@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -48,7 +49,7 @@ class MarketplaceSale(SellerOwned, Base):
     order_status: Mapped[str] = mapped_column(String, nullable=False, default="paid", server_default="paid")
     order_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     order_observed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    financials: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    financials: Mapped[Any] = mapped_column(JSON, nullable=True)
     financial_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # The local item matched by its validated marketplace listing identity.
     conversation_id: Mapped[str | None] = mapped_column(String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)

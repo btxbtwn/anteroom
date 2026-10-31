@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -41,8 +42,8 @@ class DiagnosticRun(SellerOwned, Base):
     dropdowns_with_options: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     live_dropdowns_with_options: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     total_dropdown_options: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
-    expanded_sections: Mapped[object | None] = mapped_column(JSON, nullable=True)
-    headings: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    expanded_sections: Mapped[Any] = mapped_column(JSON, nullable=True)
+    headings: Mapped[Any] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
 
 
@@ -57,8 +58,8 @@ class FieldObservation(SellerOwned, Base):
     diagnostic_run_id: Mapped[str] = mapped_column(String, ForeignKey("diagnostic_runs.id"), nullable=False, index=True)
     observation_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     label: Mapped[str | None] = mapped_column(String, nullable=True)
-    label_sources: Mapped[object | None] = mapped_column(JSON, nullable=True)
-    section_path: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    label_sources: Mapped[Any] = mapped_column(JSON, nullable=True)
+    section_path: Mapped[Any] = mapped_column(JSON, nullable=True)
     selector: Mapped[str | None] = mapped_column(String, nullable=True)
     tag: Mapped[str | None] = mapped_column(String, nullable=True)
     control_type: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -69,6 +70,6 @@ class FieldObservation(SellerOwned, Base):
     classes: Mapped[str | None] = mapped_column(String, nullable=True)
     is_dropdown: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     option_count: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
-    options: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    options: Mapped[Any] = mapped_column(JSON, nullable=True)
     options_source: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)

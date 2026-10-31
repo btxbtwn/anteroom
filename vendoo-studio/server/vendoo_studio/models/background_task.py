@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -34,7 +35,7 @@ class BackgroundTask(SellerOwned, Base):
     conversation_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default='queued')
-    payload: Mapped[object] = mapped_column(JSON, nullable=False, default=dict)
+    payload: Mapped[Any] = mapped_column(JSON, nullable=False, default=dict)
     lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     leased_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

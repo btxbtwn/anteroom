@@ -6,8 +6,6 @@ Create Date: 2026-10-31 06:19:59.341295
 """
 from __future__ import annotations
 
-
-
 revision = '8fac6ea04af1'
 down_revision = '56b5ee7250ec'
 branch_labels = None

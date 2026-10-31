@@ -1,6 +1,6 @@
 [project]
 name = "vendoo-studio"
-version = "0.1.605"
+version = "0.1.606"
 description = "Local web app for generating and automating Vendoo marketplace listings"
 requires-python = ">=3.12"
 dependencies = [
@@ -85,8 +85,7 @@ ignore = ["UP042"]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query", "fastapi.Body", "fastapi.Header"]
 
 # Type checking. .basedpyright/baseline.json holds the errors that existed when
-# the check was added; only new ones fail. Most come from models declared with
-# Column(...) instead of Mapped[...].
+# the check was added; only new ones fail. The baseline may only shrink.
 [tool.basedpyright]
 include = ["server/vendoo_studio"]
 extraPaths = ["server"]

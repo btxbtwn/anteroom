@@ -8,6 +8,7 @@ reply becomes ``unknown`` and is never repeated.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -47,7 +48,7 @@ class ListingPromotion(SellerOwned, Base):
     floor_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # The shipping discounts the marketplace offered at review; the seller picks one of them.
-    shipping_options: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    shipping_options: Mapped[Any] = mapped_column(JSON, nullable=True)
     shipping_discount_id: Mapped[str | None] = mapped_column(String, nullable=True)
     shipping_discount_label: Mapped[str | None] = mapped_column(String, nullable=True)
     like_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

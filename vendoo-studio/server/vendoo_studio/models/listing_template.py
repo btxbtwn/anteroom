@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,7 +18,7 @@ class ListingTemplate(SellerOwned, Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    fields: Mapped[object] = mapped_column(JSON, nullable=False)
+    fields: Mapped[Any] = mapped_column(JSON, nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)

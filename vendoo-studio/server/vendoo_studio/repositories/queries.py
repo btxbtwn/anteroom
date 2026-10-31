@@ -9,8 +9,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import json_value
-from vendoo_studio.models.conversation import Conversation, Message, Photo, new_id, utcnow
-from vendoo_studio.models.listing import Listing, ListingRevision
+from vendoo_studio.models.conversation import (
+    Conversation,
+    Message,
+    Photo,
+    new_id,
+    utcnow,
+)
+from vendoo_studio.models.diagnostics import DiagnosticRun, FieldObservation
+from vendoo_studio.models.fill_log import FillLogEntry
 from vendoo_studio.models.job import (
     ACTIVE_JOB_STATUSES,
     DISPATCHABLE_JOB_STATUSES,
@@ -19,9 +26,8 @@ from vendoo_studio.models.job import (
     JobEvent,
     VendooDraftCache,
 )
-from vendoo_studio.models.diagnostics import DiagnosticRun, FieldObservation
+from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.registry import FieldRegistry
-from vendoo_studio.models.fill_log import FillLogEntry
 
 # Keys the extension sends with a step result that are only useful while the
 # message is being handled: the item, the discovered schema, the fill log and
@@ -303,13 +309,13 @@ class ConversationRepo:
         self.db.refresh(conv)
         return conv
 
-    def _latest_jobs(self) -> dict[str, tuple[str, Any]]:
+    def _latest_jobs(self) -> dict[str, tuple[str | None, Any]]:
         """Newest job status per conversation, as ``{conv_id: (status, updated_at)}``.
 
         The sidebar reconciles every row on each refresh, so this reads the two
         columns it needs rather than whole jobs with their listing snapshots.
         """
-        latest: dict[str, tuple[str, Any]] = {}
+        latest: dict[str, tuple[str | None, Any]] = {}
         # Direct marketplace jobs are not Vendoo sends: the Marketplaces
         # section shows them, and their failures never relabel the listing.
         rows = (
@@ -544,7 +550,10 @@ def _drop_fixed_marketplace_errors(db: Session, conv_id: str, before: dict, afte
     so a category fixed in the editor or by chat would still show as missing.
     Each field this save changed leaves the error; the next List checks it again.
     """
-    from vendoo_studio.models.marketplace_listing import UNSETTLED_STATES, MarketplaceListing
+    from vendoo_studio.models.marketplace_listing import (
+        UNSETTLED_STATES,
+        MarketplaceListing,
+    )
 
     rows = db.query(MarketplaceListing).filter(
         MarketplaceListing.conversation_id == conv_id, MarketplaceListing.error_code == "missing_fields",
@@ -575,7 +584,10 @@ class ListingRepo:
 
     def save_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None) -> ListingRevision:
         """Save atomically; an empty expected id means no listing may exist yet."""
-        from vendoo_studio.services.native_field_fill import FILL_ON_SOURCES, category_saved
+        from vendoo_studio.services.native_field_fill import (
+            FILL_ON_SOURCES,
+            category_saved,
+        )
 
         before: dict = {}
         current = self.get_current(conv_id)
@@ -803,7 +815,11 @@ class JobRepo:
         Only a send that failed because it was cut off qualifies, and only the
         first time. Returns True when the job is queued again.
         """
-        from vendoo_studio.models.job import AUTO_RETRY_EVENT, INTERRUPTED_SEND_ERRORS, is_vendoo_api_step
+        from vendoo_studio.models.job import (
+            AUTO_RETRY_EVENT,
+            INTERRUPTED_SEND_ERRORS,
+            is_vendoo_api_step,
+        )
 
         job = self.db.query(Job).filter(Job.id == job_id).first()
         if (

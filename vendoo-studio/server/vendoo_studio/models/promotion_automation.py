@@ -8,6 +8,7 @@ carrying its ``automation_id``; each round is a ``promotion_runs`` row.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -39,14 +40,14 @@ class PromotionAutomation(SellerOwned, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # "all" live listings on the marketplace, or the chosen ``conversation_ids``; never the excluded ones.
     scope: Mapped[str] = mapped_column(String, nullable=False, default="all")
-    conversation_ids: Mapped[object] = mapped_column(JSON, nullable=False, default=list)
-    excluded_ids: Mapped[object] = mapped_column(JSON, nullable=False, default=list)
+    conversation_ids: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
+    excluded_ids: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
     min_days_listed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Shares only.
     share_order: Mapped[str | None] = mapped_column(String, nullable=True)
     speed: Mapped[str | None] = mapped_column(String, nullable=True)
     daily_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    times: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    times: Mapped[Any] = mapped_column(JSON, nullable=True)
     timezone: Mapped[str | None] = mapped_column(String, nullable=True)
     # Offers only. No shipping label means no shipping discount.
     discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)

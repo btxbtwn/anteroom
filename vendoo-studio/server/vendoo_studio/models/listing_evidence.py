@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -32,7 +33,7 @@ class ListingCorrection(SellerOwned, Base):
     source: Mapped[str] = mapped_column(String, nullable=False, default="user_form")
     category_path: Mapped[str] = mapped_column(String, nullable=False)
     brand: Mapped[str] = mapped_column(String, nullable=False)
-    changes: Mapped[object] = mapped_column(JSON, nullable=False)
+    changes: Mapped[Any] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
@@ -47,7 +48,7 @@ class SaleSnapshot(SellerOwned, Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
     sale_key: Mapped[str] = mapped_column(String, nullable=False)
-    listing: Mapped[object] = mapped_column(JSON, nullable=False)
+    listing: Mapped[Any] = mapped_column(JSON, nullable=False)
     source: Mapped[str] = mapped_column(String, nullable=False)
     observed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 

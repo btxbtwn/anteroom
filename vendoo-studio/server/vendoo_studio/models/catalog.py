@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,7 +19,7 @@ class CategorySchema(SellerOwned, Base):
     general_path: Mapped[str] = mapped_column(String, nullable=False, index=True)
     marketplace: Mapped[str] = mapped_column(String, nullable=False)
     category_path: Mapped[str] = mapped_column(String, nullable=False)
-    fields: Mapped[object] = mapped_column(JSON, nullable=False)
+    fields: Mapped[Any] = mapped_column(JSON, nullable=False)
     observed_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
     __table_args__ = (UniqueConstraint("user_id", "general_path", "marketplace", name="uq_category_schemas_seller"),)
 
@@ -36,7 +37,7 @@ class CategoryFieldSchema(SellerOwned, Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     marketplace: Mapped[str] = mapped_column(String, nullable=False)
     category_id: Mapped[str] = mapped_column(String, nullable=False)
-    fields: Mapped[object] = mapped_column(JSON, nullable=False)
+    fields: Mapped[Any] = mapped_column(JSON, nullable=False)
     fetched_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
     __table_args__ = (UniqueConstraint("user_id", "marketplace", "category_id", name="uq_category_field_schemas_seller"),)
 

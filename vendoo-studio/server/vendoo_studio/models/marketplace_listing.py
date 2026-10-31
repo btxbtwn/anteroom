@@ -9,6 +9,7 @@ here are what make a retry reuse the same listing instead of creating another.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -64,7 +65,7 @@ class MarketplaceListing(SellerOwned, Base):
 
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String, nullable=True)
-    error_fields: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    error_fields: Mapped[Any] = mapped_column(JSON, nullable=True)
     marketplace_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_after: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -74,31 +75,31 @@ class MarketplaceListing(SellerOwned, Base):
     # Set before the inventory item is first written: from then on the SKU is this item's.
     ebay_inventory_written: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # [{"photo_id", "checksum", "url"}] in listing order.
-    ebay_images: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    ebay_images: Mapped[Any] = mapped_column(JSON, nullable=True)
     # A listing with variations: its inventory item group, and {variation SKU: offer ID}.
     ebay_group_key: Mapped[str | None] = mapped_column(String, nullable=True)
-    ebay_variant_offers: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    ebay_variant_offers: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     etsy_shop_id: Mapped[str | None] = mapped_column(String, nullable=True)
     etsy_pending_write: Mapped[str | None] = mapped_column(String, nullable=True)
-    etsy_photo_ids: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    etsy_photo_ids: Mapped[Any] = mapped_column(JSON, nullable=True)
     # {photo_id: listing_image_id}
-    etsy_image_ids: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    etsy_image_ids: Mapped[Any] = mapped_column(JSON, nullable=True)
     # {photo_id: checksum} of each uploaded file, so an edited photo is uploaded again.
-    etsy_image_checksums: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    etsy_image_checksums: Mapped[Any] = mapped_column(JSON, nullable=True)
     etsy_photos_complete: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     etsy_shipping_profile_id: Mapped[str | None] = mapped_column(String, nullable=True)
     etsy_readiness_state_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     storage: Mapped[str | None] = mapped_column(String, nullable=True)
     local_draft_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    photo_ids: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    photo_ids: Mapped[Any] = mapped_column(JSON, nullable=True)
     sellwild_category_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sellwild_condition_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Latest verified direct inventory read; listing identity and read-start time
     # keep a later sale or replacement link from reusing stale stock.
-    inventory_observation: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    inventory_observation: Mapped[Any] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)

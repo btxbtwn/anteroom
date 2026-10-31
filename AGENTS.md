@@ -130,8 +130,7 @@ mix it with a fix or a feature.
   breaks: type errors (basedpyright), imports that go the wrong way between
   layers (import-linter), and code left unused (knip for the frontend,
   `scripts/check-dead-code.py` for the backend). Each one records the problems
-  that existed when it was added and fails only on new ones (the type check
-  only reports for now; see the note there). See
+  that existed when it was added and fails only on new ones. See
   `vendoo-studio/AGENTS.md`, **Code health checks**. A refactor that fixes
   recorded problems removes them from the record in the same PR.
 

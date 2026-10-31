@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -52,7 +53,7 @@ class Job(SellerOwned, Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
     approved_revision_id: Mapped[str] = mapped_column(String, nullable=False)
-    listing_snapshot: Mapped[object] = mapped_column(JSON, nullable=False)
+    listing_snapshot: Mapped[Any] = mapped_column(JSON, nullable=False)
     status: Mapped[str | None] = mapped_column(String, default="queued", nullable=True)
     current_step: Mapped[str | None] = mapped_column(String, nullable=True)
     vendoo_item_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -75,7 +76,7 @@ class JobEvent(SellerOwned, Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     event_type: Mapped[str] = mapped_column(String, nullable=False)
     step: Mapped[str | None] = mapped_column(String, nullable=True)
-    payload: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    payload: Mapped[Any] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
 
 
@@ -99,5 +100,5 @@ class VendooDraftCache(SellerOwned, Base):
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
     step: Mapped[str | None] = mapped_column(String, nullable=True)
-    payload: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    payload: Mapped[Any] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)

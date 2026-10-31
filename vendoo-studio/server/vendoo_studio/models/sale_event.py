@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import JSON, Date, DateTime, Float, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,7 +27,7 @@ class SaleEvent(SellerOwned, Base):
     shipping_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     minimum_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Snapshot the chosen items so an edit or deletion cannot rewrite history.
-    items: Mapped[object] = mapped_column(JSON, nullable=False)
+    items: Mapped[Any] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="planned")
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)

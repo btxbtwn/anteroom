@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from vendoo_studio.models.listing import Listing
@@ -76,7 +76,7 @@ class Message(SellerOwned, Base):
     model: Mapped[str | None] = mapped_column(String, nullable=True)
     # Images the seller attached: [{id, name, mime_type, size_bytes, width, height}];
     # the files live under the data folder, see services/chat_attachments.py.
-    attachments: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    attachments: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Identifies the exact ordered photo files used for a vision reading.
     photo_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
@@ -104,7 +104,7 @@ class Photo(SellerOwned, Base):
     # An edited photo keeps its upload here and serves the rendered edit from
     # stored_filename, so every send uses the edit and Reset restores the upload.
     source_filename: Mapped[str | None] = mapped_column(String, nullable=True)
-    edits: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    edits: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Set for a photo added on one marketplace's form: only that marketplace can send it.
     marketplace: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -19,8 +20,8 @@ class FieldRegistry(SellerOwned, Base):
     normalized_label: Mapped[str] = mapped_column(String, nullable=False)
     control_type: Mapped[str | None] = mapped_column(String, nullable=True)
     is_dropdown: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
-    known_selectors: Mapped[object | None] = mapped_column(JSON, default=[], nullable=True)
-    known_options: Mapped[object | None] = mapped_column(JSON, default=[], nullable=True)
+    known_selectors: Mapped[Any] = mapped_column(JSON, default=[], nullable=True)
+    known_options: Mapped[Any] = mapped_column(JSON, default=[], nullable=True)
     # How known_options was last captured. An authoritative read of an open
     # dropdown replaces the option set; anything weaker only unions into it.
     options_source: Mapped[str | None] = mapped_column(String, nullable=True)

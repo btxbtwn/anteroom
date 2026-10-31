@@ -14,6 +14,7 @@ a specific item and action. A failed relist is recorded for manual recovery.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -46,10 +47,10 @@ class Automation(SellerOwned, Base):
     # draft until the seller confirms; active runs; paused waits; completed is a one-off that finished.
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
     timezone: Mapped[str] = mapped_column(String, nullable=False, default="UTC")
-    schedule: Mapped[object] = mapped_column(JSON, nullable=False)
-    filters: Mapped[object] = mapped_column(JSON, nullable=False)
-    actions: Mapped[object] = mapped_column(JSON, nullable=False)
-    marketplaces: Mapped[object] = mapped_column(JSON, nullable=False)
+    schedule: Mapped[Any] = mapped_column(JSON, nullable=False)
+    filters: Mapped[Any] = mapped_column(JSON, nullable=False)
+    actions: Mapped[Any] = mapped_column(JSON, nullable=False)
+    marketplaces: Mapped[Any] = mapped_column(JSON, nullable=False)
     # step walks the original price down each cycle. once drops a single time.
     # Empty means the price action's own repeat still applies.
     price_repeat: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -90,7 +91,7 @@ class AutomationRun(SellerOwned, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    summary: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    summary: Mapped[Any] = mapped_column(JSON, nullable=True)
 
 
 class AutomationApplication(SellerOwned, Base):
@@ -162,9 +163,9 @@ class AutomationApproval(SellerOwned, Base):
     title: Mapped[str | None] = mapped_column(String, nullable=True)
     revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
     action: Mapped[str] = mapped_column(String, nullable=False, server_default="publish")
-    targets: Mapped[object] = mapped_column(JSON, nullable=False, server_default="{}")
+    targets: Mapped[Any] = mapped_column(JSON, nullable=False, server_default="{}")
     review_basis: Mapped[str] = mapped_column(String, nullable=False, server_default="")
-    marketplaces: Mapped[object] = mapped_column(JSON, nullable=False)
+    marketplaces: Mapped[Any] = mapped_column(JSON, nullable=False)
     # pending, approved, dismissed
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)

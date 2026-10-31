@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, Float, String, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -29,8 +30,8 @@ class GenerationTiming(SellerOwned, Base):
     conversation_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # The stream starts preparing; background field work supplies its final outcome.
     outcome: Mapped[str] = mapped_column(String, nullable=False)
-    stages: Mapped[object] = mapped_column(JSON, nullable=False)
-    calls: Mapped[object] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    stages: Mapped[Any] = mapped_column(JSON, nullable=False)
+    calls: Mapped[Any] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     total_sec: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)

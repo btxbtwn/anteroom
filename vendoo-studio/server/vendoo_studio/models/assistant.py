@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -59,9 +60,9 @@ class AssistantMessage(SellerOwned, Base):
     provider: Mapped[str | None] = mapped_column(String, nullable=True)
     model: Mapped[str | None] = mapped_column(String, nullable=True)
     # {"status": proposed | applied | dismissed, "items": [...]}; see services/assistant_changes.py.
-    changes: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    changes: Mapped[Any] = mapped_column(JSON, nullable=True)
     # {"status": proposed | confirmed | dismissed, "proposal": {...}}; see services/automations.py.
-    automation: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    automation: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Images attached to a question; see services/chat_attachments.py.
-    attachments: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    attachments: Mapped[Any] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, index=True)

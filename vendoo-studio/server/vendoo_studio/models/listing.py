@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from vendoo_studio.models.conversation import Conversation
@@ -33,7 +33,7 @@ class Listing(SellerOwned, Base):
     conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), primary_key=True, nullable=False)
     current_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
     validation_status: Mapped[str | None] = mapped_column(String, nullable=True)
-    validation_errors: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    validation_errors: Mapped[Any] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="listing", primaryjoin="and_(Conversation.id == foreign(Listing.conversation_id), Conversation.user_id == Listing.user_id)")
@@ -58,7 +58,7 @@ class ListingRevision(SellerOwned, Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
-    listing_json: Mapped[object] = mapped_column(JSON, nullable=False)
+    listing_json: Mapped[Any] = mapped_column(JSON, nullable=False)
     # Status reads scan quantity history, never the large marketplace form JSON.
     inventory_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True, default=revision_quantity)
     source: Mapped[str] = mapped_column(String, nullable=False)

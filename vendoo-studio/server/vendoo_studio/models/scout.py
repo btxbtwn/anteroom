@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -34,7 +35,7 @@ class ScoutCheck(SellerOwned, Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="checking")  # checking | done | failed
     asking_price: Mapped[float | None] = mapped_column(Float, nullable=True)
-    photos: Mapped[object] = mapped_column(JSON, nullable=False, default=list)  # stored filenames, in order
+    photos: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)  # stored filenames, in order
     title: Mapped[str | None] = mapped_column(String, nullable=True)
     analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
     comps: Mapped[str | None] = mapped_column(Text, nullable=True)
