@@ -60,6 +60,11 @@ final class AnteroomAPI: Sendable {
         try await send(request("GET", "api/drafts/\(draftID)/photos/\(photoID)"))
     }
 
+    func photoThumbnailData(photoID: String, size: Int) async throws -> Data {
+        try await send(request("GET", "api/photos/\(photoID)/thumb",
+                               query: [URLQueryItem(name: "size", value: String(size))]))
+    }
+
     func deletePhoto(draftID: String, photoID: String) async throws {
         _ = try await send(request("DELETE", "api/drafts/\(draftID)/photos/\(photoID)"))
     }
@@ -123,6 +128,25 @@ final class AnteroomAPI: Sendable {
             await receive(frame)
         }
         throw APIError(status: 0, message: "The connection ended. Reconnect to check your draft before trying again.")
+    }
+
+    // MARK: Shared listing history
+
+    func revisions(_ id: String) async throws -> [ListingRevision] {
+        try await decode(request("GET", "api/conversations/\(id)/revisions"))
+    }
+
+    func revisionPointer(_ id: String) async throws -> ListingRevisionPointer {
+        try await decode(request("GET", "api/conversations/\(id)/listing"))
+    }
+
+    func revision(_ id: String, revisionID: String) async throws -> RevisionSnapshot {
+        try await decode(request("GET", "api/conversations/\(id)/revisions/\(revisionID)"))
+    }
+
+    func restoreRevision(_ id: String, revisionID: String, expectedRevisionID: String) async throws {
+        _ = try await send(request("POST", "api/conversations/\(id)/revisions/\(revisionID)/restore",
+                                   json: ["expected_revision_id": expectedRevisionID]))
     }
 
     // MARK: Transport
