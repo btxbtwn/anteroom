@@ -9,6 +9,7 @@ body:
       options:
         - Anteroom
         - Chrome extension
+        - Webhook relay
         - list-this skills
         - CI / repo hygiene
     validations:
@@ -27,3 +28,8 @@ body:
       description: The smallest change that would fix it.
     validations:
       required: true
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: What a seller can do afterwards, written so it can become a test.

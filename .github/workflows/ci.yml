@@ -126,6 +126,41 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: "public-build-validation"
         run: npm run build
 
+  studio-browser:
+    name: Studio browser tests (sandbox)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vendoo-studio
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: vendoo-studio/package-lock.json
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -U pip
+          .venv/bin/python -m pip install -e ".[dev]"
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Desktop and phone layouts against the sandbox
+        run: npm run e2e
+      - name: Keep the report, screenshots and traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: studio-browser-report
+          path: |
+            vendoo-studio/e2e/report
+            vendoo-studio/e2e/results
+          retention-days: 7
+
   studio-backend:
     name: Studio backend
     runs-on: ubuntu-latest
@@ -266,6 +301,7 @@ jobs:
       - portable-paths
       - secrets
       - studio-frontend
+      - studio-browser
       - studio-backend
       - studio-backend-postgres
       - studio-update-zip

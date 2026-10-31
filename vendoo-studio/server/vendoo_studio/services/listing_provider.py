@@ -68,7 +68,11 @@ def _key_provider(provider_id: str):
 
 
 def _provider_for(choice: str):
+    from vendoo_studio import sandbox
     from vendoo_studio.services.service_context import current
+    if sandbox.enabled():
+        from vendoo_studio.providers.sandbox import SandboxProvider
+        return SandboxProvider()
     context = current()
     if context is not None:
         if context.provider_factory is None:
@@ -132,7 +136,10 @@ def get_photo_provider():
 
 
 def provider_is_configured() -> bool:
+    from vendoo_studio import sandbox
     from vendoo_studio.services.service_context import current
+    if sandbox.enabled():
+        return True
     if current() is not None:
         return any(_provider_for(choice) is not None for choice in PROVIDER_CHOICES)
     return (

@@ -156,23 +156,8 @@ def _no_real_keychain():
     xdist worker, every time the suite runs.
     """
     import keyring
-    from keyring.backend import KeyringBackend
 
-    class MemoryKeyring(KeyringBackend):
-        priority = 1
-
-        def __init__(self) -> None:
-            super().__init__()
-            self.items: dict[tuple[str, str], str] = {}
-
-        def get_password(self, service, username):
-            return self.items.get((service, username))
-
-        def set_password(self, service, username, password):
-            self.items[(service, username)] = password
-
-        def delete_password(self, service, username):
-            self.items.pop((service, username), None)
+    from vendoo_studio.sandbox import MemoryKeyring
 
     original = keyring.get_keyring()
     keyring.set_keyring(MemoryKeyring())

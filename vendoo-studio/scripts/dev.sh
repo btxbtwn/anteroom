@@ -9,10 +9,16 @@ if [[ ! -x .venv/bin/python || ! -d node_modules ]]; then
   exit 1
 fi
 
-if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:4318 -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "Port 4318 is already in use. Quit the other Anteroom process and try again." >&2
-  exit 1
-fi
+API_PORT="${VENDOO_STUDIO_PORT:-4318}"
+WEB_PORT="${VENDOO_STUDIO_WEB_PORT:-5173}"
+export VENDOO_STUDIO_PORT="$API_PORT" VENDOO_STUDIO_WEB_PORT="$WEB_PORT"
+
+for port in "$API_PORT" "$WEB_PORT"; do
+  if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "Port $port is already in use. Quit the other Anteroom process and try again." >&2
+    exit 1
+  fi
+done
 
 BACKEND_PID=""
 FRONTEND_PID=""
@@ -30,21 +36,21 @@ export PYTHONPATH="$ROOT/server"
 .venv/bin/python -m vendoo_studio.main &
 BACKEND_PID=$!
 
-npm run dev -- --host 127.0.0.1 --port 5173 &
+npm run dev -- --host 127.0.0.1 --port "$WEB_PORT" --strictPort &
 FRONTEND_PID=$!
 
-echo "Anteroom backend  http://127.0.0.1:4318"
-echo "Anteroom frontend http://127.0.0.1:5173"
+echo "Anteroom backend  http://127.0.0.1:$API_PORT"
+echo "Anteroom frontend http://127.0.0.1:$WEB_PORT"
 echo "Open the frontend URL. Press Ctrl+C to stop both processes."
 
-if command -v open >/dev/null 2>&1; then
+if [[ "${ANTEROOM_NO_OPEN:-}" != "1" ]] && command -v open >/dev/null 2>&1; then
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if curl -sf "http://127.0.0.1:4318/api/health" >/dev/null 2>&1; then
+    if curl -sf "http://127.0.0.1:$API_PORT/api/health" >/dev/null 2>&1; then
       break
     fi
     sleep 0.3
   done
-  open "http://127.0.0.1:5173" >/dev/null 2>&1 || true
+  open "http://127.0.0.1:$WEB_PORT" >/dev/null 2>&1 || true
 fi
 
 wait
