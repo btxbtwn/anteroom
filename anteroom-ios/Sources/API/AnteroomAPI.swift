@@ -71,6 +71,13 @@ final class AnteroomAPI: Sendable {
         return GeneralOptions(vendoo: payload.forms["vendoo"] ?? [:])
     }
 
+    /// The inventory's ranked next steps.
+    func suggestions() async throws -> [Suggestion] {
+        struct Payload: Decodable { let suggestions: [Suggestion] }
+        let payload: Payload = try await decode(request("GET", "api/suggestions"))
+        return payload.suggestions
+    }
+
     // MARK: Bulk actions (reviewed first, as on the desktop)
 
     func previewBulkEdit(ids: [String], edits: BulkEdits) async throws -> [BulkEditReviewRow] {
