@@ -162,6 +162,27 @@ test('a new Vinted draft uploads a photo, saves once, and is confirmed by readin
   assert.equal(JSON.stringify(result).includes('seller@example.com'), false);
 });
 
+test('No brand overrides General and resolves to Vinted\'s brand ID in the saved draft', async () => {
+  const { c, sent } = worker();
+  c.fetch = ((inner) => async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v2/item_upload/brands') {
+      assert.equal(parsed.searchParams.get('keyword'), 'No brand');
+      assert.equal(parsed.searchParams.get('category_id'), '1904');
+      return reply(200, { brands: [{ id: 149, title: 'No brand' }] });
+    }
+    return inner(url, options);
+  })(c.fetch);
+  const result = await c.runVintedNative(message({ listing: {
+    ...listing, brand: 'Nike', vinted_specifics: { ...listing.vinted_specifics, brand: 'No brand' },
+  } }));
+  assert.equal(result.ok, true);
+  const saved = JSON.parse(sent('POST', '/api/v2/item_upload/drafts')[0].body);
+  assert.equal(saved.draft.brand_id, 149);
+  assert.equal(saved.draft.brand, 'No brand');
+  assert.equal(sent('POST', '/api/v2/item_upload/drafts/42/completion').length, 0);
+});
+
 test('publishing a Vinted draft completes it once and returns the public listing', async () => {
   const { c, sent } = worker({ read: n => (n < 2 ? DRAFT : { ...DRAFT, is_draft: false }) });
   const result = await c.runVintedNative(message({ action: 'publish', confirm: true, draft_url: DRAFT_URL }));
@@ -176,6 +197,18 @@ test('publishing a Vinted draft completes it once and returns the public listing
   assert.equal(body.draft.assigned_photos, undefined);
   assert.deepEqual(body.draft.photos, [{ id: 11, orientation: 0 }]);
   assert.deepEqual(body.draft.item_attributes, [{ code: 'condition', ids: [3] }]);
+});
+
+test('a Vinted draft not yet live after publishing says to check again and keeps Vinted\'s reply', async () => {
+  const { c } = worker({ read: () => DRAFT });
+  c.marketplaceSleep = async () => {};
+  const inner = c.fetch;
+  c.fetch = async (url, options = {}) => (new URL(url).pathname.endsWith('/completion')
+    ? reply(200, { code: 0, item: { id: 42, is_draft: true, user: { email: 'seller@example.com' } } }) : inner(url, options));
+  const result = await c.runVintedNative(message({ action: 'publish', confirm: true, draft_url: DRAFT_URL }));
+  assert.equal(result.ok, false);
+  assert.match(result.error, /not shown this listing as live yet/);
+  assert.equal(result.marketplace_message, 'code=0 is_draft=true');
 });
 
 test('a Vinted listing that is already live is not published again', async () => {

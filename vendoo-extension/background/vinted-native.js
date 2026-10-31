@@ -547,6 +547,20 @@ async function updateVintedItem(call, session, payload, listing, recovery, writi
   return { ok: true, state: 'published', listing_url: listingUrl };
 }
 
+// What Vinted said when it completed a draft, without the seller's account details.
+function vintedCompletionReply(body) {
+  if (!body || typeof body !== 'object') return null;
+  const item = body.item || body.draft || {};
+  const parts = [];
+  if (body.code != null) parts.push(`code=${body.code}`);
+  const words = marketplaceBodyMessage(body);
+  if (words) parts.push(words);
+  for (const key of ['is_draft', 'is_hidden', 'is_processing', 'is_closed', 'is_reserved', 'item_closing_action', 'status']) {
+    if (item[key] != null && typeof item[key] !== 'object') parts.push(`${key}=${item[key]}`);
+  }
+  return parts.length ? marketplaceScrub(parts.join(' ')).slice(0, 500) : null;
+}
+
 async function runVintedNative(msg, recovery = false) {
   const payload = { ...(msg.payload || {}), deadline: Date.now() + 120000 };
   const listing = payload.listing && typeof payload.listing === 'object' ? payload.listing : {};
@@ -646,7 +660,10 @@ async function runVintedNative(msg, recovery = false) {
       }
       const after = await vintedConfirmLive(call, publishedId);
       if (!vintedLive(after)) {
-        throw marketplaceError('Vinted did not confirm the listing. Check your Vinted listings before trying again.', { code: 'uncertain', rejected: false });
+        // Vinted can take a few minutes to show a completed draft as live.
+        // Listing again reads the same item first and never publishes it twice.
+        throw marketplaceError('Vinted has not shown this listing as live yet. It can take a few minutes. List on Vinted again to check; it will not list twice.',
+          { code: 'uncertain', rejected: false, marketplace_message: vintedCompletionReply(completed) });
       }
       const listingUrl = vintedPublicUrl(publishedId);
       await storeReceipt({ listing_url: listingUrl });
