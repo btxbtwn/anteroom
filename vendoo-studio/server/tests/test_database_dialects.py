@@ -25,7 +25,7 @@ def test_postgres_bursts_wait_for_a_connection_instead_of_exceeding_session_limi
 
     if engine.dialect.name != 'postgresql':
         pytest.skip('Exercises the real Postgres connection pool')
-    isolated = make_engine(engine.url)
+    isolated = make_engine(engine.url.render_as_string(hide_password=False))
     isolated.pool._timeout = 0.05
     try:
         with ExitStack() as stack:

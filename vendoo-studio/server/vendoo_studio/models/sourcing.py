@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from sqlalchemy import UniqueConstraint, Column, DateTime, Float, Integer, String
+from datetime import datetime
+
+from sqlalchemy import DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class SourceBox(SellerOwned, Base):
@@ -17,24 +20,24 @@ class SourceBox(SellerOwned, Base):
         UniqueConstraint("user_id", "id", name="uq_source_boxes_seller_id"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    store = Column(String, nullable=False)
-    title = Column(String, nullable=False)
-    url = Column(String, nullable=True)
-    price = Column(Float, nullable=False, default=0.0)
-    shipping = Column(Float, nullable=False, default=0.0)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    store: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    url: Mapped[str | None] = mapped_column(String, nullable=True)
+    price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    shipping: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     # The carrier's list rate the buy list estimated from when the box was
     # bought, so what the store actually charged can tune later estimates.
-    list_shipping = Column(Float, nullable=True)
-    pieces = Column(Integer, nullable=True)
+    list_shipping: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pieces: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Pieces that arrived not worth listing: stained, torn, wrong item. Their
     # cost lands on the pieces that can sell.
-    unsellable = Column(Integer, nullable=True)
+    unsellable: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # What the buy list expected one piece to sell for when the box was bought,
     # so real sales can show how far off the estimates run.
-    estimate_per_piece = Column(Float, nullable=True)
-    bought_at = Column(DateTime, nullable=False, default=utcnow)
-    created_at = Column(DateTime, default=utcnow)
+    estimate_per_piece: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bought_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
 
     @property
     def landed(self) -> float:

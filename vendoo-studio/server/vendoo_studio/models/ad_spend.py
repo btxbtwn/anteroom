@@ -1,10 +1,15 @@
 """Ad spend the seller copied from a marketplace's ads dashboard."""
 
-from sqlalchemy import Column, Date, DateTime, Float, Integer, String, Text
+from __future__ import annotations
+
+from datetime import date, datetime
+
+from sqlalchemy import Date, DateTime, Float, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class AdSpend(SellerOwned, Base):
@@ -14,17 +19,17 @@ class AdSpend(SellerOwned, Base):
 
     __tablename__ = "ad_spend"
 
-    id = Column(String, primary_key=True, default=new_id)
-    marketplace = Column(String, nullable=False)
-    start_date = Column(Date, nullable=False)
-    end_date = Column(Date, nullable=False)
-    spend = Column(Float, nullable=False)
-    clicks = Column(Integer, nullable=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    marketplace: Mapped[str] = mapped_column(String, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    spend: Mapped[float] = mapped_column(Float, nullable=False)
+    clicks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Orders and revenue the dashboard attributes to the ads; organic sales are not in them.
-    orders = Column(Integer, nullable=True)
-    revenue = Column(Float, nullable=True)
-    notes = Column(Text, nullable=False, default="")
+    orders: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # Set on rows an uploaded Etsy Ads CSV wrote, so the next upload can replace them.
-    source = Column(String, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)

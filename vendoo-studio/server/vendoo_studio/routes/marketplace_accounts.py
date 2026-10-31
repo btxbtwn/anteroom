@@ -6,7 +6,7 @@ publish or delist; seller-confirmed marketplace actions are handled separately.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from typing import Literal
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -110,7 +110,7 @@ def list_sales(state: str | None = "new", conversation_id: str | None = None, db
         key = (sale.conversation_id, sale.marketplace, sale.listing_id)
         if sale.conversation_id in convs and key not in stocks:
             stocks[key] = stock_after_sale(db, *key)
-    return {"sales": [_sale_out(s, convs.get(s.conversation_id), listings.get(s.conversation_id, {}),
+    return {"sales": [_sale_out(s, convs.get(cast(str, s.conversation_id)), listings.get(cast(str, s.conversation_id), {}),
                                stocks.get((s.conversation_id, s.marketplace, s.listing_id), {"status": "unknown", "remaining": None}))
                       for s in sales]}
 

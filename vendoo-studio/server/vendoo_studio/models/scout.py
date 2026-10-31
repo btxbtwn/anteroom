@@ -1,10 +1,23 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKeyConstraint, JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class ScoutCheck(SellerOwned, Base):
@@ -19,19 +32,19 @@ class ScoutCheck(SellerOwned, Base):
             name="fk_scout_checks_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    status = Column(String, nullable=False, default="checking")  # checking | done | failed
-    asking_price = Column(Float, nullable=True)
-    photos = Column(JSON, nullable=False, default=list)  # stored filenames, in order
-    title = Column(String, nullable=True)
-    analysis = Column(Text, nullable=True)
-    comps = Column(Text, nullable=True)
-    estimate = Column(Float, nullable=True)  # expected sale price
-    comps_count = Column(Integer, nullable=True)
-    error = Column(Text, nullable=True)
-    decision = Column(String, nullable=True)  # bought | passed
-    conversation_id = Column(
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="checking")  # checking | done | failed
+    asking_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    photos: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)  # stored filenames, in order
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    comps: Mapped[str | None] = mapped_column(Text, nullable=True)
+    estimate: Mapped[float | None] = mapped_column(Float, nullable=True)  # expected sale price
+    comps_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision: Mapped[str | None] = mapped_column(String, nullable=True)  # bought | passed
+    conversation_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True,
     )
-    created_at = Column(DateTime, default=utcnow)
-    decided_at = Column(DateTime, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

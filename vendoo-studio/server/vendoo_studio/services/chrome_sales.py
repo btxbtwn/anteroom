@@ -22,6 +22,7 @@ import re
 import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import cast
 
 from sqlalchemy.orm import Session
 
@@ -121,7 +122,7 @@ def _recorded_sales(db: Session, conv_ids, marketplace: str | None = None) -> di
     if marketplace:
         query = query.filter(MarketplaceSale.marketplace == marketplace)
     for conv_id, name, listing_id in query.all():
-        recorded.setdefault((conv_id, name), set()).add(listing_id)
+        recorded.setdefault((cast(str, conv_id), name), set()).add(listing_id)
     return recorded
 
 

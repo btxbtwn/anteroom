@@ -17,12 +17,12 @@ recorded as ``dry_run``, not as a completed send.
 from __future__ import annotations
 
 import copy
-import logging
 import hashlib
 import json
+import logging
 import re
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, overload
 
 from sqlalchemy import String, cast, update
 from sqlalchemy.exc import IntegrityError
@@ -40,10 +40,13 @@ from vendoo_studio.models.conversation import Conversation, new_id, utcnow
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceListing
-from vendoo_studio.repositories.queries import JobRepo, ListingRepo, ConversationRepo
-from vendoo_studio.services.automation_age import listed_markets, load_listed_index, resolve_listed_at
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.services.automation_age import (
+    listed_markets,
+    load_listed_index,
+    resolve_listed_at,
+)
 from vendoo_studio.services.automation_pricing import PriceError, drop_price
-from vendoo_studio.services.vendoo_import import parse_notes
 from vendoo_studio.services.automation_prompt import MARKETPLACES, draft_from_prompt
 from vendoo_studio.services.automation_schedule import (
     ScheduleError,
@@ -54,6 +57,7 @@ from vendoo_studio.services.automation_schedule import (
     normalize_schedule,
     require_timezone,
 )
+from vendoo_studio.services.vendoo_import import parse_notes
 
 log = logging.getLogger("vendoo_studio.automations")
 
@@ -1196,6 +1200,14 @@ def _find_named(db: Session, data: dict) -> Automation | None:
     if not name:
         return None
     return db.query(Automation).filter(Automation.name == name).order_by(Automation.created_at.desc()).first()
+
+
+@overload
+def _naive(value: datetime) -> datetime: ...
+
+
+@overload
+def _naive(value: None) -> None: ...
 
 
 def _naive(value: datetime | None) -> datetime | None:

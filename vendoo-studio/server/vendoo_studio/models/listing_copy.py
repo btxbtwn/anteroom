@@ -1,9 +1,21 @@
 """Completed local copy requests, retained so retries cannot duplicate inventory."""
-from sqlalchemy import ForeignKeyConstraint, Column, DateTime, ForeignKey, String, PrimaryKeyConstraint
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    PrimaryKeyConstraint,
+    String,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class ListingCopyReceipt(SellerOwned, Base):
@@ -15,10 +27,10 @@ class ListingCopyReceipt(SellerOwned, Base):
             name="fk_listing_copy_receipts_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    request_id = Column(String, nullable=False)
-    fingerprint = Column(String, nullable=False)
-    source_kind = Column(String, nullable=False, server_default="listing")
-    source_id = Column(String, nullable=False)
+    request_id: Mapped[str] = mapped_column(String, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    source_kind: Mapped[str] = mapped_column(String, nullable=False, server_default="listing")
+    source_id: Mapped[str] = mapped_column(String, nullable=False)
     # Deleting a copy keeps its receipt: retrying the old request must not recreate it.
-    conversation_id = Column(String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
+    conversation_id: Mapped[str | None] = mapped_column(String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)

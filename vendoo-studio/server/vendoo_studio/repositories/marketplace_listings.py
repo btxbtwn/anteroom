@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.marketplace_listing import FIELDS, LIVE_STATES, UNSETTLED_STATES, MarketplaceListing
+from vendoo_studio.models.marketplace_listing import (
+    FIELDS,
+    LIVE_STATES,
+    UNSETTLED_STATES,
+    MarketplaceListing,
+)
 
 
 def as_dict(row: MarketplaceListing | None) -> dict:
@@ -94,7 +100,7 @@ class MarketplaceListingRepo:
             query = query.filter(MarketplaceListing.conversation_id == conv_id)
         grouped: dict[str, dict[str, str]] = {}
         for conversation_id, marketplace, url in query.all():
-            grouped.setdefault(conversation_id, {})[marketplace] = url
+            grouped.setdefault(conversation_id, {})[marketplace] = cast(str, url)
         return grouped
 
     def unsettled(self) -> list[MarketplaceListing]:
@@ -105,7 +111,7 @@ class MarketplaceListingRepo:
     def job_ids(self, conv_id: str) -> set[str]:
         rows = self.db.query(MarketplaceListing.job_id).filter(
             MarketplaceListing.conversation_id == conv_id, MarketplaceListing.job_id.isnot(None))
-        return {job_id for (job_id,) in rows}
+        return {cast(str, job_id) for (job_id,) in rows}
 
     def delete_for_conversation(self, conv_id: str) -> None:
         self.db.query(MarketplaceListing).filter(MarketplaceListing.conversation_id == conv_id).delete(synchronize_session=False)

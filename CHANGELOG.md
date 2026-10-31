@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.607 — 2026-10-31
+## 0.1.608 — 2026-10-31
 
 - The Poshmark and Depop forms on the web can now be edited, including opening their category pickers. Web requests also stay within the database connection limit.
+
+## 0.1.607 — 2026-10-31
+
+- Improve checks that catch data-handling mistakes before an app update.
 
 ## 0.1.606 — 2026-10-31
 

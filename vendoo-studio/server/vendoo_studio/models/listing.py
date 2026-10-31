@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKeyConstraint, Column, String, DateTime, ForeignKey, Index, Integer, JSON
-from sqlalchemy.orm import relationship
+if TYPE_CHECKING:
+    from vendoo_studio.models.conversation import Conversation
+
+from datetime import datetime
+
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class Listing(SellerOwned, Base):
@@ -16,13 +30,13 @@ class Listing(SellerOwned, Base):
             name="fk_listings_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    conversation_id = Column(String, ForeignKey("conversations.id"), primary_key=True)
-    current_revision_id = Column(String, nullable=True)
-    validation_status = Column(String, nullable=True)
-    validation_errors = Column(JSON, nullable=True)
-    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), primary_key=True, nullable=False)
+    current_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    validation_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    validation_errors: Mapped[Any] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 
-    conversation = relationship("Conversation", back_populates="listing", primaryjoin="and_(Conversation.id == foreign(Listing.conversation_id), Conversation.user_id == Listing.user_id)")
+    conversation: Mapped[Conversation] = relationship("Conversation", back_populates="listing", primaryjoin="and_(Conversation.id == foreign(Listing.conversation_id), Conversation.user_id == Listing.user_id)")
 
 
 def revision_quantity(context):
@@ -42,11 +56,11 @@ class ListingRevision(SellerOwned, Base):
         Index("ix_listing_revisions_quantity_history", "user_id", "conversation_id", "created_at", "inventory_quantity"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
-    listing_json = Column(JSON, nullable=False)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    listing_json: Mapped[Any] = mapped_column(JSON, nullable=False)
     # Status reads scan quantity history, never the large marketplace form JSON.
-    inventory_quantity = Column(Integer, nullable=True, default=revision_quantity)
-    source = Column(String, nullable=False)
-    parent_revision_id = Column(String, nullable=True)
-    created_at = Column(DateTime, default=utcnow)
+    inventory_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True, default=revision_quantity)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    parent_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
