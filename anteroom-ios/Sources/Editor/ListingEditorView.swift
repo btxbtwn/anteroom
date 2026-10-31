@@ -1,15 +1,15 @@
 import SwiftUI
 
-struct DraftEditorView: View {
+struct ListingEditorView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var model: DraftEditorModel
+    @State private var model: ListingEditorModel
     @State private var confirmDiscard = false
     @State private var showingAssistant = false
     @State private var showingHistory = false
-    private let onSaved: (Draft) -> Void
+    private let onSaved: () -> Void
 
-    init(api: AnteroomAPI, draft: Draft, onSaved: @escaping (Draft) -> Void) {
-        _model = State(initialValue: DraftEditorModel(api: api, draft: draft))
+    init(api: AnteroomAPI, listing: ListingSummary, onSaved: @escaping () -> Void) {
+        _model = State(initialValue: ListingEditorModel(api: api, listing: listing))
         self.onSaved = onSaved
     }
 
@@ -30,17 +30,17 @@ struct DraftEditorView: View {
                         .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
                     Spacer()
-                    Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved draft")
+                    Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .font(.subheadline)
                 .padding(.horizontal, 4)
 
                 ListingInspectorSection("Photos") {
-                    PhotoStrip(api: model.api, draftID: model.draftID)
+                    PhotoStrip(api: model.api, listingID: model.listingID, canAdd: model.isDraft)
                 }
                 SellerInputFields(inputs: $model.form.sellerInputs)
-                GeneralListingFields(form: $model.form)
+                GeneralListingFields(form: $model.form, options: model.options)
             }
             .padding(16)
         }
@@ -50,7 +50,7 @@ struct DraftEditorView: View {
         .scrollDismissesKeyboard(.interactively)
         .disabled(model.isLoading && model.loadError == nil)
         .overlay { if model.isLoading { ProgressView() } }
-        .navigationTitle(model.form.title.isEmpty ? "Draft" : model.form.title)
+        .navigationTitle(model.title.isEmpty ? "Listing" : model.title)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(model.hasChanges)
         .toolbar {
@@ -101,19 +101,19 @@ struct DraftEditorView: View {
             Task {
                 guard !model.hasChanges else { return }
                 await model.load()
-                if model.loadError == nil { onSaved(model.summary) }
+                if model.loadError == nil { onSaved() }
             }
         }) {
-            ListingAssistantView(api: model.api, listingID: model.draftID)
+            ListingAssistantView(api: model.api, listingID: model.listingID)
         }
         .sheet(isPresented: $showingHistory, onDismiss: {
             Task {
                 guard !model.hasChanges else { return }
                 await model.load()
-                if model.loadError == nil { onSaved(model.summary) }
+                if model.loadError == nil { onSaved() }
             }
         }) {
-            ListingHistoryView(api: model.api, listingID: model.draftID)
+            ListingHistoryView(api: model.api, listingID: model.listingID)
         }
         .task { await model.load() }
     }
@@ -125,9 +125,7 @@ struct DraftEditorView: View {
     private func save() {
         hideKeyboard()
         Task {
-            if let draft = await model.save() {
-                onSaved(draft)
-            }
+            if await model.save() { onSaved() }
         }
     }
 

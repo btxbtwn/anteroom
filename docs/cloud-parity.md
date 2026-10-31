@@ -242,6 +242,11 @@ Its cache is keyed by seller, and on the web the Claude row reports that
 sign-in usage is shown in the Mac app instead of probing a CLI login on the
 server.
 
+On `feat/hosted-mercari-form`, the Mercari tab uses the canonical native form
+builder through the same owned, revision-checked route as Poshmark and Depop.
+Its only outbound read is Mercari's anonymous public shipping quote; a failed
+quote leaves every product field available with a note.
+
 On `feat/hosted-marketplace-accounts`, Settings → Connections shows eBay and
 Etsy sign-in on the web. Each seller registers as their own relay device and
 keeps tokens in their Vault through the keychain boundary. Pending sign-ins and
@@ -249,3 +254,7 @@ token-refresh locks are keyed by seller, the seller's browser opens the sign-in
 page, and the server never opens a browser. eBay and Etsy listing defaults and
 policy pickers use the canonical handlers. Sale streaming, sale detection and
 Chrome sessions stay off on the web until they have a seller-owned worker.
+
+The same branch adds the eBay tab: the canonical eBay form builder reads the
+category schema (cached per seller in `category_field_schemas`) and the seller's
+own business policies and locations with their connected account.

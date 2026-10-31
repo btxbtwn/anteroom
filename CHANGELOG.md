@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.614 — 2026-10-31
+
+- On the web, listings now have the Mercari tab, with Mercari's own fields, categories and shipping choices.
+
 ## 0.1.613 — 2026-10-31
 
 - The web app now has the Usage page. It shows each AI provider's limits for your account; Claude sign-in usage stays in the Mac app.

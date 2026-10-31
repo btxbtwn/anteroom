@@ -3,13 +3,14 @@ import SwiftUI
 /// Mirrors the desktop General inspector's section headings and field groups
 /// (listingFieldSections.ts). Native marketplace forms remain separate.
 struct GeneralListingFields: View {
-    @Binding var form: DraftEditorModel.Form
+    @Binding var form: ListingEditorModel.Form
+    var options = GeneralOptions()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         ListingInspectorSection("Listing") {
             WorkspaceField("Title") {
-                TextField("Title", text: $form.title, axis: .vertical).lineLimit(1...3)
+                TextField("Title", text: $form.fields.title, axis: .vertical).lineLimit(1...3)
             }
             WorkspaceField("Description") {
                 TextField("Describe your item", text: $form.fields.description, axis: .vertical).lineLimit(5...16)
@@ -25,22 +26,30 @@ struct GeneralListingFields: View {
             }
         }
         ListingInspectorSection("Condition") {
-            TextRow("Condition", text: $form.fields.condition)
+            OptionField("Condition", value: $form.fields.condition, options: options.condition)
         }
         ListingInspectorSection("Item") {
-            TextRow("Category", text: $form.fields.categoryPath)
+            VStack(alignment: .leading, spacing: 6) {
+                TextRow("Category *", text: $form.fields.categoryPath)
+                    .accessibilityHint("Required")
+                Text("Applied to each marketplace form. Name the last category, such as Men > Shirts > Tees. Each marketplace form keeps its own category list.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             TextRow("Brand", text: $form.fields.brand)
             TextRow("Department", text: $form.fields.department)
         }
-        ListingInspectorSection("Size") { TextRow("Size", text: $form.fields.size) }
+        ListingInspectorSection("Size & fit") {
+            OptionField("Size", value: $form.fields.size, options: options.size)
+        }
         ListingInspectorSection("Color & material") {
-            TextRow("Primary Color", text: $form.fields.primaryColor)
-            TextRow("Secondary Color", text: $form.fields.secondaryColor)
+            OptionField("Primary Color", value: $form.fields.primaryColor, options: options.primaryColor)
+            OptionField("Secondary Color", value: $form.fields.secondaryColor, options: options.secondaryColor)
         }
         ListingInspectorSection("Shipping") {
-            TextRow("Inventory location", text: $form.fields.zipCode)
             NumberField("Package Weight (oz)", text: $form.weightOz)
             TextRow("Package Dimensions (LxWxH in)", text: $form.fields.packageDimensionsIn)
+            TextRow("Inventory location", text: $form.fields.zipCode)
         }
         ListingInspectorSection("Inventory & identifiers") {
             WorkspaceField("Quantity") { TextField("1", text: $form.quantity).keyboardType(.numberPad) }
