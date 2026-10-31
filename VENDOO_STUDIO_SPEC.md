@@ -988,7 +988,7 @@ Live Vendoo smoke test:
 
 ## 19. Relevant Existing Files
 
-- `README.md`: monorepo overview and Anteroom workflow.
+- `docs/json-contract.md`: the listing JSON shared by skills, Anteroom and the extension.
 - `skills/list-this/SKILL.md`: canonical listing-generation policy.
 - `skills/list-this/references/vendoo_listing_template.md`: JSON and marketplace guidance.
 

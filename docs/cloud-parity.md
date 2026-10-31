@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.587. Do not describe the currently deployed inventory/editor
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/anteroom/pull/982). The deployed public release is now 0.1.587. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
 The service boundary is `services/service_context.py`. A verified hosted request
