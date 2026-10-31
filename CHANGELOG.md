@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.598 — 2026-10-31
+
+- Changing the general category now sets each marketplace tab's category from that marketplace's own list. When a marketplace has no match, its old category is cleared so you pick one there, instead of it keeping the category from before.
+
 ## 0.1.597 — 2026-10-31
 
 - Etsy's "What is it?" is answered from the Etsy category when it is missing, so List no longer stops on it.
