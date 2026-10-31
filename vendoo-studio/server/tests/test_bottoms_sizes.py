@@ -62,12 +62,12 @@ class BottomsSizeTest(unittest.TestCase):
         self.assertEqual(listing["etsy_specifics"]["size"], "32")
         self.assertEqual(listing["etsy_specifics"]["inseam"], "30")
         self.assertEqual(listing["vinted_specifics"]["size"], "32")
-        self.assertEqual(listing["sellwild_specifics"]["size"], "32x30")
+        # Sellwild's sell form has no size field.
+        self.assertEqual(listing["sellwild_specifics"], {})
         # A second pass keeps the marketplace spelling. It does not collapse Waist 32.
         again = copy.deepcopy(listing)
         align_size_fields(again)
         self.assertEqual(again["poshmark_specifics"]["size"], "Waist 32")
-        self.assertEqual(again["sellwild_specifics"]["size"], "32x30")
         self.assertEqual(again["ebay_specifics"]["inseam"], "30")
 
     def test_a_repeated_waist_does_not_invent_an_inseam(self):
@@ -80,7 +80,6 @@ class BottomsSizeTest(unittest.TestCase):
         align_size_fields(listing)
         self.assertEqual(listing["size"], "34")
         self.assertNotIn("inseam", listing["ebay_specifics"])
-        self.assertEqual(listing["sellwild_specifics"]["size"], "34")
 
     def test_womens_numeric_and_petite_map_without_a_mens_waist(self):
         listing = {
@@ -100,8 +99,9 @@ class BottomsSizeTest(unittest.TestCase):
         self.assertEqual(listing["depop_specifics"]["size"], "8")
         self.assertEqual(listing["depop_specifics"]["sizeGrouping"], "Petite")
         self.assertEqual(listing["etsy_specifics"]["size"], "8")
-        self.assertEqual(listing["vinted_specifics"]["size"], "S / 8")
-        self.assertEqual(listing["sellwild_specifics"]["size"], "8")
+        self.assertEqual(listing["vinted_specifics"], {"size": "S / 8"})
+        # Neither Sellwild's nor Vinted's form has a size type field.
+        self.assertNotIn("sellwild_specifics", listing)
 
     def test_a_seller_size_is_not_replaced(self):
         listing = copy.deepcopy(JEANS)
