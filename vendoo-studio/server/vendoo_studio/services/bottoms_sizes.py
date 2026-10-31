@@ -1,7 +1,9 @@
 """Bottoms sizes as each marketplace lists them.
 
 The general size for men's bottoms stays the waist. The inseam and the size
-each marketplace actually accepts live on that marketplace's form.
+each marketplace actually accepts live on that marketplace's form. A
+marketplace whose form has no size or size type field (Sellwild has neither,
+Vinted has no size type) gets none.
 """
 
 from __future__ import annotations
@@ -54,7 +56,6 @@ VINTED_WOMEN = {
     "20": "XL / 20", "22": "XXL / 22", "24": "XXL / 24",
 }
 VINTED_MEN = [str(n) for n in range(26, 51)] + [f"W{n}" for n in range(26, 51)]
-SELLWILD_SIZE_TYPES = ["Regular", "Petite", "Plus", "Tall", "Big & Tall"]
 
 _FIT = {
     "p": "Petite", "petite": "Petite", "petites": "Petites",
@@ -206,8 +207,6 @@ def _targets(listing: dict, parsed: dict[str, str]) -> dict[str, str]:
         targets["ebay_specifics.sizeType"] = "Petites" if fit == "Petite" else fit
         targets["poshmark_specifics.sizeType"] = "Petite" if fit == "Petite" else fit
         targets["mercari_specifics.sizeType"] = fit if fit in {"Petite", "Plus", "Tall"} else ""
-        targets["vinted_specifics.sizeType"] = fit if fit in {"Petite", "Plus", "Tall"} else ""
-        targets["sellwild_specifics.sizeType"] = fit if fit != "Juniors" else ""
         if not str(listing.get("sizeType") or "").strip():
             targets["sizeType"] = "Petites" if fit == "Petite" else fit
     poshmark = _poshmark_size(parsed, kind)
@@ -232,10 +231,6 @@ def _targets(listing: dict, parsed: dict[str, str]) -> dict[str, str]:
         targets["vinted_specifics.size"] = VINTED_WOMEN[parsed["numeric"]]
     elif parsed["waist"]:
         targets["vinted_specifics.size"] = parsed["waist"]
-    if parsed["combined"]:
-        targets["sellwild_specifics.size"] = parsed["combined"]
-    elif etsy:
-        targets["sellwild_specifics.size"] = etsy
     return {path: value for path, value in targets.items() if value}
 
 
@@ -279,8 +274,5 @@ def bottoms_options(listing: dict | None, marketplace: str) -> dict[str, list[st
         return {"size": sizes, "inseam": EBAY_INSEAMS, "sizeType": ["Regular", "Petite", "Plus", "Tall"]}
     if marketplace == "vinted":
         sizes = (list(VINTED_WOMEN.values()) if women else []) + (VINTED_MEN if men else [])
-        return {"size": sizes, "sizeType": ["Regular", "Petite", "Plus", "Tall"]}
-    if marketplace == "sellwild":
-        sizes = (WOMENS_NUMERIC if women else []) + (ETSY_WAISTS if men else []) + (ETSY_COMBINED if men else [])
-        return {"size": sizes, "sizeType": SELLWILD_SIZE_TYPES}
+        return {"size": sizes}
     return {}
