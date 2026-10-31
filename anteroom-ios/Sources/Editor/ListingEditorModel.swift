@@ -20,6 +20,7 @@ final class ListingEditorModel {
     let api: AnteroomAPI
     let listingID: String
     private(set) var status: String
+    private(set) var options = GeneralOptions()
     var form = Form()
     private var saved = Form()
     /// The full listing as loaded; edits are written into it, never rebuilt.
@@ -50,6 +51,8 @@ final class ListingEditorModel {
             async let detail = api.conversation(listingID)
             async let listing = api.listing(listingID)
             let (conversation, current) = try await (detail, listing)
+            // Without the lists the fields stay editable as text.
+            if options == GeneralOptions(), let lists = try? await api.generalOptions() { options = lists }
             status = conversation.status ?? "draft"
             document = current.listing
             revisionID = current.currentRevisionID

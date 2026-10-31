@@ -64,6 +64,13 @@ final class AnteroomAPI: Sendable {
         return payload.selected
     }
 
+    /// The desktop's General dropdown lists (Condition, colors, Size).
+    func generalOptions() async throws -> GeneralOptions {
+        struct Payload: Decodable { let forms: [String: [String: [String]]] }
+        let payload: Payload = try await decode(request("GET", "api/catalog/dropdown-options"))
+        return GeneralOptions(vendoo: payload.forms["vendoo"] ?? [:])
+    }
+
     // MARK: Photos
 
     func photos(listingID: String) async throws -> [ListingPhoto] {
