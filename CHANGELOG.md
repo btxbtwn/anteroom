@@ -8,8 +8,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.599 — 2026-10-31
 
-- New sandbox mode for trying changes safely: `./sandbox.sh` runs Anteroom on sample listings with a stand-in AI, never goes online, and refuses to list, delist or update anything on a marketplace.
-- Two copies of Anteroom can run side by side: the web port now follows `VENDOO_STUDIO_WEB_PORT` as the API port follows `VENDOO_STUDIO_PORT`.
+- On the web, Regenerate rewrites a listing from its photos and item details again, and you can select several listings and regenerate them together, with an optional price drop first. Clear works on the web too.
 
 ## 0.1.598 — 2026-10-31
 

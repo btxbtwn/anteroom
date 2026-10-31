@@ -215,3 +215,13 @@ review. Hosted deletes reuse the single-item removal service: only owned,
 unsent, idle drafts are removed, each under its own row lock with the desktop
 review token re-checked, and Storage objects are released after the commit.
 Nothing is delisted and no job is created.
+
+On `feat/hosted-bulk-regenerate`, the web reset endpoint backs Clear, single
+Regenerate and bulk Regenerate. It shares the removal service's rules: only
+owned, unsent, idle drafts are wiped. Regenerate keeps photos and carries
+listing-only facts into Item Details; Clear also releases photos from Storage.
+The single price drop bulk Regenerate saves first uses the shared service and
+submission row lock. Bulk Regenerate is offered only when the draft worker is
+running, and its generate stream uses the authenticated transport. Items with
+a Send or marketplace record stay excluded until imported inventory and
+marketplace actions are ported.
