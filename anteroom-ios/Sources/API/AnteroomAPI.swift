@@ -260,6 +260,23 @@ final class AnteroomAPI: Sendable {
         ]))
     }
 
+    // MARK: Similar items
+
+    func similarItems() async throws -> (pairs: [SimilarPair], total: Int) {
+        struct Payload: Decodable { let total: Int; let pairs: [SimilarPair] }
+        let payload: Payload = try await decode(request("GET", "api/similar-items"))
+        return (payload.pairs, payload.total)
+    }
+
+    func dismissSimilar(_ first: String, _ second: String) async throws {
+        _ = try await send(request("POST", "api/similar-items/dismiss", json: ["first_id": first, "second_id": second]))
+    }
+
+    /// Moves the other item's links, sales and labels to the kept one. Nothing is deleted or delisted.
+    func mergeSimilar(keep: String, merge: String) async throws {
+        _ = try await send(request("POST", "api/similar-items/merge", json: ["keep_id": keep, "merge_id": merge]))
+    }
+
     // MARK: Analytics
 
     func analytics(range: String, start: Date? = nil, end: Date? = nil) async throws -> InventoryAnalytics {

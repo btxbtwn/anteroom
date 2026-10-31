@@ -30,6 +30,13 @@ struct ListingsSettingsView: View {
             shipping
             fields
             listingFormulas
+            Section {
+                NavigationLink("Similar items") { SimilarItemsView(api: api) }
+            } header: {
+                Text("Duplicate check")
+            } footer: {
+                Text("Find items that look like the same thing listed twice, then keep one and merge the other into it, or mark them as different. Nothing is deleted or delisted.")
+            }
         }
         .navigationTitle("Listings")
         .navigationBarTitleDisplayMode(.inline)
