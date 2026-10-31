@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ListingEditorView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @State private var model: ListingEditorModel
     @State private var confirmDiscard = false
@@ -142,6 +143,10 @@ struct ListingEditorView: View {
             }
         }
         .task { await model.load() }
+        // Pick up changes from other devices, but never over unsaved edits.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && !model.hasChanges && !model.isSaving && !model.isLoading { Task { await model.load() } }
+        }
     }
 
     private var saveErrorShown: Binding<Bool> {

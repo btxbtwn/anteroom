@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// A marketplace tab: the server's native form for that marketplace, with its
@@ -312,6 +313,10 @@ private struct MarketplacePhotoPicker: View {
     let marketplace: String
     let field: NativeField
     @State private var photos: [ListingPhoto] = []
+    @State private var itemPhotoIDs: [String] = []
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var uploading = false
+    @State private var uploadError: String?
 
     private static let limits = ["ebay": 24, "etsy": 20, "poshmark": 16, "mercari": 12, "depop": 8, "vinted": 20, "sellwild": 20]
     private var limit: Int { Self.limits[marketplace] ?? 20 }
@@ -344,22 +349,35 @@ private struct MarketplacePhotoPicker: View {
                         .accessibilityHint("Double-tap to \(position == nil ? "send" : "leave out") this photo")
                     }
                 }
+                if model.isDraft {
+                    let title = uploading ? "Adding…" : "Add a photo for \(Marketplaces.name(marketplace)) only"
+                    PhotosPicker(selection: $picked, maxSelectionCount: 4, matching: .images) {
+                        Label(title, systemImage: "plus").font(.footnote)
+                    }
+                    .disabled(uploading)
+                }
+                if let uploadError { Text(uploadError).font(.footnote).foregroundStyle(.red) }
                 HStack {
                     Text("\(sent.count) of \(limit) photos sent")
                         .font(.footnote).foregroundStyle(sent.count > limit ? .red : .secondary)
                     Spacer()
-                    if !picked.isEmpty {
+                    if !pick.isEmpty {
                         Button("Use item photos") { model.setValue(.array([]), for: field) }
                             .font(.footnote)
                     }
                 }
             }
         }
-        .task { photos = (try? await model.api.photos(listingID: model.listingID)) ?? [] }
+        .task { await load() }
+        .onChange(of: picked) { _, items in
+            guard !items.isEmpty else { return }
+            picked = []
+            Task { await upload(items) }
+        }
     }
 
     /// The seller's own pick, or empty when the item's photos are used.
-    private var picked: [String] {
+    private var pick: [String] {
         if case .array(let items)? = model.value(field) {
             let ids = items.map(\.text).filter { id in photos.contains { $0.id == id } }
             return ids
@@ -367,12 +385,43 @@ private struct MarketplacePhotoPicker: View {
         return []
     }
 
+    /// Without a pick, the form sends the item's photos only, in item order.
     private var sent: [String] {
-        Array((picked.isEmpty ? photos.map(\.id) : picked).prefix(limit))
+        Array((pick.isEmpty ? itemPhotoIDs : pick).prefix(limit))
+    }
+
+    private func load() async {
+        let item = (try? await model.api.photos(listingID: model.listingID)) ?? []
+        let own = (try? await model.api.photos(listingID: model.listingID, marketplace: marketplace)) ?? []
+        itemPhotoIDs = item.map(\.id)
+        photos = item + own
+    }
+
+    /// Photos added here belong to this form only and are ticked to send.
+    private func upload(_ items: [PhotosPickerItem]) async {
+        uploading = true
+        defer { uploading = false }
+        var next = pick.isEmpty ? Array(itemPhotoIDs.prefix(limit)) : pick
+        for item in items {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let jpeg = await Task.detached(priority: .userInitiated, operation: { PhotoPreparer.jpeg(from: data) }).value else {
+                uploadError = "Couldn't read one of the photos."
+                continue
+            }
+            do {
+                let photo = try await model.api.uploadPhoto(listingID: model.listingID, jpeg: jpeg, marketplace: marketplace)
+                photos.append(photo)
+                next.append(photo.id)
+                uploadError = nil
+            } catch {
+                uploadError = error.localizedDescription
+            }
+        }
+        model.setValue(.array(next.map(JSONValue.string)), for: field)
     }
 
     private func toggle(_ id: String) {
-        var next = picked.isEmpty ? Array(photos.map(\.id).prefix(limit)) : picked
+        var next = pick.isEmpty ? Array(itemPhotoIDs.prefix(limit)) : pick
         if let index = next.firstIndex(of: id) { next.remove(at: index) } else { next.append(id) }
         model.setValue(.array(next.map(JSONValue.string)), for: field)
     }

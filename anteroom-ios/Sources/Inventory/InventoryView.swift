@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct InventoryView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model: InventoryModel
     @State private var search = ""
     @State private var path: [ListingSummary] = []
@@ -68,6 +69,10 @@ struct InventoryView: View {
             .searchable(text: $search, prompt: "Search title or SKU")
             .refreshable { await model.reload() }
             .task { if !model.hasLoaded { await model.reload() } }
+            // Listings change on other devices; catch up when the app comes back.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active && model.hasLoaded { Task { await model.reload() } }
+            }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     filterMenu
