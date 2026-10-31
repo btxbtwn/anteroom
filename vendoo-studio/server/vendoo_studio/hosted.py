@@ -167,6 +167,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
     app.include_router(prices_router)
     from vendoo_studio.routes.hosted_bulk_edit import router as bulk_edit_router
     app.include_router(bulk_edit_router)
+    from vendoo_studio.routes.hosted_bulk_delete import router as bulk_delete_router
+    app.include_router(bulk_delete_router)
     from vendoo_studio.routes.catalog import dropdown_options
     app.add_api_route('/api/catalog/dropdown-options', dropdown_options, methods=['GET'])
     from vendoo_studio.routes.conversations import preview_copy, copy_conversation, copy_result, ConversationResponse

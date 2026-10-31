@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.597 — 2026-10-31
+
+- On the web, select listings and choose Delete to remove unsent drafts in one go. You review the list first, and anything already sent, still generating, or changed since you reviewed it is left alone.
+
 ## 0.1.596 — 2026-10-30
 
 - If an update breaks something, Settings → About → Previous versions lets you go back to an earlier build. When that build used an older database layout, Anteroom restores your backup from that time and keeps a backup of your current data.
