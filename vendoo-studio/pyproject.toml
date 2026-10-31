@@ -38,11 +38,15 @@ hosted = [
     "psycopg[binary]>=3.2",
 ]
 dev = [
+    # Pinned: a new release can find new errors and break the recorded baseline.
+    "basedpyright==1.40.2",
+    "import-linter>=2.15",
     "pip-audit>=2.9",
     "psycopg[binary]>=3.2",
     "pytest>=8.3",
     "pytest-xdist>=3.6",
     "ruff>=0.15",
+    "vulture>=2.16",
 ]
 desktop = [
     "pywebview>=5,<7",
@@ -79,3 +83,84 @@ ignore = ["UP042"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query", "fastapi.Body", "fastapi.Header"]
+
+# Type checking. .basedpyright/baseline.json holds the errors that existed when
+# the check was added; only new ones fail. Most come from models declared with
+# Column(...) instead of Mapped[...].
+[tool.basedpyright]
+include = ["server/vendoo_studio"]
+extraPaths = ["server"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+
+# Lower layers must not import higher ones: routes stay thin, services hold the
+# behavior, repositories hold queries, models hold tables. ignore_imports lists
+# the imports that broke this rule when the check was added; remove a line when
+# you fix it, and never add one.
+[tool.importlinter]
+root_package = "vendoo_studio"
+
+[[tool.importlinter.contracts]]
+name = "Routes, then services, then repositories, then models"
+type = "layers"
+layers = [
+  "vendoo_studio.routes",
+  "vendoo_studio.services",
+  "vendoo_studio.repositories",
+  "vendoo_studio.models",
+]
+ignore_imports = [
+  "vendoo_studio.database -> vendoo_studio.services.schema_migrations",
+  "vendoo_studio.database -> vendoo_studio.services.service_context",
+  "vendoo_studio.models.depop_fields -> vendoo_studio.services.category_fields",
+  "vendoo_studio.models.depop_fields -> vendoo_studio.services.depop_form",
+  "vendoo_studio.models.depop_fields -> vendoo_studio.services.seller_overrides",
+  "vendoo_studio.models.ebay_fields -> vendoo_studio.services.seller_overrides",
+  "vendoo_studio.models.ebay_fields -> vendoo_studio.services.vendoo_specifics",
+  "vendoo_studio.models.validation -> vendoo_studio.services.fill_log",
+  "vendoo_studio.models.validation -> vendoo_studio.services.listing_generate",
+  "vendoo_studio.models.validation -> vendoo_studio.services.marketplaces",
+  "vendoo_studio.models.validation -> vendoo_studio.services.native_contract",
+  "vendoo_studio.models.validation -> vendoo_studio.services.registry",
+  "vendoo_studio.models.validation -> vendoo_studio.services.seller_overrides",
+  "vendoo_studio.models.validation -> vendoo_studio.services.skill_formulas",
+  "vendoo_studio.models.validation -> vendoo_studio.services.vendoo_categories",
+  "vendoo_studio.models.validation -> vendoo_studio.services.vendoo_marketplace_fields",
+  "vendoo_studio.repositories.hosted_drafts -> vendoo_studio.services.background_tasks",
+  "vendoo_studio.repositories.hosted_drafts -> vendoo_studio.services.hosted_fields",
+  "vendoo_studio.repositories.inventory_imports -> vendoo_studio.services.marketplace_identity",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.activity",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.api_job_lock",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.chat_listing",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.draft_cache",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.item_status",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.native_contract",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.native_field_fill",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.native_marketplaces",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.streaming",
+  "vendoo_studio.repositories.queries -> vendoo_studio.services.vendoo_import",
+  "vendoo_studio.services.automation_actions -> vendoo_studio.routes.chat",
+  "vendoo_studio.services.background_worker -> vendoo_studio.routes.chat",
+  "vendoo_studio.services.box_scout -> vendoo_studio.desktop",
+  "vendoo_studio.services.browser_bridge -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.browser_fill -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.category_lookup -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.category_tree -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.chrome_catalog -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.chrome_sales -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.completion_pause -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.completion_readback -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.facebook_listing -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.job_watchdog -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.listing_completion -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.listing_promotions -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.marketplace_accounts -> vendoo_studio.desktop",
+  "vendoo_studio.services.marketplace_delist -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.native_marketplaces -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.schema_probe -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.send_queue -> vendoo_studio.routes.extension",
+  "vendoo_studio.services.send_queue -> vendoo_studio.routes.vendoo_api",
+  "vendoo_studio.services.sold_listings -> vendoo_studio.routes.extension",
+]

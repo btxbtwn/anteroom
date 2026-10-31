@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.604 — 2026-10-31
+## 0.1.605 — 2026-10-31
 
 - The eBay, Etsy, Poshmark, Depop and Mercari tabs now show only their own category. They no longer show the category Vendoo saved, which could be out of date after you changed the general category. Drafts you already have keep the category each tab showed.
+
+## 0.1.604 — 2026-10-31
+
+- Behind the scenes: new automatic checks catch type mistakes, code that nothing uses any more, and code in the wrong layer before a change ships. Nothing changes in the app.
 
 ## 0.1.603 — 2026-10-31
 
