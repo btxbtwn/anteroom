@@ -43,6 +43,7 @@ struct InventoryView: View {
                             newTitle = listing.title ?? ""
                             renaming = listing
                         }
+                        Button("Copy listing", systemImage: "doc.on.doc") { bulk = .copy([listing.id]) }
                         Button("Delete", systemImage: "trash", role: .destructive) { deleting = listing }
                     }
                 }
@@ -86,6 +87,8 @@ struct InventoryView: View {
                         Spacer()
                         Menu("Actions") {
                             Button("Edit fields", systemImage: "square.and.pencil") { bulk = .edit(ordered(rows)) }
+                            Button("Copy items", systemImage: "doc.on.doc") { bulk = .copy(ordered(rows)) }
+                            Button("Mark down prices", systemImage: "tag") { bulk = .markdown(ordered(rows)) }
                             Button("Delete", systemImage: "trash", role: .destructive) { bulk = .delete(ordered(rows)) }
                         }
                         .disabled(selected.isEmpty || selected.count > 300)
@@ -129,6 +132,10 @@ struct InventoryView: View {
                     BulkEditView(api: model.api, ids: ids) { finishBulk() }
                 case .delete(let ids):
                     BulkDeleteView(api: model.api, ids: ids) { finishBulk() }
+                case .copy(let ids):
+                    BulkCopyView(api: model.api, ids: ids) { finishBulk() }
+                case .markdown(let ids):
+                    BulkMarkdownView(api: model.api, ids: ids) { finishBulk() }
                 }
             }
             .navigationDestination(for: ListingSummary.self) { listing in
@@ -375,12 +382,14 @@ struct ListingRowContent<Thumbnail: View>: View {
 }
 
 private enum BulkAction: Identifiable {
-    case edit([String]), delete([String])
+    case edit([String]), delete([String]), copy([String]), markdown([String])
 
     var id: String {
         switch self {
         case .edit(let ids): "edit-" + ids.joined(separator: ",")
         case .delete(let ids): "delete-" + ids.joined(separator: ",")
+        case .copy(let ids): "copy-" + ids.joined(separator: ",")
+        case .markdown(let ids): "markdown-" + ids.joined(separator: ",")
         }
     }
 }

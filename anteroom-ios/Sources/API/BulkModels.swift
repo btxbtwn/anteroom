@@ -122,3 +122,96 @@ extension JSONValue {
         }
     }
 }
+
+/// One source item in a copy review (`/api/listings/copies/preview`).
+struct CopyReviewRow: Decodable, Identifiable, Sendable {
+    let sourceID: String
+    let sourceTitle: String
+    let skipReason: String?
+    let expectedBasis: String?
+    let photoCount: Int?
+    let title: String?
+
+    var id: String { sourceID }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case sourceID = "source_id"
+        case sourceTitle = "source_title"
+        case skipReason = "skip_reason"
+        case expectedBasis = "expected_basis"
+        case photoCount = "photo_count"
+    }
+}
+
+/// The approved values for one copy. The request ID stays fixed across
+/// retries so a lost reply never creates a second draft.
+struct CopyRequest: Encodable, Sendable {
+    let requestID: String
+    let expectedBasis: String
+    let title: String
+    let sku: String
+    let quantity: Int
+    let includePhotos: Bool
+    let includeCost: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case title, sku, quantity
+        case requestID = "request_id"
+        case expectedBasis = "expected_basis"
+        case includePhotos = "include_photos"
+        case includeCost = "include_cost"
+    }
+}
+
+/// A suggested markdown from the seller's own sales (`/api/price-drop/batch/preview`).
+struct MarkdownReviewRow: Decodable, Identifiable, Sendable {
+    let conversationID: String
+    let title: String
+    let revisionID: String?
+    let currentPrice: Double?
+    let suggestedPrice: Double?
+    let suggestedReason: String?
+    let ageDays: Int?
+    let skipReason: String?
+
+    var id: String { conversationID }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case conversationID = "conversation_id"
+        case revisionID = "revision_id"
+        case currentPrice = "current_price"
+        case suggestedPrice = "suggested_price"
+        case suggestedReason = "suggested_reason"
+        case ageDays = "age_days"
+        case skipReason = "skip_reason"
+    }
+}
+
+struct MarkdownDrop: Encodable, Sendable {
+    let conversationID: String
+    let price: Double
+    let expectedRevisionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case price
+        case conversationID = "conversation_id"
+        case expectedRevisionID = "expected_revision_id"
+    }
+}
+
+struct MarkdownResult: Decodable, Sendable {
+    struct Applied: Decodable, Sendable {
+        let conversationID: String
+        let price: Double
+        let previousPrice: Double?
+        enum CodingKeys: String, CodingKey {
+            case price
+            case conversationID = "conversation_id"
+            case previousPrice = "previous_price"
+        }
+    }
+    let applied: [Applied]
+    let skipped: [BulkSkipped]
+}

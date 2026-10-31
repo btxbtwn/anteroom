@@ -101,6 +101,37 @@ final class AnteroomAPI: Sendable {
         return try await decode(request("POST", "api/listings/bulk-delete/delete", json: Body(rows: reviewed, confirm: true)))
     }
 
+    func previewCopies(ids: [String]) async throws -> [CopyReviewRow] {
+        struct Payload: Decodable { let rows: [CopyReviewRow] }
+        let payload: Payload = try await decode(request("POST", "api/listings/copies/preview",
+                                                        json: ["conversation_ids": ids]))
+        return payload.rows
+    }
+
+    /// Creates one local draft copy. Returns the new listing's id.
+    func copyListing(_ id: String, _ body: CopyRequest) async throws -> String {
+        let created: ConversationDetail = try await decode(request("POST", "api/conversations/\(id)/copy", json: body))
+        return created.id
+    }
+
+    /// Whether an earlier copy request finished, for a reply that was lost.
+    func copyResult(_ id: String, requestID: String) async throws -> String {
+        let created: ConversationDetail = try await decode(request("GET", "api/conversations/\(id)/copy-result/\(requestID)"))
+        return created.id
+    }
+
+    func previewMarkdowns(ids: [String]) async throws -> [MarkdownReviewRow] {
+        struct Payload: Decodable { let rows: [MarkdownReviewRow] }
+        let payload: Payload = try await decode(request("POST", "api/price-drop/batch/preview",
+                                                        json: ["conversation_ids": ids]))
+        return payload.rows
+    }
+
+    /// Saves reviewed prices in Anteroom. Nothing is sent to a marketplace.
+    func applyMarkdowns(_ drops: [MarkdownDrop]) async throws -> MarkdownResult {
+        try await decode(request("POST", "api/price-drop/batch", json: ["drops": drops]))
+    }
+
     // MARK: Photos
 
     func photos(listingID: String) async throws -> [ListingPhoto] {
