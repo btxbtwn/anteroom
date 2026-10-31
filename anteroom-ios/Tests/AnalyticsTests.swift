@@ -10,7 +10,7 @@ struct AnalyticsTests {
         precondition(data.marketplaces[0].id == "ebay" && data.marketplaces[0].sales.revenue == 120.5)
         precondition(data.labels[0].color == "green" && data.recent[0].profit == 9.5)
         precondition(data.aging[0].listings[0].daysListed == nil && data.incompleteSales[0].missing == ["cost", "fees"])
-        precondition(data.previous != nil && data.sales.profit == nil)
+        precondition(data.previous != nil && data.sales.profit == nil && data.stale.isEmpty)
 
         precondition(AnalyticsFormat.money(12) == "$12" && AnalyticsFormat.money(12.5) == "$12.50")
         precondition(AnalyticsFormat.money(1234) == "$1,234" && AnalyticsFormat.money(-3) == "-$3")

@@ -146,6 +146,21 @@ struct InventoryAnalyticsView: View {
             }
         }
 
+        let staleDays = data.staleDays ?? 60
+        AnalyticsSection("Discount deeper", note: "Active listings up \(staleDays) days or more, oldest first. Give these 35–40% off in the next sale instead of 25%, as deep as still covers what the item cost after 20% fees. Items with no cost recorded get 35%.") {
+            if data.stale.isEmpty {
+                Empty("Nothing has been listed \(staleDays) days without selling.")
+            } else {
+                ForEach(data.stale) { listing in
+                    ListingLink(id: listing.conversationID, title: listing.title,
+                                meta: "\(AnalyticsFormat.days(listing.daysListed)) · \(AnalyticsFormat.money(listing.price))"
+                                    + (listing.lowestPrice.map { " · lowest \(AnalyticsFormat.money(Double($0)))" } ?? ""),
+                                value: listing.discountPercent.flatMap { percent in listing.salePrice.map { "\(percent)% off → \(AnalyticsFormat.money($0))" } }
+                                    ?? "Keep full price")
+                }
+            }
+        }
+
         AnalyticsSection("Current inventory by age", note: "All active listings, regardless of the sales period. Open an age group to review its listings.") {
             if data.aging.isEmpty {
                 Empty("No active listings.")

@@ -96,6 +96,23 @@ struct InventoryAnalytics: Decodable, Sendable {
         }
     }
 
+    /// A listing past the stale threshold, with the deeper cut its cost allows.
+    struct StaleListing: Decodable, Identifiable, Sendable {
+        let conversationID: String
+        let title: String
+        let daysListed: Int
+        let price: Double
+        let lowestPrice: Int?
+        let discountPercent: Int?
+        let salePrice: Double?
+        var id: String { conversationID }
+        enum CodingKeys: String, CodingKey {
+            case title, price
+            case conversationID = "conversation_id", daysListed = "days_listed", lowestPrice = "lowest_price"
+            case discountPercent = "discount_percent", salePrice = "sale_price"
+        }
+    }
+
     struct IncompleteSale: Decodable, Identifiable, Sendable {
         let conversationID: String
         let title: String
@@ -119,11 +136,14 @@ struct InventoryAnalytics: Decodable, Sendable {
     let periods: [Group]
     let marketplaces, categories, brands, labels, priceTiers: [Group]
     let aging: [Aging]
+    let stale: [StaleListing]
+    let staleDays: Int?
     let recent: [Sale]
     let oldest: [ActiveListing]
 
     enum CodingKeys: String, CodingKey {
-        case range, inventory, sales, previous, periods, marketplaces, categories, brands, labels, aging, recent, oldest
+        case range, inventory, sales, previous, periods, marketplaces, categories, brands, labels, aging, recent, oldest, stale
+        case staleDays = "stale_days"
         case lastUpdatedAt = "last_updated_at", incompleteSales = "incomplete_sales", undatedSales = "undated_sales"
         case periodsTruncated = "periods_truncated", sellThroughRate = "sell_through_rate", priceTiers = "price_tiers"
     }
