@@ -6,6 +6,10 @@ exercise Postgres.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
+
+import pytest
+from sqlalchemy.exc import TimeoutError
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 
@@ -14,6 +18,26 @@ from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.listing_evidence import SaleSnapshot
 from vendoo_studio.services.listing_evidence import capture_sale_snapshot
+
+
+def test_postgres_bursts_wait_for_a_connection_instead_of_exceeding_session_limit():
+    from vendoo_studio.database import make_engine
+
+    if engine.dialect.name != 'postgresql':
+        pytest.skip('Exercises the real Postgres connection pool')
+    isolated = make_engine(engine.url.render_as_string(hide_password=False))
+    isolated.pool._timeout = 0.05
+    try:
+        with ExitStack() as stack:
+            for _ in range(5):
+                stack.enter_context(isolated.connect())
+            with pytest.raises(TimeoutError):
+                isolated.connect()
+        # Returning a checkout makes the next request succeed again.
+        with isolated.connect() as connection:
+            assert connection.exec_driver_sql('SELECT 1').scalar_one() == 1
+    finally:
+        isolated.dispose()
 
 
 def test_migrations_leave_the_schema_the_models_describe():
