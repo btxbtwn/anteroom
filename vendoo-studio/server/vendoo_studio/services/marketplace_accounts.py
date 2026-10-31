@@ -59,7 +59,21 @@ class PendingSignIn:
     task: asyncio.Task | None = None
 
 
-_pending: dict[str, PendingSignIn] = {}
+_pending: dict[tuple[str, str], PendingSignIn] = {}
+
+
+def _seller() -> str:
+    """Whose sign-ins these are. The Mac has one seller; the web app has many."""
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    return context.seller_id if context is not None else ""
+
+
+def _on_web() -> bool:
+    from vendoo_studio.services.service_context import current
+
+    return current() is not None
 
 
 def _check(marketplace: str) -> str:
@@ -125,7 +139,7 @@ async def start_sign_in(marketplace: str, features: list[str] | None = None) -> 
     if marketplace == "ebay":
         # Listing on eBay reads the seller's business policies, which needs this grant.
         features = sorted({*(features or []), "listings"})
-    previous = _pending.pop(marketplace, None)
+    previous = _pending.pop((_seller(), marketplace), None)
     if previous and previous.task and not previous.task.done():
         previous.task.cancel()
     resp = await relay_request("POST", f"/studio/oauth/{marketplace}/start", **({"params": {"features": ",".join(features)}} if features else {}))
@@ -136,16 +150,18 @@ async def start_sign_in(marketplace: str, features: list[str] | None = None) -> 
     body = resp.json()
     pending = PendingSignIn(marketplace=marketplace, state=body["state"], authorize_url=body["authorizeUrl"])
     pending.task = asyncio.get_running_loop().create_task(_wait_for_sign_in(pending))
-    _pending[marketplace] = pending
-    try:
-        webbrowser.open(pending.authorize_url)
-    except Exception:  # noqa: BLE001 - the page shows the link too
-        log.debug("could not open %s sign-in", marketplace, exc_info=True)
+    _pending[(_seller(), marketplace)] = pending
+    if not _on_web():
+        # On the web, the seller's own browser opens the page from the response.
+        try:
+            webbrowser.open(pending.authorize_url)
+        except Exception:  # noqa: BLE001 - the page shows the link too
+            log.debug("could not open %s sign-in", marketplace, exc_info=True)
     return {"authorizeUrl": pending.authorize_url}
 
 
 def cancel_sign_in(marketplace: str) -> None:
-    pending = _pending.pop(_check(marketplace), None)
+    pending = _pending.pop((_seller(), _check(marketplace)), None)
     if pending and pending.task and not pending.task.done():
         pending.task.cancel()
 
@@ -161,7 +177,7 @@ async def disconnect(marketplace: str) -> None:
         except Exception as exc:  # noqa: BLE001 - forget locally regardless
             log.warning("could not unlink %s on the relay: %s", marketplace, exc)
     delete_marketplace_account(marketplace)
-    if not get_marketplace_accounts():
+    if not get_marketplace_accounts() and not _on_web():
         relay_client.stop_stream()
 
 
@@ -199,11 +215,12 @@ def _refresh_lock(marketplace: str) -> asyncio.Lock:
     """One refresh per marketplace at a time. Etsy rotates its refresh token, so
     a second refresh sent with the old one would sign the seller out."""
     loop = asyncio.get_running_loop()
-    lock = _refresh_locks.get((loop, marketplace))
+    key = (loop, f"{_seller()}:{marketplace}")
+    lock = _refresh_locks.get(key)
     if lock is None:
-        for key in [key for key in _refresh_locks if key[0] is not loop]:
-            del _refresh_locks[key]
-        lock = _refresh_locks[(loop, marketplace)] = asyncio.Lock()
+        for stale in [stale for stale in _refresh_locks if stale[0] is not loop]:
+            del _refresh_locks[stale]
+        lock = _refresh_locks[key] = asyncio.Lock()
     return lock
 
 
@@ -461,7 +478,13 @@ def _handler():
 
 
 def start_listening() -> None:
-    """Listen for sales while any account is connected. Call on the server loop."""
+    """Listen for sales while any account is connected. Call on the server loop.
+
+    The web app does not listen yet: a sale there would need the seller's own
+    worker to record it and, if they turned it on, delist elsewhere.
+    """
+    if _on_web():
+        return
     if get_marketplace_accounts():
         relay_client.start_stream(_handler())
 
@@ -471,7 +494,7 @@ def status() -> dict:
     out = {}
     for marketplace in MARKETPLACES:
         account = accounts.get(marketplace)
-        pending = _pending.get(marketplace)
+        pending = _pending.get((_seller(), marketplace))
         out[marketplace] = {
             "connected": bool(account),
             "label": account.get("label") if account else None,
@@ -480,4 +503,5 @@ def status() -> dict:
             "authorizeUrl": pending.authorize_url if pending and not pending.done else None,
             "error": pending.error if pending and pending.done else None,
         }
-    return {"accounts": out, "relay": relay_client.stream_state()}
+    relay = relay_client.stream_state() if not _on_web() else {"running": False, "connected": False, "lastError": None, "lastEventAt": None}
+    return {"accounts": out, "relay": relay}

@@ -232,7 +232,7 @@ class SignInTest(unittest.TestCase):
                 self.assertEqual(out["authorizeUrl"], "https://auth.ebay.com/x")
                 opened.assert_called_once_with("https://auth.ebay.com/x")
                 self.assertTrue(marketplace_accounts.status()["accounts"]["ebay"]["pending"])
-                await marketplace_accounts._pending["ebay"].task
+                await marketplace_accounts._pending[("", "ebay")].task
                 listen.assert_called_once()
 
         asyncio.run(scenario())
@@ -254,7 +254,7 @@ class SignInTest(unittest.TestCase):
                  mock.patch.object(marketplace_accounts, "POLL_INTERVAL_S", 0), \
                  mock.patch.object(marketplace_accounts.webbrowser, "open"):
                 await marketplace_accounts.start_sign_in("etsy")
-                await marketplace_accounts._pending["etsy"].task
+                await marketplace_accounts._pending[("", "etsy")].task
 
         asyncio.run(scenario())
         status = marketplace_accounts.status()["accounts"]["etsy"]
