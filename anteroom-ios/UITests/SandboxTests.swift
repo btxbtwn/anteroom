@@ -156,12 +156,6 @@ final class AppearanceSandboxTests: XCTestCase {
         let settings = app.tabBars.buttons["Settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 30))
         settings.tap()
-        // Settings opens on its sections; Theme lives under General.
-        if !app.buttons["appearance-picker"].exists {
-            let general = app.buttons["General"].firstMatch
-            XCTAssertTrue(general.waitForExistence(timeout: 10))
-            general.tap()
-        }
         XCTAssertTrue(app.buttons["appearance-picker"].waitForExistence(timeout: 10))
     }
 

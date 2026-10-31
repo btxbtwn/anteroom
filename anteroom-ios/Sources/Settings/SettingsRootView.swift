@@ -11,10 +11,10 @@ struct SettingsRootView: View {
     var body: some View {
         NavigationStack {
             List {
+                // General's rows sit on this screen; a theme change rebuilds
+                // the window's colours and must not pop a pushed page.
+                GeneralSettingsSections(api: api)
                 Section {
-                    NavigationLink { GeneralSettingsView(api: api) } label: {
-                        Label("General", systemImage: "gearshape")
-                    }
                     NavigationLink { ListingsSettingsView(api: api) } label: {
                         Label("Listings", systemImage: "tag")
                     }
@@ -49,12 +49,12 @@ struct SettingsRootView: View {
 }
 
 /// General: Appearance and About (GeneralSettings.tsx, hosted rows).
-struct GeneralSettingsView: View {
+struct GeneralSettingsSections: View {
     let api: AnteroomAPI
     @Environment(AppearanceModel.self) private var appearance
 
     var body: some View {
-        Form {
+        Group {
             Section {
                 Picker("Theme", selection: Binding(
                     get: { appearance.theme },
@@ -96,8 +96,6 @@ struct GeneralSettingsView: View {
                 NavigationLink("What's new") { ChangelogView(api: api) }
             }
         }
-        .navigationTitle("General")
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var version: String {
