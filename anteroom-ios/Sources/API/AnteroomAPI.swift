@@ -99,6 +99,30 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("DELETE", "api/conversations/\(listingID)/photos/\(photoID)"))
     }
 
+    /// Saves a new photo order; every photo of the listing, each once.
+    func reorderPhotos(listingID: String, ids: [String]) async throws {
+        _ = try await send(request("PATCH", "api/conversations/\(listingID)/photos/order", json: ids))
+    }
+
+    /// Turns the photo a further quarter turn; -90 turns it left.
+    func rotatePhoto(listingID: String, photoID: String, degrees: Int) async throws -> ListingPhoto {
+        try await decode(request("POST", "api/conversations/\(listingID)/photos/\(photoID)/rotate",
+                                 json: ["degrees": degrees]))
+    }
+
+    func savePhotoEdits(listingID: String, photoID: String, edits: PhotoEdits) async throws -> ListingPhoto {
+        try await decode(request("PUT", "api/conversations/\(listingID)/photos/\(photoID)/edits", json: edits))
+    }
+
+    func resetPhotoEdits(listingID: String, photoID: String) async throws -> ListingPhoto {
+        try await decode(request("DELETE", "api/conversations/\(listingID)/photos/\(photoID)/edits"))
+    }
+
+    /// A smaller JPEG of unsaved edits, rendered by the server.
+    func previewPhotoEdits(listingID: String, photoID: String, edits: PhotoEdits) async throws -> Data {
+        try await send(request("POST", "api/conversations/\(listingID)/photos/\(photoID)/edits/preview", json: edits))
+    }
+
     // MARK: Shared workspace and durable draft tasks
 
     func capabilities() async throws -> WorkspaceCapabilities {
