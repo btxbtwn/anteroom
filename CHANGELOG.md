@@ -6,9 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.597 — 2026-10-31
+## 0.1.598 — 2026-10-31
 
 - On the web, select listings and choose Delete to remove unsent drafts in one go. You review the list first, and anything already sent, still generating, or changed since you reviewed it is left alone.
+
+## 0.1.597 — 2026-10-31
+
+- Etsy's "What is it?" is answered from the Etsy category when it is missing, so List no longer stops on it.
+- Etsy List works again when When made is filled on the Etsy tab. It used to say When made was missing.
 
 ## 0.1.596 — 2026-10-30
 
