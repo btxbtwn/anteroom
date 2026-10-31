@@ -90,14 +90,14 @@ reconnection remain to be ported. Generation requires server deployment with
 the background worker and a configured provider; compilation does not verify
 those production settings.
 
-| Workflow | iPhone status |
-| --- | --- |
-| Sign-in, drafts, General editing, camera/library | Implemented |
-| Native Inventory/Settings navigation and account | Implemented |
-| Hosted generation and text assistant | Implemented; device/integration verification pending |
-| Full inventory states, filtering, history/restore | Still to port |
-| Provider setup, preferences, analytics, sourcing | Still to port |
-| Marketplace forms and seller-approved actions | Still to port; browser connection required where applicable |
+The complete feature-by-feature tracker is
+[`docs/iphone-parity.md`](../docs/iphone-parity.md). It separates native
+implementation, hosted backend availability and device verification.
+
+Listing history uses the existing shared revisions API: browse saved versions,
+preview General details and restore the full server snapshot with the current
+revision ID as a conflict guard. Unsaved edits must be saved first. Restore
+creates a new revision; it does not restore photos/private notes or publish.
 
 Swift stream framing tests run in the iOS build workflow. Device verification
 must cover a configured account generating from photos, assistant edits, an
@@ -111,36 +111,45 @@ from the repo root, then launch Debug with
 `ANTEROOM_SANDBOX_URL=http://localhost:4320` in the Xcode scheme environment.
 Release ignores this variable. `./anteroom-ios/test-sandbox.sh` starts the local
 hosted backend and runs the draft creation/relaunch UI test without accounts.
-=======
-## Shared backend port
 
-The iPhone is a native client of the hosted FastAPI backend. It never embeds
-Python, stores provider credentials, or talks to the desktop HTTP server.
-Generation and chat use the existing seller-authenticated workspace contracts:
-`GET /api/runtime`, `/api/status`, conversation messages/activity, streaming
-`POST /generate` and `/messages`, explicit `/stop`, and `resume=true` to observe
-existing work without submitting it again. The server saves generated revisions;
-the native editor reloads on return from the assistant. Unsaved local edits must
-be saved first. Disconnecting never cancels or automatically retries work.
+## Desktop visual alignment
 
-The first functional port adds native generation, a saved text transcript,
-progress, stop, and explicit reconnect. Provider setup currently remains in the
-web app. Chat attachments, live token rendering, and automatic foreground
-reconnection remain to be ported. Generation requires server deployment with
-the background worker and a configured provider; compilation does not verify
-those production settings.
+The General editor uses the desktop inspector's Listing, Pricing, Condition,
+Item, Size, Color & material, Shipping, and Inventory & identifiers sections,
+with flat dividers instead of one large card. Photos come before the fields;
+assistant/history live in the native actions menu. Inventory rows use cover
+photos and the same compact title/status hierarchy. Photos show six thumbnails
+in an adaptive grid, with an explicit expand control for larger sets.
+Thumbnails are authenticated requests to the existing shared backend.
 
-| Workflow | iPhone status |
-| --- | --- |
-| Sign-in, drafts, General editing, camera/library | Implemented |
-| Native Inventory/Settings navigation and account | Implemented |
-| Hosted generation and text assistant | Implemented; device/integration verification pending |
-| Full inventory states, filtering, history/restore | Still to port |
-| Provider setup, preferences, analytics, sourcing | Still to port |
-| Marketplace forms and seller-approved actions | Still to port; browser connection required where applicable |
+For offline simulator layout review, run `./tools/build-layout-review.sh` on a
+Mac and install the resulting `.app` with device tooling. It has its own bundle
+ID and uses production row/field/section views with clearly labelled sample
+data. It does not replace the signed-in app or test API behavior. The sample
+photo illustrations are placeholders, not uploaded product photos. Review
+light/dark appearance and larger text sizes; live cover-photo loading, uploads
+and edits still need configured-account verification.
 
-Swift stream framing tests run in the iOS build workflow. Device verification
-must cover a configured account generating from photos, assistant edits, an
-interrupted connection followed by Reconnect, Stop, and refresh of the saved
-listing without submitting duplicate work. No test or app flow publishes.
->>>>>>> origin/main
+## Seller inputs and measurements
+
+Photos are followed by native Notes & Labels, Pricing & Shipping, and
+Measurements (in), before generated General listing fields. These controls use
+the desktop ItemDetails notes keys: SKU, seller notes, known flaws, labels,
+cost of goods, package dimensions, garment and per-garment measurements.
+Top, Pants and Skirt retain their separate values when switching. Measurements
+are seller text in inches, so fractions are not converted or rounded.
+
+Save sends the structured notes with the existing optimistic draft save.
+Unedited notes are sent byte-for-byte unchanged; editing known fields preserves
+unknown root fields and nested measurement values. Plain narrative notes remain
+seller notes when other fields are added. No database or API schema changes are
+needed. Seller inputs are evidence for generation, separate from generated
+price/cost/SKU fields. Existing generated labels remain preserved by the General
+save contract; the visible seller labels use desktop's `vendooLabels` notes key.
+Package dimensions display saved seller values; shared preference defaults and
+recent-label suggestions remain part of the settings port.
+
+The iOS workflow runs executable seller-note preservation tests and the hosted
+sandbox UI test that saves seller inputs, switches garments, relaunches the app
+and checks the saved values. Screenshots are exported from XCTest results into
+the `iphone-sandbox-results` workflow artifact, on success as well as failure.

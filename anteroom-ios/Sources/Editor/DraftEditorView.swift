@@ -2,10 +2,10 @@ import SwiftUI
 
 struct DraftEditorView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var model: DraftEditorModel
     @State private var confirmDiscard = false
     @State private var showingAssistant = false
+    @State private var showingHistory = false
     private let onSaved: (Draft) -> Void
 
     init(api: AnteroomAPI, draft: Draft, onSaved: @escaping (Draft) -> Void) {
@@ -26,6 +26,9 @@ struct DraftEditorView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "square.and.pencil")
                     Text("General").fontWeight(.semibold)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
                     Spacer()
                     Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved draft")
                         .font(.caption).foregroundStyle(.secondary)
@@ -33,54 +36,11 @@ struct DraftEditorView: View {
                 .font(.subheadline)
                 .padding(.horizontal, 4)
 
-                WorkspaceSection("Listing assistant") {
-                    Button("Generate or edit with Anteroom", systemImage: "sparkles") { showingAssistant = true }
-                        .frame(minHeight: 44)
-                        .disabled(model.hasChanges || model.isLoading || model.loadError != nil || model.isSaving)
-                    if model.hasChanges {
-                        Text("Save your changes before opening the assistant.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-                WorkspaceSection("Photos") {
+                ListingInspectorSection("Photos") {
                     PhotoStrip(api: model.api, draftID: model.draftID)
                 }
-                WorkspaceSection("Listing details") {
-                    WorkspaceField("Title") {
-                        TextField("Title", text: $model.form.title, axis: .vertical).lineLimit(1...3)
-                    }
-                    WorkspaceField("Description") {
-                        TextField("Describe your item", text: $model.form.fields.description, axis: .vertical)
-                            .lineLimit(5...16)
-                    }
-                    let priceLayout = dynamicTypeSize.isAccessibilitySize
-                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-                        : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
-                    priceLayout {
-                        NumberField("Price", text: $model.form.price, prefix: "$")
-                        NumberField("Cost", text: $model.form.cost, prefix: "$")
-                    }
-                    WorkspaceField("Quantity") {
-                        TextField("1", text: $model.form.quantity).keyboardType(.numberPad)
-                    }
-                    TextRow("Brand", text: $model.form.fields.brand)
-                    TextRow("Condition", text: $model.form.fields.condition)
-                    TextRow("Primary Color", text: $model.form.fields.primaryColor)
-                    TextRow("Secondary Color", text: $model.form.fields.secondaryColor)
-                    TextRow("Size", text: $model.form.fields.size)
-                    TextRow("SKU", text: $model.form.fields.sku)
-                    TextRow("Inventory location", text: $model.form.fields.zipCode)
-                    TextRow("Category", text: $model.form.fields.categoryPath)
-                    TextRow("Department", text: $model.form.fields.department)
-                    NumberField("Package Weight (oz)", text: $model.form.weightOz)
-                    TextRow("Package Dimensions (LxWxH in)", text: $model.form.fields.packageDimensionsIn)
-                }
-                WorkspaceSection("Organization") {
-                    TextRow("Labels", text: $model.form.labels)
-                    WorkspaceField("Private notes") {
-                        TextField("Notes about this item", text: $model.form.notes, axis: .vertical).lineLimit(3...10)
-                    }
-                }
+                SellerInputFields(inputs: $model.form.sellerInputs)
+                GeneralListingFields(form: $model.form)
             }
             .padding(16)
         }
@@ -100,12 +60,22 @@ struct DraftEditorView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Menu("Listing actions", systemImage: "ellipsis.circle") {
+                    Button("Listing assistant", systemImage: "sparkles") { showingAssistant = true }
+                    Button("Listing history", systemImage: "clock.arrow.circlepath") { showingHistory = true }
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .disabled(model.hasChanges || model.isLoading || model.isSaving || model.loadError != nil)
+                .accessibilityHint("Save changes first to open the assistant or listing history")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 if model.isSaving {
                     ProgressView()
                 } else {
                     Button("Save") { save() }
                         .fontWeight(.semibold)
-                        .disabled(!model.hasChanges)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!model.hasChanges || model.isSaving)
                 }
             }
             ToolbarItemGroup(placement: .keyboard) {
@@ -136,6 +106,15 @@ struct DraftEditorView: View {
         }) {
             ListingAssistantView(api: model.api, listingID: model.draftID)
         }
+        .sheet(isPresented: $showingHistory, onDismiss: {
+            Task {
+                guard !model.hasChanges else { return }
+                await model.load()
+                if model.loadError == nil { onSaved(model.summary) }
+            }
+        }) {
+            ListingHistoryView(api: model.api, listingID: model.draftID)
+        }
         .task { await model.load() }
     }
 
@@ -157,7 +136,7 @@ struct DraftEditorView: View {
     }
 }
 
-private struct TextRow: View {
+struct TextRow: View {
     let label: String
     @Binding var text: String
 
@@ -173,7 +152,7 @@ private struct TextRow: View {
     }
 }
 
-private struct NumberField: View {
+struct NumberField: View {
     let label: String
     @Binding var text: String
     var prefix: String?
