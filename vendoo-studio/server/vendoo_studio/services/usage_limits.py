@@ -173,8 +173,12 @@ def _percent_from_amounts(used: object, limit: object) -> float | None:
 def _claude_spend_percent(rate_limits: dict) -> float | None:
     spend = rate_limits.get("spend")
     if isinstance(spend, dict) and spend.get("enabled") is True:
-        used = spend.get("used") if isinstance(spend.get("used"), dict) else None
-        limit = spend.get("limit") if isinstance(spend.get("limit"), dict) else None
+        used = spend.get("used")
+        if not isinstance(used, dict):
+            used = None
+        limit = spend.get("limit")
+        if not isinstance(limit, dict):
+            limit = None
         if (
             used
             and limit
@@ -212,8 +216,12 @@ def _claude_model_scoped(rate_limits: dict) -> list[dict]:
     for limit in rate_limits.get("limits") or []:
         if not isinstance(limit, dict) or limit.get("kind") != "weekly_scoped":
             continue
-        scope = limit.get("scope") if isinstance(limit.get("scope"), dict) else {}
-        model = scope.get("model") if isinstance(scope.get("model"), dict) else {}
+        scope = limit.get("scope")
+        if not isinstance(scope, dict):
+            scope = {}
+        model = scope.get("model")
+        if not isinstance(model, dict):
+            model = {}
         name = model.get("display_name")
         if isinstance(name, str) and name.strip():
             scoped.append({
@@ -286,8 +294,13 @@ async def _claude_get_usage() -> dict:
 
 async def fetch_claude() -> dict:
     from vendoo_studio.services import claude_auth
+    from vendoo_studio.services.service_context import current
 
     checked_at = now_iso()
+    if current() is not None:
+        # The Claude sign-in is the seller's own Claude Code login on their Mac.
+        # The web app never starts a CLI or reads this server's home folder.
+        return make_unavailable("claude", checked_at, "unsupported", "Claude sign-in usage is shown in the Mac app.")
     signed_in = await asyncio.to_thread(claude_auth.claude_signed_in)
     if not signed_in:
         return make_unavailable("claude", checked_at, "unsupported", "Sign in to Claude in Settings → Providers.")
@@ -315,7 +328,9 @@ def cursor_usage_to_limits(body: object, checked_at: str) -> dict:
         cycle_end = 0.0
     if math.isfinite(cycle_end) and cycle_end > 0:
         resets_at = iso_from_epoch_seconds(cycle_end / 1000)
-    plan_usage = data.get("planUsage") if isinstance(data.get("planUsage"), dict) else None
+    plan_usage = data.get("planUsage")
+    if not isinstance(plan_usage, dict):
+        plan_usage = None
     windows: list[dict] = []
     if plan_usage:
         for window_id, label, description in CURSOR_USAGE_WINDOWS:
@@ -404,8 +419,16 @@ FETCHERS = {
     "mimo": fetch_mimo,
 }
 
-_cache: dict[str, tuple[float, dict]] = {}
-_locks: dict[str, asyncio.Lock] = {}
+_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+_locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def _key(provider: str) -> tuple[str, str]:
+    """Cache per seller on the web app, so one account never sees another's usage."""
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    return (context.seller_id if context is not None else "", provider)
 
 
 def clear_cache() -> None:
@@ -422,11 +445,12 @@ def _fresh(entry: tuple[float, dict] | None) -> dict | None:
 
 
 async def provider_usage_limits(provider: str, *, force: bool = False) -> dict:
-    if not force and (cached := _fresh(_cache.get(provider))):
+    key = _key(provider)
+    if not force and (cached := _fresh(_cache.get(key))):
         return cached
-    lock = _locks.setdefault(provider, asyncio.Lock())
+    lock = _locks.setdefault(key, asyncio.Lock())
     async with lock:
-        if not force and (cached := _fresh(_cache.get(provider))):
+        if not force and (cached := _fresh(_cache.get(key))):
             return cached
         try:
             limits = await asyncio.wait_for(FETCHERS[provider](), PROBE_TIMEOUT_S + 5)
@@ -435,7 +459,7 @@ async def provider_usage_limits(provider: str, *, force: bool = False) -> dict:
             limits = make_unavailable(
                 provider, now_iso(), "probeFailed", f"{PROVIDER_LABELS[provider]} could not read usage limits."
             )
-        _cache[provider] = (time.monotonic(), limits)
+        _cache[key] = (time.monotonic(), limits)
         return limits
 
 

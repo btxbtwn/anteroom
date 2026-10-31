@@ -17,7 +17,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
-from sqlalchemy import event
+from sqlalchemy import Connection, event
 from sqlalchemy.orm import Session
 
 TTL_SECONDS = 120.0
@@ -45,8 +45,9 @@ def cached(db: Session, day: date, build: Callable[[], Any]) -> Any:
     """``build()``'s result, reused while nothing it reads has changed."""
     global _entry
     bind = db.get_bind()
+    engine = bind.engine if isinstance(bind, Connection) else bind
     with _lock:
-        key = (id(bind), str(bind.url), day, _generation, getattr(db, 'user_id', None))
+        key = (id(bind), str(engine.url), day, _generation, getattr(db, 'user_id', None))
         if _entry is not None and _entry[0] == key and time.monotonic() - _entry[1] < TTL_SECONDS:
             return _entry[2]
     value = build()

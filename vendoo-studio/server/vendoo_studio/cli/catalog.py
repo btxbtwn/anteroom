@@ -104,6 +104,8 @@ def build_catalog_from_app() -> dict[str, Any]:
     for context in iter_route_contexts(app.routes):
         route = context.original_route
         path = context.path_format or context.path or getattr(route, "path", None)
+        if not isinstance(path, str):
+            continue
         if isinstance(route, APIRoute):
             for method in sorted((context.methods or set()) - _SKIP_METHODS):
                 key = (method, path)

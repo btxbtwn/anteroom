@@ -54,7 +54,7 @@ class AnteroomClient:
                         files=opened, headers=request_headers, stream_seconds=stream_seconds, output=output,
                     )
                 response = client.request(
-                    method.upper(), url, params=params, json=json_body, data=form or None,
+                    method.upper(), url, params=tuple(params), json=json_body, data=form or None,
                     files=opened or None, headers=request_headers,
                 )
                 return _interpret(response, output)
@@ -81,7 +81,7 @@ class AnteroomClient:
         output: str | None,
     ) -> dict[str, Any]:
         with client.stream(
-            method.upper(), url, params=params, json=json_body, data=form or None,
+            method.upper(), url, params=tuple(params), json=json_body, data=form or None,
             files=files or None, headers=headers,
         ) as response:
             content_type = response.headers.get("content-type", "")
@@ -90,12 +90,12 @@ class AnteroomClient:
                 # response with the original headers makes httpx decode the
                 # plain body a second time (gzip raises DecodingError).
                 body = b"".join(response.iter_bytes())
-                headers = [
+                response_headers = [
                     (key, value)
                     for key, value in response.headers.multi_items()
                     if key.lower() not in {"content-encoding", "content-length"}
                 ]
-                finished = httpx.Response(response.status_code, headers=headers, content=body)
+                finished = httpx.Response(response.status_code, headers=response_headers, content=body)
                 return _interpret(finished, output)
             events: list[Any] = []
             raw_lines: list[str] = []

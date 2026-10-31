@@ -1,5 +1,7 @@
 """Seller-owned financial records on the direct order-line ledger."""
 from __future__ import annotations
+from typing import cast as type_cast
+from sqlalchemy.engine import CursorResult
 
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -125,7 +127,7 @@ def save_financials(db: Session, sale_id: str, body: FinancialSave) -> dict:
             result = db.execute(update(MarketplaceSale).where(*conditions).values(
                 financials=data, financial_revision=MarketplaceSale.financial_revision + 1,
             ).execution_options(synchronize_session=False))
-            if result.rowcount != 1:
+            if type_cast(CursorResult, result).rowcount != 1:
                 db.rollback()
                 raise LedgerError("The financial record changed. Reload it before saving.", 409)
             db.commit()

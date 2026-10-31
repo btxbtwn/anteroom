@@ -212,7 +212,9 @@ async def ebay_form(snapshot: dict) -> dict:
     variations = await _ebay_variations_field(snapshot, category, schema)
     condition_row = next((row for row in schema if row.get("id") == "condition"), None)
     payment, shipping_policy, location, returns = await _ebay_choices(snapshot)
-    schedule = details.get("schedule") if isinstance(details.get("schedule"), dict) else {}
+    schedule = details.get("schedule")
+    if not isinstance(schedule, dict):
+        schedule = {}
     second_path = details.get("secondaryCategoryPath") or details.get("secondaryCategoryId")
     quantity = (field("quantity", "Quantity", ebay_variations.total_quantity(snapshot), input_type="number", locked=True,
                       help="The quantity is the total of the variations.") if varied else
@@ -411,7 +413,7 @@ def _sellwild_discount(coupons: list, selected) -> dict:
         kind = str(row.get("discountType") or row.get("discount_type") or "")
         raw = row.get("discountValue") if row.get("discountValue") is not None else row.get("discount_value")
         try:
-            number = float(raw)
+            number = float(raw) if raw is not None else None
         except (TypeError, ValueError):
             number = None
         if kind == "percentage" and number is not None:
@@ -451,7 +453,8 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
     # The category picker shows "Group | Category" once a category is picked.
     categories = [{"id": row["id"], "label": row["label"].replace(" > ", " | ", 1)} for row in catalog["categories"]]
     try:
-        price_amount = float(snapshot.get("price"))
+        raw_price = snapshot.get("price")
+        price_amount = float(raw_price) if raw_price is not None else None
     except (TypeError, ValueError):
         price_amount = None
     fee = round(price_amount * 0.10, 2) if price_amount is not None else None

@@ -55,7 +55,9 @@ def _category_path(value: Any) -> str:
 def _leaf_from_section(section: Any) -> dict[str, Any]:
     if not isinstance(section, dict):
         return {}
-    overrides = section.get("overrides") if isinstance(section.get("overrides"), dict) else {}
+    overrides = section.get("overrides")
+    if not isinstance(overrides, dict):
+        overrides = {}
     for source in (overrides, section):
         for key in ("categoryV2", "category"):
             leaf = source.get(key)
@@ -86,7 +88,9 @@ def category_seed_from_vendoo_item(item: dict[str, Any] | None) -> dict[str, Any
     """
     if not isinstance(item, dict):
         return {}
-    general = item.get("generalDetails") if isinstance(item.get("generalDetails"), dict) else {}
+    general = item.get("generalDetails")
+    if not isinstance(general, dict):
+        general = {}
     general_leaf = general.get("categoryV2") or general.get("category")
     general_leaf = general_leaf if isinstance(general_leaf, dict) else {}
     seed: dict[str, Any] = {}
@@ -100,7 +104,9 @@ def category_seed_from_vendoo_item(item: dict[str, Any] | None) -> dict[str, Any
     ids: dict[str, str] = {}
     paths: dict[str, str] = {}
     objects: dict[str, dict[str, Any]] = {}
-    listings = item.get("listings") if isinstance(item.get("listings"), dict) else {}
+    listings = item.get("listings")
+    if not isinstance(listings, dict):
+        listings = {}
     for marketplace in _MARKETPLACES:
         section = listings.get(marketplace)
         leaf = _leaf_from_section(section)

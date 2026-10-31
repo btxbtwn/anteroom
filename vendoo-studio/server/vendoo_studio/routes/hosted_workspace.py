@@ -85,7 +85,7 @@ def runtime(request: Request, db=Depends(get_seller_db)):
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions']
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else []),
-            'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark', 'depop', 'mercari']}
+            'views': ['listings', 'analytics', 'settings', 'usage'], 'marketplace_forms': ['poshmark', 'depop', 'mercari']}
 
 
 @router.get('/status')

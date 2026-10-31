@@ -238,7 +238,9 @@ def vinted_package_size(listing: dict) -> str:
 
 
 def _materials(listing: dict) -> list[str]:
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     found: list[str] = []
     for source in (
         listing.get("material"),
@@ -304,7 +306,9 @@ def apply_vinted_listing(listing: dict) -> bool:
 
 
 def _price(snapshot: dict):
-    specifics = snapshot.get("vinted_specifics") if isinstance(snapshot.get("vinted_specifics"), dict) else {}
+    specifics = snapshot.get("vinted_specifics")
+    if not isinstance(specifics, dict):
+        specifics = {}
     from vendoo_studio.services.seller_overrides import price_for
 
     raw = price_for(snapshot, "vinted")
@@ -335,7 +339,9 @@ def vinted_requirements(snapshot: dict, context: Context) -> list[dict]:
     amount = _price(snapshot)
     if amount is None or amount <= 0:
         found.append(gap("price", "Vinted needs a price."))
-    specifics = snapshot.get("vinted_specifics") if isinstance(snapshot.get("vinted_specifics"), dict) else {}
+    specifics = snapshot.get("vinted_specifics")
+    if not isinstance(specifics, dict):
+        specifics = {}
     if not str(specifics.get("category") or "").strip():
         found.append(gap("vinted_specifics.category", "Vinted needs a clothing category. Say whether this is for women or men."))
     if not str(specifics.get("condition") or "").strip():

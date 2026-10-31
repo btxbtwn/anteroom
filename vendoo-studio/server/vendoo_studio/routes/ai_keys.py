@@ -117,8 +117,9 @@ async def ai_key_models(provider_id: str):
     provider = _instance(provider_id)
     entries: list = []
     try:
-        if hasattr(provider, "list_model_entries"):
-            entries = await provider.list_model_entries()
+        list_entries = getattr(provider, "list_model_entries", None)
+        if list_entries is not None:
+            entries = await list_entries()
         else:
             from vendoo_studio.providers.chat_completions import ModelEntry
 

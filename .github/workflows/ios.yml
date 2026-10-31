@@ -73,10 +73,13 @@ jobs:
           cd vendoo-studio
           python -m venv .venv
           .venv/bin/pip install -e ".[dev]"
+      - name: Initialize Xcode simulator components
+        run: sudo xcodebuild -runFirstLaunch
+      - name: Install the iOS simulator runtime
+        run: xcodebuild -downloadPlatform iOS
       - name: Create and reopen a draft through the hosted sandbox
         run: |
-          set -o pipefail
-          xcodebuild -downloadPlatform iOS
+          set -euxo pipefail
           SIMULATOR_ID="$(xcrun simctl create 'Anteroom sandbox tests' 'com.apple.CoreSimulator.SimDeviceType.iPhone-17')"
           ANTEROOM_TEST_DESTINATION="platform=iOS Simulator,id=$SIMULATOR_ID" \
             ANTEROOM_TEST_RESULTS="$RUNNER_TEMP/sandbox.xcresult" ./anteroom-ios/test-sandbox.sh

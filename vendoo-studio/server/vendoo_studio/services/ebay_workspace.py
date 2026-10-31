@@ -27,7 +27,7 @@ class _Text(HTMLParser):
         self.parts = []
         self.hidden = 0
 
-    def handle_starttag(self, tag, _attrs):
+    def handle_starttag(self, tag, attrs):
         if tag in ("script", "style"):
             self.hidden += 1
         if tag in ("br", "p", "div", "li"):
@@ -37,9 +37,9 @@ class _Text(HTMLParser):
         if tag in ("script", "style"):
             self.hidden = max(0, self.hidden - 1)
 
-    def handle_data(self, value):
+    def handle_data(self, data):
         if not self.hidden:
-            self.parts.append(value)
+            self.parts.append(data)
 
 
 def plain(value: object) -> str:
@@ -61,7 +61,7 @@ def amount(value: dict | None) -> str | None:
         return None
 
 
-def row(identifier, title, *, subtitle="", status="", money=None, fields=None, children=None):
+def row(identifier, title, *, subtitle: str | None = "", status: str | None = "", money=None, fields=None, children=None):
     return {"id": str(identifier), "title": plain(title), "subtitle": plain(subtitle), "status": str(status),
             "amount": amount(money), "fields": fields or {}, "children": children or []}
 
@@ -80,7 +80,7 @@ def dates(start: date, end: date) -> tuple[str, str]:
     return f"{start.isoformat()}T00:00:00.000Z", last
 
 
-def traffic_bindings(db: Session) -> dict[str, str]:
+def traffic_bindings(db: Session) -> dict[str, str | None]:
     """Every validated eBay reference, with titles only for unique local owners."""
     conversations = {conv.id: conv for conv in db.query(Conversation).order_by(Conversation.id).all()}
     owners: dict[str, set[str]] = {}

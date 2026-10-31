@@ -1,5 +1,7 @@
 """Seller-selected saved fields; applying a template always requires local review."""
 from __future__ import annotations
+from typing import cast as type_cast
+from sqlalchemy.engine import CursorResult
 
 import copy
 from datetime import UTC
@@ -124,7 +126,7 @@ def save(db: Session, body: TemplateSave, template_id: str | None = None) -> dic
         fields = _selected_fields(db, body.selection) if body.selection else copy.deepcopy(row.fields)
         changed = db.execute(update(ListingTemplate).where(ListingTemplate.id == template_id, ListingTemplate.revision == body.expected_revision)
                              .values(name=body.name, fields=fields, revision=ListingTemplate.revision + 1, updated_at=utcnow()))
-        if changed.rowcount != 1:
+        if type_cast(CursorResult, changed).rowcount != 1:
             db.rollback()
             raise CopyError("The template changed. Reload it before saving.")
         db.commit()
@@ -135,7 +137,7 @@ def remove(db: Session, template_id: str, expected_revision: int) -> dict:
     with start_gate():
         _row(db, template_id)
         result = db.execute(delete(ListingTemplate).where(ListingTemplate.id == template_id, ListingTemplate.revision == expected_revision))
-        if result.rowcount != 1:
+        if type_cast(CursorResult, result).rowcount != 1:
             db.rollback()
             raise CopyError("The template changed. Reload it before removing it.")
         db.commit()

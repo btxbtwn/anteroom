@@ -161,11 +161,11 @@ def _claim_next(db: Session, now: datetime) -> AutomationRun | None:
     if db.query(AutomationRun).filter(AutomationRun.status.in_(("running", "waiting"))).first():
         return None
     due = [
-        row for row in db.query(Automation).filter(Automation.status == "active").all()
-        if as_utc(row.next_run_at) is not None and as_utc(row.next_run_at) <= now
+        (when, row) for row in db.query(Automation).filter(Automation.status == "active").all()
+        if (when := as_utc(row.next_run_at)) is not None and when <= now
     ]
-    due.sort(key=lambda row: as_utc(row.next_run_at))
-    for row in due:
+    due.sort(key=lambda item: item[0])
+    for _when, row in due:
         run = claim_scheduled_run(db, row, now)
         if run is not None:
             return run

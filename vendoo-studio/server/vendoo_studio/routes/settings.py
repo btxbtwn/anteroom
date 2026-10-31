@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal, TYPE_CHECKING, cast
 
 import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from vendoo_studio.providers.anthropic_api import AnthropicAPIProvider
+    from vendoo_studio.providers.chat_completions import ChatCompletionsProvider
+    from vendoo_studio.providers.openai_api import OpenAIAPIProvider
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
@@ -17,9 +22,9 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
 _PROVIDER_IDS = (*SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS)
-ProviderChoice = Literal[_PROVIDER_IDS]  # type: ignore[valid-type]
-FallbackChoice = Literal[(*_PROVIDER_IDS, "none")]  # type: ignore[valid-type]
-PhotoChoice = Literal[("same", *_PROVIDER_IDS)]  # type: ignore[valid-type]
+ProviderChoice = Annotated[str, Field(pattern="^(?:" + "|".join(_PROVIDER_IDS) + ")$", json_schema_extra={"enum": list(_PROVIDER_IDS)})]
+FallbackChoice = Annotated[str, Field(pattern="^(?:" + "|".join((*_PROVIDER_IDS, "none")) + ")$", json_schema_extra={"enum": [*_PROVIDER_IDS, "none"]})]
+PhotoChoice = Annotated[str, Field(pattern="^(?:" + "|".join(("same", *_PROVIDER_IDS)) + ")$", json_schema_extra={"enum": ["same", *_PROVIDER_IDS]})]
 
 
 class ChatGPTModelsConfig(BaseModel):
@@ -219,7 +224,7 @@ def get_provider():
             masked_cursor_key=masked_cursor,
             vision_model=active.vision_model,
             listing_model=active.listing_model,
-            base_url=active.base_url,
+            base_url=cast("OpenAIAPIProvider | AnthropicAPIProvider | ChatCompletionsProvider", active).base_url,
             chatgpt=chatgpt,
             claude=claude,
         )

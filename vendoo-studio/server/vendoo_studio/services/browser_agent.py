@@ -123,7 +123,7 @@ def is_account_field(marketplace: str, label: str, flagged: bool = False) -> boo
     return bool(flagged) or field_lookup_key(label) in SELLER_SETTING_LABELS or is_account_managed_field(marketplace, label)
 
 
-def field_key(marketplace: str, label: str) -> tuple[str, str]:
+def field_key(marketplace: object, label: object) -> tuple[str, str]:
     return (str(marketplace or "general").strip().lower(), normalize_field_label(str(label or "")))
 
 
