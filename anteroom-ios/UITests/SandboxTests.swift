@@ -83,6 +83,17 @@ final class SellerInputSandboxTests: XCTestCase {
         let control = field(id, app: app)
         control.tap()
         control.typeText(text)
+        dismissKeyboard(app)
+        XCTAssertEqual(control.value as? String, text)
+    }
+
+    private func dismissKeyboard(_ app: XCUIApplication) {
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists else { return }
+        let done = app.buttons["Done"].firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "The editor must provide a keyboard dismissal action")
+        done.tap()
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 5), "Dismiss the keyboard before scrolling the form")
     }
 
     private func field(_ id: String, app: XCUIApplication) -> XCUIElement {
@@ -93,6 +104,9 @@ final class SellerInputSandboxTests: XCTestCase {
     }
 
     private func reveal(_ control: XCUIElement, app: XCUIApplication) {
+        // A full ScrollView swipe can otherwise start on the keyboard and
+        // insert predictive text instead of moving the form (CI video repro).
+        dismissKeyboard(app)
         for _ in 0..<12 {
             if control.isHittable { return }
             app.scrollViews.firstMatch.swipeUp()
