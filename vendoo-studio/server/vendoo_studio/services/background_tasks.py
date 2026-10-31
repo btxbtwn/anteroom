@@ -28,6 +28,18 @@ def require_idle(db, conversation_id):
         raise HTTPException(409, 'Wait for the draft task to finish, or stop it before editing.')
 
 
+def draft_payload(db, conversation_id, text='', attachments=()):
+    """The inputs a draft task checks again before it starts, so a changed draft is never overwritten."""
+    from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services.listing_generate import photo_fingerprint
+
+    repo = ConversationRepo(db)
+    row = repo.get(conversation_id)
+    return {'revision_id': repo.current_revision_id(conversation_id) or '',
+            'photos': photo_fingerprint(repo.get_photos(conversation_id)), 'notes': (row.notes if row else '') or '',
+            'text': text, 'attachments': list(attachments)}
+
+
 def enqueue(db, conversation_id, kind, payload):
     if kind not in DRAFT_KINDS:
         raise ValueError('Only draft generation and chat may enter the background queue')
