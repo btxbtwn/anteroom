@@ -3,13 +3,13 @@ import SwiftUI
 /// Mirrors the desktop General inspector's section headings and field groups
 /// (listingFieldSections.ts). Native marketplace forms remain separate.
 struct GeneralListingFields: View {
-    @Binding var form: DraftEditorModel.Form
+    @Binding var form: ListingEditorModel.Form
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         ListingInspectorSection("Listing") {
             WorkspaceField("Title") {
-                TextField("Title", text: $form.title, axis: .vertical).lineLimit(1...3)
+                TextField("Title", text: $form.fields.title, axis: .vertical).lineLimit(1...3)
             }
             WorkspaceField("Description") {
                 TextField("Describe your item", text: $form.fields.description, axis: .vertical).lineLimit(5...16)

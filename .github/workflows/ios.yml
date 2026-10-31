@@ -46,6 +46,10 @@ jobs:
         run: |
           xcrun swiftc Sources/Inputs/SellerInputs.swift Tests/SellerInputsTests.swift -o "$RUNNER_TEMP/seller-input-tests"
           "$RUNNER_TEMP/seller-input-tests"
+      - name: Test inventory rules and lossless listing edits
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/Inventory/InventoryFilters.swift Tests/InventoryTests.swift -o "$RUNNER_TEMP/inventory-tests"
+          "$RUNNER_TEMP/inventory-tests"
       - name: Test appearance preference contract
         run: |
           xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"
