@@ -71,6 +71,36 @@ final class AnteroomAPI: Sendable {
         return GeneralOptions(vendoo: payload.forms["vendoo"] ?? [:])
     }
 
+    // MARK: Bulk actions (reviewed first, as on the desktop)
+
+    func previewBulkEdit(ids: [String], edits: BulkEdits) async throws -> [BulkEditReviewRow] {
+        struct Body: Encodable { let conversation_ids: [String]; let edits: BulkEdits }
+        struct Payload: Decodable { let rows: [BulkEditReviewRow] }
+        let payload: Payload = try await decode(request("POST", "api/listings/bulk-edit/preview",
+                                                        json: Body(conversation_ids: ids, edits: edits)))
+        return payload.rows
+    }
+
+    func applyBulkEdit(edits: BulkEdits, rows: [BulkReviewToken]) async throws -> BulkEditResult {
+        struct Body: Encodable { let edits: BulkEdits; let rows: [BulkReviewToken] }
+        return try await decode(request("POST", "api/listings/bulk-edit/apply", json: Body(edits: edits, rows: rows)))
+    }
+
+    func previewBulkDelete(ids: [String]) async throws -> [BulkDeleteReviewRow] {
+        struct Payload: Decodable { let rows: [BulkDeleteReviewRow] }
+        let payload: Payload = try await decode(request("POST", "api/listings/bulk-delete/preview",
+                                                        json: ["conversation_ids": ids]))
+        return payload.rows
+    }
+
+    /// Deletes only the reviewed items, each with the token from its review.
+    func bulkDelete(rows: [BulkDeleteReviewRow]) async throws -> BulkDeleteResult {
+        struct Row: Encodable { let conversation_id: String; let review_token: String }
+        struct Body: Encodable { let rows: [Row]; let confirm: Bool }
+        let reviewed = rows.compactMap { row in row.reviewToken.map { Row(conversation_id: row.conversationID, review_token: $0) } }
+        return try await decode(request("POST", "api/listings/bulk-delete/delete", json: Body(rows: reviewed, confirm: true)))
+    }
+
     // MARK: Photos
 
     func photos(listingID: String) async throws -> [ListingPhoto] {
