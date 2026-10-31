@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.599 — 2026-10-31
+
+- New sandbox mode for trying changes safely: `./sandbox.sh` runs Anteroom on sample listings with a stand-in AI, never goes online, and refuses to list, delist or update anything on a marketplace.
+- Two copies of Anteroom can run side by side: the web port now follows `VENDOO_STUDIO_WEB_PORT` as the API port follows `VENDOO_STUDIO_PORT`.
+
 ## 0.1.598 — 2026-10-31
 
 - On the web, select listings and choose Delete to remove unsent drafts in one go. You review the list first, and anything already sent, still generating, or changed since you reviewed it is left alone.
