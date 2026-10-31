@@ -26,7 +26,17 @@ final class SessionStore {
             state = .missingConfiguration
             return
         }
-        let client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key)
+        let client: SupabaseClient
+#if DEBUG
+        if AppConfig.sandboxURL != nil {
+            client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key,
+                                    options: .init(auth: .init(storage: SandboxAuthStorage())))
+        } else {
+            client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key)
+        }
+#else
+        client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key)
+#endif
         self.client = client
         api = AnteroomAPI(baseURL: AppConfig.apiBaseURL) {
             try await client.auth.session.accessToken

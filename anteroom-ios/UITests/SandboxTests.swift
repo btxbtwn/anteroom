@@ -3,6 +3,7 @@ import XCTest
 @MainActor
 final class SandboxTests: XCTestCase {
     func testCreateAndReopenDraft() {
+        continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         app.launch()
