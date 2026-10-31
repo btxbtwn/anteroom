@@ -19,6 +19,23 @@ Photos, labels and private notes remain available alongside them.
 This is the first visual alignment pass, not desktop feature parity. The
 hosted API still does not expose generation or the full marketplace workflow.
 
+## iPhone navigation
+
+Inventory and Settings are native tabs, each with its own navigation stack.
+New listing is a modal task, not a tab: Cancel writes nothing, Create runs
+once while the sheet is busy, and success opens the new draft after dismissal.
+Settings shows the signed-in account and installed version, with confirmation
+before signing out. Inventory keeps its search and open listing across tabs.
+
+Fields expose their labels to VoiceOver; price/cost and photo controls stack
+at accessibility text sizes. Photo deletion is a visible action with
+confirmation, rather than a long-press-only gesture. Photos save immediately;
+listing text still saves with Save.
+
+Device review: check tab switching with an open edited draft, Cancel/Create
+(including a failed request and retry), the largest accessibility text size,
+VoiceOver field labels, photo add/delete, and light/dark appearance.
+
 ## Build on a Mac
 
 Needs Xcode 16 or newer and [XcodeGen](https://github.com/yonaskolb/XcodeGen).

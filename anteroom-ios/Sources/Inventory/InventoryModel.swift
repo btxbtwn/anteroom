@@ -46,17 +46,6 @@ final class InventoryModel {
         }
     }
 
-    func create(title: String) async -> Draft? {
-        do {
-            let draft = try await api.createDraft(title: title)
-            drafts.insert(draft, at: 0)
-            return draft
-        } catch {
-            self.error = error.localizedDescription
-            return nil
-        }
-    }
-
     /// Moves a saved draft to the top, matching the server's newest-first order.
     func didSave(_ draft: Draft) {
         drafts.removeAll { $0.id == draft.id }
