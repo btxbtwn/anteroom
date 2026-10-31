@@ -45,6 +45,17 @@ struct ProvidersSettingsView: View {
                 }
                 .disabled(saving)
                 Section {
+                    NavigationLink {
+                        MimoKeyView(api: api, maskedKey: order?.mimoMaskedKey) { Task { await load() } }
+                    } label: {
+                        HStack {
+                            Text("Xiaomi MiMo")
+                            Spacer()
+                            Text(order?.mimoConfigured == true ? "Key saved" : "Not set")
+                                .font(.footnote)
+                                .foregroundStyle(order?.mimoConfigured == true ? .green : .secondary)
+                        }
+                    }
                     ForEach(providers) { provider in
                         NavigationLink {
                             ProviderKeyView(api: api, provider: provider) { Task { await load() } }
@@ -75,7 +86,17 @@ struct ProvidersSettingsView: View {
         .task { await load() }
     }
 
-    private var configured: [KeyProvider] { providers.filter(\.configured) }
+    /// Every provider with a key, MiMo included, as listing-AI choices.
+    private var configured: [Choice] {
+        var choices = providers.filter(\.configured).map { Choice(id: $0.id, label: $0.label) }
+        if order?.mimoConfigured == true { choices.append(Choice(id: "mimo", label: "Xiaomi MiMo")) }
+        return choices
+    }
+
+    private struct Choice: Identifiable {
+        let id: String
+        let label: String
+    }
 
     private func load() async {
         do {
@@ -259,6 +280,93 @@ private struct ProviderKeyView: View {
             try await api.setProviderModels(provider.id, vision: vision, listing: listing, reasoning: reasoning)
             await loadModels()
             onChanged()
+        }
+    }
+}
+
+/// Xiaomi MiMo: one key, fixed models (ProvidersSettings.tsx, hosted).
+private struct MimoKeyView: View {
+    let api: AnteroomAPI
+    let maskedKey: String?
+    let onChanged: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var newKey = ""
+    @State private var configured: Bool
+    @State private var working = false
+    @State private var message: String?
+    @State private var failure: String?
+    @State private var confirmRemove = false
+
+    init(api: AnteroomAPI, maskedKey: String?, onChanged: @escaping () -> Void) {
+        self.api = api
+        self.maskedKey = maskedKey
+        self.onChanged = onChanged
+        _configured = State(initialValue: !(maskedKey ?? "").isEmpty)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                if configured { LabeledContent("Saved key", value: maskedKey ?? "Saved") }
+                SecureField(configured ? "Replace key" : "MiMo API key", text: $newKey)
+                    .textContentType(.password).autocorrectionDisabled().textInputAutocapitalization(.never)
+                Button(configured ? "Replace key" : "Save key") { save() }
+                    .disabled(newKey.trimmingCharacters(in: .whitespaces).isEmpty || working)
+            } header: {
+                Text("API key")
+            } footer: {
+                Text("Encrypted in your account's private vault. Usage is billed to your MiMo account. MiMo reads photos with mimo-v2.5 and writes listings with mimo-v2.5-pro. These are fixed.")
+            }
+            if configured {
+                Section {
+                    Button("Test connection") { test() }.disabled(working)
+                    Button("Remove key", role: .destructive) { confirmRemove = true }.disabled(working)
+                }
+            }
+            if let message { Section { Label(message, systemImage: "checkmark.circle").foregroundStyle(.green) } }
+            if let failure { Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
+        }
+        .navigationTitle("Xiaomi MiMo")
+        .navigationBarTitleDisplayMode(.inline)
+        .overlay { if working { ProgressView() } }
+        .confirmationDialog("Remove the MiMo key?", isPresented: $confirmRemove, titleVisibility: .visible) {
+            Button("Remove key", role: .destructive) { remove() }
+        }
+    }
+
+    private func run(_ change: @escaping () async throws -> Void) {
+        working = true
+        message = nil
+        failure = nil
+        Task {
+            defer { working = false }
+            do { try await change() } catch { failure = error.localizedDescription }
+        }
+    }
+
+    private func save() {
+        let key = newKey
+        run {
+            try await api.saveMimoKey(key)
+            newKey = ""
+            configured = true
+            message = "Key saved."
+            onChanged()
+        }
+    }
+
+    private func test() {
+        run {
+            if let problem = try await api.testMimo() { failure = problem } else { message = "MiMo answered. The key works." }
+        }
+    }
+
+    private func remove() {
+        run {
+            try await api.removeMimoKey()
+            onChanged()
+            dismiss()
         }
     }
 }
