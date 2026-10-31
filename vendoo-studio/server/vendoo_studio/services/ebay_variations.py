@@ -37,7 +37,9 @@ _SKU = re.compile(r"[A-Za-z0-9_-]{1,50}")
 
 
 def raw(snapshot: dict) -> dict:
-    details = snapshot.get("ebay_specifics") if isinstance(snapshot.get("ebay_specifics"), dict) else {}
+    details = snapshot.get("ebay_specifics")
+    if not isinstance(details, dict):
+        details = {}
     value = details.get("variations")
     return value if isinstance(value, dict) else {}
 
@@ -65,7 +67,9 @@ def plan(snapshot: dict, listing_price: str) -> dict:
     """The seller's variations, checked against eBay's documented rules. Raises with every problem at once."""
     data = raw(snapshot)
     names = [_text(name) for name in data.get("aspects") or [] if _text(name)]
-    rows = data.get("rows") if isinstance(data.get("rows"), list) else []
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        rows = []
     problems: list[tuple[str, str]] = []
     if not names:
         problems.append((f"{FIELD}.aspects", "Choose what the eBay variations differ by, such as Size."))
@@ -81,7 +85,9 @@ def plan(snapshot: dict, listing_price: str) -> dict:
     for index, row in enumerate(rows):
         row = row if isinstance(row, dict) else {}
         prefix = f"{FIELD}.rows.{index}"
-        given = row.get("values") if isinstance(row.get("values"), dict) else {}
+        given = row.get("values")
+        if not isinstance(given, dict):
+            given = {}
         folded = {_text(key).casefold(): _text(value) for key, value in given.items()}
         values = {name: folded.get(name.casefold(), "") for name in names}
         for name, value in values.items():
@@ -124,7 +130,9 @@ def plan(snapshot: dict, listing_price: str) -> dict:
     if photos_by and photos_by.casefold() not in {name.casefold() for name in names}:
         problems.append((f"{FIELD}.photosBy", "Photos can vary only by one of the aspects the variations differ by."))
     photos_by = next((name for name in names if name.casefold() == photos_by.casefold()), names[0] if names else "")
-    chosen_photos = data.get("photos") if isinstance(data.get("photos"), dict) else {}
+    chosen_photos = data.get("photos")
+    if not isinstance(chosen_photos, dict):
+        chosen_photos = {}
     photos: dict[str, list[str]] = {}
     for value, ids in chosen_photos.items():
         ids = [str(item) for item in ids or [] if str(item or "").strip()] if isinstance(ids, list) else []
@@ -285,7 +293,9 @@ def group_differences(saved: dict, fields: dict, chosen: dict) -> list[str]:
         return sorted((str(entry.get("name")), sorted(str(value) for value in entry.get("values") or []))
                       for entry in entries or [] if isinstance(entry, dict))
 
-    varies = saved.get("variesBy") if isinstance(saved.get("variesBy"), dict) else {}
+    varies = saved.get("variesBy")
+    if not isinstance(varies, dict):
+        varies = {}
     checks = {
         "variations": sorted(saved.get("variantSKUs") or []) == sorted(row["sku"] for row in chosen["rows"]),
         "variation aspects": specs(varies.get("specifications")) == specs(specifications(chosen)),
@@ -311,7 +321,9 @@ async def _offers(client: EbayClient, chosen: dict, binding: dict) -> dict[str, 
     """eBay's offer for each row's SKU, where there is one: the saved ID, or looked up by SKU."""
     from vendoo_studio.services.ebay_listings import FIXED_PRICE, _offer_for
 
-    known = binding.get("ebay_variant_offers") if isinstance(binding.get("ebay_variant_offers"), dict) else {}
+    known = binding.get("ebay_variant_offers")
+    if not isinstance(known, dict):
+        known = {}
     found = {}
     for row in chosen["rows"]:
         offer = await _offer_for(client, row["sku"], {"ebay_offer_id": known.get(row["sku"]),
@@ -468,7 +480,9 @@ async def update_live(client: EbayClient, snapshot: dict, form: dict, fields: di
                          body=group_body(fields, chosen, shared, image_urls[:single.MAX_PHOTOS]))
     for row in chosen["rows"]:
         offer = offers[row["sku"]]
-        policies = offer.get("listingPolicies") if isinstance(offer.get("listingPolicies"), dict) else {}
+        policies = offer.get("listingPolicies")
+        if not isinstance(policies, dict):
+            policies = {}
         own = single.own_listing_choices(snapshot)
         policies = {**policies, **{key: value for key, value in own.items() if key != "merchantLocationKey"}}
         body = offer_body(row, fields, own.get("merchantLocationKey") or offer.get("merchantLocationKey"), policies)
@@ -496,11 +510,15 @@ async def check(client: EbayClient, binding: dict, snapshot: dict | None, record
     from vendoo_studio.services import ebay_listings as single
     from vendoo_studio.services.native_form import vendoo_form
 
-    known = binding.get("ebay_variant_offers") if isinstance(binding.get("ebay_variant_offers"), dict) else {}
+    known = binding.get("ebay_variant_offers")
+    if not isinstance(known, dict):
+        known = {}
     chosen = None
     fields = None
     if snapshot and has_variations(snapshot):
-        form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
+        form = snapshot.get("form")
+        if not isinstance(form, dict):
+            form = vendoo_form(snapshot, "ebay")
         fields = single._listing_fields(snapshot, form)
         chosen = assign_skus(fields["variations"], str(binding.get("ebay_sku") or ""))
         chosen = await check_category(client, fields["category_id"], chosen)

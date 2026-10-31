@@ -208,7 +208,9 @@ def _text(value: Any) -> str:
 
 def evidence(listing: dict) -> str:
     """The listing's own words that can settle a tie: its title and sleeve length."""
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     return " ".join(_text(value) for value in (
         listing.get("title"), listing.get("sleeveLength"), ebay.get("sleeveLength"),
     ) if _text(value))

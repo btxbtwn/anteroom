@@ -9,8 +9,9 @@ import gzip
 import json
 from datetime import datetime, UTC
 from pathlib import Path
+from typing import cast
 
-from sqlalchemy import Engine, create_engine, delete, func, inspect, insert, select
+from sqlalchemy import Table, Engine, create_engine, delete, func, inspect, insert, select
 
 from vendoo_studio.services.category_tree import MARKETPLACES
 
@@ -34,10 +35,10 @@ def default_db_path() -> Path:
     return PACKAGED_DB
 
 
-def _tables():
+def _tables() -> tuple[Table, Table]:
     from vendoo_studio.models.catalog import CategoryTree, CategoryTreeNode
 
-    return CategoryTree.__table__, CategoryTreeNode.__table__
+    return cast(Table, CategoryTree.__table__), cast(Table, CategoryTreeNode.__table__)
 
 
 def _engine(target: Engine | Path | None) -> Engine:

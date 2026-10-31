@@ -70,7 +70,9 @@ _FIT = {
 def is_bottoms(listing: dict | None) -> bool:
     if not isinstance(listing, dict):
         return False
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     parts = [
         listing.get("category_path"), listing.get("title"), listing.get("department"),
         ebay.get("type"), ebay.get("department"),
@@ -82,7 +84,9 @@ def is_bottoms(listing: dict | None) -> bool:
 
 
 def department_kind(listing: dict) -> str:
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     text = " ".join(str(part or "") for part in (
         listing.get("department"), ebay.get("department"), listing.get("category_path"), listing.get("title"),
     ))
@@ -99,7 +103,9 @@ def _fit_name(raw: str) -> str:
 
 def _parse(listing: dict) -> dict[str, str]:
     """Waist, inseam, women's number and size type named by the draft."""
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     size = str(listing.get("size") or listing.get("size_us") or "").strip()
     fit = _fit_name(str(listing.get("sizeType") or ebay.get("sizeType") or ""))
     waist = inseam = numeric = ""

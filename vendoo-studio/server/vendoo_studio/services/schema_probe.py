@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import TypeGuard
 
 import logging
 from copy import deepcopy
@@ -67,7 +68,7 @@ def listing_for_extension(snapshot: dict | None) -> dict:
     }
 
 
-def should_probe(listing: dict | None, *, previous_path: str | None = None) -> bool:
+def should_probe(listing: dict | None, *, previous_path: str | None = None) -> TypeGuard[dict]:
     if not isinstance(listing, dict):
         return False
     path = str(listing.get("category_path") or "").strip()

@@ -29,7 +29,9 @@ _COMPATIBLE = {
 def department_text(listing: dict | None) -> str:
     if not isinstance(listing, dict):
         return ""
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     return " ".join(str(part or "") for part in (
         listing.get("department"), ebay.get("department"), listing.get("category_path"), listing.get("title"),
     ))
@@ -54,7 +56,9 @@ def department_bucket(listing: dict | None) -> str:
 def condition_text(listing: dict | None) -> str:
     if not isinstance(listing, dict):
         return ""
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     return " ".join(str(part or "") for part in (listing.get("condition"), ebay.get("condition")))
 
 

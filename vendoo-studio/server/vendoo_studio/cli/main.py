@@ -192,6 +192,7 @@ def _add_generated_group(sub: argparse._SubParsersAction, common: argparse.Argum
     if actions is None:
         group_parser = sub.add_parser(group, help=f"{group.replace('-', ' ')} routes", parents=[common])
         actions = group_parser.add_subparsers(dest="action", required=True, metavar="action")
+    assert actions is not None
     for command in commands:
         action = actions.add_parser(
             command["action"],

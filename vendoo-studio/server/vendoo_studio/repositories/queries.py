@@ -1,4 +1,6 @@
 from __future__ import annotations
+from typing import cast as type_cast
+from sqlalchemy.engine import CursorResult
 
 import copy
 import json
@@ -267,7 +269,7 @@ class ConversationRepo:
         if not bump_updated_at:
             values["updated_at"] = conv.updated_at
         self.db.query(Conversation).filter(Conversation.id == conv_id).update(
-            values, synchronize_session=False
+            type_cast(dict, values), synchronize_session=False
         )
         self.db.commit()
         self.db.refresh(conv)
@@ -644,14 +646,14 @@ class ListingRepo:
                 result = self.db.execute(update(Listing).where(
                     Listing.conversation_id == conv_id, Listing.current_revision_id.is_(None),
                 ).values(current_revision_id=revision.id))
-                if result.rowcount != 1:
+                if type_cast(CursorResult, result).rowcount != 1:
                     self.db.rollback()
                     raise RevisionConflict("This listing changed since you reviewed it")
         elif expected_revision_id is not None:
             result = self.db.execute(update(Listing).where(
                 Listing.conversation_id == conv_id, Listing.current_revision_id == expected_revision_id,
             ).values(current_revision_id=revision.id))
-            if result.rowcount != 1:
+            if type_cast(CursorResult, result).rowcount != 1:
                 self.db.rollback()
                 raise RevisionConflict("This listing changed since you reviewed it")
         elif listing:
@@ -688,7 +690,7 @@ class ListingRepo:
         )
         return {rev_id: body for rev_id, body in rows if isinstance(body, dict)}
 
-    def get_revision(self, revision_id: str) -> ListingRevision | None:
+    def get_revision(self, revision_id: str | None) -> ListingRevision | None:
         return self.db.query(ListingRevision).filter(ListingRevision.id == revision_id).first()
 
     def get_revisions(self, conv_id: str) -> list[ListingRevision]:

@@ -8,6 +8,7 @@ lost, so a retry finishes the listing instead of making a second one. Check
 only reads.
 """
 from __future__ import annotations
+from typing import Literal, overload
 
 import asyncio
 import base64
@@ -96,7 +97,9 @@ CONDITION_IDS = {
 
 
 def ebay_condition(listing: dict) -> str:
-    specifics = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    specifics = listing.get("ebay_specifics")
+    if not isinstance(specifics, dict):
+        specifics = {}
     text = str(specifics.get("condition") or listing.get("condition") or "").strip()
     native = next((code for code, condition_id in CONDITION_IDS.items() if condition_id == text), None)
     if native:
@@ -283,6 +286,14 @@ def duration_label(value: str) -> str:
     return f"{days} day" if days == 1 else f"{days} days"
 
 
+@overload
+def _format_amount(details: dict, key: str, label: str, *, required: Literal[True]) -> str: ...
+
+
+@overload
+def _format_amount(details: dict, key: str, label: str, *, required: Literal[False] = False) -> str | None: ...
+
+
 def _format_amount(details: dict, key: str, label: str, *, required: bool = False) -> str | None:
     text = str(details.get(key) or "").replace("$", "").replace(",", "").strip()
     if not text:
@@ -303,7 +314,9 @@ def listing_format(snapshot: dict) -> dict:
     """
     from vendoo_studio.services.marketplace_schemas import _ebay_listing_type, ebay_duration
 
-    details = snapshot.get("ebay_specifics") if isinstance(snapshot.get("ebay_specifics"), dict) else {}
+    details = snapshot.get("ebay_specifics")
+    if not isinstance(details, dict):
+        details = {}
     raw = str(details.get("listingFormat") or "").strip()
     kind = _ebay_listing_type(raw) if raw else FIXED_PRICE
     if kind is None:
@@ -591,7 +604,9 @@ LISTING_CHOICE_KEYS = {"fulfillmentPolicyId": "fulfillment_policy_id", "paymentP
 
 def own_listing_choices(snapshot: dict | None) -> dict[str, str]:
     """The policies and item location chosen on this listing's eBay form, over the Settings defaults."""
-    details = (snapshot or {}).get("ebay_specifics") if isinstance((snapshot or {}).get("ebay_specifics"), dict) else {}
+    details = (snapshot or {}).get("ebay_specifics")
+    if not isinstance(details, dict):
+        details = {}
     return {key: str(details[key]) for key in LISTING_CHOICE_KEYS if str(details.get(key) or "").strip()}
 
 
@@ -616,8 +631,12 @@ def best_offer_terms(form: dict, price: str, listing: dict | None = None) -> dic
     """Best Offer for create and update. The seller's prices win; otherwise accept at list - $2 and decline under list - $4."""
     from vendoo_studio.services.vendoo_marketplace_fields import best_offer_enabled, offer_floors
 
-    ebay = (listing or {}).get("ebay_specifics") if isinstance((listing or {}).get("ebay_specifics"), dict) else {}
-    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
+    ebay = (listing or {}).get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
+    chosen = ebay.get("bestOffer")
+    if not isinstance(chosen, dict):
+        chosen = {}
     fixed = ((form.get("specifics") or {}).get("pricingFormatDetails") or {}).get("fixedPrice") or {}
     if not best_offer_enabled(chosen) or fixed.get("allowBestOffer") is False and not chosen:
         return {"bestOfferEnabled": False}
@@ -861,7 +880,9 @@ VIDEO_FIELD = "ebay_specifics.videoId"
 
 def _video_choice(snapshot: dict) -> dict | None | bool:
     """The video this revision selects: a video, None to clear it, False when the form never touched it."""
-    details = snapshot.get("ebay_specifics") if isinstance(snapshot.get("ebay_specifics"), dict) else {}
+    details = snapshot.get("ebay_specifics")
+    if not isinstance(details, dict):
+        details = {}
     if "videoId" not in details:
         return False
     wanted = str(details.get("videoId") or "")
@@ -889,7 +910,9 @@ async def _video_ids(client: EbayClient, snapshot: dict, binding: dict, record: 
     video = _video_choice(snapshot)
     if not video:
         return []
-    saved = binding.get("ebay_video") if isinstance(binding.get("ebay_video"), dict) else {}
+    saved = binding.get("ebay_video")
+    if not isinstance(saved, dict):
+        saved = {}
     video_id = str(saved.get("video_id") or "") if saved.get("checksum") == video["checksum"] else ""
     status = await _video_status(client, video_id) if video_id else None
     data = await asyncio.to_thread(video_bytes, video) if status is None or status.get("status") == "PENDING_UPLOAD" else b""
@@ -1021,7 +1044,9 @@ SUBTITLE_MAX = 55
 
 def listing_options(snapshot: dict, category_id: str) -> dict:
     """The rest of eBay's listing form: subtitle, second category, start time, lot, private listing, irregular package."""
-    details = snapshot.get("ebay_specifics") if isinstance(snapshot.get("ebay_specifics"), dict) else {}
+    details = snapshot.get("ebay_specifics")
+    if not isinstance(details, dict):
+        details = {}
     options: dict = {}
     subtitle = str(details.get("subtitle") or "").strip()
     if len(subtitle) > SUBTITLE_MAX:
@@ -1033,7 +1058,9 @@ def listing_options(snapshot: dict, category_id: str) -> dict:
         if not re.fullmatch(r"\d{1,12}", second) or second == category_id:
             raise missing("Choose a second eBay category different from the first, or clear it.", "ebay_specifics.secondaryCategoryId")
         options["secondary_category_id"] = second
-    schedule = details.get("schedule") if isinstance(details.get("schedule"), dict) else {}
+    schedule = details.get("schedule")
+    if not isinstance(schedule, dict):
+        schedule = {}
     if schedule.get("enabled") in (True, "true"):
         try:
             start = datetime.fromisoformat(str(schedule.get("startAt") or "").strip())
@@ -1088,7 +1115,9 @@ def _charity(details: dict) -> dict | None:
 @requirement("ebay")
 def requirements(snapshot: dict, context: Context) -> list[dict]:
     """What eBay would refuse, read from the listing alone. Aspects, policies and conditions are checked live at List."""
-    form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
+    form = snapshot.get("form")
+    if not isinstance(form, dict):
+        form = vendoo_form(snapshot, "ebay")
     found: list[dict] = []
     for check in (lambda: _listing_fields(snapshot, form), lambda: package_ounces(snapshot, form)):
         try:
@@ -1277,7 +1306,9 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         if not 1 <= len(photos) <= MAX_PHOTOS:
             raise missing(f"Choose between one and {MAX_PHOTOS} eBay photos.", "photos")
         client = await EbayClient.connect()
-        form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
+        form = snapshot.get("form")
+        if not isinstance(form, dict):
+            form = vendoo_form(snapshot, "ebay")
         fields = _listing_fields(snapshot, form)
         from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
 
@@ -1324,7 +1355,9 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
                              body=_inventory_body(fields, aspects, image_urls, snapshot, form, video_ids))
         await _confirm_video(client, sku, snapshot, video_ids)
-        policies = offer.get("listingPolicies") if isinstance(offer.get("listingPolicies"), dict) else {}
+        policies = offer.get("listingPolicies")
+        if not isinstance(policies, dict):
+            policies = {}
         own = own_listing_choices(snapshot)
         policies = {**policies, **{key: value for key, value in own.items() if key != "merchantLocationKey"},
                     "bestOfferTerms": offer_terms(form, fields, snapshot)}
@@ -1356,7 +1389,9 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         if not 1 <= len(photos) <= MAX_PHOTOS:
             raise missing(f"Choose between one and {MAX_PHOTOS} eBay photos.", "photos")
         client = await EbayClient.connect()
-        form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
+        form = snapshot.get("form")
+        if not isinstance(form, dict):
+            form = vendoo_form(snapshot, "ebay")
         fields = _listing_fields(snapshot, form)
         from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
 
@@ -1465,7 +1500,9 @@ async def check(binding: dict, snapshot: dict | None = None, record: Callable[[d
             if live:
                 return live
             if binding.get("action") == "save_draft" and snapshot:
-                form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
+                form = snapshot.get("form")
+                if not isinstance(form, dict):
+                    form = vendoo_form(snapshot, "ebay")
                 differences = offer_differences(offer, sku, _listing_fields(snapshot, form))
                 if differences:
                     raise ValueError(f"eBay saved different values for: {', '.join(differences)}. Save the draft again.")
@@ -1491,7 +1528,9 @@ def _same_amount(saved: object, expected: str | None) -> bool:
 def offer_differences(offer: dict, sku: str, fields: dict) -> list[str]:
     """What eBay's saved offer holds differently from the revision sent. Empty when it matches."""
     chosen = fields["format"]
-    pricing = offer.get("pricingSummary") if isinstance(offer.get("pricingSummary"), dict) else {}
+    pricing = offer.get("pricingSummary")
+    if not isinstance(pricing, dict):
+        pricing = {}
     checks = {
         "SKU": offer.get("sku") == sku,
         "format": offer.get("format") == chosen["format"],
@@ -1512,7 +1551,9 @@ def _checked_video_ids(snapshot: dict, binding: dict) -> list[str]:
     video = _video_choice(snapshot)
     if not video:
         return []
-    saved = binding.get("ebay_video") if isinstance(binding.get("ebay_video"), dict) else {}
+    saved = binding.get("ebay_video")
+    if not isinstance(saved, dict):
+        saved = {}
     if saved.get("checksum") != video["checksum"] or not saved.get("video_id"):
         raise ValueError("eBay has not confirmed the video for this revision. Check the item before trying again.")
     return [str(saved["video_id"])]
@@ -1534,7 +1575,9 @@ async def _check_update(client: EbayClient, binding: dict, snapshot: dict) -> di
     offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
     sku = str(offer.get("sku") or binding.get("ebay_sku") or "")
     item = await client.request("GET", f"/sell/inventory/v1/inventory_item/{segment(sku)}") if sku else {}
-    product = item.get("product") if isinstance(item.get("product"), dict) else {}
+    product = item.get("product")
+    if not isinstance(product, dict):
+        product = {}
     chosen = listing_format(snapshot)
     if chosen["format"] == AUCTION:
         same_price = _same_amount((offer.get("pricingSummary") or {}).get("auctionStartPrice"), chosen["start"])

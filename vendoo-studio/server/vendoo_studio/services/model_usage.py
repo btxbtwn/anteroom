@@ -73,8 +73,9 @@ class Call:
         details = raw.get("output_tokens_details") or raw.get("completion_tokens_details") or {}
         if isinstance(details, dict) and _number(details.get("reasoning_tokens")) is not None:
             self.record["reasoning_tokens"] = _number(details["reasoning_tokens"], integer=True)
-        if _number(sdk_cost) is not None:
-            self.record.update(cost_usd=float(sdk_cost), cost_source="sdk_estimate")
+        sdk_price = _number(sdk_cost)
+        if sdk_price is not None:
+            self.record.update(cost_usd=float(sdk_price), cost_source="sdk_estimate")
         elif "cost" in source:
             self.record.update(cost_usd=source["cost"], cost_source="provider_reported")
 

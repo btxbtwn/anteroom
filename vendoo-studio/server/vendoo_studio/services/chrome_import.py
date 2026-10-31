@@ -229,7 +229,7 @@ def snapshot(marketplace: str, listing: dict) -> tuple[dict, list[str]]:
     if marketplace == "vinted" and category:
         out["vinted_specifics"] = {"category": category}
     if marketplace == "sellwild":
-        specifics = {key: int(value) for key, value in (("nativeCategoryId", category_id), ("nativeConditionId", listing.get("condition")))
+        specifics = {key: int(str(value)) for key, value in (("nativeCategoryId", category_id), ("nativeConditionId", listing.get("condition")))
                      if str(value or "").isdigit()}
         if specifics:
             out["sellwild_specifics"] = specifics
