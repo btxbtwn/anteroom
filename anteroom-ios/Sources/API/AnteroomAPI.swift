@@ -149,6 +149,16 @@ final class AnteroomAPI: Sendable {
                                    json: ["expected_revision_id": expectedRevisionID]))
     }
 
+    // MARK: Shared appearance preferences
+
+    func appearance() async throws -> AppearancePreferences {
+        try await decode(request("GET", "api/settings/ui"))
+    }
+
+    func setAppearance(_ theme: AppearanceTheme) async throws -> AppearancePreferences {
+        try await decode(request("PUT", "api/settings/ui", json: AppearanceUpdate(theme: theme)))
+    }
+
     // MARK: Transport
 
     private func request(_ method: String, _ path: String, query: [URLQueryItem] = []) async throws -> URLRequest {

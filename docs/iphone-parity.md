@@ -56,7 +56,7 @@ Anteroom's terminology and identity while following iOS navigation conventions.
 | Automations: promotion schedules, repricing, relisting and run outcomes | Desktop services; hosted support incomplete | Missing | Seller-scoped execution and explicit approval boundaries; no automatic publishing |
 | Usage: provider/token/cost reporting | Desktop routes; hosted coverage needs audit | Missing | Native usage views and server-side accounting contract |
 | Settings / General: account and version | Session and bundle | Implemented | Seller tested basic app; full account flows still need review |
-| Settings / General: appearance, naming and other preferences | Shared `/api/settings/ui` | Missing | Seller-scoped preference store and native settings controls |
+| Settings / General: appearance, naming and other preferences | Shared `/api/settings/ui` | Appearance implemented in current work; naming/other settings missing | Theme-only updates and foreground reload; simulator persistence/screenshots pending CI; standalone Mac-local preferences are not synchronized |
 | Settings / Listings: templates, shipping, inventory, formulas, hidden fields and defaults | Hosted settings partially mounted | Missing | Audit each setting; do not duplicate listing rules from skills |
 | Settings / Assistant: business notes, memory and instructions | Hosted coverage incomplete | Missing | Inspect endpoints, ownership and secret boundaries |
 | Settings / Providers: supported provider configuration and sign-in | Hosted keys/settings routes mounted | Missing | Native setup without returning/logging stored credentials; verify platform-specific OAuth requirements |

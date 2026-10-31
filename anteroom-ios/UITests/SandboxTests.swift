@@ -126,3 +126,46 @@ final class SellerInputSandboxTests: XCTestCase {
         add(attachment)
     }
 }
+
+@MainActor
+final class AppearanceSandboxTests: XCTestCase {
+    func testAppearanceChoicesPersistAcrossRelaunch() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        app.launch()
+        for choice in ["Light", "Dark", "System"] {
+            openSettings(app)
+            let picker = app.buttons["appearance-picker"]
+            waitForReady(picker)
+            picker.tap()
+            app.buttons[choice].tap()
+            waitForValue(choice, picker: picker)
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Appearance \(choice)"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            app.terminate()
+            app.launch()
+            openSettings(app)
+            waitForValue(choice, picker: app.buttons["appearance-picker"])
+        }
+    }
+
+    private func openSettings(_ app: XCUIApplication) {
+        let settings = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 30))
+        settings.tap()
+        XCTAssertTrue(app.buttons["appearance-picker"].waitForExistence(timeout: 10))
+    }
+
+    private func waitForReady(_ picker: XCUIElement) {
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: picker)
+        waitForExpectations(timeout: 15)
+    }
+
+    private func waitForValue(_ choice: String, picker: XCUIElement) {
+        expectation(for: NSPredicate(format: "value == %@ AND enabled == true", choice), evaluatedWith: picker)
+        waitForExpectations(timeout: 15)
+    }
+}
