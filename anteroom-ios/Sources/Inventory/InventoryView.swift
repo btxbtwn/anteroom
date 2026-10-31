@@ -3,83 +3,157 @@ import SwiftUI
 struct InventoryView: View {
     @State private var model: InventoryModel
     @State private var search = ""
-    @State private var path: [Draft] = []
+    @State private var path: [ListingSummary] = []
     @State private var showingNewListing = false
-    @State private var createdDraft: Draft?
+    @State private var createdListing: ListingSummary?
+    @State private var renaming: ListingSummary?
+    @State private var newTitle = ""
+    @State private var deleting: ListingSummary?
 
     init(api: AnteroomAPI) {
         _model = State(initialValue: InventoryModel(api: api))
     }
 
     var body: some View {
+        @Bindable var model = model
+        let counts = model.counts(search: search)
+        let rows = model.rows(search: search)
         NavigationStack(path: $path) {
             List {
-                Section {
-                    ForEach(model.drafts) { draft in
-                        NavigationLink(value: draft) {
-                            DraftRow(api: model.api, draft: draft)
-                        }
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                ForEach(rows) { listing in
+                    NavigationLink(value: listing) {
+                        ListingRow(api: model.api, listing: listing)
                     }
-                    if model.canLoadMore {
-                        Button("Load more") {
-                            Task { await model.loadMore(search: search) }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                    .swipeActions(edge: .trailing) {
+                        Button("Delete", systemImage: "trash") { deleting = listing }
+                            .tint(.red)
+                        Button("Rename", systemImage: "pencil") {
+                            newTitle = listing.title ?? ""
+                            renaming = listing
                         }
-                        .disabled(model.isLoading)
                     }
-                } header: {
-                    Text(search.isEmpty ? "Drafts" : "Search results")
-                        .font(.caption.weight(.semibold))
-                        .textCase(nil)
+                    .contextMenu {
+                        Button("Rename", systemImage: "pencil") {
+                            newTitle = listing.title ?? ""
+                            renaming = listing
+                        }
+                        Button("Delete", systemImage: "trash", role: .destructive) { deleting = listing }
+                    }
                 }
             }
             .listStyle(.plain)
-            .overlay { emptyState }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                StatusTabs(tabs: model.tabs(counts: counts), counts: counts, selection: $model.filters.status)
+            }
+            .overlay { emptyState(rows: rows) }
             .navigationTitle("Inventory")
             .navigationBarTitleDisplayMode(.inline)
             .scrollContentBackground(.hidden)
             .background(WorkspaceStyle.sidebar)
             .toolbarBackground(WorkspaceStyle.sidebar, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .searchable(text: $search, prompt: "Search titles")
-            .refreshable { await model.reload(search: search) }
-            .task(id: search) {
-                // Wait for typing to pause; a newer keystroke cancels this one.
-                if !search.isEmpty {
-                    do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
-                }
-                await model.reload(search: search)
-            }
+            .searchable(text: $search, prompt: "Search title or SKU")
+            .refreshable { await model.reload() }
+            .task { if !model.hasLoaded { await model.reload() } }
             .toolbar {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    filterMenu
+                    sortMenu
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("New listing", systemImage: "plus") { showingNewListing = true }
                         .frame(minWidth: 44, minHeight: 44)
                         .accessibilityHint("Create a draft, then add photos and item details")
                 }
             }
-            .sheet(isPresented: $showingNewListing, onDismiss: openCreatedDraft) {
-                NewListingView(api: model.api) { draft in
-                    model.didSave(draft)
-                    createdDraft = draft
+            .sheet(isPresented: $showingNewListing, onDismiss: openCreatedListing) {
+                NewListingView(api: model.api) { listing in
+                    model.created(listing)
+                    createdListing = listing
                 }
             }
-            .alert("Couldn't load drafts", isPresented: errorShown) {
+            .alert("Rename listing", isPresented: renameShown) {
+                TextField("Title", text: $newTitle)
+                Button("Cancel", role: .cancel) {}
+                Button("Rename") {
+                    let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let listing = renaming, !title.isEmpty { Task { await model.rename(listing, to: title) } }
+                }
+            }
+            .confirmationDialog(deleteTitle, isPresented: deleteShown, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    if let listing = deleting { Task { await model.delete(listing) } }
+                }
+            } message: {
+                Text("This removes the listing and its photos from Anteroom.")
+            }
+            .alert("Something went wrong", isPresented: errorShown) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(model.error ?? "")
             }
-            .navigationDestination(for: Draft.self) { draft in
-                DraftEditorView(api: model.api, draft: draft, onSaved: model.didSave)
+            .navigationDestination(for: ListingSummary.self) { listing in
+                ListingEditorView(api: model.api, listing: listing) { Task { await model.reload() } }
             }
         }
     }
 
+    private var filterMenu: some View {
+        let source = model.facetSource(search: search)
+        let options = model.marketplaceOptions()
+        let counts = InventoryQuery.marketplaceCounts(source, options: options, notListed: model.filters.notListed)
+        return Menu {
+            Section(model.filters.notListed ? "Not listed on" : "Marketplaces") {
+                ForEach(options, id: \.self) { id in
+                    Toggle(isOn: Binding(get: { model.filters.marketplaces.contains(id) },
+                                         set: { _ in model.toggleMarketplace(id) })) {
+                        Text("\(Marketplaces.name(id))  \(counts[id] ?? 0)")
+                    }
+                }
+                if options.isEmpty {
+                    Text("No listing is live on a marketplace yet")
+                }
+            }
+            Section {
+                Toggle(isOn: Binding(get: { model.filters.notListed }, set: { model.filters.notListed = $0 })) {
+                    Text("Not listed  \(InventoryQuery.notListedCount(source))")
+                }
+            }
+            if model.filters.activeCount > 0 {
+                Button("Clear filters", role: .destructive) {
+                    model.filters.marketplaces = []
+                    model.filters.notListed = false
+                }
+            }
+        } label: {
+            Label(model.filters.activeCount > 0 ? "Filters (\(model.filters.activeCount))" : "Filters",
+                  systemImage: model.filters.activeCount > 0
+                      ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        }
+        .menuActionDismissBehavior(.disabled)
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel(model.filters.activeCount > 0 ? "Filters, \(model.filters.activeCount) on" : "Filters")
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort listings", selection: Binding(get: { model.filters.sort }, set: { model.filters.sort = $0 })) {
+                ForEach(ListingSort.allCases) { sort in Text(sort.label).tag(sort) }
+            }
+        } label: {
+            Label("Sort", systemImage: "arrow.up.arrow.down")
+        }
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel("Sort listings, \(model.filters.sort.label)")
+    }
+
     @ViewBuilder
-    private var emptyState: some View {
-        if model.drafts.isEmpty && model.hasLoaded {
-            if search.isEmpty {
+    private func emptyState(rows: [ListingSummary]) -> some View {
+        if rows.isEmpty && model.hasLoaded {
+            if model.listings.isEmpty {
                 ContentUnavailableView {
                     Label("Your inventory starts here", systemImage: "tag")
                 } description: {
@@ -89,8 +163,17 @@ struct InventoryView: View {
                         .buttonStyle(.borderedProminent)
                         .frame(minHeight: 44)
                 }
-            } else {
+            } else if !search.isEmpty {
                 ContentUnavailableView.search(text: search)
+            } else {
+                ContentUnavailableView {
+                    Label("No matching listings", systemImage: "line.3.horizontal.decrease.circle")
+                } actions: {
+                    if model.filters.activeCount > 0 || model.filters.status != .all {
+                        Button("Show all listings") { model.filters = InventoryFilters(sort: model.filters.sort) }
+                            .frame(minHeight: 44)
+                    }
+                }
             }
         } else if !model.hasLoaded, model.error != nil {
             ContentUnavailableView {
@@ -98,7 +181,7 @@ struct InventoryView: View {
             } description: {
                 Text("Check your connection and try again.")
             } actions: {
-                Button("Try again") { Task { await model.reload(search: search) } }
+                Button("Try again") { Task { await model.reload() } }
                     .disabled(model.isLoading)
                     .buttonStyle(.borderedProminent)
                     .frame(minHeight: 44)
@@ -112,23 +195,69 @@ struct InventoryView: View {
         Binding(get: { model.hasLoaded && model.error != nil }, set: { if !$0 { model.error = nil } })
     }
 
-    private func openCreatedDraft() {
-        guard let draft = createdDraft else { return }
-        createdDraft = nil
-        path.append(draft)
+    private var renameShown: Binding<Bool> {
+        Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
     }
 
+    private var deleteShown: Binding<Bool> {
+        Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
+    }
+
+    private var deleteTitle: String {
+        "Delete \"\(deleting?.displayTitle ?? "")\"?"
+    }
+
+    private func openCreatedListing() {
+        guard let listing = createdListing else { return }
+        createdListing = nil
+        path.append(listing)
+    }
 }
 
-struct DraftRow: View {
-    let api: AnteroomAPI
-    let draft: Draft
-    @State private var coverID: String?
+/// All / Draft / Active / Sold (and Failed while anything failed), with counts.
+private struct StatusTabs: View {
+    let tabs: [StatusTab]
+    let counts: [StatusTab: Int]
+    @Binding var selection: StatusTab
 
     var body: some View {
-        InventoryRowContent(title: draft.displayTitle, updated: draft.updatedDate) {
-            if let coverID {
-                RemotePhoto(api: api, draftID: draft.id, photoID: coverID, maxPixels: 96)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(tabs) { tab in
+                    let count = counts[tab] ?? 0
+                    Button {
+                        selection = tab
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(tab.label).fontWeight(.medium)
+                            Text(InventoryQuery.compactCount(count)).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 36)
+                        .background(selection == tab ? WorkspaceStyle.surface : .clear, in: Capsule())
+                        .overlay(Capsule().stroke(selection == tab ? WorkspaceStyle.border : .clear, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minHeight: 44)
+                    .accessibilityLabel("\(tab.label), \(count) listings")
+                    .accessibilityAddTraits(selection == tab ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .background(WorkspaceStyle.sidebar)
+    }
+}
+
+struct ListingRow: View {
+    let api: AnteroomAPI
+    let listing: ListingSummary
+
+    var body: some View {
+        ListingRowContent(listing: listing) {
+            if let cover = listing.coverPhotoID {
+                RemotePhoto(api: api, photoID: cover, maxPixels: 96)
             } else {
                 Image(systemName: "photo")
                     .foregroundStyle(.secondary)
@@ -136,21 +265,16 @@ struct DraftRow: View {
                     .background(WorkspaceStyle.surface)
             }
         }
-        .task(id: draft.updatedAt) {
-            // Load only visible rows. Photo failures don't hide a listing.
-            coverID = try? await api.photos(draftID: draft.id).first?.id
-        }
     }
 }
 
-struct InventoryRowContent<Thumbnail: View>: View {
-    let title: String
-    let updated: Date?
+/// The desktop row: cover, name, colored lifecycle word, then where it is live.
+struct ListingRowContent<Thumbnail: View>: View {
+    let listing: ListingSummary
     let thumbnail: Thumbnail
 
-    init(title: String, updated: Date?, @ViewBuilder thumbnail: () -> Thumbnail) {
-        self.title = title
-        self.updated = updated
+    init(listing: ListingSummary, @ViewBuilder thumbnail: () -> Thumbnail) {
+        self.listing = listing
         self.thumbnail = thumbnail()
     }
 
@@ -161,22 +285,44 @@ struct InventoryRowContent<Thumbnail: View>: View {
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(WorkspaceStyle.border, lineWidth: 1))
+                .opacity(listing.settledAt == nil ? 1 : 0.6)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.subheadline.weight(.medium)).lineLimit(2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(listing.displayTitle).font(.subheadline.weight(.medium)).lineLimit(2)
                 HStack(spacing: 6) {
-                    Text("Draft")
-                    if let updated {
-                        Text("·").accessibilityHidden(true)
-                        Text(updated, format: .relative(presentation: .named))
+                    Text(listing.statusLabel).fontWeight(.medium).foregroundStyle(statusColor)
+                    if let price = listing.price {
+                        Text(price, format: .currency(code: "USD")).foregroundStyle(.secondary)
+                    }
+                    if let sku = listing.sku, !sku.isEmpty {
+                        Text(sku).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                let live = listing.liveMarketplaces
+                if !live.isEmpty {
+                    Text(live.map(Marketplaces.name).joined(separator: " · "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .accessibilityLabel("Listed on \(live.map(Marketplaces.name).joined(separator: ", "))")
+                }
             }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
+    }
+
+    private var statusColor: Color {
+        switch listing.inventoryStatus {
+        case "draft": .orange
+        case "in_progress": .teal
+        case "listing": .purple
+        case "active": .green
+        case "sold": WorkspaceStyle.accent
+        case "failed": .red
+        default: .secondary
+        }
     }
 }

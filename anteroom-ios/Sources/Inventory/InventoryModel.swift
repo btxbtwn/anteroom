@@ -5,24 +5,24 @@ import Observation
 @Observable
 final class InventoryModel {
     let api: AnteroomAPI
-    private(set) var drafts: [Draft] = []
+    private(set) var listings: [ListingSummary] = []
+    private(set) var preferredMarketplaces: [String] = []
     private(set) var isLoading = false
     private(set) var hasLoaded = false
-    private(set) var canLoadMore = false
+    var filters = InventoryFilters()
     var error: String?
 
     init(api: AnteroomAPI) {
         self.api = api
     }
 
-    func reload(search: String) async {
+    func reload() async {
         isLoading = true
         defer { isLoading = false }
         do {
-            let page = try await api.drafts(offset: 0, search: search)
+            let rows = try await api.listings()
             try Task.checkCancellation()
-            drafts = page
-            canLoadMore = page.count == AnteroomAPI.pageSize
+            listings = rows
             hasLoaded = true
             error = nil
         } catch is CancellationError {
@@ -30,25 +30,61 @@ final class InventoryModel {
         } catch {
             self.error = error.localizedDescription
         }
+        // The filter menu still works from the inventory alone if this fails.
+        if let selected = try? await api.selectedMarketplaces() { preferredMarketplaces = selected }
     }
 
-    func loadMore(search: String) async {
-        guard canLoadMore, !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
+    func rows(search: String) -> [ListingSummary] {
+        InventoryQuery.rows(listings, search: search, filters: filters)
+    }
+
+    func counts(search: String) -> [StatusTab: Int] {
+        InventoryQuery.counts(listings, search: search)
+    }
+
+    /// Tabs in desktop order; Failed only appears while something failed.
+    func tabs(counts: [StatusTab: Int]) -> [StatusTab] {
+        StatusTab.allCases.filter { $0 != .failed || (counts[.failed] ?? 0) > 0 || filters.status == .failed }
+    }
+
+    /// Facet counts are taken over the tab in front of the seller.
+    func facetSource(search: String) -> [ListingSummary] {
+        let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return listings.filter { InventoryQuery.matchesSearch($0, needle) && InventoryQuery.inTab($0, filters.status) }
+    }
+
+    func marketplaceOptions() -> [String] {
+        InventoryQuery.marketplaceOptions(listings, preferred: preferredMarketplaces, includeUnused: filters.notListed)
+    }
+
+    func toggleMarketplace(_ id: String) {
+        if let index = filters.marketplaces.firstIndex(of: id) {
+            filters.marketplaces.remove(at: index)
+        } else {
+            filters.marketplaces.append(id)
+        }
+    }
+
+    func created(_ listing: ListingSummary) {
+        listings.removeAll { $0.id == listing.id }
+        listings.insert(listing, at: 0)
+    }
+
+    func rename(_ listing: ListingSummary, to title: String) async {
         do {
-            let page = try await api.drafts(offset: drafts.count, search: search)
-            let known = Set(drafts.map(\.id))
-            drafts += page.filter { !known.contains($0.id) }
-            canLoadMore = page.count == AnteroomAPI.pageSize
+            try await api.rename(listing.id, title: title)
+            await reload()
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    /// Moves a saved draft to the top, matching the server's newest-first order.
-    func didSave(_ draft: Draft) {
-        drafts.removeAll { $0.id == draft.id }
-        drafts.insert(draft, at: 0)
+    func delete(_ listing: ListingSummary) async {
+        do {
+            try await api.deleteListing(listing.id)
+            listings.removeAll { $0.id == listing.id }
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
