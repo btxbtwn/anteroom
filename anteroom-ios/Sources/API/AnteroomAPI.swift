@@ -125,6 +125,25 @@ final class AnteroomAPI: Sendable {
         throw APIError(status: 0, message: "The connection ended. Reconnect to check your draft before trying again.")
     }
 
+    // MARK: Shared listing history
+
+    func revisions(_ id: String) async throws -> [ListingRevision] {
+        try await decode(request("GET", "api/conversations/\(id)/revisions"))
+    }
+
+    func revisionPointer(_ id: String) async throws -> ListingRevisionPointer {
+        try await decode(request("GET", "api/conversations/\(id)/listing"))
+    }
+
+    func revision(_ id: String, revisionID: String) async throws -> RevisionSnapshot {
+        try await decode(request("GET", "api/conversations/\(id)/revisions/\(revisionID)"))
+    }
+
+    func restoreRevision(_ id: String, revisionID: String, expectedRevisionID: String) async throws {
+        _ = try await send(request("POST", "api/conversations/\(id)/revisions/\(revisionID)/restore",
+                                   json: ["expected_revision_id": expectedRevisionID]))
+    }
+
     // MARK: Transport
 
     private func request(_ method: String, _ path: String, query: [URLQueryItem] = []) async throws -> URLRequest {
