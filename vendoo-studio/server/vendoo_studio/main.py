@@ -28,12 +28,21 @@ from vendoo_studio.routes import listing_videos
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from vendoo_studio import sandbox
+
+    # Sandbox mode keeps everything on this machine: no timers that crawl
+    # suppliers, fill categories with a model, run automations or talk to
+    # marketplaces and the relay.
+    offline = sandbox.enabled()
+    if offline:
+        sandbox.install()
     from vendoo_studio.services.error_log import install as install_error_log
 
     install_error_log()
     from vendoo_studio.services import tailscale_serve
 
-    await asyncio.to_thread(tailscale_serve.status)
+    if not offline:
+        await asyncio.to_thread(tailscale_serve.status)
     init_db()
     try:
         from vendoo_studio.services.keychain import warm_keychain
@@ -57,7 +66,8 @@ async def lifespan(app: FastAPI):
         pass
     try:
         from vendoo_studio.services.box_scout import start_sourcing_timer
-        start_sourcing_timer()
+        if not offline:
+            start_sourcing_timer()
     except Exception:
         pass
     try:
@@ -67,12 +77,14 @@ async def lifespan(app: FastAPI):
         pass
     try:
         from vendoo_studio.services.native_field_fill import start_category_fills
-        start_category_fills()
+        if not offline:
+            start_category_fills()
     except Exception:
         pass
     try:
         from vendoo_studio.services.automation_scheduler import start_automation_scheduler
-        start_automation_scheduler()
+        if not offline:
+            start_automation_scheduler()
     except Exception:
         pass
     try:
@@ -96,18 +108,21 @@ async def lifespan(app: FastAPI):
         pass
     try:
         from vendoo_studio.services.marketplace_accounts import start_listening
-        start_listening()
+        if not offline:
+            start_listening()
     except Exception:
         pass
     try:
         from vendoo_studio.services.chrome_sales import start_chrome_sales
-        start_chrome_sales()
+        if not offline:
+            start_chrome_sales()
     except Exception:
         pass
     from vendoo_studio.providers import chatgpt_codex, claude_sessions
 
     from vendoo_studio.services import ebay_offers as offer_service
-    offer_service.start()
+    if not offline:
+        offer_service.start()
     from vendoo_studio.services.ebay_actions import recover as recover_ebay_actions
     with SessionLocal() as db:
         recover_ebay_actions(db)
@@ -116,7 +131,8 @@ async def lifespan(app: FastAPI):
         # A share or offer that was sending when Anteroom stopped is unknown, never resent.
         recover_promotions(db)
     from vendoo_studio.services import promotion_automations as promotion_automation_service
-    promotion_automation_service.start()
+    if not offline:
+        promotion_automation_service.start()
 
     claude_sessions.keep_warm_on_this_loop()
     chatgpt_codex.keep_connection_on_this_loop()
@@ -175,6 +191,26 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+class _SandboxMiddleware:
+    """In sandbox mode, refuse anything that would change a live listing or leave the machine."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            from vendoo_studio import sandbox
+
+            reason = sandbox.enabled() and sandbox.refusal(scope.get("method") or "GET", scope.get("path") or "")
+            if reason and scope["type"] == "websocket":
+                await send({"type": "websocket.close", "code": 1008, "reason": reason})
+                return
+            if reason:
+                await JSONResponse({"detail": reason}, status_code=403)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 class _VendooOffMiddleware:
     """Answer Vendoo routes with 409 while the seller has Vendoo turned off.
 
@@ -198,6 +234,7 @@ class _VendooOffMiddleware:
         await self.app(scope, receive, send)
 
 
+app.add_middleware(_SandboxMiddleware)
 app.add_middleware(_VendooOffMiddleware)
 app.add_middleware(
     CORSMiddleware,
