@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.598 — 2026-10-31
+## 0.1.599 — 2026-10-31
 
 - Changing the general category now sets each marketplace tab's category from that marketplace's own list. When a marketplace has no match, its old category is cleared so you pick one there, instead of it keeping the category from before.
+
+## 0.1.598 — 2026-10-31
+
+- On the web, select listings and choose Delete to remove unsent drafts in one go. You review the list first, and anything already sent, still generating, or changed since you reviewed it is left alone.
 
 ## 0.1.597 — 2026-10-31
 
