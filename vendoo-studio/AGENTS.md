@@ -75,6 +75,10 @@ add to a record to make a check pass.
 - Most recorded type errors come from models declared with `Column(...)`.
   Moving a model to `Mapped[...] = mapped_column(...)` clears its errors.
   Autogenerate an Alembic revision afterwards: it must come out empty.
+- Until every model has moved, the type check reports but does not fail CI,
+  because setting a `Column(...)` field in new code reads as an error. Still
+  fix the errors it reports in code you wrote. The PR that finishes the move
+  makes the check fail on new errors again.
 - Most layer exceptions are services importing `routes/extension.py` for the
   extension connection. Moving that connection into a service removes them.
 

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.603 — 2026-10-31
+
+- Behind the scenes: new automatic checks catch type mistakes, code that nothing uses any more, and code in the wrong layer before a change ships. Nothing changes in the app.
+
 ## 0.1.602 — 2026-10-31
 
 - A marketplace that said it needs a field, like Vinted asking for a category, stops saying so once you or chat change that field. Press List to check it again.
