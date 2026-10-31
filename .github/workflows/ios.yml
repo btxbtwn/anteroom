@@ -65,6 +65,8 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen
+      # Archive unsigned: development signing would need a registered device.
+      # The export below signs for App Store distribution with the API key.
       - name: Archive
         run: |
           set -o pipefail
@@ -73,10 +75,7 @@ jobs:
             -scheme Anteroom \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Anteroom.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/asc.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             SUPABASE_PUBLISHABLE_KEY=${{ vars.SUPABASE_PUBLISHABLE_KEY }}
       - name: Upload
