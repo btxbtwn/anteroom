@@ -1,7 +1,7 @@
 """Drop size fields Sellwild and Vinted forms do not have
 
 Revision ID: c7e2a41d9b05
-Revises: 56b5ee7250ec
+Revises: b4e9d2c7a813
 Create Date: 2026-10-31 01:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = 'c7e2a41d9b05'
-down_revision = '56b5ee7250ec'
+down_revision = 'b4e9d2c7a813'
 branch_labels = None
 depends_on = None
 

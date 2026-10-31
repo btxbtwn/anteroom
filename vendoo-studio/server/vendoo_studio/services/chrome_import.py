@@ -223,6 +223,11 @@ def snapshot(marketplace: str, listing: dict) -> tuple[dict, list[str]]:
         out["marketplace_categories"] = {marketplace: category}
     if category_id:
         out["marketplace_category_ids"] = {marketplace: category_id}
+        # The marketplace's own category is the one its tab shows.
+        if marketplace in {"poshmark", "depop", "mercari"}:
+            out["direct_category_ids"] = {marketplace: category_id}
+    if marketplace == "vinted" and category:
+        out["vinted_specifics"] = {"category": category}
     if marketplace == "sellwild":
         specifics = {key: int(value) for key, value in (("nativeCategoryId", category_id), ("nativeConditionId", listing.get("condition")))
                      if str(value or "").isdigit()}

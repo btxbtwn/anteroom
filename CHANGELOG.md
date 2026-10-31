@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.606 — 2026-10-31
+## 0.1.607 — 2026-10-31
 
 - Pants and jeans no longer get a Size or Size Type on Sellwild, or a Size Type on Vinted, since those forms have no such fields. Listings that already had one are cleaned up, so the "This field is not provided by the selected marketplace form" warning goes away.
 - The Sellwild tab no longer shows a "Reload Sellwild choices" link. Your address, discounts and packages still load on their own after you sign in.
+
+## 0.1.606 — 2026-10-31
+
+- The eBay, Etsy, Poshmark, Depop and Mercari tabs now show only their own category. They no longer show the category Vendoo saved, which could be out of date after you changed the general category. Drafts you already have keep the category each tab showed.
 
 ## 0.1.605 — 2026-10-31
 

@@ -1,0 +1,195 @@
+import PhotosUI
+import SwiftUI
+
+/// The draft's photos in a horizontal row, with buttons to add from the camera
+/// or library. Photos save as soon as they upload, separately from Save.
+struct PhotoStrip: View {
+    let api: AnteroomAPI
+    let draftID: String
+
+    @State private var photos: [DraftPhoto] = []
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var uploading = 0
+    @State private var showingCamera = false
+    @State private var error: String?
+
+    private static let limit = 30
+    private let thumbSize: CGFloat = 96
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 8) {
+                    ForEach(photos) { photo in
+                        RemotePhoto(api: api, draftID: draftID, photoID: photo.id, maxPixels: 300)
+                            .frame(width: thumbSize, height: thumbSize)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .contextMenu {
+                                Button("Delete photo", systemImage: "trash", role: .destructive) {
+                                    delete(photo)
+                                }
+                            }
+                    }
+                    ForEach(0..<uploading, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.quaternary)
+                            .frame(width: thumbSize, height: thumbSize)
+                            .overlay { ProgressView() }
+                    }
+                }
+            }
+            .frame(height: photos.isEmpty && uploading == 0 ? 0 : thumbSize)
+
+            HStack {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("Camera", systemImage: "camera") { showingCamera = true }
+                        .buttonStyle(.bordered)
+                }
+                PhotosPicker(selection: $picked, maxSelectionCount: remaining, matching: .images) {
+                    Label("Library", systemImage: "photo.on.rectangle")
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+                Text("\(photos.count)/\(Self.limit)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(remaining == 0)
+
+            if let error {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(.vertical, 4)
+        .task { await load() }
+        .onChange(of: picked) { _, items in
+            guard !items.isEmpty else { return }
+            picked = []
+            Task { await upload(items) }
+        }
+        .fullScreenCover(isPresented: $showingCamera) {
+            CameraPicker { data in
+                Task { await upload([data]) }
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    private var remaining: Int { max(0, Self.limit - photos.count - uploading) }
+
+    private func load() async {
+        do {
+            photos = try await api.photos(draftID: draftID)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func upload(_ items: [PhotosPickerItem]) async {
+        uploading += items.count
+        for item in items {
+            defer { uploading -= 1 }
+            guard let data = try? await item.loadTransferable(type: Data.self) else {
+                error = "Couldn't read one of the photos."
+                continue
+            }
+            await send(data)
+        }
+    }
+
+    private func upload(_ captured: [Data]) async {
+        uploading += captured.count
+        for data in captured {
+            defer { uploading -= 1 }
+            await send(data)
+        }
+    }
+
+    private func send(_ original: Data) async {
+        let jpeg = await Task.detached(priority: .userInitiated) {
+            PhotoPreparer.jpeg(from: original)
+        }.value
+        guard let jpeg else {
+            error = "That photo couldn't be opened."
+            return
+        }
+        do {
+            photos.append(try await api.uploadPhoto(draftID: draftID, jpeg: jpeg))
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func delete(_ photo: DraftPhoto) {
+        Task {
+            do {
+                try await api.deletePhoto(draftID: draftID, photoID: photo.id)
+                photos.removeAll { $0.id == photo.id }
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+}
+
+/// Loads a photo with the seller's token; the photo URLs are not public.
+struct RemotePhoto: View {
+    let api: AnteroomAPI
+    let draftID: String
+    let photoID: String
+    let maxPixels: Int
+
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.quaternary)
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else if failed {
+                Image(systemName: "photo").foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+            }
+        }
+        .task(id: photoID) { await load() }
+    }
+
+    private func load() async {
+        let key = "\(photoID)@\(maxPixels)" as NSString
+        if let cached = PhotoCache.images.object(forKey: key) {
+            image = cached
+            return
+        }
+        do {
+            let data = try await api.photoData(draftID: draftID, photoID: photoID)
+            let size = maxPixels
+            let decoded = await Task.detached(priority: .userInitiated) {
+                PhotoPreparer.thumbnail(from: data, maxPixels: size)
+            }.value
+            if let decoded {
+                PhotoCache.images.setObject(decoded, forKey: key)
+                image = decoded
+            } else {
+                failed = true
+            }
+        } catch {
+            failed = true
+        }
+    }
+}
+
+@MainActor
+enum PhotoCache {
+    static let images: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 200
+        return cache
+    }()
+}

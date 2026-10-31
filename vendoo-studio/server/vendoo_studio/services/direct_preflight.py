@@ -61,8 +61,7 @@ def gap(field_path: str, message: str, *, blocking: bool = True) -> dict:
 
 
 _GAP_FIXES = {
-    "marketplace_category_ids.mercari": "anteroom conversations fields --conv-id CONV --path marketplace_category_ids.mercari --value CATEGORY_ID",
-    "direct_category_ids.mercari": "anteroom conversations fields --conv-id CONV --path marketplace_category_ids.mercari --value CATEGORY_ID",
+    "direct_category_ids.mercari": "anteroom conversations fields --conv-id CONV --path direct_category_ids.mercari --value CATEGORY_ID",
     "mercari_specifics.size": "anteroom conversations fields --conv-id CONV --path mercari_specifics.size --value M",
     "mercari_specifics.package.fitsShoebox": "anteroom conversations fields --conv-id CONV --path mercari_specifics.package.fitsShoebox --value yes",
     "mercari_specifics.package.pounds": "anteroom conversations fields --conv-id CONV --path mercari_specifics.package.pounds --value 1",
@@ -186,21 +185,6 @@ def refusal(marketplace: str, found: list[dict]) -> dict:
     lead = needed[0]["message"] if len(needed) == 1 else f"{name} needs {len(needed)} more details before listing."
     return failure(lead, "missing_fields", safe=True,
                    fields=[{"field": item["field"], "message": item["message"]} for item in needed])
-
-
-def seeded_subcategories(db: Session | None, marketplace: str, *, category_id: str = "", path: str = "") -> list[str]:
-    """Labels under a stored category, by id or path. Empty for a leaf or a node the tree does not know."""
-    if db is None or not (category_id or path):
-        return []
-    from vendoo_studio.models.catalog import CategoryTreeNode
-
-    query = db.query(CategoryTreeNode).filter_by(marketplace=marketplace)
-    node = (query.filter_by(category_id=str(category_id)) if category_id else query.filter_by(path=path)).first()
-    if node is None or not node.has_children:
-        return []
-    children = (db.query(CategoryTreeNode).filter_by(marketplace=marketplace, parent_id=node.category_id)
-                .order_by(CategoryTreeNode.category_id).all())
-    return [child.label for child in children if child.label]
 
 
 def seeded_leaf(db: Session | None, marketplace: str, category_id: str) -> bool | None:

@@ -71,22 +71,21 @@ class ChromePreflightTest(unittest.TestCase):
         self.assertEqual(poshmark_color_name("Beige"), "Tan")
 
     def test_a_missing_parcel_or_a_parent_category_holds_list_off(self):
-        depop = depop_requirements({"marketplace_category_ids": {"depop": "menswear_tshirts"}}, Context())
+        depop = depop_requirements({"direct_category_ids": {"depop": "menswear_tshirts"}}, Context())
         self.assertTrue(any(gap["field"] == "depop_specifics.parcelSize" and gap["blocking"] for gap in depop))
         titled = depop_requirements({
             "depop_specifics": {"parcelSize": "Under 1lb"},
-            "marketplace_category_ids": {"depop": "menswear_tshirts"},
+            "direct_category_ids": {"depop": "menswear_tshirts"},
         }, Context())
         self.assertTrue(any("does not offer" in gap["message"] and gap["blocking"] for gap in titled))
         known = depop_requirements({
             "depop_specifics": {"parcelSize": "Medium"},
-            "marketplace_category_ids": {"depop": "menswear_tshirts"},
+            "direct_category_ids": {"depop": "menswear_tshirts"},
         }, Context())
         self.assertFalse(any("does not offer" in gap["message"] for gap in known))
         mercari = mercari_requirements({
             "description": "Soft cotton",
-            "marketplace_category_ids": {"mercari": "1885"},
-            "form": {"overrides": {"categoryV2": {"id": "1885", "hasChildren": True}}},
+            "direct_category_ids": {"mercari": "1885"},
         }, Context())
         self.assertTrue(any(gap["blocking"] and "subcategories" in gap["message"] for gap in mercari))
 
@@ -134,7 +133,7 @@ class ChromePreflightTest(unittest.TestCase):
         rows = [{"name": "Sleeve Length", "required": True, "mode": "selection", "multi": False, "max_length": None,
                  "values": [{"label": "Short"}]}]
         listing = {"title": "Tee", "description": "Soft cotton tee", "price": "12", "quantity": 1,
-                   "weight_oz": 8, "marketplace_category_ids": {"ebay": "15687"}}
+                   "weight_oz": 8, "direct_category_ids": {"ebay": "15687"}}
         with patch("vendoo_studio.services.category_fields.load_rows", return_value=rows):
             gaps = ebay_requirements(listing, Context())
         self.assertTrue(any(gap["field"].endswith("Sleeve Length") and gap["blocking"] for gap in gaps))
@@ -194,44 +193,24 @@ class ChromeCatalogTest(unittest.TestCase):
 
 
 class MercariParentCategoryTest(unittest.TestCase):
-    """Mercari lists a parent category with no size, so List holds it off, stored id or not."""
-
-    def setUp(self):
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import Session
-
-        from vendoo_studio.database import Base
-        from vendoo_studio.models.catalog import CategoryTreeNode
-
-        engine = create_engine("sqlite://")
-        Base.metadata.create_all(engine)
-        self.db = Session(engine)
-        for cid, parent, path, children in (
-            ("1881", "3", "Kids > Boys coats & jackets", True),
-            ("1915", "1881", "Kids > Boys coats & jackets > Boys 0-24 mos", False),
-            ("1923", "1881", "Kids > Boys coats & jackets > Boys 2T-5T", False),
-            ("1931", "1881", "Kids > Boys coats & jackets > Boys (4+)", False),
-        ):
-            self.db.add(CategoryTreeNode(marketplace="mercari", category_id=cid, parent_id=parent, label=path.split(" > ")[-1],
-                                         path=path, is_leaf=True, has_children=children, children_loaded=True))
-        self.db.commit()
-
-    def tearDown(self):
-        self.db.close()
+    """Mercari lists a parent category with no size, so List holds it off."""
 
     def _gaps(self, **listing):
         listing.setdefault("mercari_specifics", {
             "shipsFrom": "70125", "shippingClassId": "2550", "package": {"fitsShoebox": "no", "pounds": 1},
         })
-        return mercari_requirements({"description": "Windbreaker", **listing}, Context(db=self.db))
+        return mercari_requirements({"description": "Windbreaker", **listing}, Context())
 
     def test_a_stored_parent_id_is_refused_and_its_subcategories_named(self):
-        for listing in ({"direct_category_ids": {"mercari": "1881"}},
-                        {"marketplace_category_ids": {"mercari": "1881"},
-                         "form": {"overrides": {"categoryV2": {"id": "1881", "isLeaf": True}}}},
-                        {"marketplace_categories": {"mercari": "Kids > Boys coats & jackets"}}):
+        gaps = self._gaps(direct_category_ids={"mercari": "1881"})
+        self.assertTrue(any(gap["blocking"] and "Boys 0-24 mos, Boys 2T-5T, Boys (4+)" in gap["message"] for gap in gaps), gaps)
+
+    def test_vendoos_mercari_category_is_not_the_tabs(self):
+        for listing in ({"marketplace_category_ids": {"mercari": "1931"},
+                         "form": {"overrides": {"categoryV2": {"id": "1931", "isLeaf": True}}}},
+                        {"marketplace_categories": {"mercari": "Kids > Boys coats & jackets > Boys (4+)"}}):
             gaps = self._gaps(**listing)
-            self.assertTrue(any(gap["blocking"] and "Boys 0-24 mos, Boys 2T-5T, Boys (4+)" in gap["message"]
+            self.assertTrue(any(gap["field"] == "direct_category_ids.mercari" and gap["message"] == "Mercari needs a category."
                                 for gap in gaps), listing)
 
     def test_a_sized_leaf_no_longer_needs_vendoos_size_list(self):

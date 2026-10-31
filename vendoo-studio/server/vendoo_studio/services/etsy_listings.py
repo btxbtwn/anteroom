@@ -228,9 +228,9 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
                         if not value])
     from vendoo_studio.services.direct_categories import direct_category_id
 
-    category = direct_category_id(snapshot, "etsy") or str((snapshot.get("marketplace_category_ids") or {}).get("etsy") or "")
+    category = direct_category_id(snapshot, "etsy")
     if not re.fullmatch(r"[1-9]\d*", category):
-        raise missing("Choose a verified Etsy category before listing.", "marketplace_category_ids.etsy")
+        raise missing("Choose a verified Etsy category before listing.", "direct_category_ids.etsy")
     # Like the Vendoo path: is_supply is Etsy's "What is it?" answer, a supply or tool.
     fields.update(quantity=str(etsy_quantity(snapshot)), who_made=who, when_made=when, is_supply="true" if what == "1" else "false",
                   taxonomy_id=category, type="physical", should_auto_renew="false")
@@ -274,7 +274,7 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
                   else "Etsy allows %, :, & and + once each and no emoji or special symbols")
         found.append(gap("title", f"{reason}, so Etsy gets: {fields['title']}", blocking=False))
     if seeded_leaf(context.db, "etsy", fields["taxonomy_id"]) is False:
-        found.append(gap("marketplace_category_ids.etsy", "That Etsy category has subcategories. Choose the most specific one."))
+        found.append(gap("direct_category_ids.etsy", "That Etsy category has subcategories. Choose the most specific one."))
     found.extend(_cached_property_gaps(snapshot))
     return found
 
@@ -285,7 +285,7 @@ def _cached_property_gaps(snapshot: dict) -> list[dict]:
     from vendoo_studio.services.direct_categories import direct_category_id
     from vendoo_studio.services.marketplace_schemas import ETSY_PROPERTIES
 
-    category = direct_category_id(snapshot, "etsy") or str((snapshot.get("marketplace_category_ids") or {}).get("etsy") or "")
+    category = direct_category_id(snapshot, "etsy")
     if not re.fullmatch(r"[1-9]\d*", category):
         return []
     try:
@@ -440,7 +440,7 @@ def _success(remote: dict) -> dict:
 
 # Etsy's request field names, and where each lives on the listing.
 _FIELD_PATHS = {"shipping_profile_id": "etsy_specifics.shipping_profile_id", "readiness_state_id": "etsy_specifics.readiness_state_id",
-                "return_policy_id": "etsy_specifics.return_policy_id", "taxonomy_id": "marketplace_category_ids.etsy",
+                "return_policy_id": "etsy_specifics.return_policy_id", "taxonomy_id": "direct_category_ids.etsy",
                 "who_made": "etsy_specifics.who_made", "when_made": "etsy_specifics.when_made", "is_supply": "etsy_specifics.what_is",
                 "price": "price", "quantity": "quantity", "title": "title", "description": "description", "image": "photos"}
 
@@ -761,7 +761,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         taxonomy = fields["taxonomy_id"]
         if taxonomy not in await marketplace_schemas.etsy_leaves():
             raise missing("Etsy no longer offers that category, or it has subcategories. Choose a current Etsy category.",
-                          "marketplace_category_ids.etsy")
+                          "direct_category_ids.etsy")
         # Every required category property is answered before anything is written.
         assignments = property_values(snapshot, await marketplace_schemas.etsy_properties(taxonomy))
         if not creating:

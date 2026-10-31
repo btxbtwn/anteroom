@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { loadWorker, reply } = require('./worker-context');
 
 const listing = { title: 'Test jacket', description: 'Private draft', price: 24.6, condition: 'Pre-Owned - Good',
-  marketplace_category_ids: { mercari: '303' }, zipCode: '70125', weight_lb: 0, weight_oz: 10,
+  direct_category_ids: { mercari: '303' }, zipCode: '70125', weight_lb: 0, weight_oz: 10,
   form: { specifics: { shipping: { payerId: 1, carrierId: '2509' } } } };
 // What Mercari's draftItemQuery answers for a draft that kept the label and payer.
 const KEPT = { itemCondition: { id: 3 }, itemCategory: { id: 303 }, shippingPayer: { id: 1 }, shippingClasses: [{ id: 2509 }] };
@@ -225,11 +225,13 @@ test('conditions map to Mercari IDs, and worn items never become Like new', () =
   ]) assert.equal(c.mercariConditionId(condition), id, condition);
 });
 
-test('the Mercari category comes from the listing, or is left for Mercari to ask', () => {
+test('the Mercari category is the one Anteroom stored, never Vendoo\'s', () => {
   const c = loadWorker();
-  assert.equal(c.mercariCategoryId({ marketplace_category_ids: { mercari: '303' } }), 303);
-  assert.equal(c.mercariCategoryId({ mercari_specifics: { categoryId: '27' } }), 27);
-  assert.equal(c.mercariCategoryId({ marketplace_category_ids: { mercari: 'Men > Tops' } }), null);
+  assert.equal(c.mercariCategoryId({ direct_category_ids: { mercari: '303' } }), 303);
+  assert.equal(c.mercariCategoryId({ direct_category_ids: { mercari: 'Men > Tops' } }), null);
+  assert.equal(c.mercariCategoryId({ marketplace_category_ids: { mercari: '303' } }), null);
+  assert.equal(c.mercariCategoryId({ mercari_specifics: { categoryId: '27' } }), null);
+  assert.equal(c.mercariCategoryId({ form: { overrides: { categoryV2: { id: '303' } } } }), null);
 });
 
 test('Mercari needs a package weight, sent in whole ounces', async () => {
@@ -310,7 +312,7 @@ const BOYS_SIZES = [[101, 'XS (4-5)', 'XS'], [102, 'S (6-7)', 'S'], [103, 'M (8)
 const MEN_TOP_SIZES = [[11, 'L (42-44)', 'L', 20], [12, 'XL (46-48)', 'XL', 20], [13, 'XXL (50-52)', 'XXL', 20], [342, 'XL', 'XL', 21],
   [346, 'Big 2X', 'Big 2X', 22]].map(([id, name, title, group]) => ({ id, name, title, group }));
 const clothing = extra => ({ title: 'Boys graphic tee', description: 'Soft cotton tee', price: 18.4, brand: 'Nike', size: 'XL (18/20)',
-  condition: 'Pre-Owned - Good', weight_lb: 0, weight_oz: 7, ...extra,
+  condition: 'Pre-Owned - Good', weight_lb: 0, weight_oz: 7, direct_category_ids: { mercari: '1934' }, ...extra,
   form: { overrides: { condition: '3', brand: 'Nike', categoryV2: { id: '1934', path: ['3', '1885', '1934'], hasChildren: false } },
     specifics: { shipping: { payerId: 1, carrierId: 2508, location: '70115', deliveryMethod: 'mercari_shipping' } },
     aspects: {}, sizes: BOYS_SIZES, ships_from_zip: '70115', ...extra?.form } });
@@ -494,7 +496,7 @@ test('a Mercari listing with no prepaid label stops before any upload rather tha
 test('a Mercari listing Mercari would refuse stops before any upload and names each field', async () => {
   for (const [listing, field] of [[clothing({ size: 'L/XL' }), 'sizeId'], [clothing({ price: 2400 }), 'price'], [clothing({ price: 0.4 }), 'price'],
     [clothing({ description: 'x'.repeat(1001) }), 'description'], [clothing({ weight_lb: 51 }), 'weight'],
-    [clothing({ form: { overrides: { condition: '3', categoryV2: { id: '1885', hasChildren: true } } } }), 'categoryId']]) {
+    [clothing({ direct_category_ids: { mercari: '1885' }, form: { overrides: { condition: '3', categoryV2: { id: '1885', hasChildren: true } } } }), 'categoryId']]) {
     const { c, requests } = worker();
     const result = await c.runMercariNative(message({ listing }));
     assert.equal(result.error_code, 'missing_fields', field);
