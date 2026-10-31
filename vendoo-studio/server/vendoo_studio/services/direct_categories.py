@@ -1,4 +1,4 @@
-"""eBay's and Etsy's own categories, kept beside the Vendoo ones.
+"""Each marketplace's own categories, kept beside the Vendoo ones.
 
 Send to Vendoo keeps ``marketplace_category_ids`` and Vendoo's field names.
 Direct List, generation, and the eBay and Etsy editor sections read
@@ -7,6 +7,7 @@ and that leaf's own fields.
 """
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from typing import Any
@@ -245,15 +246,19 @@ async def attach_direct_categories(db, listing: dict, evidence: str = "") -> dic
     cache_query = "\n".join((query, etsy_query))
     chosen = dict(current)
     if chosen.get("query") != cache_query:
-        for key in ("ebay", "ebay_path", "etsy", "etsy_path", "poshmark", "depop"):
+        for key in ("ebay", "ebay_path", "etsy", "etsy_path", "poshmark", "depop", "mercari"):
             chosen.pop(key, None)
-    if not direct_category_id({"direct_category_ids": chosen}, "ebay"):
+    markets = {market for market in ("ebay", "poshmark", "depop", "mercari")
+               if not direct_category_id({"direct_category_ids": chosen}, market)}
+    if markets:
         from vendoo_studio.services.agent_categories import apply_agent_categories, ebay_tree_leaves
+        from vendoo_studio.services.native_category_match import native_rows
 
-        # Use the same verified leaf/path match as the editor before asking
-        # the suggestion service. A known category needs no network search.
-        apply_agent_categories({**listing, "direct_category_ids": chosen},
-                               {"ebay": ebay_tree_leaves(db)}, markets={"ebay"})
+        # Each form's own options, matched the same way as a category change in
+        # the editor. A known eBay leaf needs no network search.
+        # A copy, so filling a category here does not clear the sizes generation wrote.
+        apply_agent_categories({**copy.deepcopy(listing), "direct_category_ids": chosen},
+                               {**native_rows(), "ebay": ebay_tree_leaves(db)}, markets=markets)
     if not direct_category_id({"direct_category_ids": chosen}, "ebay"):
         try:
             hit = await _ebay_leaf(query)
@@ -272,7 +277,7 @@ async def attach_direct_categories(db, listing: dict, evidence: str = "") -> dic
         if hit:
             chosen["etsy"] = hit["id"]
             chosen["etsy_path"] = hit["path"]
-    if chosen.get("ebay") or chosen.get("etsy") or chosen.get("poshmark") or chosen.get("depop"):
+    if any(chosen.get(market) for market in ("ebay", "etsy", "poshmark", "depop", "mercari")):
         chosen["query"] = cache_query
         listing["direct_category_ids"] = chosen
     return chosen

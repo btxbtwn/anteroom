@@ -8,8 +8,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.600 — 2026-10-31
 
-- New sandbox mode for trying changes safely: `./sandbox.sh` runs Anteroom on sample listings with a stand-in AI, never goes online, and refuses to list, delist or update anything on a marketplace.
-- Two copies of Anteroom can run side by side: the web port now follows `VENDOO_STUDIO_WEB_PORT` as the API port follows `VENDOO_STUDIO_PORT`.
+- Changing the general category now sets each marketplace tab's category from that marketplace's own list. When a marketplace has no match, its old category is cleared so you pick one there, instead of it keeping the category from before.
 
 ## 0.1.599 — 2026-10-31
 

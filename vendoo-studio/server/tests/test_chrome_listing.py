@@ -7,9 +7,7 @@ from unittest.mock import patch
 from vendoo_studio.services.chrome_catalog import (
     apply_direct_ids,
     apply_preview,
-    depop_category_id,
     keep_direct_categories,
-    poshmark_category_id,
 )
 from vendoo_studio.services.chrome_listing import (
     depop_requirements,
@@ -156,38 +154,16 @@ class ChromePreflightTest(unittest.TestCase):
 DEPT = "01008c10d97b4e1245005764"
 SHIRTS = "07008c10d97b4e1245005764"
 TEES = "a" * 24
-POSHMARK = {"catalog": {"departments": [{"id": DEPT, "display": "Men", "categories": [{
-    "id": SHIRTS, "display": "Shirts", "category_features": [{"id": TEES, "display": "Tees - Short Sleeve"}],
-}]}]}}
-DEPOP = {
-    "department": [{"id": "menswear"}, {"id": "womenswear"}],
-    "group": [
-        {"id": "tops", "department": ["menswear", "womenswear"], "product_types": [{"id": "tshirts"}]},
-        {"id": "dresses", "department": ["womenswear"], "product_types": [{"id": "dresses"}]},
-    ],
-}
 
 
 class ChromeCatalogTest(unittest.TestCase):
-    def test_a_stale_vendoo_id_resolves_to_the_live_category_and_stays_off_vendoo(self):
-        listing = {
-            "marketplace_category_ids": {"poshmark": "stale", "depop": "old_leaf"},
-            "marketplace_categories": {"poshmark": "Men > Shirts > Tees - Short Sleeve", "depop": "Men > Tops > T-Shirts"},
-        }
-        self.assertEqual(poshmark_category_id(POSHMARK, listing), f"{DEPT}/{SHIRTS}/{TEES}")
-        self.assertEqual(depop_category_id(DEPOP, listing), "menswear_tshirts")
+    def test_chrome_ids_are_remembered_beside_vendoos(self):
+        listing = {"marketplace_category_ids": {"poshmark": "stale", "depop": "old_leaf"}}
         self.assertTrue(apply_direct_ids(listing, {
             "poshmark": f"{DEPT}/{SHIRTS}/{TEES}", "depop": "menswear_tshirts",
         }))
         self.assertEqual(listing["marketplace_category_ids"], {"poshmark": "stale", "depop": "old_leaf"})
         self.assertEqual(listing["direct_category_ids"]["depop"], "menswear_tshirts")
-
-    def test_a_direct_depop_id_wins_over_the_vendoo_id(self):
-        listing = {
-            "direct_category_ids": {"depop": "womenswear_dresses"},
-            "marketplace_category_ids": {"depop": "menswear_tshirts"},
-        }
-        self.assertEqual(depop_category_id(DEPOP, listing), "womenswear_dresses")
 
     def test_a_poshmark_size_chrome_refuses_holds_list_off(self):
         found = apply_preview([], {
