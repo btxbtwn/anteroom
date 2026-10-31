@@ -1,7 +1,7 @@
 {
   "name": "vendoo-studio",
   "private": true,
-  "version": "0.1.603",
+  "version": "0.1.604",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,7 @@
     "lint": "oxlint src",
     "test": "vitest run",
     "e2e": "playwright test",
+    "knip": "knip --no-progress",
     "preview": "vite preview",
     "setup": "bash scripts/setup.sh",
     "doctor": "bash scripts/doctor.sh",
@@ -46,6 +47,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "knip": "6.44.0",
     "oxlint": "^1.89.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~7.0.2",

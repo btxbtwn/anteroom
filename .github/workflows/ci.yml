@@ -117,6 +117,8 @@ jobs:
           cache-dependency-path: vendoo-studio/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - name: Unused files, exports and dependencies (knip.json lists the ones that predate the check)
+        run: npm run knip
       - run: npm test
       - run: npm run build
       - name: Build hosted workspace
@@ -160,6 +162,34 @@ jobs:
             vendoo-studio/e2e/report
             vendoo-studio/e2e/results
           retention-days: 7
+
+  studio-code-health:
+    name: Studio code health
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vendoo-studio
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      # basedpyright reads packages from .venv (pyproject.toml), as on a laptop.
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -U pip
+          .venv/bin/python -m pip install -e ".[dev]"
+      # Reports without failing until the models move from Column(...) to
+      # Mapped[...]: until then any new code that sets a model field reads as
+      # a type error. Remove continue-on-error in that PR.
+      - name: Types (new errors only; .basedpyright/baseline.json holds the old ones)
+        continue-on-error: true
+        run: .venv/bin/basedpyright
+      - name: Layers (routes, services, repositories, models)
+        run: .venv/bin/lint-imports
+      - name: Unused functions, methods and classes
+        run: .venv/bin/python scripts/check-dead-code.py
 
   studio-backend:
     name: Studio backend
@@ -302,6 +332,7 @@ jobs:
       - secrets
       - studio-frontend
       - studio-browser
+      - studio-code-health
       - studio-backend
       - studio-backend-postgres
       - studio-update-zip
