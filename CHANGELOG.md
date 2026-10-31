@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.606 — 2026-10-31
+
+- Keep category pickers and other web requests working when several requests need the database at once.
+
 ## 0.1.605 — 2026-10-31
 
 - The project now lives at github.com/btxbtwn/anteroom. Updates, release downloads and help links point there; old links keep working.
