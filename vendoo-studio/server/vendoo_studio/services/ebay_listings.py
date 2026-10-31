@@ -382,15 +382,13 @@ def card_condition(listing: dict, category_id: str) -> tuple[str, list[dict]] | 
 
 
 def ebay_category_id(listing: dict) -> str:
-    """The live eBay leaf when one was chosen, otherwise the Vendoo category id Send uses."""
+    """The eBay tab's own category. Vendoo's eBay category is Send to Vendoo's alone."""
     from vendoo_studio.services.direct_categories import direct_category_id
 
-    specifics = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
-    category = direct_category_id(listing, "ebay") or (listing.get("marketplace_category_ids") or {}).get("ebay") or specifics.get("categoryId")
-    text = str(category or "")
-    if not re.fullmatch(r"\d{1,15}", text):
-        raise missing("Choose an eBay category before listing.", "marketplace_category_ids.ebay")
-    return text
+    category = direct_category_id(listing, "ebay")
+    if not category:
+        raise missing("Choose an eBay category before listing.", "direct_category_ids.ebay")
+    return category
 
 
 def package_ounces(listing: dict, form: dict) -> str:
@@ -701,7 +699,7 @@ async def _complete_aspects(client: EbayClient, category_id: str, aspects: dict[
     except EbayFailure as exc:
         if exc.code == "rejected" and exc.status in {400, 404}:
             raise missing("eBay does not list items in that category. Choose a current, most specific eBay category.",
-                          "marketplace_category_ids.ebay") from exc
+                          "direct_category_ids.ebay") from exc
         raise
     return _match_aspects(schema, aspects)
 
@@ -1104,9 +1102,10 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
     title = " ".join(marketplace_text(snapshot, "ebay", "title").split())
     if len(title) > TITLE_MAX:
         found.append(gap("title", f"eBay titles are at most {TITLE_MAX} characters, so eBay gets: {ebay_title(snapshot)}", blocking=False))
-    category = str((snapshot.get("marketplace_category_ids") or {}).get("ebay") or "")
-    if seeded_leaf(context.db, "ebay", category) is False:
-        found.append(gap("marketplace_category_ids.ebay", "That eBay category has subcategories. Choose the most specific one."))
+    from vendoo_studio.services.direct_categories import direct_category_id
+
+    if seeded_leaf(context.db, "ebay", direct_category_id(snapshot, "ebay")) is False:
+        found.append(gap("direct_category_ids.ebay", "That eBay category has subcategories. Choose the most specific one."))
     found.extend(_cached_aspect_gaps(snapshot, form))
     return found
 
@@ -1114,10 +1113,10 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
 def _cached_aspect_gaps(snapshot: dict, form: dict) -> list[dict]:
     """Required eBay aspects from the cached live schema. No cache means List still checks them."""
     from vendoo_studio.services.category_fields import load_rows
-    from vendoo_studio.services.direct_categories import live_category_id
+    from vendoo_studio.services.direct_categories import direct_category_id
     from vendoo_studio.services.marketplace_schemas import EBAY_ASPECTS
 
-    category = live_category_id(snapshot, "ebay")
+    category = direct_category_id(snapshot, "ebay")
     if not re.fullmatch(r"[1-9]\d{0,14}", category):
         return []
     try:

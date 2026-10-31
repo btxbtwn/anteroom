@@ -24,7 +24,7 @@ from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, Listin
 from vendoo_studio.services import etsy_listings, native_marketplaces, relay_client
 
 LISTING = {"title": "Private api check - do not publish", "description": "Private draft check.", "price": 12,
-           "marketplace_category_ids": {"etsy": 482}, "etsy_specifics": {
+           "direct_category_ids": {"etsy": "482"}, "etsy_specifics": {
                "who_made": "Another company or person", "what_is": "A finished product", "when_made": "1990s (Vintage)",
                "shipping_profile_id": "99", "readiness_state_id": "88", "return_policy_id": "77"}}
 URL = "https://www.etsy.com/your/shops/me/listing-editor/edit/123456"
@@ -560,14 +560,14 @@ class EtsyListingsTest(unittest.TestCase):
         self.assertTrue(all(c[0] == "GET" for c in self.calls))
 
     def test_invalid_or_ineligible_details_never_create_a_listing(self):
-        for changes in [{"marketplace_category_ids": {}}, {"etsy_specifics": {}}, {"price": "NaN"}, {"price": "0.001"}]:
+        for changes in [{"direct_category_ids": {}}, {"etsy_specifics": {}}, {"price": "NaN"}, {"price": "0.001"}]:
             with self.assertRaises(ValueError):
                 etsy_listings.draft_fields({**LISTING, **changes}, creating=True)
 
     def test_missing_details_name_the_fields_to_fix(self):
-        result = self.execute("save_draft", {}, snapshot={**LISTING, "marketplace_category_ids": {}})
+        result = self.execute("save_draft", {}, snapshot={**LISTING, "direct_category_ids": {}})
         self.assertEqual(result["error_code"], "missing_fields")
-        self.assertEqual(result["fields"][0]["field"], "marketplace_category_ids.etsy")
+        self.assertEqual(result["fields"][0]["field"], "direct_category_ids.etsy")
 
     def test_a_recent_item_can_still_be_prepared_for_etsy(self):
         fields = etsy_listings.draft_fields({**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "2010 - 2019 (Recently)"}}, creating=True)

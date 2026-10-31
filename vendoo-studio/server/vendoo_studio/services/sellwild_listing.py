@@ -25,70 +25,26 @@ def sellwild_catalog() -> dict:
     return json.loads((skills_dir() / "list-this" / "references" / "sellwild-native-catalog.json").read_text(encoding="utf-8"))
 
 
-# Marketplace and general category words that name the same Sellwild leaf.
-_SELLWILD_SYNONYMS = {"tee": "shirt", "tshirt": "shirt", "tees": "shirt", "blouse": "top", "tank": "top", "cami": "top",
-                      "jumper": "sweater", "sweatshirt": "sweater", "cardigan": "sweater", "pullover": "sweater",
-                      "vest": "jacket", "gilet": "jacket", "parka": "coat", "trouser": "pant", "legging": "activewear",
-                      "sneaker": "sneaker", "trainer": "sneaker", "bag": "handbag", "purse": "handbag"}
-
-
-def _sellwild_words(text: str) -> set[str]:
-    text = re.sub(r"\b(short|long|3/4)[ -]sleeves?\b", " ", text.lower()).replace("t-shirt", "tshirt")
-    words = set()
-    for word in re.findall(r"[a-z0-9]+", text):
-        word = word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
-        words.add(_SELLWILD_SYNONYMS.get(word, word))
-    return words
-
-
-def _sellwild_text_sources(listing: dict) -> list[str]:
-    """Where the listing already says what it is, most specific first."""
-    poshmark = ((listing.get("marketplace_category_objects") or {}).get("poshmark") or {}).get("displayPath") or []
-    depop = str((listing.get("marketplace_category_ids") or {}).get("depop") or "")
-    # eBay's top level names every clothing branch; it says nothing about the item.
-    general = re.sub(r"clothing,? shoes (&|and) accessories", " ", str(listing.get("category_path") or ""), flags=re.I)
-    return [" ".join(map(str, poshmark[1:])), depop.split("_", 1)[-1].replace("-", " "),
-            " ".join(general.replace(">", "/").split("/")[-2:]), str(listing.get("title") or "")]
-
-
 def suggest_sellwild(listing: dict) -> dict:
-    """Sellwild's own category and condition, worked out from what the listing already says."""
+    """Sellwild's own category and condition, worked out from the general category and the listing."""
+    from vendoo_studio.services.native_category_match import evidence, match_row
+
     catalog = sellwild_catalog()
     ids = {option["id"] for option in catalog["categories"]}
     specifics = listing.get("sellwild_specifics") if isinstance(listing.get("sellwild_specifics"), dict) else {}
     explicit = specifics.get("nativeCategoryId")
     category_id = int(explicit) if str(explicit or "").isdigit() and int(explicit) in ids else None
-    objects = listing.get("marketplace_category_objects") or {}
-    poshmark = (objects.get("poshmark") or {}).get("displayPath") or []
-    general = (objects.get("general") or {}).get("displayPath") or []
-    # Every category the listing names except Vendoo's retired Sellwild one, whose
-    # "Fashion > Mens Clothing" says nothing about a boys' or girls' item.
-    paths = [str(path) for key, path in (listing.get("marketplace_categories") or {}).items() if key != "sellwild"]
-    everything = " ".join([str(listing.get("category_path") or ""), str(listing.get("department") or ""),
-                           " ".join(map(str, general)), " ".join(map(str, poshmark)), *paths,
-                           str((listing.get("marketplace_category_ids") or {}).get("depop") or "")]).lower()
+    general = str(listing.get("category_path") or "")
+    # Sellwild keeps children's clothes in two groups of its own, by age.
+    everything = f"{general} {listing.get('department') or ''}".lower()
     if category_id is None and re.search(r"\bbaby\b|infant|newborn", everything):
         category_id = 66
-    elif category_id is None and re.search(r"\bkids?\b|kidswear|\bboys?\b|\bgirls?\b", everything):
+    elif category_id is None and re.search(r"\bkids?\b|\bboys?\b|\bgirls?\b", everything):
         category_id = 246
-    # Vendoo's (retired) Sellwild category still names the right top-level group.
-    vendoo_group = str((((listing.get("marketplace_category_objects") or {}).get("sellwild") or {}).get("displayPath") or [""])[0] or "")
-    clothing = bool(re.search(r"clothing|menswear|womenswear|\bmen\b|\bwomen\b|shoes|accessories", everything))
-    group = vendoo_group or ("Fashion" if clothing else "")
     if category_id is None:
-        for text in _sellwild_text_sources(listing):
-            words = _sellwild_words(text)
-            best, score = None, 0
-            for option in catalog["categories"]:
-                parent, _, leaf = option["label"].partition(" > ")
-                if group and parent != group:
-                    continue
-                hits = len(_sellwild_words(leaf.replace("&", " ").replace(",", " ")) & words)
-                if hits > score:
-                    best, score = option["id"], hits
-            if best is not None:
-                category_id = best
-                break
+        rows = [{"id": option["id"], "path": option["label"]} for option in catalog["categories"]]
+        hit = match_row(rows, general, evidence(listing))
+        category_id = hit["id"] if hit else None
     native_condition = specifics.get("nativeConditionId")
     condition = str(listing.get("condition") or "").lower()
     # Sellwild's own scale: 5 Brand New, 4 Like New, 3 Good, 2 Gently Used, 1 Quite Used.

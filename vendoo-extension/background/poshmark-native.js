@@ -293,30 +293,8 @@ function poshmarkFromIds(catalog, ids) {
     catalog: { department: department.id, category: category.id, category_features: feature ? [feature.id] : [] } };
 }
 
-function poshmarkNames(listing) {
-  const object = listing.marketplace_category_objects?.poshmark;
-  const formPath = listing.form?.overrides?.categoryV2?.displayPath;
-  const names = Array.isArray(object?.displayPath) && object.displayPath.length ? object.displayPath
-    : Array.isArray(formPath) && formPath.length ? formPath : null;
-  if (names) return names.map(String);
-  return String(listing.marketplace_categories?.poshmark || '').split('>').map(part => part.trim()).filter(Boolean);
-}
-
-// The live leaf whose names match the listing's path, when the stored ids are not in the catalog.
-function poshmarkByName(catalog, names) {
-  if (names.length < 2) return null;
-  const department = (catalog.catalog?.departments || []).find(entry => poshmarkKey(entry.display) === poshmarkKey(names[0]));
-  if (!department) return null;
-  const category = (department.categories || []).find(entry => poshmarkKey(entry.display) === poshmarkKey(names[1]));
-  if (!category) return null;
-  if (names.length === 2) return poshmarkFromIds(catalog, [department.id, category.id]);
-  const feature = (category.category_features || []).find(entry => poshmarkKey(entry.display) === poshmarkKey(names[2]));
-  return feature ? poshmarkFromIds(catalog, [department.id, category.id, feature.id]) : null;
-}
-
-// Poshmark's own category for a direct list. A stored direct id wins, then ids
-// that are still in the live catalog, then the catalog leaf with the same names.
-// Vendoo's category ids are left as they are.
+// Poshmark's own category for a direct list: the id Anteroom stored, checked
+// against the live catalog. Vendoo's category is never read here.
 function poshmarkCategory(catalog, listing) {
   const direct = listing.direct_category_ids?.poshmark;
   const directIds = typeof direct === 'string' ? direct.split('/') : Array.isArray(direct) ? direct : [];
@@ -324,14 +302,7 @@ function poshmarkCategory(catalog, listing) {
   // A stored id that already names the leaf wins. An older sub-category value
   // only fills in when that id stopped at the parent category.
   if (fromDirect?.leaf && fromDirect.leaf !== fromDirect.category.id) return fromDirect;
-  // A stored id that resolved against the live catalog is authoritative even
-  // when it names a parent: the seller chose that category, so keep it. Falling
-  // through to a name match here used to swap in a different leaf — one with no
-  // size sets — and every size the seller picked was then refused.
-  if (fromDirect) return poshmarkWithSubcategory(catalog, fromDirect, listing.poshmark_specifics?.subcategory);
-  const found = poshmarkFromIds(catalog, listing.form?.overrides?.categoryV2?.path || listing.marketplace_category_objects?.poshmark?.path)
-    || poshmarkByName(catalog, poshmarkNames(listing));
-  return found && poshmarkWithSubcategory(catalog, found, listing.poshmark_specifics?.subcategory);
+  return fromDirect && poshmarkWithSubcategory(catalog, fromDirect, listing.poshmark_specifics?.subcategory);
 }
 
 // The sub-category the seller chose on the Poshmark tab, inside the category

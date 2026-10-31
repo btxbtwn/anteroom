@@ -47,10 +47,8 @@ def form(listing: dict) -> dict:
     from vendoo_studio.services.native_editor import field
 
     categories = catalog()["categories"]
-    ids = listing.get("direct_category_ids") or {}
     specifics = listing.get("depop_specifics") or {}
-    category_id = str(ids.get("depop") or specifics.get("categoryId")
-                      or (listing.get("marketplace_category_ids") or {}).get("depop") or "")
+    category_id = str((listing.get("direct_category_ids") or {}).get("depop") or "")
     category = next((row for row in categories if row["id"] == category_id), None)
     fixed = fixed_options()
 

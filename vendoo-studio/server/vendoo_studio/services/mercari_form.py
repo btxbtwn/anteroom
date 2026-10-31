@@ -108,8 +108,7 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     from vendoo_studio.services.native_editor import field
 
     specifics = listing.get("mercari_specifics") or {}
-    category_id = str((listing.get("direct_category_ids") or {}).get("mercari")
-                      or (listing.get("marketplace_category_ids") or {}).get("mercari") or "")
+    category_id = str((listing.get("direct_category_ids") or {}).get("mercari") or "")
     category = next((row for row in catalog()["itemCategories"] if str(row["id"]) == category_id), None)
     rows = copy.deepcopy(catalog()["fields"])
     fields = {row["path"]: row for row in rows}

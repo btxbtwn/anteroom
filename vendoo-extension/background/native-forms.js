@@ -445,7 +445,7 @@ function mercariEditorForm(listing, master) {
       { required: true, presentation: 'radio-row', option_help: Object.fromEntries(MERCARI_CONDITION_CHOICES) }),
   ].map(product('Product info'));
   fields.unshift(nativePhotosRow('mercari'));
-  const heldCategory = listing.form?.overrides?.categoryV2 || listing.marketplace_category_objects?.mercari;
+  const heldCategory = listing.form?.overrides?.categoryV2;
   if (!categories.some(row => String(row.value) === String(category)) && String(heldCategory?.id) === String(category)) {
     const label = (heldCategory.displayPath || []).join(' > ');
     if (label) fields.find(row => row.path === 'direct_category_ids.mercari').option_values[label] = String(category);

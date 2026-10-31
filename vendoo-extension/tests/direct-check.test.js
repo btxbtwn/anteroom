@@ -24,8 +24,7 @@ test('a direct check names the live category and a size or parcel List would ref
   const c = loadWorker();
   const named = call(c, 'chromeDirectPreview', {
     size: 'M',
-    marketplace_categories: { poshmark: 'Men > Shirts > Tees - Short Sleeve', depop: 'Men > Tops > T-Shirts' },
-    marketplace_category_ids: { poshmark: 'stale', depop: 'old_leaf' },
+    direct_category_ids: { poshmark: `${DEPT}/${SHIRTS}/${TEES}`, depop: 'menswear_tshirts' },
     depop_specifics: { parcelSize: 'Medium' },
   }, { catalog: CATALOG, attributes: ATTRIBUTES, parcels: [{ title: 'Medium' }, { title: 'Small' }] });
   assert.equal(named.categories.poshmark, `${DEPT}/${SHIRTS}/${TEES}`);
@@ -47,12 +46,31 @@ test('a direct check names the live category and a size or parcel List would ref
   assert.match(refused.gaps.depop[0].message, /Under 1lb/);
 });
 
+test('Vendoo\'s category alone names no category, and a stored id the catalog lost is refused', () => {
+  const c = loadWorker();
+  const vendooOnly = call(c, 'chromeDirectPreview', {
+    size: 'M',
+    marketplace_categories: { poshmark: 'Men > Shirts > Tees - Short Sleeve', depop: 'Men > Tops > T-Shirts' },
+    marketplace_category_ids: { poshmark: 'stale', depop: 'menswear_tshirts' },
+    depop_specifics: { categoryId: 'menswear_tshirts' },
+    form: { overrides: { categoryV2: { id: 'menswear_tshirts', path: ['menswear', 'menswear_tops', 'menswear_tshirts'] } } },
+  }, { catalog: CATALOG, attributes: ATTRIBUTES });
+  assert.deepEqual(JSON.parse(JSON.stringify(vendooOnly.categories)), {});
+  assert.deepEqual(vendooOnly.gaps.poshmark, []);
+  assert.deepEqual(vendooOnly.gaps.depop, []);
+  const lost = call(c, 'chromeDirectPreview', {
+    direct_category_ids: { poshmark: `${DEPT}/${'c'.repeat(24)}`, depop: 'menswear_gone' },
+  }, { catalog: CATALOG, attributes: ATTRIBUTES });
+  assert.equal(lost.gaps.poshmark[0].field, 'direct_category_ids.poshmark');
+  assert.equal(lost.gaps.depop[0].field, 'direct_category_ids.depop');
+});
+
 test('one size categories and a live parcel title are not refused', () => {
   const c = loadWorker();
   const catalog = { catalog: { departments: [{ id: DEPT, display: 'Women', categories: [{ id: SHIRTS, display: 'Accessories',
     size_sets: [{ tags: ['standard'], size_systems: { us: { sizes: [{ id: 'OS', display: 'OS' }] } } }] }] }] } };
   const preview = call(c, 'chromeDirectPreview', {
-    marketplace_categories: { poshmark: 'Women > Accessories' },
+    direct_category_ids: { poshmark: `${DEPT}/${SHIRTS}` },
     depop_specifics: { parcelSize: 'Oversize' },
   }, { catalog, parcels: [{ title: 'Oversize' }] });
   assert.deepEqual(preview.gaps.poshmark, []);

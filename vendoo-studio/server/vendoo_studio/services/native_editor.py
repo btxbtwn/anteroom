@@ -231,8 +231,8 @@ async def ebay_form(snapshot: dict) -> dict:
               reveal="See title options",
               help="Create a custom label to enter information you want to track, such as your own SKU number. "
                    "It comes from Item Details."),
-        field("direct_category_ids.ebay", "Category", (snapshot.get("direct_category_ids") or {}).get("ebay_path")
-              or (snapshot.get("marketplace_categories") or {}).get("ebay") or category, section="Item category", width="half", required=True),
+        field("direct_category_ids.ebay", "Category", (snapshot.get("direct_category_ids") or {}).get("ebay_path") or category,
+              section="Item category", width="half", required=True),
         field("ebay_specifics.secondaryCategoryId", "Second category", second_path or "", section="Item category", width="half",
               help="Fees may apply whether or not your item sells."),
         field("ebay_specifics.primaryStoreCategory", "First category", details.get("primaryStoreCategory"), section="Store category",
