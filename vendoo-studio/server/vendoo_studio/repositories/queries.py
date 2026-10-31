@@ -518,6 +518,50 @@ def _recheck_error_flag(db: Session, conv_id: str) -> None:
     listing.validation_errors = validation.errors + validation.warnings
 
 
+def _field_value(listing: dict, marketplace: str, field: str):
+    """What a marketplace reads for ``field``: a dotted path, or its own copy of a top-level field."""
+    if "." not in field:
+        block = listing.get(f"{marketplace}_specifics")
+        return block[field] if isinstance(block, dict) and field in block else listing.get(field)
+    value = listing
+    for part in field.split("."):
+        value = value.get(part) if isinstance(value, dict) else None
+    return value
+
+
+def _field_unchanged(item, marketplace: str, before: dict, after: dict) -> bool:
+    field = str(item.get("field") or "") if isinstance(item, dict) else ""
+    # Settings live outside the listing; only a new List can tell they are fixed.
+    if not field or field.startswith("settings."):
+        return True
+    return _field_value(before, marketplace, field) == _field_value(after, marketplace, field)
+
+
+def _drop_fixed_marketplace_errors(db: Session, conv_id: str, before: dict, after: dict) -> None:
+    """Clear a marketplace's "needs these fields" error once a save changes those fields.
+
+    A List that stopped for missing fields keeps its error until the next List,
+    so a category fixed in the editor or by chat would still show as missing.
+    Each field this save changed leaves the error; the next List checks it again.
+    """
+    from vendoo_studio.models.marketplace_listing import UNSETTLED_STATES, MarketplaceListing
+
+    rows = db.query(MarketplaceListing).filter(
+        MarketplaceListing.conversation_id == conv_id, MarketplaceListing.error_code == "missing_fields",
+    ).all()
+    for row in rows:
+        if row.state in UNSETTLED_STATES or not isinstance(row.error_fields, list):
+            continue
+        left = [item for item in row.error_fields if _field_unchanged(item, row.marketplace, before, after)]
+        if len(left) == len(row.error_fields):
+            continue
+        if left:
+            row.error_fields = left
+            row.error = " ".join(f"{str(item.get('message') or '').rstrip('.')}." for item in left if isinstance(item, dict))
+        else:
+            row.error = row.error_code = row.error_fields = row.marketplace_message = None
+
+
 class RevisionConflict(ValueError):
     pass
 
@@ -604,6 +648,7 @@ class ListingRepo:
             listing = Listing(conversation_id=conv_id, current_revision_id=revision.id)
             self.db.add(listing)
         _recheck_error_flag(self.db, conv_id)
+        _drop_fixed_marketplace_errors(self.db, conv_id, before, listing_json)
 
         title = (listing_json.get("title") or "").strip()
         if title:

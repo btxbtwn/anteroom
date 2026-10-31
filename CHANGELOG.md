@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.602 — 2026-10-31
+## 0.1.603 — 2026-10-31
 
 - On the web, Edit fields can now change the shared, eBay and Depop categories of several listings at once, picked from Anteroom's category lists, and drafts generated on the web get the same category matching as the Mac app.
+
+## 0.1.602 — 2026-10-31
+
+- A marketplace that said it needs a field, like Vinted asking for a category, stops saying so once you or chat change that field. Press List to check it again.
 
 ## 0.1.601 — 2026-10-31
 
