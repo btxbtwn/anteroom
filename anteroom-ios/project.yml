@@ -36,7 +36,7 @@ targets:
         NSCameraUsageDescription: Take photos of the items you are listing.
         SupabasePublishableKey: $(SUPABASE_PUBLISHABLE_KEY)
         CFBundleURLTypes:
-          - CFBundleURLName: app.anteroom.signin
+          - CFBundleURLName: com.btxbtwn.anteroom.signin
             CFBundleURLSchemes:
               - anteroom
     settings:

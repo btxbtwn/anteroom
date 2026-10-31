@@ -4,4 +4,4 @@
 // or service-role key here.
 SUPABASE_PUBLISHABLE_KEY = sb_publishable_...
 // Bundle IDs are unique across the App Store; change it if this one is taken.
-// PRODUCT_BUNDLE_IDENTIFIER = app.anteroom.ios
+// PRODUCT_BUNDLE_IDENTIFIER = com.btxbtwn.anteroom
