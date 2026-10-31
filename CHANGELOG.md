@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.605 — 2026-10-31
+
+- The project now lives at github.com/btxbtwn/anteroom. Updates, release downloads and help links point there; old links keep working.
+
 ## 0.1.604 — 2026-10-31
 
 - Behind the scenes: new automatic checks catch type mistakes, code that nothing uses any more, and code in the wrong layer before a change ships. Nothing changes in the app.

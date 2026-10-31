@@ -23,7 +23,7 @@
 # and leaves nothing behind. Delete the .p12 afterwards; Keychain still has it.
 set -euo pipefail
 
-REPO="${REPO:-btxbtwn/list-this-vendoo-suite}"
+REPO="${REPO:-btxbtwn/anteroom}"
 P12="${1:-}"
 if [[ -z "$P12" || ! -f "$P12" ]]; then
   echo "Usage: $0 path/to/certificate.p12" >&2

@@ -81,7 +81,7 @@ export function privacyPage() {
 <p>Disconnecting an account in Anteroom (Settings → Connections) removes its link. Removing Anteroom's connection removes the Mac's ID, key and any waiting events. If eBay tells the relay an account was closed, its link is removed automatically.</p>
 
 <h2>Questions</h2>
-<p>Open an issue at <a href="https://github.com/btxbtwn/list-this-vendoo-suite/issues">github.com/btxbtwn/list-this-vendoo-suite</a>.</p>
+<p>Open an issue at <a href="https://github.com/btxbtwn/anteroom/issues">github.com/btxbtwn/anteroom</a>.</p>
 </main>
 </body>
 </html>`;
