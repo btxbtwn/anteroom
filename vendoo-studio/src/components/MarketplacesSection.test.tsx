@@ -218,6 +218,13 @@ describe("marketplaces section", () => {
     expect(html).not.toContain("Ask chat");
   });
 
+  it("shows Vinted's field-specific rejection alongside the failed action", () => {
+    const html = render({ vinted: { state: "unknown", error: "Vinted refused the request (HTTP 400).",
+      marketplace_message: "title: Title contains too many capital letters, try using lowercase letters. Sorry, there are some errors" } },
+    {}, { selected: "vinted" });
+    expect(html).toContain("Vinted said: title: Title contains too many capital letters, try using lowercase letters.");
+  });
+
   it("shows progress and Cancel while a List runs, and offers Check or Reset once it is unconfirmed", () => {
     const running = render({ mercari: { state: "publishing", running: true, progress: { step: "publish", label: "Publishing", index: 1, total: 2 } } },
       {}, { selected: "mercari" });

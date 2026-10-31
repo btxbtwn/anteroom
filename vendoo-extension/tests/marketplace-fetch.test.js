@@ -22,6 +22,15 @@ function worker(answers) {
 
 const failure = async promise => { try { await promise; } catch (error) { return error; } assert.fail('expected a failure'); };
 
+test('error values are read only from Vinted field validation responses', () => {
+  const c = loadWorker();
+  const body = { message: 'Invalid', message_code: 'validation_error', errors: [{ field: 'title', value: 'Use lowercase' }] };
+  assert.equal(c.marketplaceBodyMessage(body, 'vinted'), 'title: Use lowercase Invalid');
+  assert.equal(c.marketplaceBodyMessage(body, 'depop'), 'Invalid');
+  assert.equal(c.marketplaceBodyMessage({ ...body, message_code: 'other' }, 'vinted'), 'Invalid');
+  assert.equal(c.marketplaceBodyMessage({ ...body, errors: [{ value: 'private input' }] }, 'vinted'), 'Invalid');
+});
+
 test('a transient read is retried with a pause and then succeeds', async () => {
   const { calls, sleeps, run } = worker([new TypeError('Failed to fetch'), reply(502, 'Bad gateway'), reply(200, { id: 1 })]);
   const { data } = await run();
