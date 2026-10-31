@@ -60,6 +60,11 @@ final class AnteroomAPI: Sendable {
         try await send(request("GET", "api/drafts/\(draftID)/photos/\(photoID)"))
     }
 
+    func photoThumbnailData(photoID: String, size: Int) async throws -> Data {
+        try await send(request("GET", "api/photos/\(photoID)/thumb",
+                               query: [URLQueryItem(name: "size", value: String(size))]))
+    }
+
     func deletePhoto(draftID: String, photoID: String) async throws {
         _ = try await send(request("DELETE", "api/drafts/\(draftID)/photos/\(photoID)"))
     }

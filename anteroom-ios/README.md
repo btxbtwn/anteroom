@@ -103,3 +103,21 @@ Swift stream framing tests run in the iOS build workflow. Device verification
 must cover a configured account generating from photos, assistant edits, an
 interrupted connection followed by Reconnect, Stop, and refresh of the saved
 listing without submitting duplicate work. No test or app flow publishes.
+
+## Desktop visual alignment
+
+The General editor uses the desktop inspector's Listing, Pricing, Condition,
+Item, Size, Color & material, Shipping, and Inventory & identifiers sections,
+with flat dividers instead of one large card. Photos come before the fields;
+assistant/history live in the native actions menu. Inventory rows use cover
+photos and the same compact title/status hierarchy. Photos show six thumbnails
+in an adaptive grid, with an explicit expand control for larger sets.
+Thumbnails are authenticated requests to the existing shared backend.
+
+For offline simulator layout review, run `./tools/build-layout-review.sh` on a
+Mac and install the resulting `.app` with device tooling. It has its own bundle
+ID and uses production row/field/section views with clearly labelled sample
+data. It does not replace the signed-in app or test API behavior. The sample
+photo illustrations are placeholders, not uploaded product photos. Review
+light/dark appearance and larger text sizes; live cover-photo loading, uploads
+and edits still need configured-account verification.
