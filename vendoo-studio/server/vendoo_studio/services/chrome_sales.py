@@ -195,9 +195,15 @@ def _claimed_sold_at(db: Session, conv_id: str, marketplace: str) -> datetime | 
 
     conv = db.get(Conversation, conv_id)
     notes = parse_notes(conv.notes) if conv else {}
-    sale = notes.get("vendooSale") if isinstance(notes.get("vendooSale"), dict) else {}
-    dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
-    sold_by = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}
+    sale = notes.get("vendooSale")
+    if not isinstance(sale, dict):
+        sale = {}
+    dates = notes.get("vendooDates")
+    if not isinstance(dates, dict):
+        dates = {}
+    sold_by = dates.get("soldByMarketplace")
+    if not isinstance(sold_by, dict):
+        sold_by = {}
     claimed = sold_by.get(marketplace)
     if not claimed and str(sale.get("marketplace") or "") == marketplace:
         claimed = sale.get("soldAt")

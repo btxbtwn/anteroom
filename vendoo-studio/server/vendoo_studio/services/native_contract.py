@@ -586,7 +586,9 @@ def required_for_this_listing(row: dict, listing: dict, path: str) -> bool:
         return True
     from vendoo_studio.services.marketplace_schemas import _ebay_listing_type
 
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     return _ebay_listing_type(ebay.get("listingFormat")) == "AUCTION"
 
 

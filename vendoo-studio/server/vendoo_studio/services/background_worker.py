@@ -21,6 +21,8 @@ async def _execute(task_id, token):
     with SessionLocal() as db:
         task = db.get(BackgroundTask, task_id)
         queue.check_write_lease(db, task_id, token)
+        if task is None:
+            raise queue.TaskLeaseExpired()
         conversation_id, kind, payload = task.conversation_id, task.kind, task.payload
         repo = ConversationRepo(db)
         conversation = repo.get(conversation_id)
@@ -41,8 +43,8 @@ async def _execute(task_id, token):
             raise ValueError('Unsupported draft task')
     frames, flushed_at, failed = [], time.monotonic(), False
     async for frame in response.body_iterator:
-        if isinstance(frame, bytes):
-            frame = frame.decode('utf-8')
+        if isinstance(frame, (bytes, memoryview)):
+            frame = bytes(frame).decode('utf-8')
         # The durable stream closes only after all draft preparation finishes.
         if frame == 'data: [DONE]\n\n':
             continue
@@ -55,6 +57,8 @@ async def _execute(task_id, token):
             frames, flushed_at = [], time.monotonic()
     await asyncio.to_thread(queue.append_events, task_id, token, frames)
     context = current()
+    if context is None:
+        raise RuntimeError("Hosted draft work requires a seller context")
     while context.spawned_tasks:
         await asyncio.gather(*list(context.spawned_tasks), return_exceptions=False)
         await asyncio.sleep(0)
@@ -63,8 +67,7 @@ async def _execute(task_id, token):
 
 
 async def run_claimed(task_id, owner, token):
-    with use(for_seller(owner, task_lease=(task_id, token))):
-        context = current()
+    with use(for_seller(owner, task_lease=(task_id, token))) as context:
         work = asyncio.create_task(_execute(task_id, token))
 
         async def heartbeat():

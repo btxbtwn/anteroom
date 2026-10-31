@@ -226,7 +226,9 @@ def web_search_query(item: dict) -> str:
     """The query a finished ``web_search_call`` item ran, or ''."""
     if item.get("type") != "web_search_call":
         return ""
-    action = item.get("action") if isinstance(item.get("action"), dict) else {}
+    action = item.get("action")
+    if not isinstance(action, dict):
+        action = {}
     query = action.get("query")
     return query.strip() if isinstance(query, str) else ""
 
@@ -266,7 +268,9 @@ def web_search_sources(output: list[dict]) -> list[dict]:
             continue
         if item.get("type") != "web_search_call":
             continue
-        action = item.get("action") if isinstance(item.get("action"), dict) else {}
+        action = item.get("action")
+        if not isinstance(action, dict):
+            action = {}
         for group in (action.get("sources"), item.get("sources"), item.get("results")):
             if not isinstance(group, list):
                 continue

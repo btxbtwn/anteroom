@@ -109,7 +109,9 @@ def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:
 
 def _unresolved(snapshot: dict, marketplace: str) -> list[dict]:
     """Values the marketplace section could not encode. Sent empty, so shown, never hidden."""
-    form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else {}
+    form = snapshot.get("form")
+    if not isinstance(form, dict):
+        form = {}
     name = NAMES.get(marketplace, marketplace)
     found = []
     for item in form.get("unresolved") or []:

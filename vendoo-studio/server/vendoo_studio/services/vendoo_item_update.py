@@ -68,7 +68,9 @@ def _set_ebay_bin_price(section: dict[str, Any], price: Any, listing: dict[str, 
     """
     ebay = (listing or {}).get("ebay_specifics") if isinstance(listing, dict) else None
     ebay = ebay if isinstance(ebay, dict) else {}
-    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
+    chosen = ebay.get("bestOffer")
+    if not isinstance(chosen, dict):
+        chosen = {}
     specs = _bucket(section, "marketplaceSpecifics")
     details = specs.get("pricingFormatDetails")
     if not isinstance(details, dict):
@@ -97,8 +99,12 @@ def _apply_condition(
     so the form does not keep showing the wrong tier.
     """
     want_over = _bucket(want_section, "overrides")
-    have_over = have_section.get("overrides") if isinstance(have_section.get("overrides"), dict) else {}
-    have_specs = have_section.get("categorySpecifics") if isinstance(have_section.get("categorySpecifics"), dict) else {}
+    have_over = have_section.get("overrides")
+    if not isinstance(have_over, dict):
+        have_over = {}
+    have_specs = have_section.get("categorySpecifics")
+    if not isinstance(have_specs, dict):
+        have_specs = {}
     want_specs = _bucket(want_section, "categorySpecifics")
     marketplace = str(want_section.get("marketplaceID") or "")
 
@@ -172,14 +178,18 @@ def apply_update_all(
     Forms in ``leave`` get nothing written to them, not even Update All's
     copies: their section is dropped from ``desired`` so no change is found.
     """
-    general = desired.get(GENERAL_KEY) if isinstance(desired.get(GENERAL_KEY), dict) else {}
+    general = desired.get(GENERAL_KEY)
+    if not isinstance(general, dict):
+        general = {}
     listings_want = desired.get(LISTINGS_KEY)
     if not isinstance(listings_want, dict):
         listings_want = {}
         desired[LISTINGS_KEY] = listings_want
     for marketplace in leave:
         listings_want.pop(marketplace, None)
-    listings_have = current.get(LISTINGS_KEY) if isinstance(current.get(LISTINGS_KEY), dict) else {}
+    listings_have = current.get(LISTINGS_KEY)
+    if not isinstance(listings_have, dict):
+        listings_have = {}
     tags = _string_list(general.get("tags"))
     price = general.get("price")
     for marketplace, have_section in listings_have.items():
@@ -191,7 +201,9 @@ def apply_update_all(
             listings_want[marketplace] = want_section
         want_section.setdefault("marketplaceID", marketplace)
         want_over = _bucket(want_section, "overrides")
-        have_over = have_section.get("overrides") if isinstance(have_section.get("overrides"), dict) else {}
+        have_over = have_section.get("overrides")
+        if not isinstance(have_over, dict):
+            have_over = {}
         for key in _UPDATE_ALL_OVERRIDE_KEYS:
             value = tags if key == "tags" else general.get(key)
             if value in (None, "", []):
@@ -291,15 +303,25 @@ def _clear_stale_category_specifics(have_section: dict[str, Any], want_section: 
     leaf, keys like ``53159_Department`` would otherwise linger beside the new
     leaf's fields and leave the form half-stale.
     """
-    have_over = have_section.get("overrides") if isinstance(have_section.get("overrides"), dict) else {}
-    want_over = want_section.get("overrides") if isinstance(want_section.get("overrides"), dict) else {}
-    have_leaf = have_over.get("categoryV2") if isinstance(have_over.get("categoryV2"), dict) else {}
-    want_leaf = want_over.get("categoryV2") if isinstance(want_over.get("categoryV2"), dict) else {}
+    have_over = have_section.get("overrides")
+    if not isinstance(have_over, dict):
+        have_over = {}
+    want_over = want_section.get("overrides")
+    if not isinstance(want_over, dict):
+        want_over = {}
+    have_leaf = have_over.get("categoryV2")
+    if not isinstance(have_leaf, dict):
+        have_leaf = {}
+    want_leaf = want_over.get("categoryV2")
+    if not isinstance(want_leaf, dict):
+        want_leaf = {}
     have_id = str(have_leaf.get("id") or "").strip()
     want_id = str(want_leaf.get("id") or "").strip()
     if not want_id or not have_id or have_id == want_id:
         return
-    have_specs = have_section.get("categorySpecifics") if isinstance(have_section.get("categorySpecifics"), dict) else {}
+    have_specs = have_section.get("categorySpecifics")
+    if not isinstance(have_specs, dict):
+        have_specs = {}
     want_specs = _bucket(want_section, "categorySpecifics")
     for key in have_specs:
         if key not in want_specs:

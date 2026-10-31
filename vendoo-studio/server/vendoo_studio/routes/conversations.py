@@ -752,7 +752,9 @@ def _listing_urls(notes: dict) -> dict[str, str]:
 
 def _vendoo_dates(notes: dict) -> dict:
     """Vendoo's time tracking for the row, as the sidebar and details read it."""
-    dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
+    dates = notes.get("vendooDates")
+    if not isinstance(dates, dict):
+        dates = {}
 
     def text(key: str) -> str | None:
         return str(dates.get(key) or "") or None

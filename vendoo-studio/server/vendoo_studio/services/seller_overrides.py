@@ -58,7 +58,7 @@ _TOP_LEVEL = (
 _DEPOP_MULTI = ("style", "occasion", "material", "type", "fit", "bodyFit", "attributeBottomStyle")
 
 
-def fold_key(key: str) -> str:
+def fold_key(key: object) -> str:
     return re.sub(r"[^a-z0-9]", "", str(key or "").casefold())
 
 
@@ -277,14 +277,22 @@ def _changed_paths(previous: dict, submitted: dict) -> set[str]:
             changed.add(key)
     for marketplace in MARKETPLACES:
         bucket = f"{marketplace}_specifics"
-        prev = previous.get(bucket) if isinstance(previous.get(bucket), dict) else {}
-        sub = submitted.get(bucket) if isinstance(submitted.get(bucket), dict) else {}
+        prev = previous.get(bucket)
+        if not isinstance(prev, dict):
+            prev = {}
+        sub = submitted.get(bucket)
+        if not isinstance(sub, dict):
+            sub = {}
         for key in set(prev) | set(sub):
             if _stable(prev.get(key)) != _stable(sub.get(key)):
                 changed.add(f"{bucket}.{key}")
     for bucket in ("marketplace_category_ids", "marketplace_categories", "direct_category_ids", "marketplace_photos"):
-        prev = previous.get(bucket) if isinstance(previous.get(bucket), dict) else {}
-        sub = submitted.get(bucket) if isinstance(submitted.get(bucket), dict) else {}
+        prev = previous.get(bucket)
+        if not isinstance(prev, dict):
+            prev = {}
+        sub = submitted.get(bucket)
+        if not isinstance(sub, dict):
+            sub = {}
         for key in set(prev) | set(sub):
             if _stable(prev.get(key)) != _stable(sub.get(key)):
                 changed.add(f"{bucket}.{key}")

@@ -70,14 +70,14 @@ def storage_call(method: str, key: str, token: str, data: bytes | None = None) -
         raise HTTPException(503, 'Photo storage is not configured')
     try:
         url = f'{origin}/storage/v1/object/{BUCKET}'
-        options = {'json': {'prefixes': [key]}} if method == 'DELETE' else {'content': data}
         if method != 'DELETE':
             url += '/' + key
         response = httpx.request(method, url,
                                  headers={'Authorization': f'Bearer {token}', 'apikey': public_key,
                                           'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
                                           'Cache-Control': 'no-store'},
-                                 **options, timeout=20, follow_redirects=False)
+                                 json={'prefixes': [key]} if method == 'DELETE' else None,
+                                 content=None if method == 'DELETE' else data, timeout=20, follow_redirects=False)
     except httpx.HTTPError:
         raise HTTPException(503, 'Photo storage is temporarily unavailable') from None
     if method == 'DELETE' and response.status_code == 404:

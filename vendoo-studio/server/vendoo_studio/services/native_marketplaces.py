@@ -354,7 +354,10 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
     listing = ListingRepo(db).get_current(conv_id)
     if not listing or listing.current_revision_id != body.revision_id:
         raise NativeMarketplaceError(409, "The listing changed. Refresh it before continuing.")
-    snapshot = ListingRepo(db).get_revision(body.revision_id).listing_json
+    revision = ListingRepo(db).get_revision(body.revision_id)
+    if revision is None:
+        raise NativeMarketplaceError(409, "The listing changed. Refresh it before continuing.")
+    snapshot = revision.listing_json
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
     snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
@@ -575,7 +578,9 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
     if marketplace == "sellwild":
         from vendoo_studio.services.sellwild_listing import package_sides, sellwild_catalog
 
-        details = snapshot.get("sellwild_specifics") if isinstance(snapshot.get("sellwild_specifics"), dict) else {}
+        details = snapshot.get("sellwild_specifics")
+        if not isinstance(details, dict):
+            details = {}
         template = str(details.get("parcelTemplate") or "")
         preset = next((row for row in sellwild_catalog()["parcel_templates"] if row["id"] == template), None)
         sides = package_sides(snapshot)
@@ -989,7 +994,10 @@ def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> d
     listing = ListingRepo(db).get_current(conv_id)
     if not listing or listing.current_revision_id != body.revision_id:
         raise NativeMarketplaceError(409, "The listing changed. Refresh it before continuing.")
-    snapshot = ListingRepo(db).get_revision(body.revision_id).listing_json
+    revision = ListingRepo(db).get_revision(body.revision_id)
+    if revision is None:
+        raise NativeMarketplaceError(409, "The listing changed. Refresh it before continuing.")
+    snapshot = revision.listing_json
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
     catalog = sellwild_catalog()

@@ -112,6 +112,8 @@ async def run_listing_generation(
     stream_repo = ConversationRepo(stream_db)
     skill_rules = load_skill_rules(item_details, stream_db)
     full_text = ""
+    prompt_analysis: str | None = None
+    expected_revision_id: str | None = None
     child_tasks: list[asyncio.Task] = []
     run_started = time.monotonic()
     stage_started = run_started
@@ -217,6 +219,7 @@ async def run_listing_generation(
         if existing:
             prompt_analysis = analysis_with_photo_count(photo_count, analysis_text)
 
+        assert prompt_analysis is not None
         mark("photo_analysis")
         listing_rules = load_skill_rules(
             f"{prompt_analysis}\n{item_details}",
@@ -372,6 +375,7 @@ async def run_listing_generation(
         # listing into the wiped conversation.
         if (
             not generation_discarded(conv_id, run)
+            and expected_revision_id is not None
             and full_text.strip()
             and not full_text.lstrip().lower().startswith("error:")
         ):

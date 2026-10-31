@@ -34,7 +34,6 @@ def photo_call(method: str, key: str, data: bytes | None = None) -> bytes:
     if not secret or not origin:
         raise HTTPException(503, 'Background photo storage is not configured')
     url = f'{origin}/storage/v1/object/{BUCKET}'
-    options = {'json': {'prefixes': [key]}} if method == 'DELETE' else {'content': data}
     if method != 'DELETE':
         url += '/' + key
     try:
@@ -42,7 +41,8 @@ def photo_call(method: str, key: str, data: bytes | None = None) -> bytes:
             'apikey': secret, 'Cache-Control': 'no-store',
             'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
             **({'x-upsert': 'true'} if method == 'POST' else {}),
-        }, **options, timeout=30, follow_redirects=False)
+        }, json={'prefixes': [key]} if method == 'DELETE' else None,
+                                 content=None if method == 'DELETE' else data, timeout=30, follow_redirects=False)
     except httpx.HTTPError:
         raise HTTPException(503, 'Background photo storage is temporarily unavailable') from None
     if response.status_code == 404:

@@ -11,6 +11,7 @@ import html
 import re
 import unicodedata
 from collections.abc import Callable
+from typing import Literal
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -163,12 +164,15 @@ def _words(values, limit: int, max_length: int) -> list[str]:
 
 
 def _form(snapshot: dict) -> dict:
-    return snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "etsy")
+    form = snapshot.get("form")
+    return form if isinstance(form, dict) else vendoo_form(snapshot, "etsy")
 
 
 def list_fields(snapshot: dict) -> dict[str, list[str]]:
     """Tags, materials and styles, cleaned the way Etsy takes them (the Vendoo path's tags)."""
-    details = snapshot.get("etsy_specifics") if isinstance(snapshot.get("etsy_specifics"), dict) else {}
+    details = snapshot.get("etsy_specifics")
+    if not isinstance(details, dict):
+        details = {}
     specifics = _form(snapshot).get("specifics") or {}
     tags = sanitize_etsy_tags(specifics.get("tags") or details.get("tags") or snapshot.get("tags"))
     materials = _words(details.get("materials") or snapshot.get("material"), *_ETSY_LIST_LIMITS["materials"])
@@ -315,8 +319,12 @@ _NOT_PROPERTIES = frozenset(_key(key) for key in (
 
 def _answers(snapshot: dict) -> dict[str, list[str]]:
     """What the listing says, keyed the way Etsy names properties ("Sleeve length" → sleevelength)."""
-    details = snapshot.get("etsy_specifics") if isinstance(snapshot.get("etsy_specifics"), dict) else {}
-    nested = details.get("category_specifics") if isinstance(details.get("category_specifics"), dict) else {}
+    details = snapshot.get("etsy_specifics")
+    if not isinstance(details, dict):
+        details = {}
+    nested = details.get("category_specifics")
+    if not isinstance(nested, dict):
+        nested = {}
     answers: dict[str, list[str]] = {}
 
     def put(name: str, value) -> None:
@@ -585,9 +593,11 @@ _VIDEO_EXTENSIONS = {"video/mp4": "mp4", "video/quicktime": "mov", "video/x-flv"
                      "video/3gpp": "3gp", "video/mpeg": "mpeg"}
 
 
-def _video_choice(snapshot: dict) -> dict | None | bool:
+def _video_choice(snapshot: dict) -> dict | None | Literal[False]:
     """The video this revision selects: a video, None to clear it, False when the form never touched it."""
-    details = snapshot.get("etsy_specifics") if isinstance(snapshot.get("etsy_specifics"), dict) else {}
+    details = snapshot.get("etsy_specifics")
+    if not isinstance(details, dict):
+        details = {}
     if "videoId" not in details:
         return False
     wanted = str(details.get("videoId") or "")
@@ -624,7 +634,9 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
         return
     videos = await _listing_videos(item_id)
     active = _active_videos(videos)
-    saved = binding.get("etsy_video") if isinstance(binding.get("etsy_video"), dict) else {}
+    saved = binding.get("etsy_video")
+    if not isinstance(saved, dict):
+        saved = {}
     same = choice is not None and saved.get("checksum") == choice["checksum"]
     known = str(saved.get("video_id") or "") if same else ""
     if same and saved.get("pending") and not known and active:
@@ -651,7 +663,7 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
         name = f"{choice['id']}.{_VIDEO_EXTENSIONS.get(choice.get('mime_type'), 'mp4')}"
         uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/videos", "video",
                                data={"name": name}, files={"video": (name, data, choice.get("mime_type"))}, timeout=300)
-    video_id = str(uploaded.get("video_id") or "")
+    video_id = str(uploaded.get("video_id") or "") if isinstance(uploaded, dict) else ""
     if not re.fullmatch(r"[1-9]\d*", video_id):
         raise ValueError("Etsy did not confirm the video. Check the listing before another upload.")
     record({"etsy_video": {"checksum": choice["checksum"], "video_id": video_id}, "etsy_pending_write": None})
@@ -664,7 +676,9 @@ async def _video_kept(item_id: str, snapshot: dict, binding: dict) -> bool:
         return True
     expected: list[str] = []
     if choice is not None:
-        saved = binding.get("etsy_video") if isinstance(binding.get("etsy_video"), dict) else {}
+        saved = binding.get("etsy_video")
+        if not isinstance(saved, dict):
+            saved = {}
         if saved.get("checksum") != choice["checksum"] or not saved.get("video_id"):
             return False
         expected = [str(saved["video_id"])]

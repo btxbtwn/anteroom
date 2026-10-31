@@ -5,6 +5,8 @@ A committed reservation precedes every buyer-facing call. Ambiguous outcomes blo
 further sends for that listing until the seller checks Seller Hub.
 """
 from __future__ import annotations
+from typing import cast as type_cast
+from sqlalchemy.engine import CursorResult
 
 import asyncio
 import logging
@@ -275,7 +277,7 @@ async def send(db: Session, attempt_id: str, *, automatic: bool = False, policy_
             EbayOfferPolicy.discount_percent == attempt.discount_percent,
             EbayOfferPolicy.minimum_price_cents == attempt.minimum_price_cents,
         ).values(enabled=True))
-        if approved.rowcount != 1:
+        if type_cast(CursorResult, approved).rowcount != 1:
             db.rollback()
             raise OfferConflict("The all-listings offer rule changed or was paused.")
     elif automatic:
@@ -287,7 +289,7 @@ async def send(db: Session, attempt_id: str, *, automatic: bool = False, policy_
             EbayOfferRule.minimum_price_cents == attempt.minimum_price_cents,
         )
     reserved = db.execute(reservation.values(last_attempt_at=now()))
-    if reserved.rowcount != 1:
+    if type_cast(CursorResult, reserved).rowcount != 1:
         db.rollback()
         raise OfferConflict("Another offer was already sent or started for this listing.")
     attempt.state = "sending"

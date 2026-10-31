@@ -243,8 +243,12 @@ def _recent_sales(
         notes = parse_notes(conv.notes)
         if str(conv.status or "") != "sold" and str(notes.get("vendooStatus") or "") != "sold":
             continue
-        dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
-        sale = notes.get("vendooSale") if isinstance(notes.get("vendooSale"), dict) else {}
+        dates = notes.get("vendooDates")
+        if not isinstance(dates, dict):
+            dates = {}
+        sale = notes.get("vendooSale")
+        if not isinstance(sale, dict):
+            sale = {}
         sold_at = _parse_moment(str(dates.get("sold") or sale.get("soldAt") or ""))
         if sold_at is None or not since <= sold_at <= now:
             continue
