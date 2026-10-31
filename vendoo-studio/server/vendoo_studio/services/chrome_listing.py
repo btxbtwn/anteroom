@@ -13,7 +13,7 @@ import math
 import re
 from decimal import Decimal, ROUND_HALF_UP
 
-from vendoo_studio.services.direct_preflight import Context, gap, requirement, seeded_subcategories
+from vendoo_studio.services.direct_preflight import Context, gap, requirement
 
 # Poshmark's catalog colors (catalog_v2, read 2026-10-25). Grey and Beige are its Gray and Tan.
 POSHMARK_COLORS = (
@@ -79,35 +79,22 @@ def poshmark_requirements(snapshot: dict, context: Context) -> list[dict]:
     if dropped:
         listed = " and ".join(dropped)
         found.append(gap("primaryColor", f"Poshmark does not list {listed}, so that color is left off.", blocking=False))
-    direct = snapshot.get("direct_category_ids") if isinstance(snapshot.get("direct_category_ids"), dict) else {}
-    vendoo = snapshot.get("marketplace_category_ids") if isinstance(snapshot.get("marketplace_category_ids"), dict) else {}
-    if not str(direct.get("poshmark") or "").strip() and not str(vendoo.get("poshmark") or "").strip():
+    if not _category_id(snapshot, "poshmark"):
         found.append(gap("direct_category_ids.poshmark", "Poshmark needs a category from its own list."))
     return found
 
 
 def _category_id(snapshot: dict, marketplace: str) -> str:
+    """The marketplace tab's own category. Vendoo's category ids are Send to Vendoo's alone."""
     direct = snapshot.get("direct_category_ids") if isinstance(snapshot.get("direct_category_ids"), dict) else {}
-    if str(direct.get(marketplace) or "").strip():
-        return str(direct[marketplace]).strip()
-    ids = snapshot.get("marketplace_category_ids") if isinstance(snapshot.get("marketplace_category_ids"), dict) else {}
-    return str(ids.get(marketplace) or "").strip()
+    return str(direct.get(marketplace) or "").strip()
 
 
-def _mercari_parent(snapshot: dict, context: Context, chosen: str, category: dict) -> list[str] | None:
-    """The subcategories under the Mercari category this list would send, or None for a real leaf.
+def _mercari_subcategories(chosen: str) -> list[str]:
+    """The names under a Mercari category in its own catalog. A leaf has none."""
+    from vendoo_studio.services.mercari_form import catalog
 
-    Vendoo's tree calls some Mercari parents leaves; Mercari lists them with no size.
-    """
-    paths = snapshot.get("marketplace_categories") if isinstance(snapshot.get("marketplace_categories"), dict) else {}
-    path = " > ".join(part.strip() for part in str(paths.get("mercari") or "").split(">") if part.strip())
-    children = seeded_subcategories(context.db, "mercari", category_id=chosen) if chosen \
-        else seeded_subcategories(context.db, "mercari", path=path)
-    if children:
-        return children
-    if chosen and category.get("hasChildren") is True and str(category.get("id") or "") == chosen:
-        return []
-    return None
+    return [str(row["name"]) for row in catalog()["itemCategories"] if str(row["parentId"]) == chosen]
 
 
 @requirement("mercari")
@@ -121,15 +108,12 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
     elif len(description) > 1000:
         found.append(gap("description", "Mercari descriptions are at most 1,000 characters."))
     form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else {}
-    category = (form.get("overrides") or {}).get("categoryV2") if isinstance(form.get("overrides"), dict) else {}
-    category = category if isinstance(category, dict) else {}
-    chosen = _category_id(snapshot, "mercari") or str(category.get("id") or "")
+    chosen = _category_id(snapshot, "mercari")
     chosen = chosen if re.fullmatch(r"\d{1,6}", chosen) else ""
-    children = _mercari_parent(snapshot, context, chosen, category)
-    if children is not None:
-        listed = f" ({', '.join(children)})" if children else ""
-        found.append(gap("marketplace_category_ids.mercari",
-                         f"That Mercari category has subcategories{listed}. Choose the most specific one."))
+    children = _mercari_subcategories(chosen) if chosen else []
+    if children:
+        found.append(gap("direct_category_ids.mercari",
+                         f"That Mercari category has subcategories ({', '.join(children)}). Choose the most specific one."))
     elif not chosen:
         found.append(gap("direct_category_ids.mercari", "Mercari needs a category."))
     specifics = snapshot.get("mercari_specifics") if isinstance(snapshot.get("mercari_specifics"), dict) else {}
@@ -149,6 +133,7 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
             found.append(gap("mercari_specifics.shippingClassId", "Mercari needs a prepaid shipping label."))
     # Chrome checks the selected leaf and size against Mercari's own master
     # catalog before uploading. Vendoo's mirrored size table is not consulted.
+    del context
     return found
 
 

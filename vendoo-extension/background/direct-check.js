@@ -1,6 +1,7 @@
 // A direct List checked against Poshmark's and Depop's own catalogs before anything is written.
-// Send to Vendoo still uses marketplace_category_ids. The ids returned here are
-// each site's own category, stored beside Vendoo's.
+// The category is the id Anteroom stored for each site; Send to Vendoo's
+// marketplace_category_ids are never read here. A stored id the live catalog
+// no longer lists is reported so the seller picks again.
 
 function directIdString(value) {
   return String(value || '').trim();
@@ -32,20 +33,7 @@ function depopDirectId(resolved) {
   return `${resolved.department}_${resolved.productType}`;
 }
 
-function hasPoshmarkCategory(listing) {
-  return Boolean(directIdString(listing.direct_category_ids?.poshmark)
-    || directIdString(listing.marketplace_category_ids?.poshmark)
-    || poshmarkNames(listing).length);
-}
-
-function hasDepopCategory(listing) {
-  return Boolean(directIdString(listing.direct_category_ids?.depop)
-    || directIdString(listing.marketplace_category_ids?.depop)
-    || directIdString(listing.depop_specifics?.categoryId)
-    || directIdString(listing.marketplace_categories?.depop));
-}
-
-// Categories Chrome resolved, and the size or parcel List would refuse.
+// The stored categories Chrome confirmed, and the size or parcel List would refuse.
 function chromeDirectPreview(listing, sources = {}) {
   const categories = {};
   const gaps = { poshmark: [], depop: [] };
@@ -63,7 +51,7 @@ function chromeDirectPreview(listing, sources = {}) {
         const needs = size?.problem || 'a size Poshmark offers in this category';
         gaps.poshmark.push({ field: 'size', message: `Poshmark needs ${needs}.`, blocking: true });
       }
-    } else if (hasPoshmarkCategory(poshmarkListing)) {
+    } else if (directIdString(item.direct_category_ids?.poshmark)) {
       gaps.poshmark.push({
         field: 'direct_category_ids.poshmark', message: 'Poshmark needs a category from its own list.', blocking: true,
       });
@@ -79,7 +67,7 @@ function chromeDirectPreview(listing, sources = {}) {
       if (size.problem) {
         gaps.depop.push({ field: 'size', message: `Depop needs ${size.problem}.`, blocking: true });
       }
-    } else if (hasDepopCategory(depopListing)) {
+    } else if (directIdString(item.direct_category_ids?.depop)) {
       gaps.depop.push({
         field: 'direct_category_ids.depop', message: 'Depop needs a category from its own list.', blocking: true,
       });

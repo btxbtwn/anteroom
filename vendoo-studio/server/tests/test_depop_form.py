@@ -103,11 +103,13 @@ class DepopFormTest(unittest.TestCase):
                             "depop_specifics": {"size": ""}})
         self.assertEqual(cleared["value"], "")
 
-    def test_a_depop_category_stored_only_on_the_specifics_still_shows_its_size_list(self):
-        form = depop_form.form({"depop_specifics": {"categoryId": "menswear_jeans"}, "size": "36"})
+    def test_only_the_tabs_own_category_shows_its_size_list(self):
+        form = depop_form.form({"direct_category_ids": {"depop": "menswear_jeans"}, "size": "36"})
         fields = {row["path"]: row for row in form["fields"]}
         self.assertEqual(form["category_id"], "menswear_jeans")
         self.assertEqual(fields["depop_specifics.size"]["value"], '36"')
+        vendoo = depop_form.form({"marketplace_category_ids": {"depop": "menswear_jeans"}, "size": "36"})
+        self.assertEqual(vendoo["category_id"], "")
 
     def test_seller_values_survive_without_mutating_the_catalog_or_listing(self):
         listing = {"description": "General", "direct_category_ids": {"depop": "menswear_jeans"},

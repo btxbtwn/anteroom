@@ -59,16 +59,12 @@ def form(listing: dict) -> dict:
     rows = copy.deepcopy(data["fields"])
     category_row = next(row for row in rows if row["path"] == "direct_category_ids.poshmark")
     choices = category_row["option_values"]
-    wanted = str((listing.get("direct_category_ids") or {}).get("poshmark")
-                 or (listing.get("marketplace_category_ids") or {}).get("poshmark") or "")
+    wanted = str((listing.get("direct_category_ids") or {}).get("poshmark") or "")
     category_id = wanted if wanted in choices.values() else ""
     if not category_id:
         matches = {value for value in choices.values() if wanted and value.split("/")[-1] == wanted}
         if len(matches) == 1:
             category_id = matches.pop()
-    if not category_id:
-        path = (listing.get("marketplace_categories") or {}).get("poshmark")
-        category_id = choices.get(path, "") if isinstance(path, str) else ""
     groups = copy.deepcopy(data["inventory_groups"].get("/".join(category_id.split("/")[:2]), []))
     specifics = listing.get("poshmark_specifics") or {}
     for row in rows:

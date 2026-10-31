@@ -66,7 +66,7 @@ function depopFormFields(listing, attributes) {
 // Anteroom stores Depop's own category id, such as kidswear_jackets. The draft
 // wants the product type, whether it is kids', and male/female/unisex.
 function depopCategoryFields(listing) {
-  const id = String(listing?.direct_category_ids?.depop || listing?.depop_specifics?.categoryId || listing?.marketplace_category_ids?.depop || '');
+  const id = String(listing?.direct_category_ids?.depop || '');
   const match = /^(kidswear|menswear|womenswear)_(.+)$/.exec(id);
   if (!match) return null;
   const kids = match[1] === 'kidswear';
@@ -345,53 +345,12 @@ function depopProduct(attributes, department, productType, leaf) {
   return { leaf: leaf || `${department}_${productType}`, department, group: group.id, productType, attributeIds: type.attribute_ids || [] };
 }
 
-// Depop's own product type for a direct id such as menswear_tshirts.
-function depopFromDirect(listing, attributes) {
+// The leaf's department and product type: Depop's own id Anteroom stored,
+// such as menswear_tshirts, checked against Depop's live list. Vendoo's
+// category is never read here.
+function depopCategory(listing, attributes) {
   const match = /^(kidswear|menswear|womenswear|everything-else)_(.+)$/.exec(String(listing.direct_category_ids?.depop || ''));
   return match ? depopProduct(attributes, match[1], match[2], match[0]) : null;
-}
-
-// The one live product type whose name matches the listing's category path.
-function depopByName(listing, attributes) {
-  const object = listing.marketplace_category_objects?.depop;
-  const text = Array.isArray(object?.displayPath) ? object.displayPath.join(' > ') : String(listing.marketplace_categories?.depop || '');
-  const parts = text.split('>').map(part => part.trim()).filter(Boolean);
-  const leaf = marketplaceNameKey(parts[parts.length - 1] || '');
-  const head = marketplaceNameKey(parts[0] || '');
-  const department = /kid/.test(head) ? 'kidswear' : /women|female/.test(head) ? 'womenswear' : /men|male/.test(head) ? 'menswear' : '';
-  if (!leaf) return null;
-  const hits = [];
-  for (const group of attributes.group || []) {
-    for (const type of group.product_types || []) {
-      if (marketplaceNameKey(type.id) !== leaf && marketplaceNameKey(depopName(type)) !== leaf) continue;
-      for (const id of (Array.isArray(group.department) ? group.department : [])) {
-        if (!department || id === department) hits.push(depopProduct(attributes, id, type.id));
-      }
-    }
-  }
-  const found = hits.filter(Boolean);
-  return found.length === 1 ? found[0] : null;
-}
-
-// The leaf's department and product type. A direct category id is Depop's own.
-// A live Vendoo hit names the product type in its extras; a tree leaf is
-// ``<department>_<product type>`` under a ``<department>_<group>`` parent,
-// checked against Depop's own list. A stale id falls back to the path's name.
-function depopCategory(listing, attributes) {
-  const direct = depopFromDirect(listing, attributes);
-  if (direct) return direct;
-  const resolved = listing.form?.overrides?.categoryV2 || listing.marketplace_category_objects?.depop;
-  const leaf = String(resolved?.id || '');
-  const chain = Array.isArray(resolved?.path) ? resolved.path.map(String) : [];
-  const department = String(chain[0] || leaf.split('_')[0] || '');
-  const parent = chain.length > 2 ? chain[chain.length - 2] : '';
-  const candidates = [resolved?.extras?.productType, parent && leaf.startsWith(`${parent}_`) ? leaf.slice(parent.length + 1) : '',
-    leaf.startsWith(`${department}_`) ? leaf.slice(department.length + 1) : ''].filter(Boolean).map(String);
-  for (const productType of candidates) {
-    const hit = depopProduct(attributes, department, productType, leaf);
-    if (hit) return hit;
-  }
-  return depopByName(listing, attributes);
 }
 
 // The US size set for the product type and the listing's size inside it.
