@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.602 — 2026-10-31
+
+- A marketplace that said it needs a field, like Vinted asking for a category, stops saying so once you or chat change that field. Press List to check it again.
+
 ## 0.1.601 — 2026-10-31
 
 - New sandbox mode for trying changes safely: `./sandbox.sh` runs Anteroom on sample listings with a stand-in AI, never goes online, and refuses to list, delist or update anything on a marketplace.
