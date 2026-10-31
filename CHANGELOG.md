@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.597 — 2026-10-31
+
+- Etsy's "What is it?" is answered from the Etsy category when it is missing, so List no longer stops on it.
+- Etsy List works again when When made is filled on the Etsy tab. It used to say When made was missing.
+
 ## 0.1.596 — 2026-10-30
 
 - If an update breaks something, Settings → About → Previous versions lets you go back to an earlier build. When that build used an older database layout, Anteroom restores your backup from that time and keeps a backup of your current data.
