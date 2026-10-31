@@ -20,13 +20,17 @@ from __future__ import annotations
 
 import statistics
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.sourcing import SourceBox
-from vendoo_studio.services.inventory_analytics import PREMIUM_PRICE, AnalyticsItem, load_rows
+from vendoo_studio.services.inventory_analytics import (
+    PREMIUM_PRICE,
+    AnalyticsItem,
+    load_rows,
+)
 
 _LISTED = {"active", "sold"}
 # Sales from bought boxes before a store's resale estimates are adjusted, and
@@ -231,7 +235,7 @@ def _totals(entries: list[tuple[SourceBox, list[AnalyticsItem]]], now: datetime)
     days = [item.days_listed for item in sold if item.days_listed is not None]
     # Only boxes where the seller recorded how many were unsellable, zero included.
     counted = [box for box, _items in entries if box.unsellable is not None and box.pieces]
-    unsellable = sum(box.unsellable for box in counted) if counted else None
+    unsellable = sum(cast(int, box.unsellable) for box in counted) if counted else None
     return {
         "spent": round(spent, 2),
         "listings": len(items),
@@ -249,7 +253,7 @@ def _totals(entries: list[tuple[SourceBox, list[AnalyticsItem]]], now: datetime)
         "sold_premium": sum(1 for price in priced if price >= PREMIUM_PRICE),
         "unsellable": unsellable,
         "unsellable_rate": (
-            round(unsellable / sum(box.pieces for box in counted), 3) if unsellable is not None else None
+            round(unsellable / sum(cast(int, box.pieces) for box in counted), 3) if unsellable is not None else None
         ),
     }
 

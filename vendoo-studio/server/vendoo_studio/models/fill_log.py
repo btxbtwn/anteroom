@@ -1,26 +1,29 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKeyConstraint, Column, String, DateTime, ForeignKey, Index
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, ForeignKeyConstraint, Index, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class FillLogEntry(SellerOwned, Base):
     __tablename__ = "fill_log_entries"
 
-    id = Column(String, primary_key=True, default=new_id)
-    job_id = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
-    conversation_id = Column(String, nullable=False, index=True)
-    step = Column(String, nullable=False)
-    marketplace = Column(String, nullable=False, index=True)
-    field = Column(String, nullable=False)
-    status = Column(String, nullable=False)
-    reason = Column(String, nullable=True)
-    selector = Column(String, nullable=True)
-    value_preview = Column(String, nullable=True)
-    created_at = Column(DateTime, default=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), nullable=False, index=True)
+    conversation_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    step: Mapped[str] = mapped_column(String, nullable=False)
+    marketplace: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    field: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    selector: Mapped[str | None] = mapped_column(String, nullable=True)
+    value_preview: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
 
     __table_args__ = (
         Index("ix_fill_log_job_step", "job_id", "step"),

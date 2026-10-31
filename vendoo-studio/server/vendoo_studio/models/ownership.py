@@ -1,6 +1,9 @@
 """Ownership shared by seller data, on the desktop and hosted databases."""
 
-from sqlalchemy import Column, String
+from __future__ import annotations
+
+from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column
 
 # A reserved owner for the single-seller desktop database. Importing a Mac into
 # a cloud account must explicitly map this owner to the verified Supabase UUID;
@@ -9,7 +12,7 @@ LOCAL_USER_ID = "00000000-0000-0000-0000-000000000000"
 
 
 class SellerOwned:
-    user_id = Column(
+    user_id: Mapped[str] = mapped_column(
         String(36), nullable=False, index=True,
         default=LOCAL_USER_ID, server_default=LOCAL_USER_ID,
     )

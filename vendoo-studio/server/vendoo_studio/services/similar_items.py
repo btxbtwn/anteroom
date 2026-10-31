@@ -17,13 +17,17 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import json_value
-from vendoo_studio.services.chrome_import import MATCH_THRESHOLD, title_similarity, title_tokens
+from vendoo_studio.services.chrome_import import (
+    MATCH_THRESHOLD,
+    title_similarity,
+    title_tokens,
+)
 from vendoo_studio.services.photo_store import photo_store
 
 # Bits two cover hashes may differ by and still look like the same shot.
@@ -217,7 +221,7 @@ def find_similar(db: Session) -> dict[str, Any]:
     stored = dict(
         db.query(Photo.checksum, Photo.stored_filename).filter(Photo.checksum.in_(covers)).all()
     ) if covers else {}
-    hashes = _fingerprints(db, stored)
+    hashes = _fingerprints(db, cast(dict[str, str], stored))
     for (first, second), entry in found.items():
         left, right = hashes.get(items[first].cover_checksum), hashes.get(items[second].cover_checksum)
         if left is None or right is None or "same_photo" in entry["reasons"]:
@@ -291,9 +295,18 @@ def merge(db: Session, keep_id: str, merge_id: str) -> dict[str, Any]:
     from vendoo_studio.models.listing import Listing, ListingRevision
     from vendoo_studio.models.marketplace_listing import MarketplaceListing
     from vendoo_studio.models.marketplace_sale import MarketplaceSale
-    from vendoo_studio.repositories.queries import BUSY_LISTING_STATUSES, ListingRepo, RevisionConflict, _settle
+    from vendoo_studio.repositories.queries import (
+        BUSY_LISTING_STATUSES,
+        ListingRepo,
+        RevisionConflict,
+        _settle,
+    )
     from vendoo_studio.services.native_marketplaces import NAMES, running_marketplace
-    from vendoo_studio.services.vendoo_import import merge_notes, parse_notes, split_vendoo_labels
+    from vendoo_studio.services.vendoo_import import (
+        merge_notes,
+        parse_notes,
+        split_vendoo_labels,
+    )
 
     if keep_id == merge_id:
         raise MergeError(400, "Pick two different items to merge.")

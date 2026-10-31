@@ -1,12 +1,11 @@
 import SwiftUI
 
 struct InventoryView: View {
-    @Environment(SessionStore.self) private var session
     @State private var model: InventoryModel
     @State private var search = ""
     @State private var path: [Draft] = []
-    @State private var isNaming = false
-    @State private var newTitle = ""
+    @State private var showingNewListing = false
+    @State private var createdDraft: Draft?
 
     init(api: AnteroomAPI) {
         _model = State(initialValue: InventoryModel(api: api))
@@ -51,23 +50,17 @@ struct InventoryView: View {
                 await model.reload(search: search)
             }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    accountMenu
-                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("New listing", systemImage: "plus") {
-                        newTitle = ""
-                        isNaming = true
-                    }
+                    Button("New listing", systemImage: "plus") { showingNewListing = true }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityHint("Create a draft, then add photos and item details")
                 }
             }
-            .alert("New listing", isPresented: $isNaming) {
-                TextField("Title", text: $newTitle)
-                Button("Cancel", role: .cancel) {}
-                Button("Create") { create() }
-                    .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty)
-            } message: {
-                Text("What are you listing?")
+            .sheet(isPresented: $showingNewListing, onDismiss: openCreatedDraft) {
+                NewListingView(api: model.api) { draft in
+                    model.didSave(draft)
+                    createdDraft = draft
+                }
             }
             .alert("Couldn't load drafts", isPresented: errorShown) {
                 Button("OK", role: .cancel) {}
@@ -84,45 +77,44 @@ struct InventoryView: View {
     private var emptyState: some View {
         if model.drafts.isEmpty && model.hasLoaded {
             if search.isEmpty {
-                ContentUnavailableView(
-                    "Your inventory starts here",
-                    systemImage: "tag",
-                    description: Text("Create a listing, add your photos, and keep your draft ready to edit.")
-                )
+                ContentUnavailableView {
+                    Label("Your inventory starts here", systemImage: "tag")
+                } description: {
+                    Text("Create a listing, add your photos, and keep your draft ready to edit.")
+                } actions: {
+                    Button("New listing") { showingNewListing = true }
+                        .buttonStyle(.borderedProminent)
+                        .frame(minHeight: 44)
+                }
             } else {
                 ContentUnavailableView.search(text: search)
+            }
+        } else if !model.hasLoaded, model.error != nil {
+            ContentUnavailableView {
+                Label("Couldn't load inventory", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text("Check your connection and try again.")
+            } actions: {
+                Button("Try again") { Task { await model.reload(search: search) } }
+                    .disabled(model.isLoading)
+                    .buttonStyle(.borderedProminent)
+                    .frame(minHeight: 44)
             }
         } else if !model.hasLoaded && model.isLoading {
             ProgressView()
         }
     }
 
-    private var accountMenu: some View {
-        Menu {
-            if let email = session.email {
-                Text(email)
-            }
-            Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                Task { await session.signOut() }
-            }
-        } label: {
-            Image(systemName: "person.crop.circle")
-        }
-    }
-
     private var errorShown: Binding<Bool> {
-        Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })
+        Binding(get: { model.hasLoaded && model.error != nil }, set: { if !$0 { model.error = nil } })
     }
 
-    private func create() {
-        let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
-        Task {
-            if let draft = await model.create(title: title) {
-                path.append(draft)
-            }
-        }
+    private func openCreatedDraft() {
+        guard let draft = createdDraft else { return }
+        createdDraft = nil
+        path.append(draft)
     }
+
 }
 
 private struct DraftRow: View {
@@ -132,6 +124,7 @@ private struct DraftRow: View {
         HStack(spacing: 12) {
             Image(systemName: "tag")
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
                 .frame(width: 40, height: 44)
                 .background(WorkspaceStyle.background, in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 5) {
@@ -148,5 +141,6 @@ private struct DraftRow: View {
             }
         }
         .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
     }
 }

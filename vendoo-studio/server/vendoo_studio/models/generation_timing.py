@@ -1,10 +1,16 @@
 """How long each stage of one listing generation took."""
 
-from sqlalchemy import JSON, Column, DateTime, Float, String, text
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import JSON, DateTime, Float, String, text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class GenerationTiming(SellerOwned, Base):
@@ -20,12 +26,12 @@ class GenerationTiming(SellerOwned, Base):
 
     __tablename__ = "generation_timings"
 
-    id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, nullable=False, index=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # The stream starts preparing; background field work supplies its final outcome.
-    outcome = Column(String, nullable=False)
-    stages = Column(JSON, nullable=False)
-    calls = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
-    total_sec = Column(Float, nullable=False)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    stages: Mapped[Any] = mapped_column(JSON, nullable=False)
+    calls: Mapped[Any] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    total_sec: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)

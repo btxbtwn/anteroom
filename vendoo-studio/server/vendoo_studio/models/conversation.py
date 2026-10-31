@@ -1,10 +1,26 @@
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, UTC
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, JSON, Column, String, Text, DateTime, Integer, ForeignKey, Index
-from sqlalchemy.orm import relationship
+if TYPE_CHECKING:
+    from vendoo_studio.models.listing import Listing
+    from vendoo_studio.models.listing_video import ListingVideo
+
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -26,21 +42,21 @@ class Conversation(SellerOwned, Base):
             name="fk_conversations_seller_box_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    title = Column(String, nullable=True)
-    notes = Column(Text, nullable=True)
-    status = Column(String, default="draft")
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str | None] = mapped_column(String, default="draft", nullable=True)
     # The wholesale box this item came out of, when the seller said so.
-    box_id = Column(String, ForeignKey("source_boxes.id", ondelete="SET NULL"), nullable=True, index=True)
-    settled_at = Column(DateTime, nullable=True)
-    unsettled_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=utcnow)
-    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    box_id: Mapped[str | None] = mapped_column(String, ForeignKey("source_boxes.id", ondelete="SET NULL"), nullable=True, index=True)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    unsettled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 
-    messages = relationship("Message", primaryjoin="and_(Conversation.id == foreign(Message.conversation_id), Conversation.user_id == Message.user_id)", back_populates="conversation", cascade="all, delete-orphan")
-    photos = relationship("Photo", primaryjoin="and_(Conversation.id == foreign(Photo.conversation_id), Conversation.user_id == Photo.user_id)", back_populates="conversation", cascade="all, delete-orphan")
-    videos = relationship("ListingVideo", primaryjoin="and_(Conversation.id == foreign(ListingVideo.conversation_id), Conversation.user_id == ListingVideo.user_id)", back_populates="conversation", cascade="all, delete-orphan")
-    listing = relationship("Listing", primaryjoin="and_(Conversation.id == foreign(Listing.conversation_id), Conversation.user_id == Listing.user_id)", back_populates="conversation", uselist=False, cascade="all, delete-orphan")
+    messages: Mapped[list[Message]] = relationship("Message", primaryjoin="and_(Conversation.id == foreign(Message.conversation_id), Conversation.user_id == Message.user_id)", back_populates="conversation", cascade="all, delete-orphan")
+    photos: Mapped[list[Photo]] = relationship("Photo", primaryjoin="and_(Conversation.id == foreign(Photo.conversation_id), Conversation.user_id == Photo.user_id)", back_populates="conversation", cascade="all, delete-orphan")
+    videos: Mapped[list[ListingVideo]] = relationship("ListingVideo", primaryjoin="and_(Conversation.id == foreign(ListingVideo.conversation_id), Conversation.user_id == ListingVideo.user_id)", back_populates="conversation", cascade="all, delete-orphan")
+    listing: Mapped[Listing | None] = relationship("Listing", primaryjoin="and_(Conversation.id == foreign(Listing.conversation_id), Conversation.user_id == Listing.user_id)", back_populates="conversation", uselist=False, cascade="all, delete-orphan")
 
 
 class Message(SellerOwned, Base):
@@ -52,20 +68,20 @@ class Message(SellerOwned, Base):
             name="fk_messages_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False)
-    role = Column(String, nullable=False)
-    text = Column(Text, nullable=False)
-    provider = Column(String, nullable=True)
-    model = Column(String, nullable=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
     # Images the seller attached: [{id, name, mime_type, size_bytes, width, height}];
     # the files live under the data folder, see services/chat_attachments.py.
-    attachments = Column(JSON, nullable=True)
+    attachments: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Identifies the exact ordered photo files used for a vision reading.
-    photo_fingerprint = Column(String(64), nullable=True)
-    created_at = Column(DateTime, default=utcnow)
+    photo_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
 
-    conversation = relationship("Conversation", back_populates="messages", primaryjoin="and_(Conversation.id == foreign(Message.conversation_id), Conversation.user_id == Message.user_id)")
+    conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages", primaryjoin="and_(Conversation.id == foreign(Message.conversation_id), Conversation.user_id == Message.user_id)")
 
 
 class Photo(SellerOwned, Base):
@@ -75,22 +91,22 @@ class Photo(SellerOwned, Base):
             name="fk_photos_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
-    original_filename = Column(String, nullable=False)
-    stored_filename = Column(String, nullable=False)
-    mime_type = Column(String, nullable=False)
-    size_bytes = Column(Integer, nullable=False)
-    display_order = Column(Integer, nullable=False, default=0)
-    checksum = Column(String, nullable=True)
-    width = Column(Integer, nullable=True)
-    height = Column(Integer, nullable=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    original_filename: Mapped[str] = mapped_column(String, nullable=False)
+    stored_filename: Mapped[str] = mapped_column(String, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    checksum: Mapped[str | None] = mapped_column(String, nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # An edited photo keeps its upload here and serves the rendered edit from
     # stored_filename, so every send uses the edit and Reset restores the upload.
-    source_filename = Column(String, nullable=True)
-    edits = Column(JSON, nullable=True)
+    source_filename: Mapped[str | None] = mapped_column(String, nullable=True)
+    edits: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Set for a photo added on one marketplace's form: only that marketplace can send it.
-    marketplace = Column(String, nullable=True)
-    created_at = Column(DateTime, default=utcnow)
+    marketplace: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
 
-    conversation = relationship("Conversation", back_populates="photos", primaryjoin="and_(Conversation.id == foreign(Photo.conversation_id), Conversation.user_id == Photo.user_id)")
+    conversation: Mapped[Conversation] = relationship("Conversation", back_populates="photos", primaryjoin="and_(Conversation.id == foreign(Photo.conversation_id), Conversation.user_id == Photo.user_id)")

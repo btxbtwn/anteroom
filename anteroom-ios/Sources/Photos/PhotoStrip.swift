@@ -12,6 +12,8 @@ struct PhotoStrip: View {
     @State private var uploading = 0
     @State private var showingCamera = false
     @State private var error: String?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var photoToDelete: DraftPhoto?
 
     private static let limit = 30
     private let thumbSize: CGFloat = 96
@@ -24,10 +26,14 @@ struct PhotoStrip: View {
                         RemotePhoto(api: api, draftID: draftID, photoID: photo.id, maxPixels: 300)
                             .frame(width: thumbSize, height: thumbSize)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .contextMenu {
+                            .accessibilityLabel("Listing photo")
+                            .overlay(alignment: .topTrailing) {
                                 Button("Delete photo", systemImage: "trash", role: .destructive) {
-                                    delete(photo)
+                                    photoToDelete = photo
                                 }
+                                .labelStyle(.iconOnly)
+                                .frame(width: 44, height: 44)
+                                .background(.regularMaterial, in: Circle())
                             }
                     }
                     ForEach(0..<uploading, id: \.self) { _ in
@@ -40,17 +46,24 @@ struct PhotoStrip: View {
             }
             .frame(height: photos.isEmpty && uploading == 0 ? 0 : thumbSize)
 
-            HStack {
+            let controlsLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                : AnyLayout(HStackLayout(spacing: 12))
+            controlsLayout {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    Button("Camera", systemImage: "camera") { showingCamera = true }
+                    Button { showingCamera = true } label: {
+                        Label("Camera", systemImage: "camera").frame(minHeight: 44)
+                    }
+                        .accessibilityLabel("Take a listing photo")
                         .buttonStyle(.bordered)
                 }
                 PhotosPicker(selection: $picked, maxSelectionCount: remaining, matching: .images) {
-                    Label("Library", systemImage: "photo.on.rectangle")
+                    Label("Library", systemImage: "photo.on.rectangle").frame(minHeight: 44)
                 }
                 .buttonStyle(.bordered)
-                Spacer()
+                .accessibilityLabel("Add photos from library")
                 Text("\(photos.count)/\(Self.limit)")
+                    .accessibilityLabel("\(photos.count) of \(Self.limit) photos")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -61,6 +74,16 @@ struct PhotoStrip: View {
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
+        }
+        .confirmationDialog("Delete this photo?", isPresented: Binding(
+            get: { photoToDelete != nil },
+            set: { if !$0 { photoToDelete = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete photo", role: .destructive) {
+                if let photo = photoToDelete { delete(photo) }
+                photoToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { photoToDelete = nil }
         }
         .padding(.vertical, 4)
         .task { await load() }
