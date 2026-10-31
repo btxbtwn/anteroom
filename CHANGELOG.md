@@ -4,11 +4,11 @@ Every change to Anteroom, newest first. Anteroom bumps its patch version
 on each merged pull request, so a version here is one change. The app reads this
 file: Settings → General → About → What's new.
 
-Entry format: `## 0.1.606 — 2026-10-31
+Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
+
+## 0.1.606 — 2026-10-31
 
 - Improve checks that catch data-handling mistakes before an app update.
-
-## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.605 — 2026-10-31
 
