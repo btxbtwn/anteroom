@@ -464,8 +464,9 @@ final class AnteroomAPI: Sendable {
         switch action {
         case .generate, .regenerate:
             upload = try await request("POST", "api/conversations/\(id)/generate")
-        case .message(let text):
-            upload = try await request("POST", "api/conversations/\(id)/messages", json: ["text": text])
+        case .message(let text, let attachments):
+            struct Body: Encodable { let text: String; let attachments: [ChatAttachment] }
+            upload = try await request("POST", "api/conversations/\(id)/messages", json: Body(text: text, attachments: attachments))
         case .reconnect:
             upload = try await request("POST", "api/conversations/\(id)/generate",
                                        query: [URLQueryItem(name: "resume", value: "true")])
