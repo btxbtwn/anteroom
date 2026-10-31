@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { AutomationsPage } from "./AutomationsPage";
+import { WorkspaceRuntimeProvider } from "../app/runtime";
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
@@ -32,5 +33,16 @@ describe("AutomationsPage", () => {
     expect(html).toContain('aria-label="eBay offers"');
     expect(html).toContain("Automatic offers check every 15 minutes");
     expect(html).toContain("No unsold listings with eBay links");
+  });
+
+  it("on the web, hides offers and sharing, which need marketplace sessions", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(["inventory"]), views: new Set(["automations"]), marketplaceForms: new Set() }}>
+        <AutomationsPage onOpenListing={vi.fn()} />
+      </WorkspaceRuntimeProvider>,
+    );
+    expect(html).toContain("Draft from prompt");
+    expect(html).toContain("Waiting for approval");
+    expect(html).not.toContain('aria-label="eBay offers"');
   });
 });
