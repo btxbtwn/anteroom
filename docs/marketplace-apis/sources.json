@@ -1,0 +1,74 @@
+[
+  {
+    "file": "specs/etsy.json",
+    "url": "https://www.etsy.com/openapi/generated/oas/3.0.0.json",
+    "retrieved_at": "2026-10-31T03:56:00.129820+00:00",
+    "title": "Etsy Open API v3",
+    "version": "3.0.0",
+    "sha256": "4d6b2a4af50c8a72b32bd1980d66f1c420f42b25b1c7e71ca4d98c3f928ee95d"
+  },
+  {
+    "file": "specs/depop.yaml",
+    "url": "https://partnerapi.depop.com/api-docs/openapi.yaml",
+    "retrieved_at": "2026-10-31T03:56:00.332313+00:00",
+    "title": "Seller API",
+    "version": "1.0.0",
+    "sha256": "56fef8e38e4419badf4c3a7ab5a7919964307c0e858984fbe149d3c4d7de3d2b"
+  },
+  {
+    "file": "specs/vinted.yaml",
+    "url": "https://pro-docs.svc.vinted.com/downloads/api.yml",
+    "retrieved_at": "2026-10-31T03:56:00.423213+00:00",
+    "title": "Vinted Pro Integrations documentation",
+    "version": "v0.385.0",
+    "sha256": "fa13f02f1410bcdb9af2d2cbc849a5034222fdd897a73041a6ff039b481c8469"
+  },
+  {
+    "file": "specs/ebay-inventory.json",
+    "url": "https://developer.ebay.com/api-docs/master/sell/inventory/openapi/3/sell_inventory_v1_oas3.json",
+    "retrieved_at": "2026-10-31T03:56:00.874313+00:00",
+    "title": "Inventory API",
+    "version": "1.18.5",
+    "sha256": "070e35efbc1e6b0c67c702d3bd9d8a4fb5046bcd948dca7170f1bc33d5a36a46"
+  },
+  {
+    "file": "specs/ebay-account.json",
+    "url": "https://developer.ebay.com/api-docs/master/sell/account/openapi/3/sell_account_v1_oas3.json",
+    "retrieved_at": "2026-10-31T03:56:01.062612+00:00",
+    "title": "Account v1 API",
+    "version": "v1.9.3",
+    "sha256": "3f04cf1fd7c80160312d68be5afd7d0de00eb57fd32d508cbb5eeec526b8bfbb"
+  },
+  {
+    "file": "specs/ebay-taxonomy.json",
+    "url": "https://developer.ebay.com/api-docs/master/commerce/taxonomy/openapi/3/commerce_taxonomy_v1_oas3.json",
+    "retrieved_at": "2026-10-31T03:56:01.111745+00:00",
+    "title": "Taxonomy API",
+    "version": "v1.1.1",
+    "sha256": "294c327d8484b172d81c29a23e3ab6c28f4ba679bdb7d7c1dca4df901574a14d"
+  },
+  {
+    "file": "specs/ebay-metadata.json",
+    "url": "https://developer.ebay.com/api-docs/master/sell/metadata/openapi/3/sell_metadata_v1_oas3.json",
+    "retrieved_at": "2026-10-31T03:56:01.298791+00:00",
+    "title": "Metadata API",
+    "version": "v1.12.1",
+    "sha256": "b35e8e51a4bb3b7d937a3586700a329ba26700b4f0fd939385fa506f9764182f"
+  },
+  {
+    "file": "specs/ebay-fulfillment.json",
+    "url": "https://developer.ebay.com/api-docs/master/sell/fulfillment/openapi/3/sell_fulfillment_v1_oas3.json",
+    "retrieved_at": "2026-10-31T03:56:01.458475+00:00",
+    "title": "Fulfillment API",
+    "version": "v1.20.7",
+    "sha256": "db06cfec913918dc675c19f36efcc8c5d8ae57231463a7e322b4c43b30c16eb9"
+  },
+  {
+    "file": "specs/ebay-media.json",
+    "url": "https://developer.ebay.com/api-docs/master/commerce/media/openapi/3/commerce_media_v1_beta_oas3.json",
+    "retrieved_at": "2026-10-31T03:56:01.520807+00:00",
+    "title": "Media API",
+    "version": "v1_beta.5.0",
+    "sha256": "0ad949cd2fd6e1973506d5a6f4f673e3195d73844236f626e4fb031ec5e10f18"
+  }
+]

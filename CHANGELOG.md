@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.594 — 2026-10-31
+
+- Finish saving Etsy drafts with category details instead of stopping before the photos with an incomplete-listing message.
+
 ## 0.1.593 — 2026-10-31
 
 - Show the marketplace photo-limit warning once instead of repeating it around the photos.

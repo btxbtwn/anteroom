@@ -100,6 +100,9 @@ class EtsyListingsTest(unittest.TestCase):
                 self.listing_properties[path.rsplit("/", 1)[-1]] = data
             return {}
         if method == "GET" and path.endswith("/properties"):
+            if path != "shops/123/listings/123456/properties":
+                raise httpx.HTTPStatusError("Resource not found", request=httpx.Request(method, "https://example.test/" + path),
+                                            response=httpx.Response(404, json={"error": "Resource not found"}))
             return {"results": [{"property_id": int(pid), "value_ids": [int(v) for v in d["value_ids"].split(",") if v],
                                  "values": d["values"].split(",")} for pid, d in self.listing_properties.items()]}
         if path.endswith("/readiness-state-definitions"):
@@ -182,6 +185,23 @@ class EtsyListingsTest(unittest.TestCase):
 
     def writes(self):
         return [c for c in self.calls if c[0] != "GET"]
+
+    def test_property_readback_uses_shop_endpoint(self):
+        assignments = [{"property_id": 200, "name": "Color", "value_ids": [1], "values": ["White"]}]
+        self.listing_properties["200"] = {"value_ids": "1", "values": "White"}
+        self.assertEqual(asyncio.run(etsy_listings.unkept_properties("123", "123456", assignments)), [])
+        self.assertEqual(self.calls[-1][1], "shops/123/listings/123456/properties")
+
+    def test_category_property_readback_allows_photos_and_same_draft_retry(self):
+        assignments = [{"property_id": 200, "name": "Color", "value_ids": [1], "values": ["White"]}]
+        binding = {}
+        with patch.object(etsy_listings, "property_values", return_value=assignments):
+            first = self.execute("save_draft", binding)
+            self.assertEqual(first["state"], "draft", first)
+            self.assertEqual(len(self.remote["images"]), 2)
+            second = self.execute("save_draft", binding)
+        self.assertEqual(second["state"], "draft", second)
+        self.assertEqual(sum(method == "POST" and path == "shops/123/listings" for method, path, *_ in self.calls), 1)
 
     def test_profile_ids_survive_vendoo_camel_case(self):
         details = {key: value for key, value in LISTING["etsy_specifics"].items()
