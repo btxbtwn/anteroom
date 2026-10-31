@@ -105,7 +105,8 @@ def _snapshot(item: dict, sku: str | None, quantity: int, price: float, properti
             "price": price, "quantity": quantity, "sku": sku,
             "tags": tags, "material": ", ".join(materials),
             "brand": next(iter(by_name.get("brand") or []), None), "size": next(iter(by_name.get("size") or []), None),
-            "marketplace_category_ids": {"etsy": str(item["taxonomy_id"])}, "etsy_specifics": details}
+            "marketplace_category_ids": {"etsy": str(item["taxonomy_id"])},
+            "direct_category_ids": {"etsy": str(item["taxonomy_id"])}, "etsy_specifics": details}
 
 
 async def import_listing(client: EtsyClient, db: Session, listing_id: str) -> dict:

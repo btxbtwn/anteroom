@@ -21,7 +21,7 @@ LISTING = {
     "weight_oz": 8,
     "condition": "Pre-Owned - Good",
     "brand": "Abercrombie",
-    "marketplace_category_ids": {"ebay": "15687"},
+    "direct_category_ids": {"ebay": "15687"},
     "ebay_specifics": {"department": "Men", "category_specifics": {"Sleeve Length": "Does Not Apply"}},
     "form": {"overrides": {"brand": "Abercrombie"}, "specifics": {"conditionDescription": "Pre-owned, washed, no stains."}},
 }
@@ -408,7 +408,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(ebay_listings.EbayClient, "connect", return_value=Refusing()):
             result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True)
-        self.assertEqual((result["error_code"], result["fields"][0]["field"]), ("missing_fields", "marketplace_category_ids.ebay"))
+        self.assertEqual((result["error_code"], result["fields"][0]["field"]), ("missing_fields", "direct_category_ids.ebay"))
 
     async def test_no_weight_is_asked_for_instead_of_guessed(self):
         client = Client()
@@ -444,7 +444,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(too_many["fields"][0]["field"], "photos")
 
     def test_trading_cards_carry_condition_descriptors(self):
-        card = {**LISTING, "marketplace_category_ids": {"ebay": "183454"}}
+        card = {**LISTING, "direct_category_ids": {"ebay": "183454"}}
         graded = {**card, "ebay_specifics": {"category_specifics": {"Professional Grader": "PSA", "Grade": "9.5",
                                                                      "Certification Number": "12345678"}}}
         self.assertEqual(ebay_listings.card_condition(graded, "183454"), ("LIKE_NEW", [

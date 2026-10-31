@@ -177,18 +177,16 @@ const MERCARI_SHIPPING_PAYER = { SELLER: 2, BUYER: 1 };
 // Mercari's prepaid labels stop at 50 lb.
 const MERCARI_MAX_LABEL_OZ = 800;
 
-// The leaf a direct list sends. A stored Mercari category id wins. Otherwise
-// the id is the one Vendoo has. A category with subcategories is too broad
-// even when Vendoo's tree calls it a leaf: Mercari then lists it with no size.
+// The leaf a direct list sends: the Mercari id Anteroom stored. A category with
+// subcategories is too broad: Mercari then lists it with no size. Only the
+// catalog row this extension attached for the same id says so.
 function mercariCategory(listing) {
+  const id = String(listing.direct_category_ids?.mercari ?? '');
+  if (!/^\d{1,6}$/.test(id)) return null;
   const resolved = listing.form?.overrides?.categoryV2;
-  const direct = String(listing.direct_category_ids?.mercari ?? '');
-  const id = /^\d{1,6}$/.test(direct) ? direct
-    : resolved?.id ?? listing.marketplace_category_ids?.mercari ?? listing.mercari_specifics?.categoryId;
-  if (!/^\d{1,6}$/.test(String(id ?? ''))) return null;
   // Mercari's sell page offers a category with subcategories through its "All ..."
   // row, except at the top level (read 2026-10-27).
-  return { id: Number(id), parent: resolved?.hasChildren === true && String(resolved.id) === String(id)
+  return { id: Number(id), parent: resolved?.hasChildren === true && String(resolved.id) === id
     && (resolved.displayPath || []).length <= 1 };
 }
 

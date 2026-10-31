@@ -1,4 +1,4 @@
-"""Live eBay and Etsy categories stay off the ids Send to Vendoo uses."""
+"""The eBay and Etsy tabs keep their own categories, apart from the ids Send to Vendoo uses."""
 from __future__ import annotations
 
 import unittest
@@ -12,7 +12,6 @@ from vendoo_studio.models.catalog import CategoryTree, CategoryTreeNode
 
 from vendoo_studio.services.direct_categories import (
     attach_direct_categories,
-    live_category_id,
     live_fields_prompt,
     merge_live_fields,
     overlay_live_fields,
@@ -105,8 +104,12 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ebay_category_id(listing), "15687")
         self.assertEqual(listing["marketplace_category_ids"]["ebay"], "111")
 
-    def test_vendoo_category_is_used_when_no_live_leaf_was_chosen(self):
-        self.assertEqual(ebay_category_id({"marketplace_category_ids": {"ebay": "111"}}), "111")
+    def test_vendoos_ebay_category_is_not_the_ebay_tabs(self):
+        from vendoo_studio.services.listing_result import ListingProblem
+
+        with self.assertRaises(ListingProblem):
+            ebay_category_id({"marketplace_category_ids": {"ebay": "111"}})
+        self.assertEqual(ebay_category_id({"direct_category_ids": {"ebay": "111"}}), "111")
 
     def test_matching_live_field_keeps_the_vendoo_key_and_takes_live_choices(self):
         fields = merge_live_fields(
@@ -147,19 +150,20 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Send to Vendoo reads those", text)
         self.assertIn("Fill these under ebay_specifics using", text)
 
-    async def test_the_vendoo_ebay_id_is_the_live_leaf_when_none_was_chosen(self):
-        listing = {"marketplace_category_ids": {"ebay": "260968", "etsy": "392"}}
-        self.assertEqual(live_category_id(listing, "ebay"), "260968")
-        self.assertEqual(live_category_id(listing, "etsy"), "")
-        self.assertEqual(live_category_id({**listing, "direct_category_ids": {"ebay": "57988"}}, "ebay"), "57988")
+    async def test_only_the_tabs_own_ebay_category_reads_its_live_fields(self):
+        vendoo = {"marketplace_category_ids": {"ebay": "260968", "etsy": "392"}}
         rows = [{"name": "Outer Shell Material", "required": True, "values": [{"label": "Polyester"}]}]
-        with patch("vendoo_studio.services.category_fields.load_rows", return_value=rows):
-            self.assertIn("(id 260968)", live_fields_prompt(listing))
         live = AsyncMock(return_value=[{"name": "Outer Shell Material", "required": True, "mode": "free_text",
                                         "values": [{"label": "Polyester"}]}])
-        with patch("vendoo_studio.services.marketplace_schemas.fields", live):
+        with patch("vendoo_studio.services.category_fields.load_rows", return_value=rows), \
+                patch("vendoo_studio.services.marketplace_schemas.fields", live):
+            self.assertEqual(live_fields_prompt(vendoo), "")
+            self.assertEqual(await overlay_live_fields(vendoo, "ebay", []), [])
+            live.assert_not_awaited()
+            listing = {**vendoo, "direct_category_ids": {"ebay": "57988"}}
+            self.assertIn("(id 57988)", live_fields_prompt(listing))
             fields = await overlay_live_fields(listing, "ebay", [])
-        live.assert_awaited_once_with("ebay", "260968")
+        live.assert_awaited_once_with("ebay", "57988")
         self.assertEqual([(row["key"], row["options"]) for row in fields], [("Outer Shell Material", ["Polyester"])])
 
     async def test_choosing_a_live_category_leaves_the_vendoo_id_alone(self):

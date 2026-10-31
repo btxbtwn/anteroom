@@ -25,6 +25,7 @@ const ATTRIBUTES = {
   brand: [{ id: 'nike', name: 'Nike' }, { id: 'other', name: 'Other' }],
 };
 const FULL = { ...listing, brand: 'Nike', size: '2XL', condition: 'Pre-Owned - Good', primaryColor: 'Multicolor', tags: ['vintage tee', 'Y2K'],
+  direct_category_ids: { depop: 'menswear_tshirts' },
   depop_specifics: { parcelSize: 'Medium', material: ['Cotton'], occasion: ['Casual', 'Party'] },
   form: { overrides: { condition: 'used_good', brand: 'Nike', categoryV2: { id: 'menswear_tshirts', path: ['menswear', 'menswear_tops', 'menswear_tshirts'] } },
     specifics: { style: ['casual'] }, aspects: {}, ships_from_zip: '70115' } };
@@ -776,7 +777,7 @@ test('a boys jacket draft sends Depop\'s category, brand, location, and parcel',
   payload.listing = {
     ...listing, brand: 'Columbia', department: 'Boys', price: 12,
     depop_specifics: { categoryId: 'kidswear_jackets', parcelSize: 'Medium' },
-    marketplace_category_ids: { depop: 'kidswear_jackets' },
+    direct_category_ids: { depop: 'kidswear_jackets' },
     form: { ships_from_zip: '70115' },
   };
   const brands = [
@@ -839,7 +840,7 @@ test('a boys jacket draft sends Depop\'s category, brand, location, and parcel',
   assert.equal(call(c, 'depopBrand', { brand: 'Not A Real Brand' }, { brand: split }), 'brand-other');
 });
 
-test('a direct Depop category wins, and a stale id falls back to the live product type name', () => {
+test('Depop reads only its own stored category, never Vendoo\'s', () => {
   const c = loadWorker();
   const direct = call(c, 'depopCategory', {
     direct_category_ids: { depop: 'womenswear_dresses' },
@@ -848,12 +849,13 @@ test('a direct Depop category wins, and a stale id falls back to the live produc
   }, ATTRIBUTES);
   assert.equal(direct.productType, 'dresses');
   assert.equal(direct.department, 'womenswear');
-  const named = call(c, 'depopCategory', {
+  assert.equal(call(c, 'depopCategory', {
+    marketplace_category_ids: { depop: 'menswear_tshirts' },
     marketplace_categories: { depop: 'Men > Tops > T-Shirts' },
-    marketplace_category_objects: { depop: { id: 'old_leaf', path: ['old'] } },
-  }, ATTRIBUTES);
-  assert.equal(named.productType, 'tshirts');
-  assert.equal(named.department, 'menswear');
+    depop_specifics: { categoryId: 'menswear_tshirts' },
+    form: { overrides: { categoryV2: { id: 'menswear_tshirts', path: ['menswear', 'menswear_tops', 'menswear_tshirts'] } } },
+  }, ATTRIBUTES), null);
+  assert.equal(call(c, 'depopCategoryFields', { marketplace_category_ids: { depop: 'menswear_tshirts' } }), null);
 });
 
 // Depop's kids coats, as its catalog lists them: an age size set and a jacket type.

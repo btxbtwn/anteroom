@@ -42,16 +42,9 @@ function textOf(value: unknown): string {
  * Price, brand, condition and the other saved values are not part of it.
  */
 export function nativeFormCategoryKey(listing: ListingData | undefined, marketplace: string): string {
-  const direct = asRecord(listing?.direct_category_ids);
-  const mapped = asRecord(listing?.marketplace_category_ids);
   if (marketplace === "sellwild") return textOf(asRecord(listing?.sellwild_specifics).nativeCategoryId);
-  if (marketplace === "ebay") {
-    return textOf(direct.ebay) || textOf(mapped.ebay) || textOf(asRecord(listing?.ebay_specifics).categoryId);
-  }
-  if (marketplace === "depop") {
-    return textOf(direct.depop) || textOf(asRecord(listing?.depop_specifics).categoryId) || textOf(mapped.depop);
-  }
-  return textOf(direct[marketplace]) || textOf(mapped[marketplace]);
+  // The tab's own category only. Vendoo's category ids belong to Send to Vendoo.
+  return textOf(asRecord(listing?.direct_category_ids)[marketplace]);
 }
 
 /**

@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.606 — 2026-10-31
+## 0.1.607 — 2026-10-31
 
 - Keep category pickers and other web requests working when several requests need the database at once.
+
+## 0.1.606 — 2026-10-31
+
+- The eBay, Etsy, Poshmark, Depop and Mercari tabs now show only their own category. They no longer show the category Vendoo saved, which could be out of date after you changed the general category. Drafts you already have keep the category each tab showed.
 
 ## 0.1.605 — 2026-10-31
 
