@@ -41,7 +41,7 @@ def load_listed_index(db: Session) -> ListedIndex:
     for event in db.query(JobEvent).filter(JobEvent.event_type == "native_result").all():
         job = by_id.get(event.job_id)
         found = _publish_event(job, event)
-        if found is not None:
+        if found is not None and job is not None:
             when, market = found
             index.publishes.setdefault(job.conversation_id, []).append((when, market))
     for job in jobs:
@@ -139,10 +139,16 @@ def _is_vendoo_job(job: Job) -> bool:
 
 
 def _vendoo_live(notes: dict) -> list[str]:
-    dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
-    sold = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}
+    dates = notes.get("vendooDates")
+    if not isinstance(dates, dict):
+        dates = {}
+    sold = dates.get("soldByMarketplace")
+    if not isinstance(sold, dict):
+        sold = {}
     sold_names = {_market(str(name)) for name in sold if sold.get(name)}
-    raw = notes.get("vendooMarketplaces") if isinstance(notes.get("vendooMarketplaces"), list) else []
+    raw = notes.get("vendooMarketplaces")
+    if not isinstance(raw, list):
+        raw = []
     live = []
     for name in raw:
         market = _market(str(name))
@@ -152,9 +158,15 @@ def _vendoo_live(notes: dict) -> list[str]:
 
 
 def _note_times(notes: dict, wanted: set[str]) -> list[datetime]:
-    dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
-    listed_by = dates.get("listedByMarketplace") if isinstance(dates.get("listedByMarketplace"), dict) else {}
-    sold = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}
+    dates = notes.get("vendooDates")
+    if not isinstance(dates, dict):
+        dates = {}
+    listed_by = dates.get("listedByMarketplace")
+    if not isinstance(listed_by, dict):
+        listed_by = {}
+    sold = dates.get("soldByMarketplace")
+    if not isinstance(sold, dict):
+        sold = {}
     sold_names = {_market(str(name)) for name in sold if sold.get(name)}
     live = set(_vendoo_live(notes))
     stamps = []

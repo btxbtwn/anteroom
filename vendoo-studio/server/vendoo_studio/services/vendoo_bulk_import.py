@@ -87,7 +87,9 @@ async def _list_page(page_token: str, *, ids_only: bool = False) -> tuple[list[d
         "ids_only": ids_only,
     }])
     hit = next((r for r in reply.get("results", []) if r.get("op") == "list_items"), {})
-    items = hit.get("items") if isinstance(hit.get("items"), list) else []
+    items = hit.get("items")
+    if not isinstance(items, list):
+        items = []
     return items, str(hit.get("next_page_token") or "")
 
 
@@ -283,5 +285,7 @@ def _delete_missing(db, conv_repo, seen_ids: set[str]) -> None:
 
 
 def _item_title(item: dict) -> str:
-    general = item.get("generalDetails") if isinstance(item.get("generalDetails"), dict) else {}
+    general = item.get("generalDetails")
+    if not isinstance(general, dict):
+        general = {}
     return str(general.get("title") or "").strip()

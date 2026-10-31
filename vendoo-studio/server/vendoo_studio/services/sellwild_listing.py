@@ -31,9 +31,11 @@ def suggest_sellwild(listing: dict) -> dict:
 
     catalog = sellwild_catalog()
     ids = {option["id"] for option in catalog["categories"]}
-    specifics = listing.get("sellwild_specifics") if isinstance(listing.get("sellwild_specifics"), dict) else {}
+    specifics = listing.get("sellwild_specifics")
+    if not isinstance(specifics, dict):
+        specifics = {}
     explicit = specifics.get("nativeCategoryId")
-    category_id = int(explicit) if str(explicit or "").isdigit() and int(explicit) in ids else None
+    category_id = int(str(explicit)) if str(explicit or "").isdigit() and int(str(explicit)) in ids else None
     general = str(listing.get("category_path") or "")
     # Sellwild keeps children's clothes in two groups of its own, by age.
     everything = f"{general} {listing.get('department') or ''}".lower()
@@ -49,7 +51,7 @@ def suggest_sellwild(listing: dict) -> dict:
     condition = str(listing.get("condition") or "").lower()
     # Sellwild's own scale: 5 Brand New, 4 Like New, 3 Good, 2 Gently Used, 1 Quite Used.
     # Excellent is Like New and Good is Good. A plain pre-owned or used item is Gently Used.
-    condition_id = (int(native_condition) if str(native_condition or "") in {"1", "2", "3", "4", "5"}
+    condition_id = (int(str(native_condition)) if str(native_condition or "") in {"1", "2", "3", "4", "5"}
                     else 1 if re.search(r"poor|major flaw|\bfair\b|acceptable", condition)
                     else 4 if re.search(r"new without tags|nwot|like new|excellent", condition)
                     else 3 if re.search(r"new with defects|imperfection|\bgood\b", condition)
@@ -148,7 +150,9 @@ def requirements(listing: dict, context: Context) -> list[dict]:
         found.append(gap("sellwild_specifics.nativeCategoryId", "Choose a Sellwild category."))
     if choice["condition_id"] not in {option["id"] for option in catalog["conditions"]}:
         found.append(gap("sellwild_specifics.nativeConditionId", "Choose a Sellwild condition."))
-    specifics = listing.get("sellwild_specifics") if isinstance(listing.get("sellwild_specifics"), dict) else {}
+    specifics = listing.get("sellwild_specifics")
+    if not isinstance(specifics, dict):
+        specifics = {}
     template = str(specifics.get("parcelTemplate") or "")
     preset = next((row for row in catalog["parcel_templates"] if row["id"] == template), None)
     # Sellwild's page asks for a weight with every package except the flat-rate ones.

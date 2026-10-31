@@ -351,7 +351,9 @@ def deterministic_gap_patches(
             patch_value = value
             lookup = field_lookup_key(field)
             if not value and lookup in EBAY_OPTIONAL_DNA_LOOKUPS:
-                ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+                ebay = listing.get("ebay_specifics")
+                if not isinstance(ebay, dict):
+                    ebay = {}
                 raw = None
                 for key in (
                     "mpn", "upc", "character", "characterFamily", "strapType",
@@ -379,13 +381,17 @@ def deterministic_gap_patches(
             patch_value = value
             lookup = field_lookup_key(field)
             if not value and lookup in {"pattern", "fabric pattern"}:
-                etsy = listing.get("etsy_specifics") if isinstance(listing.get("etsy_specifics"), dict) else {}
+                etsy = listing.get("etsy_specifics")
+                if not isinstance(etsy, dict):
+                    etsy = {}
                 raw = ebay_optional_raw(etsy, "fabricPattern") or ebay_optional_raw(etsy, "pattern")
                 if raw is not None and str(raw).strip():
                     patch_value = raw
                     value = str(raw).strip()
             if not value and lookup in ETSY_OPTIONAL_DNA_LOOKUPS:
-                etsy = listing.get("etsy_specifics") if isinstance(listing.get("etsy_specifics"), dict) else {}
+                etsy = listing.get("etsy_specifics")
+                if not isinstance(etsy, dict):
+                    etsy = {}
                 raw = None
                 for dna_key in ("graphic", "collarStyle", "holiday", "occasion", "sustainability"):
                     if field_lookup_key(dna_key) == lookup:
@@ -408,7 +414,9 @@ def deterministic_gap_patches(
             patch_value = value
             lookup = field_lookup_key(field)
             if not value and lookup in {"style", "occasion", "material"}:
-                depop = listing.get("depop_specifics") if isinstance(listing.get("depop_specifics"), dict) else {}
+                depop = listing.get("depop_specifics")
+                if not isinstance(depop, dict):
+                    depop = {}
                 raw = depop.get("style" if lookup == "style" else "occasion" if lookup == "occasion" else "material")
                 if isinstance(raw, list) and raw:
                     patch_value = raw

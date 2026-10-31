@@ -118,7 +118,9 @@ def test_connection() -> dict[str, Any]:
         else:
             detail = f"The anteroom command could not reach this app ({detail})."
         return {"ok": False, "detail": detail[:500], "version": None, "base_url": base_url}
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        data = {}
     if data.get("service") not in {None, "vendoo-studio"}:
         return {
             "ok": False,

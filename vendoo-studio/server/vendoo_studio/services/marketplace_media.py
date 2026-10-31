@@ -62,8 +62,12 @@ def keep_media(previous: dict | None, listing: dict) -> None:
         listing["marketplace_photos"] = dict(previous["marketplace_photos"])
     for marketplace in VIDEO_MARKETPLACES:
         bucket = f"{marketplace}_specifics"
-        before = previous.get(bucket) if isinstance(previous.get(bucket), dict) else {}
+        before = previous.get(bucket)
+        if not isinstance(before, dict):
+            before = {}
         if "videoId" not in before:
             continue
-        after = listing.get(bucket) if isinstance(listing.get(bucket), dict) else {}
+        after = listing.get(bucket)
+        if not isinstance(after, dict):
+            after = {}
         listing[bucket] = {**after, "videoId": before["videoId"]}

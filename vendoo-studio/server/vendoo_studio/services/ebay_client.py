@@ -144,6 +144,7 @@ class EbayClient:
             raise EbayFailure("Invalid eBay operation.", 422)
         assert_identity(self.seller)
         token = self.token
+        response: httpx.Response | None = None
         if app:
             operations = {
                 ("GET", "/commerce/taxonomy/v1/category_tree/0/get_category_suggestions"): "categories",
@@ -155,8 +156,10 @@ class EbayClient:
             operation = operations.get((method, path))
             if not operation:
                 raise EbayFailure("Invalid eBay research operation.", 422)
+            if operation == "image" and (body is None or "image" not in body):
+                raise EbayFailure("Choose an image for image search.", 422)
             response = await relay_request("POST", "/studio/ebay/research", json_body={
-                "operation": operation, "params": params or {}, **({"image": body["image"]} if operation == "image" else {}),
+                "operation": operation, "params": params or {}, **({"image": body["image"]} if operation == "image" and body is not None else {}),
             })
             assert_identity(self.seller)
         host = api_host(path)
@@ -185,6 +188,7 @@ class EbayClient:
                 self.token = await access_token("ebay", rejected=token)
                 assert_identity(self.seller)
                 response = await send(self.token)
+        assert response is not None
         # Never put response bodies in our own words: eBay errors can echo private
         # input. eBay's message goes beside them, scrubbed.
         if app and response.status_code in (401, 403):

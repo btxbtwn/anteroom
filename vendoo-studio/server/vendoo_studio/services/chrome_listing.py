@@ -86,7 +86,9 @@ def poshmark_requirements(snapshot: dict, context: Context) -> list[dict]:
 
 def _category_id(snapshot: dict, marketplace: str) -> str:
     """The marketplace tab's own category. Vendoo's category ids are Send to Vendoo's alone."""
-    direct = snapshot.get("direct_category_ids") if isinstance(snapshot.get("direct_category_ids"), dict) else {}
+    direct = snapshot.get("direct_category_ids")
+    if not isinstance(direct, dict):
+        direct = {}
     return str(direct.get(marketplace) or "").strip()
 
 
@@ -107,7 +109,9 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
         found.append(gap("description", "Mercari needs a description."))
     elif len(description) > 1000:
         found.append(gap("description", "Mercari descriptions are at most 1,000 characters."))
-    form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else {}
+    form = snapshot.get("form")
+    if not isinstance(form, dict):
+        form = {}
     chosen = _category_id(snapshot, "mercari")
     chosen = chosen if re.fullmatch(r"\d{1,6}", chosen) else ""
     children = _mercari_subcategories(chosen) if chosen else []
@@ -116,9 +120,15 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
                          f"That Mercari category has subcategories ({', '.join(children)}). Choose the most specific one."))
     elif not chosen:
         found.append(gap("direct_category_ids.mercari", "Mercari needs a category."))
-    specifics = snapshot.get("mercari_specifics") if isinstance(snapshot.get("mercari_specifics"), dict) else {}
-    package = specifics.get("package") if isinstance(specifics.get("package"), dict) else {}
-    overrides = form.get("overrides") if isinstance(form.get("overrides"), dict) else {}
+    specifics = snapshot.get("mercari_specifics")
+    if not isinstance(specifics, dict):
+        specifics = {}
+    package = specifics.get("package")
+    if not isinstance(package, dict):
+        package = {}
+    overrides = form.get("overrides")
+    if not isinstance(overrides, dict):
+        overrides = {}
     # Mercari's form asks these on the page. Answering them here keeps List
     # Everywhere from starting a job Chrome would refuse before its first write.
     if not _mercari_ships_from(snapshot, specifics, form):
@@ -139,8 +149,12 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
 
 def _mercari_ships_from(snapshot: dict, specifics: dict, form: dict) -> str:
     """The five-digit ZIP Mercari's form requires, from the listing or Item Details."""
-    form_specifics = form.get("specifics") if isinstance(form.get("specifics"), dict) else {}
-    shipping = form_specifics.get("shipping") if isinstance(form_specifics.get("shipping"), dict) else {}
+    form_specifics = form.get("specifics")
+    if not isinstance(form_specifics, dict):
+        form_specifics = {}
+    shipping = form_specifics.get("shipping")
+    if not isinstance(shipping, dict):
+        shipping = {}
     for value in (specifics.get("shipsFrom"), form.get("ships_from_zip"), snapshot.get("zipCode"),
                   shipping.get("location")):
         text = str(value or "").strip()
@@ -157,7 +171,9 @@ def _mercari_ounces(snapshot: dict, package: dict, overrides: dict) -> int:
     if present(package.get("pounds")) or present(package.get("ounces")):
         sources = [(package.get("pounds"), package.get("ounces"))]
     else:
-        weight = overrides.get("weight") if isinstance(overrides.get("weight"), dict) else {}
+        weight = overrides.get("weight")
+        if not isinstance(weight, dict):
+            weight = {}
         sources = [(snapshot.get("weight_lb"), snapshot.get("weight_oz")),
                    (weight.get("pounds"), weight.get("ounces"))]
     for pounds, ounces in sources:
@@ -172,8 +188,12 @@ def _mercari_ounces(snapshot: dict, package: dict, overrides: dict) -> int:
 
 def _mercari_shipping_label(specifics: dict, form: dict) -> str:
     """A listing's picked label id or the seller's saved carrier default."""
-    form_specifics = form.get("specifics") if isinstance(form.get("specifics"), dict) else {}
-    shipping = form_specifics.get("shipping") if isinstance(form_specifics.get("shipping"), dict) else {}
+    form_specifics = form.get("specifics")
+    if not isinstance(form_specifics, dict):
+        form_specifics = {}
+    shipping = form_specifics.get("shipping")
+    if not isinstance(shipping, dict):
+        shipping = {}
     for value in (specifics.get("shippingClassId"), shipping.get("carrierId")):
         text = str(value or "").strip()
         if text and text != "0":
@@ -185,7 +205,9 @@ def _mercari_shipping_label(specifics: dict, form: dict) -> str:
 @requirement("depop")
 def depop_requirements(snapshot: dict, context: Context) -> list[dict]:
     found: list[dict] = []
-    specifics = snapshot.get("depop_specifics") if isinstance(snapshot.get("depop_specifics"), dict) else {}
+    specifics = snapshot.get("depop_specifics")
+    if not isinstance(specifics, dict):
+        specifics = {}
     worldwide = specifics.get("worldwideShipping") or {}
     if worldwide.get("enabled") is True:
         amount = _money(worldwide.get("price"))

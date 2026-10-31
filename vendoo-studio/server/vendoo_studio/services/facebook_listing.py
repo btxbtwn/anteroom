@@ -26,7 +26,9 @@ def _reply(raw: object) -> dict:
     if data.get("ok") is True and data.get("state") in STATES:
         return {"ok": True, "state": data["state"], "owner": data.get("owner") if data.get("owner") in OWNERS else None}
     code = data.get("error_code") if data.get("error_code") in ERROR_CODES else "rejected"
-    error = data.get("error") if isinstance(data.get("error"), str) else ""
+    error = data.get("error")
+    if not isinstance(error, str):
+        error = ""
     return {"ok": False, "error_code": code,
             "error": scrub(error)[:300] if error else "Chrome could not read the Facebook listing.",
             "marketplace_message": scrub(data.get("marketplace_message"))}

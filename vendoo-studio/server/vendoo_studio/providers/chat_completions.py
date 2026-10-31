@@ -336,7 +336,9 @@ def openrouter_sources(payload: dict) -> list[dict]:
     for item in annotations if isinstance(annotations, list) else []:
         if not isinstance(item, dict) or item.get("type") != "url_citation":
             continue
-        cited = item.get("url_citation") if isinstance(item.get("url_citation"), dict) else item
+        cited = item.get("url_citation")
+        if not isinstance(cited, dict):
+            cited = item
         url = str(cited.get("url") or "")
         if url.startswith("http") and url not in seen:
             seen.add(url)

@@ -171,8 +171,12 @@ def ensure_poshmark_style_tags(listing: dict) -> bool:
     from vendoo_studio.models.ebay_fields import ebay_season_haystack
     from vendoo_studio.models.listing_values import infer_known_options
 
-    depop = listing.get("depop_specifics") if isinstance(listing.get("depop_specifics"), dict) else {}
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    depop = listing.get("depop_specifics")
+    if not isinstance(depop, dict):
+        depop = {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     filled: list[str] = []
     for candidate in as_list(depop.get("style")):
         text_tag = text_value(candidate)
@@ -384,7 +388,9 @@ def normalize_listing_dropdowns(listing: dict) -> bool:
 
     # Shipping weight often lands only under marketplace specifics — promote it.
     if "weight_lb" not in listing and "weight_oz" not in listing:
-        ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+        ebay = listing.get("ebay_specifics")
+        if not isinstance(ebay, dict):
+            ebay = {}
         pounds = ebay.get("pounds") if isinstance(ebay, dict) else None
         ounces = ebay.get("ounces") if isinstance(ebay, dict) else None
         if pounds is None and ounces is None:
