@@ -126,6 +126,14 @@ mix it with a fix or a feature.
   files.
 - Run the browser tests before and after. The same tests must pass with the
   same screens.
+- The code-health checks in `./check.sh` and CI catch what a refactor commonly
+  breaks: type errors (basedpyright), imports that go the wrong way between
+  layers (import-linter), and code left unused (knip for the frontend,
+  `scripts/check-dead-code.py` for the backend). Each one records the problems
+  that existed when it was added and fails only on new ones (the type check
+  only reports for now; see the note there). See
+  `vendoo-studio/AGENTS.md`, **Code health checks**. A refactor that fixes
+  recorded problems removes them from the record in the same PR.
 
 ## Repository Structure
 
@@ -140,6 +148,7 @@ mix it with a fix or a feature.
 - **Anteroom start:** `./start.sh` or `cd vendoo-studio && ./scripts/dev.sh`
 - **Anteroom sandbox:** `./sandbox.sh` (see **Sandbox** above)
 - **Anteroom browser tests:** `cd vendoo-studio && npm run e2e` (starts its own sandbox on 4329/5184)
+- **Anteroom code health:** `cd vendoo-studio && npm run knip && basedpyright && lint-imports && python scripts/check-dead-code.py`
 - **Everything CI checks, for what you changed:** `./check.sh` (`--fast` skips browser tests, `--all` runs every component)
 - **Anteroom doctor:** `cd vendoo-studio && ./scripts/doctor.sh`
 - **Anteroom schema check:** `cd vendoo-studio && ./scripts/check-db-schema.sh [db]`
@@ -176,6 +185,7 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 
 - **Anteroom frontend:** `cd vendoo-studio && npm ci && npm run lint && npm test && npm run build`
 - **Anteroom backend:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
+- **Anteroom code health:** knip (in the frontend job) and basedpyright, import-linter and the dead-code check (in **Studio code health**). Commands above; details in `vendoo-studio/AGENTS.md`.
 - **Anteroom browser tests:** `cd vendoo-studio && npx playwright install chromium && npm run e2e`. They run against the sandbox at desktop and phone sizes; on failure, the report, screenshots and traces are in `vendoo-studio/e2e/report` and `e2e/results`, and CI uploads them as an artifact.
 - **Extension:** `node --check` on changed JS files, `node --test 'vendoo-extension/tests/*.test.js'`, and `python -m json.tool vendoo-extension/manifest.json`. Then reload the unpacked extension and test affected marketplace flows manually. Use platform-prefixed console logs (`[EBAY]`, `[POSHMARK]`, etc.), the DevTools diagnostic tool for live form structure, and Anteroom’s fill results for per-field outcomes.
 - **Skills:** Confirm `skills/list-this/SKILL.md` exists and `python -m json.tool skills/list-this/references/vendoo-dropdown-options.json` succeeds.
