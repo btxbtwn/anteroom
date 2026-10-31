@@ -5,6 +5,7 @@
  * price drop is saved first, so the rewrite reuses that price. The next listing
  * waits for a worker whose stream and leftover field fill have finished.
  */
+import { studioFetch } from "./api/transport";
 
 export type BulkRegenerateProgress = {
   index: number;
@@ -319,7 +320,7 @@ export async function followListingGeneration(
     onStarted?: () => void;
   } = {},
 ): Promise<void> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = options.fetchImpl ?? studioFetch;
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const maxAttempts = options.maxAttempts ?? 20;
   let started = false;

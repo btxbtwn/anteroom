@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { installHostedApiSession } from "./api/transport";
 import {
   bulkPriceDrops,
   bulkRegenerateToast,
@@ -353,6 +354,21 @@ describe("runBulkRegenerate", () => {
 });
 
 describe("followListingGeneration", () => {
+  it("signs the web app's generate stream with the seller's session", async () => {
+    const fetchMock = vi.fn(async () => sseResponse("data: {\"title\":\"Coat\"}\n\ndata: [DONE]\n\n"));
+    vi.stubGlobal("fetch", fetchMock);
+    const uninstall = installHostedApiSession({ origin: "https://anteroom.test", accessToken: async () => "seller-token", unauthorized: () => {} });
+    try {
+      await followListingGeneration("conv-1");
+    } finally {
+      uninstall();
+      vi.unstubAllGlobals();
+    }
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://anteroom.test/api/conversations/conv-1/generate");
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer seller-token");
+  });
+
   it("resolves when the stream finishes with listing text", async () => {
     const started = vi.fn();
     await followListingGeneration("conv-1", {
