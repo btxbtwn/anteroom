@@ -1295,6 +1295,31 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         chat_routes.SessionLocal = self._orig_session
         listing_generation.SessionLocal = self._orig_session
 
+    async def test_skill_retrieval_keeps_the_api_responsive(self):
+        import threading
+
+        entered = threading.Event()
+        release = threading.Event()
+        blocked_loop = []
+
+        def held_rules(*_args, **_kwargs):
+            entered.set()
+            if not release.wait(5):
+                blocked_loop.append(True)
+            return "rules"
+
+        with patch("vendoo_studio.services.listing_generation.load_skill_rules", side_effect=held_rules):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4329") as client:
+                generating = asyncio.create_task(client.post(f"/api/conversations/{self.conv_id}/generate"))
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait, 5), "Generation never requested skill rules")
+                    health = await client.get("/api/health")
+                    self.assertEqual(health.status_code, 200)
+                finally:
+                    release.set()
+                    await generating
+        self.assertFalse(blocked_loop, "Skill retrieval blocked the event loop before health could respond")
+
     async def test_generate_stream_includes_keepalive_and_listing(self):
         finishing = []
         def spawn_finish(coro):
