@@ -207,6 +207,35 @@ final class AnteroomAPI: Sendable {
         return try await decode(request("GET", "api/analytics", query: query))
     }
 
+    // MARK: Sales records
+
+    func salesLedger(start: String, end: String, marketplace: String?, page: Int) async throws -> SalesLedgerPage {
+        var query = [URLQueryItem(name: "start", value: start), URLQueryItem(name: "end", value: end),
+                     URLQueryItem(name: "page", value: String(page))]
+        if let marketplace { query.append(URLQueryItem(name: "marketplace", value: marketplace)) }
+        return try await decode(request("GET", "api/sales-ledger", query: query))
+    }
+
+    func salesRecord(_ id: String) async throws -> SalesLedgerRow {
+        try await decode(request("GET", "api/sales-ledger/\(id)"))
+    }
+
+    /// Saves amounts for one order line; blank fields stay unknown.
+    func saveSaleAmounts(_ id: String, currency: String, values: [String: String?], revision: Int, basis: String) async throws {
+        var body: [String: JSONValue] = ["currency": .string(currency), "expected_revision": .int(revision),
+                                         "expected_order_basis": .string(basis)]
+        for (field, value) in values { body[field] = value.map(JSONValue.string) ?? .null }
+        _ = try await send(request("PUT", "api/sales-ledger/\(id)/financials", json: body))
+    }
+
+    /// A CSV export as a file to share.
+    func exportCSV(_ path: String, query: [URLQueryItem] = [], filename: String) async throws -> URL {
+        let data = try await send(request("GET", path, query: query))
+        let url = FileManager.default.temporaryDirectory.appending(path: filename)
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
     // MARK: Bulk actions (reviewed first, as on the desktop)
 
     func previewBulkEdit(ids: [String], edits: BulkEdits) async throws -> [BulkEditReviewRow] {
