@@ -53,6 +53,35 @@ in the sandbox.
   the CLI at `--base-url http://127.0.0.1:4319`. Use headless Chromium for
   screenshots (`npx playwright screenshot --device "iPhone 15" --wait-for-timeout 3000 <url> out.png`, or `--viewport-size "1440, 900"` for desktop).
 
+## Code health checks
+
+Four checks guard refactors. Each started with the problems already in the
+code recorded, so it fails only on new ones. The records may only shrink: when
+you fix a recorded problem, remove it from the record in the same PR, and never
+add to a record to make a check pass.
+
+| Check | Command | Record of existing problems |
+|---|---|---|
+| Types (basedpyright, standard mode) | `basedpyright` | `.basedpyright/baseline.json`; after fixing errors, `basedpyright --writebaseline` and check the diff only removes entries |
+| Layers: routes, then services, then repositories, then models; a lower one never imports a higher one | `lint-imports` | `ignore_imports` in `pyproject.toml` |
+| Unused backend functions, methods, classes and properties (vulture) | `python scripts/check-dead-code.py` | `server/dead_code_baseline.py`; `--write-baseline` after deleting code |
+| Unused frontend files, exports and dependencies | `npm run knip` | `ignoreIssues` in `knip.json` |
+
+- Code that something calls only by name (a handler method a library calls, a
+  callback) goes in `server/dead_code_allowlist.py`, with a comment naming the
+  caller.
+- knip's record works file by file. A file listed there is not checked for that
+  issue type at all. Shrink the list rather than adding to it.
+- Most recorded type errors come from models declared with `Column(...)`.
+  Moving a model to `Mapped[...] = mapped_column(...)` clears its errors.
+  Autogenerate an Alembic revision afterwards: it must come out empty.
+- Until every model has moved, the type check reports but does not fail CI,
+  because setting a `Column(...)` field in new code reads as an error. Still
+  fix the errors it reports in code you wrote. The PR that finishes the move
+  makes the check fail on new errors again.
+- Most layer exceptions are services importing `routes/extension.py` for the
+  extension connection. Moving that connection into a service removes them.
+
 ## Traps
 
 - `config.py` reads `VENDOO_STUDIO_DATA_DIR` when it is imported. Set it before
