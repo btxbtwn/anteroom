@@ -344,6 +344,21 @@ def _ensure_general_condition(listing: dict) -> bool:
     return True
 
 
+def _etsy_what_from_category(listing: dict) -> str:
+    """Etsy's "What is it?" read from the chosen Etsy category, or "" with none.
+
+    Etsy files supplies and tools under Craft Supplies & Tools, so the category
+    answers the question: there a supply, anywhere else a finished product.
+    """
+    from vendoo_studio.services.vendoo_categories import path_parts
+
+    paths = listing.get("marketplace_categories")
+    parts = path_parts(paths.get("etsy")) if isinstance(paths, dict) else []
+    if not parts:
+        return ""
+    return "A supply or tool to make things" if parts[0].startswith("Craft Supplies") else "A finished product"
+
+
 def normalize_listing_dropdowns(listing: dict) -> bool:
     """Rewrite dropdown values to the current Vendoo options."""
     if not isinstance(listing, dict):
@@ -485,7 +500,7 @@ def normalize_listing_dropdowns(listing: dict) -> bool:
     if isinstance(etsy, dict):
         etsy = dict(etsy)
         who = etsy_who_raw(etsy)
-        what = etsy_what_raw(etsy)
+        what = etsy_what_raw(etsy) or _etsy_what_from_category(listing)
         when_raw = etsy_when_raw(etsy, listing)
         if who and text_value(etsy.get("who_made")) != who:
             etsy["who_made"] = who

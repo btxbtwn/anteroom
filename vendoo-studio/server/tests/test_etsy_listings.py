@@ -212,6 +212,14 @@ class EtsyListingsTest(unittest.TestCase):
         self.assertEqual(fields["return_policy_id"], "77")
         self.assertEqual(fields["readiness_state_id"], "88")
 
+    def test_editor_camel_case_answers_are_read(self):
+        # The Etsy tab saves whoMade, whatIsIt and whenMade.
+        details = {key: value for key, value in LISTING["etsy_specifics"].items()
+                   if key not in {"who_made", "what_is", "when_made"}}
+        details.update(whoMade="Another company or person", whatIsIt="A finished product", whenMade="Before 2007 (Vintage)")
+        fields = etsy_listings.draft_fields({**LISTING, "etsy_specifics": details}, creating=True)
+        self.assertEqual((fields["who_made"], fields["when_made"], fields["is_supply"]), ("someone_else", "before_2007", "false"))
+
     def test_non_vintage_when_made_is_a_year_range(self):
         made = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "who_made": "I did", "when_made": "Made To Order (Not Yet Made)"}}
         self.assertEqual(etsy_listings.draft_fields(made, creating=True)["when_made"], "2010_2019")
