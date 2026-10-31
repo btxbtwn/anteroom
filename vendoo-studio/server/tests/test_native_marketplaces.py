@@ -301,11 +301,22 @@ class NativeMarketplacesTest(unittest.TestCase):
             self.assertEqual(context["expected_photo_count"], 2)
 
     def test_list_saves_then_publishes_in_one_job_that_holds_the_slot(self):
+        import gc
+        from sqlalchemy import event
+
+        # An unclosed observer session can be collected during the worker's
+        # next flush and roll back their shared StaticPool connection.
+        def collect_during_flush(session, context):
+            gc.collect()
+
+        event.listen(self.sessions.class_, "after_flush", collect_during_flush)
+        self.addCleanup(event.remove, self.sessions.class_, "after_flush", collect_during_flush)
         for platform in URLS:
             seen = []
 
             async def bridge(job, kind, payload, timeout=None, platform=platform, seen=seen):
-                seen.append([j.id for j in JobRepo(self.sessions()).get_running()])
+                with self.sessions() as observer:
+                    seen.append([j.id for j in JobRepo(observer).get_running()])
                 return ({"ok": True, "state": "draft", "draft_url": URLS[platform]} if payload["action"] == "save_draft"
                         else self.published(platform))
 

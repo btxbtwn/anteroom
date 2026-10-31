@@ -9,5 +9,5 @@ it.each([true, false])("shows the sign-in prompt only while disconnected (%s)", 
   </QueryClientProvider>);
   expect(html.includes("Sign in to Sellwild in Anteroom")).toBe(!connected);
   expect(html.includes("Sellwild is signed in.")).toBe(connected);
-  expect(html).toContain("Reload Sellwild choices");
+  expect(html).not.toContain("Reload");
 });

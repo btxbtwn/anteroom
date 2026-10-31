@@ -6,7 +6,6 @@ import { api } from "../api/client";
 export function SellwildAccountChoices({ convId, disabled, connected }: { convId: string; disabled?: boolean; connected: boolean }) {
   const client = useQueryClient();
   const signIn = useMutation({ mutationFn: () => api.nativeMarketplaces.sellwildConnect(convId) });
-  const reload = useMutation({ mutationFn: () => client.invalidateQueries({ queryKey: ["native-editor-form", convId, "sellwild"] }) });
   useEffect(() => {
     if (!signIn.isSuccess || connected || disabled) return;
     const queryKey = ["native-editor-form", convId, "sellwild"];
@@ -21,7 +20,5 @@ export function SellwildAccountChoices({ convId, disabled, connected }: { convId
       onClick={() => signIn.mutate()}>Sign in to Sellwild in Anteroom</button>}
     {signIn.isSuccess && !connected && <p className="text-muted-foreground">Finish signing in in the Sellwild window. Your choices will reload automatically.</p>}
     {signIn.isError && <p role="alert" className="text-warning-foreground">{signIn.error.message}</p>}
-    <button type="button" className="text-left text-primary underline" disabled={disabled || reload.isPending}
-      onClick={() => reload.mutate()}>Reload Sellwild choices</button>
   </div>;
 }
