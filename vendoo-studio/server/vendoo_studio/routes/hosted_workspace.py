@@ -81,7 +81,7 @@ def listing_response(db, identity):
 def runtime(request: Request):
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
-    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions'] + (['generation', 'chat_attachments'] if generation else []),
+    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions'] + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else []),
             'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark', 'depop']}
 
 
@@ -281,6 +281,28 @@ def jobs(conversation_id: str | None = None, db=Depends(get_seller_db)):
 def queue(db=Depends(get_seller_db)):
     rows = db.scalars(select(Job).where(Job.status.in_(ACTIVE_JOB_STATUSES)).order_by(Job.created_at)).all()
     return {'work': [], 'jobs': [job_response(row) for row in rows]}
+
+
+class ResetInput(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    keep_inputs: bool = False
+
+
+@router.post('/conversations/{identity}/reset')
+def reset_conversation(identity: str, request: Request, body: ResetInput | None = None, db=Depends(get_seller_db)):
+    """Clear, or with keep_inputs Regenerate's wipe. Never contacts a marketplace."""
+    from vendoo_studio.services import hosted_listing_delete
+    from vendoo_studio.services.hidden_fields import clear_listing_hidden_fields
+    conversation(db, identity, lock=True)
+    assert_idle(db, identity)
+    try:
+        keys = hosted_listing_delete.reset_unsent_draft(db, identity, keep_inputs=bool(body and body.keep_inputs))
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from None
+    db.commit()
+    hosted_listing_delete.release(keys, request.headers['authorization'].partition(' ')[2])
+    clear_listing_hidden_fields(identity)
+    return conversation_response(conversation(db, identity))
 
 
 @router.get('/conversations/{identity}/native-marketplaces')
