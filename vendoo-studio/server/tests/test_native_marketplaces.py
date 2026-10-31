@@ -103,8 +103,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
         before = copy.deepcopy(revision.listing_json)
         read = AsyncMock(side_effect=AssertionError("Chrome or remote catalog used during editor preflight"))
-        with patch("vendoo_studio.services.chrome_catalog.live_preview", new=read), \
-             patch("vendoo_studio.services.chrome_catalog.ensure_catalogs", new=read):
+        with patch("vendoo_studio.services.chrome_catalog.live_preview", new=read):
             for connected in (False, True):
                 self.manager.connected = connected
                 response = self.client.get(f"{self.base}/preflight")
