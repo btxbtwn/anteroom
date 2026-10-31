@@ -89,7 +89,7 @@ jobs:
           cd vendoo-studio
           python -m venv .venv
           .venv/bin/pip install -e ".[dev]"
-      - name: Create and reopen a draft through the hosted sandbox
+      - name: Run the iPhone app against the hosted sandbox
         run: |
           set -o pipefail
           xcodebuild -downloadPlatform iOS
