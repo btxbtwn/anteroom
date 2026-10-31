@@ -12,6 +12,7 @@ from vendoo_studio.routes import ai_keys, settings
 router = APIRouter(prefix='/api/settings', tags=['settings'])
 
 router.add_api_route('/provider', settings.get_provider, methods=['GET'])
+router.add_api_route('/usage-limits', settings.usage_limits, methods=['GET'])
 router.add_api_route('/provider', settings.set_provider, methods=['PUT'])
 router.add_api_route('/provider/preferred', settings.set_preferred_provider, methods=['PUT'])
 router.add_api_route('/provider/photos', settings.set_photo_provider, methods=['PUT'])
