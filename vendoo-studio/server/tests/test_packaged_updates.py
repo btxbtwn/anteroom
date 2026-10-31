@@ -63,7 +63,7 @@ class PackagedUpdateTest(unittest.TestCase):
         url = packaged_updates.release_asset_url("build_info.json")
         self.assertEqual(
             url,
-            "https://github.com/btxbtwn/list-this-vendoo-suite/releases/download/studio-macos/build_info.json",
+            "https://github.com/btxbtwn/anteroom/releases/download/studio-macos/build_info.json",
         )
 
     def test_normalize_build_info_formats_every_pull_request(self):
@@ -121,7 +121,7 @@ class PackagedUpdateTest(unittest.TestCase):
         self.assertEqual(status["remote_sha"], "bbb2222")
         self.assertEqual(
             status["download_url"],
-            "https://github.com/btxbtwn/list-this-vendoo-suite/releases/download/studio-macos/Anteroom-macos.zip",
+            "https://github.com/btxbtwn/anteroom/releases/download/studio-macos/Anteroom-macos.zip",
         )
         self.assertEqual(status["sha256"], "ab" * 32)
         self.assertEqual(status["summary"], "")

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.604 — 2026-10-31
+
+- The project now lives at github.com/btxbtwn/anteroom. Updates, release downloads and help links point there; old links keep working.
+
 ## 0.1.603 — 2026-10-31
 
 - On the web, Edit fields can now change the shared, eBay and Depop categories of several listings at once, picked from Anteroom's category lists, and drafts generated on the web get the same category matching as the Mac app.

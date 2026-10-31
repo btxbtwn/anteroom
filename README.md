@@ -1,12 +1,12 @@
 # Anteroom
 
-[![CI](https://github.com/btxbtwn/list-this-vendoo-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/btxbtwn/list-this-vendoo-suite/actions/workflows/ci.yml)
+[![CI](https://github.com/btxbtwn/anteroom/actions/workflows/ci.yml/badge.svg)](https://github.com/btxbtwn/anteroom/actions/workflows/ci.yml)
 
 Turn product photos into marketplace listing drafts, review them in **Anteroom**, and send approved listings to Vendoo from your Mac. Automated sends stop at saved drafts. You choose when and where to publish.
 
 Anteroom combines a listing editor, inventory, a business assistant, sales analytics, and wholesale sourcing. It uses the listing rules in this repository and a Chrome extension to fill Vendoo forms for eBay, Poshmark, Mercari, Depop, and eligible Etsy items.
 
-[Download for Mac](https://github.com/btxbtwn/list-this-vendoo-suite/releases/tag/studio-macos) · [Run from source](#run-from-this-repo) · [Contribute](CONTRIBUTING.md)
+[Download for Mac](https://github.com/btxbtwn/anteroom/releases/tag/studio-macos) · [Run from source](#run-from-this-repo) · [Contribute](CONTRIBUTING.md)
 
 ![Anteroom listing workspace with sample inventory on the left, item chat in the center, and marketplace listing forms on the right](docs/screenshots/anteroom-workspace.png)
 
@@ -104,7 +104,7 @@ Sign in with ChatGPT or Claude, or use your own API key for OpenAI, Anthropic, G
 
 You need **macOS 13+**, **Google Chrome**, a Vendoo account, and access to one of the supported AI providers. The app includes its Python runtime and frontend; recipients do not need Python, Node.js, or a clone of this repository.
 
-1. Download `Anteroom-macos.zip` from the [Mac release](https://github.com/btxbtwn/list-this-vendoo-suite/releases/tag/studio-macos), unzip it, and read **How to Open.txt**.
+1. Download `Anteroom-macos.zip` from the [Mac release](https://github.com/btxbtwn/anteroom/releases/tag/studio-macos), unzip it, and read **How to Open.txt**.
 2. Drag **Anteroom.app** into Applications. Control-click it and choose **Open** the first time; follow the included instructions if macOS warns about the developer.
 3. Follow the setup guide or open **Settings → Providers**. Sign in with ChatGPT, Claude, or OpenRouter, or enter an API key for any listed provider.
 4. Click **Connect Chrome**, then load Anteroom's unpacked extension once: open `chrome://extensions/`, enable **Developer mode**, and choose **Load unpacked**. Use the folder shown in **Settings → Connections** (normally `~/Library/Application Support/Anteroom/vendoo-extension` for the Mac app).

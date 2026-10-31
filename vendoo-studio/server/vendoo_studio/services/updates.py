@@ -14,7 +14,7 @@ from vendoo_studio.config import BASE_DIR, is_packaged
 
 REMOTE = os.environ.get("VENDOO_STUDIO_UPDATE_REMOTE", "origin")
 REF = os.environ.get("VENDOO_STUDIO_UPDATE_REF", "main")
-DEFAULT_REMOTE_URL = "https://github.com/btxbtwn/list-this-vendoo-suite.git"
+DEFAULT_REMOTE_URL = "https://github.com/btxbtwn/anteroom.git"
 FETCH_TIMEOUT_S = 30
 GIT_TIMEOUT_S = 60
 BUILD_TIMEOUT_S = 180

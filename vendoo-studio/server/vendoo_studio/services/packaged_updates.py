@@ -22,7 +22,7 @@ from vendoo_studio.version import app_version
 
 GITHUB_API = os.environ.get("VENDOO_STUDIO_GITHUB_API", "https://api.github.com")
 GITHUB_DOWNLOAD = os.environ.get("VENDOO_STUDIO_GITHUB_DOWNLOAD", "https://github.com")
-GITHUB_REPO = os.environ.get("VENDOO_STUDIO_GITHUB_REPO", "btxbtwn/list-this-vendoo-suite")
+GITHUB_REPO = os.environ.get("VENDOO_STUDIO_GITHUB_REPO", "btxbtwn/anteroom")
 RELEASE_TAG = os.environ.get("VENDOO_STUDIO_RELEASE_TAG", "studio-macos")
 # Every build is also published under its own tag, "studio-macos-v<version>-<sha>",
 # so a build that turns out broken can be swapped for an earlier one.

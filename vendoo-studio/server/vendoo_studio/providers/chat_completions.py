@@ -30,7 +30,7 @@ from vendoo_studio.services.ai_key_catalog import KeyProvider
 from vendoo_studio.version import app_version
 
 # OpenRouter shows the calling app on the seller's activity page.
-APP_URL = "https://github.com/btxbtwn/list-this-vendoo-suite"
+APP_URL = "https://github.com/btxbtwn/anteroom"
 APP_TITLE = "Anteroom"
 
 
