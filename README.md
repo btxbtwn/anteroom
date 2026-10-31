@@ -14,6 +14,8 @@ Anteroom combines a listing editor, inventory, a business assistant, sales analy
 
 ## Direct marketplace listing
 
+Developer references: [marketplace API documentation and local OpenAPI snapshots](docs/marketplace-apis/README.md).
+
 The local build lists directly on **Depop, Etsy, Poshmark, Mercari, Sellwild, and Vinted** with one seller-confirmed **List…**, without requiring Vendoo. Use **Marketplaces** at the top of a listing's Input tab. Etsy uses its official API; Depop, Poshmark, Mercari, Sellwild, and Vinted use your signed-in Chrome session. Those browser connections have no confirmed marketplace authorization and carry account-enforcement risk. eBay's separate workspace uses its official API. Sign in to the Chrome marketplaces under **Settings → Connections**.
 
 ## From photos to a saved draft

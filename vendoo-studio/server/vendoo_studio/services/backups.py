@@ -21,6 +21,7 @@ import logging
 import re
 import shutil
 import sqlite3
+import tempfile
 import threading
 import uuid
 from dataclasses import dataclass
@@ -354,6 +355,50 @@ def decompress_snapshot(snapshot: Path, destination: Path) -> Path:
     with gzip.open(source, "rb") as compressed, open(destination, "wb") as plain:
         shutil.copyfileobj(compressed, plain)
     return destination
+
+
+def database_revision(path: Path) -> str | None:
+    """The Alembic revision a plain SQLite file is stamped with, if any."""
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        row = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+    except sqlite3.DatabaseError:
+        return None
+    finally:
+        connection.close()
+    return str(row[0]) if row and row[0] else None
+
+
+def find_snapshot_at(revision: str, directory: Path | None = None) -> Snapshot | None:
+    """The newest snapshot whose database is stamped with ``revision``.
+
+    Snapshots are gzipped, so each one is unpacked to read its stamp. The
+    search goes newest first and stops at the first match, which is normally
+    the snapshot taken just before the migration away from ``revision``.
+    """
+    with tempfile.TemporaryDirectory(prefix="anteroom-snapshot-") as scratch:
+        plain = Path(scratch) / "snapshot.db"
+        for snapshot in list_snapshots(directory):
+            try:
+                decompress_snapshot(snapshot.path, plain)
+            except (OSError, EOFError, gzip.BadGzipFile) as exc:
+                log.warning("Skipping unreadable snapshot %s: %s", snapshot.path.name, exc)
+                continue
+            if database_revision(plain) == revision:
+                return snapshot
+    return None
+
+
+def stage_restore(snapshot: Snapshot, database: Path) -> Path:
+    """Unpack ``snapshot`` beside ``database`` and check it opens, ready to move in."""
+    staged = database.with_name(database.name + ".restoring")
+    decompress_snapshot(snapshot.path, staged)
+    try:
+        _verify(staged)
+    except BackupError:
+        staged.unlink(missing_ok=True)
+        raise
+    return staged
 
 
 def take_snapshot(reason: str, *, source: str | Path | None = None) -> Snapshot:

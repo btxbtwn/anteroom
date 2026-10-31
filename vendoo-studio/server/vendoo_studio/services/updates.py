@@ -378,6 +378,104 @@ def reinstall_app() -> dict:
         raise UpdateBlocked(str(exc)) from exc
 
 
+def list_versions() -> dict:
+    """Builds still published under their own tag, for going back to one."""
+    from vendoo_studio.services.packaged_updates import PackagedUpdateError, list_published_versions
+
+    try:
+        return {"packaged": is_packaged(), "versions": list_published_versions(), "error": None}
+    except PackagedUpdateError as exc:
+        return {"packaged": is_packaged(), "versions": [], "error": str(exc)}
+
+
+def version_plan(tag: str) -> dict:
+    """What installing the build under ``tag`` would do, before doing it."""
+    from vendoo_studio.services.packaged_updates import PackagedUpdateError, fetch_version_build_info
+    from vendoo_studio.services.schema_migrations import rollback_plan
+
+    try:
+        remote = fetch_version_build_info(tag)
+    except PackagedUpdateError as exc:
+        raise UpdateBlocked(str(exc)) from exc
+    return {
+        "tag": tag,
+        "version": remote.get("version"),
+        "title": remote.get("title"),
+        **rollback_plan(remote.get("schema_revision")),
+    }
+
+
+def install_version(tag: str, snapshot_name: str | None = None) -> dict:
+    """Replace the app with the build under ``tag``, restoring ``snapshot_name`` when it needs one.
+
+    A build with an older database layout cannot open this database, so the
+    snapshot named by ``version_plan`` is unpacked, checked, and moved into
+    place once the app has quit. The current database is snapshotted first so
+    going forward again is possible.
+    """
+    if not is_packaged():
+        raise UpdateBlocked("Earlier versions can only be installed in the Mac app.")
+    from vendoo_studio.database import engine
+    from vendoo_studio.services.backups import (
+        BackupError,
+        database_revision,
+        list_snapshots,
+        snapshot_quietly,
+        stage_restore,
+        take_snapshot,
+    )
+    from vendoo_studio.services.packaged_updates import (
+        PackagedUpdateError,
+        fetch_version_build_info,
+        install_packaged_version,
+    )
+    from vendoo_studio.services.schema_migrations import SchemaError, database_path, needs_older_database
+
+    with _operation_lock:
+        if _operation_state["status"] in {"downloading", "installing"}:
+            raise UpdateBlocked("An update is already in progress.")
+        _operation_state.update(status="downloading", download_percent=0, sha=None, error=None)
+    staged: Path | None = None
+    try:
+        try:
+            remote = fetch_version_build_info(tag)
+            older = needs_older_database(remote.get("schema_revision"), engine)
+        except (PackagedUpdateError, SchemaError) as exc:
+            raise UpdateBlocked(str(exc)) from exc
+        restore = None
+        if older:
+            snapshot = next((item for item in list_snapshots() if item.path.name == snapshot_name), None)
+            if snapshot is None:
+                raise UpdateBlocked("That version needs an earlier backup of your data. Choose it again to review which one.")
+            database = database_path(engine)
+            try:
+                staged = stage_restore(snapshot, database)
+                if database_revision(staged) != remote.get("schema_revision"):
+                    raise UpdateBlocked(f"{snapshot.path.name} is not in that version's database layout.")
+                take_snapshot("pre-rollback")
+            except (BackupError, OSError) as exc:
+                raise UpdateBlocked(f"Your data was left as it is: {exc}") from exc
+            restore = (staged, database)
+        else:
+            snapshot_quietly("pre-rollback")
+        try:
+            result = install_packaged_version(
+                tag,
+                remote,
+                restore_database=restore,
+                progress_callback=lambda percent: _set_operation_state(download_percent=percent),
+            )
+        except PackagedUpdateError as exc:
+            raise UpdateBlocked(str(exc)) from exc
+        _set_operation_state(status="installing", download_percent=100, sha=result.get("sha"), error=None)
+        return result
+    except Exception as exc:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
+        _set_operation_state(status="error", download_percent=None, error=str(exc))
+        raise
+
+
 def preserve_dirty_tree(root: Path) -> Path | None:
     """Write uncommitted changes to a patch before an update discards them.
 

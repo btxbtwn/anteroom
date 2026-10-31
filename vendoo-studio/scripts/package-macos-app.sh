@@ -67,10 +67,21 @@ SHA="$(git -C "$REPO" rev-parse HEAD)"
 SHORT="$(git -C "$REPO" rev-parse --short HEAD)"
 REF="$(git -C "$REPO" rev-parse --abbrev-ref HEAD)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-"$PYTHON" - "$ROOT/desktop/build_info.json" "$SHA" "$SHORT" "$REF" "$VERSION" <<'PY'
+"$PYTHON" - "$ROOT/desktop/build_info.json" "$SHA" "$SHORT" "$REF" "$VERSION" "$ROOT/server/vendoo_studio/migrations" <<'PY'
 import json
 import sys
 from pathlib import Path
+
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
+# The database layout this build expects. Installing an earlier build reads it
+# to tell whether that build can open the current database.
+config = Config()
+config.set_main_option("script_location", sys.argv[6])
+schema_revision = ScriptDirectory.from_config(config).get_current_head()
+if not schema_revision:
+    raise SystemExit(f"No migration head found in {sys.argv[6]}")
 
 path = Path(sys.argv[1])
 path.write_text(json.dumps({
@@ -78,6 +89,7 @@ path.write_text(json.dumps({
     "sha": sys.argv[2],
     "short_sha": sys.argv[3],
     "ref": sys.argv[4],
+    "schema_revision": schema_revision,
 }, indent=2) + "\n", encoding="utf-8")
 print(path)
 PY

@@ -195,3 +195,56 @@ def ensure_schema(engine: Engine | None = None) -> str:
     _snapshot("pre-migration", target)
     command.upgrade(config, "head")
     return head
+
+
+
+ROLLBACK_NO_LAYOUT = "That build does not record which database layout it uses, so it cannot be installed safely."
+ROLLBACK_HOSTED = (
+    "That build uses an older database layout, and this database is hosted, "
+    "so it cannot be rolled back from here."
+)
+ROLLBACK_NO_SNAPSHOT = (
+    "That build uses an older database layout, and no backup on this Mac was taken "
+    "in that layout, so going back would leave Anteroom unable to open your data."
+)
+
+
+def needs_older_database(target_revision: str | None, engine: Engine | None = None) -> bool:
+    """Whether a build at ``target_revision`` would refuse this database.
+
+    False when the layout is the same, or when that build is newer than this
+    one (its revision is unknown here) and migrates the database forward on
+    launch. True when it predates this database's layout.
+    Raises ``SchemaError`` when the answer cannot be given safely.
+    """
+    from vendoo_studio.database import engine as default_engine
+
+    target = engine or default_engine
+    if not target_revision:
+        raise SchemaError(ROLLBACK_NO_LAYOUT)
+    current = recorded_revision(target)
+    if current is None or current == target_revision or not _known(target_revision):
+        return False
+    if target.dialect.name != "sqlite":
+        raise SchemaError(ROLLBACK_HOSTED)
+    return True
+
+
+def rollback_plan(target_revision: str | None, engine: Engine | None = None) -> dict:
+    """What switching to a build at ``target_revision`` does to the database.
+
+    ``keep``: it works with that build as it is. ``restore``: that build would
+    refuse it, so the newest snapshot in that build's layout goes back in place.
+    ``blocked``: neither is possible, and ``reason`` says why.
+    """
+    from vendoo_studio.services.backups import find_snapshot_at
+
+    try:
+        if not needs_older_database(target_revision, engine):
+            return {"action": "keep"}
+    except SchemaError as exc:
+        return {"action": "blocked", "reason": str(exc)}
+    snapshot = find_snapshot_at(str(target_revision))
+    if snapshot is None:
+        return {"action": "blocked", "reason": ROLLBACK_NO_SNAPSHOT}
+    return {"action": "restore", "snapshot": snapshot.as_dict()}

@@ -147,6 +147,32 @@ async function requestWithTimeout<T>(
   }
 }
 
+export interface PublishedVersion {
+  tag: string;
+  version: string;
+  short_sha: string;
+  title: string;
+  published_at: string | null;
+  url: string | null;
+  installed: boolean;
+}
+
+export interface PublishedVersions {
+  packaged: boolean;
+  versions: PublishedVersion[];
+  error: string | null;
+}
+
+export type VersionPlan = {
+  tag: string;
+  version: string | null;
+  title: string | null;
+} & (
+  | { action: "keep" }
+  | { action: "blocked"; reason: string }
+  | { action: "restore"; snapshot: { name: string; taken_at: string; reason: string; size_bytes: number } }
+);
+
 export interface VendooSyncStatus {
   checked_at: string | null;
   conflict: boolean;
@@ -1424,6 +1450,13 @@ export const api = {
       request<{ ok: boolean; updated: boolean; sha?: string; reloading?: boolean }>("/updates/apply", {
         method: "POST",
       }),
+    versions: () => request<PublishedVersions>("/updates/versions"),
+    versionPlan: (tag: string) => request<VersionPlan>(`/updates/versions/${encodeURIComponent(tag)}/plan`),
+    installVersion: (tag: string, snapshot?: string | null) =>
+      request<{ ok: boolean; updated: boolean; version?: string; reloading?: boolean; database_restored?: boolean }>(
+        "/updates/versions/install",
+        { method: "POST", body: JSON.stringify({ tag, snapshot: snapshot ?? null }) },
+      ),
   },
 
   changelog: () =>

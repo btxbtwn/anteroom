@@ -219,6 +219,8 @@ def is_destructive(method: str, path: str, body_names: set[str]) -> str | None:
             return "changes a listing price"
         if len(parts) >= 2 and parts[-2] == "updates" and last in {"apply", "download"}:
             return "downloads or applies an Anteroom update"
+        if "updates" in parts and "versions" in parts and last == "install":
+            return "replaces Anteroom with another published version"
         if last == "update" and "vendoo-api" in parts:
             return "writes fields onto a Vendoo item"
     if "confirm" in body_names:

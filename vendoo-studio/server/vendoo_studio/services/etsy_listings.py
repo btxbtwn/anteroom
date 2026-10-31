@@ -17,7 +17,7 @@ import httpx
 
 from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.models.etsy_fields import (
-    sanitize_etsy_tags, etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_to_store, is_etsy_digital_listing,
+    sanitize_etsy_tags, etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_raw, etsy_when_to_store, is_etsy_digital_listing,
 )
 from vendoo_studio.services import marketplace_accounts, marketplace_schemas
 from vendoo_studio.services.keychain import get_marketplace_accounts
@@ -220,7 +220,7 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     details = snapshot.get("etsy_specifics") or {}
     who = _code(details.get("who_made") or details.get("whoMade"), _WHO)
     what = _code(details.get("what_is") or details.get("whatIsIt"), _WHAT)
-    when = etsy_when_to_store(str(details.get("when_made") or ""), snapshot, etsy_when_options())
+    when = etsy_when_to_store(etsy_when_raw(details, snapshot), snapshot, etsy_when_options())
     when = etsy_when_made_code(when)
     if not who or what is None or not when:
         raise missing("Complete Etsy's who made it, what is it, and when made details before listing.",
@@ -391,11 +391,11 @@ async def _write_properties(write, shop_id: str, item_id: str, assignments: list
         await write("PUT", f"shops/{shop_id}/listings/{item_id}/properties/{row['property_id']}", "properties", data=data)
 
 
-async def unkept_properties(item_id: str, assignments: list[dict]) -> list[str]:
+async def unkept_properties(shop_id: str, item_id: str, assignments: list[dict]) -> list[str]:
     """The written properties Etsy did not keep, read back from the listing."""
     if not assignments:
         return []
-    body = await marketplace_accounts.etsy_api("GET", f"listings/{item_id}/properties")
+    body = await marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/listings/{item_id}/properties")
     kept = {str(row.get("property_id")): ({str(value) for value in row.get("value_ids") or []},
                                           {str(value).casefold() for value in row.get("values") or []})
             for row in body.get("results") or []}
@@ -818,7 +818,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         # Each property write replaces that property, so writing it again is safe.
         await _write_properties(write, shop_id, item_id, assignments)
         record({"etsy_pending_write": None})
-        lost = await unkept_properties(item_id, assignments)
+        lost = await unkept_properties(shop_id, item_id, assignments)
         if lost:
             rejected = True
             raise ListingProblem(f"Etsy did not keep these category details: {', '.join(lost)}. Check them in the Etsy draft.",

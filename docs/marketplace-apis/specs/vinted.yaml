@@ -1,0 +1,2482 @@
+openapi: 3.0.3
+info:
+    title: Vinted Pro Integrations documentation
+    version: v0.385.0
+components:
+    schemas:
+        Address:
+            properties:
+                city:
+                    type: string
+                country_code:
+                    description: ISO 3166 alpha-2 country code.
+                    pattern: ^[A-Z]{2}$
+                    type: string
+                line_1:
+                    type: string
+                line_2:
+                    type: string
+                name:
+                    description: Name of the addressee.
+                    example: John Doe
+                    type: string
+                postal_code:
+                    type: string
+                state:
+                    type: string
+            required:
+                - name
+                - line_1
+                - postal_code
+                - city
+                - country_code
+            type: object
+        CancelOrderFailureEventData:
+            properties:
+                error:
+                    description: The error message.
+                    type: string
+                order_id:
+                    description: The order ID.
+                    format: int64
+                    type: integer
+                    x-go-name: OrderID
+            required:
+                - order_id
+                - error
+            type: object
+        Catalog:
+            properties:
+                catalogs:
+                    description: The child catalogs. Empty for leaf catalogs.
+                    items:
+                        $ref: '#/components/schemas/Catalog'
+                    type: array
+                disabled_fields:
+                    description: Fields that are disabled for this catalog. Empty for non-leaf catalogs. Disabled fields will be ignored on an item when the catalog is set to this catalog.
+                    items:
+                        enum:
+                            - brand
+                            - size_id
+                            - color_ids
+                            - status_id
+                            - package_size_id
+                            - measurement_length
+                            - measurement_width
+                        type: string
+                    type: array
+                id:
+                    description: The catalog ID.
+                    type: integer
+                item_attribute_ids:
+                    description: The IDs of the item attributes associated with this catalog.
+                    items:
+                        type: string
+                    type: array
+                size_group_ids:
+                    description: Only the provided size groups are valid for this catalog. Empty for non-leaf catalogs.
+                    items:
+                        type: integer
+                    type: array
+                title:
+                    description: The catalog title.
+                    type: string
+            required:
+                - id
+                - title
+            type: object
+        Color:
+            properties:
+                id:
+                    description: The color ID.
+                    type: integer
+                title:
+                    description: The color title.
+                    type: string
+            required:
+                - id
+                - title
+            type: object
+        CompleteItemToCreate:
+            allOf:
+                - $ref: '#/components/schemas/ItemProperties'
+                - $ref: '#/components/schemas/ItemReference'
+                - $ref: '#/components/schemas/ItemIsDraft'
+        CreateItemFailureEventData:
+            $ref: '#/components/schemas/ItemIDAndReferenceWithErrors'
+        CreateItemSuccessEventData:
+            $ref: '#/components/schemas/ItemIDAndReference'
+        CreateItemValidationError:
+            $ref: '#/components/schemas/ValidationError'
+        CreateItems:
+            properties:
+                items:
+                    description: An array of items to create. At most 100 items can be created in a single request.
+                    items:
+                        $ref: '#/components/schemas/CompleteItemToCreate'
+                    maxItems: 100
+                    minItems: 1
+                    type: array
+            required:
+                - items
+            type: object
+        CreateItemsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/ItemIDAndReference'
+                    type: array
+            required:
+                - items
+            type: object
+        CreateItemsValidationErrorResponse:
+            items:
+                $ref: '#/components/schemas/CreateItemValidationError'
+            type: array
+        CreateUpdateWebhook:
+            properties:
+                event_types:
+                    description: |
+                        The event types that the webhook should subscribe to. At least one event type is required.
+
+                        - `CREATE_ITEM_SUCCESS`: Triggered when an item is successfully created.
+                        - `CREATE_ITEM_FAILURE`: Triggered when an item creation fails.
+                        - `UPDATE_ITEM_SUCCESS`: Triggered when a requested item update succeeds.
+                        - `UPDATE_ITEM_FAILURE`: Triggered when a requested item update fails.
+                        - `DELETE_ITEM_SUCCESS`: Triggered when the requested deletion of an item succeeds.
+                        - `DELETE_ITEM_FAILURE`: Triggered when the requested deletion of an item fails.
+                        - `ITEM_DELETED`: Triggered when an item is deleted outside of VPI.
+                        - `ITEM_SOLD`: Triggered when an item is sold.
+                        - `ITEM_UPDATED`: Triggered when an item is updated outside of VPI.
+                        - `ORDER_CREATED`: Triggered when an escrow order is created for one or more items. Note that this excludes manually completed orders.
+                        - `CANCEL_ORDER_FAILURE`: Triggered when an order cancellation via VPI fails.
+                        - `SHIPMENT_LABEL_CREATED`: Triggered when a shipment label is created for an order.
+                        - `ITEM_PUBLISHED`: Triggered when an item is published and visible on the marketplace.
+                        - `ORDER_CANCELLED`: Triggered when an order is cancelled due to a transaction cancellation. Includes the cancellation status code and description.
+                        - `VINTED_AUTHENTICATION_ERROR`: Triggered when authentication with the Vinted Marketplace fails for this integration. Re-authenticate to restore access.
+                        - `ITEM_DRAFT_UPDATED`: Triggered when an item draft is updated in the Marketplace.
+                        - `ITEM_REUPLOADED`: Triggered when a relisted item is successfully reuploaded to the Marketplace, assigning a new `marketplace_item_id`.
+                    items:
+                        $ref: '#/components/schemas/WebhookEventType'
+                    minItems: 1
+                    type: array
+                url:
+                    description: The URL to POST the webhook to when the event occurs. Must be between 9 and 255 characters and start with http:// or https://.
+                    format: url
+                    maxLength: 255
+                    minLength: 9
+                    pattern: ^https?://.*
+                    type: string
+            required:
+                - event_types
+                - url
+            type: object
+        CreateWebhookError:
+            properties:
+                error:
+                    enum:
+                        - MAX_WEBHOOKS_EXCEEDED
+                        - ONLY_HTTPS_URLS_ALLOWED
+                    type: string
+            required:
+                - error
+            type: object
+        CreateWebhookResponse:
+            properties:
+                signing_key:
+                    type: string
+                webhook:
+                    $ref: '#/components/schemas/Webhook'
+            required:
+                - webhook
+                - signing_key
+            type: object
+        Currency:
+            description: The currency used for prices.
+            enum:
+                - EUR
+                - GBP
+            type: string
+            x-go-type-skip-optional-pointer: true
+        DeleteItemFailureEventData:
+            $ref: '#/components/schemas/ItemIDAndReference'
+        DeleteItemSuccessEventData:
+            $ref: '#/components/schemas/ItemIDAndReference'
+        DeleteItems:
+            properties:
+                item_ids:
+                    description: An array of item identifiers. When the items were created in VPI, you received an identifier for each item. Use that identifier to delete the item. At most 100 items can be deleted in a single request.
+                    items:
+                        format: uuid
+                        type: string
+                    maxItems: 100
+                    minItems: 1
+                    type: array
+            required:
+                - item_ids
+            type: object
+        DeleteItemsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/DeleteItemsResponseItem'
+                    type: array
+            required:
+                - items
+            type: object
+        DeleteItemsResponseItem:
+            properties:
+                accepted:
+                    description: A boolean indicating if the deletion request for the item was accepted. Examples of reasons for an item deletion not to be accepted are than you do not own the item, the item was already deleted or the item was already sold.
+                    type: boolean
+                item_id:
+                    format: uuid
+                    type: string
+                    x-go-name: ItemID
+            required:
+                - item_id
+                - accepted
+            type: object
+        GetImportedItemsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/ImportedItem'
+                    type: array
+            required:
+                - items
+            type: object
+        GetItemPriceSuggestionsResponse:
+            properties:
+                currency:
+                    $ref: '#/components/schemas/Currency'
+                maximum:
+                    description: Upper bound of the suggested price range.
+                    format: float
+                    minimum: 0.01
+                    type: number
+            required:
+                - currency
+                - maximum
+            type: object
+        GetItemStatusResponse:
+            properties:
+                errors:
+                    items:
+                        $ref: '#/components/schemas/ValidationError'
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                marketplace_item_id:
+                    description: The public integer item ID as used in the website URLs for Vinted. Note that VPI does not accept this ID on any of its endpoints, only the UUID. However, VPI provides this ID because it can be useful to cross-reference with the Vinted website.
+                    format: int64
+                    type: integer
+                status:
+                    $ref: '#/components/schemas/ItemStatus'
+            required:
+                - status
+                - marketplace_item_id
+            type: object
+        GetItemsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/GetItemsResponseItem'
+                    type: array
+            required:
+                - items
+            type: object
+        GetItemsResponseItem:
+            allOf:
+                - $ref: '#/components/schemas/ItemIDAndReference'
+                - $ref: '#/components/schemas/GetItemStatusResponse'
+        GetOntologiesResponse:
+            properties:
+                enumerations:
+                    description: Ontologies enumerations. Only values from these enumerations are valid for sending as item data. However, not all values from these enumerations are valid for all items. The Catalog object dictates some subsets of valid values.
+                    properties:
+                        catalogs:
+                            items:
+                                $ref: '#/components/schemas/Catalog'
+                            type: array
+                        colors:
+                            items:
+                                $ref: '#/components/schemas/Color'
+                            type: array
+                        item_attributes:
+                            items:
+                                $ref: '#/components/schemas/ItemAttribute'
+                            type: array
+                        package_sizes:
+                            items:
+                                $ref: '#/components/schemas/PackageSize'
+                            type: array
+                        size_groups:
+                            items:
+                                $ref: '#/components/schemas/SizeGroup'
+                            type: array
+                        statuses:
+                            deprecated: true
+                            description: Deprecated. Use the item attribute with the id `condition` from `item_attributes` instead, which carries the same options and the per-catalog rules that apply to them.
+                            items:
+                                $ref: '#/components/schemas/Status'
+                            type: array
+                    required:
+                        - catalogs
+                        - size_groups
+                        - statuses
+                        - package_sizes
+                        - colors
+                        - item_attributes
+                    type: object
+                validation_rules:
+                    $ref: '#/components/schemas/ValidationRules'
+                version:
+                    description: Although most of the ontologies data is static, it does vary based on country and currency, therefore the ontologies are versioned using those properties + a date-time reference to when it was last updated.
+                    properties:
+                        country:
+                            enum:
+                                - AT
+                                - BE
+                                - DE
+                                - ES
+                                - FR
+                                - IT
+                                - LU
+                                - NL
+                                - PT
+                                - UK
+                            type: string
+                        currency:
+                            $ref: '#/components/schemas/Currency'
+                        last_updated_on:
+                            format: date-time
+                            type: string
+                    required:
+                        - country
+                        - currency
+                        - last_updated_on
+                    type: object
+            required:
+                - version
+                - enumerations
+                - validation_rules
+            type: object
+        GetOntologiesV2Response:
+            properties:
+                categories:
+                    description: The category tree. Only leaf categories (categories without `categories`) are valid for items.
+                    items:
+                        $ref: '#/components/schemas/OntologyCategory'
+                    type: array
+                item_attributes:
+                    additionalProperties:
+                        $ref: '#/components/schemas/OntologyItemAttribute'
+                    description: The item attributes named by the leaf categories, keyed by item attribute ID.
+                    type: object
+                package_size_groups:
+                    additionalProperties:
+                        $ref: '#/components/schemas/OntologyPackageSizeGroup'
+                    description: The package size groups named by the leaf categories, keyed by package size group ID.
+                    type: object
+                size_groups:
+                    additionalProperties:
+                        $ref: '#/components/schemas/OntologySizeGroup'
+                    description: The size groups named by the leaf categories, keyed by size group ID.
+                    type: object
+                version:
+                    description: The country and currency the response applies to, and a hash of its content.
+                    properties:
+                        country:
+                            description: The two-letter country code the ontologies apply to. The United Kingdom is `UK`.
+                            maxLength: 2
+                            minLength: 2
+                            type: string
+                        currency:
+                            $ref: '#/components/schemas/Currency'
+                        hash:
+                            description: |
+                                A digest of the response content. It changes whenever the content changes, so refetch when it differs
+                                from the one you cached.
+                            maxLength: 64
+                            type: string
+                    required:
+                        - country
+                        - currency
+                        - hash
+                    type: object
+            required:
+                - version
+                - categories
+                - item_attributes
+                - size_groups
+                - package_size_groups
+            type: object
+        GetOrderResponse:
+            properties:
+                amount:
+                    description: The amount you will receive for this order.
+                    format: float
+                    minimum: 0.01
+                    type: number
+                billing_address:
+                    $ref: '#/components/schemas/Address'
+                created_at:
+                    format: date-time
+                    type: string
+                currency:
+                    $ref: '#/components/schemas/Currency'
+                delivery_address:
+                    $ref: '#/components/schemas/Address'
+                id:
+                    type: integer
+                items:
+                    description: The items in the order.
+                    items:
+                        $ref: '#/components/schemas/OrderItem'
+                    type: array
+                status:
+                    $ref: '#/components/schemas/OrderStatus'
+            required:
+                - id
+                - created_at
+                - status
+                - amount
+                - currency
+                - items
+                - buyer
+                - billing_address
+                - delivery_address
+            type: object
+        GetOrderShipmentLabelNotFoundResponse:
+            properties:
+                error:
+                    enum:
+                        - ORDER_NOT_FOUND
+                        - LABEL_CREATION_IN_PROGRESS
+                        - LABEL_CREATION_FAILED
+                    type: string
+            required:
+                - error
+            type: object
+        GetOrderShipmentResponse:
+            properties:
+                carrier:
+                    properties:
+                        name:
+                            example: Vinted Go
+                            type: string
+                    type: object
+                currency:
+                    $ref: '#/components/schemas/Currency'
+                price_ex_vat:
+                    description: The price paid for the label, excluding VAT.
+                    format: float
+                    minimum: 0.01
+                    type: number
+                tracking_code:
+                    description: The tracking code for the shipment. Will be empty for orders containing items that are not managed via Vinted Pro Integrations.
+                    type: string
+                vat_amount:
+                    description: The VAT paid.
+                    format: float
+                    minimum: 0.01
+                    type: number
+            required:
+                - carrier
+                - status
+                - tracking_code
+                - price_ex_vat
+                - vat_amount
+            type: object
+        GetOrdersResponse:
+            properties:
+                orders:
+                    items:
+                        $ref: '#/components/schemas/OrderListElement'
+                    maxItems: 250
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+            type: object
+        GetWebhooksResponse:
+            items:
+                $ref: '#/components/schemas/Webhook'
+            type: array
+        ImportedItem:
+            properties:
+                description:
+                    type: string
+                id:
+                    format: uuid
+                    type: string
+                status:
+                    $ref: '#/components/schemas/ItemStatus'
+                title:
+                    type: string
+                url:
+                    format: uri
+                    type: string
+            required:
+                - id
+                - url
+                - title
+                - description
+                - status
+            type: object
+        ItemAttribute:
+            properties:
+                id:
+                    description: The item attribute ID.
+                    type: string
+                is_required:
+                    description: A boolean indicating if the item attribute is required.
+                    type: boolean
+                options:
+                    description: The item attribute options.
+                    items:
+                        $ref: '#/components/schemas/ItemAttributeOption'
+                    type: array
+                selection_limit:
+                    description: The item attribute options selection limit.
+                    type: integer
+                selection_type:
+                    $ref: '#/components/schemas/ItemAttributeSelectionType'
+                title:
+                    description: The item attribute title.
+                    type: string
+            required:
+                - id
+                - title
+                - is_required
+                - selection_type
+                - selection_limit
+                - options
+            type: object
+        ItemAttributeInput:
+            properties:
+                item_attribute_id:
+                    description: The item attribute ID, as returned in the ontologies response.
+                    type: string
+                item_attribute_option_ids:
+                    description: The item attribute option IDs. Send at least one.
+                    items:
+                        format: int
+                        type: integer
+                    type: array
+            type: object
+        ItemAttributeOption:
+            properties:
+                id:
+                    description: The item attribute option ID.
+                    type: integer
+                title:
+                    description: The item attribute option title.
+                    type: string
+            required:
+                - id
+                - title
+            type: object
+        ItemAttributeSelectionType:
+            description: The item attribute selection type.
+            enum:
+                - SINGLE
+                - MULTIPLE
+            type: string
+        ItemDeletedEventData:
+            $ref: '#/components/schemas/ItemIDAndReference'
+        ItemDraftUpdatedEventData:
+            allOf:
+                - $ref: '#/components/schemas/ItemIDAndReference'
+                - description: The current state of an item draft. A draft is a partial item, so most fields are optional.
+                  properties:
+                    brand_id:
+                        description: The brand ID of the draft.
+                        format: int64
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    catalog_id:
+                        description: The catalog ID of the draft.
+                        format: int64
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    color1_id:
+                        description: The first color ID of the draft.
+                        format: int64
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    color2_id:
+                        description: The second color ID of the draft.
+                        format: int64
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    currency:
+                        $ref: '#/components/schemas/Currency'
+                    description:
+                        description: The description of the draft.
+                        nullable: true
+                        type: string
+                        x-omitempty: false
+                    package_size_id:
+                        description: The package size ID of the draft.
+                        format: int64
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    price:
+                        description: The price of the draft (decimal represented as a string).
+                        nullable: true
+                        type: string
+                        x-omitempty: false
+                    size_id:
+                        description: The size ID of the draft.
+                        format: int64
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    status_id:
+                        description: The status ID of the draft.
+                        format: int64
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    title:
+                        description: The title of the draft.
+                        nullable: true
+                        type: string
+                        x-omitempty: false
+                    updated_at:
+                        description: The time the draft was last updated.
+                        format: date-time
+                        type: string
+                  required:
+                    - currency
+                    - updated_at
+                  type: object
+        ItemIDAndReference:
+            properties:
+                item_id:
+                    description: The main item identifier.
+                    format: uuid
+                    type: string
+                    x-go-name: ItemID
+                item_reference:
+                    description: The item reference for the integrator to identify the item.
+                    maxLength: 64
+                    type: string
+            required:
+                - item_id
+                - item_reference
+            type: object
+        ItemIDAndReferenceWithErrors:
+            allOf:
+                - $ref: '#/components/schemas/ItemIDAndReference'
+                - properties:
+                    errors:
+                        items:
+                            $ref: '#/components/schemas/ValidationError'
+                        type: array
+                        x-go-type-skip-optional-pointer: true
+                    message:
+                        type: string
+                  type: object
+        ItemIsDraft:
+            properties:
+                is_draft:
+                    description: A boolean indicating whether the item is a draft.
+                    type: boolean
+                    x-go-type-skip-optional-pointer: true
+            required:
+                - is_draft
+            type: object
+        ItemProperties:
+            properties:
+                brand:
+                    description: The item brand.
+                    maxLength: 256
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+                catalog_id:
+                    description: The ID of item catalog. This must be a leaf catalog. Use the ontologies endpoint to get the catalog tree.
+                    format: int
+                    type: integer
+                    x-go-name: CatalogID
+                    x-go-type-skip-optional-pointer: true
+                color_ids:
+                    description: The item colors IDs. Use the ontologies endpoint to get the colors.
+                    items:
+                        format: int
+                        type: integer
+                    maxItems: 2
+                    type: array
+                    x-go-name: ColorIDs
+                currency:
+                    $ref: '#/components/schemas/Currency'
+                description:
+                    description: The item description. Must be between 5 and 2000 characters.
+                    maxLength: 2000
+                    minLength: 5
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+                is_unisex:
+                    description: A boolean indicating if item is unisex.
+                    type: boolean
+                isbn:
+                    description: The ISBN of the book. Applicable to book catalogs only.
+                    type: string
+                    x-go-name: ISBN
+                item_attributes:
+                    description: The item attributes.
+                    items:
+                        $ref: '#/components/schemas/ItemAttributeInput'
+                    type: array
+                manufacturer:
+                    description: Manufacturer credentials. E.g. "Mattel (USA)".
+                    maxLength: 2000
+                    minLength: 5
+                    type: string
+                manufacturer_labelling:
+                    description: Labelling and marketing information. This should be general information on product safety and compliance such as safety warnings and instructions of use or safety marks/logo/certifications related to the product.
+                    maxLength: 2000
+                    minLength: 5
+                    type: string
+                measurement_length:
+                    description: The item measurement length.
+                    format: int
+                    type: integer
+                measurement_width:
+                    description: The item measurement width.
+                    format: int
+                    type: integer
+                package_size_id:
+                    description: The ID of item package size. Use the ontologies endpoint to get the package sizes.
+                    format: int
+                    type: integer
+                    x-go-name: PackageSizeID
+                photo_urls:
+                    description: The URLs of the item photos. Must be publicly accessible. At least one photo is required. The maximum size of a photo is 5MB.
+                    items:
+                        format: uri
+                        maxLength: 640
+                        minLength: 1
+                        type: string
+                    minItems: 1
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                price:
+                    description: The item price.
+                    format: float
+                    minimum: 1
+                    type: number
+                    x-go-type-skip-optional-pointer: true
+                size_id:
+                    description: The ID of item size. This is required for catalogs that have a size group (i.e. a non-empty size_group_ids array). Use the ontologies endpoint to get the size groups.
+                    format: int
+                    type: integer
+                    x-go-name: SizeID
+                status_id:
+                    deprecated: true
+                    description: Deprecated. Send the item condition as an item attribute with the id `condition` instead, using an option ID from that attribute in the ontologies response. If you send `status_id` and no `condition` attribute, the condition is still taken from `status_id`, but this fallback will be removed.
+                    format: int
+                    type: integer
+                    x-go-name: StatusID
+                title:
+                    description: The item title. Must be between 5 and 100 characters.
+                    maxLength: 100
+                    minLength: 5
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+                video_game_rating_id:
+                    description: The video game content rating ID. Applicable to video game catalogs only.
+                    format: int
+                    type: integer
+                    x-go-name: VideoGameRatingID
+            required:
+                - title
+                - photo_urls
+                - currency
+                - price
+                - description
+                - catalog_id
+                - brand
+                - package_size_id
+            type: object
+        ItemPublishedEventData:
+            $ref: '#/components/schemas/ItemIDAndReference'
+        ItemReference:
+            properties:
+                item_reference:
+                    description: The item reference for the integrator to identify the item.
+                    maxLength: 64
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+            required:
+                - item_reference
+            type: object
+        ItemReuploadedEventData:
+            allOf:
+                - $ref: '#/components/schemas/ItemIDAndReference'
+                - properties:
+                    marketplace_item_id:
+                        description: The new marketplace item ID after reupload. The item_id (UUID) stays stable across reuploads, but marketplace_item_id rotates.
+                        format: int64
+                        type: integer
+                  required:
+                    - marketplace_item_id
+                  type: object
+        ItemSoldEventData:
+            $ref: '#/components/schemas/ItemIDAndReference'
+        ItemStatus:
+            description: The item status.
+            enum:
+                - IN_PROGRESS
+                - ACTIVE
+                - SOLD
+                - DELETED
+                - DELETE_INTERNAL_ERROR
+                - VALIDATION_ERROR
+                - UPDATE_INTERNAL_ERROR
+                - UPDATE_VALIDATION_ERROR
+                - INTERNAL_ERROR
+                - SALE_CANCELLED
+            type: string
+        ItemToUpdate:
+            allOf:
+                - $ref: '#/components/schemas/ItemProperties'
+                - $ref: '#/components/schemas/ItemIsDraft'
+                - properties:
+                    item_id:
+                        description: The item ID.
+                        format: uuid
+                        type: string
+                        x-go-name: ItemID
+                  required:
+                    - item_id
+                  type: object
+        ItemToValidate:
+            description: An item to validate. Fields are intentionally loose (no length or presence constraints) so the validation rules, not the schema, report content problems. Only the fields currently validated are declared.
+            properties:
+                description:
+                    description: The item description.
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+                item_reference:
+                    description: The item reference for the integrator to identify the item in the response.
+                    maxLength: 64
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+                manufacturer:
+                    description: Manufacturer credentials.
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+                manufacturer_labelling:
+                    description: Labelling and marketing information.
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+                price:
+                    description: The item price. Omitted price is treated as missing (blank); a submitted price is range-checked.
+                    format: float
+                    type: number
+                title:
+                    description: The item title.
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+            required:
+                - item_reference
+            type: object
+        ItemUpdatedEventData:
+            allOf:
+                - $ref: '#/components/schemas/ItemIDAndReference'
+                - properties:
+                    brand_id:
+                        description: The brand ID of the item.
+                        format: int
+                        type: integer
+                    catalog_id:
+                        description: The catalog ID of the item.
+                        format: int
+                        type: integer
+                    color1_id:
+                        description: The first color ID of the item.
+                        format: int
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    color2_id:
+                        description: The second color ID of the item.
+                        format: int
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    currency:
+                        description: The currency of the item price.
+                        type: string
+                    description:
+                        description: The description of the item.
+                        type: string
+                    package_size_id:
+                        description: The package size ID of the item.
+                        format: int
+                        type: integer
+                    price:
+                        description: The price of the item.
+                        format: float
+                        type: number
+                    size_id:
+                        description: The size ID of the item.
+                        format: int
+                        nullable: true
+                        type: integer
+                        x-omitempty: false
+                    status_id:
+                        description: The status ID of the item.
+                        format: int
+                        type: integer
+                    title:
+                        description: The title of the item.
+                        type: string
+                    updated_attributes:
+                        description: List of attribute names that were updated.
+                        items:
+                            enum:
+                                - title
+                                - description
+                                - brand_id
+                                - catalog_id
+                                - color1_id
+                                - color2_id
+                                - currency
+                                - package_size_id
+                                - price
+                                - size_id
+                                - status_id
+                            type: string
+                        type: array
+                  required:
+                    - title
+                    - description
+                    - brand_id
+                    - catalog_id
+                    - currency
+                    - price
+                    - package_size_id
+                    - status_id
+                    - updated_attributes
+                  type: object
+        ItemValidationError:
+            properties:
+                code:
+                    description: 'A stable, machine-readable error code. Existing codes will not change, but new codes may be added over time, so consumers should tolerate unrecognised values. Known values: BLANK, TOO_SHORT, TOO_LONG, PRICE_TOO_LOW, CONTAINS_EMAIL, EXCESSIVE_UPPERCASE, EXCESSIVE_SYMBOLS, UNALLOWED_SYMBOLS, LONG_WORDS.'
+                    type: string
+                field:
+                    description: The field that failed validation.
+                    type: string
+                message:
+                    description: A human-readable error message.
+                    type: string
+            required:
+                - field
+                - code
+                - message
+            type: object
+        ItemValidationResult:
+            properties:
+                errors:
+                    items:
+                        $ref: '#/components/schemas/ItemValidationError'
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                item_reference:
+                    description: The item reference echoed from the request.
+                    type: string
+                valid:
+                    description: Whether the item passed all validation checks.
+                    type: boolean
+                    x-go-type-skip-optional-pointer: true
+            required:
+                - item_reference
+                - valid
+            type: object
+        OntologyAttributeOption:
+            properties:
+                id:
+                    description: The item attribute option ID.
+                    format: int64
+                    type: integer
+                title:
+                    description: The item attribute option title.
+                    type: string
+            required:
+                - id
+                - title
+            type: object
+        OntologyCategory:
+            properties:
+                allowed_attribute_value_ids:
+                    additionalProperties:
+                        items:
+                            format: int64
+                            type: integer
+                        type: array
+                    description: Per item attribute, the option IDs accepted in this category when they are fewer than the attribute's `options`. An attribute that is not listed accepts every option in this response.
+                    type: object
+                    x-go-type-skip-optional-pointer: true
+                categories:
+                    description: The child categories. Absent for leaf categories.
+                    items:
+                        $ref: '#/components/schemas/OntologyCategory'
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                code:
+                    description: The category code, the same in every country.
+                    type: string
+                id:
+                    description: The category ID. Send it as `catalog_id`.
+                    format: int64
+                    type: integer
+                item_attribute_ids:
+                    description: The item attributes that apply to items in this category, as keys of `item_attributes`. Present on leaf categories only. `SIZE` is listed first when the category takes a size.
+                    items:
+                        type: string
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                package_size_group_ids:
+                    description: The package size groups whose package sizes are valid for this category, as keys of `package_size_groups`. Present on leaf categories only.
+                    items:
+                        type: string
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                size_group_ids:
+                    description: The size groups whose sizes are valid for this category, as keys of `size_groups`. Present on leaf categories that take a size.
+                    items:
+                        type: string
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                title:
+                    description: The category title.
+                    type: string
+            required:
+                - id
+                - code
+                - title
+            type: object
+        OntologyItemAttribute:
+            properties:
+                is_required:
+                    description: Whether items in a category that lists this attribute must have it.
+                    type: boolean
+                options:
+                    description: The item attribute options. Absent for free-text attributes and for `SIZE`, whose options are the sizes of the category's size groups.
+                    items:
+                        $ref: '#/components/schemas/OntologyAttributeOption'
+                    type: array
+                    x-go-type-skip-optional-pointer: true
+                selection_limit:
+                    description: The maximum number of options that may be sent.
+                    format: int32
+                    type: integer
+                selection_type:
+                    $ref: '#/components/schemas/ItemAttributeSelectionType'
+                title:
+                    description: The item attribute title.
+                    type: string
+                type:
+                    description: The item attribute value type. An attribute with `options` takes option IDs. `SIZE` takes a size ID from the category's size groups, sent as `size_id`. Other attributes without `options` take free text.
+                    type: string
+            required:
+                - title
+                - type
+                - is_required
+            type: object
+        OntologyPackageSize:
+            properties:
+                id:
+                    description: The package size ID.
+                    format: int64
+                    type: integer
+                title:
+                    description: The package size title.
+                    type: string
+                weight_description:
+                    description: The package size weight description.
+                    type: string
+                    x-go-type-skip-optional-pointer: true
+            required:
+                - id
+                - title
+            type: object
+        OntologyPackageSizeGroup:
+            properties:
+                package_sizes:
+                    description: The package sizes in this group. Send the chosen one as `package_size_id`.
+                    items:
+                        $ref: '#/components/schemas/OntologyPackageSize'
+                    type: array
+            required:
+                - package_sizes
+            type: object
+        OntologySize:
+            properties:
+                id:
+                    description: The size ID.
+                    format: int64
+                    type: integer
+                title:
+                    description: The size title.
+                    type: string
+            required:
+                - id
+                - title
+            type: object
+        OntologySizeGroup:
+            properties:
+                sizes:
+                    description: The sizes in this size group. Send the chosen one as `size_id`.
+                    items:
+                        $ref: '#/components/schemas/OntologySize'
+                    type: array
+                title:
+                    description: The size group title.
+                    type: string
+            required:
+                - title
+                - sizes
+            type: object
+        OrderCancelledEventData:
+            properties:
+                cancellation_status_code:
+                    description: The numeric cancellation status code from Core.
+                    format: int64
+                    type: integer
+                cancellation_status_description:
+                    description: The human-readable cancellation status description.
+                    type: string
+                order_id:
+                    description: The order ID.
+                    format: int64
+                    type: integer
+                    x-go-name: OrderID
+            required:
+                - order_id
+                - cancellation_status_code
+                - cancellation_status_description
+            type: object
+        OrderCreatedEventData:
+            properties:
+                items:
+                    description: The items in the order.
+                    items:
+                        $ref: '#/components/schemas/ItemIDAndReference'
+                    type: array
+                order_id:
+                    description: The order ID.
+                    format: int64
+                    type: integer
+            required:
+                - order_id
+                - items
+            type: object
+        OrderItem:
+            properties:
+                id:
+                    description: The item ID. Will be 00000000-0000-0000-0000-000000000000 for items not managed via Vinted Pro Integrations.
+                    format: uuid
+                    type: string
+                item_reference:
+                    description: The item reference for the integrator to identify the item.
+                    type: string
+                price:
+                    $ref: '#/components/schemas/Price'
+                title:
+                    description: The title under which the item was listed.
+                    example: White Hilfiger t-shirt
+                    type: string
+            required:
+                - id
+                - title
+                - price
+            type: object
+        OrderListElement:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                id:
+                    format: int64
+                    type: integer
+                status:
+                    $ref: '#/components/schemas/OrderStatus'
+            required:
+                - id
+                - created_at
+                - status
+            type: object
+        OrderStatus:
+            enum:
+                - CREATED
+                - READY_TO_BE_SHIPPED
+                - SHIPPED
+                - DELIVERED
+                - LOST
+                - RETURN_REQUESTED
+                - RETURN_INITIATED
+                - RETURN_SHIPPED
+                - RETURN_DELIVERED
+                - RETURN_LOST
+                - CANCELED
+                - COMPLETED
+                - PARTIALLY_COMPLETED
+                - CLOSED
+            type: string
+        PackageSize:
+            description: The size of the package that the item will be shipped in.
+            properties:
+                id:
+                    description: The package size ID.
+                    type: integer
+                title:
+                    description: The package size title.
+                    type: string
+                weight_description:
+                    description: The package size weight description.
+                    type: string
+            required:
+                - id
+                - title
+                - description
+            type: object
+        Price:
+            description: A price paid for something.
+            format: float
+            minimum: 0.01
+            type: number
+        RelistOrdersResponse:
+            properties:
+                orders:
+                    items:
+                        $ref: '#/components/schemas/RelistOrdersResponseItem'
+                    type: array
+            required:
+                - orders
+            type: object
+        RelistOrdersResponseItem:
+            properties:
+                accepted:
+                    description: Whether the order was accepted for relisting.
+                    type: boolean
+                order_id:
+                    format: int64
+                    type: integer
+                    x-go-name: OrderID
+                reason:
+                    description: The reason the order was not accepted for relisting.
+                    enum:
+                        - ORDER_NOT_FOUND
+                        - ORDER_NOT_CANCELLED
+                    type: string
+            required:
+                - order_id
+                - accepted
+            type: object
+        ShipmentLabelCreatedEventData:
+            properties:
+                order_id:
+                    description: The order ID.
+                    format: int64
+                    type: integer
+            required:
+                - order_id
+            type: object
+        Size:
+            properties:
+                id:
+                    description: The size ID.
+                    type: integer
+                title:
+                    description: The size title.
+                    type: string
+            required:
+                - id
+                - title
+            type: object
+        SizeGroup:
+            properties:
+                description:
+                    description: The size group description.
+                    type: string
+                id:
+                    description: The size group ID.
+                    type: integer
+                sizes:
+                    description: The sizes in this size group.
+                    items:
+                        $ref: '#/components/schemas/Size'
+                    type: array
+                title:
+                    description: The size group title.
+                    type: string
+            required:
+                - id
+                - title
+                - description
+                - sizes
+            type: object
+        Status:
+            description: Condition of an item/product.
+            properties:
+                description:
+                    description: Always empty. Status descriptions are no longer published; use the title instead.
+                    type: string
+                id:
+                    description: The status ID.
+                    type: integer
+                title:
+                    description: The status title.
+                    type: string
+            required:
+                - id
+                - title
+                - description
+            type: object
+        UnauthorizedError:
+            properties:
+                error:
+                    description: |
+                        Possible error values:
+                        - `INVALID_HMAC_SIGNATURE`: The HMAC signature provided is invalid.
+                        - `INVALID_ACCESS_KEY`: The access key provided is invalid.
+                        - `REAUTHORISATION_REQUIRED`: Your token is broken due to the associated Vinted OAuth token being revoked. Logging out and back into Vinted Pro Integrations Portal should fix this.
+                    enum:
+                        - INVALID_HMAC_SIGNATURE
+                        - INVALID_ACCESS_KEY
+                        - REAUTHORISATION_REQUIRED
+                    type: string
+            required:
+                - error
+            type: object
+        UpdateItemFailureEventData:
+            $ref: '#/components/schemas/ItemIDAndReferenceWithErrors'
+        UpdateItemReferencesResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/UpdateItemReferencesResponseItem'
+                    type: array
+            required:
+                - items
+            type: object
+        UpdateItemReferencesResponseItem:
+            properties:
+                accepted:
+                    description: A boolean indicating if the item reference update was accepted.
+                    type: boolean
+                item_id:
+                    format: uuid
+                    type: string
+                    x-go-name: ItemID
+                reason:
+                    description: The reason why the item reference update was not accepted.
+                    enum:
+                        - ITEM_NOT_FOUND
+                        - ITEM_REFERENCE_ALREADY_IN_USE
+                        - ITEM_REFERENCE_HAS_RESERVED_PREFIX
+                    type: string
+            required:
+                - item_id
+                - accepted
+            type: object
+        UpdateItemSuccessEventData:
+            $ref: '#/components/schemas/ItemIDAndReference'
+        UpdateItems:
+            properties:
+                items:
+                    description: An array of items to update. When the items were created in VPI, you received an identifier for each item. Use that identifier to update the item. At most 100 items can be updated in a single request.
+                    items:
+                        $ref: '#/components/schemas/ItemToUpdate'
+                    maxItems: 100
+                    minItems: 1
+                    type: array
+            required:
+                - items
+            type: object
+        UpdateItemsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/UpdateItemsResponseItem'
+                    type: array
+            required:
+                - items
+            type: object
+        UpdateItemsResponseItem:
+            properties:
+                accepted:
+                    description: A boolean indicating if the update request for the item was accepted. Examples of reasons for an item update not to be accepted are that you do not own the item or the item was already sold.
+                    type: boolean
+                item_id:
+                    format: uuid
+                    type: string
+                    x-go-name: ItemID
+                reason:
+                    description: The reason why the update was not accepted.
+                    enum:
+                        - ITEM_NOT_FOUND
+                        - ITEM_SOLD
+                        - ITEM_DELETED
+                        - ITEM_IN_PROGRESS
+                        - ITEM_NOT_ACTIVE
+                    type: string
+            required:
+                - item_id
+                - accepted
+            type: object
+        UpdateWebhookError:
+            properties:
+                error:
+                    enum:
+                        - ONLY_HTTPS_URLS_ALLOWED
+                    type: string
+            required:
+                - error
+            type: object
+        ValidateItems:
+            properties:
+                items:
+                    description: An array of items to validate. At most 100 items can be validated in a single request.
+                    items:
+                        $ref: '#/components/schemas/ItemToValidate'
+                    maxItems: 100
+                    minItems: 1
+                    type: array
+            required:
+                - items
+            type: object
+        ValidateItemsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/ItemValidationResult'
+                    type: array
+            required:
+                - items
+            type: object
+        ValidationError:
+            properties:
+                field:
+                    type: string
+                message:
+                    type: string
+            required:
+                - field
+                - message
+            type: object
+        ValidationRules:
+            properties:
+                max_photos:
+                    description: The maximum number of photos allowed for an item.
+                    type: integer
+                max_price:
+                    description: The maximum price allowed for an item.
+                    format: float
+                    type: number
+                min_price:
+                    description: The minimum price allowed for an item.
+                    format: float
+                    type: number
+            required:
+                - max_photos
+                - min_price
+                - max_price
+            type: object
+        VintedAuthenticationErrorEventData:
+            properties: {}
+            type: object
+        Webhook:
+            properties:
+                event_types:
+                    items:
+                        $ref: '#/components/schemas/WebhookEventType'
+                    type: array
+                id:
+                    format: uuid
+                    type: string
+                url:
+                    format: url
+                    maxLength: 255
+                    pattern: ^https?://.*
+                    type: string
+            required:
+                - id
+                - event_types
+                - url
+            type: object
+        WebhookDeliveryResult:
+            properties:
+                created_at:
+                    description: The date and time when the delivery result was created.
+                    format: date-time
+                    type: string
+                error_msg:
+                    description: The error message if the delivery was not successful.
+                    type: string
+                event_type:
+                    $ref: '#/components/schemas/WebhookEventType'
+                http_status_code:
+                    description: The HTTP status code of the response that Vinted received from the webhook endpoint. If a response was received at all.
+                    format: int
+                    type: integer
+                success:
+                    description: A boolean indicating if the delivery was successful.
+                    type: boolean
+            required:
+                - created_at
+                - event_type
+                - success
+            type: object
+        WebhookEventData:
+            description: The event data sent to a webhook endpoint.
+            properties:
+                event_data:
+                    description: The data that is sent with the webhook.
+                    oneOf:
+                        - $ref: '#/components/schemas/CreateItemSuccessEventData'
+                        - $ref: '#/components/schemas/CreateItemFailureEventData'
+                        - $ref: '#/components/schemas/UpdateItemSuccessEventData'
+                        - $ref: '#/components/schemas/UpdateItemFailureEventData'
+                        - $ref: '#/components/schemas/DeleteItemSuccessEventData'
+                        - $ref: '#/components/schemas/DeleteItemFailureEventData'
+                        - $ref: '#/components/schemas/ItemDeletedEventData'
+                        - $ref: '#/components/schemas/ItemSoldEventData'
+                        - $ref: '#/components/schemas/ItemUpdatedEventData'
+                        - $ref: '#/components/schemas/OrderCreatedEventData'
+                        - $ref: '#/components/schemas/CancelOrderFailureEventData'
+                        - $ref: '#/components/schemas/ShipmentLabelCreatedEventData'
+                        - $ref: '#/components/schemas/ItemPublishedEventData'
+                        - $ref: '#/components/schemas/OrderCancelledEventData'
+                        - $ref: '#/components/schemas/VintedAuthenticationErrorEventData'
+                        - $ref: '#/components/schemas/ItemDraftUpdatedEventData'
+                        - $ref: '#/components/schemas/ItemReuploadedEventData'
+                event_type:
+                    $ref: '#/components/schemas/WebhookEventType'
+                webhook_id:
+                    format: uuid
+                    type: string
+            required:
+                - event_type
+                - webhook_id
+                - event_data
+            type: object
+        WebhookEventType:
+            description: The event type of the webhook.
+            enum:
+                - CREATE_ITEM_SUCCESS
+                - CREATE_ITEM_FAILURE
+                - UPDATE_ITEM_SUCCESS
+                - UPDATE_ITEM_FAILURE
+                - DELETE_ITEM_SUCCESS
+                - DELETE_ITEM_FAILURE
+                - ITEM_DELETED
+                - ITEM_SOLD
+                - ITEM_UPDATED
+                - ORDER_CREATED
+                - CANCEL_ORDER_FAILURE
+                - SHIPMENT_LABEL_CREATED
+                - ITEM_PUBLISHED
+                - ORDER_CANCELLED
+                - VINTED_AUTHENTICATION_ERROR
+                - ITEM_DRAFT_UPDATED
+                - ITEM_REUPLOADED
+            type: string
+    responses:
+        Unauthorized:
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/UnauthorizedError'
+            description: User is not authorized to use API.
+    parameters:
+        HMACSignature:
+            description: Signature header. Reference script in documentation.
+            in: header
+            name: X-Vpi-Hmac-Sha256
+            required: true
+            schema:
+                type: string
+    securitySchemes:
+        AccessKeyAuth:
+            in: header
+            name: X-Vpi-Access-Key
+            type: apiKey
+    requestBodies:
+        CreateItemsBody:
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/CreateItems'
+            description: The request body for creating items.
+            required: true
+        CreateUpdateWebhookBody:
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/CreateUpdateWebhook'
+            description: The request body for creating or updating webhooks.
+            required: true
+        DeleteItemsBody:
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/DeleteItems'
+            description: The request body for deleting items.
+            required: true
+        RelistOrdersBody:
+            content:
+                application/json:
+                    schema:
+                        properties:
+                            order_ids:
+                                description: The Core escrow order IDs to relist.
+                                items:
+                                    format: int64
+                                    type: integer
+                                maxItems: 250
+                                minItems: 1
+                                type: array
+                        required:
+                            - order_ids
+                        type: object
+            description: The escrow order IDs to relist.
+            required: true
+        UpdateItemReferencesBody:
+            content:
+                application/json:
+                    schema:
+                        items:
+                            $ref: '#/components/schemas/ItemIDAndReference'
+                        type: array
+            description: The request body for setting item references.
+            required: true
+        UpdateItemsBody:
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/UpdateItems'
+            description: The request body for updating items.
+            required: true
+        ValidateItemsBody:
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/ValidateItems'
+            description: The request body for validating items.
+            required: true
+paths:
+    /api/v1/items:
+        delete:
+            description: Deletes a batch of items in Vinted. At most 100 items can be deleted in a single request. Items are deleted asynchronously. Deleting item is only available for items that are successfully listed. Items that have the status `IN_PROGRESS` cannot be deleted.
+            operationId: DeleteItems
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            requestBody:
+                $ref: '#/components/requestBodies/DeleteItemsBody'
+            responses:
+                202:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteItemsResponse'
+                    description: Request accepted. Deletions will be processed in the background. If items were not recognised as items that belong to your account the deletions will silently fail.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                404:
+                    description: The item is not found.
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Items API
+        get:
+            description: Lists items that were created in VPI.
+            operationId: GetItems
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: If set, returns only items after the item with this ID. Used for paging.
+                  in: query
+                  name: after_item_id
+                  schema:
+                    format: uuid
+                    type: string
+                - description: The maximum number of items to return.
+                  in: query
+                  name: limit
+                  schema:
+                    format: int64
+                    maximum: 250
+                    minimum: 1
+                    type: integer
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetItemsResponse'
+                    description: The items.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Items API
+        post:
+            description: Creates a batch of items in Vinted. At most 100 items can be created in a single request. Items are validated and uploaded asynchronously. The response contains the identifier for each item. This identifier is used to further interact with the item, make sure to store it on your end as well.
+            operationId: CreateItems
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            requestBody:
+                $ref: '#/components/requestBodies/CreateItemsBody'
+            responses:
+                202:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateItemsResponse'
+                    description: Request accepted, items will be uploaded asynchronously. Receiving the item ID does not mean the item is listed.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                409:
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    active_items:
+                                        description: Number of active items for this account.
+                                        format: int64
+                                        type: integer
+                                    attempted_batch_size:
+                                        description: Number of items in the request.
+                                        format: int64
+                                        type: integer
+                                    slots:
+                                        description: Maximum number of items allowed for this account.
+                                        format: int64
+                                        type: integer
+                                required:
+                                    - slots
+                                    - active_items
+                                    - attempted_batch_size
+                                type: object
+                    description: Adding these items would exceed the maximum number of items allowed for this account, please reduce the number of active items before creating more.
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Items API
+        put:
+            description: Updates a batch of items in Vinted. At most 100 items can be updated in a single request. Items are validated and updated asynchronously. Updating item is only available for items that are successfully listed. Items that have the status `IN_PROGRESS` cannot be updated.
+            operationId: UpdateItems
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            requestBody:
+                $ref: '#/components/requestBodies/UpdateItemsBody'
+            responses:
+                202:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateItemsResponse'
+                    description: Request accepted. Updates will be processed in the background. If items were not recognized as items that belong to your account the Updates will silently fail.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Items API
+    /api/v1/items/{id}/status:
+        get:
+            description: Retrieves the current status of an item on Vinted by its ID.
+            operationId: GetItemStatus
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The item ID.
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetItemStatusResponse'
+                    description: Successfully retrieved the item status.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                404:
+                    description: The item could not be found.
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Items API
+    /api/v1/items/imported:
+        get:
+            description: Returns a list of items that were imported. VPI can import items that were added to Vinted in other ways than through VPI.
+            operationId: GetImportedItems
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: If set, returns only items after the item with this ID. Used for paging.
+                  in: query
+                  name: after_item_id
+                  schema:
+                    format: uuid
+                    type: string
+                - description: The maximum number of items to return.
+                  in: query
+                  name: limit
+                  schema:
+                    format: int64
+                    maximum: 250
+                    minimum: 1
+                    type: integer
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetImportedItemsResponse'
+                    description: The imported items list.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occurred.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Items API
+    /api/v1/items/item-references:
+        put:
+            description: Sets the item references for the items in the request.
+            operationId: UpdateItemReferences
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            requestBody:
+                $ref: '#/components/requestBodies/UpdateItemReferencesBody'
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateItemReferencesResponse'
+                    description: Item references set successfully.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Items API
+    /api/v1/items/validate:
+        post:
+            description: Validates a batch of items without creating them. At most 100 items can be validated in a single request. Returns per-item validation results so integrators can check items before uploading. This endpoint has no side effects.
+            operationId: ValidateItems
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            requestBody:
+                $ref: '#/components/requestBodies/ValidateItemsBody'
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidateItemsResponse'
+                    description: Per-item validation results.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occurred.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occurred.
+            security:
+                - AccessKeyAuth: []
+            summary: Validate items without creating them.
+            tags:
+                - Items API
+    /api/v1/ontologies:
+        get:
+            description: Gets the ontologies required to create valid Vinted items. For many fields the valid values depend on the category of the item. Therefore it's recommended to first map your category tree to Vinted's category tree before you map other product properties. Note that gender is encoded in the root categories at Vinted, but the category trees aren't equal for the Women, Men and Kids. This means your category mapping should take gender into account as well. Brands are omitted from the response due to the large number of brands available on Vinted. You can send any brand name when creating or updating an item which will automatically be mapped to a supported brand or VPI will leave the brand unassigned if its not recognised.
+            operationId: GetOntologies
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetOntologiesResponse'
+                    description: Successfully retrieved ontologies.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Items API
+    /api/v1/orders:
+        get:
+            description: Returns a list of orders. Use the `after-id` query parameter to iterate over the results.
+            operationId: GetOrders
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: If set, returns only orders created after the order with this ID.
+                  in: query
+                  name: after-id
+                  schema:
+                    format: int64
+                    type: integer
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetOrdersResponse'
+                    description: The orders list.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occurred.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Orders API
+    /api/v1/orders/{id}:
+        get:
+            description: Returns the order with the given ID.
+            operationId: GetOrder
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The order ID
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: int64
+                    type: integer
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetOrderResponse'
+                    description: The order.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                403:
+                    description: User is not authorized to use this endpoint.
+                404:
+                    description: Order not found.
+                500:
+                    description: An unexpected error occurred.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Orders API
+    /api/v1/orders/{id}/cancel:
+        post:
+            description: Cancels the order with the given ID asynchronously.
+            operationId: CancelOrder
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The order ID
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: int64
+                    type: integer
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                cancellation_reason_explanation:
+                                    description: Explanation for the cancellation
+                                    maxLength: 100
+                                    type: string
+                            required:
+                                - cancellation_reason_explanation
+                            type: object
+                required: true
+            responses:
+                200:
+                    description: Order will be cancelled asynchronously.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occurred.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Orders API
+    /api/v1/orders/{id}/shipment:
+        get:
+            description: Returns the shipment for the order with the given ID.
+            operationId: GetOrderShipment
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The order ID
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: int64
+                    type: integer
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetOrderShipmentResponse'
+                    description: The shipment.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                404:
+                    description: Shipment not found. This can be because the shipment does not (yet) exist.
+                500:
+                    description: An unexpected error occurred.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Orders API
+    /api/v1/orders/{id}/shipment-label:
+        get:
+            description: Retrieves the shipment label shipment label by order ID.
+            operationId: GetOrderShipmentLabel
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The order ID.
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: int64
+                    type: integer
+            responses:
+                200:
+                    content:
+                        application/pdf:
+                            schema:
+                                format: binary
+                                type: string
+                    description: Successfully retrieved the order shipment label.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                404:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetOrderShipmentLabelNotFoundResponse'
+                    description: The shipment label could not be found. Will also be returned for orders containing items that are not managed via Vinted Pro Integrations.
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Orders API
+    /api/v1/orders/relist:
+        post:
+            description: 'Relists one or more cancelled escrow orders by proxying to Core''s transaction reupload. Each order is validated and, if eligible, relisted asynchronously. Reupload is order-scoped: every revoked item in the order is relisted.'
+            operationId: RelistOrders
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            requestBody:
+                $ref: '#/components/requestBodies/RelistOrdersBody'
+            responses:
+                202:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RelistOrdersResponse'
+                    description: Relist requests accepted for processing.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occurred.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occurred.
+            security:
+                - AccessKeyAuth: []
+            summary: Relist cancelled escrow orders.
+            tags:
+                - Orders API
+    /api/v1/webhooks:
+        get:
+            description: Lists your registered webhooks.
+            operationId: GetWebhooks
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetWebhooksResponse'
+                    description: Successfully retrieved the webhooks.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Webhooks API
+        post:
+            description: Add a webhook to be called when events happen in Vinted.
+            operationId: CreateWebhook
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            requestBody:
+                $ref: '#/components/requestBodies/CreateUpdateWebhookBody'
+            responses:
+                201:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateWebhookResponse'
+                    description: The webhook was successfully created.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                422:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateWebhookError'
+                    description: The request could not be processed.
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Webhooks API
+    /api/v1/webhooks/{id}:
+        delete:
+            description: Deletes a webhook.
+            operationId: DeleteWebhook
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The webhook ID.
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            responses:
+                200:
+                    description: Successfully deleted the webhook.
+                304:
+                    description: The webhook has already been deleted.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                404:
+                    description: The webhook could not be found.
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Webhooks API
+        put:
+            description: Updates a webhook's URL and/or subscribed event types.
+            operationId: UpdateWebhook
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The webhook ID.
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            requestBody:
+                $ref: '#/components/requestBodies/CreateUpdateWebhookBody'
+            responses:
+                200:
+                    description: Successfully updated webhook.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                404:
+                    description: The webhook could not be found.
+                422:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateWebhookError'
+                    description: The request could not be processed.
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Webhooks API
+    /api/v1/webhooks/{id}/delivery-results:
+        get:
+            description: Gets the 100 latest delivery results (attempts, failures and successes) for a webhook.
+            operationId: GetWebhookDeliveryResults
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The webhook ID.
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+                  x-go-name: ID
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: '#/components/schemas/WebhookDeliveryResult'
+                                type: array
+                    description: Successfully retrieved the delivery results.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            tags:
+                - Webhooks API
+    /api/v2/item-price-suggestions:
+        get:
+            description: Returns the maximum suggested price for an item based on category, brand and condition, benchmarked against historical sold prices.
+            operationId: GetItemPriceSuggestions
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The catalog (category) ID of the item. Use the ontologies endpoint to get the catalog tree.
+                  in: query
+                  name: catalog_id
+                  required: true
+                  schema:
+                    format: int64
+                    type: integer
+                  x-go-name: CatalogID
+                - description: The brand ID of the item.
+                  in: query
+                  name: brand_id
+                  schema:
+                    format: int64
+                    type: integer
+                  x-go-name: BrandID
+                - description: The condition (status) ID of the item. Use the ontologies endpoint to get the statuses.
+                  in: query
+                  name: status_id
+                  schema:
+                    format: int64
+                    type: integer
+                  x-go-name: StatusID
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetItemPriceSuggestionsResponse'
+                    description: Successfully retrieved maximum price suggestion.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                404:
+                    description: No price suggestion available for the given combination.
+                500:
+                    description: An unexpected error occurred.
+            security:
+                - AccessKeyAuth: []
+            summary: Get maximum price suggestion for an item.
+            tags:
+                - Items API
+    /api/v2/ontologies:
+        get:
+            description: |
+                This endpoint is being rolled out. Some size IDs in its response are not yet accepted for every account, so
+                keep using `GetOntologies` until we contact you directly to switch.
+
+                Gets the categories, item attributes, size groups and package sizes needed to create Vinted items in your
+                account's country and currency. The response is large and changes rarely, so cache it and refetch it when
+                `version.hash` changes.
+
+                Items must be created in a leaf category, one without child `categories`, so start by mapping your categories
+                to the leaves. Each leaf lists what applies to its items as keys of the top-level `item_attributes`,
+                `size_groups` and `package_size_groups` maps.
+
+                In `CreateItems`, send attributes with `options` as `item_attributes`, except `COLOUR`, which goes in the
+                top-level `color_ids` field. `BRAND` and `ISBN` take free text, so send them in the top-level `brand` and
+                `isbn` fields rather than in `item_attributes`.
+
+                Compared to `GetOntologies`, colours and conditions are listed as item attributes, size groups and package sizes
+                are keyed by ID, and `validation_rules` are not included.
+            operationId: GetOntologiesV2
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+            responses:
+                200:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetOntologiesV2Response'
+                    description: Successfully retrieved ontologies.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    $ref: '#/components/responses/Unauthorized'
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            summary: Get the ontologies for creating items
+            tags:
+                - Items API
+    /dev/v1/triggers/item-sold/{itemID}:
+        post:
+            description: Use this endpoint to simulate making a sale. Only available in dev mode.
+            operationId: TriggerItemSold
+            parameters:
+                - $ref: '#/components/parameters/HMACSignature'
+                - description: The item ID.
+                  in: path
+                  name: itemID
+                  required: true
+                  schema:
+                    format: uuid
+                    type: string
+            responses:
+                200:
+                    description: The item sale was successfully triggered.
+                400:
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                    description: A validation error occured.
+                401:
+                    description: The request had invalid authentication.
+                404:
+                    description: The item is not found.
+                409:
+                    description: The item is already sold.
+                500:
+                    description: An unexpected error occured.
+            security:
+                - AccessKeyAuth: []
+            summary: Triggers the sale of an item
+            tags:
+                - Dev mode API

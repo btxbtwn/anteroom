@@ -9,7 +9,7 @@ const POLL_MS = 60 * 1000;
 
 type UpdateStatus = Awaited<ReturnType<typeof api.updates.status>>;
 
-async function waitForReload() {
+export async function waitForReload() {
   // Give the restart thread a moment to begin shutting down.
   await new Promise((resolve) => setTimeout(resolve, 500));
   let sawDown = false;

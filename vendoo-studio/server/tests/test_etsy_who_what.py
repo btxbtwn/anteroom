@@ -38,6 +38,24 @@ class EtsyWhoWhatTests(unittest.TestCase):
         self.assertIn("Etsy who-made is not a current dropdown value", issues)
         self.assertIn("Etsy what-is is not a current dropdown value", issues)
 
+    def test_missing_what_is_comes_from_the_etsy_category(self):
+        for path, expected in [
+            ("Clothing > Men's Clothing > Shirts & Tees > Tank Tops", "A finished product"),
+            ("Craft Supplies & Tools > Fabric", "A supply or tool to make things"),
+        ]:
+            with self.subTest(path=path):
+                listing = {"marketplace_categories": {"etsy": path},
+                           "etsy_specifics": {"who_made": "Another company or person", "when_made": "2000 - 2006 (Vintage)"}}
+                normalize_listing_dropdowns(listing)
+                self.assertEqual(listing["etsy_specifics"]["what_is"], expected)
+                self.assertEqual(listing["etsy_specifics"]["when_made"], "2000 - 2006 (Vintage)")
+
+    def test_seller_what_is_is_kept_over_the_category(self):
+        listing = {"marketplace_categories": {"etsy": "Clothing > Tank Tops"},
+                   "etsy_specifics": {"what_is": "A supply or tool to make things"}}
+        normalize_listing_dropdowns(listing)
+        self.assertEqual(listing["etsy_specifics"]["what_is"], "A supply or tool to make things")
+
 
 if __name__ == "__main__":
     unittest.main()
