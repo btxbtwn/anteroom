@@ -236,3 +236,13 @@ requests, and hosted lookups never build it inline: a background build publishes
 it while search uses the verified lexical fallback. The Machine has 2 GB for that
 build. The index is still per seller; a shared category index is needed before
 many sellers use the web app.
+
+On `feat/hosted-automations`, the Automations view mounts the desktop handlers
+for saving, previewing, pausing, running and history, plus `/api/errors`. A
+`SECURITY DEFINER` function (`due_automation_owners`, revision `3b9d6f2a1c47`)
+lets only the trusted process login list sellers with due or unfinished runs;
+each tick then runs in that seller's row-secured context. Regenerate queues the
+seller's durable draft task. Marketplace writes stay approvals, and approving
+one is refused until web marketplace actions exist. Offers and sharing panels
+need marketplace sessions and stay hidden. Fly's trial stops the Machine after
+five minutes, so schedules only fire while it is running.
