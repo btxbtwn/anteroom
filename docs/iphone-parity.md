@@ -11,6 +11,11 @@ routers it mounts (paths are relative to `vendoo-studio/`). The native source
 is `anteroom-ios/Sources/`. Backend availability below describes code, not a
 verified production deployment. Recheck `/api/runtime` on the deployed server.
 
+The built-desktop visual/code reference is
+[`desktop-ui-reference.md`](desktop-ui-reference.md). Use its source map,
+observed screen hierarchy and acceptance criteria before further UI changes.
+It records where the native form still differs from the desktop workflow.
+
 ## Completion rule
 
 For every row, verify its seller-scoped backend contract, native interface,
@@ -61,6 +66,20 @@ Anteroom's terminology and identity while following iOS navigation conventions.
 | Settings / Help: onboarding, help, changelog and support | Hosted changelog mounted; other coverage needs audit | Missing | Native onboarding/help routes, support links and app-store readiness |
 | App lifecycle: foreground refresh, interrupted work, push/deep links | Durable tasks exist; no complete iOS lifecycle integration | Partial | Reconnect generation explicitly today; audit notifications and stale screen refresh |
 | Public release: privacy, account deletion, permission descriptions and distribution | Not covered by existing TestFlight flow | Missing | Complete before a public App Store release; TestFlight is not release readiness |
+
+## Core visual alignment
+
+The current visual pass uses the desktop inspector's section headings and flat
+dividers, photos before fields, a native actions menu for assistant/history,
+and a prominent Save action. Inventory rows show private cover thumbnails;
+the photo tray uses an adaptive grid with an expand control. The separate
+layout-review simulator app uses the production row/section/field views and
+invented sample data, without calling the backend or touching a seller account.
+
+Simulator inventory layout was inspected. Opening the editor for visual review
+was blocked by repeated device-runner build failures after one cache recovery.
+Editor appearance, dark mode, accessibility text sizes and real-account photo
+loading still need device review. Compilation is not visual verification.
 
 ## Delivery order
 

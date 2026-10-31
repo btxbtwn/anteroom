@@ -17,8 +17,11 @@ struct InventoryView: View {
                 Section {
                     ForEach(model.drafts) { draft in
                         NavigationLink(value: draft) {
-                            DraftRow(draft: draft)
+                            DraftRow(api: model.api, draft: draft)
                         }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     }
                     if model.canLoadMore {
                         Button("Load more") {
@@ -117,30 +120,63 @@ struct InventoryView: View {
 
 }
 
-private struct DraftRow: View {
+struct DraftRow: View {
+    let api: AnteroomAPI
     let draft: Draft
+    @State private var coverID: String?
+
+    var body: some View {
+        InventoryRowContent(title: draft.displayTitle, updated: draft.updatedDate) {
+            if let coverID {
+                RemotePhoto(api: api, draftID: draft.id, photoID: coverID, maxPixels: 96)
+            } else {
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(WorkspaceStyle.surface)
+            }
+        }
+        .task(id: draft.updatedAt) {
+            // Load only visible rows. Photo failures don't hide a listing.
+            coverID = try? await api.photos(draftID: draft.id).first?.id
+        }
+    }
+}
+
+struct InventoryRowContent<Thumbnail: View>: View {
+    let title: String
+    let updated: Date?
+    let thumbnail: Thumbnail
+
+    init(title: String, updated: Date?, @ViewBuilder thumbnail: () -> Thumbnail) {
+        self.title = title
+        self.updated = updated
+        self.thumbnail = thumbnail()
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "tag")
-                .foregroundStyle(.secondary)
+            thumbnail
+                .frame(width: 44, height: 44)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(WorkspaceStyle.border, lineWidth: 1))
                 .accessibilityHidden(true)
-                .frame(width: 40, height: 44)
-                .background(WorkspaceStyle.background, in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 5) {
-                Text(draft.displayTitle).font(.body).lineLimit(2)
+                Text(title).font(.subheadline.weight(.medium)).lineLimit(2)
                 HStack(spacing: 6) {
                     Text("Draft")
-                    if let updated = draft.updatedDate {
+                    if let updated {
                         Text("·").accessibilityHidden(true)
                         Text(updated, format: .relative(presentation: .named))
                     }
                 }
-                .font(.footnote)
+                .font(.caption)
                 .foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
     }
 }
