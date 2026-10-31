@@ -286,8 +286,13 @@ async def _claude_get_usage() -> dict:
 
 async def fetch_claude() -> dict:
     from vendoo_studio.services import claude_auth
+    from vendoo_studio.services.service_context import current
 
     checked_at = now_iso()
+    if current() is not None:
+        # The Claude sign-in is the seller's own Claude Code login on their Mac.
+        # The web app never starts a CLI or reads this server's home folder.
+        return make_unavailable("claude", checked_at, "unsupported", "Claude sign-in usage is shown in the Mac app.")
     signed_in = await asyncio.to_thread(claude_auth.claude_signed_in)
     if not signed_in:
         return make_unavailable("claude", checked_at, "unsupported", "Sign in to Claude in Settings → Providers.")
@@ -404,8 +409,16 @@ FETCHERS = {
     "mimo": fetch_mimo,
 }
 
-_cache: dict[str, tuple[float, dict]] = {}
-_locks: dict[str, asyncio.Lock] = {}
+_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+_locks: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def _key(provider: str) -> tuple[str, str]:
+    """Cache per seller on the web app, so one account never sees another's usage."""
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    return (context.seller_id if context is not None else "", provider)
 
 
 def clear_cache() -> None:
@@ -422,11 +435,12 @@ def _fresh(entry: tuple[float, dict] | None) -> dict | None:
 
 
 async def provider_usage_limits(provider: str, *, force: bool = False) -> dict:
-    if not force and (cached := _fresh(_cache.get(provider))):
+    key = _key(provider)
+    if not force and (cached := _fresh(_cache.get(key))):
         return cached
-    lock = _locks.setdefault(provider, asyncio.Lock())
+    lock = _locks.setdefault(key, asyncio.Lock())
     async with lock:
-        if not force and (cached := _fresh(_cache.get(provider))):
+        if not force and (cached := _fresh(_cache.get(key))):
             return cached
         try:
             limits = await asyncio.wait_for(FETCHERS[provider](), PROBE_TIMEOUT_S + 5)
@@ -435,7 +449,7 @@ async def provider_usage_limits(provider: str, *, force: bool = False) -> dict:
             limits = make_unavailable(
                 provider, now_iso(), "probeFailed", f"{PROVIDER_LABELS[provider]} could not read usage limits."
             )
-        _cache[provider] = (time.monotonic(), limits)
+        _cache[key] = (time.monotonic(), limits)
         return limits
 
 
