@@ -91,6 +91,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   // "Your cover photo is photo 9" is about a photo this form sent, so it goes
   // once the seller drags that photo back into the slots the page draws.
   const shown = warnings.filter((message) => {
+    // The current photo selection owns this notice, including after local edits.
+    if (message.startsWith(`${name} keeps `) && message.includes(" photos. The first ")) return false;
     const cover = COVER_LIMIT.exec(message);
     return !cover || !savedPick.length || (Number(cover[1]) <= picked.length && Number(cover[1]) >= picked.length - late.length + 1);
   });
@@ -249,7 +251,10 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   });
   // The page's empty slots keep their captions after the photos, up to its limit.
   const emptySlots = (page?.slots ?? []).slice(picked.length);
-  const notes = shown.length > 0 && <>
+  const notes = <>
+    {limit !== undefined && picked.length > limit && <p role="status" className="text-xs text-warning-foreground">
+      {name} keeps {limit} photos. The first {limit} of {picked.length} are sent. Leave some off or drag the ones you want first.
+    </p>}
     {shown.map((message) => <p key={message} role="status" className="text-warning-foreground text-xs">{message}</p>)}
   </>;
 
@@ -334,10 +339,6 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
           <PhotoStrip>{untickedTiles}</PhotoStrip>
         </div>}
         {reset}
-        {limit !== undefined && picked.length > limit && <p role="status" className="text-xs text-warning-foreground">
-          {name} keeps {limit} photos. The first {limit} of {picked.length} are sent. Leave some off or drag the ones you want first.
-        </p>}
-        {notes}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         {viewers}
       </div>
@@ -380,9 +381,6 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
           {videoRules ? videoRuleText(videoRules) : ""}
           {custom ? " Photos added to the item later show here, left off, until you add them." : ""}
         </p>
-        {limit !== undefined && picked.length > limit && <p role="status" className="text-xs text-warning-foreground">
-          {name} keeps {limit} photos. The first {limit} of {picked.length} are sent. Leave some off or drag the ones you want first.
-        </p>}
         {notes}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
