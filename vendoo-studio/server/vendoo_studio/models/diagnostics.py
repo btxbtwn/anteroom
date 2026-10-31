@@ -1,38 +1,50 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKeyConstraint, Column, String, DateTime, ForeignKey, JSON, Integer, UniqueConstraint
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class DiagnosticRun(SellerOwned, Base):
     __tablename__ = "diagnostic_runs"
 
-    id = Column(String, primary_key=True, default=new_id)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     __table_args__ = (
         UniqueConstraint("user_id", "observation_id", name="uq_diagnostic_runs_seller_observation"),
         UniqueConstraint("user_id", "id", name="uq_diagnostic_runs_seller_id"),
         ForeignKeyConstraint(["user_id", "job_id"], ["jobs.user_id", "jobs.id"],
             name="fk_diagnostic_runs_seller_job_id", deferrable=True, initially="DEFERRED"),
     )
-    observation_id = Column(String, nullable=False)
-    job_id = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
-    step = Column(String, nullable=False)
-    collector_version = Column(String, nullable=False)
-    mode = Column(String, nullable=False)
-    url = Column(String, nullable=True)
-    title = Column(String, nullable=True)
-    timestamp = Column(String, nullable=True)
-    field_count = Column(Integer, default=0)
-    dropdown_count = Column(Integer, default=0)
-    dropdowns_with_options = Column(Integer, default=0)
-    live_dropdowns_with_options = Column(Integer, default=0)
-    total_dropdown_options = Column(Integer, default=0)
-    expanded_sections = Column(JSON, nullable=True)
-    headings = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=utcnow)
+    observation_id: Mapped[str] = mapped_column(String, nullable=False)
+    job_id: Mapped[str] = mapped_column(String, ForeignKey("jobs.id"), nullable=False, index=True)
+    step: Mapped[str] = mapped_column(String, nullable=False)
+    collector_version: Mapped[str] = mapped_column(String, nullable=False)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    url: Mapped[str | None] = mapped_column(String, nullable=True)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    timestamp: Mapped[str | None] = mapped_column(String, nullable=True)
+    field_count: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    dropdown_count: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    dropdowns_with_options: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    live_dropdowns_with_options: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    total_dropdown_options: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    expanded_sections: Mapped[Any] = mapped_column(JSON, nullable=True)
+    headings: Mapped[Any] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
 
 
 class FieldObservation(SellerOwned, Base):
@@ -42,22 +54,22 @@ class FieldObservation(SellerOwned, Base):
             name="fk_field_observations_seller_diagnostic_run_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    diagnostic_run_id = Column(String, ForeignKey("diagnostic_runs.id"), nullable=False, index=True)
-    observation_id = Column(String, nullable=False, index=True)
-    label = Column(String, nullable=True)
-    label_sources = Column(JSON, nullable=True)
-    section_path = Column(JSON, nullable=True)
-    selector = Column(String, nullable=True)
-    tag = Column(String, nullable=True)
-    control_type = Column(String, nullable=True)
-    role = Column(String, nullable=True)
-    name = Column(String, nullable=True)
-    control_id = Column(String, nullable=True)
-    placeholder = Column(String, nullable=True)
-    classes = Column(String, nullable=True)
-    is_dropdown = Column(Integer, default=0)
-    option_count = Column(Integer, default=0)
-    options = Column(JSON, nullable=True)
-    options_source = Column(String, nullable=True)
-    created_at = Column(DateTime, default=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    diagnostic_run_id: Mapped[str] = mapped_column(String, ForeignKey("diagnostic_runs.id"), nullable=False, index=True)
+    observation_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    label: Mapped[str | None] = mapped_column(String, nullable=True)
+    label_sources: Mapped[Any] = mapped_column(JSON, nullable=True)
+    section_path: Mapped[Any] = mapped_column(JSON, nullable=True)
+    selector: Mapped[str | None] = mapped_column(String, nullable=True)
+    tag: Mapped[str | None] = mapped_column(String, nullable=True)
+    control_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    role: Mapped[str | None] = mapped_column(String, nullable=True)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    control_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    placeholder: Mapped[str | None] = mapped_column(String, nullable=True)
+    classes: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_dropdown: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    option_count: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    options: Mapped[Any] = mapped_column(JSON, nullable=True)
+    options_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)

@@ -1,8 +1,16 @@
+from datetime import datetime
+from typing import cast
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
-from vendoo_studio.models.catalog import CategoryNode, CategorySchema, CategoryTree, CategoryTreeNode
+from vendoo_studio.models.catalog import (
+    CategoryNode,
+    CategorySchema,
+    CategoryTree,
+    CategoryTreeNode,
+)
 from vendoo_studio.services.category_tree import MARKETPLACES, start_sync, syncing
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
@@ -20,7 +28,7 @@ def categories(marketplace: str = "general", db: Session = Depends(get_db)):
     rows = db.query(CategoryNode).filter_by(marketplace=marketplace).order_by(CategoryNode.path).all()
     return {"coverage": "observed", "complete": False, "nodes": [{
         "path": row.path, "parent_path": row.parent_path, "label": row.label,
-        "observed_at": row.observed_at.isoformat(),
+        "observed_at": cast(datetime, row.observed_at).isoformat(),
     } for row in rows]}
 
 
@@ -122,4 +130,4 @@ def fields(marketplace: str, category_id: str):
 def schema(category_path: str, db: Session = Depends(get_db)):
     rows = db.query(CategorySchema).filter_by(general_path=category_path).all()
     return {row.marketplace: {"category_path": row.category_path, "fields": row.fields,
-                             "observed_at": row.observed_at.isoformat()} for row in rows}
+                             "observed_at": cast(datetime, row.observed_at).isoformat()} for row in rows}

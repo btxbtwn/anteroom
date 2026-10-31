@@ -13,6 +13,7 @@ is shown. It cannot send, list, delist or publish anything.
 """
 
 from __future__ import annotations
+from typing import cast
 
 import copy
 import json
@@ -116,7 +117,7 @@ def propose(db: Session, block: str) -> dict[str, Any] | None:
             to_set["box"] = box_id
             # The seller reads a box by its name; the id is what gets assigned.
             fields.append({
-                "field": "box", "old": _box_name(boxes.get(conv.box_id)), "new": _box_name(boxes.get(box_id)),
+                "field": "box", "old": _box_name(boxes.get(cast(str, conv.box_id))), "new": _box_name(boxes.get(cast(str, box_id))),
             })
         if fields:
             items.append({

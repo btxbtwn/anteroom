@@ -1,17 +1,24 @@
 """Named seller-selected reusable listing fields."""
-from sqlalchemy import Column, DateTime, Integer, JSON, String
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import JSON, DateTime, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class ListingTemplate(SellerOwned, Base):
     __tablename__ = "listing_templates"
 
-    id = Column(String, primary_key=True, default=new_id)
-    name = Column(String, nullable=False)
-    fields = Column(JSON, nullable=False)
-    revision = Column(Integer, nullable=False, default=1, server_default="1")
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    fields: Mapped[Any] = mapped_column(JSON, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)

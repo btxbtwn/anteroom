@@ -20,18 +20,28 @@ import random
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.models.conversation import Conversation, new_id
-from vendoo_studio.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
+from vendoo_studio.models.listing_promotion import (
+    ListingPromotion,
+    MarketplaceOfferFloor,
+)
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.models.promotion_automation import PromotionAutomation, PromotionRun
 from vendoo_studio.repositories.queries import JobRepo
 from vendoo_studio.services import listing_promotions as promotions
 from vendoo_studio.services.automation_age import load_listed_index, resolve_listed_at
-from vendoo_studio.services.automation_schedule import ScheduleError, as_utc, next_after, normalize_schedule, require_timezone
+from vendoo_studio.services.automation_schedule import (
+    ScheduleError,
+    as_utc,
+    next_after,
+    normalize_schedule,
+    require_timezone,
+)
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_promotions import NAMES, STOP_CODES, PromotionError
 
@@ -332,10 +342,10 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 await promotions.review(db, send, conv, new_like_at=new_like_at)
                 shipping = None
                 if row.action == "offer":
-                    if send.like_count < (row.min_likes or 1):
+                    if cast(int, send.like_count) < (row.min_likes or 1):
                         raise PromotionError(409, "fewer likes than the rule needs")
                     last = promotions.likes_at_last_offer(db, row.marketplace, listing_id)
-                    if new_like_at is None and last is not None and send.like_count <= last:
+                    if new_like_at is None and last is not None and cast(int, send.like_count) <= last:
                         raise PromotionError(409, "no new likers since the last offer")
                     shipping = _shipping_choice(row, send)
             except PromotionError as exc:

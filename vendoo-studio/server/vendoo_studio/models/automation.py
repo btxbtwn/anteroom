@@ -13,11 +13,26 @@ a specific item and action. A failed relist is recorded for manual recovery.
 """
 from __future__ import annotations
 
-from sqlalchemy import ForeignKeyConstraint, JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
+from vendoo_studio.models.ownership import SellerOwned
 
 
 class Automation(SellerOwned, Base):
@@ -26,24 +41,24 @@ class Automation(SellerOwned, Base):
         UniqueConstraint("user_id", "id", name="uq_automations_seller_id"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    name = Column(String, nullable=False)
-    prompt = Column(Text, nullable=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     # draft until the seller confirms; active runs; paused waits; completed is a one-off that finished.
-    status = Column(String, nullable=False, default="draft")
-    timezone = Column(String, nullable=False, default="UTC")
-    schedule = Column(JSON, nullable=False)
-    filters = Column(JSON, nullable=False)
-    actions = Column(JSON, nullable=False)
-    marketplaces = Column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
+    timezone: Mapped[str] = mapped_column(String, nullable=False, default="UTC")
+    schedule: Mapped[Any] = mapped_column(JSON, nullable=False)
+    filters: Mapped[Any] = mapped_column(JSON, nullable=False)
+    actions: Mapped[Any] = mapped_column(JSON, nullable=False)
+    marketplaces: Mapped[Any] = mapped_column(JSON, nullable=False)
     # step walks the original price down each cycle. once drops a single time.
     # Empty means the price action's own repeat still applies.
-    price_repeat = Column(String, nullable=True)
-    confirmed_at = Column(DateTime, nullable=True)
-    next_run_at = Column(DateTime, nullable=True, index=True)
-    last_run_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    updated_at = Column(DateTime, nullable=False, default=utcnow)
+    price_repeat: Mapped[str | None] = mapped_column(String, nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
 class AutomationRun(SellerOwned, Base):
@@ -63,20 +78,20 @@ class AutomationRun(SellerOwned, Base):
             name="fk_automation_runs_seller_automation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
-    scheduled_for = Column(DateTime, nullable=False)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    automation_id: Mapped[str] = mapped_column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     # schedule or manual. A manual run uses its own slot so it does not consume the next timer fire.
-    origin = Column(String, nullable=False, default="schedule")
+    origin: Mapped[str] = mapped_column(String, nullable=False, default="schedule")
     # running, waiting, completed, failed
-    status = Column(String, nullable=False, default="running")
-    dry_run = Column(Boolean, nullable=False, default=False)
-    attempt_count = Column(Integer, nullable=False, default=0)
-    started_at = Column(DateTime, nullable=True)
-    finished_at = Column(DateTime, nullable=True)
-    next_attempt_at = Column(DateTime, nullable=True)
-    error = Column(Text, nullable=True)
-    summary = Column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="running")
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[Any] = mapped_column(JSON, nullable=True)
 
 
 class AutomationApplication(SellerOwned, Base):
@@ -96,11 +111,11 @@ class AutomationApplication(SellerOwned, Base):
             name="fk_automation_applications_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
-    conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
-    listed_at = Column(DateTime, nullable=True)
-    applied_at = Column(DateTime, nullable=False, default=utcnow)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    automation_id: Mapped[str] = mapped_column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    listed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    applied_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
 class AutomationRelistGap(SellerOwned, Base):
@@ -118,16 +133,16 @@ class AutomationRelistGap(SellerOwned, Base):
             name="fk_automation_relist_gaps_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
-    run_id = Column(String, nullable=True)
-    conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
-    title = Column(String, nullable=True)
-    marketplace = Column(String, nullable=False)
-    error = Column(Text, nullable=True)
-    state = Column(String, nullable=False, default="down, needs relist")
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    resolved_at = Column(DateTime, nullable=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    automation_id: Mapped[str] = mapped_column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    marketplace: Mapped[str] = mapped_column(String, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="down, needs relist")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class AutomationApproval(SellerOwned, Base):
@@ -141,20 +156,20 @@ class AutomationApproval(SellerOwned, Base):
             name="fk_automation_approvals_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    id = Column(String, primary_key=True, default=new_id)
-    automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
-    run_id = Column(String, nullable=True)
-    conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
-    title = Column(String, nullable=True)
-    revision_id = Column(String, nullable=True)
-    action = Column(String, nullable=False, server_default="publish")
-    targets = Column(JSON, nullable=False, server_default="{}")
-    review_basis = Column(String, nullable=False, server_default="")
-    marketplaces = Column(JSON, nullable=False)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    automation_id: Mapped[str] = mapped_column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    action: Mapped[str] = mapped_column(String, nullable=False, server_default="publish")
+    targets: Mapped[Any] = mapped_column(JSON, nullable=False, server_default="{}")
+    review_basis: Mapped[str] = mapped_column(String, nullable=False, server_default="")
+    marketplaces: Mapped[Any] = mapped_column(JSON, nullable=False)
     # pending, approved, dismissed
-    status = Column(String, nullable=False, default="pending")
-    created_at = Column(DateTime, nullable=False, default=utcnow)
-    decided_at = Column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ItemPriceBaseline(SellerOwned, Base):
@@ -166,6 +181,6 @@ class ItemPriceBaseline(SellerOwned, Base):
             name="fk_item_price_baselines_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
-    conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
-    original_price = Column(Float, nullable=False)
-    created_at = Column(DateTime, nullable=False, default=utcnow)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    original_price: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
