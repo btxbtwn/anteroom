@@ -12,6 +12,27 @@ from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.services import hosted_photos
 
 
+def test_poshmark_category_choice_saves_and_reloads_its_native_form(cloud, signing_keys):  # noqa: F811
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    path = '/api/conversations/' + identity
+    initial = client.put(path + '/listing', headers=alice, json={'listing': {'title': 'Coat'}, 'expected_revision_id': ''})
+    assert initial.status_code == 200, initial.text
+    form_path = path + '/native-marketplaces/poshmark/form'
+    response = client.get(form_path, headers=alice)
+    assert response.status_code == 200, response.text
+    category = next(row for row in response.json()['fields'] if row['path'] == 'direct_category_ids.poshmark')
+    picked = next(iter(category['option_values'].values()))
+    payload = {'title': 'Coat', 'direct_category_ids': {'poshmark': picked}}
+    saved = client.put(path + '/listing', headers=alice, json={'listing': payload, 'expected_revision_id': initial.json()['revision_id']})
+    assert saved.status_code == 200, saved.text
+    assert client.get(path + '/listing', headers=alice).json()['listing']['direct_category_ids']['poshmark'] == picked
+    refreshed = client.get(form_path, headers=alice)
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()['category_id'] == picked
+
+
 def test_full_editor_saves_history_and_preserves_existing_draft(cloud, signing_keys):  # noqa: F811
     client, engine = cloud
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
