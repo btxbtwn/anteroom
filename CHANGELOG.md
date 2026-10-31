@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.594 — 2026-10-31
+
+- Vinted errors now tell you which field to adjust and why, including titles rejected for too many capital letters.
+
 ## 0.1.593 — 2026-10-31
 
 - Show the marketplace photo-limit warning once instead of repeating it around the photos.

@@ -93,6 +93,21 @@ test('a Vinted hour that ran out is renewed before the draft, and keeps the sign
   assert.equal(JSON.stringify(result).includes(token(-60)), false);
 });
 
+test('Vinted field validation reasons reach the seller without exporting the response body', async () => {
+  const { c, sent } = worker();
+  const reason = 'Title contains too many capital letters, try using lowercase letters.';
+  c.fetch = ((inner) => async (url, options = {}) => (
+    new URL(url).pathname === '/api/v2/item_upload/drafts'
+      ? reply(400, { code: 99, message: 'Sorry, there are some errors', message_code: 'validation_error',
+        errors: [{ field: 'title', value: reason }], payload: { private: 'do-not-export' } })
+      : inner(url, options)))(c.fetch);
+  const result = await c.runVintedNative(message());
+  assert.equal(result.ok, false);
+  assert.match(result.marketplace_message, new RegExp(`title: ${reason}`));
+  assert.equal(JSON.stringify(result).includes('do-not-export'), false);
+  assert.equal(sent('POST', '/api/v2/item_upload/drafts/42/completion').length, 0);
+});
+
 test('a fresh Vinted hour is used without asking for a new one', async () => {
   const { c, sent } = worker();
   assert.equal((await c.runVintedNative(message())).ok, true);
