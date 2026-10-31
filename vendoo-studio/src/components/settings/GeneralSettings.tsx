@@ -5,6 +5,7 @@ import type { ListingNames } from "../../api/types";
 import { frontendBuildState } from "../buildStamp";
 import { useStudioUpdate } from "../UpdateButton";
 import { ChangelogDialog } from "../ChangelogDialog";
+import { PreviousVersionsDialog } from "../PreviousVersionsDialog";
 import { applyTheme, normalizeTheme, type ThemePreference } from "../../theme";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
@@ -135,6 +136,24 @@ function WhatsNewRow() {
   );
 }
 
+function PreviousVersionsRow() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <SettingsRow
+        title="Previous versions"
+        description="Go back to an earlier build if the current one isn't working."
+        control={
+          <Button size="xs" variant="outline" onClick={() => setOpen(true)}>
+            Choose version
+          </Button>
+        }
+      />
+      <PreviousVersionsDialog open={open} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
 export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () => void }) {
   const { hosted } = useWorkspaceRuntime();
   const { data: status } = useQuery({
@@ -158,6 +177,7 @@ export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () =>
       <SettingsSection id="about" title="About">
         <AboutVersionRow version={status?.version || "…"} />
         <WhatsNewRow />
+        {!hosted ? <PreviousVersionsRow /> : null}
       </SettingsSection>
     </>
   );

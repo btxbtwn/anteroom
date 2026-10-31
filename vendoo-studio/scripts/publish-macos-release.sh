@@ -94,6 +94,21 @@ PY
 CHANGES="$(python3 -c 'import json,sys; print("\n".join("- [#{number}]({url}) {title}".format(**p) for p in json.loads(sys.argv[1])))' "$PULL_REQUESTS_JSON")"
 NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull requests\n%s\n\nInstall\n1. Unzip Anteroom-macos.zip\n2. Move Anteroom.app into Applications\n3. Control-click the app and choose Open (first launch only)\n4. In Settings, sign in with ChatGPT or add a MiMo API key\n5. Click Connect Chrome, load the listing extension once, and sign in to Vendoo\n\nNeeds macOS 13+ and Google Chrome. Listing data stays on this Mac.\n' "${VERSION:-unknown}" "$BUILT_AT" "$SHA" "$REF" "${CHANGES:-- None detected}")
 
+# Keep this build under its own tag as well, so Settings → About can go back to
+# it if a later build turns out broken. The rolling tag above is what updates
+# follow; these are never marked latest.
+VERSIONED_TAG="${TAG}-v${VERSION:-unknown}-${SHORT}"
+if gh release view "$VERSIONED_TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
+  gh release upload "$VERSIONED_TAG" "$ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
+else
+  gh release create "$VERSIONED_TAG" "$ZIP" "$INFO" \
+    --latest=false \
+    --title "Anteroom ${VERSION:-unknown} (${SHORT}): ${TITLE}" \
+    --notes "$NOTES" \
+    --target "$SHA" \
+    --repo "$GITHUB_REPO"
+fi
+
 if [[ "$RELEASE_EXISTS" == 1 ]]; then
   gh release upload "$TAG" "$ZIP" "$LEGACY_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
   gh release edit "$TAG" --title "$TITLE" --notes "$NOTES" --latest --repo "$GITHUB_REPO"
@@ -120,4 +135,20 @@ if [[ "$TAG_SHA" != "$SHA" ]]; then
   fi
 fi
 
+# Each build is about 90 MB. Keep the newest few dozen; older ones go with their tags.
+KEEP_VERSIONS="${VENDOO_STUDIO_KEEP_VERSIONS:-30}"
+prune_old_versions() {
+  gh api --paginate "repos/${GITHUB_REPO}/releases?per_page=100" \
+    --jq ".[] | select(.tag_name | startswith(\"${TAG}-v\")) | [.created_at, .tag_name] | @tsv" \
+    | sort -r | tail -n "+$((KEEP_VERSIONS + 1))" | cut -f2 \
+    | while read -r old_tag; do
+        [[ -n "$old_tag" ]] || continue
+        gh release delete "$old_tag" --cleanup-tag --yes --repo "$GITHUB_REPO"
+        echo "Removed old build $old_tag"
+      done
+}
+# The build is already published; failing to tidy old ones must not fail the job.
+prune_old_versions || echo "Warning: could not remove old builds beyond the newest $KEEP_VERSIONS." >&2
+
 echo "Published $SHORT ($TITLE) to https://github.com/${GITHUB_REPO}/releases/tag/$TAG"
+echo "Kept this build as https://github.com/${GITHUB_REPO}/releases/tag/$VERSIONED_TAG"

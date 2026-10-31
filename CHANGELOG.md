@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.596 — 2026-10-30
+
+- If an update breaks something, Settings → About → Previous versions lets you go back to an earlier build. When that build used an older database layout, Anteroom restores your backup from that time and keeps a backup of your current data.
+
 ## 0.1.595 — 2026-10-31
 
 - Finish saving Etsy drafts with category details instead of stopping before the photos with an incomplete-listing message.
