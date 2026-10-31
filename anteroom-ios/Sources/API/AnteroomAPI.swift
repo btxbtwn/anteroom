@@ -197,6 +197,69 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("PUT", "api/settings/ai-keys/\(id)/models", json: body))
     }
 
+    // MARK: Listing templates
+
+    func templates() async throws -> [ListingTemplate] {
+        struct Payload: Decodable { let templates: [ListingTemplate] }
+        let payload: Payload = try await decode(request("GET", "api/listing-templates"))
+        return payload.templates
+    }
+
+    func templateSource(_ listingID: String) async throws -> TemplateSource {
+        try await decode(request("GET", "api/listing-templates/source/\(listingID)"))
+    }
+
+    /// Saves the checked fields as a new template, or replaces an existing one's fields.
+    func saveTemplate(name: String, source: TemplateSource, fields: [String], replacing: ListingTemplate?) async throws {
+        var body: [String: JSONValue] = [
+            "name": .string(name),
+            "selection": .object(["source_id": .string(source.sourceID), "expected_basis": .string(source.expectedBasis),
+                                  "fields": .array(fields.map(JSONValue.string))]),
+        ]
+        if let replacing { body["expected_revision"] = .int(replacing.revision) }
+        let path = replacing.map { "api/listing-templates/\($0.id)" } ?? "api/listing-templates"
+        _ = try await send(request(replacing == nil ? "POST" : "PUT", path, json: body))
+    }
+
+    func renameTemplate(_ template: ListingTemplate, to name: String) async throws {
+        _ = try await send(request("PUT", "api/listing-templates/\(template.id)",
+                                   json: ["name": JSONValue.string(name), "expected_revision": .int(template.revision)]))
+    }
+
+    func deleteTemplate(_ template: ListingTemplate) async throws {
+        _ = try await send(request("DELETE", "api/listing-templates/\(template.id)",
+                                   query: [URLQueryItem(name: "expected_revision", value: String(template.revision))]))
+    }
+
+    /// A new draft from a template. The request id makes a retry safe.
+    func draftFromTemplate(_ template: ListingTemplate, requestID: String, title: String, sku: String, quantity: Int) async throws -> String {
+        struct Payload: Decodable { let conversation_id: String }
+        let body: [String: JSONValue] = ["request_id": .string(requestID), "expected_revision": .int(template.revision),
+                                         "title": .string(title), "sku": .string(sku), "quantity": .int(quantity)]
+        let payload: Payload = try await decode(request("POST", "api/listing-templates/\(template.id)/draft", json: body))
+        return payload.conversation_id
+    }
+
+    func templateDraftResult(_ template: ListingTemplate, requestID: String) async throws -> String {
+        struct Payload: Decodable { let conversation_id: String }
+        let payload: Payload = try await decode(request("GET", "api/listing-templates/\(template.id)/draft-result/\(requestID)"))
+        return payload.conversation_id
+    }
+
+    func previewTemplate(_ template: ListingTemplate, listingID: String, mode: String) async throws -> TemplateReview {
+        try await decode(request("POST", "api/listing-templates/\(template.id)/apply-preview", json: [
+            "conversation_id": JSONValue.string(listingID), "expected_template_revision": .int(template.revision), "mode": .string(mode),
+        ]))
+    }
+
+    func applyTemplate(_ template: ListingTemplate, listingID: String, mode: String, review: TemplateReview) async throws {
+        _ = try await send(request("POST", "api/listing-templates/\(template.id)/apply", json: [
+            "conversation_id": JSONValue.string(listingID), "expected_template_revision": .int(template.revision), "mode": .string(mode),
+            "expected_revision_id": .string(review.expectedRevisionID), "expected_basis": .string(review.expectedBasis),
+            "expected_result": .string(review.expectedResult),
+        ]))
+    }
+
     // MARK: Analytics
 
     func analytics(range: String, start: Date? = nil, end: Date? = nil) async throws -> InventoryAnalytics {

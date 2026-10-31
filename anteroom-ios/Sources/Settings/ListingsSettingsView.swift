@@ -20,6 +20,11 @@ struct ListingsSettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                NavigationLink("Saved templates") { SavedTemplatesView(api: api) }
+            } footer: {
+                Text("Reusable listing fields, saved from a listing's Templates action.")
+            }
             whereYouList
             inventory
             shipping
