@@ -178,6 +178,18 @@ test('publishing a Vinted draft completes it once and returns the public listing
   assert.deepEqual(body.draft.item_attributes, [{ code: 'condition', ids: [3] }]);
 });
 
+test('a Vinted draft not yet live after publishing says to check again and keeps Vinted\'s reply', async () => {
+  const { c } = worker({ read: () => DRAFT });
+  c.marketplaceSleep = async () => {};
+  const inner = c.fetch;
+  c.fetch = async (url, options = {}) => (new URL(url).pathname.endsWith('/completion')
+    ? reply(200, { code: 0, item: { id: 42, is_draft: true, user: { email: 'seller@example.com' } } }) : inner(url, options));
+  const result = await c.runVintedNative(message({ action: 'publish', confirm: true, draft_url: DRAFT_URL }));
+  assert.equal(result.ok, false);
+  assert.match(result.error, /not shown this listing as live yet/);
+  assert.equal(result.marketplace_message, 'code=0 is_draft=true');
+});
+
 test('a Vinted listing that is already live is not published again', async () => {
   const { c, sent } = worker({ read: () => ({ ...DRAFT, is_draft: false }) });
   const result = await c.runVintedNative(message({ action: 'publish', confirm: true, draft_url: DRAFT_URL }));
