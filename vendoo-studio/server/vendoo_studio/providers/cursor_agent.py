@@ -17,6 +17,11 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cursor_sdk import Client
+    from cursor_sdk.types import ModelParameterDefinition, SDKModel
 
 from vendoo_studio.config import user_data_root
 from vendoo_studio.services import live_trace
@@ -87,13 +92,13 @@ def listing_scratch_dir() -> Path:
 _BRIDGE_POOL_MAX = 8
 _BRIDGE_IDLE_CLOSE_SEC = 180.0
 _bridge_pool_lock = threading.Lock()
-_idle_bridges: list[tuple[object, float]] = []
+_idle_bridges: list[tuple[Client, float]] = []
 # Each bridge's own agent store, removed when the bridge closes. Left to its
 # default, every bridge on the workspace shares one SQLite file under
 # ~/.cursor/projects, and a bridge opening it while another writes fails with
 # "database is locked" (bulk measurement reads, listings generating together).
 # Studio never resumes a Cursor agent, so nothing in a store outlives its bridge.
-_bridge_stores: dict[object, str] = {}
+_bridge_stores: dict[Client, str] = {}
 # Lowest reasoning choice per model id. None means the model has no such knob.
 _reasoning_floor: dict[str, tuple[str, str] | None] = {}
 _LOWEST_REASONING = ("none", "minimal", "low")
@@ -136,7 +141,7 @@ def _local_options(scratch: str, store: str):
     return LocalAgentOptions(cwd=scratch, setting_sources=[], store={"type": "jsonl", "root_dir": store})
 
 
-def _launch_bridge(scratch: str):
+def _launch_bridge(scratch: str) -> Client:
     from cursor_sdk import Client
 
     store = tempfile.mkdtemp(prefix="cursor-store-")
@@ -159,7 +164,7 @@ def _bridge_local(client, scratch: str):
 
 
 @contextlib.contextmanager
-def _one_off_bridge(scratch: str) -> Iterator[object]:
+def _one_off_bridge(scratch: str) -> Iterator[Client]:
     client = _launch_bridge(scratch)
     try:
         yield client
@@ -288,7 +293,7 @@ def _image_from_data_url(url: str):
         return None
 
 
-def reasoning_parameter(model) -> object | None:
+def reasoning_parameter(model: SDKModel) -> ModelParameterDefinition | None:
     """The model's reasoning parameter definition, or None when it has none."""
     for param in getattr(model, "parameters", ()) or ():
         label = f"{getattr(param, 'id', '')} {getattr(param, 'display_name', '')}"
@@ -400,7 +405,7 @@ class CursorProvider:
         Raises RuntimeError with a user-facing message on failure so Settings can
         show the real Cursor/SDK error instead of a generic "Connection failed".
         """
-        from cursor_sdk import CursorAgentError, CursorSDKError
+        from cursor_sdk import CursorAgentError
 
         if not self.api_key:
             raise RuntimeError("Cursor API key is empty.")
@@ -417,9 +422,6 @@ class CursorProvider:
             models = await asyncio.to_thread(_probe)
         except CursorAgentError as exc:
             message = str(exc).strip() or "Cursor authentication failed."
-            raise RuntimeError(message) from exc
-        except CursorSDKError as exc:
-            message = str(exc).strip() or "Cursor SDK is not available."
             raise RuntimeError(message) from exc
         except Exception as exc:
             log.warning("Cursor connection test failed", exc_info=True)
@@ -695,7 +697,9 @@ class CursorProvider:
                         if on_thinking is not None:
                             on_thinking(item)
                         continue
-                    yield item  # type: ignore[misc]
+                    if not isinstance(item, str):
+                        raise RuntimeError("The Cursor bridge returned an unsupported stream item")
+                    yield item
             finally:
                 if not finished:
                     threading.Thread(target=_abort, name="cursor-abort", daemon=True).start()

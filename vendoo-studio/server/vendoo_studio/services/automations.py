@@ -15,6 +15,8 @@ using the Bridge. Each item's outcome is a row in ``jobs``. A dry run is
 recorded as ``dry_run``, not as a completed send.
 """
 from __future__ import annotations
+from typing import cast as type_cast
+from sqlalchemy.engine import CursorResult
 
 import copy
 import hashlib
@@ -628,7 +630,7 @@ def claim_approval(db: Session, row: AutomationApproval, *, review_token: str, a
         raise AutomationError("The item, its photos or marketplace links changed. Review a new proposal.", 409)
     result = db.execute(update(AutomationApproval).where(AutomationApproval.id == row.id, AutomationApproval.status == "pending")
                         .values(status="executing", decided_at=_naive(utcnow())))
-    if result.rowcount != 1:
+    if type_cast(CursorResult, result).rowcount != 1:
         db.rollback()
         raise AutomationError("This action was already decided.", 409)
     db.commit()

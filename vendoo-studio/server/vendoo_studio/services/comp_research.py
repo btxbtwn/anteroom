@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 
 from vendoo_studio.config import skills_dir
@@ -175,7 +175,9 @@ async def _run_model_search(
             timeout=MODEL_SEARCH_TIMEOUT_SEC,
         )
     answer = str(result.get("answer") or "")
-    sources = result.get("sources") if isinstance(result.get("sources"), list) else []
+    sources = result.get("sources")
+    if not isinstance(sources, list):
+        sources = []
     report = model_report(
         search.label,
         query,
@@ -238,7 +240,7 @@ def _in_order(sources: dict[asyncio.Task, str], answered: dict[asyncio.Task, Sol
     return [answered[task] for task in sources if task in answered]
 
 
-async def _stream_comps(fields: dict[str, str]) -> AsyncIterator[CompsEvent]:
+async def _stream_comps(fields: dict[str, str]) -> AsyncGenerator[CompsEvent, None]:
     query = sold_comps_query(fields)
     if not query:
         yield CompsEvent("done", text=_comps_note("", "photo analysis", COMPS_THIN_IDENTITY_NOTE))

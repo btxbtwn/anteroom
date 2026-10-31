@@ -610,7 +610,9 @@ def ensure_etsy_category_optionals(listing: dict) -> bool:
     if not isinstance(raw, dict):
         return False
     etsy = dict(raw)
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     changed = False
 
     def set_key(key: str, value: Any) -> None:

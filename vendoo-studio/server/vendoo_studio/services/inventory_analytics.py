@@ -197,8 +197,12 @@ def load_rows(db) -> list[AnalyticsItem]:
     lines = paid_lines(db)
     for conv_id, title, status, notes, box_id in conversations:
         price, cost, brand, category = facets.get(conv_id, (None, None, None, None))
-        dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
-        sale = notes.get("vendooSale") if isinstance(notes.get("vendooSale"), dict) else {}
+        dates = notes.get("vendooDates")
+        if not isinstance(dates, dict):
+            dates = {}
+        sale = notes.get("vendooSale")
+        if not isinstance(sale, dict):
+            sale = {}
         listed_text = str(dates.get("listed") or "")
         derived = own[conv_id]
         effective = str(status) if str(status or "") in _BUSY else derived.status

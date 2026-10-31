@@ -168,7 +168,9 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
         own = lines.get(conv_id, [])
         units = sum(_units(line.quantity) for line in own)
         moments = [_time(line.sold_at or line.received_at) for line in own]
-        marks = notes.get("marketplaceMarks") if isinstance(notes.get("marketplaceMarks"), dict) else {}
+        marks = notes.get("marketplaceMarks")
+        if not isinstance(marks, dict):
+            marks = {}
         with_lines = {line.marketplace for line in own}
         for marketplace, mark in marks.items():
             # A mark made before Mark as sold recorded a sale line.

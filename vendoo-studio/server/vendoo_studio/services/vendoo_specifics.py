@@ -218,8 +218,12 @@ def _scales_of(raw: dict[str, Any], key: str, entry: dict[str, Any]) -> dict[str
         child = raw.get(scale_id)
         if not isinstance(child, dict):
             continue
-        child_rules = child.get("rules") if isinstance(child.get("rules"), dict) else {}
-        path = child.get("path") if isinstance(child.get("path"), list) else []
+        child_rules = child.get("rules")
+        if not isinstance(child_rules, dict):
+            child_rules = {}
+        path = child.get("path")
+        if not isinstance(path, list):
+            path = []
         if not child_rules.get("embedded") or not path or str(path[0]) != key:
             continue
         scales[str(scale_id)] = {
@@ -243,10 +247,14 @@ def normalize_specifics(raw: Any) -> dict[str, FieldSpec]:
     for key, entry in raw.items():
         if not isinstance(entry, dict):
             continue
-        rules = entry.get("rules") if isinstance(entry.get("rules"), dict) else {}
+        rules = entry.get("rules")
+        if not isinstance(rules, dict):
+            rules = {}
         if rules.get("embedded"):
             continue
-        field_options = rules.get("fieldOptions") if isinstance(rules.get("fieldOptions"), dict) else {}
+        field_options = rules.get("fieldOptions")
+        if not isinstance(field_options, dict):
+            field_options = {}
         try:
             min_values = int(field_options.get("minValues") or 0)
         except (TypeError, ValueError):

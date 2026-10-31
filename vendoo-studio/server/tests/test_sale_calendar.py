@@ -293,3 +293,21 @@ def test_records_track_post_event_sales_for_at_most_fourteen_days():
     result = event_result(e, [e], rows, now=clock)
     assert result['after_days'] == 14
     assert result['after']['count'] == 2
+
+
+def test_tied_weekday_windows_do_not_recommend_an_arbitrary_winner(monkeypatch):
+    from vendoo_studio.services import sale_calendar
+    rows = [sale(NOW - timedelta(days=90 + index)) for index in range(40)]
+    monkeypatch.setattr(sale_calendar, '_best_window', lambda _counts: (1.0, [(0, 2), (4, 2)]))
+    monkeypatch.setattr(sale_calendar, '_null_maxima', lambda _total: (0.0,) * 999)
+    advice = next(item for item in weekday_patterns(rows, 'UTC', now=NOW) if item['marketplace'] == 'ebay')
+    assert 'No weekday run stands out' in advice['reason']
+    assert advice['suggested_start'] == NOW.date().isoformat()
+    assert advice['suggested_end'] == (NOW.date() + timedelta(days=6)).isoformat()
+
+
+def test_unknown_sale_prices_are_not_used_to_estimate_fees():
+    from dataclasses import replace
+    from vendoo_studio.services import box_scout
+    missing = replace(sale(NOW - timedelta(days=1)), sold_price=None)
+    assert box_scout.measured_fees([missing] * box_scout.MEASURED_MIN_SALES, NOW) is None

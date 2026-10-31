@@ -148,7 +148,9 @@ def _normalize_build_info(payload: dict) -> dict:
     sha = payload.get("sha")
     # Digests are keyed by asset name. The top-level zip_sha256 belongs to the
     # zip that builds from before the rename download, not to ZIP_NAME.
-    zips = payload.get("zips") if isinstance(payload.get("zips"), dict) else {}
+    zips = payload.get("zips")
+    if not isinstance(zips, dict):
+        zips = {}
     zip_sha = str(zips.get(ZIP_NAME) or "").strip().lower()
     if zip_sha.startswith("sha256:"):
         zip_sha = zip_sha.split(":", 1)[1].strip().lower()
@@ -157,8 +159,11 @@ def _normalize_build_info(payload: dict) -> dict:
     for item in payload.get("pull_requests") or []:
         if not isinstance(item, dict):
             continue
+        raw_number = item.get("number")
+        if raw_number is None:
+            continue
         try:
-            number = int(item.get("number"))
+            number = int(raw_number)
         except (TypeError, ValueError):
             continue
         pull_title = str(item.get("title") or "").strip()

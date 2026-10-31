@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import json
 import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from webview.window import Window
 from urllib.parse import urlparse
 
 # Waiting for the marketplace page to load before reading it is what makes a
@@ -25,7 +29,7 @@ class PrivateAccountWindow:
     def __init__(self, name: str, origin: str, connect_path: str):
         self.name, self.origin, self.connect_path = name, origin, connect_path
         self._factory = None
-        self._window = None
+        self._window: Window | None = None
         self._lock = threading.RLock()
 
     def install(self, factory) -> None:
@@ -37,7 +41,7 @@ class PrivateAccountWindow:
         if window is not None:
             window.destroy()
 
-    def _open(self, *, hidden: bool) -> tuple[object | None, bool]:
+    def _open(self, *, hidden: bool) -> tuple[Window | None, bool]:
         """The marketplace window, opening it (shown or hidden) when there is none."""
         with self._lock:
             if self._factory is None:

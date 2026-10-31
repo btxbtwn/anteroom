@@ -91,7 +91,9 @@ async def _list_page(page_token: str) -> tuple[list[dict], str]:
         "ids_only": False,
     }])
     hit = next((r for r in reply.get("results", []) if r.get("op") == "list_items"), {})
-    items = hit.get("items") if isinstance(hit.get("items"), list) else []
+    items = hit.get("items")
+    if not isinstance(items, list):
+        items = []
     return items, str(hit.get("next_page_token") or "")
 
 

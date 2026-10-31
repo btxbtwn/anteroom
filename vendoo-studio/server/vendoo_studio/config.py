@@ -26,7 +26,7 @@ def resource_root() -> Path:
     if override:
         return Path(override).expanduser().resolve()
     if is_frozen():
-        meipass = Path(sys._MEIPASS)
+        meipass = Path(vars(sys)["_MEIPASS"])
         resources = Path(sys.executable).resolve().parent.parent / "Resources"
         if (meipass / "dist" / "index.html").is_file():
             return meipass
