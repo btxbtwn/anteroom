@@ -105,6 +105,7 @@ struct ListingAssistantView: View {
         }
     }
 
+    @ViewBuilder
     private var composer: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 8) {
