@@ -41,7 +41,7 @@ function marketplaceScrub(text) {
 }
 
 // Message-like fields of a marketplace error body, never the whole body.
-function marketplaceBodyMessage(body) {
+function marketplaceBodyMessage(body, marketplace) {
   if (body == null) return '';
   if (typeof body === 'string') return body;
   if (typeof body !== 'object') return '';
@@ -58,7 +58,11 @@ function marketplaceBodyMessage(body) {
       if (typeof entry === 'string') add(entry);
       else if (entry && typeof entry === 'object') {
         const field = entry.field || entry.param || entry.extensions?.field;
-        add(field && entry.message ? `${field}: ${entry.message}` : entry.message);
+        // Vinted calls its validation explanation "value". Only read that
+        // documented error shape; other responses may use value for input data.
+        const message = entry.message || (marketplace === 'vinted' && body.message_code === 'validation_error' && field
+          ? entry.value : null);
+        add(field && typeof message === 'string' ? `${field}: ${message}` : message);
       }
     }
   } else if (body.errors && typeof body.errors === 'object') {
@@ -181,7 +185,7 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
       const status = response.status;
       const statusLine = `HTTP ${status}${response.statusText ? ` ${response.statusText}` : ''}`;
       const plain = !data && text && !/<html|<!doctype/i.test(text) ? marketplaceScrub(text).slice(0, 180) : '';
-      const ownWords = data ? marketplaceBodyMessage(data) || statusLine : (plain || statusLine);
+      const ownWords = data ? marketplaceBodyMessage(data, marketplace) || statusLine : (plain || statusLine);
       // Normal pages carry bot-check scripts too, so only a blocked or
       // unexpected answer is read for challenge markers.
       const unexpected = status < 300 && status !== 204 && expect === 'json' && !data;
