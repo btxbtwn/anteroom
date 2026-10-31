@@ -37,7 +37,8 @@ def apply_direct_ids(listing: dict, categories: dict | None) -> bool:
     """Remember Poshmark's and Depop's ids on the listing. Vendoo's ids stay as they are."""
     if not isinstance(listing, dict) or not isinstance(categories, dict):
         return False
-    current = dict(listing.get("direct_category_ids")) if isinstance(listing.get("direct_category_ids"), dict) else {}
+    current = listing.get("direct_category_ids")
+    current = dict(current) if isinstance(current, dict) else {}
     changed = False
     for key in CHROME_MARKETS:
         value = str(categories.get(key) or "").strip()
@@ -53,7 +54,9 @@ def keep_direct_categories(previous: dict, incoming: dict) -> None:
     """A save from the editor keeps a category Chrome already resolved."""
     if not isinstance(previous, dict) or not isinstance(incoming, dict):
         return
-    old = previous.get("direct_category_ids") if isinstance(previous.get("direct_category_ids"), dict) else {}
+    old = previous.get("direct_category_ids")
+    if not isinstance(old, dict):
+        old = {}
     if not any(str(old.get(key) or "").strip() for key in CHROME_MARKETS):
         return
     if not isinstance(incoming.get("direct_category_ids"), dict):
@@ -81,7 +84,9 @@ def apply_preview(found: list[dict], preview: dict | None, marketplace: str) -> 
     """Add the size, category, and parcel refusals Chrome found. A live parcel match wins."""
     if not isinstance(preview, dict):
         return found
-    gaps = preview.get("gaps") if isinstance(preview.get("gaps"), dict) else {}
+    gaps = preview.get("gaps")
+    if not isinstance(gaps, dict):
+        gaps = {}
     extra = []
     for item in gaps.get(marketplace) or []:
         if isinstance(item, dict) and str(item.get("field") or "") and str(item.get("message") or ""):
@@ -103,7 +108,9 @@ def apply_preview(found: list[dict], preview: dict | None, marketplace: str) -> 
 
 
 def preview_categories(preview: dict | None) -> dict[str, str]:
-    raw = preview.get("categories") if isinstance(preview, dict) and isinstance(preview.get("categories"), dict) else {}
+    raw = preview.get("categories") if (isinstance(preview, dict)) else {}
+    if not isinstance(raw, dict):
+        raw = {}
     return {key: str(raw.get(key)).strip() for key in CHROME_MARKETS if str(raw.get(key) or "").strip()}
 
 

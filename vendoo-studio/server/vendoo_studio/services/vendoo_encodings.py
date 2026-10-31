@@ -109,7 +109,9 @@ def _observe_shipping_choices(
     elif marketplace == "vinted" and leaf_id:
         specifics = section.get("categorySpecifics")
         size = (specifics or {}).get(specifics_key(leaf_id, "packageSizeId")) if isinstance(specifics, dict) else None
-        weight = general.get("weight") if isinstance(general.get("weight"), dict) else {}
+        weight = general.get("weight")
+        if not isinstance(weight, dict):
+            weight = {}
         ounces = package_ounces(weight.get("pounds"), weight.get("ounces"))
         if size not in (None, "") and ounces > 0:
             marketplaces.setdefault(marketplace, {}).setdefault("packageSize", {})[str(ounces)] = str(size)
@@ -127,7 +129,9 @@ def observe_listing_encodings(
     eBay stores multi-select aspects as lists. Both are read off the seller's
     own items rather than guessed.
     """
-    general = item.get(GENERAL_KEY) if isinstance(item.get(GENERAL_KEY), dict) else {}
+    general = item.get(GENERAL_KEY)
+    if not isinstance(general, dict):
+        general = {}
     general_condition = _code_of(general.get("condition")) or general.get("condition")
     general_key = _norm(general_condition)
     listings = item.get(LISTINGS_KEY)
@@ -136,12 +140,16 @@ def observe_listing_encodings(
     for marketplace, section in listings.items():
         if not isinstance(section, dict):
             continue
-        overrides = section.get("overrides") if isinstance(section.get("overrides"), dict) else {}
+        overrides = section.get("overrides")
+        if not isinstance(overrides, dict):
+            overrides = {}
         code = overrides.get("condition")
         if general_key and code not in (None, ""):
             entry = marketplaces.setdefault(str(marketplace), {})
             entry.setdefault("condition", {})[general_key] = code
-        leaf = overrides.get("categoryV2") if isinstance(overrides.get("categoryV2"), dict) else {}
+        leaf = overrides.get("categoryV2")
+        if not isinstance(leaf, dict):
+            leaf = {}
         leaf_id = leaf.get("id") or ""
         _observe_shipping_choices(str(marketplace), section, str(leaf_id), general, marketplaces)
         specifics = section.get("categorySpecifics")

@@ -1290,6 +1290,8 @@ def run_window() -> None:
     vinted_browser.install(webview.create_window)
     sellwild_browser.install(webview.create_window)
     window = create_studio_window(webview)
+    if window is None:
+        raise RuntimeError("The desktop window could not be created")
     window.events.closed += vinted_browser.shutdown
     window.events.closed += sellwild_browser.shutdown
     webview.start(lambda: _boot_window(window), **studio_start_kwargs())

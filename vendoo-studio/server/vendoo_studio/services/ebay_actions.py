@@ -1,5 +1,7 @@
 """Reviewed eBay writes. Persist hashes and receipts, never private request bodies."""
 from __future__ import annotations
+from typing import cast as type_cast
+from sqlalchemy.engine import CursorResult
 
 import asyncio
 import base64
@@ -530,7 +532,7 @@ async def execute(db: Session, action_id: str, kind: str, payload: dict) -> dict
         raise EbayFailure("This action was already sent or has an uncertain result.", 409)
     try:
         claimed = db.execute(update(EbayAction).where(EbayAction.id == action_id, EbayAction.state == "preview").values(state="sending"))
-        if claimed.rowcount != 1:
+        if type_cast(CursorResult, claimed).rowcount != 1:
             raise EbayFailure("This action already started.", 409)
         db.execute(update(EbayAction).where(EbayAction.account_id == action.account_id, EbayAction.fingerprint == action.fingerprint,
                                            EbayAction.state == "preview", EbayAction.id != action.id).values(state="superseded"))

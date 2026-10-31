@@ -120,8 +120,12 @@ def best_offer_error(listing: dict[str, Any] | None) -> str | None:
     """The seller's Best Offer must be minimum < auto-accept < price. Blank uses the formula."""
     if not isinstance(listing, dict):
         return None
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
-    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
+    chosen = ebay.get("bestOffer")
+    if not isinstance(chosen, dict):
+        chosen = {}
     if not chosen or not best_offer_enabled(chosen):
         return None
     accept = _offer_amount(chosen, "autoAcceptPrice")
@@ -231,8 +235,12 @@ def _apply_ebay_pricing(
     if price:
         fixed["buyItNowPrice"] = price
     fixed["duration"] = _clean(fixed.get("duration")) or "GTC"
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
-    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
+    chosen = ebay.get("bestOffer")
+    if not isinstance(chosen, dict):
+        chosen = {}
     fixed.update(ebay_offer_terms(price or fixed.get("buyItNowPrice"), chosen))
 
 

@@ -146,7 +146,9 @@ def _json_object(text: str) -> dict | None:
 
 def validated_values(reply: dict, rows: dict[str, dict], *, evidence: str | None = None) -> dict[str, tuple[Any, list[str]]]:
     """Validate choices, or evidence-backed custom text when the native field allows it."""
-    answers = reply.get("fields") if isinstance(reply.get("fields"), dict) else {}
+    answers = reply.get("fields")
+    if not isinstance(answers, dict):
+        answers = {}
     accepted: dict[str, tuple[Any, list[str]]] = {}
     for path, raw in answers.items():
         row = rows.get(str(path))
@@ -219,7 +221,7 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
     saved = repo.get_current(conv_id)
     revision = repo.get_revision(saved.current_revision_id) if saved else None
     strict = bool(revision and native_contract.KEY in revision.listing_json)
-    if strict:
+    if strict and revision is not None:
         markets &= set(revision.listing_json[native_contract.KEY])
     categories = await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets, categories=True)
     if strict:
@@ -228,7 +230,8 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
     required_only = False
     for _round in range(3 if strict else 1):
         saved = repo.get_current(conv_id)
-        before = repo.get_revision(saved.current_revision_id).listing_json if saved else {}
+        previous = repo.get_revision(saved.current_revision_id) if saved else None
+        before = previous.listing_json if previous is not None else {}
         fields = await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets,
                                           categories=False, required_only=required_only)
         dependencies_changed = fields is not None and any(
@@ -249,7 +252,8 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
     if strict:
         await record_forms(db, conv_id, markets)
         saved = repo.get_current(conv_id)
-        return repo.get_revision(saved.current_revision_id).listing_json if saved else None
+        latest = repo.get_revision(saved.current_revision_id) if saved else None
+        return latest.listing_json if latest is not None else None
     return fields if fields is not None else categories
 
 
@@ -345,6 +349,8 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
 
     work = activity.begin(conv_id, "Filling marketplace fields…")
     work.fields = tuple(rows)
+    reply = None
+    text = ""
     try:
         from vendoo_studio.services.option_lookup import OptionCatalog
 

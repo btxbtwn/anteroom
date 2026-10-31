@@ -97,7 +97,7 @@ def seasonal_sales_context(db: Session, window: dict, today: date) -> dict:
         sold = _parse_moment(str(dates.get("sold") or sale.get("soldAt") or ""))
         amount = sale.get("price")
         try:
-            price = float(amount)
+            price = float(amount) if amount is not None else 0.0
         except (ValueError, TypeError):
             price = 0
         if isinstance(amount, bool) or not math.isfinite(price) or price <= 0 or not sold or sold.astimezone(UTC).date() > today:

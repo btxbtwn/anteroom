@@ -364,12 +364,16 @@ def collect_outcomes(db, *, use_cache: bool = True) -> list[SoldOutcome]:
         first_price, _first, first_seen = priced[0]
         last_price, last, _last_seen = priced[-1]
         notes = parse_notes(conv.notes)
-        sale = notes.get("vendooSale") if isinstance(notes.get("vendooSale"), dict) else {}
+        sale = notes.get("vendooSale")
+        if not isinstance(sale, dict):
+            sale = {}
         try:
             sold_price = float(sale.get("price") or 0)
         except (TypeError, ValueError):
             sold_price = 0.0
-        dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
+        dates = notes.get("vendooDates")
+        if not isinstance(dates, dict):
+            dates = {}
         sold_at = str(dates.get("sold") or "")
         outcomes.append(
             SoldOutcome(

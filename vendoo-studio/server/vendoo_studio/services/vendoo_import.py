@@ -288,8 +288,12 @@ def _inventory_location(general: dict[str, Any], ebay: Any) -> str:
 
 def listing_from_vendoo(item: dict | None, form: dict | None) -> dict[str, Any]:
     merged = _merge_payloads(form, item)
-    general = merged.get("generalDetails") if isinstance(merged.get("generalDetails"), dict) else {}
-    listings = merged.get("listings") if isinstance(merged.get("listings"), dict) else {}
+    general = merged.get("generalDetails")
+    if not isinstance(general, dict):
+        general = {}
+    listings = merged.get("listings")
+    if not isinstance(listings, dict):
+        listings = {}
 
     title = _text(general.get("title")) or "Imported from Vendoo"
     description = _text(general.get("description")) or title
@@ -302,8 +306,12 @@ def listing_from_vendoo(item: dict | None, form: dict | None) -> dict[str, Any]:
     size_raw = general.get("size")
     size = _text(_nested_option(size_raw) or size_raw)
     size_type = _text(general.get("sizeType") or _nested_scale(size_raw))
-    weight = general.get("weight") if isinstance(general.get("weight"), dict) else {}
-    dims = general.get("dimensions") if isinstance(general.get("dimensions"), dict) else {}
+    weight = general.get("weight")
+    if not isinstance(weight, dict):
+        weight = {}
+    dims = general.get("dimensions")
+    if not isinstance(dims, dict):
+        dims = {}
     package = _package_dimensions(dims)
     if not package:
         from vendoo_studio.services.user_settings import package_dimensions_string
@@ -382,7 +390,9 @@ def vendoo_image_url(record: Any) -> str:
 def vendoo_image_records(item: dict | None, form: dict | None) -> list[Any]:
     """The item's photo records, in the order Vendoo keeps them."""
     merged = _merge_payloads(form, item)
-    general = merged.get("generalDetails") if isinstance(merged.get("generalDetails"), dict) else {}
+    general = merged.get("generalDetails")
+    if not isinstance(general, dict):
+        general = {}
     for source in (general.get("images"), merged.get("images")):
         if isinstance(source, list) and source:
             return source
@@ -538,7 +548,9 @@ def _listing_entries(merged: dict[str, Any], *, external: bool = True) -> list[t
     entries: list[tuple[str, dict]] = []
     keys = ["listings", "externalListings"] if external else ["listings"]
     for key in keys:
-        group = merged.get(key) if isinstance(merged.get(key), dict) else {}
+        group = merged.get(key)
+        if not isinstance(group, dict):
+            group = {}
         for name, listing in group.items():
             if name == "validate" or not isinstance(listing, dict):
                 continue
@@ -560,7 +572,9 @@ def vendoo_item_sold(item: dict | None, form: dict | None = None) -> bool:
     if isinstance(sale_record, dict) and sale_record:
         return True
     for _name, listing in _listing_entries(merged):
-        status = listing.get("status") if isinstance(listing.get("status"), dict) else {}
+        status = listing.get("status")
+        if not isinstance(status, dict):
+            status = {}
         if status.get("sold") is True or status.get("shipped") is True:
             return True
         sales = listing.get("sales")
@@ -583,7 +597,9 @@ def vendoo_item_status(item: dict | None, form: dict | None = None) -> str:
     for name, listing in _listing_entries(merged, external=False):
         if name in VENDOO_UNLISTABLE_MARKETPLACES:
             continue
-        status = listing.get("status") if isinstance(listing.get("status"), dict) else {}
+        status = listing.get("status")
+        if not isinstance(status, dict):
+            status = {}
         if status.get("listed") is True:
             return "active"
     return "draft"
@@ -605,10 +621,14 @@ def vendoo_listed_marketplaces(item: dict | None, form: dict | None = None) -> l
     merged = _merge_payloads(form, item)
     live: set[str] = set()
     for name, listing in _listing_entries(merged, external=True):
-        status = listing.get("status") if isinstance(listing.get("status"), dict) else {}
+        status = listing.get("status")
+        if not isinstance(status, dict):
+            status = {}
         if status.get("listed") is True or status.get("sold") is True or status.get("shipped") is True:
             live.add(VENDOO_MARKETPLACE_ALIASES.get(name, name))
-    sale_record = merged.get("saleRecord") if isinstance(merged.get("saleRecord"), dict) else {}
+    sale_record = merged.get("saleRecord")
+    if not isinstance(sale_record, dict):
+        sale_record = {}
     sold_on = str(sale_record.get("marketplace") or "").strip()
     if sold_on:
         live.add(VENDOO_MARKETPLACE_ALIASES.get(sold_on, sold_on))
@@ -625,7 +645,9 @@ def vendoo_listing_urls(item: dict | None, form: dict | None = None) -> dict[str
     merged = _merge_payloads(form, item)
     urls: dict[str, str] = {}
     for name, listing in _listing_entries(merged, external=True):
-        status = listing.get("status") if isinstance(listing.get("status"), dict) else {}
+        status = listing.get("status")
+        if not isinstance(status, dict):
+            status = {}
         if not (status.get("listed") is True or status.get("sold") is True or status.get("shipped") is True):
             continue
         url = str(listing.get("listingURL") or "").strip()
@@ -647,7 +669,9 @@ def vendoo_relistable_marketplaces(item: dict | None, form: dict | None = None) 
     for name, listing in _listing_entries(merged, external=False):
         if name in VENDOO_UNLISTABLE_MARKETPLACES:
             continue
-        status = listing.get("status") if isinstance(listing.get("status"), dict) else {}
+        status = listing.get("status")
+        if not isinstance(status, dict):
+            status = {}
         if status.get("sold") is True or status.get("shipped") is True:
             continue
         if status.get("listed") is True:
@@ -727,7 +751,9 @@ def vendoo_dates(item: dict | None, form: dict | None = None) -> dict[str, Any]:
     a listing's whole history is answerable without going back to Vendoo.
     """
     merged = _merge_payloads(form, item)
-    sale_record = merged.get("saleRecord") if isinstance(merged.get("saleRecord"), dict) else {}
+    sale_record = merged.get("saleRecord")
+    if not isinstance(sale_record, dict):
+        sale_record = {}
     listed_by_marketplace: dict[str, str] = {}
     sold_by_marketplace: dict[str, str] = {}
     for name, listing in _listing_entries(merged):
@@ -767,10 +793,18 @@ def oldest_live_listed_at(notes: dict[str, Any]) -> str:
     neither counts. An item with no per-marketplace dates falls back to the
     item-wide listing date.
     """
-    dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
-    listed_by = dates.get("listedByMarketplace") if isinstance(dates.get("listedByMarketplace"), dict) else {}
-    sold_by = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}
-    live = notes.get("vendooMarketplaces") if isinstance(notes.get("vendooMarketplaces"), list) else []
+    dates = notes.get("vendooDates")
+    if not isinstance(dates, dict):
+        dates = {}
+    listed_by = dates.get("listedByMarketplace")
+    if not isinstance(listed_by, dict):
+        listed_by = {}
+    sold_by = dates.get("soldByMarketplace")
+    if not isinstance(sold_by, dict):
+        sold_by = {}
+    live = notes.get("vendooMarketplaces")
+    if not isinstance(live, list):
+        live = []
     stamps = [
         _as_iso(listed_by[market])
         for market in live
@@ -810,7 +844,9 @@ def vendoo_sale(item: dict | None, form: dict | None = None) -> dict[str, Any]:
     an unrecorded fee reads as unknown rather than as zero.
     """
     merged = _merge_payloads(form, item)
-    sale_record = merged.get("saleRecord") if isinstance(merged.get("saleRecord"), dict) else {}
+    sale_record = merged.get("saleRecord")
+    if not isinstance(sale_record, dict):
+        sale_record = {}
     sale = sale_record
     price = _sale_price(sale_record)
     marketplace = str(sale_record.get("marketplace") or "").strip()
@@ -1142,10 +1178,18 @@ async def _download_public_image(client: httpx.AsyncClient, url: str) -> tuple[b
 def _merge_payloads(form: dict | None, item: dict | None) -> dict[str, Any]:
     form_data = form if isinstance(form, dict) else {}
     item_data = item if isinstance(item, dict) else {}
-    form_general = form_data.get("generalDetails") if isinstance(form_data.get("generalDetails"), dict) else {}
-    item_general = item_data.get("generalDetails") if isinstance(item_data.get("generalDetails"), dict) else {}
-    form_listings = form_data.get("listings") if isinstance(form_data.get("listings"), dict) else {}
-    item_listings = item_data.get("listings") if isinstance(item_data.get("listings"), dict) else {}
+    form_general = form_data.get("generalDetails")
+    if not isinstance(form_general, dict):
+        form_general = {}
+    item_general = item_data.get("generalDetails")
+    if not isinstance(item_general, dict):
+        item_general = {}
+    form_listings = form_data.get("listings")
+    if not isinstance(form_listings, dict):
+        form_listings = {}
+    item_listings = item_data.get("listings")
+    if not isinstance(item_listings, dict):
+        item_listings = {}
     return {
         **form_data,
         **item_data,
@@ -1312,7 +1356,9 @@ def _package_dimensions(dims: dict[str, Any]) -> str | None:
 
 
 def _section_leaf_id(section: dict[str, Any]) -> str:
-    overrides = section.get("overrides") if isinstance(section.get("overrides"), dict) else {}
+    overrides = section.get("overrides")
+    if not isinstance(overrides, dict):
+        overrides = {}
     category = overrides.get("categoryV2") or section.get("categoryV2")
     return str(category.get("id") or "") if isinstance(category, dict) else ""
 

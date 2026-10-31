@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.612 — 2026-10-31
+
+- Keep draft preparation and sales suggestions safe when a saved version, sale price or weekday recommendation is missing.
+
 ## 0.1.611 — 2026-10-31
 
 - Behind the scenes, Chrome connection and draft-send handling now live together in a service, making future fixes easier to check without changing how listings work.

@@ -216,10 +216,18 @@ def get_marketplace_statuses(job_ids: str = Query(""), db: Session = Depends(get
         cached = drafts.get(job_id)
         if not cached:
             continue
-        item = cached.get("item") if isinstance(cached.get("item"), dict) else {}
-        form = cached.get("form") if isinstance(cached.get("form"), dict) else {}
-        listings = item.get("listings") if isinstance(item.get("listings"), dict) else {}
-        external = item.get("externalListings") if isinstance(item.get("externalListings"), dict) else {}
+        item = cached.get("item")
+        if not isinstance(item, dict):
+            item = {}
+        form = cached.get("form")
+        if not isinstance(form, dict):
+            form = {}
+        listings = item.get("listings")
+        if not isinstance(listings, dict):
+            listings = {}
+        external = item.get("externalListings")
+        if not isinstance(external, dict):
+            external = {}
         item_out: dict = {
             "listings": {
                 marketplace: {"status": listing.get("status")}
@@ -559,7 +567,9 @@ async def get_vendoo_item(
         raise HTTPException(502, str(exc)) from exc
 
     hit = next((row for row in reply.get("results", []) if row.get("op") == "get_item"), {})
-    item = hit.get("item") if isinstance(hit.get("item"), dict) else None
+    item = hit.get("item")
+    if not isinstance(item, dict):
+        item = None
     if not item:
         message = "Vendoo returned no item for this draft"
         if refresh:
@@ -636,7 +646,9 @@ async def import_draft(job_id: str, db: Session = Depends(get_db)):
     except (VendooCreateError, BrowserBridgeError) as exc:
         raise HTTPException(502, str(exc)) from exc
     hit = next((row for row in reply.get("results", []) if row.get("op") == "get_item"), {})
-    item = hit.get("item") if isinstance(hit.get("item"), dict) else None
+    item = hit.get("item")
+    if not isinstance(item, dict):
+        item = None
     if not item:
         raise HTTPException(502, "Vendoo returned no item for this draft")
 

@@ -62,8 +62,12 @@ def etsy_not_allowed_live(db: Session) -> list[dict[str, Any]]:
         live = notes.get("vendooMarketplaces")
         if not isinstance(live, list) or "etsy" not in live:
             continue
-        dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
-        sold = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}
+        dates = notes.get("vendooDates")
+        if not isinstance(dates, dict):
+            dates = {}
+        sold = dates.get("soldByMarketplace")
+        if not isinstance(sold, dict):
+            sold = {}
         if sold.get("etsy"):
             continue
         listing = {
@@ -75,8 +79,12 @@ def etsy_not_allowed_live(db: Session) -> list[dict[str, Any]]:
         etsy = listing["etsy_specifics"]
         when = etsy_when_raw(etsy, listing)
         name = str(title or conv_title or "").strip() or "Untitled"
-        listed = dates.get("listedByMarketplace") if isinstance(dates.get("listedByMarketplace"), dict) else {}
-        urls = notes.get("vendooListingUrls") if isinstance(notes.get("vendooListingUrls"), dict) else {}
+        listed = dates.get("listedByMarketplace")
+        if not isinstance(listed, dict):
+            listed = {}
+        urls = notes.get("vendooListingUrls")
+        if not isinstance(urls, dict):
+            urls = {}
         out.append({
             "conversation_id": conv_id,
             "title": name,

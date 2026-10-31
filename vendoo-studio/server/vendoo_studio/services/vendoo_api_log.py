@@ -68,7 +68,7 @@ def _at(value: object) -> str:
 
 
 def _status(value: object) -> int | None:
-    if isinstance(value, bool) or value is None:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, bytes, bytearray)):
         return None
     try:
         code = int(value)

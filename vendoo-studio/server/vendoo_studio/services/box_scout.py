@@ -474,14 +474,14 @@ def _own_sales() -> list[AnalyticsItem]:
 def measured_fees(sales: list[AnalyticsItem], now: datetime) -> dict | None:
     """The share of revenue the seller's recent sales paid in marketplace and
     payment fees, once there are enough of them to trust."""
-    recent = [item for item in sales if item.fees is not None and item.sold_at is not None
+    recent = [item for item in sales if item.fees is not None and item.sold_price is not None and item.sold_at is not None
               and (item.sold_at if item.sold_at.tzinfo else item.sold_at.replace(tzinfo=UTC)) >= now - MEASURED_WINDOW]
     if len(recent) < MEASURED_MIN_SALES:
         return None
-    revenue = sum(item.sold_price for item in recent)
+    revenue = sum(price for item in recent if (price := item.sold_price) is not None)
     if revenue <= 0:
         return None
-    return {"rate": round(min(0.5, max(0.0, sum(item.fees for item in recent) / revenue)), 3), "sales": len(recent)}
+    return {"rate": round(min(0.5, max(0.0, sum(fee for item in recent if (fee := item.fees) is not None) / revenue)), 3), "sales": len(recent)}
 
 
 def measured_sell_through(rows: list[AnalyticsItem], now: datetime) -> dict | None:
@@ -614,13 +614,16 @@ def all_sales_price(sales: list[AnalyticsItem], now: datetime) -> dict | None:
     """What a piece of any kind sold for lately: the price of a mixed box, whose
     contents no single-garment search can price."""
     recent = [item for item in sales if item.sold_at is not None
+              and item.sold_price is not None
               and 0 <= (now.date() - item.sold_at.date()).days <= 90 and 1 <= item.sold_price <= 500]
     if len(recent) < MEASURED_MIN_SALES:
         return None
-    prices = sorted(float(item.sold_price) for item in recent)
+    prices = sorted(price for item in recent if (price := item.sold_price) is not None)
     median = statistics.median(prices)
     low = prices[len(prices) // 5]
-    newest = sorted(recent, key=lambda item: item.sold_at, reverse=True)[:16]
+    newest = [item for _when, item in sorted(
+        ((item.sold_at, item) for item in recent if item.sold_at is not None),
+        key=lambda entry: entry[0], reverse=True)[:16]]
     return {
         "per_piece": round(median, 2), "sold_median": round(median, 2), "active_median": None, "active": [],
         "low": round(low, 2), "high": prices[-1], "source": f"{OWN_SOURCE} (all items)",
@@ -630,7 +633,7 @@ def all_sales_price(sales: list[AnalyticsItem], now: datetime) -> dict | None:
             "sold_at": item.sold_at.date().isoformat(), "price": float(item.sold_price),
             "marketplace": item.marketplace, "currency": "USD",
             "snippet": f"Your sale on {item.marketplace}, recorded in Anteroom.",
-        } for item in newest],
+        } for item in newest if item.sold_at is not None and item.sold_price is not None],
     }
 
 
@@ -639,17 +642,19 @@ def own_evidence(sales: list[AnalyticsItem], themes: set[str]) -> dict[str, list
     first, as comps alongside the web's. A sale matches a theme when it is the same
     garment and carries every style the theme names."""
     s = scout()
-    parts = [(item, *s.theme_parts(item.title)) for item in sales]
+    parts = [(item, when, price, *s.theme_parts(item.title)) for item in sales
+             if (when := item.sold_at) is not None and (price := item.sold_price) is not None]
     evidence: dict[str, list[dict]] = {}
     for name in themes:
-        matches = [item for item, styles, garment in parts if s.theme_matches(name, styles, garment)]
+        matches = [(item, when, price) for item, when, price, styles, garment in parts
+                   if s.theme_matches(name, styles, garment)]
         if matches:
             evidence[name] = [{
                 "url": "", "conversation_id": item.conversation_id, "title": item.title[:200],
-                "sold_at": item.sold_at.date().isoformat(), "price": float(item.sold_price),
+                "sold_at": when.date().isoformat(), "price": price,
                 "marketplace": item.marketplace, "currency": "USD",
                 "snippet": f"Your sale on {item.marketplace}, recorded in Anteroom.",
-            } for item in sorted(matches, key=lambda item: item.sold_at, reverse=True)]
+            } for item, when, price in sorted(matches, key=lambda entry: entry[1], reverse=True)]
     return evidence
 
 
@@ -826,7 +831,7 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
             store: {"name": s.STORES[store]["name"], "error": errors.get(store),
                     "sellout": baselines.get(store),
                     "zone": zones[store] if isinstance(zones.get(store), int) else None,
-                    "origins": len(zones[store]) if isinstance(zones.get(store), dict) else 1}
+                    "origins": len(zone_origins) if isinstance(zone_origins := zones.get(store), dict) else 1}
             for store in s.STORES
         },
         "research": can_research,

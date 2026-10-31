@@ -199,9 +199,9 @@ def selling_costs(rows: list[AnalyticsItem], market: str, *, now: datetime) -> d
             and row.sold_at is not None and now - timedelta(weeks=52) <= row.sold_at <= now
             and row.sold_price is not None and row.sold_price > 0]
     charged = [row for row in sold if row.fees is not None]
-    revenue = sum(row.sold_price for row in charged)
+    revenue = sum(value for row in charged if (value := row.sold_price) is not None)
     return {
-        "fee_percent": min(50.0, round(100 * sum(row.fees for row in charged) / revenue, 1)) if revenue else None,
+        "fee_percent": min(50.0, round(100 * sum(fee for row in charged if (fee := row.fees) is not None) / revenue, 1)) if revenue else None,
         "shipping_cost": round(sum(max(0.0, row.shipping_cost - row.shipping_credit) for row in sold) / len(sold), 2)
         if sold else None,
     }
@@ -228,7 +228,7 @@ def weekday_patterns(rows: list[AnalyticsItem], timezone: str, *, now: datetime)
     for market in MARKETPLACES:
         sales = [row for row in rows if row.status == "sold" and row.marketplace == market
                  and row.sold_at is not None and row.sold_at <= now]
-        first = min((row.sold_at.astimezone(tz).date() for row in sales), default=end)
+        first = min((row.sold_at.astimezone(tz).date() for row in sales if row.sold_at is not None), default=end)
         # Exclude the earliest partial week; dates before first recorded sale
         # cannot be treated as evidence of no sales.
         first_monday = first + timedelta(days=(-first.weekday()) % 7)
@@ -236,6 +236,8 @@ def weekday_patterns(rows: list[AnalyticsItem], timezone: str, *, now: datetime)
         weeks = max(0, (end - start).days // 7)
         counts = [0] * 7
         for row in sales:
+            if row.sold_at is None:
+                continue
             sold_day = row.sold_at.astimezone(tz).date()
             if start <= sold_day < end:
                 counts[sold_day.weekday()] += 1
@@ -245,12 +247,13 @@ def weekday_patterns(rows: list[AnalyticsItem], timezone: str, *, now: datetime)
         # A preferred window needs a unique strongest run that beats chance.
         chance = (1 + sum(value >= score - 1e-9 for value in _null_maxima(total))) / 1000 if score else 1.0
         week = " Run a 7-day sale so every day is covered; the weekday pattern stays fair while sales build."
+        window = best[0] if len(best) == 1 else None
         if not enough:
             reason = "Not enough history to pick days yet (20 dated sales across 8 complete weeks)." + week
-        elif score == 0 or len(best) > 1:
+        elif score == 0 or window is None:
             reason = "No weekday run stands out in your sales." + week
         else:
-            first_day, days = best[0]
+            first_day, days = window
             label = _days_label(first_day, days)
             in_window = sum(counts[(first_day + k) % 7] for k in range(days))
             reason = f"{label} had {in_window} of {total} imported sales across {weeks} complete weeks"
@@ -259,7 +262,8 @@ def weekday_patterns(rows: list[AnalyticsItem], timezone: str, *, now: datetime)
                 if chance < 0.05 else
                 f", but evenly spread sales show a peak this strong {round(chance * 100)}% of the time." + week
             )
-        if chance < 0.05:
+        if chance < 0.05 and window is not None:
+            first_day, days = window
             next_start = today + timedelta(days=(first_day - today.weekday()) % 7)
             next_end = next_start + timedelta(days=days - 1)
         else:
@@ -281,7 +285,7 @@ def weekday_patterns(rows: list[AnalyticsItem], timezone: str, *, now: datetime)
 def _totals(rows: list[AnalyticsItem]) -> dict:
     priced = [row for row in rows if row.sold_price is not None]
     known = [row for row in priced if row.cost is not None and row.fees is not None]
-    return {"count": len(rows), "revenue": round(sum(row.sold_price for row in priced), 2),
+    return {"count": len(rows), "revenue": round(sum(value for row in priced if (value := row.sold_price) is not None), 2),
             "revenue_known": len(priced),
             "profit": round(sum(row.profit for row in known), 2) if len(known) == len(rows) else None,
             "profit_known": len(known)}
