@@ -13,7 +13,11 @@
     "retrieved_at": "2026-10-31T03:56:00.332313+00:00",
     "title": "Seller API",
     "version": "1.0.0",
-    "sha256": "56fef8e38e4419badf4c3a7ab5a7919964307c0e858984fbe149d3c4d7de3d2b"
+    "sha256": "fcad89a584310d74fac240fe08f8647425346748c65acddcc64841273761619c",
+    "upstream_sha256": "56fef8e38e4419badf4c3a7ab5a7919964307c0e858984fbe149d3c4d7de3d2b",
+    "transformations": [
+      "Replace five upstream webhook-secret and OAuth-token example values with explicit EXAMPLE placeholders. Endpoint definitions and schemas are unchanged."
+    ]
   },
   {
     "file": "specs/vinted.yaml",

@@ -2,7 +2,9 @@
 
 Checked 2026-10-31. Start with the marketplace page below before changing an API call.
 Downloaded OpenAPI contracts live in `specs/`; `sources.json` records their original
-URLs, retrieval times, upstream versions, and SHA-256 checksums. They are reference
+URLs, retrieval times, upstream versions, and SHA-256 checksums. Depop's downloaded
+credential examples are replaced with explicit placeholders; its manifest entry
+also retains the upstream checksum and describes that transformation. They are reference
 snapshots, not runtime dependencies. Upstream documentation can change after retrieval.
 
 | Marketplace | Local reference | Official contract snapshot | Current Anteroom integration |
@@ -25,8 +27,10 @@ Mercari US. No providers or authentication flows are changed by storing these do
 Use the exact `url` in `sources.json` to download the upstream file into a temporary
 directory. Parse it as JSON or YAML and require `openapi`, `info`, and `paths` before
 replacing the matching snapshot. Review endpoint, authentication, and schema changes;
-update the retrieval time, upstream version, and SHA-256 in the manifest in the same
-change. Preserve upstream notices and terms; these files remain upstream material.
+replace credential-like examples with explicit placeholders, then update the retrieval
+time, upstream version, and local SHA-256 in the manifest in the same change. Record
+the upstream checksum and any transformations for modified snapshots. Preserve
+upstream notices and terms; these files remain upstream material.
 Do not copy cookies, access tokens, HAR captures, or seller data into this directory.
 
 For example, the Etsy draft bug was a valid write followed by an invalid read:

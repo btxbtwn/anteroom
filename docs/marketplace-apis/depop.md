@@ -4,6 +4,9 @@ Official partner reference: https://partnerapi.depop.com/api-docs/reference/
 Authentication: https://partnerapi.depop.com/api-docs/concepts/authentication/
 Local contract: [Selling API](specs/depop.yaml).
 
+The stored contract replaces upstream sample webhook secrets and OAuth tokens with
+explicit example placeholders. Endpoint definitions and schemas are unchanged.
+
 The partner API supports API keys for direct partners and OAuth authorization code
 flow with PKCE for third-party applications. Depop must configure access first;
 public documentation does not grant credentials or partner approval.
