@@ -34,7 +34,7 @@ struct RootView: View {
             SignInView()
         case .signedIn:
             if let api = session.api {
-                InventoryView(api: api)
+                WorkspaceView(api: api)
             }
         }
     }

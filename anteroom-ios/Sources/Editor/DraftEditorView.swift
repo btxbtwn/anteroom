@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DraftEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var model: DraftEditorModel
     @State private var confirmDiscard = false
     private let onSaved: (Draft) -> Void
@@ -42,15 +43,12 @@ struct DraftEditorView: View {
                         TextField("Describe your item", text: $model.form.fields.description, axis: .vertical)
                             .lineLimit(5...16)
                     }
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .top, spacing: 12) {
-                            NumberField("Price", text: $model.form.price, prefix: "$")
-                            NumberField("Cost", text: $model.form.cost, prefix: "$")
-                        }
-                        VStack(spacing: 12) {
-                            NumberField("Price", text: $model.form.price, prefix: "$")
-                            NumberField("Cost", text: $model.form.cost, prefix: "$")
-                        }
+                    let priceLayout = dynamicTypeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                        : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+                    priceLayout {
+                        NumberField("Price", text: $model.form.price, prefix: "$")
+                        NumberField("Cost", text: $model.form.cost, prefix: "$")
                     }
                     WorkspaceField("Quantity") {
                         TextField("1", text: $model.form.quantity).keyboardType(.numberPad)
@@ -151,7 +149,7 @@ private struct TextRow: View {
 
     var body: some View {
         WorkspaceField(label) {
-            TextField(label, text: $text)
+            TextField(label, text: $text, axis: .vertical).lineLimit(1...4)
         }
     }
 }
@@ -174,6 +172,7 @@ private struct NumberField: View {
                     Text(prefix).foregroundStyle(.secondary)
                 }
                 TextField("0", text: $text)
+                    .accessibilityLabel(label)
                     .keyboardType(.decimalPad)
             }
         }

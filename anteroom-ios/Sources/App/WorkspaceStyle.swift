@@ -31,7 +31,7 @@ struct WorkspaceSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(title).font(.subheadline.weight(.semibold))
+            Text(title).font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -54,6 +54,7 @@ struct WorkspaceField<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(label).font(.footnote.weight(.medium)).foregroundStyle(.secondary)
             content
+                .accessibilityLabel(label)
                 .font(.body)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
