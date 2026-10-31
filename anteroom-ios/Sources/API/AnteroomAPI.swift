@@ -78,6 +78,17 @@ final class AnteroomAPI: Sendable {
         return payload.suggestions
     }
 
+    /// Marketplace tabs this workspace can edit natively (`/api/runtime`).
+    func marketplaceForms() async throws -> [String] {
+        struct Payload: Decodable { let marketplace_forms: [String]? }
+        let payload: Payload = try await decode(request("GET", "api/runtime"))
+        return payload.marketplace_forms ?? []
+    }
+
+    func nativeForm(_ id: String, marketplace: String) async throws -> NativeForm {
+        try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/\(marketplace)/form"))
+    }
+
     // MARK: Bulk actions (reviewed first, as on the desktop)
 
     func previewBulkEdit(ids: [String], edits: BulkEdits) async throws -> [BulkEditReviewRow] {

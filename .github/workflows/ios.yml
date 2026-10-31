@@ -50,6 +50,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/Inventory/InventoryFilters.swift Tests/InventoryTests.swift -o "$RUNNER_TEMP/inventory-tests"
           "$RUNNER_TEMP/inventory-tests"
+      - name: Test native marketplace forms
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/API/NativeFormModels.swift Tests/NativeFormTests.swift -o "$RUNNER_TEMP/native-form-tests"
+          "$RUNNER_TEMP/native-form-tests"
       - name: Test appearance preference contract
         run: |
           xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"
