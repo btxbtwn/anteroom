@@ -1,0 +1,8 @@
+// Copy to Local.xcconfig and fill in. Local.xcconfig is not tracked.
+// The publishable key is the same one the hosted web build uses
+// (Supabase dashboard → Project Settings → API Keys). Never put a secret
+// or service-role key here.
+SUPABASE_PUBLISHABLE_KEY = sb_publishable_...
+DEVELOPMENT_TEAM = YOURTEAMID
+// Bundle IDs are unique across the App Store; change it if this one is taken.
+// PRODUCT_BUNDLE_IDENTIFIER = app.anteroom.ios

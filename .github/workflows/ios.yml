@@ -1,0 +1,43 @@
+name: iPhone app
+
+on:
+  pull_request:
+    paths:
+      - "anteroom-ios/**"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [main]
+    paths:
+      - "anteroom-ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build for Simulator
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: anteroom-ios
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen
+      - name: Build
+        run: |
+          xcodebuild build \
+            -project Anteroom.xcodeproj \
+            -scheme Anteroom \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build.log
+          exit "${PIPESTATUS[0]}"

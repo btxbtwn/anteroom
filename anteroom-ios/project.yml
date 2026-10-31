@@ -1,0 +1,47 @@
+# XcodeGen spec. Run `xcodegen` in this folder to create Anteroom.xcodeproj.
+name: Anteroom
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Config/App.xcconfig
+  Release: Config/App.xcconfig
+packages:
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    majorVersion: 2.0.0
+targets:
+  Anteroom:
+    type: application
+    platform: iOS
+    scheme: {}
+    sources:
+      - path: Sources
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: Supabase
+        product: Supabase
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Anteroom
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSCameraUsageDescription: Take photos of the items you are listing.
+        SupabasePublishableKey: $(SUPABASE_PUBLISHABLE_KEY)
+        CFBundleURLTypes:
+          - CFBundleURLName: app.anteroom.signin
+            CFBundleURLSchemes:
+              - anteroom
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "6.0"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_PREVIEWS: YES

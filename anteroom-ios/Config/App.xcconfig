@@ -1,0 +1,5 @@
+// Shared build settings. Your own values go in Local.xcconfig (not tracked).
+PRODUCT_BUNDLE_IDENTIFIER = app.anteroom.ios
+SUPABASE_PUBLISHABLE_KEY =
+
+#include? "Local.xcconfig"

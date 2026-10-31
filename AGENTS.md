@@ -50,6 +50,7 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 - **`vendoo-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. Content scripts under `content-scripts/` handle Vendoo, eBay, Poshmark, Mercari, Depop, and Etsy. `background.js` routes messages and loads the worker modules in `background/`; the extension runs without its own interface, with review and approved Sends handled in Anteroom. Node unit tests live in `tests/`.
 - **`webhook-relay/`** — Cloudflare Worker that receives eBay and Etsy webhooks, verifies their signatures, keeps only IDs, and holds them in a per-device inbox until that Mac's Anteroom pulls them over an outbound connection. It also brokers eBay and Etsy sign-in and forwards Etsy API calls, so eBay's Cert ID and Etsy's shared secret never ship in the app. See its `README.md`.
 - **`vendoo-studio/`** — React + TypeScript frontend (`src/`) and FastAPI Python backend (`server/vendoo_studio/`). Frontend API clients live under `src/api/`. Backend routes live under `server/vendoo_studio/routes/`; domain behavior lives in `server/vendoo_studio/services/` and `server/vendoo_studio/repositories/`.
+- **`anteroom-ios/`** — Native SwiftUI iPhone app on the hosted API and Supabase. The Xcode project is generated from `project.yml` with XcodeGen and not tracked; it builds only on macOS.
 
 ## Development Commands
 
@@ -63,6 +64,7 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 - **Anteroom frontend lint and tests:** `cd vendoo-studio && npm run lint && npm test`
 - **Anteroom backend lint and tests:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
 - **Anteroom backend tests on Postgres:** set `ANTEROOM_TEST_DATABASE_URL` to any database on a Postgres 16 server (each test worker creates its own). Without a local server, `pip install pgserver` gives one. Mark tests that need the SQLite file `@pytest.mark.sqlite_only("why")`.
+- **iPhone app (macOS only):** `cd anteroom-ios && xcodegen && open Anteroom.xcodeproj`. CI builds it for the Simulator (`.github/workflows/ios.yml`).
 - **Extension tests:** `node --test 'vendoo-extension/tests/*.test.js'`
 - **Webhook relay tests and deploy:** `cd webhook-relay && npm test`; `npx wrangler deploy` only when the seller asks.
 - **Extension:** **Connect Chrome** opens everyday Chrome. Load unpacked from `vendoo-extension/` in `chrome://extensions/` with Developer mode enabled.
