@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.593 — 2026-10-31
+
+- Show the marketplace photo-limit warning once instead of repeating it around the photos.
+
 ## 0.1.592 — 2026-10-30
 
 - The listing agent now sees which marketplace fields are required and rechecks remaining required answers before finishing. It still leaves unsupported facts blank for review.

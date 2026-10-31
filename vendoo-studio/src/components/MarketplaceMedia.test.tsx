@@ -102,3 +102,15 @@ it("shows List's answer about the photos above them, where the seller drags or l
   expect(html.indexOf(warnings[0])).toBeLessThan(html.indexOf("/api/photos/p1"));
   expect(html.match(/Not sent/g)).toHaveLength(1);
 });
+
+it("says the photo limit once when preflight also reports it", () => {
+  serve(Array.from({ length: 11 }, (_, index) => photo(`p${index + 1}`)));
+  for (const page of [undefined, { hint: "Add up to 8 photos." }]) {
+    const html = renderToStaticMarkup(<MarketplaceMedia convId="c1" marketplace="depop" listing={{}} onChange={vi.fn()}
+      warnings={["Depop keeps 8 photos. The first 8 of 11 are sent. Untick photos on the Depop form to choose which.", "Check the cover photo."]}
+      page={page} />);
+    expect(html.match(/Depop keeps 8 photos\. The first/g)).toHaveLength(1);
+    expect(html.match(/Check the cover photo/g)).toHaveLength(1);
+    expect(html).not.toContain("Untick photos");
+  }
+});
