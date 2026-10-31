@@ -19,6 +19,7 @@ final class DraftEditorModel {
 
     let api: AnteroomAPI
     let draftID: String
+    private(set) var summary: Draft
     var form = Form()
     private var saved = Form()
     private var updatedAt: String?
@@ -31,6 +32,7 @@ final class DraftEditorModel {
     init(api: AnteroomAPI, draft: Draft) {
         self.api = api
         draftID = draft.id
+        summary = draft
         form.title = draft.title ?? ""
         form.notes = draft.notes ?? ""
         saved = form
@@ -81,6 +83,7 @@ final class DraftEditorModel {
     }
 
     private func apply(_ detail: DraftDetail) {
+        summary = detail.summary
         updatedAt = detail.updatedAt
         var next = Form()
         next.title = detail.title ?? ""

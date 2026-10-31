@@ -32,6 +32,10 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen
+      - name: Test stream framing
+        run: |
+          xcrun swiftc Sources/API/StreamFrame.swift Tests/StreamFramesTests.swift -o "$RUNNER_TEMP/stream-tests"
+          "$RUNNER_TEMP/stream-tests"
       - name: Build
         run: |
           set -o pipefail
