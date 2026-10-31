@@ -209,3 +209,9 @@ fields, tags and labels with row locks, draft-task checks and revision/basis/res
 fences. Static dropdown choices use the canonical catalog handler. Bulk category
 pickers and category writes stay gated until the verified browser-backed catalog
 is connected. Desktop retains its existing category pickers and send gate.
+
+On `feat/hosted-parity-next`, selection also exposes the shared bulk delete
+review. Hosted deletes reuse the single-item removal service: only owned,
+unsent, idle drafts are removed, each under its own row lock with the desktop
+review token re-checked, and Storage objects are released after the commit.
+Nothing is delisted and no job is created.

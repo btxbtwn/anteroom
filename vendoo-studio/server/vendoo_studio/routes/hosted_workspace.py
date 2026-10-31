@@ -81,7 +81,7 @@ def listing_response(db, identity):
 def runtime(request: Request):
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
-    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_markdowns', 'suggestions'] + (['generation', 'chat_attachments'] if generation else []),
+    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions'] + (['generation', 'chat_attachments'] if generation else []),
             'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark', 'depop']}
 
 
@@ -445,42 +445,17 @@ def restore_revision(identity: str, revision_id: str, body: RestoreInput, db=Dep
 
 @router.delete('/conversations/{identity}')
 def delete_conversation(identity: str, request: Request, db=Depends(get_seller_db)):
-    from sqlalchemy import delete
-    from vendoo_studio.services.hosted_photos import check_key, storage_call
-    row = conversation(db, identity, lock=True)
+    from vendoo_studio.services import hosted_listing_delete
+    conversation(db, identity, lock=True)
     assert_idle(db, identity)
-    # Draft removal cannot discard marketplace identities or history of a Send.
-    if row.status != 'draft' or db.scalar(select(Job.id).where(Job.conversation_id == identity).limit(1)) or db.scalar(
-            select(MarketplaceListing.id).where(MarketplaceListing.conversation_id == identity).limit(1)):
-        raise HTTPException(409, 'Only an unsent draft can be removed from this workspace')
-    photos = db.scalars(select(Photo).where(Photo.conversation_id == identity)).all()
-    keys = set()
-    for photo in photos:
-        for key in (photo.stored_filename, photo.source_filename):
-            if key:
-                check_key(key, db.user_id, identity)
-                keys.add(key)
-    from vendoo_studio.models.background_task import BackgroundTask
-    attachments = [item for batch in db.scalars(select(Message.attachments).where(Message.conversation_id == identity))
-                   for item in (batch or [])]
-    for payload in db.scalars(select(BackgroundTask.payload).where(BackgroundTask.conversation_id == identity)):
-        attachments.extend(payload.get('attachments', []))
-    for item in attachments:
-        key = item['id']
-        check_key(key, db.user_id, identity)
-        keys.add(key)
-    from vendoo_studio.services.background_tasks import delete_history
-    delete_history(db, identity)
-    for model in (Listing, ListingRevision, Photo, Message):
-        db.execute(delete(model).where(model.conversation_id == identity))
-    db.execute(delete(Conversation).where(Conversation.id == identity))
+    photos = db.scalar(select(func.count()).select_from(Photo).where(Photo.conversation_id == identity))
+    try:
+        keys = hosted_listing_delete.remove_unsent_draft(db, identity)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from None
     db.commit()
-    for key in keys:
-        try:
-            storage_call('DELETE', key, request.headers['authorization'].partition(' ')[2])
-        except HTTPException:
-            continue
-    return {'ok': True, 'deleted_jobs': 0, 'deleted_photos': len(photos)}
+    hosted_listing_delete.release(keys, request.headers['authorization'].partition(' ')[2])
+    return {'ok': True, 'deleted_jobs': 0, 'deleted_photos': photos}
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
