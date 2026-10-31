@@ -310,9 +310,10 @@ private struct StatusTabs: View {
 struct ListingRow: View {
     let api: AnteroomAPI
     let listing: ListingSummary
+    @Environment(AppearanceModel.self) private var appearance
 
     var body: some View {
-        ListingRowContent(listing: listing) {
+        ListingRowContent(listing: listing, bySKU: appearance.listingNames == .sku) {
             if let cover = listing.coverPhotoID {
                 RemotePhoto(api: api, photoID: cover, maxPixels: 96)
             } else {
@@ -328,11 +329,19 @@ struct ListingRow: View {
 /// The desktop row: cover, name, colored lifecycle word, then where it is live.
 struct ListingRowContent<Thumbnail: View>: View {
     let listing: ListingSummary
+    var bySKU = false
     let thumbnail: Thumbnail
 
-    init(listing: ListingSummary, @ViewBuilder thumbnail: () -> Thumbnail) {
+    init(listing: ListingSummary, bySKU: Bool = false, @ViewBuilder thumbnail: () -> Thumbnail) {
         self.listing = listing
+        self.bySKU = bySKU
         self.thumbnail = thumbnail()
+    }
+
+    /// Settings → General → Listing names; a listing without a SKU keeps its title.
+    private var name: String {
+        if bySKU, let sku = listing.sku?.trimmingCharacters(in: .whitespaces), !sku.isEmpty { return sku }
+        return listing.displayTitle
     }
 
     var body: some View {
@@ -345,13 +354,15 @@ struct ListingRowContent<Thumbnail: View>: View {
                 .opacity(listing.settledAt == nil ? 1 : 0.6)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text(listing.displayTitle).font(.subheadline.weight(.medium)).lineLimit(2)
+                Text(name).font(.subheadline.weight(.medium)).lineLimit(2)
                 HStack(spacing: 6) {
                     Text(listing.statusLabel).fontWeight(.medium).foregroundStyle(statusColor)
                     if let price = listing.price {
                         Text(price, format: .currency(code: "USD")).foregroundStyle(.secondary)
                     }
-                    if let sku = listing.sku, !sku.isEmpty {
+                    if bySKU, name != listing.displayTitle {
+                        Text(listing.displayTitle).foregroundStyle(.secondary).lineLimit(1)
+                    } else if let sku = listing.sku, !sku.isEmpty {
                         Text(sku).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }

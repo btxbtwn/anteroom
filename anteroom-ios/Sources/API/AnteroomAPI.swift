@@ -89,6 +89,114 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/\(marketplace)/form"))
     }
 
+    // MARK: Listings settings (hosted rows of Settings → Listings)
+
+    func marketplaceSettings() async throws -> MarketplaceSettings {
+        try await decode(request("GET", "api/settings/marketplaces"))
+    }
+
+    func setMarketplaces(_ selected: [String]) async throws -> MarketplaceSettings {
+        try await decode(request("PUT", "api/settings/marketplaces", json: ["selected": selected]))
+    }
+
+    func packageDimensions() async throws -> PackageDimensions {
+        try await decode(request("GET", "api/settings/package-dimensions"))
+    }
+
+    func setPackageDimensions(_ dimensions: PackageDimensions) async throws -> PackageDimensions {
+        try await decode(request("PUT", "api/settings/package-dimensions", json: dimensions))
+    }
+
+    func shipsFromZip() async throws -> String {
+        struct Payload: Decodable { let zip: String }
+        let payload: Payload = try await decode(request("GET", "api/settings/ships-from-zip"))
+        return payload.zip
+    }
+
+    func setShipsFromZip(_ zip: String) async throws -> String {
+        struct Payload: Decodable { let zip: String }
+        let payload: Payload = try await decode(request("PUT", "api/settings/ships-from-zip", json: ["zip": zip]))
+        return payload.zip
+    }
+
+    func hiddenFields() async throws -> HiddenFields {
+        try await decode(request("GET", "api/settings/hidden-fields"))
+    }
+
+    func restoreHiddenField(_ field: HiddenField) async throws -> HiddenFields {
+        try await decode(request("DELETE", "api/settings/hidden-fields",
+                                 json: ["marketplace": field.marketplace, "field": field.field, "scope": "always"]))
+    }
+
+    func listingFormulas() async throws -> ListingFormulas {
+        try await decode(request("GET", "api/settings/formulas"))
+    }
+
+    /// Empty text restores the built-in formula.
+    func setListingFormulas(title: String, description: String) async throws -> ListingFormulas {
+        try await decode(request("PUT", "api/settings/formulas", json: ["title": title, "description": description]))
+    }
+
+    func staleListingDays() async throws -> Int {
+        struct Payload: Decodable { let stale_listing_days: Int? }
+        let payload: Payload = try await decode(request("GET", "api/settings/ui"))
+        return payload.stale_listing_days ?? 60
+    }
+
+    func setStaleListingDays(_ days: Int) async throws -> Int {
+        struct Payload: Decodable { let stale_listing_days: Int? }
+        let payload: Payload = try await decode(request("PUT", "api/settings/ui", json: ["stale_listing_days": days]))
+        return payload.stale_listing_days ?? days
+    }
+
+    // MARK: Providers (API keys, kept encrypted server-side and never returned)
+
+    func keyProviders() async throws -> [KeyProvider] {
+        struct Payload: Decodable { let providers: [KeyProvider] }
+        let payload: Payload = try await decode(request("GET", "api/settings/ai-keys"))
+        return payload.providers
+    }
+
+    func providerOrder() async throws -> ProviderOrder {
+        try await decode(request("GET", "api/settings/provider"))
+    }
+
+    func setProviderOrder(primary: String, fallback: String) async throws {
+        _ = try await send(request("PUT", "api/settings/provider/preferred",
+                                   json: ["primary": primary, "fallback": fallback]))
+    }
+
+    func setPhotoProvider(_ choice: String) async throws {
+        _ = try await send(request("PUT", "api/settings/provider/photos", json: ["choice": choice]))
+    }
+
+    func saveProviderKey(_ id: String, key: String) async throws {
+        _ = try await send(request("PUT", "api/settings/ai-keys/\(id)", json: ["api_key": key]))
+    }
+
+    func removeProviderKey(_ id: String) async throws {
+        _ = try await send(request("DELETE", "api/settings/ai-keys/\(id)"))
+    }
+
+    /// Nil when the connection works; otherwise the provider's message.
+    func testProviderKey(_ id: String) async throws -> String? {
+        struct Payload: Decodable { let ok: Bool; let error: String? }
+        let payload: Payload = try await decode(request("POST", "api/settings/ai-keys/\(id)/test"))
+        return payload.ok ? nil : (payload.error ?? "The connection failed.")
+    }
+
+    func providerModels(_ id: String) async throws -> ProviderModels {
+        try await decode(request("GET", "api/settings/ai-keys/\(id)/models"))
+    }
+
+    func setProviderModels(_ id: String, vision: String? = nil, listing: String? = nil, reasoning: String? = nil) async throws {
+        var body: [String: String] = [:]
+        if let vision { body["vision_model"] = vision }
+        if let listing { body["listing_model"] = listing }
+        if let reasoning { body["reasoning_effort"] = reasoning }
+        _ = try await send(request("PUT", "api/settings/ai-keys/\(id)/models", json: body))
+    }
+
     // MARK: Analytics
 
     func analytics(range: String, start: Date? = nil, end: Date? = nil) async throws -> InventoryAnalytics {
@@ -300,6 +408,15 @@ final class AnteroomAPI: Sendable {
 
     func setAppearance(_ theme: AppearanceTheme) async throws -> AppearancePreferences {
         try await decode(request("PUT", "api/settings/ui", json: AppearanceUpdate(theme: theme)))
+    }
+
+    func setListingNames(_ names: ListingNames) async throws -> AppearancePreferences {
+        try await decode(request("PUT", "api/settings/ui", json: AppearanceUpdate(listingNames: names)))
+    }
+
+    /// Every change to Anteroom, newest first.
+    func changelog() async throws -> Changelog {
+        try await decode(request("GET", "api/changelog"))
     }
 
     // MARK: Transport
