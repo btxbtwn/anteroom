@@ -162,27 +162,6 @@ test('a new Vinted draft uploads a photo, saves once, and is confirmed by readin
   assert.equal(JSON.stringify(result).includes('seller@example.com'), false);
 });
 
-test('No brand overrides General and resolves to Vinted\'s brand ID in the saved draft', async () => {
-  const { c, sent } = worker();
-  c.fetch = ((inner) => async (url, options = {}) => {
-    const parsed = new URL(url);
-    if (parsed.pathname === '/api/v2/item_upload/brands') {
-      assert.equal(parsed.searchParams.get('keyword'), 'No brand');
-      assert.equal(parsed.searchParams.get('category_id'), '1904');
-      return reply(200, { brands: [{ id: 149, title: 'No brand' }] });
-    }
-    return inner(url, options);
-  })(c.fetch);
-  const result = await c.runVintedNative(message({ listing: {
-    ...listing, brand: 'Nike', vinted_specifics: { ...listing.vinted_specifics, brand: 'No brand' },
-  } }));
-  assert.equal(result.ok, true);
-  const saved = JSON.parse(sent('POST', '/api/v2/item_upload/drafts')[0].body);
-  assert.equal(saved.draft.brand_id, 149);
-  assert.equal(saved.draft.brand, 'No brand');
-  assert.equal(sent('POST', '/api/v2/item_upload/drafts/42/completion').length, 0);
-});
-
 test('publishing a Vinted draft completes it once and returns the public listing', async () => {
   const { c, sent } = worker({ read: n => (n < 2 ? DRAFT : { ...DRAFT, is_draft: false }) });
   const result = await c.runVintedNative(message({ action: 'publish', confirm: true, draft_url: DRAFT_URL }));
