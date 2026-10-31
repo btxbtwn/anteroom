@@ -30,7 +30,15 @@ Add that URL to the Supabase project's **Auth → URL Configuration → Redirect
 URLs**, or the link will open the web app instead. Open the link on the same
 iPhone that asked for it.
 
-## CI
+## CI and TestFlight
 
-`.github/workflows/ios.yml` generates the project and builds it for the
-Simulator on every change under `anteroom-ios/`.
+`.github/workflows/ios.yml` builds for the Simulator on every change under
+`anteroom-ios/`. On `main` (or when run by hand from the Actions tab) it also
+archives, signs and uploads the build to TestFlight, numbered by the workflow
+run. Install it on the iPhone from the TestFlight app.
+
+Signing uses an App Store Connect API key (Admin role) stored as the
+repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_P8`; Xcode
+creates and renews the certificate and profile with it. The publishable key
+comes from the repository variable `SUPABASE_PUBLISHABLE_KEY`. Pull requests
+never run the upload job.
