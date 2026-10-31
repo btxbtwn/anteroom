@@ -9,6 +9,14 @@ MARKETPLACES = ("general", "ebay", "poshmark", "mercari", "depop", "etsy")
 _task: asyncio.Task | None = None
 
 
+def categories_ready(db) -> bool:
+    """Whether all six shared category trees are loaded and complete."""
+    from sqlalchemy import func, select
+
+    return db.scalar(select(func.count()).select_from(CategoryTree).where(
+        CategoryTree.marketplace.in_(MARKETPLACES), CategoryTree.status == 'complete')) == len(MARKETPLACES)
+
+
 def syncing() -> bool:
     return _task is not None and not _task.done()
 
