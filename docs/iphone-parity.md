@@ -62,6 +62,20 @@ Anteroom's terminology and identity while following iOS navigation conventions.
 | App lifecycle: foreground refresh, interrupted work, push/deep links | Durable tasks exist; no complete iOS lifecycle integration | Partial | Reconnect generation explicitly today; audit notifications and stale screen refresh |
 | Public release: privacy, account deletion, permission descriptions and distribution | Not covered by existing TestFlight flow | Missing | Complete before a public App Store release; TestFlight is not release readiness |
 
+## Core visual alignment
+
+The current visual pass uses the desktop inspector's section headings and flat
+dividers, photos before fields, a native actions menu for assistant/history,
+and a prominent Save action. Inventory rows show private cover thumbnails;
+the photo tray uses an adaptive grid with an expand control. The separate
+layout-review simulator app uses the production row/section/field views and
+invented sample data, without calling the backend or touching a seller account.
+
+Simulator inventory layout was inspected. Opening the editor for visual review
+was blocked by repeated device-runner build failures after one cache recovery.
+Editor appearance, dark mode, accessibility text sizes and real-account photo
+loading still need device review. Compilation is not visual verification.
+
 ## Delivery order
 
 1. Finish verification of generation/chat and listing history/restore.

@@ -16,35 +16,47 @@ struct PhotoStrip: View {
     @State private var photoToDelete: DraftPhoto?
 
     private static let limit = 30
-    private let thumbSize: CGFloat = 96
+    @State private var showAll = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 8) {
-                    ForEach(photos) { photo in
+            if photos.isEmpty && uploading == 0 {
+                VStack(spacing: 10) {
+                    Image(systemName: "photo.on.rectangle.angled").font(.title2)
+                    Text("Add photos of your item").font(.subheadline.weight(.medium))
+                    Text("Use the camera or choose photos from your library.")
+                        .font(.footnote).multilineTextAlignment(.center)
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 144)
+                .padding(16)
+                .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(WorkspaceStyle.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 8)], spacing: 8) {
+                    ForEach(showAll ? photos : Array(photos.prefix(6))) { photo in
                         RemotePhoto(api: api, draftID: draftID, photoID: photo.id, maxPixels: 300)
-                            .frame(width: thumbSize, height: thumbSize)
+                            .frame(height: 104)
+                            .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .accessibilityLabel("Listing photo")
                             .overlay(alignment: .topTrailing) {
-                                Button("Delete photo", systemImage: "trash", role: .destructive) {
-                                    photoToDelete = photo
-                                }
-                                .labelStyle(.iconOnly)
-                                .frame(width: 44, height: 44)
-                                .background(.regularMaterial, in: Circle())
+                                Button("Delete photo", systemImage: "trash", role: .destructive) { photoToDelete = photo }
+                                    .labelStyle(.iconOnly)
+                                    .frame(width: 44, height: 44)
+                                    .background(.regularMaterial, in: Circle())
                             }
                     }
                     ForEach(0..<uploading, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(.quaternary)
-                            .frame(width: thumbSize, height: thumbSize)
-                            .overlay { ProgressView() }
+                        ProgressView().frame(maxWidth: .infinity, minHeight: 104)
+                            .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
+                if photos.count > 6 {
+                    Button(showAll ? "Show fewer photos" : "Show all \(photos.count) photos") { showAll.toggle() }
+                        .frame(minHeight: 44)
+                }
             }
-            .frame(height: photos.isEmpty && uploading == 0 ? 0 : thumbSize)
 
             let controlsLayout = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
@@ -191,7 +203,7 @@ struct RemotePhoto: View {
             return
         }
         do {
-            let data = try await api.photoData(draftID: draftID, photoID: photoID)
+            let data = try await api.photoThumbnailData(photoID: photoID, size: min(512, maxPixels))
             let size = maxPixels
             let decoded = await Task.detached(priority: .userInitiated) {
                 PhotoPreparer.thumbnail(from: data, maxPixels: size)
