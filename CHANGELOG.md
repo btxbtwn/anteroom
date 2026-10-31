@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.599 — 2026-10-31
+## 0.1.600 — 2026-10-31
 
 - Changing the general category now sets each marketplace tab's category from that marketplace's own list. When a marketplace has no match, its old category is cleared so you pick one there, instead of it keeping the category from before.
+
+## 0.1.599 — 2026-10-31
+
+- On the web, Regenerate rewrites a listing from its photos and item details again, and you can select several listings and regenerate them together, with an optional price drop first. Clear works on the web too.
 
 ## 0.1.598 — 2026-10-31
 
