@@ -8,7 +8,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.607 — 2026-10-31
 
-- Keep category pickers and other web requests working when several requests need the database at once.
+- The Poshmark and Depop forms on the web can now be edited, including opening their category pickers. Web requests also stay within the database connection limit.
 
 ## 0.1.606 — 2026-10-31
 
