@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.595 — 2026-10-31
+
+- Finish saving Etsy drafts with category details instead of stopping before the photos with an incomplete-listing message.
+
 ## 0.1.594 — 2026-10-31
 
 - Vinted errors now tell you which field to adjust and why, including titles rejected for too many capital letters.

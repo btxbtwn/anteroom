@@ -391,11 +391,11 @@ async def _write_properties(write, shop_id: str, item_id: str, assignments: list
         await write("PUT", f"shops/{shop_id}/listings/{item_id}/properties/{row['property_id']}", "properties", data=data)
 
 
-async def unkept_properties(item_id: str, assignments: list[dict]) -> list[str]:
+async def unkept_properties(shop_id: str, item_id: str, assignments: list[dict]) -> list[str]:
     """The written properties Etsy did not keep, read back from the listing."""
     if not assignments:
         return []
-    body = await marketplace_accounts.etsy_api("GET", f"listings/{item_id}/properties")
+    body = await marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/listings/{item_id}/properties")
     kept = {str(row.get("property_id")): ({str(value) for value in row.get("value_ids") or []},
                                           {str(value).casefold() for value in row.get("values") or []})
             for row in body.get("results") or []}
@@ -818,7 +818,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         # Each property write replaces that property, so writing it again is safe.
         await _write_properties(write, shop_id, item_id, assignments)
         record({"etsy_pending_write": None})
-        lost = await unkept_properties(item_id, assignments)
+        lost = await unkept_properties(shop_id, item_id, assignments)
         if lost:
             rejected = True
             raise ListingProblem(f"Etsy did not keep these category details: {', '.join(lost)}. Check them in the Etsy draft.",
