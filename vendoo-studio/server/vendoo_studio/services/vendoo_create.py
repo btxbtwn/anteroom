@@ -95,7 +95,9 @@ async def run_ops(
             failed = next((r for r in results if not r.get("ok")), None)
             message = (failed or {}).get("error") or reply.get("error") or "Vendoo API call failed"
             raise VendooCreateError(str(message), results=results)
-    results = reply.get("results") if isinstance(reply.get("results"), list) else []
+    results = reply.get("results")
+    if not isinstance(results, list):
+        results = []
     return reply
 
 
@@ -180,7 +182,9 @@ async def probe_schema(job, item_ids: list[str], *, reset: bool = False) -> dict
         raise VendooCreateError("Probe needs at least one Vendoo item id")
     ops = [{"op": "get_item", "item_id": item_id} for item_id in ids]
     reply = await browser_bridge.request(job, "job.vendoo_api", {"ops": ops}, timeout=REQUEST_TIMEOUT_SEC)
-    results = reply.get("results") if isinstance(reply.get("results"), list) else []
+    results = reply.get("results")
+    if not isinstance(results, list):
+        results = []
     items = [r["item"] for r in results if r.get("ok") and isinstance(r.get("item"), dict)]
     failures = [{"item_id": r.get("item_id"), "error": r.get("error")} for r in results if not r.get("ok")]
     if not items and not results and reply.get("error"):

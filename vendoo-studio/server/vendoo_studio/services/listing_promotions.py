@@ -13,6 +13,8 @@ Seller-enabled automations (``promotion_automations``) review and send through
 the same functions. Nothing here lists, publishes or delists.
 """
 from __future__ import annotations
+from typing import cast as type_cast
+from sqlalchemy.engine import CursorResult
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -347,7 +349,7 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
                         PromotionAutomation.minimum_price_cents <= row.offer_price_cents),
                 )
             still_on = db.execute(approval.values(enabled=True))
-            if still_on.rowcount != 1:
+            if type_cast(CursorResult, still_on).rowcount != 1:
                 db.rollback()
                 repo.update_status(job.id, "failed", STEP, error="The automation changed or was turned off before this was sent.")
                 raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")

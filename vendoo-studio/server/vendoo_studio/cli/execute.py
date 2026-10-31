@@ -231,6 +231,8 @@ def _parse_body_text(text: str | None) -> Any:
         if not path.is_file():
             raise UsageError(f"Body file not found: {path}")
         text = path.read_text(encoding="utf-8")
+    if text is None:
+        raise UsageError("No JSON was received on stdin")
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:

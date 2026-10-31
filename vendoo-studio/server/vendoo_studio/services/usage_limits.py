@@ -173,8 +173,12 @@ def _percent_from_amounts(used: object, limit: object) -> float | None:
 def _claude_spend_percent(rate_limits: dict) -> float | None:
     spend = rate_limits.get("spend")
     if isinstance(spend, dict) and spend.get("enabled") is True:
-        used = spend.get("used") if isinstance(spend.get("used"), dict) else None
-        limit = spend.get("limit") if isinstance(spend.get("limit"), dict) else None
+        used = spend.get("used")
+        if not isinstance(used, dict):
+            used = None
+        limit = spend.get("limit")
+        if not isinstance(limit, dict):
+            limit = None
         if (
             used
             and limit
@@ -212,8 +216,12 @@ def _claude_model_scoped(rate_limits: dict) -> list[dict]:
     for limit in rate_limits.get("limits") or []:
         if not isinstance(limit, dict) or limit.get("kind") != "weekly_scoped":
             continue
-        scope = limit.get("scope") if isinstance(limit.get("scope"), dict) else {}
-        model = scope.get("model") if isinstance(scope.get("model"), dict) else {}
+        scope = limit.get("scope")
+        if not isinstance(scope, dict):
+            scope = {}
+        model = scope.get("model")
+        if not isinstance(model, dict):
+            model = {}
         name = model.get("display_name")
         if isinstance(name, str) and name.strip():
             scoped.append({
@@ -320,7 +328,9 @@ def cursor_usage_to_limits(body: object, checked_at: str) -> dict:
         cycle_end = 0.0
     if math.isfinite(cycle_end) and cycle_end > 0:
         resets_at = iso_from_epoch_seconds(cycle_end / 1000)
-    plan_usage = data.get("planUsage") if isinstance(data.get("planUsage"), dict) else None
+    plan_usage = data.get("planUsage")
+    if not isinstance(plan_usage, dict):
+        plan_usage = None
     windows: list[dict] = []
     if plan_usage:
         for window_id, label, description in CURSOR_USAGE_WINDOWS:

@@ -503,7 +503,9 @@ def _next_dispatch() -> tuple[str, str, dict | None] | None:
         reuse_existing = bool(item_id or item_url)
         schema_probe = is_schema_probe_job(job)
         snapshot = job.listing_snapshot if isinstance(job.listing_snapshot, dict) else {}
-        stamped_platforms = snapshot.get("platforms") if isinstance(snapshot.get("platforms"), list) else []
+        stamped_platforms = snapshot.get("platforms")
+        if not isinstance(stamped_platforms, list):
+            stamped_platforms = []
         platforms = selected_fillable_platforms(stamped_platforms)
         registry_selectors = _build_registry_selectors(snapshot, db, platforms)
         registry_options = _build_registry_options(
@@ -673,7 +675,9 @@ async def dispatch_search_categories(job, request_id: str, query: str) -> bool:
     from vendoo_studio.services.marketplaces import selected_fillable_platforms
 
     snapshot = job.listing_snapshot if isinstance(job.listing_snapshot, dict) else {}
-    stamped = snapshot.get("platforms") if isinstance(snapshot.get("platforms"), list) else []
+    stamped = snapshot.get("platforms")
+    if not isinstance(stamped, list):
+        stamped = []
     item_id = durable_vendoo_item_id(job.vendoo_item_id)
     item_url = listing_url_for_job(item_id, job.vendoo_url)
     return await extension_manager.send_message(ProtocolMessage(

@@ -113,7 +113,10 @@ def form(listing: dict) -> dict:
     by_path["poshmark_specifics.earnings"]["value"] = ""
     # The earnings card follows this form's price and the chosen shipping discount.
     try:
-        price = float(price_for(listing, "poshmark"))
+        raw_price = price_for(listing, "poshmark")
+        if raw_price is None:
+            raise ValueError("No listing price")
+        price = float(raw_price)
         discount = by_path["poshmark_specifics.shippingDiscountId"]
         discount_id = specifics.get("shippingDiscountId", "")
         amounts = discount.get("option_amounts") or {}

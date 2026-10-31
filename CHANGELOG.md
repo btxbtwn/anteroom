@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.612 — 2026-10-31
+## 0.1.613 — 2026-10-31
 
 - The web app now has the Usage page. It shows each AI provider's limits for your account; Claude sign-in usage stays in the Mac app.
+
+## 0.1.612 — 2026-10-31
+
+- Keep draft preparation and sales suggestions safe when a saved version, sale price or weekday recommendation is missing.
 
 ## 0.1.611 — 2026-10-31
 

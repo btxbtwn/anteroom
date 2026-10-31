@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Literal
+from typing import Literal, TypedDict
 
 from vendoo_studio.services.category_fields import load_rows, save_rows
 
@@ -32,7 +32,12 @@ EBAY_LISTING_TYPES = "ebay_listing_types"
 EBAY_LISTING_STRUCTURE = "ebay_listing_structure"
 ETSY_PROPERTIES = "etsy_properties"
 _TAXONOMY_MAX_AGE_S = 24 * 3600
-_etsy_taxonomy: dict[str, object] = {"at": 0.0, "leaves": ()}
+class _TaxonomyCache(TypedDict):
+    at: float
+    leaves: tuple[dict[str, str], ...]
+
+
+_etsy_taxonomy: _TaxonomyCache = {"at": 0.0, "leaves": ()}
 
 SchemaMarketplace = Literal["ebay", "etsy"]
 
@@ -259,7 +264,7 @@ async def etsy_taxonomy() -> tuple[dict[str, str], ...]:
     from vendoo_studio.services import marketplace_accounts
 
     if _etsy_taxonomy["leaves"] and time.monotonic() - float(_etsy_taxonomy["at"]) < _TAXONOMY_MAX_AGE_S:
-        return _etsy_taxonomy["leaves"]  # type: ignore[return-value]
+        return _etsy_taxonomy["leaves"]
     body = await marketplace_accounts.etsy_api("GET", "seller-taxonomy/nodes")
     leaves: list[dict[str, str]] = []
 

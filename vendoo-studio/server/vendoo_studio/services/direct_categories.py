@@ -22,7 +22,9 @@ def search_text(listing: dict, evidence: str = "") -> str:
     title = " ".join(str(listing.get("title") or "").split())
     if title.casefold() in {"draft listing", "new listing"}:
         title = ""
-    paths = listing.get("marketplace_categories") if isinstance(listing.get("marketplace_categories"), dict) else {}
+    paths = listing.get("marketplace_categories")
+    if not isinstance(paths, dict):
+        paths = {}
     path = ""
     for key in ("ebay", "etsy"):
         path = str(paths.get(key) or "")
@@ -52,7 +54,9 @@ def pick_ebay_suggestion(body: dict) -> dict[str, str] | None:
     if not suggestions:
         return None
     first = suggestions[0] if isinstance(suggestions[0], dict) else {}
-    category = first.get("category") if isinstance(first.get("category"), dict) else {}
+    category = first.get("category")
+    if not isinstance(category, dict):
+        category = {}
     if not category.get("categoryId"):
         return None
     ancestors = first.get("categoryTreeNodeAncestors") or []
@@ -155,7 +159,9 @@ def live_fields_prompt(listing: dict) -> str:
     from vendoo_studio.services.category_fields import load_rows
     from vendoo_studio.services.marketplace_schemas import EBAY_ASPECTS, ETSY_PROPERTIES
 
-    ids = listing.get("direct_category_ids") if isinstance(listing.get("direct_category_ids"), dict) else {}
+    ids = listing.get("direct_category_ids")
+    if not isinstance(ids, dict):
+        ids = {}
     blocks = []
     for marketplace, cache_key, bucket in (
         ("ebay", EBAY_ASPECTS, "ebay_specifics"),
@@ -231,7 +237,9 @@ async def attach_direct_categories(db, listing: dict, evidence: str = "") -> dic
     query = search_text(listing, evidence)
     if not query:
         return current
-    paths = listing.get("marketplace_categories") if isinstance(listing.get("marketplace_categories"), dict) else {}
+    paths = listing.get("marketplace_categories")
+    if not isinstance(paths, dict):
+        paths = {}
     etsy_query = str(paths.get("etsy") or listing.get("category_path") or query)
     cache_query = "\n".join((query, etsy_query))
     chosen = dict(current)

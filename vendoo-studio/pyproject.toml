@@ -1,6 +1,6 @@
 [project]
 name = "vendoo-studio"
-version = "0.1.612"
+version = "0.1.613"
 description = "Local web app for generating and automating Vendoo marketplace listings"
 requires-python = ">=3.12"
 dependencies = [
@@ -44,6 +44,7 @@ dev = [
     "pip-audit>=2.9",
     "psycopg[binary]>=3.2",
     "pgserver==0.1.4",
+    "pywebview>=5,<7",
     "pytest>=8.3",
     "pytest-xdist>=3.6",
     "ruff>=0.15",

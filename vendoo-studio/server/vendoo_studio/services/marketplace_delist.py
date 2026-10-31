@@ -81,11 +81,17 @@ def _sold_on(db: Session, conv_id: str, notes: dict) -> dict[str, datetime | Non
             stocks[key] = stock_after_sale(db, conv_id, row.marketplace, row.listing_id)
         if stocks[key]["status"] == "sold_out":
             add(row.marketplace, row.received_at)
-    sale = notes.get("vendooSale") if isinstance(notes.get("vendooSale"), dict) else {}
+    sale = notes.get("vendooSale")
+    if not isinstance(sale, dict):
+        sale = {}
     if sale.get("marketplace"):
         add(str(sale["marketplace"]).lower(), None)
-    dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
-    sold_by = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}
+    dates = notes.get("vendooDates")
+    if not isinstance(dates, dict):
+        dates = {}
+    sold_by = dates.get("soldByMarketplace")
+    if not isinstance(sold_by, dict):
+        sold_by = {}
     for name, when in sold_by.items():
         if when:
             add(str(name).lower(), when)
@@ -116,8 +122,12 @@ def removed_marketplaces(notes: dict, anteroom_urls: dict[str, str]) -> list[str
     marks = _notes_dict(notes, "marketplaceMarks")
     removed = []
     for marketplace in MARKETPLACES:
-        mark = marks.get(marketplace) if isinstance(marks.get(marketplace), dict) else {}
-        record = delists.get(marketplace) if isinstance(delists.get(marketplace), dict) else {}
+        mark = marks.get(marketplace)
+        if not isinstance(mark, dict):
+            mark = {}
+        record = delists.get(marketplace)
+        if not isinstance(record, dict):
+            record = {}
         # Inventory reads call this for every item. Only removal records need
         # URL resolution to check whether a newer listing superseded them.
         if mark.get("state") != "not_listed" and record.get("state") != "deleted":
@@ -144,8 +154,12 @@ def listings(db: Session, conv_id: str) -> dict:
     sold = _sold_on(db, conv_id, notes)
     result = {}
     for marketplace in MARKETPLACES:
-        binding = native.get(marketplace) if isinstance(native.get(marketplace), dict) else {}
-        mark = marks.get(marketplace) if isinstance(marks.get(marketplace), dict) else {}
+        binding = native.get(marketplace)
+        if not isinstance(binding, dict):
+            binding = {}
+        mark = marks.get(marketplace)
+        if not isinstance(mark, dict):
+            mark = {}
         url, source = current_listing(marketplace, binding.get("listing_url"), urls.get(marketplace), mark)
         item_id = listing_id(marketplace, url)
         if mark.get("state") == "not_listed" and (not item_id or item_id == mark.get("listing_id")):
@@ -156,7 +170,9 @@ def listings(db: Session, conv_id: str) -> dict:
             sold_here = bool(reported and marked and reported > marked)
         elif mark.get("state") == "sold":
             sold_here = True
-        record = delists.get(marketplace) if isinstance(delists.get(marketplace), dict) else {}
+        record = delists.get(marketplace)
+        if not isinstance(record, dict):
+            record = {}
         if not url and not record and not sold_here:
             continue
         item_id = item_id or record.get("listing_id")
@@ -258,7 +274,9 @@ async def _delete_ebay(item_id: str, record: dict | None = None) -> dict:
     client = await EbayClient.connect()
     record = record or {}
     group_key = str(record.get("ebay_group_key") or "")
-    offers = record.get("ebay_variant_offers") if isinstance(record.get("ebay_variant_offers"), dict) else {}
+    offers = record.get("ebay_variant_offers")
+    if not isinstance(offers, dict):
+        offers = {}
     if group_key and offers and str(record.get("ebay_listing_id") or "") == item_id:
         # A listing with variations Anteroom made: end the whole group, and keep its offers to list again.
         from vendoo_studio.services.ebay_variations import end_group

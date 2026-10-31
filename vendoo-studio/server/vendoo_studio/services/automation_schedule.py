@@ -6,6 +6,7 @@ collapses into one catch-up instead of a run per missed interval. Fixed
 times use the task's timezone.
 """
 from __future__ import annotations
+from typing import overload
 
 import re
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,14 @@ def require_timezone(name: str) -> ZoneInfo:
         return ZoneInfo(name or "UTC")
     except ZoneInfoNotFoundError as exc:
         raise ScheduleError(f"Unknown timezone {name}.") from exc
+
+
+@overload
+def as_utc(value: datetime) -> datetime: ...
+
+
+@overload
+def as_utc(value: None) -> None: ...
 
 
 def as_utc(value: datetime | None) -> datetime | None:
