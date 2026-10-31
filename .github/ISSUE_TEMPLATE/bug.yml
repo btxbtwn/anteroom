@@ -9,10 +9,16 @@ body:
       options:
         - Anteroom
         - Chrome extension
+        - Webhook relay
         - list-this skills
         - CI / repo hygiene
     validations:
       required: true
+  - type: input
+    id: version
+    attributes:
+      label: Anteroom version
+      description: Settings → General → About, or the status bar.
   - type: textarea
     id: what-happened
     attributes:
@@ -24,6 +30,15 @@ body:
     id: reproduce
     attributes:
       label: How to reproduce
+      description: Steps from a fresh `./sandbox.sh` if it happens there too; otherwise say what the sandbox lacks (a live marketplace page, a real model, your data).
       placeholder: 1. ...
     validations:
       required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Whatever applies, with listing text, buyer details and tokens removed:
+        the job ID and its fill log (`GET /api/jobs/<id>/fill-log`), recent errors (`anteroom logs --level error`), a screenshot.
+      render: text

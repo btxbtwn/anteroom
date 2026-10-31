@@ -26,3 +26,5 @@ desktop/AppIcon.icns
 desktop/build_info.json
 *.egg-info/
 uv.lock
+e2e/results/
+e2e/report/

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from vendoo_studio import sandbox
 from vendoo_studio.config import is_packaged
 from vendoo_studio.database import get_db
 from vendoo_studio.services.chrome_bridge import chrome_executable
@@ -41,4 +42,5 @@ def status(db: Session = Depends(get_db)):
         "chrome_available": chrome_executable() is not None,
         "setup_guide_dismissed": setup_guide_dismissed(),
         "data_dir": str(user_data_root()),
+        "sandbox": sandbox.enabled(),
     }

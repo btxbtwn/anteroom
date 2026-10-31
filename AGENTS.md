@@ -44,6 +44,89 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
+## How to Work on a Change
+
+Every bug fix, feature and refactor follows the same loop. Component details
+(where logs live, how to drive the app, traps) are in the `AGENTS.md` inside
+`vendoo-studio/`, `vendoo-extension/` and `webhook-relay/`.
+
+1. **Start clean.** Work in your own worktree off a fresh `origin/main`:
+   `git fetch origin && git worktree add -b <branch> ../<name> origin/main`.
+   Other sessions share the main checkout; it may be on another branch, behind
+   `origin/main`, or switched under you. In a new worktree, install with
+   `cd vendoo-studio && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci`.
+2. **Diagnose before changing anything.** Read the logs, job events and fill
+   logs for the failure, and find the code with `semble search`. State the root
+   cause in one sentence before you write a fix. A fix you cannot explain is a
+   guess.
+3. **Reproduce it as a failing test.** Pick the narrowest test that shows the
+   bug: pytest for backend behavior, Vitest for frontend logic, `node --test`
+   for the extension, Playwright (`vendoo-studio/e2e/`) for anything that needs
+   the running app. Run it and watch it fail for the reason you stated. When a
+   test truly cannot reproduce it (a live marketplace page, a real model's
+   output), reproduce it in the sandbox and write the steps into the PR.
+4. **Fix the root cause** with the smallest change that does it. Watch the test
+   pass, and keep it.
+5. **Verify like CI.** `./check.sh` runs CI's checks for every component you
+   changed, browser tests included (`--fast` skips those while iterating). For
+   a visible change, look at it in the sandbox at desktop and phone sizes and
+   put screenshots in the PR.
+6. **Open the PR** (see **Pull requests** below) and stay with it until CI is
+   green.
+
+A feature follows the same loop: the first test describes the behavior the
+seller asked for, and the feature is done when it passes in the sandbox.
+
+### Sandbox
+
+`./sandbox.sh` runs the whole of Anteroom offline on throwaway data. Use it for
+anything you would otherwise try on the seller's real app.
+
+- Fresh data folder each run (`--keep` reuses it), seeded with sample listings
+  and photos (`--empty` skips them). API on 4319, UI on 5174.
+- A fake AI provider (`providers/sandbox.py`) answers the same way every time,
+  so generation, chat and the editor run end to end without a model or key.
+- Secrets stay in memory. Outbound connections to anything but loopback are
+  refused in-process. Routes that would publish, delist, update or delete a
+  live listing answer 403. So do updates, Connect Chrome, Tailscale and
+  provider sign-ins, because they start programs that reach outside.
+- It never runs on 4318, the real app's port, so the extension never reaches it.
+- Drive it from a browser (`npm run e2e`, Playwright at desktop and iPhone
+  sizes) or the CLI: `anteroom --base-url http://127.0.0.1:4319 <command>`.
+
+The sandbox does not cover:
+
+- real marketplace forms (form sweeps, below);
+- real model quality (`vendoo-studio/scripts/evaluate-generation.py`, see
+  `docs/listing-generation-evaluations.md`);
+- the hosted web app (backend tests cover it with Postgres and minted
+  sessions);
+- the packaged Mac app (the macOS workflow).
+
+There is no iPhone app yet; the phone layout of the web app is what the phone
+browser tests cover.
+
+Never point a test, script or sandbox at the seller's real data folder
+(`vendoo-studio/data/` or `~/Library/Application Support/Anteroom`).
+
+### Refactoring
+
+A refactor changes structure, never behavior, and ships in its own PR. Never
+mix it with a fix or a feature.
+
+- Before moving code, make sure tests pin what it does today. Where they do
+  not, add them first, in their own commit, and watch them pass on the old
+  code.
+- Change in small steps, one commit each, with `./check.sh` green after every
+  step. The tests from the first step stay unchanged throughout.
+- Delete what becomes unused: old names, wrappers, re-exports. Do not keep a
+  shim for old callers (see **Engineering Principles**).
+- Move files with `git mv`, then grep `server/tests` and `vendoo-extension/tests`
+  for the old path: some backend tests read frontend and extension source
+  files.
+- Run the browser tests before and after. The same tests must pass with the
+  same screens.
+
 ## Repository Structure
 
 - **`skills/`** — Agent skills for listing generation (`list-this`), sourcing (`box-scout`) and reading measurements from ruler photos (`measure-this`).
@@ -55,6 +138,9 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 
 - **Anteroom setup:** `./setup.sh` (from the repo root) or `cd vendoo-studio && ./scripts/setup.sh`
 - **Anteroom start:** `./start.sh` or `cd vendoo-studio && ./scripts/dev.sh`
+- **Anteroom sandbox:** `./sandbox.sh` (see **Sandbox** above)
+- **Anteroom browser tests:** `cd vendoo-studio && npm run e2e` (starts its own sandbox on 4329/5184)
+- **Everything CI checks, for what you changed:** `./check.sh` (`--fast` skips browser tests, `--all` runs every component)
 - **Anteroom doctor:** `cd vendoo-studio && ./scripts/doctor.sh`
 - **Anteroom schema check:** `cd vendoo-studio && ./scripts/check-db-schema.sh [db]`
 - **Anteroom restore:** `cd vendoo-studio && ./scripts/restore-db.sh <snapshot.db>` (quit Anteroom first)
@@ -90,12 +176,15 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 
 - **Anteroom frontend:** `cd vendoo-studio && npm ci && npm run lint && npm test && npm run build`
 - **Anteroom backend:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
+- **Anteroom browser tests:** `cd vendoo-studio && npx playwright install chromium && npm run e2e`. They run against the sandbox at desktop and phone sizes; on failure, the report, screenshots and traces are in `vendoo-studio/e2e/report` and `e2e/results`, and CI uploads them as an artifact.
 - **Extension:** `node --check` on changed JS files, `node --test 'vendoo-extension/tests/*.test.js'`, and `python -m json.tool vendoo-extension/manifest.json`. Then reload the unpacked extension and test affected marketplace flows manually. Use platform-prefixed console logs (`[EBAY]`, `[POSHMARK]`, etc.), the DevTools diagnostic tool for live form structure, and Anteroom’s fill results for per-field outcomes.
 - **Skills:** Confirm `skills/list-this/SKILL.md` exists and `python -m json.tool skills/list-this/references/vendoo-dropdown-options.json` succeeds.
 - **Marketplace forms (not in CI, needs a signed-in browser):** after changing a native form builder, or to check whether a marketplace changed its sell page, run `vendoo-extension/tools/form-sweep/<marketplace>/sweep.js` on that marketplace's sell page (Depop, Mercari, Poshmark, Sellwild), then `node vendoo-extension/tools/form-sweep/<marketplace>/compare.js <downloads folder>`. Each script's header says how; the compare exits 1 on any difference.
 - **Secrets:** Do not track `.env`, key files, photos, or private exports. CI scans the working tree with gitleaks.
 
-**Pull requests:** After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while required checks are pending or red. PRs that change `vendoo-studio/` must bump the Anteroom patch version once (`cd vendoo-studio && ./scripts/bump-version.sh`) so the status-bar version advances, and add a `CHANGELOG.md` entry for that version — one `## <version> — <YYYY-MM-DD>` heading at the top of the file with a bullet in the seller's words. The app reads that file (Settings → General → About → What's new). CI's **Changelog** job (`vendoo-studio/scripts/check-changelog.py`) fails when the newest entry does not match `VERSION`, when that entry has no notes, or when a PR bumps the version without adding a section for it; run it locally with `python vendoo-studio/scripts/check-changelog.py`.
+**Pull requests:** After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while required checks are pending or red. PRs that change `vendoo-studio/` must bump the Anteroom patch version once per PR, not once per push (`cd vendoo-studio && ./scripts/bump-version.sh`; `minor` or `major` only when the seller asks), commit the files it changes, so the status-bar version advances. The UI reads the version from the API; never hardcode it. Such PRs also add a `CHANGELOG.md` entry for that version — one `## <version> — <YYYY-MM-DD>` heading at the top of the file with a bullet in the seller's words. The app reads that file (Settings → General → About → What's new). CI's **Changelog** job (`vendoo-studio/scripts/check-changelog.py`) fails when the newest entry does not match `VERSION`, when that entry has no notes, or when a PR bumps the version without adding a section for it; run it locally with `python vendoo-studio/scripts/check-changelog.py`.
+
+When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduce the failure locally with the same command or `./check.sh`, and fix the cause before pushing again. Do not push guesses at CI. Several Anteroom PRs are often open at once and each bumps the version: fetch `origin/main` and merge it in before merging a PR, and bump again if another PR took your version first.
 
 ## Security and Product Invariants
 
@@ -117,6 +206,7 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 - `./setup.sh` looks for Google Chrome at the macOS app path (`~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` or `/Applications/...`). On Linux, link the `chrome` binary there before setup. The Cloud Agent install does that.
 - Ubuntu has no `python` on `PATH`. After setup, `python` is a wrapper for `vendoo-studio/.venv/bin/python`, and `ruff`, `pytest`, `alembic`, `semble`, and `uvicorn` on `PATH` are that venv. Backend checks from `vendoo-studio/`: `ruff check server` and `VENDOO_STUDIO_DATA_DIR=$(mktemp -d) python -m pytest -q -n auto`.
 - An unpacked dev server stores data in `vendoo-studio/data/`. `scripts/doctor.sh` still looks for the macOS data folder and warns when that file is absent. On Linux, startup logs a keychain warning (`keyring` selects the macOS backend). Reads fail and provider secrets stay unset; the API still serves `/api/health` and drafts.
+- For trying changes, prefer `./sandbox.sh` (UI http://127.0.0.1:5174) over `./start.sh`: it needs no provider, keys or Chrome, and it cannot publish.
 - **Create a listing** on the empty inventory screen stays disabled until Settings has a provider. `POST /api/conversations` still creates a draft, and the sidebar shows it. Generating copy needs a provider. Do not publish.
 - Webhook relay: `cd webhook-relay && npm test`. Extension: `node --test 'vendoo-extension/tests/*.test.js'`.
 - `./setup.sh` redraws icon PNGs. The Cloud Agent install checks those tracked files back out so the worktree stays clean.

@@ -2,20 +2,30 @@
 
 -
 
+## Kind
+
+- [ ] Bug fix: root cause in one sentence below
+- [ ] Feature
+- [ ] Refactor: no behavior change, nothing else mixed in
+- [ ] Docs / CI / repo hygiene
+
+Root cause (bug fixes):
+
 ## Component
 
 - [ ] Anteroom
 - [ ] Chrome extension
+- [ ] Webhook relay
 - [ ] `list-this` skills
 - [ ] CI / repo hygiene
 
-## Checks
+## Verification
 
-Match the CI jobs for the paths you touched:
+- [ ] `./check.sh` passes (same checks as CI for what changed)
+- [ ] A test fails without this change and passes with it (name it below), or why none can
+- [ ] Visible change: screenshots from `./sandbox.sh` at desktop and phone sizes below
 
-- [ ] Anteroom frontend: `cd vendoo-studio && npm ci && npm run lint && npm test && npm run build`
-- [ ] Anteroom backend: `cd vendoo-studio && ruff check server && python -m pytest -q -n auto`
-- [ ] Extension: `node --check` on changed JS, `node --test 'vendoo-extension/tests/*.test.js'`, plus `python -m json.tool` on `manifest.json`
+Tests and screenshots:
 
 ## Invariants
 
