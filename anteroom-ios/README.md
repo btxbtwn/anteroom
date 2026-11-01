@@ -3,7 +3,8 @@
 A native SwiftUI app on the hosted Anteroom API (`vendoo_studio.hosted:app`)
 and Supabase, step 5 of [`docs/cloud-architecture.md`](../docs/cloud-architecture.md).
 
-What works now: email-link sign-in, draft inventory with search, editing a
+What works now: email-and-password accounts (sign in, create account, and
+password reset by email link, which reopens the app through `anteroom://`), draft inventory with search, editing a
 draft's title, notes and General fields, and adding photos from the camera or
 library. The listing assistant connects native generation and text chat to the
 hosted durable-task API when the server advertises generation and has a provider.

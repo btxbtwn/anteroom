@@ -11,8 +11,14 @@ final class SessionStore {
         case loading
         case missingConfiguration
         case signedOut
+        /// A password-reset link opened the app; the seller picks a new password first.
+        case choosingNewPassword(email: String?)
         case signedIn(email: String?)
     }
+
+    /// Supabase's PKCE links do not say which email sent them, so remember that
+    /// this iPhone asked for a reset until a link signs it in.
+    private static let pendingResetKey = "anteroom.pendingPasswordReset"
 
     private(set) var state: State = .loading
     private(set) var signInError: String?
@@ -73,7 +79,8 @@ final class SessionStore {
                     state = .signedOut
                 }
             case .signedIn, .tokenRefreshed, .userUpdated:
-                if let session { state = .signedIn(email: session.user.email) }
+                // A reset link signs in too; keep asking for the new password.
+                if let session, !isChoosingNewPassword { state = .signedIn(email: session.user.email) }
             case .signedOut:
                 state = .signedOut
             default:
@@ -100,24 +107,91 @@ final class SessionStore {
         }
     }
 
-    func sendSignInLink(to email: String) async throws {
-        guard let client else { return }
-        try await client.auth.signInWithOTP(email: email, redirectTo: AppConfig.signInRedirectURL)
+    private var isChoosingNewPassword: Bool {
+        if case .choosingNewPassword = state { return true }
+        return false
     }
 
-    /// Finishes sign-in when the emailed link opens the app.
+    func signIn(email: String, password: String) async throws {
+        guard let client else { return }
+        do {
+            let session = try await client.auth.signIn(email: email, password: password)
+            UserDefaults.standard.removeObject(forKey: Self.pendingResetKey)
+            signInError = nil
+            state = .signedIn(email: session.user.email)
+        } catch {
+            throw Self.readable(error, for: .signIn)
+        }
+    }
+
+    /// Creates the account. Returns true when Supabase wants the email confirmed
+    /// first; the confirmation link opens this app and signs it in.
+    func createAccount(email: String, password: String) async throws -> Bool {
+        guard let client else { return false }
+        do {
+            let response = try await client.auth.signUp(email: email, password: password, redirectTo: AppConfig.signInRedirectURL)
+            guard let session = response.session else { return true }
+            state = .signedIn(email: session.user.email)
+            return false
+        } catch {
+            throw Self.readable(error, for: .createAccount)
+        }
+    }
+
+    func sendPasswordReset(to email: String) async throws {
+        guard let client else { return }
+        do {
+            try await client.auth.resetPasswordForEmail(email, redirectTo: AppConfig.signInRedirectURL)
+            UserDefaults.standard.set(true, forKey: Self.pendingResetKey)
+        } catch {
+            throw Self.readable(error, for: .reset)
+        }
+    }
+
+    func setNewPassword(_ password: String) async throws {
+        guard let client else { return }
+        do {
+            let user = try await client.auth.update(user: UserAttributes(password: password))
+            state = .signedIn(email: user.email)
+        } catch {
+            throw Self.readable(error, for: .newPassword)
+        }
+    }
+
+    /// Finishes an emailed link (account confirmation or password reset) that opened the app.
     func completeSignIn(from url: URL) async {
         guard let client, url.scheme == AppConfig.signInRedirectURL.scheme else { return }
         do {
             let session = try await client.auth.session(from: url)
-            state = .signedIn(email: session.user.email)
+            signInError = nil
+            if UserDefaults.standard.bool(forKey: Self.pendingResetKey) {
+                UserDefaults.standard.removeObject(forKey: Self.pendingResetKey)
+                state = .choosingNewPassword(email: session.user.email)
+            } else {
+                state = .signedIn(email: session.user.email)
+            }
         } catch {
-            signInError = error.localizedDescription
+            signInError = "That link opened somewhere other than where it was asked for, or it expired. If you just confirmed your email, sign in with your password."
         }
     }
 
     func signOut() async {
         try? await client?.auth.signOut()
+        UserDefaults.standard.removeObject(forKey: Self.pendingResetKey)
         state = .signedOut
     }
+
+    private static func readable(_ error: Error, for action: SignInAction) -> SignInFailure {
+        if let auth = error as? AuthError {
+            var serverMessage: String?
+            if case .weakPassword(let message, _) = auth { serverMessage = message }
+            return SignInFailure(message: SignInMessages.message(for: action, code: auth.errorCode.rawValue, serverMessage: serverMessage))
+        }
+        return SignInFailure(message: SignInMessages.message(for: action, code: nil, offline: error is URLError))
+    }
+}
+
+struct SignInFailure: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }
