@@ -96,3 +96,24 @@ Do not copy a stamp from one build onto another or relax the marketplace build
 check. New cloud features become available to local-app users when the app's
 matching bundled Bridge includes them. A web-only test ZIP is not a substitute
 for an app-and-extension update.
+
+## Marketplace actions from the web (Bridge 0.2.40)
+
+A connected tab relays the seller's own approved Poshmark, Mercari and Depop
+List, Update, Save draft and Delist actions to the Bridge. The hosted API starts
+each action only after the seller confirms it, then queues one of four commands
+for that seller's tab (`marketplace.execute`, `marketplace.result`,
+`marketplace.delete`, `job.cancel`; see `services/hosted_browser_relay.py`). The
+tab asks for the next command, reads the job's approved photos with its own
+session, and posts the command with those photo bytes to the content script.
+
+The content script and worker accept only that contract
+(`CloudMarketplaceProtocol.command` and `.photos`): a fixed command type, a
+32-hex request id echoed in the payload, a Chrome marketplace, no video, and at
+most 30 JPEG/PNG/WebP photos. They check the approved connection, document and
+account exactly as for form reads, then run the same handlers the Mac's socket
+uses, which still require `confirm` and claim the shared operation lock. The
+Bridge's reply goes back to the hosted API, which records what the marketplace
+did. Supabase tokens never reach the extension. The Bridge advertises
+`marketplace.actions`; an older Bridge leaves these actions refused with an
+update message.

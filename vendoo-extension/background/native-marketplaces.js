@@ -64,8 +64,14 @@ async function nativeVideo(jobId, video, deadline) {
   return blob;
 }
 
+// Photos the hosted Anteroom page read for a relayed job, by job and photo id.
+// The web app has no loopback server for the Bridge to read them from.
+const relayedPhotos = new Map();
+
 async function nativePhoto(jobId, photo, deadline = Date.now() + 30000) {
   if (!/^[a-f0-9-]+$/i.test(String(photo.id))) throw marketplaceError('Invalid photo ID.');
+  const relayed = relayedPhotos.get(String(jobId))?.get(String(photo.id));
+  if (relayed) return { ...relayed, name: `${photo.id}.${relayed.mime_type === 'image/png' ? 'png' : 'jpg'}` };
   let response;
   try {
     response = await fetch(`${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/photos/${encodeURIComponent(photo.id)}`,
@@ -125,10 +131,10 @@ async function runNativeMarketplace(msg) {
   return await runMercariNative(msg);
 }
 
-async function handleNativeMarketplaceMessage(msg) {
+async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowserResult(msg, result)) {
   const operationId = String(msg.payload?.operation_id || '');
   if (!/^[a-f0-9-]+$/i.test(operationId)) {
-    sendBrowserResult(msg, nativeRefusal('Invalid operation ID.'));
+    reply(nativeRefusal('Invalid operation ID.'));
     return;
   }
   const key = `native_operation_${operationId}`;
@@ -146,7 +152,7 @@ async function handleNativeMarketplaceMessage(msg) {
           publish_job_id: stored.publish_job_id });
         if (recovered) {
           await chrome.storage.local.set({ [key]: { ...stored, finished: true, result: recovered } });
-          sendBrowserResult(msg, { finished: true, result: recovered });
+          reply({ finished: true, result: recovered });
           return;
         }
       } finally { releaseNativeOperation(recovery); }
@@ -167,18 +173,18 @@ async function handleNativeMarketplaceMessage(msg) {
       } catch { /* The listing is already live. A missing link stays missing. */ }
       finally { releaseNativeOperation(reading); }
     }
-    sendBrowserResult(msg, stored?.finished ? { finished: true, result: stored.result } : { finished: false });
+    reply(stored?.finished ? { finished: true, result: stored.result } : { finished: false });
     return;
   }
   if (stored) {
-    sendBrowserResult(msg, stored.finished ? stored.result
+    reply(stored.finished ? stored.result
       : marketplaceFailure(new Error('This action is already in progress or interrupted. Check its result.'), false));
     return;
   }
   const marketplace = msg.payload.marketplace;
   const operation = claimNativeOperation(marketplace, operationId);
   if (!operation) {
-    sendBrowserResult(msg, nativeRefusal(activeJob || activePatch || nativeOperations.has('*')
+    reply(nativeRefusal(activeJob || activePatch || nativeOperations.has('*')
       ? 'Another automation job is running.' : `Another ${marketplaceLabel(marketplace)} action is running.`));
     return;
   }
@@ -190,7 +196,7 @@ async function handleNativeMarketplaceMessage(msg) {
     const result = await runNativeMarketplace(msg);
     const journal = (await chrome.storage.local.get(key))[key];
     await chrome.storage.local.set({ [key]: { ...journal, finished: true, result } });
-    sendBrowserResult(msg, result);
+    reply(result);
   } finally { releaseNativeOperation(operation); }
 }
 

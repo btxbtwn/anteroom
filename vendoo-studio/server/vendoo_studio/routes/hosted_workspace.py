@@ -90,7 +90,7 @@ def runtime(request: Request, db=Depends(get_seller_db)):
             + (['catalog_categories'] if categories_ready(db) else [])
             + (['ebay_offers'] if offers is not None and not offers.done() else []),
             'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant', 'marketplaces'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
-            # eBay and Etsy list through their APIs; a restart's held slot needs the job watchdog.
+            # eBay and Etsy list through their APIs, the rest through the seller's Chrome; a restart's held slot needs the job watchdog.
             'action_marketplaces': list(ACTION_MARKETPLACES) if watchdog is not None and not watchdog.done() else []}
 
 
