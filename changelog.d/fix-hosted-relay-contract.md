@@ -1,0 +1,1 @@
+- Listing, updating, saving drafts and delisting on Poshmark, Mercari and Depop from your account now reach Chrome, instead of waiting until they time out.
