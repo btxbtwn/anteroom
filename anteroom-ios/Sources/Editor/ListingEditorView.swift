@@ -1,11 +1,14 @@
 import SwiftUI
 
 struct ListingEditorView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @State private var model: ListingEditorModel
     @State private var confirmDiscard = false
     @State private var showingAssistant = false
     @State private var showingHistory = false
+    @State private var showingTemplates = false
+    @State private var tab = "general"
     private let onSaved: () -> Void
 
     init(api: AnteroomAPI, listing: ListingSummary, onSaved: @escaping () -> Void) {
@@ -24,11 +27,22 @@ struct ListingEditorView: View {
                     }
                 }
                 HStack(spacing: 8) {
-                    Image(systemName: "square.and.pencil")
-                    Text("General").fontWeight(.semibold)
-                        .padding(.horizontal, 12).padding(.vertical, 8)
+                    Menu {
+                        Picker("Form", selection: $tab) {
+                            Label("General", systemImage: "square.and.pencil").tag("general")
+                            ForEach(model.marketplaceTabs, id: \.self) { Text(Marketplaces.name($0)).tag($0) }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(tab == "general" ? "General" : Marketplaces.name(tab)).fontWeight(.semibold)
+                            Image(systemName: "chevron.down").font(.caption)
+                        }
+                        .padding(.horizontal, 12).frame(minHeight: 44)
                         .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
+                    }
+                    .disabled(model.marketplaceTabs.isEmpty)
+                    .accessibilityLabel("Form, \(tab == "general" ? "General" : Marketplaces.name(tab))")
                     Spacer()
                     Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved")
                         .font(.caption).foregroundStyle(.secondary)
@@ -36,11 +50,15 @@ struct ListingEditorView: View {
                 .font(.subheadline)
                 .padding(.horizontal, 4)
 
-                ListingInspectorSection("Photos") {
-                    PhotoStrip(api: model.api, listingID: model.listingID, canAdd: model.isDraft)
+                if tab == "general" {
+                    ListingInspectorSection("Photos") {
+                        PhotoStrip(api: model.api, listingID: model.listingID, canAdd: model.isDraft)
+                    }
+                    SellerInputFields(inputs: $model.form.sellerInputs)
+                    GeneralListingFields(form: $model.form, options: model.options)
+                } else {
+                    MarketplaceFormView(model: model, marketplace: tab)
                 }
-                SellerInputFields(inputs: $model.form.sellerInputs)
-                GeneralListingFields(form: $model.form, options: model.options)
             }
             .padding(16)
         }
@@ -63,6 +81,7 @@ struct ListingEditorView: View {
                 Menu("Listing actions", systemImage: "ellipsis.circle") {
                     Button("Listing assistant", systemImage: "sparkles") { showingAssistant = true }
                     Button("Listing history", systemImage: "clock.arrow.circlepath") { showingHistory = true }
+                    Button("Listing templates", systemImage: "rectangle.stack") { showingTemplates = true }
                 }
                 .frame(minWidth: 44, minHeight: 44)
                 .disabled(model.hasChanges || model.isLoading || model.isSaving || model.loadError != nil)
@@ -115,7 +134,19 @@ struct ListingEditorView: View {
         }) {
             ListingHistoryView(api: model.api, listingID: model.listingID)
         }
+        .sheet(isPresented: $showingTemplates) {
+            ListingTemplatesSheet(api: model.api, listingID: model.listingID) {
+                Task {
+                    await model.load()
+                    onSaved()
+                }
+            }
+        }
         .task { await model.load() }
+        // Pick up changes from other devices, but never over unsaved edits.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && !model.hasChanges && !model.isSaving && !model.isLoading { Task { await model.load() } }
+        }
     }
 
     private var saveErrorShown: Binding<Bool> {

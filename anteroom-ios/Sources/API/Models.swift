@@ -210,10 +210,56 @@ struct ListingPhoto: Codable, Identifiable, Hashable, Sendable {
     let width: Int?
     let height: Int?
     let sizeBytes: Int?
+    var url: String?
+    var edits: PhotoEdits?
 
     enum CodingKeys: String, CodingKey {
-        case id, width, height
+        case id, width, height, url, edits
         case sizeBytes = "size_bytes"
+    }
+
+    /// The content checksum the server puts in the photo URL; it changes when
+    /// an edit renders a new file, so caches key on it.
+    var version: String? {
+        url.flatMap { URLComponents(string: $0)?.queryItems?.first { $0.name == "v" }?.value }
+    }
+
+    var isEdited: Bool { !(edits ?? PhotoEdits()).isOriginal }
+}
+
+/// The desktop photo editor's adjustments (`services/photo_edits.py`). They
+/// always render from the original upload, which the server keeps.
+struct PhotoEdits: Codable, Hashable, Sendable {
+    struct CropBox: Codable, Hashable, Sendable {
+        var x: Double, y: Double, width: Double, height: Double
+    }
+
+    var rotate = 0
+    var straighten = 0.0
+    var crop: CropBox?
+    var exposure = 0.0
+    var brightness = 0.0
+    var contrast = 0.0
+    var background: String?
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        rotate = try values.decodeIfPresent(Int.self, forKey: .rotate) ?? 0
+        straighten = try values.decodeIfPresent(Double.self, forKey: .straighten) ?? 0
+        crop = try values.decodeIfPresent(CropBox.self, forKey: .crop)
+        exposure = try values.decodeIfPresent(Double.self, forKey: .exposure) ?? 0
+        brightness = try values.decodeIfPresent(Double.self, forKey: .brightness) ?? 0
+        contrast = try values.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
+        background = try values.decodeIfPresent(String.self, forKey: .background)
+    }
+
+    var isOriginal: Bool {
+        let fullFrame = crop.map { $0.width >= 0.9999 && $0.height >= 0.9999 } ?? true
+        var plain = PhotoEdits()
+        plain.crop = crop
+        return fullFrame && self == plain
     }
 }
 

@@ -15,7 +15,6 @@ from vendoo_studio.models.background_task import BackgroundTask, BackgroundTaskE
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import background_tasks as queue
 from vendoo_studio.services.hosted_database import get_seller_db
-from vendoo_studio.services.listing_generate import photo_fingerprint
 from vendoo_studio.services.listing_provider import get_listing_provider
 from vendoo_studio.services.service_context import current
 from vendoo_studio.services.streaming import KEEPALIVE, SSE_HEADERS, sse_event, stream_finished
@@ -72,7 +71,7 @@ def task_stream(task_id):
 
 
 def submit(db, conv_id, kind, text='', uploads=None, request=None):
-    row = owned_conversation(db, conv_id)
+    owned_conversation(db, conv_id)
     if get_listing_provider() is None:
         raise HTTPException(400, 'Connect an AI provider in Settings first.')
     repo = ConversationRepo(db)
@@ -84,11 +83,7 @@ def submit(db, conv_id, kind, text='', uploads=None, request=None):
     try:
         if request is not None and anyio.from_thread.run(request.is_disconnected):
             raise HTTPException(499, 'Message upload was cancelled')
-        task = queue.enqueue(db, conv_id, kind, {
-            'revision_id': repo.current_revision_id(conv_id) or '',
-            'photos': photo_fingerprint(photos), 'notes': row.notes or '', 'text': text,
-            'attachments': attachments,
-        })
+        task = queue.enqueue(db, conv_id, kind, queue.draft_payload(db, conv_id, text, attachments))
     except Exception:
         db.rollback()
         try:

@@ -50,6 +50,18 @@ jobs:
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/Inventory/InventoryFilters.swift Tests/InventoryTests.swift -o "$RUNNER_TEMP/inventory-tests"
           "$RUNNER_TEMP/inventory-tests"
+      - name: Test native marketplace forms
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/API/NativeFormModels.swift Tests/NativeFormTests.swift -o "$RUNNER_TEMP/native-form-tests"
+          "$RUNNER_TEMP/native-form-tests"
+      - name: Test analytics contract and wording
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/Analytics/AnalyticsModels.swift Tests/AnalyticsTests.swift -o "$RUNNER_TEMP/analytics-tests"
+          "$RUNNER_TEMP/analytics-tests"
+      - name: Test photo crop arithmetic
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/Photos/CropMath.swift Tests/CropMathTests.swift -o "$RUNNER_TEMP/crop-tests"
+          "$RUNNER_TEMP/crop-tests"
       - name: Test appearance preference contract
         run: |
           xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"
@@ -81,7 +93,7 @@ jobs:
         run: sudo xcodebuild -runFirstLaunch
       - name: Install the iOS simulator runtime
         run: xcodebuild -downloadPlatform iOS
-      - name: Create and reopen a draft through the hosted sandbox
+      - name: Run the iPhone app against the hosted sandbox
         run: |
           set -euxo pipefail
           SIMULATOR_ID="$(xcrun simctl create 'Anteroom sandbox tests' 'com.apple.CoreSimulator.SimDeviceType.iPhone-17')"

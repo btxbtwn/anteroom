@@ -92,18 +92,22 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
         app.state.chat_upload_slots = asyncio.Semaphore(1)
-        worker = None
+        worker = scheduler = None
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
+            from vendoo_studio.services import hosted_automation_scheduler
             from vendoo_studio.services.background_worker import serve
             worker = asyncio.create_task(serve(engine))
+            # Automations regenerate through the same draft queue, so both run together.
+            scheduler = asyncio.create_task(hosted_automation_scheduler.serve(engine))
         app.state.background_worker = worker
         try:
             yield
         finally:
-            if worker is not None:
-                worker.cancel()
-                await asyncio.gather(worker, return_exceptions=True)
+            running = [task for task in (worker, scheduler) if task is not None]
+            for task in running:
+                task.cancel()
+            await asyncio.gather(*running, return_exceptions=True)
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,
@@ -167,6 +171,11 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(prices_router)
     from vendoo_studio.routes.hosted_marketplace_accounts import router as accounts_router
     app.include_router(accounts_router)
+    from vendoo_studio.routes import assistant
+    app.include_router(assistant.router)
+    from vendoo_studio.routes.hosted_automations import errors_router, router as automations_router
+    app.include_router(automations_router)
+    app.include_router(errors_router)
     from vendoo_studio.routes.hosted_bulk_edit import router as bulk_edit_router
     app.include_router(bulk_edit_router)
     from vendoo_studio.routes.hosted_bulk_delete import router as bulk_delete_router

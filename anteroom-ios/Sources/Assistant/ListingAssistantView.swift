@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 struct ListingAssistantView: View {
@@ -7,6 +8,8 @@ struct ListingAssistantView: View {
     @State private var runID = UUID()
     @State private var stopping = false
     @State private var confirmGenerate = false
+    @State private var confirmRegenerate = false
+    @State private var picked: [PhotosPickerItem] = []
 
     init(api: AnteroomAPI, listingID: String) {
         _model = State(initialValue: ListingAssistantModel(api: api, listingID: listingID))
@@ -23,6 +26,11 @@ struct ListingAssistantView: View {
                             Text(message.role == "user" ? "You" : "Anteroom")
                                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                             Text(message.text).textSelection(.enabled)
+                            if message.attachmentCount > 0 {
+                                Label(message.attachmentCount == 1 ? "1 image attached" : "\(message.attachmentCount) images attached",
+                                      systemImage: "paperclip")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                         .padding(16)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -45,6 +53,12 @@ struct ListingAssistantView: View {
             .task(id: runID) {
                 if let action { await model.run(action) }
             }
+            .confirmationDialog("Regenerate this listing?", isPresented: $confirmRegenerate, titleVisibility: .visible) {
+                Button("Regenerate", role: .destructive) { start(.regenerate) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Rewrites the generated listing from your photos and item details. Photos, measurements, flaws, cost, labels and notes stay. The result is saved as a draft.")
+            }
             .confirmationDialog("Generate a listing from your photos?", isPresented: $confirmGenerate, titleVisibility: .visible) {
                 Button("Generate listing") { start(.generate) }
                 Button("Cancel", role: .cancel) {}
@@ -64,13 +78,17 @@ struct ListingAssistantView: View {
             Text("Listing generation isn't available on the server yet. You can continue editing your draft.")
                 .foregroundStyle(.secondary)
         } else if !model.providerConfigured {
-            Text("Connect an AI provider in the web app's Settings before generating on iPhone.")
+            Text("Add an AI provider in Settings → Providers before generating.")
                 .foregroundStyle(.secondary)
         } else {
-            Button("Generate from photos", systemImage: "sparkles") { confirmGenerate = true }
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.canStart)
-                .frame(minHeight: 44)
+            HStack(spacing: 12) {
+                Button("Generate from photos", systemImage: "sparkles") { confirmGenerate = true }
+                    .buttonStyle(.borderedProminent)
+                Button("Regenerate", systemImage: "arrow.triangle.2.circlepath") { confirmRegenerate = true }
+                    .buttonStyle(.bordered)
+            }
+            .disabled(!model.canStart)
+            .frame(minHeight: 44)
         }
         if model.isWorking || model.serverBusy || model.needsReconnect {
             VStack(alignment: .leading, spacing: 12) {
@@ -109,21 +127,61 @@ struct ListingAssistantView: View {
     private var composer: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 8) {
+            if !model.attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(model.attachments) { attachment in
+                            ZStack(alignment: .topTrailing) {
+                                if let image = UIImage(data: attachment.preview) {
+                                    Image(uiImage: image).resizable().scaledToFill()
+                                        .frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 6))
+                                }
+                                Button("Remove image", systemImage: "xmark.circle.fill") {
+                                    model.attachments.removeAll { $0.id == attachment.id }
+                                }
+                                .labelStyle(.iconOnly)
+                                .foregroundStyle(.white, .black.opacity(0.6))
+                                .frame(width: 32, height: 32)
+                            }
+                        }
+                    }
+                }
+            }
             TextField("Ask about this listing", text: $model.text, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Message to listing assistant")
                 .disabled(model.isWorking)
-            Button("Send", systemImage: "arrow.up.circle.fill") {
-                let text = model.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return }
-                start(.message(text))
+            HStack {
+                if model.attachmentsAvailable {
+                    PhotosPicker(selection: $picked, maxSelectionCount: max(1, 6 - model.attachments.count), matching: .images) {
+                        Image(systemName: "paperclip")
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .disabled(model.isWorking || model.attachments.count >= 6)
+                    .accessibilityLabel("Attach images, \(model.attachments.count) of 6")
+                }
+                Spacer()
+                Button("Send", systemImage: "arrow.up.circle.fill") {
+                    let text = model.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty || !model.attachments.isEmpty else { return }
+                    start(.message(text, model.attachments))
+                }
+                .frame(minHeight: 44)
+                .disabled(!model.canStart || (model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
             }
-            .frame(minHeight: 44)
-            .disabled(!model.canStart || model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(16)
         .background(.regularMaterial)
+        .onChange(of: picked) { _, items in
+            guard !items.isEmpty else { return }
+            picked = []
+            Task {
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self) { await model.attach(data) }
+                }
+            }
+        }
     }
 
     private func start(_ action: AssistantAction) {
