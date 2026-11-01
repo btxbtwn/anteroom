@@ -202,3 +202,39 @@ def test_missing_claims_deny_all_rows(seller_engine):
         assert connection.execute(text("SELECT id FROM conversations")).all() == []
         with pytest.raises(DBAPIError):
             connection.execute(text("INSERT INTO conversations (id, user_id) VALUES ('unscoped', :owner)"), {"owner": ALICE})
+
+
+def test_seller_transaction_scopes_in_one_statement_after_the_connection_is_checked(seller_engine):
+    # The hosted API is a network hop from Postgres, so every statement costs a
+    # round trip. Scoping each transaction took four, which ran a page's burst of
+    # requests past the pool timeout. The safety checks run once per connection.
+    from sqlalchemy import event
+
+    engine = create_engine(seller_engine.url, pool_size=1, max_overflow=0)
+    statements: list[str] = []
+    event.listen(engine, "before_cursor_execute", lambda *args: statements.append(args[2]))
+    try:
+        for user, item in [(ALICE, "alice"), (BOB, "bob")]:
+            statements.clear()
+            with SellerDatabaseSession(bind=engine, user_id=user) as db:
+                assert db.scalars(select(Conversation.id)).all() == [item]
+        assert len(statements) == 2, statements
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT current_user")).scalar_one() != "anteroom_seller"
+    finally:
+        engine.dispose()
+
+
+def test_unsafe_role_is_refused_on_a_new_connection(seller_engine):
+    engine = create_engine(seller_engine.url, pool_size=1, max_overflow=0)
+    try:
+        with SellerDatabaseSession(bind=engine, user_id=ALICE) as db:
+            assert db.scalars(select(Conversation.id)).all() == ["alice"]
+        with seller_engine.begin() as connection:
+            connection.execute(text("ALTER TABLE messages DISABLE ROW LEVEL SECURITY"))
+        engine.dispose()
+        with SellerDatabaseSession(bind=engine, user_id=ALICE) as db:
+            with pytest.raises(RuntimeError, match="not fully installed"):
+                db.scalars(select(Conversation.id)).all()
+    finally:
+        engine.dispose()
