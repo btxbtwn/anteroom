@@ -14,6 +14,7 @@ final class AnteroomAPI: Sendable {
     private let baseURL: URL
     private let accessToken: @Sendable () async throws -> String
     private let session = URLSession(configuration: .ephemeral)
+    private let thumbnails = RequestGate(limit: 4)
 
     init(baseURL: URL, accessToken: @escaping @Sendable () async throws -> String) {
         self.baseURL = baseURL
@@ -484,9 +485,20 @@ final class AnteroomAPI: Sendable {
         try await send(request("GET", "api/conversations/\(listingID)/photos/\(photoID)/bytes"))
     }
 
+    /// At most four at a time: the server resizes each one while holding one of
+    /// its few database connections, so a screen of covers at once would queue
+    /// a seller's save behind them.
     func photoThumbnailData(photoID: String, size: Int) async throws -> Data {
-        try await send(request("GET", "api/photos/\(photoID)/thumb",
-                               query: [URLQueryItem(name: "size", value: String(size))]))
+        await thumbnails.enter()
+        do {
+            let data = try await send(request("GET", "api/photos/\(photoID)/thumb",
+                                              query: [URLQueryItem(name: "size", value: String(size))]))
+            await thumbnails.leave()
+            return data
+        } catch {
+            await thumbnails.leave()
+            throw error
+        }
     }
 
     func deletePhoto(listingID: String, photoID: String) async throws {
@@ -672,5 +684,30 @@ final class AnteroomAPI: Sendable {
             }
         }
         return "Something went wrong (\(status)). Try again."
+    }
+}
+
+/// Lets a fixed number of callers through at once; the rest wait their turn.
+actor RequestGate {
+    private let limit: Int
+    private var running = 0
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func enter() async {
+        if running < limit {
+            running += 1
+            return
+        }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func leave() {
+        if waiting.isEmpty {
+            running -= 1
+        } else {
+            waiting.removeFirst().resume()
+        }
     }
 }

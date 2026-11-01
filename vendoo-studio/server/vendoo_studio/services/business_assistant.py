@@ -477,7 +477,10 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     ads = [ad_spend.entry_view(row) for row in ad_spend.list_entries(db)]
     events = _sale_events(db)
     scout_sales = scout.outcomes(db)
-    sourcing_state = box_scout.read_state()
+    from vendoo_studio.services.service_context import current
+
+    # Sourcing keeps its state in a file on the Mac. The web app has none yet.
+    sourcing_state = box_scout.default_state() if current() is not None else box_scout.read_state()
     tab_boxes = sourcing_boxes.box_rows(sourcing_state, rows, clock)
     breakdowns = {
         name: _breakdown(ranges, key, label)

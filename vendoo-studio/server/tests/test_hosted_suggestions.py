@@ -35,7 +35,7 @@ def test_suggestions_use_owned_inventory_preferences_and_durable_task_state(clou
     assert 'Alice private coat' not in bob_feed.text
     runtime = client.get('/api/runtime', headers=alice).json()
     assert 'suggestions' in runtime['features']
-    assert 'assistant' not in runtime['features']
+    assert 'assistant' in runtime['features']
     assert client.get('/api/settings/provider', headers=alice).json()['configured'] is False
     with Session(engine) as db:
         task = BackgroundTask(user_id=USER_ID, conversation_id=first, kind='chat', payload={})
