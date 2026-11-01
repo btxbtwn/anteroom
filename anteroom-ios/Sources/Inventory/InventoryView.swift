@@ -73,6 +73,10 @@ struct InventoryView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active && model.hasLoaded { Task { await model.reload() } }
             }
+            // The assistant applied changes to listings.
+            .onReceive(NotificationCenter.default.publisher(for: .anteroomListingsChanged)) { _ in
+                if model.hasLoaded { Task { await model.reload() } }
+            }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     filterMenu

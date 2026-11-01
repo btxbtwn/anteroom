@@ -89,8 +89,8 @@ extension ISO8601DateFormatter {
     }
 }
 
-/// The Usage destination (UsagePage.tsx): how much of each subscription is
-/// left, and when it resets.
+/// Usage (UsagePage.tsx): how much of each subscription is left, and when it
+/// resets. On iPhone it opens from Settings, so the tab bar keeps five tabs.
 struct UsageView: View {
     let api: AnteroomAPI
     @State private var limits: UsageLimits?
@@ -99,39 +99,37 @@ struct UsageView: View {
     @State private var error: String?
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("How much of each subscription is left, and when it resets.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    if let error {
-                        Text("Could not read usage: \(error)").font(.subheadline).foregroundStyle(.secondary)
-                    } else if let limits {
-                        let withLimits = limits.providers.filter { !$0.windows.isEmpty }
-                        if withLimits.isEmpty {
-                            Text("No provider reports subscription limits.").font(.subheadline).foregroundStyle(.secondary)
-                        }
-                        ForEach(withLimits + limits.providers.filter { $0.windows.isEmpty }) { provider in
-                            providerSection(provider)
-                        }
-                    } else {
-                        ProgressView("Reading usage…")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("How much of each subscription is left, and when it resets.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                if let error {
+                    Text("Could not read usage: \(error)").font(.subheadline).foregroundStyle(.secondary)
+                } else if let limits {
+                    let withLimits = limits.providers.filter { !$0.windows.isEmpty }
+                    if withLimits.isEmpty {
+                        Text("No provider reports subscription limits.").font(.subheadline).foregroundStyle(.secondary)
                     }
-                }
-                .padding(16)
-            }
-            .background(WorkspaceStyle.background)
-            .navigationTitle("Usage")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Refresh limits", systemImage: "arrow.clockwise") { Task { await load(refresh: true) } }
-                        .disabled(refreshing)
+                    ForEach(withLimits + limits.providers.filter { $0.windows.isEmpty }) { provider in
+                        providerSection(provider)
+                    }
+                } else {
+                    ProgressView("Reading usage…")
                 }
             }
-            .refreshable { await load(refresh: true) }
-            .task { await load(refresh: false) }
+            .padding(16)
         }
+        .background(WorkspaceStyle.background)
+        .navigationTitle("Usage")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Refresh limits", systemImage: "arrow.clockwise") { Task { await load(refresh: true) } }
+                    .disabled(refreshing)
+            }
+        }
+        .refreshable { await load(refresh: true) }
+        .task { await load(refresh: false) }
     }
 
     private func providerSection(_ provider: UsageLimits.Provider) -> some View {
