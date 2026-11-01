@@ -32,6 +32,8 @@ struct RootView: View {
             )
         case .signedOut:
             SignInView()
+        case .choosingNewPassword:
+            NewPasswordView()
         case .signedIn:
             if let api = session.api {
                 WorkspaceView(api: api).id(session.email)

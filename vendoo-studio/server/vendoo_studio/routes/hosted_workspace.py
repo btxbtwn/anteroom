@@ -82,9 +82,11 @@ def runtime(request: Request, db=Depends(get_seller_db)):
     from vendoo_studio.services.category_tree import categories_ready
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
+    offers = getattr(request.app.state, 'offer_scheduler', None)
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant']
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
-            + (['catalog_categories'] if categories_ready(db) else []),
+            + (['catalog_categories'] if categories_ready(db) else [])
+            + (['ebay_offers'] if offers is not None and not offers.done() else []),
             'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant', 'marketplaces'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay']}
 
 

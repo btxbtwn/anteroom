@@ -83,7 +83,11 @@ def test_public_web_assets_do_not_expose_data_routes(jwks, tmp_path):  # noqa: F
             assert client.get(path).status_code == 401
         assert client.post('/').status_code == 401
         assert client.get('/assets/../../hosted.py').status_code == 401
-        assert "frame-ancestors 'none'" in client.get('/').headers['content-security-policy']
+        policy = client.get('/').headers['content-security-policy']
+        assert "frame-ancestors 'none'" in policy
+        # Live updates arrive over Supabase Realtime's websocket; without wss:
+        # the browser silently blocks the subscription and only polling remains.
+        assert "connect-src 'self' https://*.supabase.co wss://*.supabase.co;" in policy
 
 
 def test_missing_cloud_database_does_not_fall_back_to_local_data(jwks, signing_keys, monkeypatch, tmp_path):  # noqa: F811

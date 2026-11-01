@@ -5,6 +5,7 @@ import type { ImportMarketplace, MarketplaceImportPage, MarketplaceImportResult 
 import { marketplaceName } from "./marketplaceNames";
 import { PageError, PageNote, PageSection } from "./WorkspacePage";
 import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 
 interface Importer {
@@ -118,8 +119,8 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
       {rows.map((row) => {
         const localId = results[row.id]?.conversation_id || row.conversation_id;
         return <li key={row.id} className="flex items-center gap-3 py-3 text-sm">
-          <input type="checkbox" aria-label={`Select ${row.title}`} checked={selected.includes(row.id)} disabled={run.isPending || Boolean(row.reason) || Boolean(localId)}
-            onChange={(event) => setSelected(event.target.checked ? [...selected, row.id] : selected.filter((id) => id !== row.id))} />
+          <Checkbox aria-label={`Select ${row.title}`} checked={selected.includes(row.id)} disabled={run.isPending || Boolean(row.reason) || Boolean(localId)}
+            onCheckedChange={(next) => setSelected(next === true ? [...selected, row.id] : selected.filter((id) => id !== row.id))} />
           <div className="min-w-0 flex-1 break-words"><p className="font-medium">{row.title}</p>
             <p className="text-xs text-muted-foreground">{row.id}{row.price != null ? ` · $${row.price}` : ""}{row.quantity != null ? ` · ${row.quantity} available` : ""}</p>
             {row.reason ? <p className="text-xs text-muted-foreground">{row.reason}</p> : null}

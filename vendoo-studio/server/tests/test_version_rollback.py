@@ -42,6 +42,9 @@ def engine(tmp_path):
 def _previous_revision() -> str:
     script = ScriptDirectory.from_config(schema_migrations.alembic_config())
     down = script.get_revision(head_revision()).down_revision
+    # A join migration has several parents; any of them is an older layout.
+    if isinstance(down, tuple):
+        down = down[0]
     assert isinstance(down, str)
     return down
 

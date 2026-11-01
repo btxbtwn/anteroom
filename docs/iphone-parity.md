@@ -30,7 +30,7 @@ Anteroom's terminology and identity while following iOS navigation conventions.
 
 | Area / workflow | Hosted backend | Native iPhone | Verification / remaining work |
 | --- | --- | --- | --- |
-| Account: email-link sign-in, callback, session restore, sign-out | Existing session-authenticated API | Implemented | Sign-in tested by seller; session expiry and account-switch isolation need review |
+| Account: email-and-password sign-in, create account, password reset, session restore, sign-out | Supabase Auth, same account as web and Mac | Implemented in current work | Confirmation and reset links open the app through `anteroom://login-callback`; a reset link asks for a new password before the workspace. Needs a device check of both links; session expiry and account-switch isolation need review |
 | Inventory: search and creation | `/api/conversations` | Implemented | Title/SKU search over every listing; creation uses the shared conversation contract |
 | Inventory: all listing states, shelves, status/marketplace/label filters, sorting | `/api/conversations` shared summaries | Implemented in current work | All/Draft/Active/Sold/Failed tabs with counts, settled listings hidden outside Sold and search, marketplace and Not listed filters, the desktop sorts that hosted rows can answer. Hosted rows carry no Vendoo labels, listing dates or relist state, so the label, stale, relist and unsent filters and the Stalest/Freshest/Date Sold sorts stay with Vendoo import |
 | Inventory: photo covers, price, SKU, quantity, marketplace status | Shared summaries and private thumbnails | Implemented in current work | Cover thumbnails from the summary, colored lifecycle word, price, SKU and live marketplaces; rename and delete as swipe and context actions |
