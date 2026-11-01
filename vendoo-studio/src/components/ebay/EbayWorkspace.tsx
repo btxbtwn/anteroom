@@ -7,6 +7,7 @@ import { api } from "../../api/client";
 import { PageError, PageNote } from "../WorkspacePage";
 import { SaleCalendar } from "../SaleCalendar";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
 import { EbayOffersSettings } from "../settings/EbayOffersSettings";
 import { ActivityPanel, DashboardPanel, InboxPanel, OrdersPanel } from "./SellerPanels";
@@ -73,7 +74,7 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
         <DialogHeader><DialogTitle>eBay connection</DialogTitle><DialogDescription>Choose the tools you want to authorize. You can grant groups separately if eBay restricts a feature.</DialogDescription></DialogHeader>
         <DialogPanel>
           <div className="grid gap-2">{FEATURES.map((feature) => <label key={feature.id} className="ebay-permission">
-            <input type="checkbox" checked={features.includes(feature.id)} onChange={(event) => setFeatures(event.target.checked ? [...features, feature.id] : features.filter((id) => id !== feature.id))} />
+            <Checkbox className="mt-0.5" checked={features.includes(feature.id)} onCheckedChange={(next) => setFeatures(next === true ? [...features, feature.id] : features.filter((id) => id !== feature.id))} />
             <span>{feature.name}<small>{feature.detail}</small></span>
           </label>)}</div>
           <PageNote>eBay may require seller eligibility or app approval. After reconnecting, refresh the view you want to use.</PageNote>

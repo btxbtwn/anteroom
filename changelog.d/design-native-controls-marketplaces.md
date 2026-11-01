@@ -1,0 +1,1 @@
+- Menus, checkboxes and choices in the eBay tools, marketplace imports, eBay offers and the sharing and offer rules now match the rest of the app.
