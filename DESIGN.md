@@ -140,6 +140,12 @@ Reject a change that adds any of these:
 
 ## Before you ship a visible change
 
+`scripts/check-design.py` (run by `./check.sh` and CI) fails on a new hard-coded
+color, uppercase label, weight above 600, gradient, native select or checkbox,
+or arbitrary text size. `design_baseline.json` records the cases that were
+already there; it only shrinks. The rest of this list needs a person's eye.
+
+
 - [ ] Uses the shared components above; no one-off page, tab or card styles.
 - [ ] No hard-coded colors; status color only where the state needs attention.
 - [ ] Sizes, weights, spacing and radii come from the scales above.
