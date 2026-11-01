@@ -57,7 +57,7 @@ def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(c
         assert fields['direct_category_ids.' + market]['value'] == choice
         assert fields[market + '_specifics.description']['value'] == 'Saved only on ' + market
         assert client.get(url + '?revision_id=stale', headers=alice).status_code == 409
-        # The web lists on eBay only; a Chrome marketplace is refused before any job starts.
+        # A List needs the approved revision; nothing starts without one.
         assert client.post(path + '/native-marketplaces/' + market + '/list', headers=alice,
                            json={'confirm': True}).status_code == 422
     assert client.get(path + '/native-marketplaces/sellwild/form', headers=alice).status_code == 422

@@ -324,3 +324,8 @@ started them. `current_extension()` picks the Mac's paired Bridge or this relay,
 so the desktop direct-listing and delist code runs unchanged. Chrome counts as
 connected while a tab that declares `marketplace.actions` has asked in the last
 30 seconds. Nothing uses the relay until the Bridge and page support it.
+
+On `feat/hosted-chrome-actions`, Poshmark, Mercari and Depop List, Update, Save
+draft and Delist run from the web through the seller's connected Chrome tab and
+Bridge 0.2.40 (see `docs/cloud-extension.md`). Sellwild and Vinted follow with
+their forms.

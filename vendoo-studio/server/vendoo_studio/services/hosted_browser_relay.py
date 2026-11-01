@@ -45,7 +45,7 @@ class BrowserRelay(ReplyWaits):
         if time.monotonic() - self._seen_at >= SEEN_FOR_S:
             return "Open Anteroom in Chrome on your computer and connect Chrome first."
         if not self._capable:
-            return "Update Anteroom Bridge in Chrome to list on this marketplace from the web."
+            return "Update Anteroom Bridge in Chrome to 0.2.40 or later to list on this marketplace from the web."
         return None
 
     async def send_message(self, message: dict) -> bool:

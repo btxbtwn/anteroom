@@ -1,11 +1,12 @@
-"""List, update and delist on eBay and Etsy from the web, through their official APIs.
+"""List, update and delist from the web: eBay and Etsy through their APIs, and
+Poshmark, Mercari and Depop through the seller's own Chrome.
 
 These are the desktop handlers, run in the signed-in seller's context with
 their own tokens. Every action is one the seller starts: List and Update carry
 ``confirm``, Delist names its marketplaces and carries ``confirm``, and nothing
-here runs on a timer or a retry. Marketplaces reached only through Chrome
-(Poshmark, Mercari, Depop, Sellwild, Vinted) are refused until the web app can
-drive the seller's Chrome.
+here runs on a timer or a retry. Chrome actions go through the seller's
+signed-in Anteroom tab (``services/hosted_browser_relay.py``). Sellwild and
+Vinted follow once their forms are on the web.
 """
 from typing import Literal
 
@@ -18,8 +19,8 @@ from vendoo_studio.routes import marketplace_listings, native_marketplaces
 from vendoo_studio.routes.vendoo_api import leaf_form
 from vendoo_studio.services.native_marketplaces import NAMES, CheckRequest, ListRequest
 
-ACTION_MARKETPLACES = ('ebay', 'etsy')
-Direct = Literal['ebay', 'etsy']
+ACTION_MARKETPLACES = ('ebay', 'etsy', 'poshmark', 'mercari', 'depop')
+Direct = Literal['ebay', 'etsy', 'poshmark', 'mercari', 'depop']
 PREFIX = '/api/conversations/{conv_id}'
 
 router = APIRouter()
@@ -73,7 +74,7 @@ async def delist(conv_id: str, body: marketplace_listings.DelistRequest, db: Ses
     browser_only = [name for name in body.marketplaces if name not in ACTION_MARKETPLACES]
     if browser_only:
         names = ', '.join(NAMES.get(name, name) for name in browser_only)
-        raise HTTPException(409, f'Delist from {names} in the Mac app for now. The web app delists from eBay and Etsy.')
+        raise HTTPException(409, f'Delist from {names} in the Mac app for now. The web app delists from eBay, Etsy, Poshmark, Mercari and Depop.')
     return await marketplace_listings.delist(conv_id, body, db)
 
 

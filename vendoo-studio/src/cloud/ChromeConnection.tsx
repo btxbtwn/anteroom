@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { cloudExtension, type BrowserAccount, type CloudConnection } from "../api/cloudExtension";
+import { startChromeRelay } from "./chromeRelay";
 
 export function ChromeConnection({ account }: { account: BrowserAccount }) {
   const [bridge] = useState(() => cloudExtension(account));
@@ -19,6 +20,10 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
     const interval = window.setInterval(() => { void bridge.status().then(status => { if (active) setConnection(status); }); }, connection.state === "pending" ? 1500 : 15000);
     return () => { active = false; window.clearInterval(interval); };
   }, [bridge, connection?.state]);
+  const connectedNow = connection?.ok === true && connection.state === "connected";
+  const capable = Boolean(connection?.supportedActions?.includes("marketplace.actions"));
+  // While this tab is connected, it carries the seller's approved marketplace commands to Chrome.
+  useEffect(() => connectedNow ? startChromeRelay(bridge, capable) : undefined, [bridge, connectedNow, capable]);
   async function connect() {
     setBusy(true); setExpanded(true);
     try { setConnection(await bridge.connect()); } finally { setBusy(false); }
