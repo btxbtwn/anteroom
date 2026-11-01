@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.617 — 2026-10-31
+## 0.1.618 — 2026-11-01
 
 - Accounts now use an email and password. Create an account on the web, confirm your email, then sign in anywhere. Forgot your password? Reset it by email. If you used to sign in by email link, choose Forgot password once to set a password.
 - The Mac app can open your account: choose Sign in, or Account › My Account in the menu bar, to see the same listings as on the web. Account › This Mac's Listings goes back. The app reopens on whichever you used last.
+
+## 0.1.617 — 2026-11-01
+
+- On the web, you can now connect your eBay and Etsy accounts in Settings → Connections, set eBay and Etsy listing defaults, and fill in the eBay tab with your own categories, policies and locations.
 
 ## 0.1.616 — 2026-10-31
 

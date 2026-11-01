@@ -87,3 +87,38 @@ def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(c
         refused = client.get(path + '/native-marketplaces/' + market + '/form', headers=alice)
         assert refused.status_code == 409
         assert 'Other private copy' not in refused.text
+
+
+def test_hosted_ebay_form_reads_the_sellers_own_schema_and_policies(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    from vendoo_studio.services import ebay_listings, marketplace_schemas
+
+    async def schema(marketplace, category_id):
+        assert (marketplace, category_id) == ('ebay', '57988')
+        return [{'id': 'Brand', 'name': 'Brand', 'required': True, 'usage': 'REQUIRED', 'mode': 'free_text',
+                 'multi': False, 'max_values': None, 'max_length': 65, 'values': []}]
+
+    async def profiles(client=None):
+        return {'fulfillment': [{'id': 'ship-1', 'title': 'Alice shipping'}], 'payment': [{'id': 'pay-1', 'title': 'Alice payment'}],
+                'return': [{'id': 'ret-1', 'title': 'Alice returns'}], 'locations': [{'id': 'loc-1', 'title': 'Alice home'}]}
+
+    monkeypatch.setattr(marketplace_schemas, 'fields', schema)
+    monkeypatch.setattr(ebay_listings, 'listing_profiles', profiles)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    path = '/api/conversations/' + identity
+    saved = client.put(path + '/listing', headers=alice, json={'listing': {
+        'title': 'Wool coat', 'price': 42, 'brand': 'Pendleton', 'direct_category_ids': {'ebay': '57988'}}, 'expected_revision_id': ''})
+    assert saved.status_code == 200, saved.text
+    url = path + '/native-marketplaces/ebay/form?revision_id=' + saved.json()['revision_id']
+    assert client.get(url).status_code == 401
+    assert client.get(url, headers=bob).status_code == 404
+    response = client.get(url, headers=alice)
+    assert response.status_code == 200, response.text
+    with use(for_seller(USER_ID)), SellerDatabaseSession(user_id=USER_ID, bind=engine) as db:
+        assert response.json() == asyncio.run(editor_form(identity, 'ebay', saved.json()['revision_id'], db))
+    fields = {row['path']: row for row in response.json()['fields']}
+    assert fields['ebay_specifics.fulfillmentPolicyId']['value'] == 'ship-1'
+    assert 'ebay' in client.get('/api/runtime', headers=alice).json()['marketplace_forms']
+    with Session(engine) as db:
+        assert db.scalar(select(func.count()).select_from(Job)) == 0
