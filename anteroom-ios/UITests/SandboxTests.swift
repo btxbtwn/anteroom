@@ -187,12 +187,18 @@ final class DestinationSandboxTests: XCTestCase {
         let filters = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Filters'")).firstMatch
         XCTAssertTrue(filters.exists)
         filters.tap()
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Not listed'")).firstMatch.waitForExistence(timeout: 5))
+        let notListed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Not listed'")).firstMatch
+        XCTAssertTrue(notListed.waitForExistence(timeout: 5))
         keep(app, "Inventory filters")
-        // Close the menu on the title, which does nothing else.
-        app.navigationBars["Inventory"].staticTexts["Inventory"].tap()
+        // The native menu occludes the title and tab bar in the AX tree.
+        // Tap the background outside its popover, then verify dismissal.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: notListed)
+        waitForExpectations(timeout: 5)
 
-        app.tabBars.buttons["Analytics"].tap()
+        let analytics = app.tabBars.buttons["Analytics"]
+        XCTAssertTrue(analytics.isHittable, "The Filters menu must release the tab bar")
+        analytics.tap()
         XCTAssertTrue(app.buttons["Sales records"].waitForExistence(timeout: 15))
         keep(app, "Analytics sales records")
         app.buttons["Inventory analytics"].tap()
