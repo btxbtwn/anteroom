@@ -85,7 +85,7 @@ def runtime(request: Request, db=Depends(get_seller_db)):
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant']
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else []),
-            'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant'], 'marketplace_forms': ['poshmark', 'depop', 'mercari']}
+            'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay']}
 
 
 @router.get('/status')
@@ -488,7 +488,7 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
-async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari'],
+async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay'],
                               revision_id: str | None = None, db=Depends(get_seller_db)):
     from starlette.concurrency import run_in_threadpool
     from vendoo_studio.services.native_editor import editor_form
@@ -496,8 +496,9 @@ async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'd
 
     def load():
         # These canonical builders read verified catalogs and the owned
-        # snapshot. Mercari also reads anonymous public shipping quotes. No
-        # browser/account operations or marketplace writes run.
+        # snapshot. Mercari also reads anonymous public shipping quotes, and
+        # eBay reads its category schema and the seller's own policies with
+        # their connected account. No browser or marketplace write runs.
         try:
             current = db.get(Listing, identity)
             if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
