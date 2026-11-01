@@ -22,7 +22,6 @@ from typing import Any
 from vendoo_studio.services import relay_client
 from vendoo_studio.services.keychain import (
     delete_marketplace_account,
-    delete_relay_device,
     get_marketplace_accounts,
     get_relay_device,
     set_marketplace_account,
@@ -179,21 +178,6 @@ async def disconnect(marketplace: str) -> None:
     delete_marketplace_account(marketplace)
     if not get_marketplace_accounts() and not _on_web():
         relay_client.stop_stream()
-
-
-async def forget_device() -> None:
-    """Remove this Mac from the relay entirely: links, inbox, token."""
-    for marketplace in MARKETPLACES:
-        cancel_sign_in(marketplace)
-    relay_client.stop_stream()
-    if get_relay_device():
-        try:
-            await relay_request("DELETE", "/studio/device")
-        except Exception as exc:  # noqa: BLE001
-            log.warning("could not remove this Mac from the relay: %s", exc)
-    for marketplace in MARKETPLACES:
-        delete_marketplace_account(marketplace)
-    delete_relay_device()
 
 
 def forget_deleted_ebay_account(user_id: str | None) -> None:

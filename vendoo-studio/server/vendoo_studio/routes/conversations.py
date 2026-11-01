@@ -92,18 +92,6 @@ class ConversationResponse(ConversationSummary):
     notes: str | None
 
 
-class MessageResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    conversation_id: str
-    role: str
-    text: str
-    provider: str | None
-    model: str | None
-    created_at: str
-
-
 class PhotoResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

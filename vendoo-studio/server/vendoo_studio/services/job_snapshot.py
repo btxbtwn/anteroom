@@ -54,11 +54,6 @@ def resume_step_for_retry(job) -> str | None:
     return None
 
 
-def validation_error_detail(validation) -> str:
-    messages = [err.get("message", "") for err in validation.errors if err.get("message")]
-    return "; ".join(messages) or "Listing cannot be sent to Vendoo. Fix validation errors first."
-
-
 def prepare_listing_snapshot(
     db: Session,
     conv,

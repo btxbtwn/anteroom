@@ -253,32 +253,3 @@ def apply_bottoms_sizes(listing: dict) -> bool:
         if _write(listing, path, value, parsed=parsed, follow=follow):
             changed = True
     return changed
-
-
-def bottoms_options(listing: dict | None, marketplace: str) -> dict[str, list[str]]:
-    """The size choices to show for a bottoms listing, or nothing for other items."""
-    if not is_bottoms(listing):
-        return {}
-    listing = listing or {}
-    kind = department_kind(listing)
-    women = kind != "men"
-    men = kind != "women"
-    if marketplace == "ebay":
-        sizes = (EBAY_WOMENS_SIZES if women else []) + (EBAY_WAISTS if men else [])
-        return {"size": sizes, "sizeType": EBAY_SIZE_TYPES, "inseam": EBAY_INSEAMS}
-    if marketplace == "poshmark":
-        sizes = (POSHMARK_WOMEN if women else []) + (POSHMARK_MEN if men else [])
-        return {"size": sizes, "sizeType": POSHMARK_SIZE_TYPES}
-    if marketplace == "mercari":
-        sizes = (WOMENS_NUMERIC if women else []) + (MERCARI_WAISTS if men else [])
-        return {"size": sizes, "sizeType": MERCARI_SIZE_TYPES}
-    if marketplace == "depop":
-        sizes = (DEPOP_WOMEN if women else []) + (DEPOP_MEN if men else [])
-        return {"size": sizes, "sizeGrouping": DEPOP_GROUPING}
-    if marketplace == "etsy":
-        sizes = (WOMENS_NUMERIC if women else []) + (ETSY_WAISTS if men else []) + (ETSY_COMBINED if men else [])
-        return {"size": sizes, "inseam": EBAY_INSEAMS, "sizeType": ["Regular", "Petite", "Plus", "Tall"]}
-    if marketplace == "vinted":
-        sizes = (list(VINTED_WOMEN.values()) if women else []) + (VINTED_MEN if men else [])
-        return {"size": sizes}
-    return {}
