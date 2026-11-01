@@ -8,7 +8,8 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.618 — 2026-11-01
 
-- A cleaner, more consistent look across Anteroom: every page uses the same tabs, headings and cards, marketplace colors appear only in their logos, missing figures no longer show in large type, Automations uses proper checkboxes and menus with real marketplace names, and drafts in the sidebar are no longer highlighted in orange.
+- Keep listing-rule loading from freezing the app and make category searches use less memory.
+- Keep hosted photo loads from blocking settings and other requests.
 
 ## 0.1.617 — 2026-11-01
 

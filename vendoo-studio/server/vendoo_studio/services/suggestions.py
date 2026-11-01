@@ -104,6 +104,11 @@ def list_suggestions(
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)
 
+    from vendoo_studio.services.user_settings import get_stale_listing_days
+
+    # Hosted preferences have their own short session. Read them before the
+    # inventory session checks out a connection from the same bounded pool.
+    stale_days = get_stale_listing_days()
     repo = ConversationRepo(db)
     covers = repo.cover_photos()
     photo_counts = _photo_counts(db)
@@ -111,9 +116,6 @@ def list_suggestions(
     conversations = repo.list_all()
     selling = _recent_sales(conversations, listings, when)
     in_demand = SEASONS_IN_DEMAND[when.month]
-    from vendoo_studio.services.user_settings import get_stale_listing_days
-
-    stale_days = get_stale_listing_days()
     from vendoo_studio.models.background_task import BackgroundTask
 
     busy = set(db.scalars(select(BackgroundTask.conversation_id).where(

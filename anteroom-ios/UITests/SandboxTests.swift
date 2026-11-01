@@ -10,7 +10,7 @@ final class SandboxTests: XCTestCase {
         let title = openNewListing(app)
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         let name = "Simulator draft \(UUID().uuidString.prefix(8))"
-        enterListingTitle(name, into: title, app: app)
+        enterListingTitle(name, app: app)
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
         app.terminate()
@@ -26,9 +26,9 @@ final class SellerInputSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        let title = openNewListing(app)
+        _ = openNewListing(app)
         let name = "Seller inputs \(UUID().uuidString.prefix(8))"
-        enterListingTitle(name, into: title, app: app)
+        enterListingTitle(name, app: app)
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
 
@@ -231,15 +231,15 @@ final class DestinationSandboxTests: XCTestCase {
 
 fileprivate extension XCTestCase {
     @MainActor
-    func enterListingTitle(_ text: String, into field: XCUIElement, app: XCUIApplication) {
+    func enterListingTitle(_ text: String, app: XCUIApplication) {
         // The sheet focuses this field automatically. Tapping it again can
         // open the AutoFill edit menu and intercept the next keyboard event.
         dismissKeyboardIntroduction(app)
-        expectation(for: NSPredicate(format: "hasKeyboardFocus == true"), evaluatedWith: field)
-        waitForExpectations(timeout: 5)
-        field.typeText(text)
-        expectation(for: NSPredicate(format: "value == %@", text), evaluatedWith: field)
-        waitForExpectations(timeout: 5)
+        // SwiftUI's multiline input wrapper can report no keyboard focus or
+        // value while its text view visibly has both. Send keyboard input to
+        // the focused app; creation and reopen assertions verify the title.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        app.typeText(text)
     }
 
     @MainActor

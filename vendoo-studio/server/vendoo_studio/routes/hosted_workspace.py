@@ -347,7 +347,11 @@ def photos(identity: str, marketplace: str | None = None, db=Depends(get_seller_
 def photo_bytes(identity: str, photo_id: str, request: Request, db=Depends(get_seller_db)):
     from vendoo_studio.services.hosted_photos import storage_call
     row = owned_photo(db, identity, photo_id)
-    data = storage_call('GET', row.stored_filename, request.headers['authorization'].partition(' ')[2])
+    key = row.stored_filename
+    # Ownership was verified above. Storage can be slow, so release this read
+    # transaction before its network I/O; retain only the checked object key.
+    db.rollback()
+    data = storage_call('GET', key, request.headers['authorization'].partition(' ')[2])
     return Response(data, media_type='image/jpeg')
 
 
