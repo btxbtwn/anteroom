@@ -1,1 +1,0 @@
-- Load listing photos faster on the web and iPhone, and stop them reloading when you scroll back.
