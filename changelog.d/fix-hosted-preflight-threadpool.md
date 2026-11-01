@@ -1,0 +1,1 @@
+- Opening one marketplace tab after another on the web no longer stalls the app, or signing in, for half a minute.
