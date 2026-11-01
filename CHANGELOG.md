@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.640 — 2026-11-01
+
+- Sourcing now works on the web: your budget, ZIP and other settings, and the boxes worth buying, are kept with your account.
+
 ## 0.1.639 — 2026-11-01
 
 - List, update and delist on Poshmark, Mercari and Depop from the web app, through Chrome on your computer with Anteroom Bridge 0.2.40. Each one still asks you to confirm first.

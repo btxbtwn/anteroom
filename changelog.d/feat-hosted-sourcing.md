@@ -1,1 +1,0 @@
-- Sourcing now works on the web: your budget, ZIP and other settings, and the boxes worth buying, are kept with your account.
