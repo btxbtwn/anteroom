@@ -185,6 +185,20 @@ final class AnteroomAPI: Sendable {
         return payload.ok ? nil : (payload.error ?? "The connection failed.")
     }
 
+    func saveMimoKey(_ key: String) async throws {
+        _ = try await send(request("PUT", "api/settings/provider", json: ["api_key": key]))
+    }
+
+    func removeMimoKey() async throws {
+        _ = try await send(request("DELETE", "api/settings/provider/key"))
+    }
+
+    func testMimo() async throws -> String? {
+        struct Payload: Decodable { let ok: Bool; let error: String?; let message: String? }
+        let payload: Payload = try await decode(request("POST", "api/settings/provider/mimo/test"))
+        return payload.ok ? nil : (payload.error ?? payload.message ?? "The connection failed.")
+    }
+
     func providerModels(_ id: String) async throws -> ProviderModels {
         try await decode(request("GET", "api/settings/ai-keys/\(id)/models"))
     }
