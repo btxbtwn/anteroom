@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.644 — 2026-11-01
+
+- The web app no longer stalls with "Request failed: 500" when a listing with many photos opens
+
 ## 0.1.643 — 2026-11-01
 
 - On the web, Settings → Connections now opens your marketplace accounts, so you can connect eBay and Etsy there. It used to show the AI provider settings instead.
