@@ -63,6 +63,10 @@ final class ListingAssistantModel {
         error = nil
         defer { isWorking = false }
         do {
+            if case .regenerate = action {
+                progress = "Clearing the generated listing…"
+                try await api.resetListing(listingID, keepInputs: true)
+            }
             try await api.runAssistant(listingID, action: action) { [weak self] frame in
                 if frame.event == "status" { self?.progress = frame.data }
             }

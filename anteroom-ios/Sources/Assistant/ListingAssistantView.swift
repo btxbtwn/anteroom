@@ -7,6 +7,7 @@ struct ListingAssistantView: View {
     @State private var runID = UUID()
     @State private var stopping = false
     @State private var confirmGenerate = false
+    @State private var confirmRegenerate = false
 
     init(api: AnteroomAPI, listingID: String) {
         _model = State(initialValue: ListingAssistantModel(api: api, listingID: listingID))
@@ -45,6 +46,12 @@ struct ListingAssistantView: View {
             .task(id: runID) {
                 if let action { await model.run(action) }
             }
+            .confirmationDialog("Regenerate this listing?", isPresented: $confirmRegenerate, titleVisibility: .visible) {
+                Button("Regenerate", role: .destructive) { start(.regenerate) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Rewrites the generated listing from your photos and item details. Photos, measurements, flaws, cost, labels and notes stay. The result is saved as a draft.")
+            }
             .confirmationDialog("Generate a listing from your photos?", isPresented: $confirmGenerate, titleVisibility: .visible) {
                 Button("Generate listing") { start(.generate) }
                 Button("Cancel", role: .cancel) {}
@@ -64,13 +71,17 @@ struct ListingAssistantView: View {
             Text("Listing generation isn't available on the server yet. You can continue editing your draft.")
                 .foregroundStyle(.secondary)
         } else if !model.providerConfigured {
-            Text("Connect an AI provider in the web app's Settings before generating on iPhone.")
+            Text("Add an AI provider in Settings → Providers before generating.")
                 .foregroundStyle(.secondary)
         } else {
-            Button("Generate from photos", systemImage: "sparkles") { confirmGenerate = true }
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.canStart)
-                .frame(minHeight: 44)
+            HStack(spacing: 12) {
+                Button("Generate from photos", systemImage: "sparkles") { confirmGenerate = true }
+                    .buttonStyle(.borderedProminent)
+                Button("Regenerate", systemImage: "arrow.triangle.2.circlepath") { confirmRegenerate = true }
+                    .buttonStyle(.bordered)
+            }
+            .disabled(!model.canStart)
+            .frame(minHeight: 44)
         }
         if model.isWorking || model.serverBusy || model.needsReconnect {
             VStack(alignment: .leading, spacing: 12) {

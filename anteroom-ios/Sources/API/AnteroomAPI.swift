@@ -367,6 +367,11 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/conversations/\(id)/activity"))
     }
 
+    /// Regenerate's wipe: keeps photos, measurements, flaws, cost, labels and notes.
+    func resetListing(_ id: String, keepInputs: Bool) async throws {
+        _ = try await send(request("POST", "api/conversations/\(id)/reset", json: ["keep_inputs": keepInputs]))
+    }
+
     func stopTask(_ id: String) async throws {
         _ = try await send(request("POST", "api/conversations/\(id)/stop"))
     }
@@ -377,7 +382,7 @@ final class AnteroomAPI: Sendable {
                       receive: @MainActor @Sendable (StreamFrame) -> Void) async throws {
         var upload: URLRequest
         switch action {
-        case .generate:
+        case .generate, .regenerate:
             upload = try await request("POST", "api/conversations/\(id)/generate")
         case .message(let text):
             upload = try await request("POST", "api/conversations/\(id)/messages", json: ["text": text])

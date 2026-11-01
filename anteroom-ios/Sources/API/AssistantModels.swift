@@ -22,6 +22,8 @@ struct ListingMessage: Decodable, Identifiable, Sendable {
 
 enum AssistantAction: Sendable {
     case generate
+    /// Regenerate: wipe the generated listing, keep the seller's inputs, generate again.
+    case regenerate
     case message(String)
     case reconnect
 }

@@ -92,6 +92,7 @@ struct InventoryView: View {
                             Button("Edit fields", systemImage: "square.and.pencil") { bulk = .edit(ordered(rows)) }
                             Button("Copy items", systemImage: "doc.on.doc") { bulk = .copy(ordered(rows)) }
                             Button("Mark down prices", systemImage: "tag") { bulk = .markdown(ordered(rows)) }
+                            Button("Regenerate", systemImage: "arrow.triangle.2.circlepath") { bulk = .regenerate(ordered(rows)) }
                             Button("Delete", systemImage: "trash", role: .destructive) { bulk = .delete(ordered(rows)) }
                         }
                         .disabled(selected.isEmpty || selected.count > 300)
@@ -139,6 +140,8 @@ struct InventoryView: View {
                     BulkCopyView(api: model.api, ids: ids) { finishBulk() }
                 case .markdown(let ids):
                     BulkMarkdownView(api: model.api, ids: ids) { finishBulk() }
+                case .regenerate(let ids):
+                    BulkRegenerateView(api: model.api, listings: ids.compactMap { id in model.listings.first { $0.id == id } }) { finishBulk() }
                 }
             }
             .navigationDestination(for: ListingSummary.self) { listing in
@@ -396,7 +399,7 @@ struct ListingRowContent<Thumbnail: View>: View {
 }
 
 private enum BulkAction: Identifiable {
-    case edit([String]), delete([String]), copy([String]), markdown([String])
+    case edit([String]), delete([String]), copy([String]), markdown([String]), regenerate([String])
 
     var id: String {
         switch self {
@@ -404,6 +407,7 @@ private enum BulkAction: Identifiable {
         case .delete(let ids): "delete-" + ids.joined(separator: ",")
         case .copy(let ids): "copy-" + ids.joined(separator: ",")
         case .markdown(let ids): "markdown-" + ids.joined(separator: ",")
+        case .regenerate(let ids): "regenerate-" + ids.joined(separator: ",")
         }
     }
 }
