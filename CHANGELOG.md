@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.636 — 2026-11-01
+
+- List, update and delist on eBay from the web app. Each one still asks you to confirm first.
+
 ## 0.1.635 — 2026-11-01
 
 - Light mode is easier to read: sidebar labels and icons are darker, hovering a sidebar row shows clearly, and warnings, errors and success messages use darker colors that stand out on white.
