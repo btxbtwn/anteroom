@@ -89,7 +89,7 @@ class VintedListRouteTest(unittest.TestCase):
         ]
         self.manager = SimpleNamespace(connected=True, build="test-build", send_message=AsyncMock(return_value=True))
         self.enterContext(patch("vendoo_studio.services.extension_connection.extension_manager", self.manager))
-        self.enterContext(patch("vendoo_studio.services.native_marketplaces.expected_extension_build", return_value="test-build"))
+        self.enterContext(patch("vendoo_studio.services.chrome_bridge.expected_extension_build", return_value="test-build"))
         self.enterContext(patch("vendoo_studio.services.extension_connection.schedule_advance_job_queue"))
         self.enterContext(patch("vendoo_studio.database.SessionLocal", self.sessions))
         self.launched = []

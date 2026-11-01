@@ -331,7 +331,7 @@ def _failure_text(marketplace: str, exc: Exception) -> str:
 
 async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
     """Delete the named listings. Runs as a job holding the automation slot, so no Send starts into Chrome meanwhile."""
-    from vendoo_studio.services.extension_connection import extension_manager, schedule_advance_job_queue
+    from vendoo_studio.services.extension_connection import current_extension, schedule_advance_job_queue
 
     names = list(dict.fromkeys(str(m).strip().lower() for m in marketplaces if str(m or "").strip()))
     if confirm is not True:
@@ -348,7 +348,7 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
             raise DelistError(409, f"Anteroom has no {name} listing link for this item.")
         if entry["sold_here"]:
             raise DelistError(409, f"This item sold on {name}. That listing is never deleted.")
-    if BROWSER_MARKETPLACES & set(names) and not extension_manager.connected:
+    if BROWSER_MARKETPLACES & set(names) and not current_extension().connected:
         raise DelistError(409, "Connect Chrome first.")
     repo = JobRepo(db)
     listing = ListingRepo(db).get_current(conv_id)

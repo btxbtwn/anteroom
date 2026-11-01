@@ -1,0 +1,1 @@
+- Prepare the web app to send your approved Poshmark, Mercari, Depop, Sellwild and Vinted actions to Chrome on your computer.
