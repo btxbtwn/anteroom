@@ -66,6 +66,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"
           "$RUNNER_TEMP/appearance-tests"
+      - name: Test sign-in messages
+        run: |
+          xcrun swiftc Sources/Session/SignInMessages.swift Tests/SignInMessagesTests.swift -o "$RUNNER_TEMP/sign-in-tests"
+          "$RUNNER_TEMP/sign-in-tests"
       - name: Build
         run: |
           set -o pipefail
