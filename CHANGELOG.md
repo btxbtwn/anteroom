@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.624 — 2026-11-01
+
+- Changes you make on the web, the Mac app or your iPhone now show up on your other devices right away, without refreshing.
+
 ## 0.1.623 — 2026-11-01
 
 - Behind the scenes: a new automatic check keeps Anteroom's look consistent, so new screens use the same colors, labels and controls as the rest of the app.
