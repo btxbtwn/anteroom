@@ -1,13 +1,16 @@
 import SwiftUI
 
 /// Each destination keeps its own navigation state when switching tabs.
+/// The tabs are decided once, before they appear: adding a tab later rebuilds
+/// the tab bar, which sends the seller back to the first tab and closes the
+/// screen they were on.
 struct WorkspaceView: View {
     let api: AnteroomAPI
     @Environment(SessionStore.self) private var session
     @Environment(\.scenePhase) private var scenePhase
     @State private var appearance: AppearanceModel
-    @State private var views: [String] = []
-    @State private var features: [String] = []
+    /// What this server offers, read once per session; nil until then.
+    @State private var runtime: (views: [String], features: [String])?
 
     init(api: AnteroomAPI) {
         self.api = api
@@ -15,6 +18,28 @@ struct WorkspaceView: View {
     }
 
     var body: some View {
+        Group {
+            if let runtime {
+                tabs(views: runtime.views, features: runtime.features)
+            } else {
+                ProgressView()
+            }
+        }
+        .environment(appearance)
+        .environment(session.changes)
+        .preferredColorScheme(appearance.theme.colorScheme)
+        // Ends with this workspace: on sign-out or when another account signs in.
+        .task { await session.followChanges() }
+        .task {
+            // Without an answer the workspace opens with the tabs every server has.
+            runtime = (try? await api.runtime()) ?? (views: [], features: [])
+        }
+        .task(id: scenePhase) {
+            if scenePhase == .active { await appearance.refresh() }
+        }
+    }
+
+    private func tabs(views: [String], features: [String]) -> some View {
         TabView {
             InventoryView(api: api)
                 .tabItem { Label("Inventory", systemImage: "tag.fill") }
@@ -28,20 +53,6 @@ struct WorkspaceView: View {
                 .tabItem { Label("Usage", systemImage: "gauge.with.dots.needle.33percent") }
             SettingsRootView(api: api)
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-        }
-        .environment(appearance)
-        .environment(session.changes)
-        // Ends with this workspace: on sign-out or when another account signs in.
-        .task { await session.followChanges() }
-        .preferredColorScheme(appearance.theme.colorScheme)
-        .task(id: scenePhase) {
-            guard scenePhase == .active else { return }
-            await appearance.refresh()
-            // Destinations follow what this server offers.
-            if let runtime = try? await api.runtime() {
-                views = runtime.views
-                features = runtime.features
-            }
         }
     }
 }
