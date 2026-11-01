@@ -307,6 +307,12 @@ web they stay in the seller's own Storage folder. A `SECURITY DEFINER` function
 sellers with a running job or an unconfirmed action; each pass runs in that
 seller's context, fails jobs no process is running, and reads eBay's result.
 
+On `feat/hosted-etsy`, the Etsy tab and Etsy List, Update, Save draft and Delist
+are on the web. The web's `/vendoo-api/fields` builds only the Etsy form, with
+the same `leaf_form` the Mac uses, from the seller's saved category fields and
+Etsy's live properties; it never asks Chrome for a schema. `action_marketplaces`
+is `["ebay", "etsy"]` while the job watchdog runs.
+
 On `feat/cloud-save-draft`, Poshmark, Mercari and Depop save drafts from the
 web through the seller's own Chrome (Bridge 0.2.40). The server records the
 action exactly as the Mac does and signs a `save_draft` command for that one

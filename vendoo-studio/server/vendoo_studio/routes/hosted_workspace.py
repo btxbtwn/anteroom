@@ -90,8 +90,8 @@ def runtime(request: Request, db=Depends(get_seller_db)):
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else [])
             + (['ebay_offers'] if offers is not None and not offers.done() else []),
-            'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant', 'marketplaces'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay'],
-            # eBay lists through its API; a restart's held slot needs the job watchdog.
+            'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant', 'marketplaces'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
+            # eBay and Etsy list through their APIs; a restart's held slot needs the job watchdog.
             'action_marketplaces': list(ACTION_MARKETPLACES) if watchdog is not None and not watchdog.done() else [],
             # Save draft through the seller's Chrome: needs signed commands, and the
             # watchdog to settle one Chrome never reports.
