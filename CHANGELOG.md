@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.617 — 2026-11-01
+
+- On the web, you can now connect your eBay and Etsy accounts in Settings → Connections, set eBay and Etsy listing defaults, and fill in the eBay tab with your own categories, policies and locations.
+
 ## 0.1.616 — 2026-10-31
 
 - The web app now has the Assistant. Each account has its own conversations and answers, and attached images stay private to that conversation.
