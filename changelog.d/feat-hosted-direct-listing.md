@@ -1,0 +1,1 @@
+- List, update and delist on eBay from the web app. Each one still asks you to confirm first.

@@ -14,7 +14,7 @@ it("opens the shared listing controls in the hosted workspace without Vendoo aut
   client.setQueryData(["settings-hidden-fields"], { always: [{ marketplace: "poshmark", field: "style tags", label: "Style tags" }], listing: [] });
   client.setQueryData(["settings-formulas"], { title: "Shop title", description: "Shop description" });
   const html = renderToStaticMarkup(
-    <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(), views: new Set(["settings"]), marketplaceForms: new Set(["depop", "poshmark"]) }}>
+    <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(), views: new Set(["settings"]), marketplaceForms: new Set(["depop", "poshmark"]), actionMarketplaces: new Set() }}>
       <QueryClientProvider client={client}><SettingsPage section="listings" onOpenListing={() => {}} /></QueryClientProvider>
     </WorkspaceRuntimeProvider>,
   );
