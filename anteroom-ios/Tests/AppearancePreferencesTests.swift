@@ -6,7 +6,11 @@ struct AppearancePreferencesTests {
         let decoder = JSONDecoder()
         let response = Data(#"{"ok":true,"theme":"light","listing_names":"sku","recent_vendoo_labels":["Keep me"]}"#.utf8)
         let preferences = try decoder.decode(AppearancePreferences.self, from: response)
-        precondition(preferences.theme == .light)
+        precondition(preferences.theme == .light && preferences.listingNames == .sku)
+        let names = try JSONSerialization.jsonObject(with: JSONEncoder().encode(AppearanceUpdate(listingNames: .sku))) as! [String: String]
+        precondition(names == ["listing_names": "sku"], "A naming update must not replace other seller preferences")
+        let older = try decoder.decode(AppearancePreferences.self, from: Data(#"{"theme":"dark"}"#.utf8))
+        precondition(older.listingNames == .title)
         for theme in AppearanceTheme.allCases {
             let body = try JSONEncoder().encode(AppearanceUpdate(theme: theme))
             let object = try JSONSerialization.jsonObject(with: body) as! [String: String]
