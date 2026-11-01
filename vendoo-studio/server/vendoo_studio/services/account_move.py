@@ -218,6 +218,7 @@ def move(email: str, password: str, account: Account, source=None, photos=None) 
     settings = account.request("PUT", "/api/account-import/settings", json=read_settings()).json()["added"]
     keys = local_secrets(SECRET_SLOTS)
     saved = account.request("PUT", "/api/account-import/secrets", json=keys).json()["saved"] if keys else []
+    account.request("POST", "/api/account-import/finish")
     paused = _pause_local_automations(source)
     result = {"records": copied, "photos": photos["copied"], "missing_photos": photos["missing"],
               "settings": len(settings), "keys": saved, "paused_automations": paused}

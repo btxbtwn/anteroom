@@ -228,3 +228,30 @@ def test_the_mac_reports_what_it_can_move_and_runs_one_move_at_a_time(monkeypatc
     assert 'pw' not in started.text
     assert client.post('/api/account-move', json={'email': 'seller@example.com', 'password': 'pw'}).status_code == 409
     account_move._set(state='idle')
+
+
+def feed(engine, user=USER_ID):
+    from vendoo_studio.models.seller_change import SellerChange
+    with engine.connect() as connection:
+        return {row.topic: row.changed_at for row in connection.execute(
+            select(SellerChange.topic, SellerChange.changed_at).where(SellerChange.user_id == user))}
+
+
+def test_a_move_announces_one_change_when_it_finishes(cloud, signing_keys):  # noqa: F811
+    """Each batch announcing a change made every open device reload the whole
+    inventory hundreds of times during a move."""
+    client, engine = cloud
+    alice = headers(signing_keys)
+    for index in range(3):
+        rows = [{'id': f'quiet{index:03d}{n:04d}', 'title': f'Item {index}-{n}'} for n in range(5)]
+        assert client.post('/api/account-import/rows', headers=alice, json={'table': 'conversations', 'rows': rows}).status_code == 200
+    assert client.get('/api/account-import/photos', headers=alice).status_code == 200
+    assert feed(engine) == {}
+    assert client.post('/api/account-import/finish', headers=alice).status_code == 200
+    from vendoo_studio.models.seller_change import TOPIC_BY_TABLE
+    assert set(feed(engine)) == set(TOPIC_BY_TABLE.values()) - {None}
+    assert feed(engine, BOB) == {}
+    # Ordinary edits still announce right away.
+    before = feed(engine)['listings']
+    client.post('/api/conversations', headers=alice, json={'title': 'New after the move'})
+    assert feed(engine)['listings'] > before
