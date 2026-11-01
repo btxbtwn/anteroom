@@ -9,6 +9,7 @@ import { PriceDialog } from "./PriceDropParts";
 import { PageError, PageNote } from "./WorkspacePage";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
+import { Radio, RadioGroup } from "./ui/radio-group";
 
 export const BULK_MARKETPLACES: DelistMarketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"];
 const ACTIONS: { value: BulkMarketplaceAction; label: string; note: string }[] = [
@@ -111,11 +112,13 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
           : `I reviewed these ${approved.length} items and want to ${verb.label.toLowerCase()} them on the marketplaces shown.`}</span>
       </label>
     </div> : <div className="space-y-4">
-      <fieldset className="space-y-2"><legend className="mb-1 font-medium">Action</legend>
-        {ACTIONS.map((entry) => <label key={entry.value} className="flex items-start gap-2">
-          <input type="radio" name="bulk-marketplace-action" className="mt-1" checked={action === entry.value} disabled={busy} onChange={() => setAction(entry.value)} />
-          <span><span className="font-medium">{entry.label}</span><span className="block text-xs text-muted-foreground">{entry.note}</span></span>
-        </label>)}
+      <fieldset><legend className="mb-3 font-medium">Action</legend>
+        <RadioGroup name="bulk-marketplace-action" className="gap-2" value={action} disabled={busy} onValueChange={(value) => setAction(value as BulkMarketplaceAction)}>
+          {ACTIONS.map((entry) => <label key={entry.value} className="flex items-start gap-2">
+            <Radio value={entry.value} className="mt-0.5" />
+            <span><span className="font-medium">{entry.label}</span><span className="block text-xs text-muted-foreground">{entry.note}</span></span>
+          </label>)}
+        </RadioGroup>
       </fieldset>
       <fieldset className="space-y-2"><legend className="mb-1 font-medium">Marketplaces</legend>
         <div className="grid gap-2 sm:grid-cols-3">{BULK_MARKETPLACES.map((name) => <label key={name} className="flex items-center gap-2">
