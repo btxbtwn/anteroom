@@ -16,7 +16,7 @@ enum AppConfig {
 #endif
     }
 
-    static var apiBaseURL: URL { sandboxURL ?? URL(string: "https://peaceful-meadowstone-6944.fly.dev")! }
+    static var apiBaseURL: URL { sandboxURL ?? URL(string: "https://myanteroom.com")! }
     static var supabaseURL: URL { sandboxURL?.appending(path: "local") ?? URL(string: "https://ytoqdgtzvutdltfkpxbu.supabase.co")! }
     static let signInRedirectURL = URL(string: "anteroom://login-callback")!
 

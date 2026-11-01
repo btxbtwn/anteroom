@@ -77,7 +77,7 @@ BASE_DIR = resource_root()
 DATA_DIR = str(user_data_root())
 # The hosted web app and API for the seller's account. The sandbox points it
 # at a local hosted sandbox so a move can be tried without the real account.
-HOSTED_URL = os.environ.get("ANTEROOM_HOSTED_URL", "https://peaceful-meadowstone-6944.fly.dev").rstrip("/")
+HOSTED_URL = os.environ.get("ANTEROOM_HOSTED_URL", "https://myanteroom.com").rstrip("/")
 PHOTOS_DIR = str(user_data_root() / "photos")
 FILL_LOGS_DIR = str(user_data_root() / "fill-logs")
 LOGS_DIR = str(user_data_root() / "logs")

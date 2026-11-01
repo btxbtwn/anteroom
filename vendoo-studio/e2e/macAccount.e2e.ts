@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 
-const HOSTED = "https://peaceful-meadowstone-6944.fly.dev";
+const HOSTED = "https://myanteroom.com";
 
 test("in the Mac app, Sign in offers to move this Mac's listings, or skip to the account", async ({ page, phone }) => {
   test.skip(phone, "The Mac app's window is never phone-sized");
