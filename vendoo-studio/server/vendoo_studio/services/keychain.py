@@ -250,6 +250,15 @@ def _set(account: str, value: str) -> bool:
         return _save_store()
 
 
+def read_slot(account: str) -> str | None:
+    """A slot's raw stored value: the Mac's Keychain, or the seller's Vault when hosted."""
+    return _get(account)
+
+
+def write_slot(account: str, value: str) -> bool:
+    return _set(account, value)
+
+
 def _delete(account: str) -> None:
     from vendoo_studio.services.service_context import current
     context = current()
