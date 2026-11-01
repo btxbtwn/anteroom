@@ -1,1 +1,0 @@
-- Your account now lives at myanteroom.com, and sign-in emails come from signin@myanteroom.com. Sign in once more after updating.

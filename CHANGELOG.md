@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.627 — 2026-11-01
+
+- Your account now lives at myanteroom.com, and sign-in emails come from signin@myanteroom.com. Sign in once more after updating.
+
 ## 0.1.626 — 2026-11-01
 
 - The Mac app can move your listings into your account. Choose Sign in, enter your email and password, and Anteroom copies this Mac's listings, photos, history, settings and provider keys, so you see them on the web and iPhone too. This Mac keeps its own copy as a backup, and its automations pause so they run once, from your account. If a move stops, run it again to pick up where it left off. Reconnect eBay and Etsy in your account afterwards.
