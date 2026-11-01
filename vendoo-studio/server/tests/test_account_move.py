@@ -40,6 +40,10 @@ def mac(tmp_path, monkeypatch):
     photos.mkdir()
     (photos / 'coat.png').write_bytes(png())
     (photos / 'coat-original.png').write_bytes(png())
+    (photos / 'broken.png').write_bytes(b'not a photo')
+    big = io.BytesIO()
+    Image.new('RGB', (6000, 6000), 'navy').save(big, 'JPEG', quality=60)
+    (photos / 'big.jpeg').write_bytes(big.getvalue())
     monkeypatch.setattr(account_move, 'MARKER', tmp_path / 'account-move.json')
     with Session(engine) as db:
         db.add(Conversation(id='coat0000mac1', title='Wool coat', status='active'))
@@ -50,6 +54,10 @@ def mac(tmp_path, monkeypatch):
                   stored_filename='coat.png', source_filename='coat-original.png', mime_type='image/png', size_bytes=10),
             Photo(id='photo000mac2', conversation_id='coat0000mac1', original_filename='gone.png',
                   stored_filename='gone.png', mime_type='image/png', size_bytes=10),
+            Photo(id='photo000mac3', conversation_id='coat0000mac1', original_filename='broken.png',
+                  stored_filename='broken.png', mime_type='image/png', size_bytes=11),
+            Photo(id='photo000mac4', conversation_id='coat0000mac1', original_filename='big.jpeg',
+                  stored_filename='big.jpeg', mime_type='image/jpeg', size_bytes=len(big.getvalue())),
             Message(conversation_id='coat0000mac1', role='user', text='Measure the sleeves'),
             Job(id='job00000mac1', conversation_id='coat0000mac1', approved_revision_id='r1', listing_snapshot={}, status='queued'),
             Automation(id='auto0000mac1', name='Weekly drop', status='active', schedule={}, filters={}, actions=[], marketplaces=[],
@@ -106,7 +114,9 @@ def test_a_mac_moves_into_its_sellers_account_once(cloud, mac, vault, storage, s
 
     result = account_move.move('seller@example.com', 'pw', account_for(client, signing_keys), source=mac[0], photos=mac[1])
 
-    assert result['photos'] == 2 and result['missing_photos'] == 1
+    # An unreadable file is left out without stopping the move; a 36 megapixel
+    # photo arrives at the stored size, whatever the account's upload limit.
+    assert result['photos'] == 3 and result['missing_photos'] == 1 and result['refused_photos'] == 1
     assert result['paused_automations'] == 2
     assert sorted(result['keys']) == ['ai-api-keys', 'brave-search-api-key']
     assert json.loads(vault[(USER_ID, 'ai-api-keys')]) == {'openai': 'sk-web', 'anthropic': 'sk-ant-mac'}
@@ -128,6 +138,10 @@ def test_a_mac_moves_into_its_sellers_account_once(cloud, mac, vault, storage, s
     for key in (stored, source):
         hosted_photos.check_key(key, USER_ID, 'coat0000mac1')
         assert Image.open(io.BytesIO(storage[key])).format == 'JPEG'
+    with engine.connect() as connection:
+        big_key = connection.execute(select(account_import._table('photos').c.stored_filename)
+                                     .where(account_import._table('photos').c.id == 'photo000mac4')).scalar_one()
+    assert Image.open(io.BytesIO(storage[big_key])).size == (2400, 2400)
     photo = client.get('/api/conversations/coat0000mac1/photos/photo000mac1/bytes', headers=alice)
     assert photo.status_code == 200 and photo.content == storage[stored]
     assert client.get('/api/settings', headers=alice).status_code in {200, 404}
@@ -141,9 +155,9 @@ def test_a_mac_moves_into_its_sellers_account_once(cloud, mac, vault, storage, s
 
     # Running it again copies nothing new and duplicates nothing.
     again = account_move.move('seller@example.com', 'pw', account_for(client, signing_keys), source=mac[0], photos=mac[1])
-    assert again['photos'] == 0 and again['missing_photos'] == 1 and again['keys'] == []
+    assert again['photos'] == 0 and again['missing_photos'] == 1 and again['refused_photos'] == 1 and again['keys'] == []
     assert len(client.get('/api/conversations', headers=alice).json()) == 1
-    assert len(storage) == 2
+    assert len(storage) == 3
 
     # The same Mac cannot also move into a second account: its records are taken.
     with pytest.raises(account_move.MoveError, match='already in a different account'):
