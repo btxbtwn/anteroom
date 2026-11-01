@@ -1,1 +1,0 @@
-- Moving your Mac into your account no longer makes your other devices reload over and over. They update once, when the move finishes.

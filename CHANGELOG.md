@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.632 — 2026-11-01
+
+- Moving your Mac into your account no longer makes your other devices reload over and over. They update once, when the move finishes.
+
+## 0.1.631 — 2026-11-01
+
+- Your account now takes photos up to 50 megapixels, like full-size camera photos, so moving your Mac no longer stops at one. Large photos also upload faster.
+
 ## 0.1.630 — 2026-11-01
 
 - Keep stock counts working when an older saved listing has no date.
