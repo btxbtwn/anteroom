@@ -110,7 +110,6 @@ async def run_listing_generation(
     run.publish(sse_event("status", "Analyzing photos…"))
     stream_db = SessionLocal()
     stream_repo = ConversationRepo(stream_db)
-    skill_rules = load_skill_rules(item_details, stream_db)
     full_text = ""
     prompt_analysis: str | None = None
     expected_revision_id: str | None = None
@@ -164,6 +163,7 @@ async def run_listing_generation(
         child_tasks.append(comps_task)
 
     try:
+        skill_rules = await asyncio.to_thread(load_skill_rules, item_details)
         evidence: dict = {}
         existing = latest_photo_analysis(stream_repo.get_messages(conv_id), fingerprint=analysis_fingerprint)
         listing_rules = skill_rules
@@ -221,9 +221,8 @@ async def run_listing_generation(
 
         assert prompt_analysis is not None
         mark("photo_analysis")
-        listing_rules = load_skill_rules(
-            f"{prompt_analysis}\n{item_details}",
-            stream_db,
+        listing_rules = await asyncio.to_thread(
+            load_skill_rules, f"{prompt_analysis}\n{item_details}",
         )
 
         if comps_task is not None and comps_brand != _brand(item_fields(prompt_analysis, evidence)):
