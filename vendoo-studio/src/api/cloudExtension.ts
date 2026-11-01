@@ -1,5 +1,6 @@
 /** Browser-local reads only. Supabase sessions never cross this transport. */
 import type { MarketplaceForm } from "./types";
+import { HOSTED_ORIGIN as ORIGIN } from "../lib/macApp";
 export interface CloudConnection {
   ok: boolean;
   state: "connected" | "disconnected" | "pending" | "unavailable";
@@ -7,7 +8,6 @@ export interface CloudConnection {
   supportedActions?: string[];
 }
 export interface BrowserAccount { id: string; email: string }
-const ORIGIN = "https://peaceful-meadowstone-6944.fly.dev";
 const ERRORS: Record<string, string> = {
   not_connected: "Connect Chrome before loading the Poshmark form.",
   account_changed: "The browser connection changed. Connect Chrome and load the form again.",

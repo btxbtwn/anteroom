@@ -18,6 +18,7 @@ from pathlib import Path
 
 from vendoo_studio.config import (
     BASE_DIR,
+    DATA_DIR,
     HOST,
     PORT,
     frontend_dist_dir,
@@ -70,11 +71,19 @@ MODERN_MACOS_SDK = 26
 MODERN_CHROME_ENV = "VENDOO_STUDIO_MODERN_CHROME"
 HEALTH_URL = f"http://{HOST}:{PORT}/api/health"
 APP_URL = f"http://{HOST}:{PORT}"
+# The hosted web app. Signed in, the window shows it, so the Mac sees the same
+# account as the web and iPhone apps.
+HOSTED_URL = "https://peaceful-meadowstone-6944.fly.dev"
+# Which of the two the window showed last, so the app reopens on it.
+WORKSPACE_FILE = Path(DATA_DIR) / "desktop-workspace.json"
 LOG_PATH = Path.home() / "Library" / "Application Support" / CHANNEL["app_name"] / "logs" / CHANNEL["log"]
 
 _server = None
 _server_thread: threading.Thread | None = None
 _owned_server = False
+# The main window once it has booted, and a workspace picked before then.
+_window = None
+_pending_url: str | None = None
 
 
 def augment_path() -> None:
@@ -382,6 +391,52 @@ def menu_reinstall_app() -> None:
     threading.Thread(target=work, daemon=True, name="studio-menu-reinstall").start()
 
 
+def _workspace_for(url: str | None) -> str | None:
+    if not url:
+        return None
+    for name, base in (("account", HOSTED_URL), ("mac", APP_URL)):
+        if url == base or url.startswith(base + "/"):
+            return name
+    return None
+
+
+def remember_workspace(url: str | None) -> None:
+    """Save which workspace the window shows; splash and other pages are ignored."""
+    workspace = _workspace_for(url)
+    if workspace is None:
+        return
+    try:
+        WORKSPACE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        WORKSPACE_FILE.write_text(json.dumps({"workspace": workspace}), encoding="utf-8")
+    except OSError as exc:
+        print(f"could not save the open workspace: {exc}", flush=True)
+
+
+def saved_workspace_url() -> str:
+    try:
+        saved = json.loads(WORKSPACE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return APP_URL
+    return HOSTED_URL if isinstance(saved, dict) and saved.get("workspace") == "account" else APP_URL
+
+
+def open_in_window(url: str) -> None:
+    """Show a workspace now, or as soon as the window has booted."""
+    global _pending_url
+    window = _window
+    if window is None:
+        _pending_url = url
+        return
+    window.load_url(url)
+
+
+def _remember_shown_workspace(window) -> None:
+    try:
+        remember_workspace(window.get_current_url())
+    except Exception as exc:
+        print(f"could not read the window's page: {exc}", flush=True)
+
+
 def studio_app_menu():
     """Native macOS menu bar items that work even when the web UI is blank."""
     try:
@@ -404,6 +459,13 @@ def studio_app_menu():
                 MenuAction("Check for Updates…", menu_check_for_updates),
                 MenuAction("Update and Restart…", menu_update_and_restart),
                 MenuAction("Reinstall from GitHub…", menu_reinstall_app),
+            ],
+        ),
+        Menu(
+            "Account",
+            [
+                MenuAction("My Account", lambda: open_in_window(HOSTED_URL)),
+                MenuAction("This Mac’s Listings", lambda: open_in_window(APP_URL)),
             ],
         ),
     ]
@@ -1139,9 +1201,17 @@ def _boot_window(window) -> None:
         window.load_html(splash_html("Starting the local studio server…"))
         reap_orphaned_bridges()
         start_owned_server()
-        window.load_url(APP_URL)
+        _show_first_workspace(window)
     except Exception as exc:
         window.load_html(error_html(str(exc)))
+
+
+def _show_first_workspace(window) -> None:
+    global _window, _pending_url
+    url = _pending_url or saved_workspace_url()
+    _pending_url = None
+    _window = window
+    window.load_url(url)
 
 
 def enable_editable_context_menus() -> None:
@@ -1274,7 +1344,7 @@ def _load_app_url(webkit_host) -> None:  # noqa: ANN001
     """Reload from scratch when the dead page left no URL to reload."""
     from Foundation import NSURL, NSURLRequest
 
-    url = NSURL.URLWithString_(APP_URL)
+    url = NSURL.URLWithString_(saved_workspace_url())
     webkit_host.loadRequest_(NSURLRequest.requestWithURL_(url))
 
 
@@ -1292,6 +1362,7 @@ def run_window() -> None:
     window = create_studio_window(webview)
     if window is None:
         raise RuntimeError("The desktop window could not be created")
+    window.events.loaded += _remember_shown_workspace
     window.events.closed += vinted_browser.shutdown
     window.events.closed += sellwild_browser.shutdown
     webview.start(lambda: _boot_window(window), **studio_start_kwargs())
