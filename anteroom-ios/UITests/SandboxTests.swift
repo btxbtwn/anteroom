@@ -189,10 +189,11 @@ final class DestinationSandboxTests: XCTestCase {
         filters.tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Not listed'")).firstMatch.waitForExistence(timeout: 5))
         keep(app, "Inventory filters")
-        // Close the menu on the title, which does nothing else.
-        app.navigationBars["Inventory"].staticTexts["Inventory"].tap()
 
-        app.tabBars.buttons["Analytics"].tap()
+        // The first tap outside an open menu only closes the menu.
+        let analytics = app.tabBars.buttons["Analytics"]
+        analytics.tap()
+        if !app.buttons["Sales records"].waitForExistence(timeout: 5) { analytics.tap() }
         XCTAssertTrue(app.buttons["Sales records"].waitForExistence(timeout: 15))
         keep(app, "Analytics sales records")
         app.buttons["Inventory analytics"].tap()
