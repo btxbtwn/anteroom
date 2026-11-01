@@ -1,4 +1,4 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { bytesToBase64, pkceChallenge } from "../../src/verify.js";
@@ -153,12 +153,14 @@ async function connectEtsy(token, { userId = "777", shopId = "42" } = {}) {
 // --- Tests -------------------------------------------------------------------
 
 describe("devices", () => {
-  it("limits registrations per address", async () => {
-    const attempt = () => relay("/devices", { method: "POST", headers: { "cf-connecting-ip": "10.9.9.9" } });
-    const statuses = [];
-    for (let i = 0; i < 6; i += 1) statuses.push((await attempt()).status);
-    expect(statuses.slice(0, 5)).toEqual([201, 201, 201, 201, 201]);
-    expect(statuses[5]).toBe(429);
+  it.each([true, false])("honors the registration limiter decision: %s", async (success) => {
+    // The vendor's counter window can roll over between requests. Test our
+    // handling of its decision without depending on the real wall clock.
+    const limit = vi.spyOn(env.REGISTRATION_LIMITER, "limit").mockResolvedValue({ success });
+    const response = await relay("/devices", { method: "POST", headers: { "cf-connecting-ip": "10.9.9.9" } });
+    expect(response.status).toBe(success ? 201 : 429);
+    expect(limit).toHaveBeenCalledTimes(1);
+    expect(limit).toHaveBeenCalledWith({ key: "10.9.9.9" });
   });
 
   it("registers devices with separate tokens and refuses unknown ones", async () => {
