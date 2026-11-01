@@ -13,6 +13,7 @@ final class SandboxTests: XCTestCase {
         let title = app.textFields["Listing title"].waitForExistence(timeout: 5) ? app.textFields["Listing title"] : app.textViews["Listing title"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         title.tap()
+        dismissKeyboardIntroduction(app)
         let name = "Simulator draft \(UUID().uuidString.prefix(8))"
         title.typeText(name)
         app.buttons["Create draft"].tap()
@@ -36,6 +37,7 @@ final class SellerInputSandboxTests: XCTestCase {
         let title = app.textFields["Listing title"].waitForExistence(timeout: 5) ? app.textFields["Listing title"] : app.textViews["Listing title"]
         let name = "Seller inputs \(UUID().uuidString.prefix(8))"
         title.tap()
+        dismissKeyboardIntroduction(app)
         title.typeText(name)
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
@@ -227,5 +229,19 @@ final class DestinationSandboxTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+}
+
+fileprivate extension XCTestCase {
+    @MainActor
+    func dismissKeyboardIntroduction(_ app: XCUIApplication) {
+        // A fresh simulator can present QuickPath onboarding over the first
+        // keyboard. Scope Continue to that system view, never an app action.
+        let introduction = app.otherElements["UIContinuousPathIntroductionView"]
+        if introduction.waitForExistence(timeout: 5) {
+            introduction.buttons["Continue"].tap()
+            expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: introduction)
+            waitForExpectations(timeout: 5)
+        }
     }
 }
