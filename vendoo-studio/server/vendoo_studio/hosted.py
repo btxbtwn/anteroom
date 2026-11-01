@@ -92,19 +92,21 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
         app.state.chat_upload_slots = asyncio.Semaphore(1)
-        worker = scheduler = None
+        worker = scheduler = offers = None
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
-            from vendoo_studio.services import hosted_automation_scheduler
+            from vendoo_studio.services import hosted_automation_scheduler, hosted_offer_scheduler
             from vendoo_studio.services.background_worker import serve
             worker = asyncio.create_task(serve(engine))
             # Automations regenerate through the same draft queue, so both run together.
             scheduler = asyncio.create_task(hosted_automation_scheduler.serve(engine))
+            offers = asyncio.create_task(hosted_offer_scheduler.serve(engine))
         app.state.background_worker = worker
+        app.state.offer_scheduler = offers
         try:
             yield
         finally:
-            running = [task for task in (worker, scheduler) if task is not None]
+            running = [task for task in (worker, scheduler, offers) if task is not None]
             for task in running:
                 task.cancel()
             await asyncio.gather(*running, return_exceptions=True)

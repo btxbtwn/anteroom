@@ -30,8 +30,15 @@ PREVIEW_TTL = timedelta(minutes=15)
 SEND_COOLDOWN = timedelta(hours=24)
 UNKNOWN_NOTE = "Send result unknown. Check offers in Seller Hub, then mark this checked. Automation is paused."
 _task: asyncio.Task | None = None
-_last_check: str | None = None
-_last_error: str | None = None
+# The last automatic check and its error, per seller on the web ("" on the Mac).
+_checks: dict[str, tuple[str, str | None]] = {}
+
+
+def _seller() -> str:
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    return context.seller_id if context is not None else ""
 
 
 class OfferConflict(ValueError):
@@ -89,6 +96,7 @@ def attempt_out(attempt: EbayOfferAttempt, rule: EbayOfferRule, title: str | Non
 
 
 def status(db: Session) -> dict:
+    last_check, last_error = _checks.get(_seller(), (None, None))
     account = get_marketplace_accounts().get("ebay") or {}
     seller = str(account.get("accountId") or "")
     policy = db.query(EbayOfferPolicy).filter_by(account_id=seller).first()
@@ -120,7 +128,7 @@ def status(db: Session) -> dict:
             "allListings": {"enabled": bool(policy and policy.enabled),
                             "discountPercent": policy.discount_percent if policy else 10,
                             "minimumPrice": ebay_api.dollars(policy.minimum_price_cents) if policy and policy.minimum_price_cents > 1 else ""},
-            "checkIntervalMinutes": CHECK_INTERVAL_S // 60, "lastCheck": _last_check, "lastError": _last_error}
+            "checkIntervalMinutes": CHECK_INTERVAL_S // 60, "lastCheck": last_check, "lastError": last_error}
 
 
 async def preview(db: Session, selections: list[dict], discount_percent: int) -> dict:
@@ -343,9 +351,8 @@ async def send_previews(db: Session, attempt_ids: list[str]) -> dict:
 
 
 async def run_automation() -> None:
-    global _last_check, _last_error
-    _last_check = now().isoformat() + "Z"
-    _last_error = None
+    checked = now().isoformat() + "Z"
+    _checks[_seller()] = (checked, None)
     try:
         seller = account_id()
         with SessionLocal() as db:
@@ -392,9 +399,9 @@ async def run_automation() -> None:
                     db.rollback()
                     continue
     except SignInRequired as exc:
-        _last_error = str(exc)
+        _checks[_seller()] = (checked, str(exc))
     except Exception:
-        _last_error = "Could not complete the eBay offer check. Check your connection and try a preview."
+        _checks[_seller()] = (checked, "Could not complete the eBay offer check. Check your connection and try a preview.")
         log.warning("eBay offer check failed; no unconfirmed sends will be retried")
 
 
@@ -405,10 +412,9 @@ async def _timer() -> None:
         await run_automation()
 
 
-def start() -> None:
-    global _task
-    if _task and not _task.done():
-        return
+def recover_interrupted() -> None:
+    """A send still marked sending when the process starts was cut off: its
+    result is unknown, so pause automation until the seller checks Seller Hub."""
     with SessionLocal() as db:
         interrupted = db.query(EbayOfferAttempt).filter_by(state="sending").all()
         for attempt in interrupted:
@@ -418,6 +424,13 @@ def start() -> None:
             rule.enabled = False
             _pause_policy(db, rule.account_id)
         db.commit()
+
+
+def start() -> None:
+    global _task
+    if _task and not _task.done():
+        return
+    recover_interrupted()
     _task = asyncio.create_task(_timer())
 
 

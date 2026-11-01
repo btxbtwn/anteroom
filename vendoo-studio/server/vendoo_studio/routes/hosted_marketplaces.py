@@ -1,16 +1,14 @@
-"""The Marketplaces page on the web: eBay and Etsy workspaces, imports and sale alerts.
+"""The Marketplaces page on the web: eBay and Etsy workspaces, offers, imports and sale alerts.
 
 Every handler is the desktop one, running in the signed-in seller's context with
 their own eBay and Etsy tokens. eBay account changes keep the desktop's review
-then confirm steps. Nothing here lists, delists or relists, and automatic eBay
-offers are not scheduled on the web yet.
+then confirm steps, and offers keep their preview and approval steps; the web
+offer timer (``hosted_offer_scheduler``) checks approved automatic offers.
+Nothing here lists, delists or relists.
 """
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from fastapi import APIRouter
 
-from vendoo_studio.database import get_db
-from vendoo_studio.routes import ebay, etsy, marketplace_accounts
-from vendoo_studio.services import ebay_offers
+from vendoo_studio.routes import ebay, ebay_offers, etsy, marketplace_accounts
 
 router = APIRouter()
 for path, handler, methods in (
@@ -32,12 +30,13 @@ for path, handler, methods in (
     ('/api/marketplace-sales/recover', marketplace_accounts.recover_orders, ['POST']),
     ('/api/marketplace-sales/reconcile', marketplace_accounts.reconcile_sales, ['POST']),
     ('/api/marketplace-sales/{sale_id}/dismiss', marketplace_accounts.dismiss_sale, ['POST']),
+    ('/api/ebay-offers', ebay_offers.status, ['GET']),
+    ('/api/ebay-offers/preview', ebay_offers.preview, ['POST']),
+    ('/api/ebay-offers/send', ebay_offers.send, ['POST']),
+    ('/api/ebay-offers/enable', ebay_offers.enable, ['POST']),
+    ('/api/ebay-offers/pause', ebay_offers.pause_all, ['POST']),
+    ('/api/ebay-offers/enable-all', ebay_offers.enable_all, ['POST']),
+    ('/api/ebay-offers/rules/{rule_id}/pause', ebay_offers.pause, ['POST']),
+    ('/api/ebay-offers/attempts/{attempt_id}/checked', ebay_offers.resolve, ['POST']),
 ):
     router.add_api_route(path, handler, methods=methods)
-
-
-@router.get('/api/ebay-offers')
-def offer_listings(db: Session = Depends(get_db)):
-    """The seller's eBay listings for the markdown picker. The automatic-offer
-    timer's last check belongs to the Mac process, so the web leaves it out."""
-    return {**ebay_offers.status(db), 'lastCheck': None, 'lastError': None}

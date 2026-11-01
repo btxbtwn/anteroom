@@ -486,14 +486,14 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
         </ul>
       )}
 
-      {features.has("marketplace_sessions") ? <>
+      {features.has("ebay_offers") ? (
         <section aria-label="eBay offers" className={SURFACE}>
           <h2 className="mb-3 text-sm font-medium">eBay offers</h2>
           <EbayOffersSettings />
         </section>
+      ) : null}
 
-        <MarketplaceAutomations />
-      </> : null}
+      {features.has("marketplace_sessions") ? <MarketplaceAutomations /> : null}
     </WorkspacePage>
   );
 }
