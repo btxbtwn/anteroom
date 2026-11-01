@@ -52,8 +52,12 @@ jobs:
           "$RUNNER_TEMP/inventory-tests"
       - name: Test native marketplace forms
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/API/NativeFormModels.swift Tests/NativeFormTests.swift -o "$RUNNER_TEMP/native-form-tests"
+          xcrun swiftc Sources/API/Models.swift Sources/API/NativeFormModels.swift Sources/API/EbayFormModels.swift Tests/NativeFormTests.swift -o "$RUNNER_TEMP/native-form-tests"
           "$RUNNER_TEMP/native-form-tests"
+      - name: Test eBay form rules, variations and categories
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/API/NativeFormModels.swift Sources/API/EbayFormModels.swift Tests/EbayFormTests.swift -o "$RUNNER_TEMP/ebay-form-tests"
+          "$RUNNER_TEMP/ebay-form-tests"
       - name: Test analytics contract and wording
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/Analytics/AnalyticsModels.swift Tests/AnalyticsTests.swift -o "$RUNNER_TEMP/analytics-tests"
