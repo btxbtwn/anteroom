@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.628 — 2026-11-01
+
+- Menus, checkboxes and choices in the eBay tools, marketplace imports, eBay offers and the sharing and offer rules now match the rest of the app.
+
 ## 0.1.627 — 2026-11-01
 
 - Your account now lives at myanteroom.com, and sign-in emails come from signin@myanteroom.com. Sign in once more after updating.
