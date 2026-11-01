@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.618 — 2026-11-01
+
+- The web app now has the Marketplaces page: your eBay dashboard, inbox, orders, marketing, listings and research, your Etsy shop, orders and listings, imports from eBay and Etsy, and sale alerts.
+
 ## 0.1.617 — 2026-11-01
 
 - On the web, you can now connect your eBay and Etsy accounts in Settings → Connections, set eBay and Etsy listing defaults, and fill in the eBay tab with your own categories, policies and locations.

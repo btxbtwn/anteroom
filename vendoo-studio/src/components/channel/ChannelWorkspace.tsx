@@ -9,6 +9,7 @@ import { marketplaceName } from "../marketplaceNames";
 import { PageError, PageNote } from "../WorkspacePage";
 import { Input } from "../ui/input";
 import "../ebay/ebay.css";
+import { useWorkspaceRuntime } from "../../app/runtime";
 
 /** Marketplaces Studio reaches through the seller's signed-in Chrome rather than a direct API connection. */
 export type ChannelMarketplace = "poshmark" | "mercari" | "depop" | "sellwild" | "vinted";
@@ -24,6 +25,7 @@ const CHANNEL_URLS: Record<ChannelMarketplace, string> = {
 /** One marketplace's workspace, laid out like eBay's: a channel heading, its sales dashboard, then import. */
 export function ChannelWorkspace({ marketplace, onOpenListing }: { marketplace: ChannelMarketplace; onOpenListing: (id: string) => void }) {
   const name = marketplaceName(marketplace);
+  const { features } = useWorkspaceRuntime();
   return <div className="ebay-workspace" data-marketplace={marketplace}>
     <header className="ebay-page-heading">
       <div><p className="ebay-eyebrow mb-3">Sales channel</p>
@@ -34,7 +36,7 @@ export function ChannelWorkspace({ marketplace, onOpenListing }: { marketplace: 
       </div>
     </header>
     <div className="ebay-tab-content"><ChannelDashboard marketplace={marketplace} /></div>
-    <div className="ebay-tab-content"><InventoryImport key={marketplace} marketplace={marketplace} accountKey={marketplace} onOpenListing={onOpenListing} /></div>
+    {features.has("marketplace_sessions") ? <div className="ebay-tab-content"><InventoryImport key={marketplace} marketplace={marketplace} accountKey={marketplace} onOpenListing={onOpenListing} /></div> : null}
   </div>;
 }
 
