@@ -116,6 +116,15 @@ def read_state() -> dict:
             state = json.loads(state_path().read_text())
         except (OSError, json.JSONDecodeError):
             state = {}
+    return _complete(state)
+
+
+def default_state() -> dict:
+    """The state of a seller who has never refreshed sourcing."""
+    return _complete({})
+
+
+def _complete(state: dict) -> dict:
     state.setdefault("prefs", {})
     state["prefs"] = {**DEFAULT_PREFS, **{k: v for k, v in state["prefs"].items() if k in DEFAULT_PREFS}}
     state.setdefault("trend", {"terms": [], "updated_at": None, "source": None})

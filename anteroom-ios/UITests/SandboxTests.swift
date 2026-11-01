@@ -12,7 +12,7 @@ final class SandboxTests: XCTestCase {
         title.tap()
         dismissKeyboardIntroduction(app)
         let name = "Simulator draft \(UUID().uuidString.prefix(8))"
-        title.typeText(name)
+        enterListingTitle(name, into: title)
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
         app.terminate()
@@ -32,7 +32,7 @@ final class SellerInputSandboxTests: XCTestCase {
         let name = "Seller inputs \(UUID().uuidString.prefix(8))"
         title.tap()
         dismissKeyboardIntroduction(app)
-        title.typeText(name)
+        enterListingTitle(name, into: title)
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
 
@@ -234,6 +234,19 @@ final class DestinationSandboxTests: XCTestCase {
 }
 
 fileprivate extension XCTestCase {
+    @MainActor
+    func enterListingTitle(_ text: String, into field: XCUIElement) {
+        // A cold simulator can drop characters from one batched typeText
+        // event. Wait for each edit before sending the next keyboard event.
+        var entered = ""
+        for character in text {
+            field.typeText(String(character))
+            entered.append(character)
+            expectation(for: NSPredicate(format: "value == %@", entered), evaluatedWith: field)
+            waitForExpectations(timeout: 5)
+        }
+    }
+
     @MainActor
     func launchSandbox(_ app: XCUIApplication) {
         app.launch()

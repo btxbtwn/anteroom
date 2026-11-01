@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.616 — 2026-11-01
+## 0.1.617 — 2026-11-01
 
 - Keep listing-rule loading from freezing the app and make category searches use less memory.
 - Keep hosted photo loads from blocking settings and other requests.
+
+## 0.1.616 — 2026-10-31
+
+- The web app now has the Assistant. Each account has its own conversations and answers, and attached images stay private to that conversation.
 
 ## 0.1.615 — 2026-10-31
 
