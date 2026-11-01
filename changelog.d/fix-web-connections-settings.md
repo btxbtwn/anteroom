@@ -1,1 +1,0 @@
-- On the web, Settings → Connections now opens your marketplace accounts, so you can connect eBay and Etsy there. It used to show the AI provider settings instead.
