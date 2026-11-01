@@ -7,13 +7,24 @@ import SwiftUI
 struct MarketplaceFormView: View {
     @Bindable var model: ListingEditorModel
     let marketplace: String
+    /// The seller's open or closed choice for "Show more" and "See … options", per section.
+    @State private var revealOverride: [String: Bool] = [:]
 
     var body: some View {
         Group {
-            if let form = model.forms[marketplace] {
+            if let loaded = model.forms[marketplace] {
+                let form = presented(loaded)
+                if marketplace == "ebay" {
+                    ForEach(EbayFormRules.notes(varied: ebayVaried(form)), id: \.self) { note in
+                        Text(note).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
                 ForEach(sections(form), id: \.id) { section in
+                    let links = NativeReveal.links(section.fields)
                     ListingInspectorSection(section.title) {
-                        ForEach(rows(section.fields), id: \.first!.key) { row in
+                        // "See … options" sits at the top of eBay's section; "Show more" sits under the fields.
+                        ForEach(links.top, id: \.self) { revealLink($0, section: section) }
+                        ForEach(rows(section.fields.filter { revealed($0, section: section) }), id: \.first!.key) { row in
                             if row.count == 2 {
                                 HStack(alignment: .top, spacing: 12) {
                                     NativeFieldControl(model: model, marketplace: marketplace, field: row[0], form: form)
@@ -23,6 +34,7 @@ struct MarketplaceFormView: View {
                                 NativeFieldControl(model: model, marketplace: marketplace, field: row[0], form: form)
                             }
                         }
+                        ForEach(links.bottom, id: \.self) { revealLink($0, section: section) }
                     }
                 }
                 if model.categoryChanged(marketplace) {
@@ -63,12 +75,14 @@ struct MarketplaceFormView: View {
         return result
     }
 
-    /// Two half-width fields in a row sit side by side, as on the page.
+    /// Two short fields in a row sit side by side, as on the page. A phone has
+    /// room for two, so quarter-width fields pair like half-width ones.
     private func rows(_ fields: [NativeField]) -> [[NativeField]] {
         var result: [[NativeField]] = []
         var index = 0
         while index < fields.count {
-            if fields[index].half, index + 1 < fields.count, fields[index + 1].half {
+            if fields[index].half || fields[index].quarter, index + 1 < fields.count,
+               fields[index + 1].half || fields[index + 1].quarter {
                 result.append([fields[index], fields[index + 1]])
                 index += 2
             } else {
@@ -79,9 +93,48 @@ struct MarketplaceFormView: View {
         return result
     }
 
-    /// The desktop's reveal rules for Poshmark and Depop (nativeFormStability.ts).
+    /// Rows behind a link show once it is open; a saved value opens it.
+    private func revealed(_ field: NativeField, section: FormSection) -> Bool {
+        guard let reveal = field.reveal else { return true }
+        return revealOpen(reveal, section: section)
+    }
+
+    private func revealOpen(_ reveal: String, section: FormSection) -> Bool {
+        if let choice = revealOverride["\(section.title)|\(reveal)"] { return choice }
+        return section.fields.contains { $0.reveal == reveal && NativeReveal.opens(model.value($0)) }
+    }
+
+    private func revealLink(_ reveal: String, section: FormSection) -> some View {
+        let open = revealOpen(reveal, section: section)
+        return Button(NativeReveal.title(reveal, open: open)) {
+            revealOverride["\(section.title)|\(reveal)"] = !open
+        }
+        .font(.subheadline)
+        .frame(minHeight: 44)
+        .accessibilityValue(open ? "Expanded" : "Collapsed")
+    }
+
+    /// eBay's format, duration and quantity follow the current format and variations.
+    private func presented(_ form: NativeForm) -> NativeForm {
+        guard marketplace == "ebay" else { return form }
+        let format = shown("ebay_specifics.listingFormat", form) == "AUCTION" ? "AUCTION" : "FIXED_PRICE"
+        let varied = ebayVaried(form)
+        return NativeForm(marketplace: form.marketplace, categoryID: form.categoryID,
+                          fields: form.fields.map { EbayFormRules.present($0, format: format, varied: varied) })
+    }
+
+    private func ebayVaried(_ form: NativeForm) -> Bool {
+        let field = form.fields.first { $0.key == "ebay_specifics.variations" }
+        let value = field.map { model.value($0) } ?? model.current(at: "ebay_specifics.variations")
+        return !EbayVariations(value).rows.isEmpty
+    }
+
+    /// The desktop's reveal rules (nativeFormStability.ts).
     private func visible(_ field: NativeField, _ form: NativeForm) -> Bool {
         if field.categorySpecific && model.categoryChanged(marketplace) { return false }
+        if marketplace == "ebay" {
+            return EbayFormRules.visible(field.key, shown: { shown($0, form) }, varied: ebayVaried(form))
+        }
         switch field.key {
         case "depop_specifics.worldwideShipping.price":
             return shown("depop_specifics.worldwideShipping.enabled", form) == "true"
@@ -168,8 +221,15 @@ private struct NativeFieldControl: View {
             }
         case "datetime-local":
             dateControl
+        case "variations":
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.footnote.weight(.medium)).foregroundStyle(.secondary)
+                EbayVariationsEditor(model: model, field: field)
+            }
         default:
-            if marketplace == "poshmark" && field.key == "poshmark_specifics.earnings" {
+            if marketplace == "ebay", let pathKey = EbayFormRules.categoryPathKeys[field.key], !field.locked {
+                EbayCategoryControl(model: model, field: field, title: title, pathKey: pathKey)
+            } else if marketplace == "poshmark" && field.key == "poshmark_specifics.earnings" {
                 readOnly(earnings)
             } else if field.locked {
                 readOnly(current?.text ?? "")
@@ -180,7 +240,8 @@ private struct NativeFieldControl: View {
             } else if field.inputType == "number" {
                 WorkspaceField(title) {
                     TextField(field.placeholder ?? "0", text: Binding(get: { current?.text ?? "" }, set: { setNumber($0) }))
-                        .keyboardType(.decimalPad)
+                        // A whole-number field ("Quantity in lot") gets the number pad.
+                        .keyboardType(field.step == 1 ? .numberPad : .decimalPad)
                 }
             } else {
                 WorkspaceField(title) {

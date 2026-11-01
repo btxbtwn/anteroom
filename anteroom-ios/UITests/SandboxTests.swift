@@ -286,6 +286,53 @@ final class AssistantSandboxTests: XCTestCase {
     }
 }
 
+/// The eBay tab draws eBay's own form: links that open more fields, offer
+/// fields that follow Allow offers, and eBay's category tree.
+@MainActor
+final class EbayFormSandboxTests: XCTestCase {
+    func testEbayFormRevealsFieldsAndBrowsesCategories() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        let listing = app.staticTexts["Levi's M Blue Cotton Crew Neck T-Shirt"].firstMatch
+        XCTAssertTrue(listing.waitForExistence(timeout: 30))
+        listing.tap()
+        let formMenu = app.buttons["Form, General"]
+        XCTAssertTrue(formMenu.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: formMenu)
+        waitForExpectations(timeout: 30)
+        formMenu.tap()
+        let ebay = app.buttons["eBay"].firstMatch
+        XCTAssertTrue(ebay.waitForExistence(timeout: 10))
+        ebay.tap()
+
+        let titleOptions = app.buttons["See title options"]
+        XCTAssertTrue(titleOptions.waitForExistence(timeout: 60), "eBay's title section offers its options link")
+        XCTAssertFalse(app.textFields["Subtitle"].exists, "Subtitle waits behind See title options")
+        keep(app, "eBay form")
+        titleOptions.tap()
+        XCTAssertTrue(app.textFields["Subtitle"].waitForExistence(timeout: 10), "See title options shows Subtitle")
+
+        let category = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Category'")).firstMatch
+        XCTAssertTrue(category.waitForExistence(timeout: 10))
+        category.tap()
+        let root = app.buttons["Clothing, Shoes & Accessories"].firstMatch
+        XCTAssertTrue(root.waitForExistence(timeout: 60), "The category sheet lists eBay's tree")
+        root.tap()
+        XCTAssertTrue(app.buttons["Men"].firstMatch.waitForExistence(timeout: 10), "Categories open one level at a time")
+        keep(app, "eBay categories")
+        app.buttons["Cancel"].firstMatch.tap()
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
 fileprivate extension XCTestCase {
     @MainActor
     func enterListingTitle(_ text: String, app: XCUIApplication) {
