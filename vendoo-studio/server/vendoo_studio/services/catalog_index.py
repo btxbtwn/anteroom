@@ -855,7 +855,13 @@ def _lexical_fallback(
         q = _leaf_query(db)
         if marketplace:
             q = q.filter_by(marketplace=marketplace)
-        for node in q.all():
+        # Ranking needs scalar columns, not tens of thousands of tracked ORM
+        # objects. Stream them so cold-index fallback has bounded row memory.
+        nodes = q.with_entities(
+            CategoryTreeNode.marketplace, CategoryTreeNode.category_id,
+            CategoryTreeNode.path, CategoryTreeNode.label,
+        )
+        for node in nodes.yield_per(1000):
             if path_prefix and not node.path.startswith(path_prefix.rstrip() + " >") and node.path != path_prefix:
                 continue
             score = _whole_word_score(node.path or "", tokens) if tokens else 0
