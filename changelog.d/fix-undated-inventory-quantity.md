@@ -1,0 +1,1 @@
+- Keep stock counts working when an older saved listing has no date.

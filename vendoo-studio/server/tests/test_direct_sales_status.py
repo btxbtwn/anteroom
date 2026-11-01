@@ -431,3 +431,15 @@ def test_real_orders_are_never_capped(env):
     payload = inventory_analytics(env.db, range_id="all")
     assert payload["sales"]["count"] == 2
     assert payload["sales"]["revenue"] == 50
+
+
+@pytest.mark.parametrize("has_sale", [False, True])
+def test_undated_revision_still_establishes_quantity(env, has_sale):
+    from vendoo_studio.models.listing import ListingRevision
+    from vendoo_studio.services.item_status import _quantities
+
+    item(env.db, "undated", quantity=3)
+    env.db.query(ListingRevision).filter_by(conversation_id="undated").update({"created_at": None})
+    env.db.commit()
+    first_sales = {"undated": datetime.now(UTC)} if has_sale else {}
+    assert _quantities(env.db, {"undated"}, first_sales) == {"undated": 3}

@@ -80,7 +80,8 @@ def _quantities(db: Session, conv_ids: set[str] | None, first_sales: dict[str, d
         if number < 1:
             return
         first_sale = first_sales.get(conv_id)
-        if first_sale is None or _time(created_at) <= first_sale or number > best.get(conv_id, 0):
+        when = _time(created_at)
+        if first_sale is None or (when is not None and when <= first_sale) or number > best.get(conv_id, 0):
             best[conv_id] = number
 
     # This scalar is recorded on each immutable revision. JSON extraction here
