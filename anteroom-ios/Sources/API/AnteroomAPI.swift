@@ -277,6 +277,15 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("POST", "api/similar-items/merge", json: ["keep_id": keep, "merge_id": merge]))
     }
 
+    func labelPreferences() async throws -> LabelPreferences {
+        try await decode(request("GET", "api/settings/ui"))
+    }
+
+    /// Sends only the label keys being changed.
+    func updateLabelPreferences(_ change: [String: JSONValue]) async throws -> LabelPreferences {
+        try await decode(request("PUT", "api/settings/ui", json: change))
+    }
+
     // MARK: Analytics
 
     func analytics(range: String, start: Date? = nil, end: Date? = nil) async throws -> InventoryAnalytics {

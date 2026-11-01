@@ -98,6 +98,7 @@ struct ListingsSettingsView: View {
                 loadingRow("stale", "Loading")
             }
             errorRow("stale")
+            NavigationLink("Labels") { LabelsSettingsView(api: api) }
         } header: {
             Text("Inventory")
         } footer: {
