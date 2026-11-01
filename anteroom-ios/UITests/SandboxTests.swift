@@ -6,7 +6,7 @@ final class SandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        app.launch()
+        launchSandbox(app)
         let title = openNewListing(app)
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         title.tap()
@@ -16,7 +16,7 @@ final class SandboxTests: XCTestCase {
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
         app.terminate()
-        app.launch()
+        launchSandbox(app)
         XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 30))
     }
 }
@@ -27,7 +27,7 @@ final class SellerInputSandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        app.launch()
+        launchSandbox(app)
         let title = openNewListing(app)
         let name = "Seller inputs \(UUID().uuidString.prefix(8))"
         title.tap()
@@ -61,7 +61,7 @@ final class SellerInputSandboxTests: XCTestCase {
         waitForExpectations(timeout: 15)
 
         app.terminate()
-        app.launch()
+        launchSandbox(app)
         let row = app.staticTexts[name]
         XCTAssertTrue(row.waitForExistence(timeout: 30))
         row.tap()
@@ -136,7 +136,7 @@ final class AppearanceSandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        app.launch()
+        launchSandbox(app)
         for choice in ["Light", "Dark", "System"] {
             openSettings(app)
             let picker = app.buttons["appearance-picker"]
@@ -149,7 +149,7 @@ final class AppearanceSandboxTests: XCTestCase {
             screenshot.lifetime = .keepAlways
             add(screenshot)
             app.terminate()
-            app.launch()
+            launchSandbox(app)
             openSettings(app)
             waitForValue(choice, picker: app.buttons["appearance-picker"])
         }
@@ -181,7 +181,7 @@ final class DestinationSandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        app.launch()
+        launchSandbox(app)
 
         let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'All,'")).firstMatch
         XCTAssertTrue(allTab.waitForExistence(timeout: 30), "Inventory shows its status tabs")
@@ -234,6 +234,15 @@ final class DestinationSandboxTests: XCTestCase {
 }
 
 fileprivate extension XCTestCase {
+    @MainActor
+    func launchSandbox(_ app: XCUIApplication) {
+        app.launch()
+        // launch() can return while the disposable account is still signing
+        // in on a cold CI simulator. Screen waits start at workspace readiness.
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 90),
+                      "Sandbox sign-in must finish before interacting with the workspace")
+    }
+
     @MainActor
     func openNewListing(_ app: XCUIApplication) -> XCUIElement {
         // A vertical TextField can appear as either native input type.
