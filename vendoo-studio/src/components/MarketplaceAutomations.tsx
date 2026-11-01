@@ -140,7 +140,7 @@ function Details({ automation, onSaveListings, busy }: {
   const error = coverage.error || activity.error || saveFloors.error || settle.error;
   return (
     <div className="mt-3 flex flex-col gap-3 text-sm">
-      {error ? <p role="alert" className="text-xs text-destructive">{error.message}</p> : null}
+      {error ? <p role="alert" className="text-xs text-destructive-foreground">{error.message}</p> : null}
       <div className="rounded-lg border border-border/60 p-3">
         <p className="font-medium">Listings {coverage.data ? `· ${coverage.data.included} covered` : ""}</p>
         {automation.action === "offer" ? <p className="text-xs text-muted-foreground">Individual minimums are optional and can raise the rule's minimum. Clear one to use the rule's minimum.</p> : null}
@@ -241,7 +241,7 @@ export function MarketplaceAutomations() {
         Scheduled Poshmark sharing and automatic offers to likers. Each one stays off until you turn it on, and any edit turns it off again.
         A round stops and turns itself off at the marketplace's first limit, browser check or unconfirmed result. These never list, publish or delist.
       </p>
-      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive-foreground">{error}</p> : null}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" disabled={busy} onClick={() => setForm(emptyPromotionForm("share"))}>New sharing schedule</Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => setForm(emptyPromotionForm("offer"))}>New offer rule</Button>

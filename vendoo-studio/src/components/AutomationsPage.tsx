@@ -384,7 +384,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
             {issues.map((issue) => <li key={issue}>{issue}</li>)}
           </ul>
         ) : null}
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {error ? <p className="text-sm text-destructive-foreground">{error}</p> : null}
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" disabled={showPreview.isPending} onClick={() => showPreview.mutate()}>
             {showPreview.isPending ? "Checking…" : "Preview"}

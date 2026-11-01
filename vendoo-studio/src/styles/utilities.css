@@ -9,8 +9,8 @@
 .text-xs { font-size: var(--text-xs); }
 .text-sm { font-size: var(--text-sm); }
 .text-muted { color: var(--color-text-muted); }
-.text-error { color: var(--color-tomato); }
-.text-success { color: var(--color-success); }
+.text-error { color: var(--destructive-foreground); }
+.text-success { color: var(--success-foreground); }
 .text-cobalt { color: var(--color-cobalt); }
 .font-mono { font-family: var(--font-mono); }
 .font-serif { font-family: var(--font-serif); }

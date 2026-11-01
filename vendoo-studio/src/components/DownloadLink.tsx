@@ -29,6 +29,6 @@ export function DownloadLink({ href, filename, className, children }: {
           setPending(false);
         }
       }}>{children}</a>
-    {error && <span role="alert" className="text-sm text-destructive">{error}</span>}
+    {error && <span role="alert" className="text-sm text-destructive-foreground">{error}</span>}
   </>;
 }

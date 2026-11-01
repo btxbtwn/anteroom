@@ -412,7 +412,7 @@ export function FillLogPanel({
       )}
 
       {vendooOn && draftQuery.error && (
-        <div className="text-xs text-error">{(draftQuery.error as Error).message || "Could not read the Vendoo draft"}</div>
+        <div className="text-xs text-destructive-foreground">{(draftQuery.error as Error).message || "Could not read the Vendoo draft"}</div>
       )}
       {draft?.api_error && <div className="pr-meta">API: {draft.api_error}</div>}
 

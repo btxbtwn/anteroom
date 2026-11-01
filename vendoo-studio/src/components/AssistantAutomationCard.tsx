@@ -55,7 +55,7 @@ export function AssistantAutomationCard({ message, automation, onSettled }: Prop
           <Button size="sm" variant="outline" disabled={busy} onClick={() => dismiss.mutate()}>Dismiss</Button>
         </div>
       ) : null}
-      {failure ? <p className="mt-2 text-destructive text-sm">{failure.message}</p> : null}
+      {failure ? <p className="mt-2 text-destructive-foreground text-sm">{failure.message}</p> : null}
     </section>
   );
 }
