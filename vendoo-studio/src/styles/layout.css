@@ -614,6 +614,20 @@
   padding-bottom: 4.5rem;
 }
 
+/* With the chat open and room for both, the form steps aside instead of
+   running under the chat. Minimized, the form gets the whole width back. On
+   narrower windows the open chat still floats over the form. */
+.listing-form-area.has-chat {
+  container: listing-form / inline-size;
+}
+
+@container listing-form (min-width: 60rem) {
+  .listing-form-area.has-chat:has(> .listing-chat[data-open]) .marketplace-pane {
+    /* !important: the pane's px-3 utility sits in a later cascade layer. */
+    padding-right: calc(26rem + 2rem) !important;
+  }
+}
+
 .listing-chat {
   position: absolute;
   right: 1rem;
