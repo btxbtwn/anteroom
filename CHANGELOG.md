@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.641 — 2026-11-01
+
+- eBay draft repair no longer repeats an optional-field value that already failed or sends duplicate repairs for the same field.
+
 ## 0.1.640 — 2026-11-01
 
 - Sourcing now works on the web: your budget, ZIP and other settings, and the boxes worth buying, are kept with your account.
