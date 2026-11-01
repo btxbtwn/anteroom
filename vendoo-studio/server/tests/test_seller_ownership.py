@@ -17,6 +17,9 @@ from vendoo_studio.models.ownership import LOCAL_USER_ID, SellerOwned
 from vendoo_studio.services import backups, schema_migrations
 
 PREVIOUS_REVISION = "3ec056c582ed"
+# Columns later revisions add to existing rows, with the value they start with.
+ADDED_LATER = {"listing_revisions": {"inventory_quantity": None},
+               "jobs": {"operation_token_hash": None, "operation_expires_at": None}}
 CURRENT_REVISION = schema_migrations.head_revision()
 SHARED_TABLES = {"category_trees", "category_tree_nodes"}
 
@@ -114,7 +117,7 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
     after = read_rows(engine, names)
     for name, rows in before.items():
         assert after[name] == [dict(row, user_id=LOCAL_USER_ID,
-                                   **({"inventory_quantity": None} if name == "listing_revisions" else {})) for row in rows]
+                                   **ADDED_LATER.get(name, {})) for row in rows]
 
     inspector = sa.inspect(engine)
     for table in Base.metadata.tables.values():
@@ -165,7 +168,7 @@ def test_pre_alembic_database_gets_ownership_without_losing_rows(migration_engin
     assert schema_migrations.ensure_schema(engine) == CURRENT_REVISION
     for name, rows in before.items():
         assert read_rows(engine, [name])[name] == [dict(row, user_id=LOCAL_USER_ID,
-            **({"inventory_quantity": None} if name == "listing_revisions" else {})) for row in rows]
+            **ADDED_LATER.get(name, {})) for row in rows]
     assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION
     assert len(backups.list_snapshots(backups.BACKUPS_DIR)) == 1
 

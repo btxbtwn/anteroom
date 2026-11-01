@@ -30,5 +30,8 @@ test("Poshmark, Mercari and Depop offer only Save draft, and ask for Chrome firs
     const pane = page.locator(`[data-marketplace-pane="${name.toLowerCase()}"]`);
     await expect(pane.getByText("Connect Chrome to save drafts.")).toBeVisible();
     await expect(pane.getByRole("button", { name: "Save draft" })).toHaveCount(0);
-    await expect(pane.getByRole("button", { name: "List…" })).toHaveCount(0);  }
+    await expect(pane.getByRole("button", { name: "List…" })).toHaveCount(0);
+    // Let this form's reads finish before opening the next one.
+    await page.waitForLoadState("networkidle");
+  }
 });

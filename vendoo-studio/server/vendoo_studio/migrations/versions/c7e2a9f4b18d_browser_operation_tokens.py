@@ -17,11 +17,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table('jobs') as batch:
-        batch.add_column(sa.Column('operation_token_hash', sa.String(length=64), nullable=True))
-        batch.add_column(sa.Column('operation_expires_at', sa.DateTime(), nullable=True))
-        batch.create_index('ix_jobs_operation_token_hash', ['operation_token_hash'], unique=True)
     bind = op.get_bind()
+    # Adopting a pre-migration Mac database runs this on tables create_all already made current.
+    inspector = sa.inspect(bind)
+    columns = {column['name'] for column in inspector.get_columns('jobs')}
+    indexes = {index['name'] for index in inspector.get_indexes('jobs')}
+    with op.batch_alter_table('jobs') as batch:
+        if 'operation_token_hash' not in columns:
+            batch.add_column(sa.Column('operation_token_hash', sa.String(length=64), nullable=True))
+        if 'operation_expires_at' not in columns:
+            batch.add_column(sa.Column('operation_expires_at', sa.DateTime(), nullable=True))
+        if 'ix_jobs_operation_token_hash' not in indexes:
+            batch.create_index('ix_jobs_operation_token_hash', ['operation_token_hash'], unique=True)
     if bind.dialect.name != 'postgresql':
         return
     # The extension fetches photos and reports the result with the operation's
