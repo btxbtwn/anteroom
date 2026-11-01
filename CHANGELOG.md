@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.625 — 2026-11-01
+
+- eBay offers now work on the web: preview and send offers to interested buyers, and turn on automatic offers, from the eBay Offers tab or Automations.
+
 ## 0.1.624 — 2026-11-01
 
 - Changes you make on the web, the Mac app or your iPhone now show up on your other devices right away, without refreshing.

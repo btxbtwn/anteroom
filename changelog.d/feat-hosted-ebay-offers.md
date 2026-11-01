@@ -1,1 +1,0 @@
-- eBay offers now work on the web: preview and send offers to interested buyers, and turn on automatic offers, from the eBay Offers tab or Automations.
