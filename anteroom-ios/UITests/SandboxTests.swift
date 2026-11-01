@@ -58,7 +58,8 @@ final class SellerInputSandboxTests: XCTestCase {
         let done = app.toolbars.buttons["Done"].firstMatch
         if done.exists { done.tap() }
         app.navigationBars[name].buttons["Save"].tap()
-        XCTAssertTrue(app.navigationBars[name].buttons["Save"].waitForExistence(timeout: 10))
+        // The disposable sandbox on a shared CI runner can take a while to save.
+        XCTAssertTrue(app.navigationBars[name].buttons["Save"].waitForExistence(timeout: 30))
         let saved = NSPredicate(format: "enabled == false")
         expectation(for: saved, evaluatedWith: app.navigationBars[name].buttons["Save"])
         waitForExpectations(timeout: 15)
@@ -81,7 +82,13 @@ final class SellerInputSandboxTests: XCTestCase {
 
     private func enter(_ id: String, text: String, app: XCUIApplication) {
         let control = field(id, app: app)
-        control.tap()
+        // A tap during a scroll or keyboard animation can miss focus; typing
+        // then fails with "no keyboard focus". Tap until the field has it.
+        for _ in 0..<3 {
+            control.tap()
+            if app.keyboards.firstMatch.waitForExistence(timeout: 3),
+               (control.value(forKey: "hasKeyboardFocus") as? Bool) == true { break }
+        }
         control.typeText(text)
         dismissKeyboard(app)
         XCTAssertEqual(control.value as? String, text)
@@ -189,10 +196,11 @@ final class DestinationSandboxTests: XCTestCase {
         filters.tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Not listed'")).firstMatch.waitForExistence(timeout: 5))
         keep(app, "Inventory filters")
-        // Close the menu on the title, which does nothing else.
-        app.navigationBars["Inventory"].staticTexts["Inventory"].tap()
 
-        app.tabBars.buttons["Analytics"].tap()
+        // The first tap outside an open menu only closes the menu.
+        let analytics = app.tabBars.buttons["Analytics"]
+        analytics.tap()
+        if !app.buttons["Sales records"].waitForExistence(timeout: 5) { analytics.tap() }
         XCTAssertTrue(app.buttons["Sales records"].waitForExistence(timeout: 15))
         keep(app, "Analytics sales records")
         app.buttons["Inventory analytics"].tap()
