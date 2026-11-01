@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.645 — 2026-11-01
+
+- Load listing photos faster on the web and iPhone, and stop them reloading when you scroll back.
+
 ## 0.1.644 — 2026-11-01
 
 - The web app no longer stalls with "Request failed: 500" when a listing with many photos opens

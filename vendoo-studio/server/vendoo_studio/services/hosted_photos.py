@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import io
 import os
+import threading
 import uuid
 import warnings
-import threading
+from collections import OrderedDict
 
 import httpx
 from fastapi import HTTPException
@@ -90,3 +91,42 @@ def storage_call(method: str, key: str, token: str, data: bytes | None = None) -
     if not response.is_success:
         raise HTTPException(503, 'Could not upload or load the photo. Please try again.')
     return response.content
+
+
+# Made thumbnails, newest last. Stored photos never change in place (an edit
+# writes a new key), so a kept thumbnail stays right. Covers are a few KB, so
+# this holds thousands while bounding memory on the shared API.
+THUMB_CACHE_BYTES = 64 * 1024 * 1024
+_thumbs: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
+_thumbs_bytes = 0
+_thumbs_lock = threading.Lock()
+
+
+def thumbnail(key: str, version: str | None, size: int, token: str) -> bytes:
+    """A JPEG at most ``size`` px on a side, made once per stored photo.
+
+    The caller has already checked that the seller owns ``key``.
+    """
+    global _thumbs_bytes
+    entry = (key, version or '', size)
+    with _thumbs_lock:
+        kept = _thumbs.get(entry)
+        if kept is not None:
+            _thumbs.move_to_end(entry)
+            return kept
+    data = storage_call('GET', key, token)
+    with _decode_slot, Image.open(io.BytesIO(data)) as image:
+        # Decode the JPEG at a fraction of its size; the cover is 96px.
+        image.draft('RGB', (size, size))
+        image.thumbnail((size, size))
+        output = io.BytesIO()
+        image.convert('RGB').save(output, 'JPEG', quality=82)
+    made = output.getvalue()
+    with _thumbs_lock:
+        if entry not in _thumbs:
+            _thumbs[entry] = made
+            _thumbs_bytes += len(made)
+        while _thumbs_bytes > THUMB_CACHE_BYTES:
+            _old, dropped = _thumbs.popitem(last=False)
+            _thumbs_bytes -= len(dropped)
+    return made
