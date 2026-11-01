@@ -4,6 +4,7 @@ import { api } from "../../api/client";
 import type { EbayRow } from "../../api/ebay";
 import { PageError, PageSection } from "../WorkspacePage";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { ListingPicker, RemoteList } from "./shared";
 import { ActionForm } from "./ActionForm";
 import { WorkspaceTabs } from "./WorkspaceTabs";
@@ -101,7 +102,7 @@ function AudiencePicker({ selected, onChange }: { selected: string[]; onChange: 
     {audiences.error ? <PageError message={audiences.error.message} /> : null}
     {audiences.isPending ? <p className="text-sm">Loading audiences…</p> : null}
     <div className="ebay-selection-list">{audiences.data?.rows.map((row) => <label key={row.id}>
-      <input type="checkbox" checked={selected.includes(row.id)} onChange={(event) => onChange(event.target.checked ? [...selected, row.id] : selected.filter((id) => id !== row.id))} />{row.title}
+      <Checkbox className="mt-0.5" checked={selected.includes(row.id)} onCheckedChange={(next) => onChange(next === true ? [...selected, row.id] : selected.filter((id) => id !== row.id))} />{row.title}
     </label>)}</div>
     {offset > 0 || audiences.data?.nextOffset != null ? <div className="ebay-pagination"><Button variant="outline" disabled={!offset} onClick={() => setOffset(Math.max(0, offset - 25))}>Previous</Button>
       <Button variant="outline" disabled={audiences.data?.nextOffset == null} onClick={() => setOffset(audiences.data!.nextOffset!)}>Next</Button></div> : null}
