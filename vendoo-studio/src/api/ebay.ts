@@ -42,19 +42,3 @@ export interface EbayListing {
 }
 
 export type EbayPayload = Record<string, unknown>;
-
-/** The policies and locations on the connected eBay account, by id and name. */
-export interface EbayListingOptions {
-  fulfillment: { id: string; name: string }[];
-  payment: { id: string; name: string }[];
-  return: { id: string; name: string }[];
-  location: { id: string; name: string }[];
-}
-
-/** What new eBay listings use when the account has more than one choice. */
-export interface EbayListingDefaults {
-  fulfillment_policy_id?: string;
-  payment_policy_id?: string;
-  return_policy_id?: string;
-  merchant_location_key?: string;
-}

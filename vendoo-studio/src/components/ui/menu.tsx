@@ -2,8 +2,6 @@
 // (c) 2026 T3 Tools Inc. Adapted only where it imported T3-specific modules.
 
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
-import { CheckIcon, ChevronRightIcon } from "lucide-react";
-import type * as React from "react";
 
 import { cn } from "../../lib/utils";
 import { buttonVariants } from "./button";
@@ -107,19 +105,6 @@ function MenuItem({
   );
 }
 
-function MenuItemLabel({ className, ...props }: React.ComponentProps<"span">) {
-  return (
-    <span
-      data-slot="menu-item-label"
-      className={cn(
-        "min-w-0 truncate in-data-[density=touch]:[text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:in-data-[density=touch]:py-[0.5em]",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
 function MenuCheckboxItem({
   className,
   children,
@@ -202,23 +187,6 @@ function MenuRadioItem({
   );
 }
 
-function MenuRadioItemIndicator({
-  className,
-  children,
-  ...props
-}: MenuPrimitive.RadioItemIndicator.Props) {
-  return (
-    <MenuPrimitive.RadioItemIndicator
-      aria-hidden
-      className={cn("flex shrink-0", className)}
-      data-slot="menu-radio-item-indicator"
-      {...props}
-    >
-      {children ?? <CheckIcon className="size-3.5" />}
-    </MenuPrimitive.RadioItemIndicator>
-  );
-}
-
 function MenuGroupLabel({
   className,
   inset,
@@ -249,109 +217,25 @@ function MenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props) {
   );
 }
 
-function MenuShortcut({ className, ...props }: React.ComponentProps<"kbd">) {
-  return (
-    <kbd
-      className={cn(
-        "ms-auto font-medium font-sans text-secondary-label text-xs tracking-widest",
-        className,
-      )}
-      data-slot="menu-shortcut"
-      {...props}
-    />
-  );
-}
-
-function MenuSub(props: MenuPrimitive.SubmenuRoot.Props) {
-  return <MenuPrimitive.SubmenuRoot data-slot="menu-sub" {...props} />;
-}
-
-function MenuSubTrigger({
-  className,
-  inset,
-  density = "default",
-  children,
-  ...props
-}: MenuPrimitive.SubmenuTrigger.Props & {
-  inset?: boolean;
-  density?: "default" | "touch";
-}) {
-  return (
-    <MenuPrimitive.SubmenuTrigger
-      className={cn(
-        // Scoped away from the last child because the chevron is also a direct
-        // svg — on a sub-trigger with no leading icon it is the only one, and
-        // these rules would take away its `ms-auto` alignment.
-        "[&>svg:not(:last-child)]:-mx-0.5 flex min-h-8 cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:cursor-not-allowed data-disabled:pointer-events-none data-highlighted:bg-accent data-popup-open:bg-accent data-inset:ps-8 data-highlighted:text-accent-foreground data-popup-open:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 pointer-coarse:min-h-11 sm:pointer-coarse:min-h-11 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground [&>svg:not(:last-child):not([class*='opacity-'])]:opacity-80 [&_svg]:pointer-events-none [&>svg]:shrink-0",
-        density === "touch" && "min-h-10 sm:min-h-10",
-        className,
-      )}
-      data-density={density}
-      data-inset={inset}
-      data-slot="menu-sub-trigger"
-      {...props}
-    >
-      {children}
-      <ChevronRightIcon className="-me-0.5 ms-auto opacity-80" />
-    </MenuPrimitive.SubmenuTrigger>
-  );
-}
-
-function MenuSubPopup({
-  className,
-  sideOffset = 0,
-  alignOffset,
-  align = "start",
-  ...props
-}: MenuPrimitive.Popup.Props & {
-  align?: MenuPrimitive.Positioner.Props["align"];
-  sideOffset?: MenuPrimitive.Positioner.Props["sideOffset"];
-  alignOffset?: MenuPrimitive.Positioner.Props["alignOffset"];
-}) {
-  const defaultAlignOffset = align !== "center" ? -5 : undefined;
-
-  return (
-    <MenuPopup
-      align={align}
-      alignOffset={alignOffset ?? defaultAlignOffset}
-      className={className}
-      data-slot="menu-sub-content"
-      side="inline-end"
-      sideOffset={sideOffset}
-      {...props}
-    />
-  );
-}
-
 export {
   Menu,
-  Menu as DropdownMenu,
+
   MenuTrigger,
-  MenuTrigger as DropdownMenuTrigger,
+
   MenuPopup,
-  MenuPopup as DropdownMenuContent,
+
   MenuGroup,
-  MenuGroup as DropdownMenuGroup,
+
   MenuItem,
-  MenuItemLabel,
-  MenuItem as DropdownMenuItem,
+
   MenuCheckboxItem,
-  MenuCheckboxItem as DropdownMenuCheckboxItem,
+
   MenuRadioGroup,
-  MenuRadioGroup as DropdownMenuRadioGroup,
+
   MenuRadioItem,
-  MenuRadioItem as DropdownMenuRadioItem,
-  MenuRadioItemIndicator,
+
   MenuGroupLabel,
-  MenuGroupLabel as DropdownMenuLabel,
+
   MenuSeparator,
-  MenuSeparator as DropdownMenuSeparator,
-  MenuShortcut,
-  MenuShortcut as DropdownMenuShortcut,
-  MenuSub,
-  MenuSub as DropdownMenuSub,
-  MenuSubTrigger,
-  MenuSubTrigger as DropdownMenuSubTrigger,
-  MenuSubPopup,
-  MenuSubPopup as DropdownMenuSubContent,
+
 };

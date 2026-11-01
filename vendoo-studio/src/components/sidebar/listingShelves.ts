@@ -1,5 +1,3 @@
-const SETTLED_SHELF_KEY = "vendoo-studio.settled-expanded";
-
 export type Listing = {
   id: string;
   title?: string | null;
@@ -27,24 +25,6 @@ export type Listing = {
   unsent_edits?: boolean;
   etsy_eligible?: boolean;
 };
-
-export function readLegacySettledExpanded(): boolean | null {
-  try {
-    const raw = localStorage.getItem(SETTLED_SHELF_KEY);
-    if (raw === null) return null;
-    return raw === "true";
-  } catch {
-    return null;
-  }
-}
-
-export function clearLegacySettledExpanded() {
-  try {
-    localStorage.removeItem(SETTLED_SHELF_KEY);
-  } catch {
-    /* ignore quota / private-mode failures */
-  }
-}
 
 function timestampMs(value?: string | null): number {
   if (!value) return 0;

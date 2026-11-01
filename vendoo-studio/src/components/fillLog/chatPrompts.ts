@@ -50,36 +50,6 @@ function optionsLine(
   return `\n  Options (use only these, verbatim): ${shown.join(" | ")}${rest > 0 ? ` (+${rest} more)` : ""}`;
 }
 
-export function leftoverFieldPrompt(
-  listing: Record<string, unknown> | undefined,
-  entry: FillLogEntry,
-  currentValue: string,
-  dropdowns?: DropdownForms,
-): string {
-  const title = listingTitle(listing);
-  const current = String(currentValue || entry.value_preview || "").trim() || "(empty)";
-  const reason = String(entry.reason || "").trim() || "(none)";
-  return `Fix this Vendoo field for listing "${title}".
-
-Listing: ${title}
-Marketplace: ${entry.marketplace}
-Field: ${entry.field}${optionsLine(dropdowns, entry.marketplace, entry.field)}
-Current value: ${current}
-Status: ${leftoverStatusLabel(entry)}
-Failure reason: ${reason}
-
-Generate a value for ONLY this field from the photos and current listing. Do not rewrite unrelated fields.
-
-${OPTIONS_RULE}
-
-Reply with JSON in this exact shape:
-
-\`\`\`json
-{"missing_fields":[{"marketplace":"${entry.marketplace}","field":"${entry.field}","value":"..."}]}
-\`\`\`
-`;
-}
-
 export function emptyFieldsPrompt(
   forms: DraftForm[],
   fromDraft: boolean,

@@ -91,7 +91,6 @@ function missingFieldsJsonExamples(fields: BlockerField[]): string {
   return examples.join(",") || '{"marketplace":"ebay","field":"Brand","value":"..."}';
 }
 
-
 function fieldLines(fields: BlockerField[]): string {
   return fields
     .map((item) => {
@@ -207,90 +206,6 @@ Prefer updating listing values with JSON in this shape:
 
 Use marketplace ids and field names from the error. Do not publish.
 `;
-}
-
-/** Specialized Ask-chat prompt for completion pauses (gaps, shipping, category, optionals). */
-export function completionBlockerPrompt(
-  errorText: string,
-  listingTitle?: string,
-  blockerFields?: BlockerField[] | null,
-  forms?: DropdownForms,
-): string {
-  const title = listingLabel(listingTitle);
-  const detail = String(errorText || "").trim() || "(no details)";
-  const fields = (() => {
-    const fromPayload = compactBlockerFields(blockerFields, forms);
-    return fromPayload.length
-      ? fromPayload
-      : compactBlockerFields(parseFieldsFromErrorText(detail), forms);
-  })();
-  const lower = detail.toLowerCase();
-
-  if (/packaged shipping|shipping weight|package dimensions|mailer size/i.test(detail)) {
-    const weightFields = fields.filter(
-      (field) => !/package dimensions|\b(?:length|width|height)\b/i.test(String(field.field || "")),
-    );
-    const targets = weightFields.length
-      ? weightFields
-      : [
-          { marketplace: "general", field: "Package Weight (lb)" },
-          { marketplace: "general", field: "Package Weight (oz)" },
-        ];
-    return `Estimate packaged shipping weight for "${title}" so verification can continue.
-
-Anteroom supplies package dimensions from Settings. From photos, seller notes, item type, size, materials, and research, infer a realistic packaged weight. Do not ask clarifying questions.
-
-Pause reason:
-${detail}
-
-Fields to fill:
-${fieldLines(targets) || "- general / Package Weight (lb)\n- general / Package Weight (oz)"}
-
-${replyShape(targets)}`;
-  }
-
-  if (/categor(y|ies)/i.test(detail) && /align|differ|repair|set vendoo category/i.test(lower)) {
-    return `Fix marketplace category alignment for "${title}".
-
-Pause reason:
-${detail}
-
-Update listing category_path and/or marketplace category fields so they match the intended Vendoo category. Prefer the category already chosen for this listing. Do not invent a new tree unless the current path is clearly wrong.
-
-${fields.length ? `Targets:\n${fieldLines(fields)}\n\n` : ""}${replyShape(
-      fields.length ? fields : [{ marketplace: "general", field: "category_path" }],
-    )}`;
-  }
-
-  if (/optional fields still need real values|show optional fields/i.test(detail)) {
-    return `Fill marketplace optional fields for "${title}" (Show Optional Fields).
-
-Pause reason:
-${detail}
-
-For each field below: use a real value when it pertains to the item. When it does not apply, send it with an empty value and "status": "not_applicable" — never write "Does Not Apply". Prefer photo analysis and seller notes. Do not invent unsupported brands or materials.
-
-Fields:
-${fieldLines(fields) || "- (see pause reason)"}
-
-${replyShape(fields)}`;
-  }
-
-  if (/could not resolve from photos and notes/i.test(detail) || fields.length > 0) {
-    return `Resolve these remaining listing fields for "${title}" so verification can continue.
-
-Pause reason:
-${detail}
-
-Generate values for ONLY these fields from photos and seller notes. Do not rewrite unrelated fields.
-
-Fields:
-${fieldLines(fields) || "- (see pause reason)"}
-
-${replyShape(fields)}`;
-  }
-
-  return jobErrorPrompt(detail, title);
 }
 
 export function emptyFieldsButtonLabel(count: number): string {
