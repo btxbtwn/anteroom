@@ -178,10 +178,12 @@ async def _read(marketplace: str, start: datetime, end: datetime, page: int, exp
             return await _ebay_payment(client, _ebay_lines(row))
 
     results = await asyncio.gather(*(payment(row) for row in rows), return_exceptions=True)
+    verified_orders: list[list[OrderLine]] = []
     for result in results:
         if isinstance(result, BaseException):
             raise result
-    return results, more == "true", lambda: assert_identity(client.seller), connection
+        verified_orders.append(result)
+    return verified_orders, more == "true", lambda: assert_identity(client.seller), connection
 
 
 def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datetime) -> dict:
@@ -257,6 +259,7 @@ async def recover(db: Session, marketplace: str, start: date, end: date, page: i
         end_at = boundary
     orders, more, verify, connection = await _read(marketplace, start_at, end_at, page, connection, connected_at)
     lines = [line for order in orders for line in order]
+    counts: dict[str, int] = {}
     for attempt in range(2):
         try:
             with start_gate():

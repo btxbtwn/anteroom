@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from typing import Any
 
 from vendoo_studio.config import skills_dir
 from vendoo_studio.services.seller_overrides import get_path, marketplace_text, price_for
@@ -52,7 +53,7 @@ def form(listing: dict) -> dict:
     category = next((row for row in categories if row["id"] == category_id), None)
     fixed = fixed_options()
 
-    def value(path, default=""):
+    def value(path: str, default: Any = "") -> Any:
         found = get_path(listing, path)
         return default if found is None else found
 

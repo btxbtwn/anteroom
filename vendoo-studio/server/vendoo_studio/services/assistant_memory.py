@@ -74,7 +74,7 @@ def visible_text(reply: str) -> str:
 
 def peel(reply: str) -> tuple[str, str | None, str | None, str | None]:
     """A finished reply as words, the memory block, the changes block, and the automation block."""
-    found = {"memory": None, "changes": None, "automation": None}
+    found: dict[str, str | None] = {"memory": None, "changes": None, "automation": None}
 
     def take(match: re.Match[str]) -> str:
         kind = match.group(1).lower()

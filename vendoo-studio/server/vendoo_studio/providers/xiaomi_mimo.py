@@ -276,7 +276,7 @@ class MiMoProvider:
         max_side: int | None = VISION_MAX_SIDE,
     ) -> dict:
         with model_usage.observe(self.name, self.vision_model) as call:
-            messages = [
+            messages: list[dict] = [
                 {
                     "role": "system",
                     "content": PHOTO_ANALYSIS_SYSTEM,
@@ -289,7 +289,7 @@ class MiMoProvider:
             if listing_rules:
                 messages[0]["content"] += f"\n\nAdditional rules:\n{listing_rules}"
 
-            content_parts = [{"type": "text", "text": "Analyze these product photos:"}]
+            content_parts: list[dict] = [{"type": "text", "text": "Analyze these product photos:"}]
             for url in await encode_images(photo_paths, max_side):
                 content_parts.append({
                     "type": "image_url",

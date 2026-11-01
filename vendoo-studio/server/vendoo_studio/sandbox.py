@@ -23,6 +23,7 @@ import re
 import socket
 
 import httpx
+from jaraco.classes import properties
 from keyring.backend import KeyringBackend
 
 ENV_VAR = "ANTEROOM_SANDBOX"
@@ -80,7 +81,9 @@ _installed = False
 class MemoryKeyring(KeyringBackend):
     """A keyring that forgets everything when the process ends."""
 
-    priority = 1
+    @properties.classproperty
+    def priority(cls) -> float:
+        return 1.0
 
     def __init__(self) -> None:
         super().__init__()

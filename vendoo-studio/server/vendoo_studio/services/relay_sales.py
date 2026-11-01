@@ -71,7 +71,7 @@ def reconcile_unmatched(db: Session, *, conversation_id: str | None = None, mark
     )
     if marketplace:
         pending = pending.filter(MarketplaceSale.marketplace == marketplace)
-    owners: dict[tuple[str, str], str | None] = {}
+    owners: dict[tuple[str, str | None], str | None] = {}
     matched = 0
     for sale_id, marketplace, item_id in pending.yield_per(100):
         key = (marketplace, item_id)

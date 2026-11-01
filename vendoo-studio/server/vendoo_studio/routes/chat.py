@@ -107,6 +107,7 @@ def _browser_message_text(body: ChatMessage) -> str:
 async def _browser_fix_stream(conv_id: str, body: ChatMessage, provider, provider_name: str, provider_model: str):
     from vendoo_studio.services.browser_agent import FixAgent, FixRequest
 
+    assert body.browser is not None
     request = FixRequest(
         job_id=body.browser.job_id,
         conversation_id=conv_id,

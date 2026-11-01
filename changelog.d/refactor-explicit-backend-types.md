@@ -1,0 +1,1 @@
+- Make internal checks stricter about missing listing details and account values.

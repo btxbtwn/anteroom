@@ -437,6 +437,7 @@ class ChatGPTCodexProvider:
             {"role": "system", "content": system},
             {"role": "user", "content": content_parts},
         ]
+        content = ""
         try:
             for attempt in range(2):
                 content = ""

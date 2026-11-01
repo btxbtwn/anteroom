@@ -41,6 +41,8 @@ class Listing(SellerOwned, Base):
 
 def revision_quantity(context):
     value = (context.get_current_parameters().get("listing_json") or {}).get("quantity")
+    if value is None:
+        return None
     try:
         quantity = int(value)
     except (TypeError, ValueError, OverflowError):

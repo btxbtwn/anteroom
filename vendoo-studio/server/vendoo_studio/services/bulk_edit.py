@@ -191,7 +191,8 @@ def _apply_categories(updated: dict, categories: dict) -> None:
 
 
 def _merged(listing: dict, key: str, mode: str, values: list[str], limit: int) -> list[str]:
-    current = [str(value) for value in listing.get(key)] if isinstance(listing.get(key), list) else []
+    saved = listing.get(key)
+    current = [str(value) for value in saved] if isinstance(saved, list) else []
     if mode == "add":
         merged = list(dict.fromkeys([*current, *values]))
     elif mode == "remove":

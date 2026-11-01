@@ -587,7 +587,7 @@ async def listing_profiles(client: EbayClient | None = None) -> dict[str, list[d
 def _pick(options: list[dict], chosen: str | None, kind: str, setting: str) -> str:
     """The seller's stored choice, else the account's only one. Several and no choice: ask."""
     ids = [option["id"] for option in options]
-    if chosen in ids:
+    if chosen is not None and chosen in ids:
         return chosen
     if len(ids) == 1:
         return ids[0]
@@ -878,7 +878,7 @@ VIDEO_POLL_S = 3
 VIDEO_FIELD = "ebay_specifics.videoId"
 
 
-def _video_choice(snapshot: dict) -> dict | None | bool:
+def _video_choice(snapshot: dict) -> dict | None | Literal[False]:
     """The video this revision selects: a video, None to clear it, False when the form never touched it."""
     details = snapshot.get("ebay_specifics")
     if not isinstance(details, dict):
