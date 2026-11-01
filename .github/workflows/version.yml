@@ -1,0 +1,71 @@
+name: Version
+
+# Turns changelog.d/ notes merged into main into version bumps and CHANGELOG.md
+# sections, so pull requests never race each other for version numbers.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "changelog.d/**"
+  workflow_dispatch:
+
+# One run at a time and never cancelled mid-push. A queued run checks out the
+# newest main, so it also picks up notes from any run it replaced.
+concurrency:
+  group: version-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-notes:
+    name: Release notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          # Notes are grouped by the merge commit that brought them in.
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Bump the version for each merged note
+        id: bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Another merge can land while this runs; start over from the new main.
+          for attempt in 1 2 3; do
+            git fetch --quiet origin main
+            git reset --quiet --hard origin/main
+            versions="$(python vendoo-studio/scripts/release-changelog.py)"
+            if [ -z "$versions" ]; then
+              echo "No pending notes in changelog.d/."
+              exit 0
+            fi
+            python vendoo-studio/scripts/check-version-sync.py
+            python vendoo-studio/scripts/check-changelog.py
+            version="$(tail -n 1 <<< "$versions")"
+            git add -A
+            git commit --quiet -m "Release Anteroom $version" -m "Versions: $(paste -sd ' ' <<< "$versions")"
+            if git push --quiet origin HEAD:main; then
+              echo "Released $(paste -sd ' ' <<< "$versions")"
+              echo "released=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "main moved during the bump (attempt $attempt); retrying."
+          done
+          echo "Could not push the version bump after 3 attempts." >&2
+          exit 1
+      - name: Build the release for the new version
+        # Pushes made with GITHUB_TOKEN do not start workflows, so start the
+        # macOS build for the bump commit explicitly.
+        if: steps.bump.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run studio-macos.yml --ref main --repo "$GITHUB_REPOSITORY"
