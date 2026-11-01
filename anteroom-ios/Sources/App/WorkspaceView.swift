@@ -17,6 +17,8 @@ struct WorkspaceView: View {
                 .tabItem { Label("Inventory", systemImage: "tag.fill") }
             AnalyticsDestination(api: api)
                 .tabItem { Label("Analytics", systemImage: "chart.bar.fill") }
+            UsageView(api: api)
+                .tabItem { Label("Usage", systemImage: "gauge.with.dots.needle.33percent") }
             SettingsRootView(api: api)
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
