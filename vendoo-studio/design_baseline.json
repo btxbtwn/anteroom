@@ -1,0 +1,145 @@
+{
+  "src/cloud/workspace.css": {
+    "hardcoded-color": 3
+  },
+  "src/components/BulkMarketplaceDialog.tsx": {
+    "native-control": 1
+  },
+  "src/components/BulkUploadDialog.tsx": {
+    "native-control": 1
+  },
+  "src/components/ClaudeLoginTerminal.tsx": {
+    "hardcoded-color": 4
+  },
+  "src/components/FirstRunGuide.tsx": {
+    "native-control": 1
+  },
+  "src/components/InventoryImport.tsx": {
+    "native-control": 1
+  },
+  "src/components/ListingEditor.tsx": {
+    "arbitrary-text-size": 2
+  },
+  "src/components/ListingFormControls.tsx": {
+    "arbitrary-text-size": 3,
+    "native-control": 1
+  },
+  "src/components/MarkdownBlocks.tsx": {
+    "gradient": 3
+  },
+  "src/components/MarketplaceAutomations.tsx": {
+    "native-control": 7
+  },
+  "src/components/MarketplaceMedia.tsx": {
+    "arbitrary-text-size": 3
+  },
+  "src/components/MobileNav.tsx": {
+    "arbitrary-text-size": 1
+  },
+  "src/components/PhotoEditor.tsx": {
+    "gradient": 1,
+    "hardcoded-color": 5
+  },
+  "src/components/PhotoThumbs.tsx": {
+    "arbitrary-text-size": 2
+  },
+  "src/components/PromotionDialog.tsx": {
+    "native-control": 3
+  },
+  "src/components/chat/ComposerSurface.tsx": {
+    "hardcoded-color": 2
+  },
+  "src/components/chat/ModelListRow.tsx": {
+    "heavy-weight": 1,
+    "uppercase-label": 1
+  },
+  "src/components/chat/TimelineRows.tsx": {
+    "gradient": 1
+  },
+  "src/components/chat/composerImages.ts": {
+    "hardcoded-color": 1
+  },
+  "src/components/ebay/ActionForm.tsx": {
+    "native-control": 1
+  },
+  "src/components/ebay/EbayWorkspace.tsx": {
+    "native-control": 1
+  },
+  "src/components/ebay/MarketingPanel.tsx": {
+    "native-control": 1
+  },
+  "src/components/ebay/ebay.css": {
+    "hardcoded-color": 1
+  },
+  "src/components/ebay/shared.tsx": {
+    "native-control": 1
+  },
+  "src/components/settings/EbayOffersSettings.tsx": {
+    "native-control": 3
+  },
+  "src/components/settings/LogsSettings.tsx": {
+    "uppercase-label": 3
+  },
+  "src/components/sidebar/ListingRow.tsx": {
+    "gradient": 2
+  },
+  "src/components/ui/alert.tsx": {
+    "arbitrary-text-size": 1
+  },
+  "src/components/ui/button.tsx": {
+    "arbitrary-text-size": 2
+  },
+  "src/components/ui/combobox.tsx": {
+    "arbitrary-text-size": 1
+  },
+  "src/components/ui/scroll-area.tsx": {
+    "gradient": 3
+  },
+  "src/components/ui/select.tsx": {
+    "gradient": 2
+  },
+  "src/components/ui/tooltip.tsx": {
+    "arbitrary-text-size": 1
+  },
+  "src/components/usage/UsageLimits.tsx": {
+    "gradient": 1,
+    "hardcoded-color": 2
+  },
+  "src/styles/base.css": {
+    "hardcoded-color": 9
+  },
+  "src/styles/chat.css": {
+    "hardcoded-color": 4
+  },
+  "src/styles/empty-state.css": {
+    "hardcoded-color": 2
+  },
+  "src/styles/fields-panel.css": {
+    "hardcoded-color": 1
+  },
+  "src/styles/layout.css": {
+    "hardcoded-color": 18
+  },
+  "src/styles/overlays.css": {
+    "hardcoded-color": 9
+  },
+  "src/styles/photo-tray.css": {
+    "hardcoded-color": 9
+  },
+  "src/styles/responsive.css": {
+    "hardcoded-color": 1
+  },
+  "src/styles/sidebar.css": {
+    "heavy-weight": 2
+  },
+  "src/styles/t3-chat.css": {
+    "gradient": 1,
+    "uppercase-label": 1
+  },
+  "src/styles/t3-theme.css": {
+    "gradient": 20
+  },
+  "src/theme.ts": {
+    "hardcoded-color": 2
+  }
+}
