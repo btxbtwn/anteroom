@@ -15,6 +15,7 @@ import { ListingsPanel, ResearchPanel } from "./ListingsPanel";
 import { WorkspaceTabs } from "./WorkspaceTabs";
 import { useFormDraft } from "./FormDrafts";
 import "./ebay.css";
+import { useWorkspaceRuntime } from "../../app/runtime";
 
 const TABS = ["Dashboard", "Inbox", "Orders", "Marketing", "Listings", "Research", "Offers", "Activity"] as const;
 type Tab = (typeof TABS)[number];
@@ -30,14 +31,20 @@ const FEATURES = [
 ];
 
 export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) => void }) {
-  const [tab, setTab] = useFormDraft<Tab>("workspace:tab", () => "Dashboard");
+  const runtime = useWorkspaceRuntime();
+  const tabs: readonly Tab[] = runtime.features.has("ebay_offers") ? TABS : TABS.filter((item) => item !== "Offers");
+  const [savedTab, setTab] = useFormDraft<Tab>("workspace:tab", () => "Dashboard");
+  const tab = tabs.includes(savedTab) ? savedTab : "Dashboard";
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [features, setFeatures] = useState(FEATURES.map((feature) => feature.id));
   const queryClient = useQueryClient();
   const connection = useQuery({ queryKey: ["direct-connections"], queryFn: api.directConnections.status,
     refetchInterval: (query) => query.state.data?.accounts.ebay.pending ? 2000 : 15000 });
   const grant = useMutation({ mutationFn: () => api.ebay.grant(features), retry: false,
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["direct-connections"] }); } });
+    onSuccess: (result) => {
+      if (runtime.hosted) window.open(result.authorizeUrl, "_blank", "noopener,noreferrer");
+      void queryClient.invalidateQueries({ queryKey: ["direct-connections"] });
+    } });
   const account = connection.data?.accounts.ebay;
   return <div className="ebay-workspace">
     <header className="ebay-page-heading">
@@ -49,7 +56,7 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
       </div>
     </header>
     {connection.error ? <PageError message={connection.error.message} /> : null}
-    {account?.connected ? <WorkspaceTabs label="eBay workspace" main items={TABS} value={tab} onChange={(value) => setTab(value as Tab)}>
+    {account?.connected ? <WorkspaceTabs label="eBay workspace" main items={tabs} value={tab} onChange={(value) => setTab(value as Tab)}>
       <div className="ebay-tab-content" key={`${account.connectedAt}-${tab}`}>
         {tab === "Dashboard" ? <DashboardPanel /> : tab === "Inbox" ? <InboxPanel /> : tab === "Orders" ? <><OrderRecovery marketplace="ebay" connectedAt={account.connectedAt} /><OrdersPanel /></>
           : tab === "Marketing" ? <><MarketingPanel /><SaleCalendar marketplace="ebay" onOpenListing={onOpenListing} /></> : tab === "Listings" ? <ListingsPanel accountKey={`${account.label}:${account.connectedAt}`} onOpenListing={onOpenListing} /> : tab === "Research" ? <ResearchPanel />

@@ -276,3 +276,11 @@ Chrome sessions stay off on the web until they have a seller-owned worker.
 The same branch adds the eBay tab: the canonical eBay form builder reads the
 category schema (cached per seller in `category_field_schemas`) and the seller's
 own business policies and locations with their connected account.
+
+On `feat/hosted-marketplaces`, the Marketplaces view mounts the desktop eBay and
+Etsy workspace handlers, eBay and Etsy imports, order recovery and sale alerts,
+all in the seller's row-secured context with their own tokens. eBay account
+changes keep the review-then-confirm steps. The eBay Offers tab stays hidden
+until automatic offers have a per-seller scheduler; the offer status read leaves
+out the Mac timer's last check. Poshmark, Mercari, Depop, Sellwild and Vinted
+show their recorded sales; their Chrome imports need marketplace sessions.
