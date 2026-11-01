@@ -490,3 +490,71 @@ class ReapOrphanedBridgesTest(unittest.TestCase):
     def test_survives_ps_failure(self):
         with patch.object(desktop.subprocess, "run", side_effect=OSError("boom")):
             self.assertEqual(desktop.reap_orphaned_bridges(), 0)
+
+
+class AccountWorkspaceTest(unittest.TestCase):
+    """Signing in on the Mac shows the same account as the web and iPhone apps."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        patcher = patch.object(desktop, "WORKSPACE_FILE", Path(self.folder.name) / "desktop-workspace.json")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_opens_this_macs_listings_until_the_seller_signs_in(self):
+        self.assertEqual(desktop.saved_workspace_url(), desktop.APP_URL)
+
+    def test_reopens_the_account_the_window_last_showed(self):
+        desktop.remember_workspace(f"{desktop.HOSTED_URL}/?code=abc")
+        self.assertEqual(desktop.saved_workspace_url(), desktop.HOSTED_URL)
+        desktop.remember_workspace(f"{desktop.APP_URL}/")
+        self.assertEqual(desktop.saved_workspace_url(), desktop.APP_URL)
+
+    def test_splash_screens_and_other_pages_do_not_change_the_choice(self):
+        desktop.remember_workspace(desktop.HOSTED_URL)
+        for url in (None, "about:blank", "https://www.poshmark.com/", f"{desktop.HOSTED_URL}.evil.test/"):
+            desktop.remember_workspace(url)
+        self.assertEqual(desktop.saved_workspace_url(), desktop.HOSTED_URL)
+
+    def test_an_unreadable_choice_opens_this_macs_listings(self):
+        desktop.WORKSPACE_FILE.write_text("{not json", encoding="utf-8")
+        self.assertEqual(desktop.saved_workspace_url(), desktop.APP_URL)
+
+    def test_a_choice_made_while_starting_opens_after_boot(self):
+        window = MagicMock()
+        with patch.object(desktop, "_window", None), patch.object(desktop, "_pending_url", None), \
+             patch.object(desktop, "ensure_frontend"), patch.object(desktop, "start_owned_server"), \
+             patch.object(desktop, "reap_orphaned_bridges"), patch.object(desktop, "is_frozen", return_value=True), \
+             patch.dict(sys.modules, {"vendoo_studio.services.keychain": SimpleNamespace(warm_keychain=lambda: None)}):
+            desktop.open_in_window(desktop.HOSTED_URL)
+            window.load_url.assert_not_called()
+            desktop._boot_window(window)
+            window.load_url.assert_called_once_with(desktop.HOSTED_URL)
+            desktop.open_in_window(desktop.APP_URL)
+            window.load_url.assert_called_with(desktop.APP_URL)
+
+    def test_boot_reopens_the_saved_workspace(self):
+        desktop.remember_workspace(desktop.HOSTED_URL)
+        window = MagicMock()
+        with patch.object(desktop, "_window", None), patch.object(desktop, "_pending_url", None), \
+             patch.object(desktop, "ensure_frontend"), patch.object(desktop, "start_owned_server"), \
+             patch.object(desktop, "reap_orphaned_bridges"), patch.object(desktop, "is_frozen", return_value=True), \
+             patch.dict(sys.modules, {"vendoo_studio.services.keychain": SimpleNamespace(warm_keychain=lambda: None)}):
+            desktop._boot_window(window)
+        window.load_url.assert_called_once_with(desktop.HOSTED_URL)
+
+    def test_account_menu_switches_the_window(self):
+        menu_mod = SimpleNamespace(
+            Menu=lambda title, items=None: SimpleNamespace(title=title, items=items or []),
+            MenuAction=lambda title, function: SimpleNamespace(title=title, function=function),
+            MenuSeparator=lambda: SimpleNamespace(kind="separator"),
+        )
+        with patch.dict(sys.modules, {"webview": SimpleNamespace(), "webview.menu": menu_mod}):
+            menus = desktop.studio_app_menu()
+        account = next(menu for menu in menus if menu.title == "Account")
+        actions = {item.title: item.function for item in account.items}
+        with patch.object(desktop, "open_in_window") as open_in_window:
+            actions["My Account"]()
+            actions["This Mac’s Listings"]()
+        self.assertEqual(open_in_window.call_args_list, [call(desktop.HOSTED_URL), call(desktop.APP_URL)])

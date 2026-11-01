@@ -27,12 +27,32 @@ permissions:
   contents: read
 
 jobs:
+  pending-notes:
+    # A push that brings changelog.d/ notes still has the old version. The
+    # Version workflow bumps it and starts this workflow for the bump commit,
+    # so a build here would publish the previous version number.
+    runs-on: ubuntu-latest
+    outputs:
+      pending: ${{ steps.notes.outputs.pending }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: notes
+        run: |
+          if find changelog.d -maxdepth 1 -type f ! -name README.md 2>/dev/null | grep -q .; then
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+          fi
+
   package:
+    needs: pending-notes
     runs-on: macos-15
     # A Dependabot pull request cannot read the signing certificate, so the job
     # would fail on the import before it built anything. The build itself is
     # covered by the push to main once the bump merges.
-    if: github.actor != 'dependabot[bot]'
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      (github.event_name != 'push' || needs.pending-notes.outputs.pending != 'true')
     permissions:
       contents: write
     steps:

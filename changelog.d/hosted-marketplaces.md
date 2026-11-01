@@ -1,0 +1,1 @@
+- The web app now has the Marketplaces page: your eBay dashboard, inbox, orders, marketing, listings and research, your Etsy shop, orders and listings, imports from eBay and Etsy, and sale alerts.
