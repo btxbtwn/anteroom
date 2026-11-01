@@ -46,8 +46,16 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
 # The one answer that can be in progress, in the registry listing generations use.
 ANSWER_RUN = "assistant"
-# Which conversation that answer belongs to, so another thread does not replay it.
-_answering_thread_id: str | None = None
+# Which conversation each seller's answer belongs to, so another thread does not replay it.
+_answering_thread_ids: dict[str, str] = {}
+
+
+def _answer_run() -> str:
+    """One answer at a time per seller. On the web, each account has its own."""
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    return f"{ANSWER_RUN}:{context.seller_id}" if context is not None else ANSWER_RUN
 # How a listing's revision history names a save the seller applied from here.
 REVISION_SOURCE = "assistant"
 UNREADABLE_CHANGES = (
@@ -77,10 +85,16 @@ def create_thread(db: Session = Depends(get_db)):
 
 @router.delete("/threads/{thread_id}")
 def remove_thread(thread_id: str, db: Session = Depends(get_db)):
-    if thread_id == _answering_thread_id and active_generation(ANSWER_RUN) is not None:
+    from vendoo_studio.services.chat_attachments import delete_attachments
+
+    if thread_id == _answering_thread_ids.get(_answer_run()) and active_generation(_answer_run()) is not None:
         raise HTTPException(409, "That conversation is still being answered.")
+    images = [item for (batch,) in db.query(AssistantMessage.attachments).filter(AssistantMessage.thread_id == thread_id)
+              for item in (batch or [])]
     if not business_assistant.delete_thread(db, thread_id):
         raise HTTPException(404, "That conversation is gone.")
+    # The conversation is gone; its images go with it.
+    delete_attachments(images)
     return {"ok": True}
 
 
@@ -240,24 +254,25 @@ async def ask(body: AssistantQuestion, db: Session = Depends(get_db)):
     question = body.text.strip()
     if not question and not body.attachments:
         raise HTTPException(422, "Ask a question first.")
-    if active_generation(ANSWER_RUN) is not None:
+    key = _answer_run()
+    if active_generation(key) is not None:
         raise HTTPException(409, "The assistant is still answering your last question.")
     provider = get_listing_provider()
     if provider is None:
         raise HTTPException(400, "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key.")
-    attachments = store_uploads(body.attachments)
     try:
         thread = business_assistant.resolve_thread(db, body.thread_id)
     except business_assistant.UnknownThread:
         raise HTTPException(404, "That conversation is gone.") from None
+    # On the web, images are stored under the seller's own conversation.
+    attachments = store_uploads(body.attachments, collection_id=thread.id)
     business_assistant.add_message(db, "user", question, attachments=attachments, thread_id=thread.id)
     thread_id = thread.id
     # Release the request-scoped session before background work opens its own.
     db.close()
-    global _answering_thread_id
-    _answering_thread_id = thread_id
+    _answering_thread_ids[key] = thread_id
     run = start_generation(
-        ANSWER_RUN,
+        key,
         functools.partial(_answer, provider=provider, question=question, attachments=attachments, thread_id=thread_id),
     )
     await asyncio.sleep(0)
@@ -270,17 +285,17 @@ async def resume(thread_id: str | None = None):
 
     A thread only hears the answer that was asked in it.
     """
-    run = active_generation(ANSWER_RUN)
-    if run is None or (thread_id and thread_id != _answering_thread_id):
+    run = active_generation(_answer_run())
+    if run is None or (thread_id and thread_id != _answering_thread_ids.get(_answer_run())):
         return stream_finished()
     return stream_generation(run)
 
 
 @router.post("/messages/stop")
 async def stop():
-    stop_generation(ANSWER_RUN)
+    stop_generation(_answer_run())
     # What was written so far is saved as the run unwinds; answer once it is there to read.
-    await wait_generation(ANSWER_RUN)
+    await wait_generation(_answer_run())
     return {"ok": True}
 
 
@@ -307,6 +322,16 @@ def _apply_to_listing(item: dict, db: Session) -> str | None:
         return "It is no longer in Anteroom."
     if listing_busy(conv_id, db):
         return "Anteroom was generating or sending it."
+    from vendoo_studio.services.service_context import current
+
+    if current() is not None:
+        from vendoo_studio.services.background_tasks import require_idle
+
+        # On the web, a save serializes with draft tasks on the item's row lock.
+        try:
+            require_idle(db, conv_id)
+        except HTTPException as refused:
+            return str(refused.detail)
     to_set = item["set"]
     if to_set.get("box") and boxes.get_box(db, to_set["box"]) is None:
         return "That box is no longer in Anteroom."

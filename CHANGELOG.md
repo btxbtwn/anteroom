@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.616 — 2026-10-31
+
+- The web app now has the Assistant. Each account has its own conversations and answers, and attached images stay private to that conversation.
+
 ## 0.1.615 — 2026-10-31
 
 - The web app now has the Automations page. Scheduled price drops and field edits run on the web, Regenerate runs as a normal draft, and anything that would list or delist waits for your approval.
