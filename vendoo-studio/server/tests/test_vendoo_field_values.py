@@ -15,6 +15,28 @@ from vendoo_studio.services.vendoo_item_update import changed_fields
 from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
 
 
+@pytest.mark.parametrize("field", ["MPN", "Theme", "Personalization Instructions"])
+def test_optional_ebay_repair_does_not_retry_a_failed_value(field):
+    from vendoo_studio.services.completion_gaps import DNA_VALUE, field_id
+
+    gap = {"marketplace": "ebay", "field": field, "error": "Empty field"}
+    patches, remaining = deterministic_gap_patches(
+        [gap], {}, tried={(field_id(gap), DNA_VALUE)},
+    )
+    assert patches == []
+    assert remaining == [gap]
+
+
+@pytest.mark.parametrize("field", ["MPN", "Theme", "Personalization Instructions"])
+def test_optional_ebay_repair_emits_one_patch_for_duplicate_gaps(field):
+    gap = {"marketplace": "ebay", "field": field, "error": "Empty field"}
+    patches, remaining = deterministic_gap_patches([gap, dict(gap)], {})
+    assert len(patches) == 1
+    assert patches[0]["field"] == field
+    assert patches[0]["value"] == "Does Not Apply"
+    assert remaining == []
+
+
 def test_registry_payload_keeps_list_values_for_browser_selection():
     listing = {"tags": ["petite", "red"], "ebay_specifics": {
         "fabricType": ["Polyester"], "material": ["Polyester", "Spandex"],
