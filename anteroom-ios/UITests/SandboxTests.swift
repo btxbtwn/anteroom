@@ -62,14 +62,21 @@ final class SellerInputSandboxTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 30))
         row.tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
-        XCTAssertEqual(field("seller-notes", app: app).value as? String, "Found at a local estate sale")
-        XCTAssertEqual(field("seller-flaws", app: app).value as? String, "Small mark near hem")
-        XCTAssertEqual(field("seller-package", app: app).value as? String, "12x9x3")
-        XCTAssertEqual(field("measurement-top-pitToPit", app: app).value as? String, "22.5")
+        // The editor opens at once and fills its fields when the listing loads.
+        expectValue("seller-notes", "Found at a local estate sale", app: app)
+        expectValue("seller-flaws", "Small mark near hem", app: app)
+        expectValue("seller-package", "12x9x3", app: app)
+        expectValue("measurement-top-pitToPit", "22.5", app: app)
         reveal(app.segmentedControls["seller-garment"], app: app)
         app.segmentedControls["seller-garment"].buttons["Pants"].tap()
         XCTAssertEqual(field("measurement-pants-waist", app: app).value as? String, "16")
         attach(app, name: "Reopened garment measurements")
+    }
+
+    private func expectValue(_ id: String, _ text: String, app: XCUIApplication) {
+        let control = field(id, app: app)
+        expectation(for: NSPredicate(format: "value == %@", text), evaluatedWith: control)
+        waitForExpectations(timeout: 20)
     }
 
     private func enter(_ id: String, text: String, app: XCUIApplication) {
