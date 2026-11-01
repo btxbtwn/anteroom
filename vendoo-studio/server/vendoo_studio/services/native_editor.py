@@ -467,7 +467,7 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
         field("sellwild.note.fee", "Sellwild Fee", "", input_type="note", section="Name Your Price (USD)",
               help=(f"{_sellwild_money(fee)}. " if fee is not None else "") + "Sellwild fee is 10% of sold price."),
         field("sellwild.note.earn", "You Earn", "", input_type="note", section="Name Your Price (USD)",
-              help=(f"{_sellwild_money(round(price_amount - fee, 2))}. " if fee is not None else "")
+               help=(f"{_sellwild_money(round(price_amount - fee, 2))}. " if fee is not None and price_amount is not None else "")
               + "What reaches your Stripe account when you approve the order. Stripe then pays it out to your bank."),
         _sellwild_discount(coupons or [], details.get("couponIds")),
         field("sellwild_specifics.description", "Describe your item (Optional)", _shared(snapshot, "sellwild", "description"),

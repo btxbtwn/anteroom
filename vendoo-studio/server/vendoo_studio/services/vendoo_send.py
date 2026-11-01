@@ -49,10 +49,10 @@ def record_photo_progress(db, job_id: str | None, payload: dict) -> None:
     completed, total = payload.get("completed"), payload.get("total")
     if type(completed) is not int or type(total) is not int or not 0 <= completed <= total or total <= 0:
         return
-    previous = repo.latest_event(job_id, "vendoo_api_progress")
+    previous = repo.latest_event(job.id, "vendoo_api_progress")
     if previous and completed < previous.payload.get("completed", 0):
         return
-    repo.add_event(job_id, "vendoo_api_progress", "vendoo_api_photos", {"completed": completed, "total": total})
+    repo.add_event(job.id, "vendoo_api_progress", "vendoo_api_photos", {"completed": completed, "total": total})
 
 
 @contextmanager

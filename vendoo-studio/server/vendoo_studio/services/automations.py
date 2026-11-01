@@ -1041,6 +1041,14 @@ def _current(db: Session, conv_id: str) -> tuple[ListingRevision | None, dict | 
     return revision, revision.listing_json
 
 
+@overload
+def _original_price(db: Session, conv_id: str, current: float, *, persist: bool) -> float: ...
+
+
+@overload
+def _original_price(db: Session, conv_id: str, current: None, *, persist: bool) -> float | None: ...
+
+
 def _original_price(db: Session, conv_id: str, current: float | None, *, persist: bool) -> float | None:
     row = db.get(ItemPriceBaseline, conv_id)
     if row is not None:

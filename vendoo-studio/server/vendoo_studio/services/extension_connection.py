@@ -622,6 +622,7 @@ async def dispatch_queued_jobs():
             from vendoo_studio.services.streaming import spawn
             spawn(run_send(job_id))
             return
+        assert message is not None
         sent = await extension_manager.send_message(message)
         if sent:
             await asyncio.to_thread(_set_job_status, job_id, "dispatched")
