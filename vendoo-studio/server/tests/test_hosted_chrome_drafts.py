@@ -247,16 +247,18 @@ def test_watchdog_keeps_a_live_web_save_and_leaves_an_expired_one_for_review(clo
     operation = command['operation_id']
 
     from vendoo_studio.database import SessionLocal
-    from vendoo_studio.models.conversation import utcnow
     from vendoo_studio.models.job import Job
     with use(for_seller(USER_ID)), SessionLocal() as db:
-        db.execute(update(Job).where(Job.id == operation).values(updated_at=utcnow() - timedelta(minutes=2)))
+        db.execute(update(Job).where(Job.id == operation).values(updated_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=2)))
         db.commit()
     assert asyncio.run(hosted_job_watchdog.sweep_owner(USER_ID, reconcile_all=True)) == []
     assert _job(operation).status == 'dispatched'
 
     with use(for_seller(USER_ID)), SessionLocal() as db:
-        db.execute(update(Job).where(Job.id == operation).values(operation_expires_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)))
+        db.execute(update(Job).where(Job.id == operation).values(
+            operation_expires_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1),
+            # Expired long after it was last heard from (an UPDATE would otherwise stamp it as just now).
+            updated_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=16)))
         db.commit()
     # Expired: the slot frees and the record waits for the seller to check. Chrome is never asked.
     assert asyncio.run(hosted_job_watchdog.sweep_owner(USER_ID, reconcile_all=True)) == [operation]
