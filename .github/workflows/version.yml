@@ -23,19 +23,21 @@ jobs:
     name: Release notes
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      actions: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
+          # main requires CI on an up-to-date branch; only this deploy key may
+          # push to it directly. Its pushes also start workflows, so the push
+          # below starts the macOS release build on its own.
+          ssh-key: ${{ secrets.VERSION_PUSH_KEY }}
           # Notes are grouped by the merge commit that brought them in.
           fetch-depth: 0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Bump the version for each merged note
-        id: bump
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -55,17 +57,9 @@ jobs:
             git commit --quiet -m "Release Anteroom $version" -m "Versions: $(paste -sd ' ' <<< "$versions")"
             if git push --quiet origin HEAD:main; then
               echo "Released $(paste -sd ' ' <<< "$versions")"
-              echo "released=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "main moved during the bump (attempt $attempt); retrying."
           done
           echo "Could not push the version bump after 3 attempts." >&2
           exit 1
-      - name: Build the release for the new version
-        # Pushes made with GITHUB_TOKEN do not start workflows, so start the
-        # macOS build for the bump commit explicitly.
-        if: steps.bump.outputs.released == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run studio-macos.yml --ref main --repo "$GITHUB_REPOSITORY"

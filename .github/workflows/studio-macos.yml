@@ -29,8 +29,8 @@ permissions:
 jobs:
   pending-notes:
     # A push that brings changelog.d/ notes still has the old version. The
-    # Version workflow bumps it and starts this workflow for the bump commit,
-    # so a build here would publish the previous version number.
+    # Version workflow bumps it, and its push of the bump commit (made with a
+    # deploy key, so it starts workflows) runs this build for the new version.
     runs-on: ubuntu-latest
     outputs:
       pending: ${{ steps.notes.outputs.pending }}
