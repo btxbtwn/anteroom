@@ -36,7 +36,7 @@ class SellerSessionMiddleware:
             await send({"type": "websocket.close", "code": 1008})
             return
         if scope["type"] != "http" or (
-            (scope["path"] == "/api/health" and scope["method"] == "GET")
+            (scope["path"] in {"/api/health", "/api/auth-config"} and scope["method"] == "GET")
             or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
                 and (scope["path"] == "/" or scope["path"].startswith("/assets/")))
         ):
@@ -180,6 +180,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(errors_router)
     from vendoo_studio.routes.hosted_bulk_edit import router as bulk_edit_router
     app.include_router(bulk_edit_router)
+    from vendoo_studio.routes.hosted_account_import import router as account_import_router
+    app.include_router(account_import_router)
     from vendoo_studio.routes.hosted_bulk_delete import router as bulk_delete_router
     app.include_router(bulk_delete_router)
     from vendoo_studio.routes.listings import apply_price_drop
@@ -198,6 +200,13 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         @app.get("/", include_in_schema=False)
         def web_index():
             return FileResponse(web_dir / "cloud.html")
+
+    @app.get("/api/auth-config")
+    def auth_config():
+        # Public browser configuration (also in the web bundle): lets the Mac
+        # app sign in to the same project when it moves its listings.
+        return {"supabase_url": os.environ.get("SUPABASE_URL", ""),
+                "publishable_key": os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")}
 
     @app.get("/api/health")
     def health():

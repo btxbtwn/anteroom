@@ -60,6 +60,8 @@ the export is loading.
   never enter ordinary JSON preferences, responses, logs or extension messages.
 - Import the Mac's inventory, photos and related records into the authenticated
   account, preserving IDs/relationships safely and checking existing data.
+  Done: the Mac app's **Move this Mac to your account** (see
+  `cloud-architecture.md`, step 2). Videos and chat attachment files remain.
 - Add reviewed Chrome Bridge command contracts for every supported marketplace
   form and approved action. Preserve the shared browser operation locks and the
   app-managed local Bridge build check. Never add an arbitrary API/RPC proxy.
