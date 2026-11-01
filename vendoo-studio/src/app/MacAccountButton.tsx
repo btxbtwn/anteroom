@@ -148,6 +148,7 @@ function MoveSummary({ result }: { result: AccountMoveResult }) {
     <ul className="list-disc space-y-1.5 pl-5" aria-label="What moved">
       <li>Copied {plural(result.records, "record")} and {plural(result.photos, "photo")}.</li>
       {result.missing_photos > 0 && <li>{plural(result.missing_photos, "photo")} could not be found on this Mac and were left out.</li>}
+      {result.refused_photos > 0 && <li>{plural(result.refused_photos, "photo")} could not be read and {result.refused_photos === 1 ? "was" : "were"} left out. {result.refused_photos === 1 ? "It stays" : "They stay"} on this Mac.</li>}
       {result.keys.length > 0 && <li>Your provider keys are saved, encrypted, in your account.</li>}
       {result.paused_automations > 0 && <li>{plural(result.paused_automations, "automation")} now run from your account and are paused on this Mac.</li>}
       <li>Reconnect eBay and Etsy in your account under Settings → Connections, so sales arrive there.</li>

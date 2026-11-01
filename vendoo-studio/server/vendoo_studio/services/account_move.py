@@ -34,6 +34,10 @@ _progress: dict = {"state": "idle"}
 class MoveError(Exception):
     """A failure the seller can act on; the message is shown as is."""
 
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
 
 SIGN_IN_ERRORS = {
     "invalid_credentials": "That email and password don’t match. Try again, or reset your password on the web.",
@@ -80,6 +84,8 @@ class Account:
         self.http = client or httpx.Client(timeout=60, follow_redirects=False)
         self.config: dict = {}
         self.session: dict = {}
+        # Photos upload from several threads; one of them refreshes the session.
+        self._refreshing = threading.Lock()
 
     def sign_in(self, email: str, password: str) -> dict:
         try:
@@ -113,8 +119,9 @@ class Account:
                         "user": {"id": payload["user"]["id"], "email": payload["user"].get("email")}}
 
     def request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        if self.session["expires_at"] - time.time() < 120:
-            self._token({"refresh_token": self.session["refresh_token"]}, "refresh_token")
+        with self._refreshing:
+            if self.session["expires_at"] - time.time() < 120:
+                self._token({"refresh_token": self.session["refresh_token"]}, "refresh_token")
         headers = {"Authorization": f"Bearer {self.session['access_token']}", **kwargs.pop("headers", {})}
         for attempt in range(3):
             try:
@@ -132,7 +139,8 @@ class Account:
                     detail = response.json().get("detail")
                 except ValueError:
                     detail = None
-                raise MoveError(detail if isinstance(detail, str) else "Your account could not take this step. Run the move again to retry.")
+                raise MoveError(detail if isinstance(detail, str) else "Your account could not take this step. Run the move again to retry.",
+                                status=response.status_code)
             return response
         raise AssertionError("unreachable")
 
@@ -220,6 +228,7 @@ def move(email: str, password: str, account: Account, source=None, photos=None) 
     saved = account.request("PUT", "/api/account-import/secrets", json=keys).json()["saved"] if keys else []
     paused = _pause_local_automations(source)
     result = {"records": copied, "photos": photos["copied"], "missing_photos": photos["missing"],
+              "refused_photos": photos["refused"],
               "settings": len(settings), "keys": saved, "paused_automations": paused}
     MARKER.parent.mkdir(parents=True, exist_ok=True)
     MARKER.write_text(json.dumps({"user_id": user["id"], "email": user.get("email"),
@@ -233,24 +242,72 @@ def local_secrets(slots) -> dict:
     return {slot: value for slot in sorted(slots) if (value := keychain.read_slot(slot))}
 
 
+PHOTO_UPLOADS = 4
+PHOTO_SIDE = 2400
+
+
+def shrink(data: bytes) -> bytes:
+    """A web-sized JPEG of a photo, the size the account stores, so uploads stay small.
+
+    A file this Mac cannot read goes as it is; the account decides whether to take it.
+    """
+    import io
+    import warnings
+
+    from PIL import Image, ImageOps
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as image:
+                image.draft("RGB", (PHOTO_SIDE, PHOTO_SIDE))
+                image = ImageOps.exif_transpose(image)
+                image.thumbnail((PHOTO_SIDE, PHOTO_SIDE))
+                rgba = image.convert("RGBA")
+                flat = Image.new("RGB", rgba.size, "white")
+                flat.paste(rgba, mask=rgba.getchannel("A"))
+                output = io.BytesIO()
+                flat.save(output, format="JPEG", quality=95)
+                return output.getvalue()
+    except Exception:  # noqa: BLE001 - unreadable here; let the account judge it
+        return data
+
+
 def _move_photos(account: Account, source, store) -> dict:
+    from concurrent.futures import ThreadPoolExecutor
+
     from vendoo_studio.models.conversation import Photo
     pending = account.request("GET", "/api/account-import/photos").json()
-    work = [(item["id"], field) for item in pending for field in item["fields"]]
-    _set(step="Copying photos…", done=0, total=len(work))
-    copied = missing = 0
+    work = []
     with Session(source) as db:
-        for done, (photo_id, field) in enumerate(work, start=1):
-            photo = db.get(Photo, str(photo_id))
-            key = None if photo is None else (photo.stored_filename if field == "stored" else photo.source_filename)
-            if not key or not store.exists(key):
-                missing += 1
-            else:
-                account.request("POST", f"/api/account-import/photos/{photo_id}/{field}", content=store.read(key),
-                                headers={"Content-Type": "application/octet-stream"})
-                copied += 1
-            _set(done=done)
-    return {"copied": copied, "missing": missing}
+        for item in pending:
+            photo = db.get(Photo, str(item["id"]))
+            for field in item["fields"]:
+                key = None if photo is None else (photo.stored_filename if field == "stored" else photo.source_filename)
+                work.append((item["id"], field, key))
+    _set(step="Copying photos…", done=0, total=len(work))
+    counts = {"copied": 0, "missing": 0, "refused": 0}
+    lock = threading.Lock()
+
+    def upload(task) -> str:
+        photo_id, field, key = task
+        if not key or not store.exists(key):
+            return "missing"
+        try:
+            account.request("POST", f"/api/account-import/photos/{photo_id}/{field}", content=shrink(store.read(key)),
+                            headers={"Content-Type": "application/octet-stream"})
+        except MoveError as error:
+            # One photo the account cannot take must not stop the whole move.
+            if error.status in {413, 422}:
+                return "refused"
+            raise
+        return "copied"
+
+    with ThreadPoolExecutor(max_workers=PHOTO_UPLOADS, thread_name_prefix="account-move-photo") as pool:
+        for outcome in pool.map(upload, work):
+            with lock:
+                counts[outcome] += 1
+                _set(done=sum(counts.values()))
+    return counts
 
 
 def _pause_local_automations(source) -> int:
