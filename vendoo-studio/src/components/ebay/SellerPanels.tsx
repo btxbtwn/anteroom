@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageNote, PageSection } from "../WorkspacePage";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
-import { EvidenceUploader, RemoteList } from "./shared";
+import { EvidenceUploader, MetricValue, RemoteList } from "./shared";
 import { ActionForm } from "./ActionForm";
 import { displayMoney, summarizeDisplayedEarnings } from "./dashboardSummary";
 import { WorkspaceTabs } from "./WorkspaceTabs";
@@ -20,7 +20,7 @@ export function DashboardPanel() {
   const coverage = finance.data ? `First ${finance.data.rows.length}${finance.data.total != null ? ` of ${finance.data.total}` : ""} ${finance.data.total === 1 ? "order" : "orders"} · totals cover these orders only` : "Totals appear when order transactions are available.";
   return <>
     <div className="ebay-dashboard-toolbar">
-      <div className="ebay-tab-intro"><p className="ebay-eyebrow">Performance</p><h2>Sales overview</h2><p>Follow your eBay earnings and listing activity.</p></div>
+      <div className="ebay-tab-intro"><h2>Sales overview</h2><p>Follow your eBay earnings and listing activity.</p></div>
       <div className="ebay-date-range">
         <label>From<Input nativeInput type="date" value={start} max={end} onChange={(event) => setStart(event.target.value)} /></label>
         <label>To<Input nativeInput type="date" value={end} min={start} max={today} onChange={(event) => setEnd(event.target.value)} /></label>
@@ -29,9 +29,9 @@ export function DashboardPanel() {
     {!valid ? <PageNote>Choose a valid start and end date to view this period.</PageNote> : null}
     <div>
       <dl className="ebay-metrics">
-        <div className="ebay-metric"><dt>Net order proceeds</dt><dd>{displayMoney(summary.earnings)}</dd><p>Recorded credits minus order charges</p></div>
-        <div className="ebay-metric"><dt>Item costs</dt><dd>{displayMoney(summary.costs)}</dd><p>Local costs for these orders</p></div>
-        <div className="ebay-metric"><dt>Profit after item costs</dt><dd>{displayMoney(summary.profit)}</dd><p>Other business expenses excluded</p></div>
+        <div className="ebay-metric"><dt>Net order proceeds</dt><MetricValue value={displayMoney(summary.earnings)} /><p>Recorded credits minus order charges</p></div>
+        <div className="ebay-metric"><dt>Item costs</dt><MetricValue value={displayMoney(summary.costs)} /><p>Local costs for these orders</p></div>
+        <div className="ebay-metric"><dt>Profit after item costs</dt><MetricValue value={displayMoney(summary.profit)} /><p>Other business expenses excluded</p></div>
       </dl>
       <p className="text-xs text-muted-foreground mt-3">{coverage}</p>
     </div>

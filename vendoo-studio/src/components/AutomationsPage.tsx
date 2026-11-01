@@ -3,19 +3,24 @@
  * before they delist, relist, regenerate, or change a price.
  */
 import { useState, type ReactNode } from "react";
+import { cn } from "../lib/utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClockIcon } from "lucide-react";
 
 import { api } from "../api/client";
 import type { Automation, AutomationApproval, AutomationDraft, AutomationPreview, AutomationRun, RelistGap } from "../api/automations";
 import { confirmDialog } from "../ui/confirmDialog";
+import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
 import { Textarea } from "./ui/textarea";
 import { MarketplaceAutomations } from "./MarketplaceAutomations";
 import { EbayOffersSettings } from "./settings/EbayOffersSettings";
-import { PageHeader, WorkspacePage } from "./WorkspacePage";
+import { marketplaceName } from "./marketplaceNames";
+import { FormField, PageHeader, WorkspacePage } from "./WorkspacePage";
 import { useWorkspaceRuntime } from "../app/runtime";
 import {
   AUTOMATION_MARKETPLACES,
@@ -34,25 +39,52 @@ const LIST_KEY = ["automations"] as const;
 const APPROVAL_KEY = ["automation-approvals"] as const;
 const GAP_KEY = ["automation-gaps"] as const;
 
+const SURFACE = "rounded-xl border border-border/60 bg-card/40 p-4";
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex min-w-0 flex-col gap-1 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      {children}
-    </label>
-  );
+  return <FormField label={label}>{children}</FormField>;
 }
 
 function Check({
   label, checked, onChange,
 }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <label className="flex min-h-8 items-center gap-2 text-sm">
-      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+    <label className="inline-flex min-h-7 cursor-pointer items-center gap-2 text-sm text-foreground">
+      <Checkbox checked={checked} onCheckedChange={(next) => onChange(next === true)} />
       {label}
     </label>
   );
 }
+
+/** A labelled row of checkboxes. */
+function CheckGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <fieldset className="flex min-w-0 flex-col gap-1.5">
+      <legend className="mb-1.5 text-xs font-medium text-muted-foreground">{label}</legend>
+      <div className="flex flex-wrap gap-x-5 gap-y-1">{children}</div>
+    </fieldset>
+  );
+}
+
+function Choice<T extends string>({ label, value, options, onChange }: {
+  label: string;
+  value: T;
+  options: readonly { value: T; label: string }[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <Select value={value} onValueChange={(next) => onChange(next as T)}>
+      <SelectTrigger aria-label={label}>
+        <SelectValue>{options.find((option) => option.value === value)?.label}</SelectValue>
+      </SelectTrigger>
+      <SelectPopup>
+        {options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+      </SelectPopup>
+    </Select>
+  );
+}
+
+const STATUS_BADGE: Record<string, "success" | "warning" | "outline"> = { active: "success", paused: "warning" };
 
 export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string) => void }) {
   const queryClient = useQueryClient();
@@ -163,7 +195,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
   // Approving runs a marketplace action. Offers and sharing need the seller's marketplace sessions.
   const canApprove = features.has("marketplace_actions");
   const approve = async (row: AutomationApproval) => {
-    const where = row.marketplaces.length ? row.marketplaces.join(", ") : "the marketplaces this task names";
+    const where = row.marketplaces.length ? row.marketplaces.map(marketplaceName).join(", ") : "the marketplaces this task names";
     const label = row.action === "publish" ? "List" : row.action === "delist" ? "Delist" : "Relist";
     const ok = await confirmDialog(`${label} “${row.title || "this listing"}” on ${where}? This approval makes one attempt per marketplace.`, { confirmLabel: label });
     if (!ok) return;
@@ -189,9 +221,9 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
         description="Manage automatic offers, sharing, draft preparation and price edits. Listing, delisting and relisting wait for your review of each item and named marketplace."
       />
 
-      <section className="rounded-xl border border-border bg-card p-4">
-        <h2 className="font-medium">Waiting for approval</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Review each item, action and marketplace before approving one attempt. Scheduling never publishes or delists on its own.</p>
+      <section className={SURFACE}>
+        <h2 className="text-sm font-medium">Waiting for approval</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Review each item, action and marketplace before approving one attempt. Scheduling never publishes or delists on its own.</p>
         {(approvals.data ?? []).length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">Nothing is waiting for approval.</p>
         ) : (
@@ -200,7 +232,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
               <li key={row.id} className="flex flex-wrap items-center justify-between gap-2">
                 <span>
                   {row.title || row.conversation_id}
-                  {row.marketplaces.length ? ` · ${row.marketplaces.join(", ")}` : ""}
+                  {row.marketplaces.length ? ` · ${row.marketplaces.map(marketplaceName).join(", ")}` : ""}
                   {` · ${row.action === "publish" ? "list" : row.action} · ${row.state}`}
                 </span>
                 <Button size="sm" variant="ghost" onClick={() => onOpenListing(row.conversation_id)}>Open item</Button>
@@ -218,7 +250,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
           <ul className="mt-2 flex flex-col gap-1 text-sm">
             {(gaps.data ?? []).map((gap: RelistGap) => (
               <li key={gap.id}>
-                {gap.title || gap.conversation_id} · {gap.marketplace} · {gap.state}
+                {gap.title || gap.conversation_id} · {marketplaceName(gap.marketplace)} · {gap.state}
                 {gap.error ? ` · ${gap.error}` : ""}
                 <Button size="xs" variant="ghost" onClick={()=>onOpenListing(gap.conversation_id)}>Open item</Button>
               </li>
@@ -227,9 +259,9 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
         </section>
       ) : null}
 
-      <section className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
-        <h2 className="flex items-center gap-2 font-medium">
-          <CalendarClockIcon className="size-4" />
+      <section className={cn(SURFACE, "flex flex-col gap-4")}>
+        <h2 className="flex items-center gap-2 text-sm font-medium">
+          <CalendarClockIcon className="size-4 text-muted-foreground" />
           {editing ? "Edit automation" : "New automation"}
         </h2>
         <Field label="Describe it">
@@ -252,14 +284,12 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
             <Input nativeInput value={form.timezone} onChange={(event) => patch({ timezone: event.target.value })} />
           </Field>
           <Field label="When">
-            <select className="h-9 rounded-md border border-border bg-background px-2 text-sm" value={form.kind} onChange={(event) => {
-              const kind = event.target.value as AutomationForm["kind"];
-              patch({ kind, priceRepeat: kind === "once" ? "once" : "step" });
-            }}>
-              <option value="once">One time</option>
-              <option value="daily">Every day</option>
-              <option value="weekly">Every week</option>
-            </select>
+            <Choice
+              label="When"
+              value={form.kind}
+              options={[{ value: "once", label: "One time" }, { value: "daily", label: "Every day" }, { value: "weekly", label: "Every week" }]}
+              onChange={(kind) => patch({ kind, priceRepeat: kind === "once" ? "once" : "step" })}
+            />
           </Field>
           {form.kind === "once" ? (
             <Field label="Date and time">
@@ -272,7 +302,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
           )}
         </div>
         {form.kind === "weekly" ? (
-          <div className="flex flex-wrap gap-3">
+          <CheckGroup label="Days">
             {WEEKDAY_LABELS.map((label, index) => (
               <Check
                 key={label}
@@ -283,41 +313,43 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
                 })}
               />
             ))}
-          </div>
+          </CheckGroup>
         ) : null}
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Department">
-            <Input nativeInput value={form.department} placeholder="men" onChange={(event) => patch({ department: event.target.value })} />
+            <Input nativeInput value={form.department} placeholder="Any" onChange={(event) => patch({ department: event.target.value })} />
           </Field>
           <Field label="Category">
-            <Input nativeInput value={form.category} placeholder="t-shirt" onChange={(event) => patch({ category: event.target.value })} />
+            <Input nativeInput value={form.category} placeholder="Any" onChange={(event) => patch({ category: event.target.value })} />
           </Field>
           <Field label="Brand">
-            <Input nativeInput value={form.brand} onChange={(event) => patch({ brand: event.target.value })} />
+            <Input nativeInput value={form.brand} placeholder="Any" onChange={(event) => patch({ brand: event.target.value })} />
           </Field>
           <Field label="Listed at least (days)">
             <Input nativeInput inputMode="numeric" value={form.minAge} onChange={(event) => patch({ minAge: event.target.value })} />
           </Field>
           <Field label="Status">
-            <Input nativeInput value={form.status} placeholder="active" onChange={(event) => patch({ status: event.target.value })} />
+            <Input nativeInput value={form.status} placeholder="Any" onChange={(event) => patch({ status: event.target.value })} />
           </Field>
           <Field label="Item ids">
-            <Input nativeInput value={form.itemIds} placeholder="optional" onChange={(event) => patch({ itemIds: event.target.value })} />
+            <Input nativeInput value={form.itemIds} placeholder="All matching items" onChange={(event) => patch({ itemIds: event.target.value })} />
           </Field>
         </div>
-        <div className="flex flex-wrap gap-4">
+        <CheckGroup label="Actions">
           <Check label="Regenerate" checked={form.regenerate} onChange={(regenerate) => patch({ regenerate })} />
           <Check label="Delist" checked={form.delist} onChange={(delist) => patch({ delist })} />
           <Check label="Relist" checked={form.relist} onChange={(relist) => patch({ relist })} />
           <Check label="Drop the price" checked={form.priceOn} onChange={(priceOn) => patch({ priceOn })} />
-        </div>
+        </CheckGroup>
         {form.priceOn ? (
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Drop by">
-              <select className="h-9 rounded-md border border-border bg-background px-2 text-sm" value={form.priceMode} onChange={(event) => patch({ priceMode: event.target.value as "amount" | "percent" })}>
-                <option value="percent">Percent of the original price</option>
-                <option value="amount">Dollars off the original price</option>
-              </select>
+              <Choice
+                label="Drop by"
+                value={form.priceMode}
+                options={[{ value: "percent", label: "Percent of the original price" }, { value: "amount", label: "Dollars off the original price" }]}
+                onChange={(priceMode) => patch({ priceMode })}
+              />
             </Field>
             <Field label={form.priceMode === "amount" ? "Amount ($)" : "Percent"}>
               <Input nativeInput inputMode="decimal" value={form.priceValue} onChange={(event) => patch({ priceValue: event.target.value })} />
@@ -326,25 +358,27 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
               <Input nativeInput inputMode="decimal" value={form.floor} onChange={(event) => patch({ floor: event.target.value })} />
             </Field>
             <Field label="How often">
-              <select className="h-9 rounded-md border border-border bg-background px-2 text-sm" value={form.priceRepeat} onChange={(event) => patch({ priceRepeat: event.target.value as AutomationForm["priceRepeat"] })}>
-                <option value="step">Each cycle, off the original price</option>
-                <option value="once">One-time drop</option>
-              </select>
+              <Choice<AutomationForm["priceRepeat"]>
+                label="How often"
+                value={form.priceRepeat}
+                options={[{ value: "step", label: "Each cycle, off the original price" }, { value: "once", label: "One-time drop" }]}
+                onChange={(priceRepeat) => patch({ priceRepeat })}
+              />
             </Field>
           </div>
         ) : null}
-        <div className="flex flex-wrap gap-3">
+        <CheckGroup label="Marketplaces">
           {AUTOMATION_MARKETPLACES.map((name) => (
             <Check
               key={name}
-              label={name}
+              label={marketplaceName(name)}
               checked={form.marketplaces.includes(name)}
               onChange={(checked) => patch({
                 marketplaces: checked ? [...form.marketplaces, name] : form.marketplaces.filter((item) => item !== name),
               })}
             />
           ))}
-        </div>
+        </CheckGroup>
         {issues.length ? (
           <ul className="list-disc pl-5 text-sm text-muted-foreground">
             {issues.map((issue) => <li key={issue}>{issue}</li>)}
@@ -376,7 +410,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
                   {item.title}
                   {item.next_price != null ? ` · ${money(item.price)} → ${money(item.next_price)} from ${money(item.original_price)}` : ""}
                   {item.age_days != null ? ` · ${item.age_days} days (${listedSourceLabel(item.listed_source)}${item.listed_at ? `, ${item.listed_at.slice(0, 10)}` : ""})` : ""}
-                  {item.marketplaces.length ? ` · ${item.marketplaces.join(", ")}` : ""}
+                  {item.marketplaces.length ? ` · ${item.marketplaces.map(marketplaceName).join(", ")}` : ""}
                 </li>
               ))}
               {skipped.slice(0, 8).map((item) => (
@@ -398,17 +432,17 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
       ) : (
         <ul className="flex flex-col gap-3">
           {(list.data ?? []).map((task) => (
-            <li key={task.id} className="rounded-xl border border-border bg-card p-4">
+            <li key={task.id} className={SURFACE}>
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h3 className="font-medium">{task.name}</h3>
-                <span className="text-muted-foreground text-xs uppercase tracking-wide">{task.status}</span>
+                <h3 className="text-sm font-medium">{task.name}</h3>
+                <Badge variant={STATUS_BADGE[task.status] ?? "outline"} className="capitalize">{task.status}</Badge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {task.summary || describeSchedule(task.schedule, task.timezone)}
                 {" · "}
                 {describeActions(task.actions)}
                 {" · marketplace writes require item approval"}
-                {task.marketplaces.length ? ` · ${task.marketplaces.join(", ")}` : ""}
+                {task.marketplaces.length ? ` · ${task.marketplaces.map(marketplaceName).join(", ")}` : ""}
               </p>
               {task.next_run_at ? <p className="mt-1 text-xs text-muted-foreground">Next run {task.next_run_at}</p> : null}
               <div className="mt-3 flex flex-wrap gap-2">
@@ -453,8 +487,8 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
       )}
 
       {features.has("marketplace_sessions") ? <>
-        <section aria-label="eBay offers" className="rounded-xl border border-border bg-card p-4">
-          <h2 className="mb-3 font-medium">eBay offers</h2>
+        <section aria-label="eBay offers" className={SURFACE}>
+          <h2 className="mb-3 text-sm font-medium">eBay offers</h2>
           <EbayOffersSettings />
         </section>
 

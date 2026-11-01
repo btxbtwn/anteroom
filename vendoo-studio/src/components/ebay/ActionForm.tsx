@@ -95,7 +95,6 @@ export function ActionForm({ title, kind, fields = [], context = {}, build, disa
     <Dialog open={Boolean(activeReview)} onOpenChange={(open) => { if (!open && !confirming.current) setReview(null); }}>
       <DialogPopup className="ebay-action-dialog sm:max-w-xl" initialFocus={cancelRef} showCloseButton={!confirm.isPending}>
         <DialogHeader>
-          <p className="ebay-eyebrow">Review before confirming</p>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>Check the details below. Confirming makes this change in your eBay account.</DialogDescription>
         </DialogHeader>

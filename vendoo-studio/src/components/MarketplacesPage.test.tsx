@@ -83,7 +83,7 @@ describe("MarketplacesPage", () => {
     for (const id of ["poshmark", "depop", "sellwild"] as const) {
       const html = renderToStaticMarkup(<MarketplacePanel marketplace={id} onOpenListing={vi.fn()} />);
       expect(html).toContain('class="ebay-workspace"');
-      expect(html).toContain("Sales channel");
+      expect(html).toContain("ebay-page-heading");
       expect(html).not.toContain("Marketing</button>");
       expect(html).not.toContain("Promoted Closet");
       expect(html).toContain("Sales overview");

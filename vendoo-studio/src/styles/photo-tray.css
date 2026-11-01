@@ -246,7 +246,6 @@
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
-  letter-spacing: 0.06em;
   color: var(--color-text-secondary);
   background: rgba(28, 28, 29, 0.88);
   border: 1px solid var(--color-border);

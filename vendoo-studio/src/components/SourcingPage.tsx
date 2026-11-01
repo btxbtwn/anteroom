@@ -9,7 +9,8 @@ import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 import { Spinner } from "./ui/spinner";
-import { Toggle, ToggleGroup } from "./ui/toggle-group";
+import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
+import "./ebay/ebay.css";
 import { BoughtBoxes } from "./BoughtBoxes";
 import { BOXES_QUERY_KEY, boxFromLot, calibrationNote, recentlyBought, shippingNote } from "./boxPurchases";
 import { DraftInput } from "./DraftInput";
@@ -43,6 +44,10 @@ interface Props {
 }
 
 const TAB_KEY = "studio.sourcing.tab";
+const SOURCING_TABS = [
+  { id: "boxes", label: "Wholesale boxes" },
+  { id: "scout", label: "Scout an item" },
+] as const;
 
 export function SourcingPage({ onOpenListing }: Props) {
   const [tab, setTab] = useState(() => localStorage.getItem(TAB_KEY) === "scout" ? "scout" : "boxes");
@@ -52,24 +57,19 @@ export function SourcingPage({ onOpenListing }: Props) {
   };
   return (
     <WorkspacePage width="wide">
-      <ToggleGroup
-        aria-label="Sourcing"
-        value={[tab]}
-        onValueChange={(next) => {
-          const value = next[0];
-          if (value === "boxes" || value === "scout") choose(value);
-        }}
+      <WorkspaceTabs
+        label="Sourcing"
+        main
+        items={SOURCING_TABS.map((item) => item.label)}
+        value={SOURCING_TABS.find((item) => item.id === tab)!.label}
+        onChange={(label) => choose(SOURCING_TABS.find((item) => item.label === label)!.id)}
       >
-        <Toggle value="boxes">Wholesale boxes</Toggle>
-        <Toggle value="scout">Scout an item</Toggle>
-      </ToggleGroup>
       {tab === "scout" ? (
         <>
           <PageHeader
             title="Is it worth buying?"
             description={<>
-              Photograph an item and its tag in the store. Anteroom identifies it, looks up what it has sold for,
-              and tells you the most worth paying. Nothing is bought or listed.
+              Photograph an item and its tag. Anteroom looks up what it sells for and tells you the most to pay.
             </>}
           />
           <ScoutPanel onOpenListing={onOpenListing} />
@@ -77,6 +77,7 @@ export function SourcingPage({ onOpenListing }: Props) {
       ) : (
         <BoxSourcing onOpenListing={onOpenListing} />
       )}
+      </WorkspaceTabs>
     </WorkspacePage>
   );
 }
@@ -118,8 +119,7 @@ function BoxSourcing({ onOpenListing }: Props) {
       <PageHeader
         title="Source with sales evidence"
         description={<>
-          Compare wholesale boxes using recent comparable sales, current competition, and your costs.
-          A mixed box’s contents and future sales remain uncertain.
+          Wholesale boxes ranked by recent sales, competition and your costs. A mixed box’s contents are never certain.
         </>}
         actions={data ? (
           <UpdateStatus
