@@ -1,0 +1,1 @@
+- Your account now takes photos up to 50 megapixels, like full-size camera photos, so moving your Mac no longer stops at one. Large photos also upload faster.
