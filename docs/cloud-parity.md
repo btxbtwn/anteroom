@@ -256,3 +256,11 @@ seller's durable draft task. Marketplace writes stay approvals, and approving
 one is refused until web marketplace actions exist. Offers and sharing panels
 need marketplace sessions and stay hidden. Fly's trial stops the Machine after
 five minutes, so schedules only fire while it is running.
+
+On `feat/hosted-assistant`, the Assistant view mounts the canonical assistant
+routes. Answers stay in-process like desktop, but the run key and its thread
+are per seller, so one account never blocks or follows another's answer.
+Images are stored under the seller's own assistant thread and readable only by
+its owner; deleting a thread releases them. Applying proposed changes takes the
+item's row lock first. The shop summary skips the Mac's local sourcing file,
+which the web app does not have yet. Answers do not survive an API restart.

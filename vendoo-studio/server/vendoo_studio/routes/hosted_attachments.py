@@ -13,8 +13,12 @@ router = APIRouter()
 
 @router.get('/api/chat-attachments/{attachment_id:path}')
 def attachment(attachment_id: str, size: int | None = None, db=Depends(get_seller_db)):
+    from vendoo_studio.models.assistant import AssistantThread
+
     checked_photo_key(attachment_id, db.user_id)
-    if ConversationRepo(db).get(attachment_id.split('/')[1]) is None:
+    # Images belong to an owned listing chat or an owned assistant conversation.
+    collection = attachment_id.split('/')[1]
+    if ConversationRepo(db).get(collection) is None and db.get(AssistantThread, collection) is None:
         raise HTTPException(404, 'Attachment not found')
     db.rollback()
     if size is not None and size not in THUMBNAIL_SIZES:
