@@ -115,6 +115,12 @@ jobs:
         run: |
           set -euxo pipefail
           SIMULATOR_ID="$(xcrun simctl create 'Anteroom sandbox tests' 'com.apple.CoreSimulator.SimDeviceType.iPhone-17')"
+          # Boot before the tests: a cold boot inside the first test's launch
+          # took over 100 seconds and timed out its first screen query.
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          # The keyboard's swipe-typing introduction covers the first
+          # keyboard and drops keys typed while it closes.
+          xcrun simctl spawn "$SIMULATOR_ID" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true
           ANTEROOM_TEST_DESTINATION="platform=iOS Simulator,id=$SIMULATOR_ID" \
             ANTEROOM_TEST_RESULTS="$RUNNER_TEMP/sandbox.xcresult" ./anteroom-ios/test-sandbox.sh
       - name: Export simulator screenshots

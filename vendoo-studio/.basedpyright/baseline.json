@@ -168,14 +168,6 @@
                     "endColumn": 84,
                     "lineCount": 1
                 }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 21,
-                    "endColumn": 24,
-                    "lineCount": 1
-                }
             }
         ],
         "./server/vendoo_studio/services/etsy_listings.py": [

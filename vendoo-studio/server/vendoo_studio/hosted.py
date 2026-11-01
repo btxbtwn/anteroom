@@ -162,7 +162,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from vendoo_studio.routes.hosted_attachments import router as attachment_router
     app.include_router(attachment_router)
     from vendoo_studio.routes import analytics, boxes, sale_calendar, sales_ledger
-    for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router):
+    from vendoo_studio.routes import sourcing
+    for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router, sourcing.router):
         app.include_router(shared_router)
     from vendoo_studio.routes.photos import edit_router
     app.include_router(edit_router)
@@ -180,6 +181,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(marketplaces_router)
     from vendoo_studio.routes.hosted_direct_listing import router as direct_listing_router
     app.include_router(direct_listing_router)
+    from vendoo_studio.routes.hosted_browser_relay import router as browser_relay_router
+    app.include_router(browser_relay_router)
     from vendoo_studio.routes import assistant
     app.include_router(assistant.router)
     from vendoo_studio.routes.hosted_automations import errors_router, router as automations_router

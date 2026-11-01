@@ -78,10 +78,10 @@ def _stop_waiting_on(job_id: str) -> None:
 
     Cancels loop futures and tasks, so it runs on the event loop.
     """
-    from vendoo_studio.services.extension_connection import extension_manager
+    from vendoo_studio.services.extension_connection import current_extension
     from vendoo_studio.services.listing_completion import cancel_completion
 
-    extension_manager.cancel_waits_for_job(job_id)
+    current_extension().cancel_waits_for_job(job_id)
     cancel_completion(job_id)
 
 

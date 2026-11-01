@@ -312,3 +312,28 @@ are on the web. The web's `/vendoo-api/fields` builds only the Etsy form, with
 the same `leaf_form` the Mac uses, from the seller's saved category fields and
 Etsy's live properties; it never asks Chrome for a schema. `action_marketplaces`
 is `["ebay", "etsy"]` while the job watchdog runs.
+
+On `feat/hosted-browser-relay`, the hosted API gains a per-seller Chrome relay
+(`services/hosted_browser_relay.py`). The seller's signed-in Anteroom tab asks
+`GET /api/browser-relay/next` for the next command for its Chrome and posts the
+Bridge's answer to `POST /api/browser-relay/replies`; the Bridge reads a job's
+approved photos from `/api/browser-relay/jobs/{job}/photos/{photo}` with the
+same session. Only `marketplace.execute`, `marketplace.result`,
+`marketplace.delete` and `job.cancel` pass through, and only to the seller who
+started them. `current_extension()` picks the Mac's paired Bridge or this relay,
+so the desktop direct-listing and delist code runs unchanged. Chrome counts as
+connected while a tab that declares `marketplace.actions` has asked in the last
+30 seconds. Nothing uses the relay until the Bridge and page support it.
+
+On `feat/hosted-chrome-actions`, Poshmark, Mercari and Depop List, Update, Save
+draft and Delist run from the web through the seller's connected Chrome tab and
+Bridge 0.2.40 (see `docs/cloud-extension.md`). Sellwild and Vinted follow with
+their forms.
+
+On `feat/hosted-sourcing`, the Sourcing view is on the web. Each seller's
+preferences, research and buy list live in their own `user_preferences` row
+(`sourcing`) instead of the Mac's `sourcing.json`; refresh locks are per seller,
+and the refresh thread carries the request's seller context. Store catalogs are
+public and stay shared. The web refreshes when the seller opens Sourcing and it
+is due; it has no background timer. The assistant's shop summary now reads the
+seller's own sourcing state on the web too.
