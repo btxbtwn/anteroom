@@ -2,6 +2,7 @@ import { useWorkspaceRuntime } from "../app/runtime";
 import { useEffect } from "react";
 import {
   DEFAULT_SETTINGS_SECTION,
+  settingsSectionFor,
   type SettingsSectionId,
 } from "./settingsNav";
 import { AgentSettings } from "./settings/AgentSettings";
@@ -47,7 +48,7 @@ export function SettingsPage({
   onOpenSetupGuide?: () => void;
 }) {
   const { hosted } = useWorkspaceRuntime();
-  if (hosted && !["general", "listings", "providers"].includes(section)) section = "providers";
+  section = settingsSectionFor(section, hosted);
   useEffect(() => {
     if (!targetId) return;
     const frame = window.requestAnimationFrame(() => {
