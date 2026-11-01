@@ -45,10 +45,11 @@ def status(conv_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/preflight")
-async def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
-                    sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db)):
-    """What each marketplace still needs before List."""
-    return await _reply(native.preflight(conv_id, db, sellwild_category_id, sellwild_condition_id))
+def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
+              sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db)):
+    """What each marketplace still needs before List. A plain function, so FastAPI runs
+    its database work in the threadpool instead of on the event loop."""
+    return _sync(native.preflight, conv_id, db, sellwild_category_id, sellwild_condition_id)
 
 
 @router.post("/{marketplace}/inspect")

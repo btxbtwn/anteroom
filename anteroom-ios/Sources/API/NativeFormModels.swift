@@ -15,33 +15,43 @@ struct NativeForm: Decodable, Sendable {
 }
 
 struct NativeField: Decodable, Identifiable, Sendable {
-    let key: String
-    let path: String
-    let label: String
-    let value: JSONValue?
-    let required: Bool
-    let multi: Bool
-    let selectionOnly: Bool
-    let options: [String]
-    let optionValues: [String: String]
-    let inputType: String
-    let help: String?
-    let section: String?
-    let half: Bool
-    let locked: Bool
-    let maxLength: Int?
-    let maxValues: Int?
-    let placeholder: String?
-    let clears: [String]
-    let categorySpecific: Bool
-    let inventoryGroups: [InventoryGroup]
-    let optionAmounts: [String: Double]
-    let inventorySystem: String?
+    var key: String
+    var path: String
+    var label: String
+    var value: JSONValue?
+    var required: Bool
+    var multi: Bool
+    var selectionOnly: Bool
+    var options: [String]
+    var optionValues: [String: String]
+    var inputType: String
+    var help: String?
+    var section: String?
+    var half: Bool
+    /// A quarter-width field, such as eBay's package weight in pounds beside ounces.
+    var quarter: Bool
+    var locked: Bool
+    var maxLength: Int?
+    var maxValues: Int?
+    var placeholder: String?
+    var clears: [String]
+    var categorySpecific: Bool
+    var inventoryGroups: [InventoryGroup]
+    var optionAmounts: [String: Double]
+    var inventorySystem: String?
+    /// The link that shows this field ("See title options", "Show more"); hidden until then.
+    var reveal: String?
+    var minValue: Double?
+    var step: Double?
+    /// eBay: the aspects variations can differ by in this category.
+    var variationAspects: [VariationAspect]
 
     var id: String { key }
 
     enum CodingKeys: String, CodingKey {
-        case key, path, label, value, required, multi, options, help, section, locked, placeholder, clears, width
+        case key, path, label, value, required, multi, options, help, section, locked, placeholder, clears, width, reveal, step
+        case minValue = "min_value"
+        case variationAspects = "variation_aspects"
         case selectionOnly = "selection_only"
         case optionValues = "option_values"
         case inputType = "input_type"
@@ -70,6 +80,7 @@ struct NativeField: Decodable, Identifiable, Sendable {
         section = try c.decodeIfPresent(String.self, forKey: .section)
         let width = try c.decodeIfPresent(String.self, forKey: .controlWidth) ?? c.decodeIfPresent(String.self, forKey: .width)
         half = width == "half"
+        quarter = width == "quarter"
         locked = try c.decodeIfPresent(Bool.self, forKey: .locked) ?? false
         maxLength = try c.decodeIfPresent(Int.self, forKey: .maxLength)
         maxValues = try c.decodeIfPresent(Int.self, forKey: .maxValues)
@@ -79,6 +90,10 @@ struct NativeField: Decodable, Identifiable, Sendable {
         inventoryGroups = (try? c.decodeIfPresent([InventoryGroup].self, forKey: .inventoryGroups)) ?? []
         optionAmounts = (try? c.decodeIfPresent([String: Double].self, forKey: .optionAmounts)) ?? [:]
         inventorySystem = try c.decodeIfPresent(String.self, forKey: .inventorySystem)
+        reveal = try c.decodeIfPresent(String.self, forKey: .reveal)
+        minValue = try? c.decodeIfPresent(Double.self, forKey: .minValue)
+        step = try? c.decodeIfPresent(Double.self, forKey: .step)
+        variationAspects = (try? c.decodeIfPresent([VariationAspect].self, forKey: .variationAspects)) ?? []
     }
 
     /// The label a stored value is shown as.

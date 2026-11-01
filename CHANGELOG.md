@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.642 — 2026-11-01
+
+- Opening one marketplace tab after another on the web no longer stalls the app, or signing in, for half a minute.
+
 ## 0.1.641 — 2026-11-01
 
 - eBay draft repair no longer repeats an optional-field value that already failed or sends duplicate repairs for the same field.
