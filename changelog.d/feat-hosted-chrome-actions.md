@@ -1,1 +1,0 @@
-- List, update and delist on Poshmark, Mercari and Depop from the web app, through Chrome on your computer with Anteroom Bridge 0.2.40. Each one still asks you to confirm first.

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.639 — 2026-11-01
+
+- List, update and delist on Poshmark, Mercari and Depop from the web app, through Chrome on your computer with Anteroom Bridge 0.2.40. Each one still asks you to confirm first.
+
 ## 0.1.638 — 2026-11-01
 
 - Prepare the web app to send your approved Poshmark, Mercari, Depop, Sellwild and Vinted actions to Chrome on your computer.
