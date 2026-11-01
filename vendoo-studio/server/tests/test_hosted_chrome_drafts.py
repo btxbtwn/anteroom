@@ -247,19 +247,22 @@ def test_watchdog_keeps_a_live_web_save_and_leaves_an_expired_one_for_review(clo
     operation = command['operation_id']
 
     from vendoo_studio.database import SessionLocal
-    from vendoo_studio.models.job import Job
-    with use(for_seller(USER_ID)), SessionLocal() as db:
-        db.execute(update(Job).where(Job.id == operation).values(updated_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=2)))
-        db.commit()
+    from vendoo_studio.models.job import Job, JobEvent
+
+    def quiet_for(minutes: int, **values) -> None:
+        """The job and its events last heard from ``minutes`` ago (naive UTC, like the columns)."""
+        then = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=minutes)
+        with use(for_seller(USER_ID)), SessionLocal() as db:
+            db.execute(update(Job).where(Job.id == operation).values(updated_at=then, **values))
+            db.execute(update(JobEvent).where(JobEvent.job_id == operation).values(created_at=then))
+            db.commit()
+
+    # Silent past the watchdog's grace, but its token is live: Chrome may still report.
+    quiet_for(2)
     assert asyncio.run(hosted_job_watchdog.sweep_owner(USER_ID, reconcile_all=True)) == []
     assert _job(operation).status == 'dispatched'
 
-    with use(for_seller(USER_ID)), SessionLocal() as db:
-        db.execute(update(Job).where(Job.id == operation).values(
-            operation_expires_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1),
-            # Expired long after it was last heard from (an UPDATE would otherwise stamp it as just now).
-            updated_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=16)))
-        db.commit()
+    quiet_for(16, operation_expires_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1))
     # Expired: the slot frees and the record waits for the seller to check. Chrome is never asked.
     assert asyncio.run(hosted_job_watchdog.sweep_owner(USER_ID, reconcile_all=True)) == [operation]
     assert _job(operation).status == 'failed'
