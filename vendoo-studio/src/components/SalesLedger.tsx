@@ -1,3 +1,4 @@
+import { cn } from "../lib/utils";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -68,14 +69,14 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
     {query.error ? <PageError message={query.error.message} /> : null}
     {data ? <>
       <SalesLedgerSummary summary={data.summary} />
-      <PageSection title="Sales records" description="One record per marketplace order line, including dismissed alerts and cancellation/refund updates. Record line totals after discounts. Blank amounts stay unknown; enter zero when confirmed.">
-        {data.rows.length ? <ul className="divide-y divide-border rounded-lg border border-border px-3">{data.rows.map((row) => <li key={row.id} className="flex min-w-0 flex-wrap items-center gap-3 py-3 text-sm">
-          <div className="min-w-0 flex-1 basis-48 break-words"><p className="font-medium">{row.title || `${marketplaceName(row.marketplace)} order ${row.order_id}`}</p>
+      <PageSection title="Sales records" description="One record per order line, including cancellations and refunds. Record totals after discounts; leave an amount blank if unknown and enter 0 once confirmed.">
+        {data.rows.length ? <ul className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/60 bg-card/40">{data.rows.map((row) => <li key={row.id} className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 text-sm">
+          <div className="flex min-w-0 flex-1 basis-48 flex-col gap-0.5 break-words"><p className="font-medium">{row.title || `${marketplaceName(row.marketplace)} order ${row.order_id}`}</p>
             <p className="text-xs text-muted-foreground">{marketplaceName(row.marketplace)} · {row.order_status.replace(/_/g, " ")} · quantity {row.quantity ?? "unknown"}</p>
-            <p className="text-xs text-muted-foreground">Order {row.order_id} · line {row.line_id}</p>
-            <p className="text-xs">Profit: {ledgerMoney(row.profit, row.financials?.currency)}</p>
+            <p className="font-mono text-2xs text-muted-foreground/80">Order {row.order_id} · line {row.line_id}</p>
             {row.financials_stale ? <p className="text-xs text-warning">Order changed or recorded amounts need review.</p> : null}
           </div>
+          <p className={cn("shrink-0 text-xs tabular-nums", row.profit == null && "text-muted-foreground")}>Profit: {ledgerMoney(row.profit, row.financials?.currency)}</p>
           <div className="flex flex-wrap gap-2">{row.conversation_id ? <Button size="xs" variant="ghost" onClick={() => onOpenListing(row.conversation_id!)}>Open item</Button> : null}
             <Button size="xs" variant="outline" onClick={() => { setSelected(row); setEditor((value) => value + 1); }}>Record amounts</Button></div>
         </li>)}</ul> : <EmptyRow>No recorded orders in this period. Recover orders from a marketplace’s Orders tab to add missing sales.</EmptyRow>}

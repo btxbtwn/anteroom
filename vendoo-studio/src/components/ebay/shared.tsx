@@ -10,6 +10,11 @@ import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
 import { ActionForm } from "./ActionForm";
 
+/** A metric's figure. A missing figure keeps its words but drops to body size and muted color. */
+export function MetricValue({ value }: { value: string }) {
+  return <dd data-empty={value === "Not available" || value === "—" || undefined}>{value}</dd>;
+}
+
 export function RowCards({ rows, onSelect, selected }: { rows: EbayRow[]; onSelect?: (row: EbayRow) => void; selected?: string }) {
   return rows.length ? <div className="ebay-records">{rows.map((row) => <article key={row.id} className="ebay-record" data-selected={selected === row.id}>
     <div className="ebay-record-header">

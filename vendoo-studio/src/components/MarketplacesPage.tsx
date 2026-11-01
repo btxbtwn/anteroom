@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { FormDraftProvider } from "./ebay/FormDrafts";
@@ -8,7 +7,8 @@ import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
 import { EtsyWorkspace } from "./etsy/EtsyWorkspace";
 import { EbayWorkspace } from "./ebay/EbayWorkspace";
-import { PageHeader, WorkspacePage } from "./WorkspacePage";
+import { WorkspacePage } from "./WorkspacePage";
+import "./ebay/ebay.css";
 
 const MARKETPLACES = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"] as const;
 export type Marketplace = (typeof MARKETPLACES)[number];
@@ -23,12 +23,11 @@ export function MarketplacesPage({ marketplace, onMarketplaceChange, onOpenListi
   const ebay = connection.data?.accounts.ebay;
   return (
     <FormDraftProvider key={`${ebay?.label}-${ebay?.connectedAt}`}><WorkspacePage width="expanded">
-      <PageHeader title="Marketplaces" description="Manage each marketplace’s listings and sales in one place." />
+      <h1 className="sr-only">Marketplaces</h1>
       <Tabs.Root value={marketplace} onValueChange={(value) => onMarketplaceChange(value as Marketplace)}>
-        <Tabs.List aria-label="Marketplaces" className="mb-7 flex flex-wrap gap-1 border-b border-border">
-          {MARKETPLACES.map((id) => <Tabs.Tab key={id} value={id} style={{ "--tab-brand": `var(--color-${id})` } as CSSProperties}
-            className="flex min-h-11 cursor-pointer items-center gap-2 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring data-[active]:border-(--tab-brand) data-[active]:text-foreground">
-            <MarketplaceLogo id={id} label={marketplaceName(id)} size={16} />{marketplaceName(id)}
+        <Tabs.List aria-label="Marketplaces" className="ebay-navigation">
+          {MARKETPLACES.map((id) => <Tabs.Tab key={id} value={id}>
+            <MarketplaceLogo id={id} label={marketplaceName(id)} size={14} />{marketplaceName(id)}
           </Tabs.Tab>)}
         </Tabs.List>
         <Tabs.Panel value={marketplace}>

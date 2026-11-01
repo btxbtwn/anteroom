@@ -406,7 +406,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col items-center px-4">
         <div className="grid h-full w-full max-w-208 grid-rows-[1fr_auto_1fr]">
           <div className="flex flex-col justify-end pb-5">
-            <h1 className="mb-2 text-center font-semibold text-2xl text-foreground">Ask about your business</h1>
+            <h1 className="mb-2 text-center font-semibold text-xl tracking-tight text-foreground">Ask about your business</h1>
             <p className="text-center text-muted-foreground text-sm leading-relaxed">
               You review every change before it is saved, and nothing here publishes a listing.
             </p>

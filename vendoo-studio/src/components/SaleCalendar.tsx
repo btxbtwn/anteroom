@@ -151,7 +151,7 @@ export function SaleCalendar({ marketplace: market, onOpenListing }: { marketpla
             </Panel>;
           })}
         </div> : null}
-        <PageNote>Suggested windows are experiments based on imported sales in {timezone}, assuming complete history. They don’t predict extra sales from a discount. Stock, traffic, seasonality, and previous promotions can affect the pattern.</PageNote>
+        <PageNote>Suggestions come from your imported sales ({timezone}). They’re experiments, not a forecast of extra sales.</PageNote>
         <Panel divided={false} className="flex flex-col gap-3 p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-1">

@@ -40,8 +40,8 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
 
   return <div className="ebay-workspace" data-marketplace="etsy">
     <header className="ebay-page-heading">
-      <div><p className="ebay-eyebrow mb-3">Sales channel</p>
-        <div className="flex items-center gap-3"><MarketplaceLogo id="etsy" label="Etsy" size={28} /><h2>Etsy</h2></div>
+      <div>
+        <div className="flex items-center gap-2"><MarketplaceLogo id="etsy" label="Etsy" size={18} /><h2>Etsy</h2></div>
         <p>Your shop, orders, and listings.</p></div>
       <div className="ebay-connection">
         {connected ? <span className="ebay-status"><CheckCircle2Icon aria-hidden="true" />{account?.label || "Connected"}</span> : null}
@@ -62,7 +62,7 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
         ) : <>
           {tab !== "Listings" ? <>
             <div className="ebay-dashboard-toolbar">
-              <div className="ebay-tab-intro"><p className="ebay-eyebrow">{tab === "Dashboard" ? "Performance" : "Orders"}</p><h2>{tab === "Dashboard" ? "Shop overview" : "Shop orders"}</h2><p>Order creation dates in UTC.</p></div>
+              <div className="ebay-tab-intro"><h2>{tab === "Dashboard" ? "Shop overview" : "Shop orders"}</h2><p>Order creation dates in UTC.</p></div>
               <div className="ebay-date-range">
                 <label>From<Input nativeInput type="date" aria-label="Etsy orders from" min="2000-01-01" max={end} value={start} onChange={(event) => setStart(event.target.value)} /></label>
                 <label>To<Input nativeInput type="date" aria-label="Etsy orders to" min={start} max={today} value={end} onChange={(event) => setEnd(event.target.value)} /></label>

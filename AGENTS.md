@@ -16,6 +16,7 @@ a retry, or as a side effect of any other action.
 
 - **`skills/`** — Canonical source for listing rules, templates, research loops, and optimizer tooling.
 - **`VENDOO_STUDIO_SPEC.md`** — Product and architecture specification for Anteroom.
+- **`DESIGN.md`** — Visual design rules and review checklist for Anteroom's web UI.
 - Do not duplicate listing rules across components.
 
 ## Code Search (Semble)
@@ -168,6 +169,7 @@ mix it with a fix or a feature.
 ## Coding Conventions
 
 - Follow the established style within each component. Do not refactor unrelated files.
+- Any visible change to the Anteroom web UI follows `DESIGN.md`: shared components, theme tokens, the type and spacing scales, and its pre-ship checklist.
 - Keep skill instructions in canonical `SKILL.md` files; keep browser-specific logic in the corresponding extension content script.
 - Keep frontend API calls under `vendoo-studio/src/api/`; keep backend routes thin and place domain behavior in services and repositories.
 - A direct marketplace tab (eBay, Poshmark, Mercari, Depop, Sellwild) is a 1:1 replica of that marketplace's own listing form: the same fields, labels and order, no more and no fewer, under the same section headings and row layout (each native field carries the page's `section`, and `width: "half"` where the page puts fields side by side). Its rows come only from the native form the server or extension builds; the editor never adds reference, hand-kept or fallback rows to it. A field the marketplace has goes into that native form builder, not the editor.

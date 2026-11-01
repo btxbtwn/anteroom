@@ -121,8 +121,6 @@
   font-weight: var(--weight-medium);
   color: var(--color-text-muted);
   margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .job-card-status {
@@ -146,7 +144,6 @@
   font-size: var(--text-2xs);
   padding: 2px 6px;
   border-radius: var(--radius-xs);
-  letter-spacing: 0.02em;
 }
 
 .fill-log-chip-filled {
@@ -326,13 +323,13 @@
 }
 
 .pr-mode-banner.is-vendoo {
-  background: rgba(248, 81, 73, 0.08);
-  border-color: rgba(248, 81, 73, 0.24);
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+  border-color: color-mix(in srgb, var(--destructive) 24%, transparent);
 }
 
 .pr-mode-banner.is-listing {
-  background: rgba(230, 167, 0, 0.1);
-  border-color: rgba(230, 167, 0, 0.24);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 24%, transparent);
 }
 
 .pr-search {
@@ -398,7 +395,7 @@
 
 .pr-icon-btn.is-on-filled {
   background: var(--color-ink-raised);
-  color: #3fb950;
+  color: var(--success-foreground);
 }
 
 .pr-menu-wrap {
@@ -670,11 +667,9 @@
   border: 1px solid var(--color-border);
   background: var(--color-ink-hover);
   color: var(--color-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: var(--text-2xs);
+  font-weight: 500;
   line-height: 1.4;
-  text-transform: uppercase;
 }
 
 .pr-live-status.is-listed {
@@ -702,19 +697,19 @@
 }
 
 .pr-add {
-  color: #3fb950;
+  color: var(--success-foreground);
 }
 
 .pr-ready {
-  color: #58a6ff;
+  color: var(--info-foreground);
 }
 
 .pr-na {
-  color: #d4a017;
+  color: var(--warning-foreground);
 }
 
 .pr-del {
-  color: #f85149;
+  color: var(--destructive-foreground);
 }
 
 .pr-diff {
@@ -794,15 +789,15 @@
 }
 
 .pr-diff-line.is-add {
-  background: rgba(63, 185, 80, 0.12);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 
 .pr-diff-line.is-na {
-  background: rgba(230, 167, 0, 0.16);
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
 }
 
 .pr-diff-line.is-del {
-  background: rgba(248, 81, 73, 0.12);
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
 }
 
 .pr-diff-gutter {
@@ -813,19 +808,19 @@
 
 .pr-diff-line.is-add .pr-diff-gutter,
 .pr-diff-line.is-add .pr-diff-name {
-  color: #3fb950;
+  color: var(--success-foreground);
 }
 
 .pr-diff-line.is-na .pr-diff-gutter,
 .pr-diff-line.is-na .pr-diff-name,
 .pr-diff-line.is-na .pr-diff-value {
-  color: #d4a017;
+  color: var(--warning-foreground);
 }
 
 .pr-diff-line.is-del .pr-diff-gutter,
 .pr-diff-line.is-del .pr-diff-name,
 .pr-diff-line.is-del .pr-diff-value {
-  color: #f85149;
+  color: var(--destructive-foreground);
 }
 
 .pr-diff-main {
@@ -867,10 +862,8 @@
 
 .pr-proposed-label {
   color: var(--color-ink-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  font-size: var(--text-2xs);
+  font-weight: 500;
 }
 
 .pr-field-table-head,
@@ -896,10 +889,8 @@
   padding-bottom: 4px;
   background: var(--color-paper);
   color: var(--color-ink-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: var(--text-2xs);
+  font-weight: 500;
 }
 
 .pr-field-table-gap {
@@ -912,15 +903,15 @@
 }
 
 .pr-field-row.is-add {
-  background: rgba(63, 185, 80, 0.12);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 
 .pr-field-row.is-na {
-  background: rgba(230, 167, 0, 0.16);
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
 }
 
 .pr-field-row.is-del {
-  background: rgba(248, 81, 73, 0.12);
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
 }
 
 .pr-field-row.is-unknown {
@@ -934,18 +925,18 @@
 
 .pr-field-row.is-add .pr-field-gutter,
 .pr-field-row.is-add .pr-field-name {
-  color: #3fb950;
+  color: var(--success-foreground);
 }
 
 .pr-field-row.is-na .pr-field-gutter,
 .pr-field-row.is-na .pr-field-name,
 .pr-field-row.is-na .pr-field-cell {
-  color: #d4a017;
+  color: var(--warning-foreground);
 }
 
 .pr-field-row.is-del .pr-field-gutter,
 .pr-field-row.is-del .pr-field-name {
-  color: #f85149;
+  color: var(--destructive-foreground);
 }
 
 .pr-field-row.is-unknown .pr-field-gutter,
@@ -974,7 +965,7 @@
 }
 
 .pr-field-cell.is-empty {
-  color: #f85149;
+  color: var(--destructive-foreground);
 }
 
 .pr-field-cell.is-unknown {
@@ -1010,8 +1001,8 @@
 }
 
 .pr-issue-badge.is-failure {
-  color: #f85149;
-  background: rgba(248, 81, 73, 0.14);
+  color: var(--destructive-foreground);
+  background: color-mix(in srgb, var(--destructive) 14%, transparent);
 }
 
 .pr-field-row:hover .pr-hide-btn,

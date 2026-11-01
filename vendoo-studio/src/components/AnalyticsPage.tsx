@@ -43,7 +43,7 @@ interface Props {
 
 export function AnalyticsPage({ onOpenListing }: Props) {
   const [view, setView] = useState("Sales records");
-  return <WorkspacePage width="expanded"><WorkspaceTabs label="Analytics views" items={["Sales records", "Inventory analytics"]} value={view} onChange={setView}>
+  return <WorkspacePage width="expanded"><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics"]} value={view} onChange={setView}>
     {view === "Sales records" ? <SalesLedger onOpenListing={onOpenListing} /> : <InventoryAnalyticsView onOpenListing={onOpenListing} />}
   </WorkspaceTabs></WorkspacePage>;
 }

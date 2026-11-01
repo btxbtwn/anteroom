@@ -1,7 +1,8 @@
 import { OrderRecovery } from "../OrderRecovery";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2Icon, Settings2Icon, StoreIcon } from "lucide-react";
+import { CheckCircle2Icon, Settings2Icon } from "lucide-react";
+import { MarketplaceLogo } from "../MarketplaceLogo";
 import { api } from "../../api/client";
 import { PageError, PageNote } from "../WorkspacePage";
 import { SaleCalendar } from "../SaleCalendar";
@@ -40,7 +41,7 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
   const account = connection.data?.accounts.ebay;
   return <div className="ebay-workspace">
     <header className="ebay-page-heading">
-      <div><p className="ebay-eyebrow mb-3">Sales channel</p><div className="flex items-center gap-3"><StoreIcon className="size-6 text-muted-foreground" aria-hidden="true" /><h2>eBay</h2></div>
+      <div><div className="flex items-center gap-2"><MarketplaceLogo id="ebay" label="eBay" size={18} /><h2>eBay</h2></div>
         <p>Orders, buyers, listings, and performance.</p></div>
       <div className="ebay-connection">
         {account?.connected ? <span className="ebay-status"><CheckCircle2Icon aria-hidden="true" />{account.label || "Connected"}</span> : null}

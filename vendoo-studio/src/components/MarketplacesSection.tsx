@@ -697,7 +697,7 @@ export function MarketplacesLayout({
                 <button type="button" aria-selected={current} title={status?.label} onClick={() => onSelect(id)}
                   onPointerEnter={() => onPrepare?.(id)} onFocus={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
                   className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent",
-                    current && "bg-accent shadow-[inset_2px_0_0_var(--primary)]")}>
+                    current && "bg-accent text-foreground")}>
                   {marketplace ? <MarketplaceLogo id={marketplace} label={name} size={16} /> : <span aria-hidden className="size-4 shrink-0" />}
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-foreground">{name}</span>

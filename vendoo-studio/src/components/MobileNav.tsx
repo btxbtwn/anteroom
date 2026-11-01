@@ -65,7 +65,7 @@ export function MobileNav({
         className="max-w-80 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)]"
       >
         <div className="flex h-14 shrink-0 items-center gap-1 px-5">
-          <SheetTitle className="text-[22px] font-extrabold tracking-[-0.04em]">
+          <SheetTitle className="text-[17px] font-semibold tracking-tight">
             Anteroom
           </SheetTitle>
         </div>

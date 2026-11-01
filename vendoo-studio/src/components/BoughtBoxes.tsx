@@ -55,9 +55,8 @@ export function BoughtBoxes() {
       title="Boxes you bought"
       actions={!adding ? <Button variant="outline" size="xs" onClick={() => setAdding(true)}>Add a box</Button> : null}
       description={<>
-        What each box cost with shipping, and what its sales have brought back after fees. Choose the box when you
-        bulk upload its photos, or in a listing's Item Details. Record the pieces that weren't worth listing, so
-        their cost lands on the pieces that sell.
+        What each box cost and what its sales have earned after fees. Pick the box when you upload its photos,
+        and record pieces you didn’t list so their cost counts toward the ones that sell.
       </>}
     >
       {adding ? (

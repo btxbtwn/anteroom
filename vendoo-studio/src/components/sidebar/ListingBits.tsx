@@ -69,9 +69,9 @@ export function SelectCheckbox({
 }
 
 const STATUS_TONES: Record<string, string> = {
-  draft: "text-warning-foreground",
+  draft: "text-muted-foreground",
   "in-progress": "text-info-foreground",
-  listing: "text-violet-500 dark:text-violet-400",
+  listing: "text-info-foreground",
   active: "text-success-foreground",
   sold: "text-primary",
   failed: "text-destructive-foreground",
