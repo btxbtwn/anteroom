@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.643 — 2026-11-01
+
+- On the web, Settings → Connections now opens your marketplace accounts, so you can connect eBay and Etsy there. It used to show the AI provider settings instead.
+
 ## 0.1.642 — 2026-11-01
 
 - Opening one marketplace tab after another on the web no longer stalls the app, or signing in, for half a minute.
