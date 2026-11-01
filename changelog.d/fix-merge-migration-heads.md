@@ -1,0 +1,1 @@
+- Fix a database update that two changes made at the same time, so Anteroom starts again on the newest build.
