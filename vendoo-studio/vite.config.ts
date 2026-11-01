@@ -31,7 +31,8 @@ export default defineConfig({
       configureServer(server) {
         if (process.env.VITE_ANTEROOM_SANDBOX !== "1") return;
         server.middlewares.use((request, _response, next) => {
-          if (request.url === "/") request.url = "/cloud.html";
+          // Keep the query: sign-in links arrive as `/?code=…`.
+          if (request.url === "/" || request.url?.startsWith("/?")) request.url = `/cloud.html${request.url.slice(1)}`;
           next();
         });
       },

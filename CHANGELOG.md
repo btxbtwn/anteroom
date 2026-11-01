@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.617 — 2026-10-31
+
+- Accounts now use an email and password. Create an account on the web, confirm your email, then sign in anywhere. Forgot your password? Reset it by email. If you used to sign in by email link, choose Forgot password once to set a password.
+- The Mac app can open your account: choose Sign in, or Account › My Account in the menu bar, to see the same listings as on the web. Account › This Mac's Listings goes back. The app reopens on whichever you used last.
+
 ## 0.1.616 — 2026-10-31
 
 - The web app now has the Assistant. Each account has its own conversations and answers, and attached images stay private to that conversation.

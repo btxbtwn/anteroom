@@ -29,7 +29,7 @@ The remaining port is backend work, rather than more frontend screens:
 - Add reviewed, seller-approved marketplace write contracts to the Chrome Bridge.
 - Port settings, account linking/import, analytics and other file-backed services
   before enabling their existing pages.
-- Connect the Mac worker for capabilities unavailable in a browser or on iPhone.
+- Connect the Mac worker for the Mac-only capabilities (see **Who can do what**).
 
 The hosted app does not expose the desktop HTTP server, Keychain, filesystem,
 loopback extension socket, or desktop startup/background services. Local
@@ -40,6 +40,11 @@ inventory remains local until the account linking/import step is implemented.
 One seller account, three apps (Mac, web, iPhone), the same listings on all of
 them, live. Nothing is lost if a Mac is lost.
 
+The account is an email and password in Supabase Auth. Signing in decides whose
+data every app shows: the web app and the Mac app show the same hosted web app,
+and the iPhone app talks to the same API. New accounts confirm their email
+before the first sign-in; a forgotten password is reset by email link.
+
 ## Why the backend moves, instead of syncing databases
 
 Today Anteroom is one FastAPI process per Mac: SQLite on disk, photos in a
@@ -47,10 +52,10 @@ folder, secrets in Keychain, about twenty background timers, all for one seller.
 Keeping several SQLite copies in step with a cloud copy would mean resolving
 conflicts in every one of its 30-odd tables, forever.
 
-Established crosslisting products (Vendoo, List Perfectly) keep one copy on their
-servers, and every device is a client. Vendoo's iPhone app queues work that its
-Chrome extension runs on the seller's computer the next time it checks in (the
-extension polls `queue/pull` every five minutes). Anteroom adopts the same shape.
+Established crosslisting products keep one copy on their servers, and every
+device is a client. Their phone apps queue form work that a Chrome extension
+runs on the seller's computer the next time it checks in. Anteroom adopts the
+same shape.
 
 ## The shape
 
@@ -62,9 +67,10 @@ extension polls `queue/pull` every five minutes). Anteroom adopts the same shape
             │ Realtime (live updates)          │        marketplace APIs, job queue
             └──────────────────────────────────┘                 ▲
                                                                   │ outbound only
-                                                      Mac worker (Chrome extension
-                                                      bridge: Poshmark, Mercari,
-                                                      Depop, Vendoo fills)
+                                                      Chrome extension on any computer
+                                                      (Poshmark, Mercari, Depop, Sellwild
+                                                      form fills); Mac worker for
+                                                      Mac-only work
 ```
 
 - **Supabase** holds accounts, the database, photos and live updates. It has
@@ -81,10 +87,10 @@ extension polls `queue/pull` every five minutes). Anteroom adopts the same shape
   command contracts and approval/concurrency checks remain before actions ship.
   A Mac worker is needed only for desktop capabilities kept in the Mac app or
   for requesting that Mac’s browser work from another device.
-- **Mac app** shows the same web app in its window, and runs the **Mac worker**:
-  the extension bridge and Chrome automation, which can only run where Chrome
-  runs. It connects outbound to the API and takes queued fill jobs, so the
-  loopback-only rule still holds on the Mac.
+- **Mac app** shows the same web app in its window once the seller signs in
+  (Account › My Account; Account › This Mac's Listings goes back), and remembers
+  which one it showed last. It also runs the **Mac worker** for Mac-only work. It
+  connects outbound to the API, so the loopback-only rule still holds on the Mac.
 - **iPhone app** is a native SwiftUI app on the same API and Supabase: photos,
   generation, editing, and queuing jobs for the Mac.
 
@@ -101,7 +107,38 @@ Unchanged: automation never publishes; publishing and delisting need the
 seller's explicit request with `confirm`; one automation job at a time per
 seller; human approval before a Send.
 
-## Order of work
+## Who can do what
+
+The design does not assume a Mac.
+
+| Seller has | What works |
+|---|---|
+| iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. |
+| Any computer with desktop Chrome | The above, plus Poshmark, Mercari, Depop and Sellwild form fills through the Bridge extension, which has the only path to those forms (they offer no public listing API). |
+| The Mac app | The above, plus Mac-only work: Apple Vision background removal and local SDK sign-ins. |
+
+A phone-only seller cannot fill browser-only marketplace forms. Running a
+browser on the server with the seller's marketplace sign-ins would store those
+sign-ins on a server and trip marketplace bot checks, so it is not planned.
+
+## Next steps (2026-10-31)
+
+1. **Accounts and the Mac.** Email-and-password accounts on web, Mac and
+   iPhone. The Mac app signs in and shows the account in its window.
+2. **Bring a Mac's listings along.** The first time a Mac with local listings
+   signs in, it offers once to add them to the account (a `VACUUM INTO`
+   snapshot plus photos, mapping the local owner to the account). It never
+   claims records without the seller confirming. The local copy stays as a
+   backup.
+3. **Fills from the web app.** Reviewed Bridge command contracts, so the web
+   app fills marketplace forms in the Chrome it runs in, on any computer.
+4. **Queue from the phone.** The extension pulls approved fills whenever Chrome
+   is open. Every fill still needs the seller's approval and stops at a draft.
+5. **Live updates.** Supabase Realtime replaces polling.
+
+The Mac worker then covers only the Mac-only work above.
+
+## Original order of work
 
 Each step ships on its own and leaves a working product.
 

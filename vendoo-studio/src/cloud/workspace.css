@@ -6,3 +6,7 @@
 .chrome-connection{position:relative}.connection-controls{display:flex;align-items:center;gap:8px}.connection-controls button{font-size:13px;white-space:nowrap}.connection-controls .subtle{border-color:transparent;background:transparent;color:#aaa;padding:8px}.connection-help{position:absolute;right:0;top:calc(100% + 12px);width:min(360px,85vw);padding:10px 18px;background:#1b1b1b;border:1px solid #3a3a3a;border-radius:12px;z-index:10;box-shadow:0 12px 35px #0008}.connection-help p{font-size:13px;line-height:1.6;overflow-wrap:anywhere}
 @media(max-width:899px){.cloud-mobile-account{display:flex;padding:8px 12px;justify-content:flex-end}}
 @media(min-width:900px){.cloud-mobile-account{display:none}}
+.cloud-auth .hint{font-size:13px;margin:6px 0 0}.cloud-auth code{font-family:var(--font-mono)}
+.sign-in-links{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;margin-top:16px}
+.cloud-auth .sign-in-links button.link,.cloud-auth .sign-in-links a.link{width:auto;margin:0;padding:0;border:0;background:none;color:var(--muted-foreground);font-size:14px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.cloud-drag{position:fixed;inset:0 0 auto 0;height:38px}

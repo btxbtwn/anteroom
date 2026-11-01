@@ -21,7 +21,9 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
   expect((await request.get(`${api}/api/drafts`)).status()).toBe(401);
   expect((await request.post(`${api}/api/conversations/${draft.id}/vendoo-api/list`, { headers, data: { marketplaces: ["ebay"], confirm: true } })).status()).toBe(403);
   await page.goto("/");
-  await page.getByRole("button", { name: "Sign in as Alice" }).click();
+  await page.getByLabel("Email address").fill("alice@sandbox.test");
+  await page.getByLabel("Password").fill("sandbox");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   if (info.project.name === "phone") {
     await page.getByRole("button", { name: "Inventory", exact: true }).click();
   }

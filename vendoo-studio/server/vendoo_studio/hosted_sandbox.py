@@ -27,6 +27,11 @@ ACCOUNTS = {name + '@sandbox.test': str(uuid.uuid5(uuid.NAMESPACE_DNS, 'anteroom
             for name in ('alice', 'bob')}
 
 
+def auth_error(status: int, code: str, message: str):
+    """Supabase Auth's error body, which supabase-js reads the code from."""
+    return JSONResponse({'error_code': code, 'msg': message}, status_code=status)
+
+
 class LocalSupabase:
     """Small protocol stand-in; the real hosted API still verifies signed JWTs."""
     def __init__(self):
@@ -40,10 +45,16 @@ class LocalSupabase:
         self.verifier.keys = LocalKeys('https://sandbox.invalid/unused')
         self.server_key = secrets.token_urlsafe(32)
         self.refresh_tokens: dict[str, str] = {}
+        # Reset links as codes: the sandbox sends no email, so tests open
+        # `/?code=recovery-<name>` the way the real link would.
+        self.recovery_codes: dict[str, str] = {}
         self.objects: dict[str, bytes] = {}
         self.app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
         self.app.add_api_route('/auth/v1/token', self.token, methods=['POST'])
         self.app.add_api_route('/auth/v1/user', self.user, methods=['GET'])
+        self.app.add_api_route('/auth/v1/user', self.update_user, methods=['PUT'])
+        self.app.add_api_route('/auth/v1/signup', self.signup, methods=['POST'])
+        self.app.add_api_route('/auth/v1/recover', self.recover, methods=['POST'])
         self.app.add_api_route('/auth/v1/logout', self.logout, methods=['POST'])
         self.app.add_api_route('/storage/v1/object/anteroom-photos/{key:path}', self.storage, methods=['GET', 'POST', 'PUT'])
         self.app.add_api_route('/storage/v1/object/anteroom-photos', self.delete, methods=['DELETE'])
@@ -68,11 +79,33 @@ class LocalSupabase:
         body = await request.json()
         if request.query_params.get('grant_type') == 'refresh_token':
             email = self.refresh_tokens.pop(body.get('refresh_token'), None)
+        elif request.query_params.get('grant_type') == 'pkce':
+            email = self.recovery_codes.pop(body.get('auth_code'), None)
         else:
             email = body.get('email') if body.get('password') == 'sandbox' else None
         if email not in ACCOUNTS:
-            raise HTTPException(400, 'Use alice@sandbox.test or bob@sandbox.test with password sandbox')
+            return auth_error(400, 'invalid_credentials', 'Use alice@sandbox.test or bob@sandbox.test with password sandbox')
         return self.session(email)
+
+    async def signup(self, request: Request):
+        # New accounts confirm their email first, so Supabase answers without a session.
+        email = (await request.json()).get('email', '')
+        if email in ACCOUNTS:
+            return auth_error(422, 'user_already_exists', 'User already registered')
+        return {'id': str(uuid.uuid4()), 'email': email, 'aud': 'authenticated', 'role': 'authenticated',
+                'identities': [{'provider': 'email'}], 'confirmation_sent_at': '2026-01-01T00:00:00Z'}
+
+    async def recover(self, request: Request):
+        email = (await request.json()).get('email', '')
+        if email in ACCOUNTS:
+            self.recovery_codes['recovery-' + email.split('@')[0]] = email
+        return {}
+
+    async def update_user(self, request: Request):
+        owner = self.owner(request)
+        if len((await request.json()).get('password', '')) < 8:
+            return auth_error(422, 'weak_password', 'Password should be at least 8 characters.')
+        return self.user_body(next(email for email, user_id in ACCOUNTS.items() if user_id == owner))
 
     def owner(self, request: Request):
         try:

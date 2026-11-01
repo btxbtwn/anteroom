@@ -24,7 +24,9 @@ After the normal developer setup, run `./sandbox.sh --hosted`. It starts:
 - the cloud UI on 5175 (open `/`);
 - local session and photo-storage protocol stand-ins under `/local`.
 
-Choose Alice or Bob on the local sign-in screen. Their drafts are isolated by
+Sign in as `alice@sandbox.test` or `bob@sandbox.test` with the password `sandbox`.
+Create account and Forgot password work too; no email is sent, so a reset link
+is opened by hand as `/?code=recovery-alice` (or `-bob`). The two sellers' drafts are isolated by
 the same Postgres roles and RLS policies used in production. The real hosted
 middleware verifies signed, expiring JWTs using an ephemeral local signing key.
 The stand-ins do not replace or disable production authentication. Session
