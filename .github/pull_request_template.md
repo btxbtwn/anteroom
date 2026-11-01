@@ -22,6 +22,7 @@ Root cause (bug fixes):
 ## Verification
 
 - [ ] `./check.sh` passes (same checks as CI for what changed)
+- [ ] Changes `vendoo-studio/`: adds a `changelog.d/<branch-slug>.md` note, and does not touch `VERSION` or `CHANGELOG.md`
 - [ ] A test fails without this change and passes with it (name it below), or why none can
 - [ ] Visible change: screenshots from `./sandbox.sh` at desktop and phone sizes below
 

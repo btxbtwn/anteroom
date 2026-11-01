@@ -1,6 +1,6 @@
 # Anteroom hosted API on Fly.io
 
-This deploys `vendoo_studio.hosted:app`, not the desktop API. The cloud UI provides email-link sign-in and private draft inventory, General listing fields and photos. `GET /api/health` is public; `/api/account` and every `/api/drafts` route
+This deploys `vendoo_studio.hosted:app`, not the desktop API. The cloud UI provides email-and-password accounts (sign in, create account, password reset) and private draft inventory, General listing fields and photos. `GET /api/health` is public; `/api/account` and every `/api/drafts` route
 require a verified seller session. Job and marketplace routes are not exposed. Chrome, Keychain
 and desktop timers do not run in this container.
 
@@ -86,7 +86,11 @@ Desktop builds still use `index.html`; cloud builds select `cloud.html` with
 `ANTEROOM_HOSTED_BUILD=1`.
 
 Configure Supabase Auth's Site URL and allowed Redirect URL to the Fly origin.
-Email links use PKCE: open the link in the browser that requested it. Supabase
+Sellers sign in with an email and password. New accounts confirm their email
+first (Supabase's **Confirm email** stays on); a confirmation link only has to
+be opened, after which the seller signs in with the password anywhere. Password
+reset links use PKCE: open the link in the browser that asked for it, which is
+why the Mac app sends resets to the default browser. Supabase
 manages session storage and refresh; the backend independently verifies every
 access token. API responses are not cached, and signed-out account UI state is
 discarded. Uvicorn access logs are disabled so callback codes do not enter logs.

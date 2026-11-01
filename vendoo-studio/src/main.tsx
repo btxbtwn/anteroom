@@ -5,20 +5,15 @@ import { createStudioQueryClient } from "./api/queryClient";
 import { App } from "./app/App";
 import { AnchoredToastProvider, ToastProvider } from "./components/ui/toast";
 import { installSoftwareKeyboard } from "./lib/softwareKeyboard";
+import { markMacApp } from "./lib/macApp";
+import { WorkspaceRuntimeProvider, desktopRuntime } from "./app/runtime";
+import { MacAccountButton } from "./app/MacAccountButton";
 import { applyTheme } from "./theme";
 import "./styles/app.css";
 
 applyTheme();
 
-function markDesktopApp() {
-  const root = document.documentElement;
-  const apply = () => root.classList.add("desktop-app");
-  const pywebview = (window as Window & { pywebview?: unknown }).pywebview;
-  if (pywebview) apply();
-  window.addEventListener("pywebviewready", apply);
-}
-
-markDesktopApp();
+markMacApp();
 installSoftwareKeyboard(window);
 
 // Polls slow down while Studio sits behind another window (see pollMs), and the
@@ -37,12 +32,14 @@ const queryClient = createStudioQueryClient();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <AnchoredToastProvider>
-          <App />
-        </AnchoredToastProvider>
-      </ToastProvider>
-    </QueryClientProvider>
+    <WorkspaceRuntimeProvider value={{ ...desktopRuntime, accountControls: <MacAccountButton /> }}>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AnchoredToastProvider>
+            <App />
+          </AnchoredToastProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    </WorkspaceRuntimeProvider>
   </React.StrictMode>
 );

@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Fail when CHANGELOG.md does not describe the version Studio is shipping.
 
-Two rules, both aimed at the same failure: a version bump that nobody wrote
-down, leaving About → What's new silent about the build sellers install.
+Pull requests do not bump ``VERSION`` or edit ``CHANGELOG.md``. They add a note
+in ``changelog.d/`` and the Version workflow turns it into a version after the
+merge (see ``changelog_fragments.py``). Rules:
 
-1. Always: the newest entry is for the current ``VERSION``, has notes, and the
-   file stays a strictly descending list of unique versions.
-2. With ``--base <ref>``: if this branch bumps ``VERSION``, the new version has
-   to be an entry the base ref did not already have.
+1. Always: the newest entry is for the current ``VERSION``, has notes, the
+   file stays a strictly descending list of unique versions, and every pending
+   note in ``changelog.d/`` is well formed.
+2. With ``--base <ref>`` (pull requests): ``VERSION`` and ``CHANGELOG.md`` are
+   unchanged from the base ref. A pull request that changes ``vendoo-studio/``
+   without adding a note gets a warning, since it will not get a version.
 """
 
 from __future__ import annotations
@@ -17,6 +20,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+from changelog_fragments import NOTES_DIR, README, read_notes
 
 ROOT = Path(__file__).resolve().parents[2]
 CHANGELOG = ROOT / "CHANGELOG.md"
@@ -56,6 +61,44 @@ def git_show(ref: str, path: str) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
+def changed_paths(base: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "diff", "--name-status", "--no-renames", base, "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def check_pull_request(base: str, version: str) -> None:
+    base_version = (git_show(base, "vendoo-studio/VERSION") or "").strip()
+    if base_version and base_version != version:
+        fail(
+            f"this pull request changes VERSION ({base_version} → {version}).\n"
+            "Versions are bumped after merge. Undo the bump (keep VERSION and the package "
+            f"manifests at {base_version}) and add a note in {NOTES_DIR}/ instead."
+        )
+    if (git_show(base, "CHANGELOG.md") or "") != CHANGELOG.read_text(encoding="utf-8"):
+        fail(
+            "this pull request edits CHANGELOG.md.\n"
+            f"Move your entry into a note in {NOTES_DIR}/ (see {NOTES_DIR}/{README}); "
+            "the Version workflow writes CHANGELOG.md after merge."
+        )
+
+    changes = [line.split("\t", 1) for line in changed_paths(base)]
+    touches_studio = any(path.startswith("vendoo-studio/") for _, path in changes)
+    adds_note = any(
+        status == "A" and path.startswith(f"{NOTES_DIR}/") and not path.endswith(f"/{README}")
+        for status, path in changes
+    )
+    if touches_studio and not adds_note:
+        print(
+            f"::warning::This pull request changes vendoo-studio/ but adds no {NOTES_DIR}/ note, "
+            "so merging it will not bump the version or add to What's new."
+        )
+
+
 def fail(message: str) -> None:
     raise SystemExit(f"CHANGELOG.md: {message}")
 
@@ -66,6 +109,9 @@ def main() -> None:
     args = parser.parse_args()
 
     version = VERSION_FILE.read_text(encoding="utf-8").strip()
+    if args.base:
+        check_pull_request(args.base, version)
+
     entries = parse(CHANGELOG.read_text(encoding="utf-8"))
     if not entries:
         fail("no version entries found. Use '## <version> — <YYYY-MM-DD>' headings.")
@@ -88,18 +134,13 @@ def main() -> None:
     if parsed != sorted(parsed, reverse=True):
         fail("entries must be newest first.")
 
-    if args.base:
-        base_version = (git_show(args.base, "vendoo-studio/VERSION") or "").strip()
-        if base_version and base_version != version:
-            base_entries = dict(parse(git_show(args.base, "CHANGELOG.md") or ""))
-            if version in base_entries:
-                fail(
-                    f"{version} was already on {args.base}, so this bump added no entry.\n"
-                    "Every version bump needs its own section."
-                )
-            print(f"Version bump {base_version} → {version} brings a new changelog entry.")
+    try:
+        notes = read_notes(ROOT)
+    except ValueError as exc:
+        fail(f"malformed notes in {NOTES_DIR}/:\n{exc}")
 
-    print(f"CHANGELOG.md documents {version} ({len(entries)} entries).")
+    pending = f", {len(notes)} pending note(s) in {NOTES_DIR}/" if notes else ""
+    print(f"CHANGELOG.md documents {version} ({len(entries)} entries){pending}.")
 
 
 if __name__ == "__main__":
