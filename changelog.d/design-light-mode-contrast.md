@@ -1,0 +1,1 @@
+- Light mode is easier to read: sidebar labels and icons are darker, hovering a sidebar row shows clearly, and warnings, errors and success messages use darker colors that stand out on white.

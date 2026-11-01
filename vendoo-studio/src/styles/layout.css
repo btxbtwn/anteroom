@@ -234,7 +234,7 @@
 }
 
 .browser-preview-live.on {
-  color: var(--color-success);
+  color: var(--success-foreground);
 }
 
 .browser-preview-live.wait {
