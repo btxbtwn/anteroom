@@ -132,6 +132,7 @@ async def list_models() -> list[dict]:
     ``[{"value", "label", "efforts"}]``."""
     from claude_agent_sdk import ClaudeSDKClient
 
+    info: dict = {}
     async with ClaudeSDKClient(_isolated_options(tools=[])) as client:
         info = await client.get_server_info() or {}
     models: list[dict] = []

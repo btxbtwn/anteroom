@@ -169,8 +169,11 @@ def _poshmark_listing(listing: object, status: str) -> tuple[str, str, float, di
     if inventory.get("status") != status or amount.get("currency_code") != "USD" or listing.get("condition") == "nwt":
         return None
     listing_id = str(listing.get("id") or "")
+    value = amount.get("val")
+    if value is None:
+        return None
     try:
-        price = float(amount.get("val"))
+        price = float(value)
     except (TypeError, ValueError):
         return None
     if not re.fullmatch(r"[0-9a-f]{24}", listing_id):

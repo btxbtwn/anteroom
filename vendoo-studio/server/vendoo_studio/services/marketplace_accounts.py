@@ -142,7 +142,7 @@ async def start_sign_in(marketplace: str, features: list[str] | None = None) -> 
     previous = _pending.pop((_seller(), marketplace), None)
     if previous and previous.task and not previous.task.done():
         previous.task.cancel()
-    resp = await relay_request("POST", f"/studio/oauth/{marketplace}/start", **({"params": {"features": ",".join(features)}} if features else {}))
+    resp = await relay_request("POST", f"/studio/oauth/{marketplace}/start", params={"features": ",".join(features)} if features else None)
     if resp.status_code == 503:
         raise RelayError(f"{NAMES[marketplace]} sign-in isn't set up on Anteroom's relay yet.", 503)
     if resp.status_code != 200:
@@ -298,7 +298,7 @@ async def etsy_api(method: str, path: str, **kwargs: Any):
     async def send(token: str):
         for upload in (kwargs.get("files") or {}).values():
             handle = upload[1] if isinstance(upload, tuple) else None
-            if hasattr(handle, "seek"):
+            if handle is not None and hasattr(handle, "seek"):
                 handle.seek(0)
         return await relay_request(
             method,

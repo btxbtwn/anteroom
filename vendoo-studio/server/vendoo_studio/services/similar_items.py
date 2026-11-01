@@ -223,7 +223,9 @@ def find_similar(db: Session) -> dict[str, Any]:
     ) if covers else {}
     hashes = _fingerprints(db, cast(dict[str, str], stored))
     for (first, second), entry in found.items():
-        left, right = hashes.get(items[first].cover_checksum), hashes.get(items[second].cover_checksum)
+        first_checksum, second_checksum = items[first].cover_checksum, items[second].cover_checksum
+        left = hashes.get(first_checksum) if first_checksum is not None else None
+        right = hashes.get(second_checksum) if second_checksum is not None else None
         if left is None or right is None or "same_photo" in entry["reasons"]:
             continue
         distance = (left ^ right).bit_count()

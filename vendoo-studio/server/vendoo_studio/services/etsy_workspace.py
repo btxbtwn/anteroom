@@ -114,7 +114,7 @@ async def shop(client: EtsyClient) -> dict:
         "activeListings": _count(raw.get("listing_active_count")),
         "soldItems": _count(raw.get("transaction_sold_count")), "favorites": _count(raw.get("num_favorers")),
         "reviewCount": _count(raw.get("review_count")),
-        "rating": rating if type(rating) in (int, float) and 0 <= rating <= 5 else None,
+        "rating": rating if (type(rating) is int or type(rating) is float) and 0 <= rating <= 5 else None,
         "onVacation": raw.get("is_vacation") is True,
     }
 

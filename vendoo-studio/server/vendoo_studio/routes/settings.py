@@ -178,7 +178,7 @@ def get_provider():
             claude=claude,
         )
 
-    if active_name == "claude":
+    if active_name == "claude" and active is not None:
         return ProviderStatus(
             provider="claude",
             primary=primary,
@@ -213,7 +213,7 @@ def get_provider():
             claude=claude,
         )
 
-    if active_name in KEY_PROVIDERS:
+    if active_name in KEY_PROVIDERS and active is not None:
         return ProviderStatus(
             provider=active_name,
             primary=primary,

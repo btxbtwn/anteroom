@@ -313,7 +313,7 @@ def _card_for(
         kind = KIND_READY_TO_GENERATE
         reason = "Photos are ready to generate a listing"
         score = KIND_BASE_SCORE[KIND_READY_TO_GENERATE]
-    elif has_revision and str(listing.get("validation_status") or "") == "error":
+    elif has_revision and listing is not None and str(listing.get("validation_status") or "") == "error":
         kind = KIND_FIX_VALIDATION
         reason = "Listing fields need to be fixed before sending"
         score = KIND_BASE_SCORE[KIND_FIX_VALIDATION]

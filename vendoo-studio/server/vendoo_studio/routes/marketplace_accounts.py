@@ -108,8 +108,8 @@ def list_sales(state: str | None = "new", conversation_id: str | None = None, db
     stocks = {}
     for sale in sales:
         key = (sale.conversation_id, sale.marketplace, sale.listing_id)
-        if sale.conversation_id in convs and key not in stocks:
-            stocks[key] = stock_after_sale(db, *key)
+        if sale.conversation_id is not None and sale.conversation_id in convs and key not in stocks:
+            stocks[key] = stock_after_sale(db, sale.conversation_id, sale.marketplace, sale.listing_id)
     return {"sales": [_sale_out(s, convs.get(cast(str, s.conversation_id)), listings.get(cast(str, s.conversation_id), {}),
                                stocks.get((s.conversation_id, s.marketplace, s.listing_id), {"status": "unknown", "remaining": None}))
                       for s in sales]}

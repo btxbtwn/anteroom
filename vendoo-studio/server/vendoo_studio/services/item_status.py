@@ -72,7 +72,9 @@ def _quantities(db: Session, conv_ids: set[str] | None, first_sales: dict[str, d
     first_sales = first_sales or {}
     best: dict[str, int] = {}
 
-    def add(conv_id, value, created_at):
+    def add(conv_id: str, value: int | None, created_at: datetime | None):
+        if value is None:
+            return
         try:
             number = int(value)
         except (TypeError, ValueError):
@@ -117,7 +119,8 @@ def paid_lines(db: Session, conv_ids: set[str] | None = None) -> dict[str, list[
         query = query.filter(MarketplaceSale.conversation_id.in_(conv_ids))
     grouped: dict[str, list[MarketplaceSale]] = {}
     for line in query.all():
-        grouped.setdefault(line.conversation_id, []).append(line)
+        if line.conversation_id is not None:
+            grouped.setdefault(line.conversation_id, []).append(line)
     return grouped
 
 

@@ -170,7 +170,7 @@ def whole_price(price: Any) -> str:
     return str(int(round(amount)))
 
 
-def poshmark_smart_sell(price: Any) -> dict[str, str]:
+def poshmark_smart_sell(price: Any) -> dict[str, bool | str]:
     """Smart Sell accepts offers down to the same minimum as eBay, or stays off."""
     floors = offer_floors(price)
     return {"enabled": floors is not None, "minPrice": floors[1] if floors else ""}

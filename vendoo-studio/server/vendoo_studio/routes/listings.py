@@ -161,7 +161,9 @@ def restore_revision(conv_id: str, revision_id: str, body: RevisionRestoreReques
         raise HTTPException(409, "Wait for generation or sending to finish before restoring a revision.")
     result = update_listing(conv_id, ListingUpdate(listing=copy.deepcopy(target.listing_json),
                                                  expected_revision_id=body.expected_revision_id), db)
-    listing_repo.get_revision(result["revision_id"]).source = "restore"
+    restored_revision = listing_repo.get_revision(result["revision_id"])
+    assert restored_revision is not None
+    restored_revision.source = "restore"
     from vendoo_studio.models.listing_evidence import ListingCorrection
     db.query(ListingCorrection).filter_by(revision_id=result["revision_id"]).update({"source": "restore"})
     db.commit()
@@ -181,7 +183,7 @@ def _current_listing(conv_id: str, db: Session) -> tuple[dict, list]:
         raise HTTPException(exc.status, str(exc)) from exc
 
 
-def _preview_inputs(conv_id: str, db: Session) -> tuple[dict, list, str, list, int | None]:
+def _preview_inputs(conv_id: str, db: Session) -> tuple[dict, list, str | None, list, int | None]:
     from vendoo_studio.services.listing_generate import current_photo_analysis
     from vendoo_studio.services.sell_through import collect_outcomes, listing_age_days
 
