@@ -62,6 +62,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/Photos/CropMath.swift Tests/CropMathTests.swift -o "$RUNNER_TEMP/crop-tests"
           "$RUNNER_TEMP/crop-tests"
+      - name: Test automation requests
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/Automations/AutomationModels.swift Tests/AutomationTests.swift -o "$RUNNER_TEMP/automation-tests"
+          "$RUNNER_TEMP/automation-tests"
       - name: Test appearance preference contract
         run: |
           xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"

@@ -5,6 +5,8 @@ struct WorkspaceView: View {
     let api: AnteroomAPI
     @Environment(\.scenePhase) private var scenePhase
     @State private var appearance: AppearanceModel
+    @State private var views: [String] = []
+    @State private var features: [String] = []
 
     init(api: AnteroomAPI) {
         self.api = api
@@ -17,6 +19,10 @@ struct WorkspaceView: View {
                 .tabItem { Label("Inventory", systemImage: "tag.fill") }
             AnalyticsDestination(api: api)
                 .tabItem { Label("Analytics", systemImage: "chart.bar.fill") }
+            if views.contains("automations") {
+                AutomationsView(api: api, canApprove: features.contains("marketplace_actions"))
+                    .tabItem { Label("Automations", systemImage: "calendar.badge.clock") }
+            }
             UsageView(api: api)
                 .tabItem { Label("Usage", systemImage: "gauge.with.dots.needle.33percent") }
             SettingsRootView(api: api)
@@ -25,7 +31,13 @@ struct WorkspaceView: View {
         .environment(appearance)
         .preferredColorScheme(appearance.theme.colorScheme)
         .task(id: scenePhase) {
-            if scenePhase == .active { await appearance.refresh() }
+            guard scenePhase == .active else { return }
+            await appearance.refresh()
+            // Destinations follow what this server offers.
+            if let runtime = try? await api.runtime() {
+                views = runtime.views
+                features = runtime.features
+            }
         }
     }
 }

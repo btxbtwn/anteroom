@@ -306,6 +306,62 @@ final class AnteroomAPI: Sendable {
                                  query: refresh ? [URLQueryItem(name: "refresh", value: "1")] : []))
     }
 
+    // MARK: Automations (never publish or delist on their own)
+
+    func automations() async throws -> [Automation] {
+        try await decode(request("GET", "api/automations"))
+    }
+
+    /// Reads a sentence into a draft; nothing is saved.
+    func draftAutomation(prompt: String, timezone: String) async throws -> AutomationDraft {
+        try await decode(request("POST", "api/automations/draft", json: ["prompt": prompt, "timezone": timezone]))
+    }
+
+    func previewAutomation(_ body: AutomationBody) async throws -> AutomationPreview {
+        try await decode(request("POST", "api/automations/preview", json: body))
+    }
+
+    func saveAutomation(_ body: AutomationBody, id: String?) async throws {
+        _ = try await send(request(id == nil ? "POST" : "PATCH", id.map { "api/automations/\($0)" } ?? "api/automations", json: body))
+    }
+
+    func pauseAutomation(_ id: String) async throws {
+        _ = try await send(request("POST", "api/automations/\(id)/pause"))
+    }
+
+    func resumeAutomation(_ id: String) async throws {
+        _ = try await send(request("POST", "api/automations/\(id)/resume"))
+    }
+
+    func deleteAutomation(_ id: String) async throws {
+        _ = try await send(request("DELETE", "api/automations/\(id)"))
+    }
+
+    func runAutomation(_ id: String, dryRun: Bool) async throws -> AutomationRun {
+        try await decode(request("POST", "api/automations/\(id)/run", json: ["dry_run": dryRun]))
+    }
+
+    func automationHistory(_ id: String) async throws -> [AutomationRun] {
+        struct Payload: Decodable { let runs: [AutomationRun] }
+        let payload: Payload = try await decode(request("GET", "api/automations/\(id)/history"))
+        return payload.runs
+    }
+
+    func automationApprovals() async throws -> [AutomationApproval] {
+        try await decode(request("GET", "api/automations/approvals"))
+    }
+
+    func relistGaps() async throws -> [RelistGap] {
+        try await decode(request("GET", "api/errors"))
+    }
+
+    /// Views and features the hosted workspace offers (`/api/runtime`).
+    func runtime() async throws -> (views: [String], features: [String]) {
+        struct Payload: Decodable { let views: [String]?; let features: [String] }
+        let payload: Payload = try await decode(request("GET", "api/runtime"))
+        return (payload.views ?? [], payload.features)
+    }
+
     // MARK: Analytics
 
     func analytics(range: String, start: Date? = nil, end: Date? = nil) async throws -> InventoryAnalytics {
