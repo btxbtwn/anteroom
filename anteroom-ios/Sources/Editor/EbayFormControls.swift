@@ -85,7 +85,7 @@ private struct EbayCategorySheet: View {
                             ContentUnavailableView("Search eBay categories", systemImage: "magnifyingglass",
                                                    description: Text("Type at least 3 characters to search eBay categories."))
                         } else {
-                            CategoryLevel(prefix: [], leaves: tree.leaves, current: current, pick: pick)
+                            CategoryLevel(prefix: [], leaves: tree.leaves, current: current, pick: pick, close: nil)
                         }
                     } else {
                         searchResults(tree)
@@ -104,7 +104,8 @@ private struct EbayCategorySheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
             .navigationDestination(for: CategoryPrefix.self) { level in
-                if let tree { CategoryLevel(prefix: level.parts, leaves: tree.leaves, current: current, pick: pick) }
+                // Each level keeps Cancel, so the sheet closes from any depth.
+                if let tree { CategoryLevel(prefix: level.parts, leaves: tree.leaves, current: current, pick: pick, close: { dismiss() }) }
             }
         }
         .task {
@@ -168,6 +169,8 @@ private struct CategoryLevel: View {
     let leaves: [CategoryLeaf]
     let current: String
     let pick: (CategoryLeaf) -> Void
+    /// Set on pushed levels; the first level shares the sheet's own Cancel.
+    let close: (() -> Void)?
 
     var body: some View {
         let selected = current.components(separatedBy: " › ")
@@ -187,6 +190,11 @@ private struct CategoryLevel: View {
             }
         }
         .navigationTitle(prefix.last ?? "Categories")
+        .toolbar {
+            if let close {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: close) }
+            }
+        }
     }
 }
 
