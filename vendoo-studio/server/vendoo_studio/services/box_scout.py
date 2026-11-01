@@ -22,6 +22,7 @@ import math
 import re
 import statistics
 import sys
+import contextvars
 import threading
 import time
 import urllib.error
@@ -80,7 +81,8 @@ TRENDS_PROMPT = (
 )
 
 _state_lock = threading.RLock()
-_refresh_lock = threading.Lock()
+# One refresh at a time per seller ("" on the Mac); another seller's refresh never blocks this one.
+_refresh_locks: dict[str, threading.Lock] = {}
 # The last crawl, so a new ZIP or budget re-prices boxes without asking the stores again.
 _catalogs: dict[str, list[dict]] = {}
 _timer_stop = threading.Event()
@@ -110,18 +112,59 @@ def state_path() -> Path:
     return user_data_root() / "sourcing.json"
 
 
-def read_state() -> dict:
+def _seller() -> str:
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    return context.seller_id if context is not None else ""
+
+
+def _refresh_lock() -> threading.Lock:
     with _state_lock:
+        return _refresh_locks.setdefault(_seller(), threading.Lock())
+
+
+def _stored() -> dict:
+    """The saved state: the Mac's file, or on the web the seller's own preferences row."""
+    if not _seller():
         try:
             state = json.loads(state_path().read_text())
         except (OSError, json.JSONDecodeError):
             state = {}
+        return state if isinstance(state, dict) else {}
+    from sqlalchemy import select
+
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.models.user_preference import UserPreference
+
+    with SessionLocal() as db:
+        value = db.scalar(select(UserPreference.value).where(UserPreference.key == "sourcing"))
+    return value if isinstance(value, dict) else {}
+
+
+def _save(state: dict) -> None:
+    if not _seller():
+        path = state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state, indent=2) + "\n")
+        tmp.replace(path)
+        return
+    from sqlalchemy.dialects.postgresql import insert
+
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.models.user_preference import UserPreference
+
+    with SessionLocal() as db:
+        db.execute(insert(UserPreference).values(user_id=_seller(), key="sourcing", value=state)
+                   .on_conflict_do_update(index_elements=["user_id", "key"], set_={"value": state}))
+        db.commit()
+
+
+def read_state() -> dict:
+    with _state_lock:
+        state = _stored()
     return _complete(state)
-
-
-def default_state() -> dict:
-    """The state of a seller who has never refreshed sourcing."""
-    return _complete({})
 
 
 def _complete(state: dict) -> dict:
@@ -140,17 +183,10 @@ def _complete(state: dict) -> dict:
 
 def _write_state(state: dict, *, preserve_prefs: bool = False) -> None:
     with _state_lock:
-        path = state_path()
         if preserve_prefs:
-            try:
-                latest = json.loads(path.read_text())
-            except (OSError, json.JSONDecodeError):
-                latest = {}
+            latest = _stored()
             state["prefs"] = {**DEFAULT_PREFS, **latest.get("prefs", state["prefs"])}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(state, indent=2) + "\n")
-        tmp.replace(path)
+        _save(state)
     # The business assistant keeps a copy of the buy list; a refresh or new prefs must reach the next question.
     from vendoo_studio.services.business_context import invalidate_business_context
 
@@ -714,7 +750,7 @@ RAGHOUSE_VIP_MONTHLY = 64.0
 
 def refresh(*, recrawl: bool = True, research: bool = True) -> dict:
     """Crawl, research what is stale, rebuild the buy list and save it."""
-    with _refresh_lock:
+    with _refresh_lock():
         return _refresh(recrawl=recrawl, research=research)
 
 
@@ -885,12 +921,13 @@ def _announce_new_picks(previous: dict | None, plan: dict, prefs: dict) -> None:
 
 
 def refreshing() -> bool:
-    return _refresh_lock.locked()
+    return _refresh_lock().locked()
 
 
 def refresh_in_background(*, recrawl: bool = True) -> bool:
     """Start a refresh unless one is running. Returns whether one was started."""
-    if not _refresh_lock.acquire(blocking=False):
+    lock = _refresh_lock()
+    if not lock.acquire(blocking=False):
         return False
 
     def _run() -> None:
@@ -899,12 +936,13 @@ def refresh_in_background(*, recrawl: bool = True) -> bool:
         except Exception:
             log.exception("Sourcing refresh failed")
         finally:
-            _refresh_lock.release()
+            lock.release()
 
     try:
-        threading.Thread(target=_run, name="sourcing-refresh", daemon=True).start()
+        # The thread runs in this request's seller context, so it reads and saves their state.
+        threading.Thread(target=contextvars.copy_context().run, args=(_run,), name="sourcing-refresh", daemon=True).start()
     except Exception:
-        _refresh_lock.release()
+        lock.release()
         raise
     return True
 

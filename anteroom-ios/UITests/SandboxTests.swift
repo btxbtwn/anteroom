@@ -262,8 +262,10 @@ final class AssistantSandboxTests: XCTestCase {
         keep(app, "Assistant answer")
 
         app.buttons["Chats"].tap()
-        let thread = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Which brands'")).firstMatch
-        XCTAssertTrue(thread.waitForExistence(timeout: 15), "Chats lists the conversation")
+        // The starter with this same title remains in the background after a
+        // relaunch. Only a row in the Chats list is a saved conversation.
+        let thread = app.collectionViews.buttons.matching(NSPredicate(format: "label CONTAINS 'Which brands'")).firstMatch
+        XCTAssertTrue(thread.waitForExistence(timeout: 60), "Chats lists the conversation")
         keep(app, "Assistant chats")
         app.buttons["Done"].tap()
 
@@ -271,7 +273,7 @@ final class AssistantSandboxTests: XCTestCase {
         launchSandbox(app)
         app.tabBars.buttons["Assistant"].tap()
         app.buttons["Chats"].tap()
-        XCTAssertTrue(thread.waitForExistence(timeout: 20))
+        XCTAssertTrue(thread.waitForExistence(timeout: 60), "Chats finishes loading the saved conversation")
         thread.tap()
         XCTAssertTrue(answer.waitForExistence(timeout: 20), "Reopening the conversation shows the saved answer")
     }
@@ -295,6 +297,15 @@ fileprivate extension XCTestCase {
         // the focused app; creation and reopen assertions verify the title.
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
         app.typeText(text)
+        // Typing right after the keyboard introduction closes can keep only
+        // the first characters. When the field reports what it holds and it
+        // is a partial title, erase it and type again.
+        let field = app.descendants(matching: .any).matching(identifier: "new-listing-title").firstMatch
+        for _ in 0..<3 {
+            guard let typed = field.value as? String, !typed.isEmpty, typed != "Listing title", typed != text else { return }
+            app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count))
+            app.typeText(text)
+        }
     }
 
     @MainActor

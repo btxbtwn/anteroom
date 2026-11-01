@@ -516,9 +516,12 @@ def _refuse(db: Session, conv_id: str, marketplace: str, result: dict) -> dict:
     return stored
 
 
-async def preflight(conv_id: str, db: Session, sellwild_category_id: int | None = None,
-                    sellwild_condition_id: int | None = None) -> dict:
-    """Read saved listing requirements locally, without Chrome or category changes."""
+def preflight(conv_id: str, db: Session, sellwild_category_id: int | None = None,
+              sellwild_condition_id: int | None = None) -> dict:
+    """Read saved listing requirements locally, without Chrome or category changes.
+
+    Synchronous database and form work: routes call it from the threadpool.
+    """
     conv = _conversation(db, conv_id)
     listing = ListingRepo(db).get_current(conv_id)
     revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None

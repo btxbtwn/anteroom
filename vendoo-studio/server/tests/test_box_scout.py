@@ -1161,7 +1161,7 @@ class RefreshConcurrencyTest(unittest.TestCase):
                 self.assertFalse(box_scout.refresh_in_background())
                 thread.assert_called_once()
             finally:
-                box_scout._refresh_lock.release()
+                box_scout._refresh_lock().release()
 
     def test_failed_background_refresh_releases_the_job(self):
         finished = threading.Event()
@@ -1175,6 +1175,6 @@ class RefreshConcurrencyTest(unittest.TestCase):
             self.assertTrue(box_scout.refresh_in_background())
             self.assertTrue(finished.wait(2))
             # Acquiring the lock waits for the worker's finally block, not just its entry.
-            self.assertTrue(box_scout._refresh_lock.acquire(timeout=2))
-            box_scout._refresh_lock.release()
+            self.assertTrue(box_scout._refresh_lock().acquire(timeout=2))
+            box_scout._refresh_lock().release()
         self.assertFalse(box_scout.refreshing())

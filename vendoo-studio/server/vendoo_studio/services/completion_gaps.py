@@ -355,13 +355,13 @@ def deterministic_gap_patches(
                 if not isinstance(ebay, dict):
                     ebay = {}
                 raw = None
-                for key in (
+                for dna_key in (
                     "mpn", "upc", "character", "characterFamily", "strapType",
                     "theme", "performanceActivity", "accents", "countryOfOrigin", "sleeveType",
                     "personalizationInstructions",
                 ):
-                    if field_lookup_key(key) == lookup:
-                        raw = ebay_optional_raw(ebay, key)
+                    if field_lookup_key(dna_key) == lookup:
+                        raw = ebay_optional_raw(ebay, dna_key)
                         break
                 if raw is not None and str(raw).strip():
                     patch_value = raw
