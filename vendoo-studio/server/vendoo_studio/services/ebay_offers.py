@@ -137,6 +137,7 @@ async def preview(db: Session, selections: list[dict], discount_percent: int) ->
             minimum = ebay_api.money_cents(selection["minimum_price"])
             if not listing_id or listing_id in seen:
                 raise OfferConflict("Select a distinct listing with an eBay link imported from Vendoo.")
+            assert conv is not None  # A listing ID was read from this conversation.
             seen.add(listing_id)
             rule = db.query(EbayOfferRule).filter_by(account_id=seller, listing_id=listing_id).first()
             if not rule:
@@ -233,7 +234,7 @@ def pause(db: Session, rule_id: str | None = None) -> dict:
 def resolve(db: Session, attempt_id: str) -> dict:
     attempt = db.get(EbayOfferAttempt, attempt_id)
     rule = db.get(EbayOfferRule, attempt.rule_id) if attempt else None
-    if not rule or rule.account_id != account_id() or attempt.state != "unknown":
+    if not attempt or not rule or rule.account_id != account_id() or attempt.state != "unknown":
         raise OfferConflict("This offer does not need a Seller Hub check.")
     attempt.state = "checked"
     attempt.note = "Seller checked the result in Seller Hub. Automation remains paused."
@@ -415,6 +416,7 @@ def start() -> None:
             attempt.state = "unknown"
             attempt.note = UNKNOWN_NOTE
             rule = db.get(EbayOfferRule, attempt.rule_id)
+            assert rule is not None  # The attempt has a required rule foreign key.
             rule.enabled = False
             _pause_policy(db, rule.account_id)
         db.commit()

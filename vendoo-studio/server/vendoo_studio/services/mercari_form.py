@@ -71,7 +71,7 @@ def package(listing: dict) -> tuple[int, tuple[float, float, float] | None, dict
         if values["skipDimensions"] in (True, "true"):
             dimensions = (0, 0, 0)
         elif all(_number(values[key]) > 0 for key in ("length", "width", "height")):
-            dimensions = tuple(_number(values[key]) for key in ("length", "width", "height"))
+            dimensions = (_number(values["length"]), _number(values["width"]), _number(values["height"]))
     return max(0, weight), dimensions, values
 
 

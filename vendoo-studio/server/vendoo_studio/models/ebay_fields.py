@@ -461,8 +461,9 @@ def ebay_optional_raw(ebay: dict, key: str) -> Any:
             return nested.get(title)
     for name in ebay_optional_keys(ebay, key):
         return ebay.get(name)
-    for name in ebay_optional_keys(nested, key):
-        return nested.get(name)
+    if isinstance(nested, dict):
+        for name in ebay_optional_keys(nested, key):
+            return nested.get(name)
     return None
 
 

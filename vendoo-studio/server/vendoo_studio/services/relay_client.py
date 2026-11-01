@@ -86,8 +86,8 @@ async def relay_request(method: str, path: str, *, json_body: Any = None, header
             method,
             f"{RELAY_URL}{path}",
             json=json_body,
-            **({"data": data} if data is not None else {}),
-            **({"files": files} if files is not None else {}),
+            data=data,
+            files=files,
             params=params,
             headers={**_auth_headers(device), **(headers or {})},
         )

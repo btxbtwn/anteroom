@@ -164,7 +164,7 @@ def seller_history_context(
             seen_items.add(item_id)
         if effective not in {"sold", "active"}:
             continue
-        example = {
+        example: dict[str, object] = {
             "title": _text(title), "size": _text(size),
             "condition": candidate_condition,
         }

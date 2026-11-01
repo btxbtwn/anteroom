@@ -534,7 +534,7 @@ def _inventory(items: list[AnalyticsItem], now: datetime) -> dict[str, Any]:
             state[item.conversation_id] = item.status
     for conv_id, item in stock.items():
         state.setdefault(conv_id, item.status)
-    counts = {"active": 0, "draft": 0, "sold": 0, "failed": 0, "working": 0}
+    counts: dict[str, float] = {"active": 0, "draft": 0, "sold": 0, "failed": 0, "working": 0}
     asking = 0.0
     for conv_id, status in state.items():
         item = stock[conv_id]

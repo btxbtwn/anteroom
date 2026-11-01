@@ -132,7 +132,7 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
 
 def preview(db: Session, body: PreviewRequest) -> dict:
     """Review only. Nothing is sent to a marketplace."""
-    marketplaces = list(dict.fromkeys(body.marketplaces))
+    marketplaces: list[str] = [*dict.fromkeys(body.marketplaces)]
     return {"action": body.action, "marketplaces": marketplaces,
             "rows": [review_row(db, conv_id, body.action, marketplaces) for conv_id in dict.fromkeys(body.conversation_ids)]}
 
@@ -176,7 +176,7 @@ async def perform(db: Session, body: PerformRequest) -> dict:
 async def _dispatch(db: Session, body: PerformRequest) -> dict:
     from vendoo_studio.services import automation_actions
 
-    marketplaces = list(body.marketplaces)
+    marketplaces: list[str] = [*body.marketplaces]
     if body.action == "list":
         return await automation_actions.publish_revision(db, body.conversation_id, marketplaces, body.revision_id)
     if body.action == "update":

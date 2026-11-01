@@ -189,6 +189,7 @@ def listings(db: Session, conv_id: str) -> dict:
 
 def _store(db: Session, conv_id: str, key: str, marketplace: str, value: dict | None) -> None:
     conv = ConversationRepo(db).get(conv_id)
+    assert conv is not None
     db.refresh(conv)
     current = _notes_dict(parse_notes(conv.notes), key)
     current = {name: entry for name, entry in current.items() if name != marketplace}

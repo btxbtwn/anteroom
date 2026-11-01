@@ -27,7 +27,8 @@ class SendUnknown(RuntimeError):
 def money_cents(value: object) -> int:
     try:
         amount = Decimal(str(value))
-        if not amount.is_finite() or amount <= 0 or amount > Decimal("9999999.99") or amount.as_tuple().exponent < -2:
+        exponent = amount.as_tuple().exponent
+        if not amount.is_finite() or amount <= 0 or amount > Decimal("9999999.99") or not isinstance(exponent, int) or exponent < -2:
             raise ValueError
         return int(amount * 100)
     except (InvalidOperation, ValueError, TypeError) as exc:

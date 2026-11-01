@@ -86,9 +86,12 @@ def totals(data: dict | None, stale: bool = False) -> tuple[str | None, str | No
     if data is None or stale:
         return None, None
     values = {key: Decimal(data[key]) if data.get(key) is not None else None for key in AMOUNTS}
-    net = (values["item_revenue"] + values["shipping_credit"] - values["refunds"]
-           if all(values[key] is not None for key in ("item_revenue", "shipping_credit", "refunds")) else None)
-    profit = net - values["fees"] - values["shipping_cost"] - values["item_cost"] if net is not None and all(value is not None for value in values.values()) else None
+    revenue, shipping_credit, refunds = (values[key] for key in ("item_revenue", "shipping_credit", "refunds"))
+    fees, shipping_cost, item_cost = (values[key] for key in ("fees", "shipping_cost", "item_cost"))
+    net = (revenue + shipping_credit - refunds
+           if revenue is not None and shipping_credit is not None and refunds is not None else None)
+    profit = (net - fees - shipping_cost - item_cost
+              if net is not None and fees is not None and shipping_cost is not None and item_cost is not None else None)
     return format(net, "f") if net is not None else None, format(profit, "f") if profit is not None else None
 
 

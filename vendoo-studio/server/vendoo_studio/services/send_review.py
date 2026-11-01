@@ -97,7 +97,7 @@ async def preview_send(db, conv_id: str) -> dict:
     job = SimpleNamespace(id=None)
     item_id = inputs["binding"].get("vendooItemId")
 
-    async def read_current() -> dict:
+    async def read_current() -> dict | None:
         if not item_id:
             return {}
         reply = await run_ops(job, [{"op": "get_item", "item_id": item_id, "with_version": True}], timeout=ITEM_READ_TIMEOUT_SEC)
@@ -112,7 +112,7 @@ async def preview_send(db, conv_id: str) -> dict:
     current, (snapshot, specifics, schema, unresolved, unfilled), names = await asyncio.gather(
         read_current(), prepare_listing_fields_for_vendoo(job, inputs["snapshot"]), read_labels(),
     )
-    if item_id and (not isinstance(current, dict) or not current.get("_studio_update_time")):
+    if not isinstance(current, dict) or (item_id and not current.get("_studio_update_time")):
         raise HTTPException(502, "Could not read the current Vendoo draft version. Reload the extension and try again.")
     images = (current.get("generalDetails") or {}).get("images") or []
     desired, build_unresolved = build_vendoo_item(snapshot, schema, images=images, specifics=specifics)
