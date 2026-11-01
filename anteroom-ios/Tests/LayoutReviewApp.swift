@@ -9,10 +9,10 @@ struct LayoutReviewApp: App {
         WindowGroup {
             NavigationStack {
                 List {
-                    Section("Drafts") {
-                        sample("Linen button-down shirt", icon: "tshirt.fill", color: .blue)
-                        sample("Leather shoulder bag", icon: "bag.fill", color: .brown)
-                        sample("Vintage cotton crewneck sweatshirt with embroidered detail", icon: "tshirt.fill", color: .green)
+                    Section {
+                        sample("Linen button-down shirt", status: "draft", icon: "tshirt.fill", color: .blue)
+                        sample("Leather shoulder bag", status: "active", price: 48, live: ["ebay", "poshmark"], icon: "bag.fill", color: .brown)
+                        sample("Vintage cotton crewneck sweatshirt with embroidered detail", status: "sold", price: 36, icon: "tshirt.fill", color: .green)
                     }
                     Section {
                         Text("Sample listings · layout review only").font(.footnote).foregroundStyle(.secondary)
@@ -28,11 +28,13 @@ struct LayoutReviewApp: App {
         }
     }
 
-    private func sample(_ title: String, icon: String, color: Color) -> some View {
-        NavigationLink {
+    private func sample(_ title: String, status: String, price: Double? = nil, live: [String] = [],
+                        icon: String, color: Color) -> some View {
+        let listing = ListingSummary(id: title, title: title, status: status, price: price, directMarketplaces: live)
+        return NavigationLink {
             EditorLayoutReview(title: title)
         } label: {
-            InventoryRowContent(title: title, updated: Date().addingTimeInterval(-3600)) {
+            ListingRowContent(listing: listing) {
                 Image(systemName: icon).resizable().scaledToFit().padding(8)
                     .foregroundStyle(color).background(WorkspaceStyle.surface)
             }
@@ -44,7 +46,7 @@ struct LayoutReviewApp: App {
 
 private struct EditorLayoutReview: View {
     let title: String
-    @State private var form = DraftEditorModel.Form()
+    @State private var form = ListingEditorModel.Form()
 
     var body: some View {
         ScrollView {
@@ -69,7 +71,7 @@ private struct EditorLayoutReview: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            form.title = title
+            form.fields.title = title
             form.fields.description = "Soft woven linen with a relaxed fit and button front. Lightly worn and ready for a new home."
             form.price = "32"
             form.cost = "8"

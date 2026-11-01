@@ -221,6 +221,11 @@ async def _regenerate(conv_id: str) -> dict:
     """Start a new draft from the photos. Uses its own session: generate closes the one it is given."""
     from fastapi import HTTPException
 
+    from vendoo_studio.services.service_context import current
+
+    if current() is not None:
+        return await _regenerate_queued(conv_id)
+
     from vendoo_studio.routes.chat import generate_listing
     from vendoo_studio.services.streaming import active_generation
 
@@ -243,6 +248,39 @@ async def _regenerate(conv_id: str) -> dict:
             return {"ok": False, "error": "Regenerate was still running when this automation stopped waiting."}
         await asyncio.sleep(0.5)
     return {"ok": True}
+
+
+async def _regenerate_queued(conv_id: str) -> dict:
+    """On the web, generation runs as the seller's durable draft task, as the editor's does."""
+    from fastapi import HTTPException
+
+    from vendoo_studio.models.background_task import BackgroundTask
+    from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services import background_tasks as queue
+    from vendoo_studio.services.listing_provider import get_listing_provider
+
+    with SessionLocal() as db:
+        if get_listing_provider() is None:
+            return {"ok": False, "error": "Connect an AI provider in Settings first."}
+        if not ConversationRepo(db).get_photos(conv_id):
+            return {"ok": False, "error": "Upload product photos before generating a listing."}
+        try:
+            task = queue.enqueue(db, conv_id, "generate", queue.draft_payload(db, conv_id))
+        except HTTPException as exc:
+            db.rollback()
+            return {"ok": False, "error": str(exc.detail)}
+        task_id = task.id
+        db.commit()
+    deadline = asyncio.get_running_loop().time() + IDLE_TIMEOUT_S
+    while True:
+        with SessionLocal() as db:
+            task = db.get(BackgroundTask, task_id)
+            status, error = (task.status, task.error) if task else ("failed", None)
+        if status not in queue.ACTIVE:
+            return {"ok": True} if status == "completed" else {"ok": False, "error": error or "Regenerate did not finish."}
+        if asyncio.get_running_loop().time() > deadline:
+            return {"ok": False, "error": "Regenerate was still running when this automation stopped waiting."}
+        await asyncio.sleep(1)
 
 
 _turns: dict[str, asyncio.Lock] = {}

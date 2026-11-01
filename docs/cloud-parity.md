@@ -242,6 +242,21 @@ Its cache is keyed by seller, and on the web the Claude row reports that
 sign-in usage is shown in the Mac app instead of probing a CLI login on the
 server.
 
+On `feat/hosted-mercari-form`, the Mercari tab uses the canonical native form
+builder through the same owned, revision-checked route as Poshmark and Depop.
+Its only outbound read is Mercari's anonymous public shipping quote; a failed
+quote leaves every product field available with a note.
+
+On `feat/hosted-automations`, the Automations view mounts the desktop handlers
+for saving, previewing, pausing, running and history, plus `/api/errors`. A
+`SECURITY DEFINER` function (`due_automation_owners`, revision `3b9d6f2a1c47`)
+lets only the trusted process login list sellers with due or unfinished runs;
+each tick then runs in that seller's row-secured context. Regenerate queues the
+seller's durable draft task. Marketplace writes stay approvals, and approving
+one is refused until web marketplace actions exist. Offers and sharing panels
+need marketplace sessions and stay hidden. Fly's trial stops the Machine after
+five minutes, so schedules only fire while it is running.
+
 On `feat/hosted-assistant`, the Assistant view mounts the canonical assistant
 routes. Answers stay in-process like desktop, but the run key and its thread
 are per seller, so one account never blocks or follows another's answer.
