@@ -12,6 +12,7 @@ struct InventoryView: View {
     @State private var selecting = false
     @State private var selected: Set<String> = []
     @State private var bulk: BulkAction?
+    @State private var templating: ListingSummary?
 
     init(api: AnteroomAPI) {
         _model = State(initialValue: InventoryModel(api: api))
@@ -47,6 +48,7 @@ struct InventoryView: View {
                             renaming = listing
                         }
                         Button("Copy listing", systemImage: "doc.on.doc") { bulk = .copy([listing.id]) }
+                        Button("Listing templates", systemImage: "rectangle.stack") { templating = listing }
                         Button("Delete", systemImage: "trash", role: .destructive) { deleting = listing }
                     }
                 }
@@ -129,6 +131,9 @@ struct InventoryView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(model.error ?? "")
+            }
+            .sheet(item: $templating) { listing in
+                ListingTemplatesSheet(api: model.api, listingID: listing.id) { Task { await model.reload() } }
             }
             .sheet(item: $bulk) { action in
                 switch action {

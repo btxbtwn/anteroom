@@ -6,6 +6,7 @@ struct ListingEditorView: View {
     @State private var confirmDiscard = false
     @State private var showingAssistant = false
     @State private var showingHistory = false
+    @State private var showingTemplates = false
     @State private var tab = "general"
     private let onSaved: () -> Void
 
@@ -79,6 +80,7 @@ struct ListingEditorView: View {
                 Menu("Listing actions", systemImage: "ellipsis.circle") {
                     Button("Listing assistant", systemImage: "sparkles") { showingAssistant = true }
                     Button("Listing history", systemImage: "clock.arrow.circlepath") { showingHistory = true }
+                    Button("Listing templates", systemImage: "rectangle.stack") { showingTemplates = true }
                 }
                 .frame(minWidth: 44, minHeight: 44)
                 .disabled(model.hasChanges || model.isLoading || model.isSaving || model.loadError != nil)
@@ -130,6 +132,14 @@ struct ListingEditorView: View {
             }
         }) {
             ListingHistoryView(api: model.api, listingID: model.listingID)
+        }
+        .sheet(isPresented: $showingTemplates) {
+            ListingTemplatesSheet(api: model.api, listingID: model.listingID) {
+                Task {
+                    await model.load()
+                    onSaved()
+                }
+            }
         }
         .task { await model.load() }
     }
