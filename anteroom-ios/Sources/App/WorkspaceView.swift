@@ -6,6 +6,7 @@ import SwiftUI
 /// screen they were on.
 struct WorkspaceView: View {
     let api: AnteroomAPI
+    @Environment(SessionStore.self) private var session
     @Environment(\.scenePhase) private var scenePhase
     @State private var appearance: AppearanceModel
     /// What this server offers, read once per session; nil until then.
@@ -25,7 +26,10 @@ struct WorkspaceView: View {
             }
         }
         .environment(appearance)
+        .environment(session.changes)
         .preferredColorScheme(appearance.theme.colorScheme)
+        // Ends with this workspace: on sign-out or when another account signs in.
+        .task { await session.followChanges() }
         .task {
             // Without an answer the workspace opens with the tabs every server has.
             runtime = (try? await api.runtime()) ?? (views: [], features: [])

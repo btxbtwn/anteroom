@@ -6,6 +6,19 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.624 — 2026-11-01
+
+- Changes you make on the web, the Mac app or your iPhone now show up on your other devices right away, without refreshing.
+
+## 0.1.623 — 2026-11-01
+
+- Behind the scenes: a new automatic check keeps Anteroom's look consistent, so new screens use the same colors, labels and controls as the rest of the app.
+
+## 0.1.622 — 2026-11-01
+
+- With the listing chat open on a wide window, the form now makes room for it instead of running underneath, so no field is hidden behind the chat.
+- The Notes box no longer shows Anteroom's internal settings (such as a chosen category) as if they were your notes.
+
 ## 0.1.621 — 2026-11-01
 
 - The web app now has the Marketplaces page: your eBay dashboard, inbox, orders, marketing, listings and research, your Etsy shop, orders and listings, imports from eBay and Etsy, and sale alerts.

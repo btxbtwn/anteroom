@@ -4,6 +4,8 @@ export const BUSY_POLL_MS = 2000;
 export const LIVE_POLL_MS = 1000;
 /** The fallback pass when nothing is running: it only catches background changes. */
 export const IDLE_POLL_MS = 10000;
+/** The idle pass while live updates announce changes; it only backs them up. */
+export const LIVE_IDLE_POLL_MS = 60000;
 /** Chrome's pairing; Connect Chrome polls on its own while it waits. */
 export const EXTENSION_STATUS_POLL_MS = 5000;
 
@@ -17,13 +19,25 @@ export function hasOpenJob(jobs: { status?: string | null }[] | undefined): bool
   return Boolean(jobs?.some((job) => isOpenJobStatus(job.status)));
 }
 
+let liveUpdates = false;
+
+/**
+ * The hosted workspace turns this on while its change feed is subscribed and
+ * off whenever it drops, so the idle pass is back to normal without it.
+ */
+export function setLiveUpdates(live: boolean): void {
+  liveUpdates = live;
+}
+
 /**
  * Polls at `ms` while Studio has focus. Behind another window the desktop
  * webview still counts as visible, so React Query would keep the fast rate;
  * cap it at the idle pass instead, and refetch when the window comes back.
+ * Live updates stretch only the idle pass; anything running keeps its rate.
  */
 export function pollMs(ms: number): number {
-  return document.hasFocus() ? ms : Math.max(ms, IDLE_POLL_MS);
+  const value = liveUpdates && ms >= IDLE_POLL_MS ? Math.max(ms, LIVE_IDLE_POLL_MS) : ms;
+  return document.hasFocus() ? value : Math.max(value, IDLE_POLL_MS);
 }
 
 /** Every observer of a jobs query polls by the same rule, or each runs its own timer. */
