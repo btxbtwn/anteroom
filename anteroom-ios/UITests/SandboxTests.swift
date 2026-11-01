@@ -297,6 +297,15 @@ fileprivate extension XCTestCase {
         // the focused app; creation and reopen assertions verify the title.
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
         app.typeText(text)
+        // Typing right after the keyboard introduction closes can keep only
+        // the first characters. When the field reports what it holds and it
+        // is a partial title, erase it and type again.
+        let field = app.descendants(matching: .any).matching(identifier: "new-listing-title").firstMatch
+        for _ in 0..<3 {
+            guard let typed = field.value as? String, !typed.isEmpty, typed != "Listing title", typed != text else { return }
+            app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count))
+            app.typeText(text)
+        }
     }
 
     @MainActor
