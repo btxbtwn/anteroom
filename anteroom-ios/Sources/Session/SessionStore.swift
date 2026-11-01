@@ -82,6 +82,24 @@ final class SessionStore {
         }
     }
 
+    /// Reads the saved session again after a slow or failed restore.
+    func retryRestore() async {
+        guard let client, state == .loading else { return }
+#if DEBUG
+        if AppConfig.sandboxURL != nil {
+            if let local = try? await client.auth.signIn(email: "alice@sandbox.test", password: "sandbox") {
+                state = .signedIn(email: local.user.email)
+            }
+            return
+        }
+#endif
+        if let current = try? await client.auth.session {
+            state = .signedIn(email: current.user.email)
+        } else {
+            state = .signedOut
+        }
+    }
+
     func sendSignInLink(to email: String) async throws {
         guard let client else { return }
         try await client.auth.signInWithOTP(email: email, redirectTo: AppConfig.signInRedirectURL)
