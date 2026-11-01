@@ -3,12 +3,14 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import type { SourceBox } from "../api/types";
 import { rotationForTurns, type BulkUploadDefaults, type BulkUploadItem, type PhotoRotation } from "../bulkPhotoUpload";
 import { formatMoney } from "./analyticsFormat";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 
 interface Props {
   groups: PhotoFolderGroup[];
@@ -38,6 +40,12 @@ type Row = {
  * it the right way up. Only the x and Cancel close it, so a stray click
  * outside cannot throw away what was typed.
  */
+/** The chosen box as the seller reads it. */
+function boxLabel(boxes: readonly SourceBox[], boxId: string | undefined): string {
+  const row = boxId ? boxes.find((box) => box.id === boxId) : undefined;
+  return row ? `${boxStoreName(row.store)} · ${row.title}` : "Not from a box";
+}
+
 export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }: Props) {
   const runtime = useWorkspaceRuntime();
   const [defaults, setDefaults] = useState<BulkUploadDefaults>(EMPTY_DEFAULTS);
@@ -193,19 +201,23 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
         </div>
         <div className="bulk-upload-fields">
           {boxes.length ? (
-            <label className="bulk-upload-field">
+            <div className="bulk-upload-field">
               <span className="label">Box</span>
-              <select
-                className="input"
+              <Select
                 value={defaults.boxId || ""}
-                onChange={(event) => setDefaults((current) => ({ ...current, boxId: event.target.value || undefined }))}
+                onValueChange={(value) => setDefaults((current) => ({ ...current, boxId: value || undefined }))}
               >
-                <option value="">Not from a box</option>
-                {boxes.map((row) => (
-                  <option key={row.id} value={row.id}>{boxStoreName(row.store)} · {row.title}</option>
-                ))}
-              </select>
-            </label>
+                <SelectTrigger aria-label="Box">
+                  <SelectValue>{boxLabel(boxes, defaults.boxId)}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value="">Not from a box</SelectItem>
+                  {boxes.map((row) => (
+                    <SelectItem key={row.id} value={row.id}>{boxStoreName(row.store)} · {row.title}</SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
           ) : null}
           <label className="bulk-upload-field">
             <span className="label">Cost of goods (COG)</span>

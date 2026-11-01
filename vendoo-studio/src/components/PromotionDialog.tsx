@@ -1,13 +1,15 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { PromotionAction, PromotionFloor, PromotionMarketplace, PromotionPreview, PromotionSupport } from "../api/promotions";
+import type { Promotion, PromotionAction, PromotionFloor, PromotionMarketplace, PromotionPreview, PromotionSupport } from "../api/promotions";
 import { needsShippingChoice, promotionTasks, runPromotionTasks, type PromotionTask } from "../promotions";
 import { marketplaceName } from "./marketplaceNames";
 import { PriceDialog } from "./PriceDropParts";
 import { PageError, PageNote } from "./WorkspacePage";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
+import { Radio, RadioGroup } from "./ui/radio-group";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 
 const FIELD = "h-8 rounded-md border border-border bg-background px-2 text-sm";
 const NOTES: Record<PromotionMarketplace, string> = {
@@ -32,6 +34,11 @@ const ACTIONS: { value: PromotionAction; label: string; note: (name: string) => 
 ];
 const risk = (name: string) => `This uses your signed-in ${name} session in Chrome. Marketplaces can limit or review accounts that act too quickly, so Anteroom spaces actions out and stops at the first limit ${name} reports.`;
 
+/** The shipping discount choice as the seller reads it. */
+function shippingLabel(row: Promotion, value: string): string {
+  if (value === "none") return "No shipping discount";
+  return row.shipping_options.find((option) => option.id === value)?.label || "Choose…";
+}
 function doneLabel(action: PromotionAction, count: number): string {
   return action === "share" ? `Share ${count} ${count === 1 ? "listing" : "listings"}` : `Send ${count} ${count === 1 ? "offer" : "offers"}`;
 }
@@ -130,12 +137,17 @@ export function PromotionDialog({ conversationIds, onClose }: { conversationIds:
           : <div className="space-y-1 text-xs">
             <p>Offer ${row.offer_price} to {row.like_count} {row.like_count === 1 ? "liker" : "likers"} · price ${row.price} · your floor ${row.floor}</p>
             {needsShippingChoice(row) ? <label className="flex flex-wrap items-center gap-2">Shipping discount
-              <select className={FIELD} aria-label={`Shipping discount for ${row.title || "item"}`} value={shipping[row.id] || ""} disabled={busy}
-                onChange={(event) => { setConfirmed(false); setShipping((previous) => ({ ...previous, [row.id]: event.target.value })); }}>
-                <option value="">Choose…</option>
-                <option value="none">No shipping discount</option>
-                {row.shipping_options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-              </select>
+              <Select value={shipping[row.id] || ""} disabled={busy}
+                onValueChange={(value) => { setConfirmed(false); setShipping((previous) => ({ ...previous, [row.id]: value ?? "" })); }}>
+                <SelectTrigger size="sm" className="w-auto min-w-44" aria-label={`Shipping discount for ${row.title || "item"}`}>
+                  <SelectValue>{shippingLabel(row, shipping[row.id] || "")}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value="">Choose…</SelectItem>
+                  <SelectItem value="none">No shipping discount</SelectItem>
+                  {row.shipping_options.map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}
+                </SelectPopup>
+              </Select>
             </label> : null}
           </div>}
       </li>)}</ul>
@@ -156,18 +168,22 @@ export function PromotionDialog({ conversationIds, onClose }: { conversationIds:
           </div>
         </div>)}
       </div> : null}
-      <fieldset className="space-y-2"><legend className="mb-1 font-medium">Marketplace</legend>
-        {marketplaces.map((entry) => <label key={entry.id} className="flex items-start gap-2">
-          <input type="radio" name="promotion-marketplace" className="mt-1" checked={marketplace === entry.id} disabled={busy || !entry.available}
-            onChange={() => { setMarketplace(entry.id); setAction(null); }} />
-          <span><span className="font-medium">{marketplaceName(entry.id)}</span><span className="block text-xs text-muted-foreground">{entry.note}</span></span>
-        </label>)}
+      <fieldset><legend className="mb-3 font-medium">Marketplace</legend>
+        <RadioGroup name="promotion-marketplace" className="gap-2" value={marketplace} disabled={busy}
+          onValueChange={(value) => { setMarketplace(value as PromotionMarketplace); setAction(null); }}>
+          {marketplaces.map((entry) => <label key={entry.id} className="flex items-start gap-2">
+            <Radio value={entry.id} className="mt-0.5" disabled={!entry.available} />
+            <span><span className="font-medium">{marketplaceName(entry.id)}</span><span className="block text-xs text-muted-foreground">{entry.note}</span></span>
+          </label>)}
+        </RadioGroup>
       </fieldset>
-      {marketplace ? <fieldset className="space-y-2"><legend className="mb-1 font-medium">Action</legend>
-        {actions.map((entry) => <label key={entry.value} className="flex items-start gap-2">
-          <input type="radio" name="promotion-action" className="mt-1" checked={action === entry.value} disabled={busy} onChange={() => setAction(entry.value)} />
-          <span><span className="font-medium">{entry.label}</span><span className="block text-xs text-muted-foreground">{entry.note(name)}</span></span>
-        </label>)}
+      {marketplace ? <fieldset><legend className="mb-3 font-medium">Action</legend>
+        <RadioGroup name="promotion-action" className="gap-2" value={action} disabled={busy} onValueChange={(value) => setAction(value as PromotionAction)}>
+          {actions.map((entry) => <label key={entry.value} className="flex items-start gap-2">
+            <Radio value={entry.value} className="mt-0.5" />
+            <span><span className="font-medium">{entry.label}</span><span className="block text-xs text-muted-foreground">{entry.note(name)}</span></span>
+          </label>)}
+        </RadioGroup>
       </fieldset> : null}
       {marketplace && action === "offer" ? <div className="space-y-3">
         <label className="flex items-center gap-2 text-sm">Discount

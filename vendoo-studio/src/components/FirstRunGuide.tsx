@@ -9,6 +9,7 @@ import { ExtensionLoadPath } from "./ExtensionLoadPath";
 import { KEY_PROVIDER_IDS, KEY_PROVIDER_LABELS, isKeyProviderId, isListingProviderId } from "./keyProviders";
 import { useVendooEnabled } from "../vendooMode";
 import type { KeyProviderId, ListingProviderId } from "../api/types";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 
 export const SETUP_GUIDE_STEPS = [
   { id: "welcome", label: "Welcome" },
@@ -446,20 +447,24 @@ export function FirstRunGuide({
                   </div>
                 ) : isKeyProviderId(selectedListing) ? (
                   <div className="setup-guide-task">
-                    <label className="setup-guide-field">
+                    <div className="setup-guide-field">
                       <span>Provider</span>
-                      <select
-                        className="input"
+                      <Select
                         value={selectedListing}
-                        onChange={(e) => chooseKeyProvider(e.target.value as KeyProviderId)}
+                        onValueChange={(value) => { if (value) chooseKeyProvider(value as KeyProviderId); }}
                       >
-                        {KEY_PROVIDER_IDS.map((id) => (
-                          <option key={id} value={id}>
-                            {KEY_PROVIDER_LABELS[id]}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                        <SelectTrigger aria-label="Provider">
+                          <SelectValue>{KEY_PROVIDER_LABELS[selectedListing]}</SelectValue>
+                        </SelectTrigger>
+                        <SelectPopup>
+                          {KEY_PROVIDER_IDS.map((id) => (
+                            <SelectItem key={id} value={id}>
+                              {KEY_PROVIDER_LABELS[id]}
+                            </SelectItem>
+                          ))}
+                        </SelectPopup>
+                      </Select>
+                    </div>
                     {keyEntry?.masked_key && keyEntry.id === selectedListing ? (
                       <p className="setup-guide-copy">
                         {KEY_PROVIDER_LABELS[selectedListing]} is ready · {keyEntry.masked_key}. Continue when you want.

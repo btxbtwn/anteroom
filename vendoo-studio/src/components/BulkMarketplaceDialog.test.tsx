@@ -23,7 +23,8 @@ describe("bulk marketplace dialog", () => {
     expect(html).toContain(">Update<");
     expect(html).toContain("Mark as not listed");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Review items<\/button>/);
-    expect(html).not.toContain('aria-checked="true"');
+    expect(html.match(/role="checkbox"[^>]*aria-checked="(?:true|false)"/g)).toHaveLength(7);
+    expect(html).not.toMatch(/role="checkbox"[^>]*aria-checked="true"/);
     expect(perform).not.toHaveBeenCalled();
     expect(preview).not.toHaveBeenCalled();
     for (const [options] of useMutation.mock.calls) expect(options.retry).toBe(false);
