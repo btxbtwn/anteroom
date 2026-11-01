@@ -413,7 +413,7 @@ a.sold-comps-row:hover .sold-comps-title {
 .citation-comment-error {
   margin: 4px 0 0;
   font-size: var(--text-xs);
-  color: var(--color-tomato);
+  color: var(--destructive-foreground);
 }
 
 .citation-comment-actions {

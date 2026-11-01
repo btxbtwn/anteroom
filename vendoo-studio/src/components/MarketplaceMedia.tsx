@@ -332,14 +332,14 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
             ? emptySlots.map((caption, index) => <SlotCaption key={caption} caption={caption}>{index === 0 ? addTile : <EmptySlot />}</SlotCaption>)
             : addTile}
         </PhotoStrip>
-        {videoId && library && !video && <p role="alert" className="text-xs text-destructive">The selected video is missing. Add another video or remove it.</p>}
+        {videoId && library && !video && <p role="alert" className="text-xs text-destructive-foreground">The selected video is missing. Add another video or remove it.</p>}
         {fileInput}
         {(unticked.length > 0 || otherVideos.length > 0) && <div className="space-y-1">
           <p className="text-xs text-muted-foreground">Not on {name}. Add one back with +.</p>
           <PhotoStrip>{untickedTiles}</PhotoStrip>
         </div>}
         {reset}
-        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-xs text-destructive-foreground">{error}</p>}
         {viewers}
       </div>
     );
@@ -368,7 +368,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
         <PhotoStrip>
           {video && <VideoTile video={video} label={`${name} video`} problem={videoProblem(video, videoRules)}
             onRemove={locked ? undefined : () => onChange(withVideo(listing, ""))} />}
-          {videoId && library && !video && <p role="alert" className="text-xs text-destructive">The selected video is missing. Add another video or remove it.</p>}
+          {videoId && library && !video && <p role="alert" className="text-xs text-destructive-foreground">The selected video is missing. Add another video or remove it.</p>}
           {thumbs}
           {addTile}
         </PhotoStrip>
@@ -382,7 +382,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
           {custom ? " Photos added to the item later show here, left off, until you add them." : ""}
         </p>
         {notes}
-        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-xs text-destructive-foreground">{error}</p>}
       </div>
       {viewers}
     </InspectorSection>

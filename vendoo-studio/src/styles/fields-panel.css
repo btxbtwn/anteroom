@@ -130,7 +130,7 @@
 }
 
 .job-card-status.error {
-  color: var(--color-tomato);
+  color: var(--destructive-foreground);
 }
 
 .fill-log-chips {
@@ -147,7 +147,7 @@
 }
 
 .fill-log-chip-filled {
-  color: var(--color-success);
+  color: var(--success-foreground);
   background: var(--color-success-tint);
 }
 
@@ -158,7 +158,7 @@
 
 .fill-log-chip-not_found,
 .fill-log-chip-failed {
-  color: var(--color-tomato);
+  color: var(--destructive-foreground);
   background: var(--color-tomato-tint);
 }
 
@@ -390,7 +390,7 @@
 
 .pr-icon-btn.is-on {
   background: var(--color-ink-raised);
-  color: var(--color-tomato);
+  color: var(--destructive-foreground);
 }
 
 .pr-icon-btn.is-on-filled {
@@ -462,7 +462,7 @@
 /* T3 Code's only red text is a menu item's: `data-[variant=destructive]` in
    ui/menu.tsx. Nothing destructive wears red out on a toolbar. */
 .pr-menu-item-destructive {
-  color: var(--color-tomato);
+  color: var(--destructive-foreground);
 }
 
 .pr-menu-item-destructive:hover:not(:disabled) {
@@ -666,7 +666,7 @@
   border-radius: 4px;
   border: 1px solid var(--color-border);
   background: var(--color-ink-hover);
-  color: var(--color-muted);
+  color: var(--color-text-muted);
   font-size: var(--text-2xs);
   font-weight: 500;
   line-height: 1.4;
@@ -674,16 +674,16 @@
 
 .pr-live-status.is-listed {
   border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
-  color: var(--color-success);
+  color: var(--success-foreground);
 }
 
 .pr-live-status.is-not-listed {
-  color: var(--color-muted);
+  color: var(--color-text-muted);
 }
 
 .pr-live-status.is-failed {
   border-color: color-mix(in srgb, var(--color-tomato) 40%, transparent);
-  color: var(--color-tomato);
+  color: var(--destructive-foreground);
 }
 
 .pr-counts {
@@ -853,7 +853,7 @@
   gap: 2px;
   min-width: 0;
   margin-top: 2px;
-  color: var(--color-success);
+  color: var(--success-foreground);
   font-size: 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1171,7 +1171,7 @@
 }
 
 .send-progress .send-spinner {
-  color: var(--color-success);
+  color: var(--success-foreground);
 }
 
 .send-btn-busy {

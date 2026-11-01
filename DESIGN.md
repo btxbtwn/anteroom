@@ -40,9 +40,10 @@ screen in the same PR or note it for a follow-up.
 | Buttons, inputs, selects, checkboxes, switches, badges | `src/components/ui/*` |
 | Settings-style rows | the components in `components/settings/` |
 
-Do not use a native `<select>` or `<input type="checkbox">` in new code. Use
-`Select` and `Checkbox`. (Native ones are restyled globally in
-`styles/controls.css` so older screens match, but they are a fallback.)
+Do not use a raw `<select>` or `<input type="checkbox">` in new code. Use
+`Select`, `Checkbox` and `RadioGroup`. The one exception is `NativeSelect` in
+`ListingFormControls.tsx`: marketplace form fields with long option lists use it
+so phones show their own picker and keyboard. Use it only for that.
 
 ## Tokens
 

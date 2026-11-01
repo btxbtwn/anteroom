@@ -22,7 +22,7 @@ function panel(markdowns: boolean, failed = false) {
   });
   const features = new Set<WorkspaceFeature>(["suggestions", ...(markdowns ? ["bulk_markdowns" as const] : [])]);
   return renderToStaticMarkup(
-    <WorkspaceRuntimeProvider value={{ hosted: true, features, views: new Set(["listings"]), marketplaceForms: new Set() }}>
+    <WorkspaceRuntimeProvider value={{ hosted: true, features, views: new Set(["listings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
       <QueryClientProvider client={client}><SuggestionsPanel variant="workspace" onSelect={() => {}} /></QueryClientProvider>
     </WorkspaceRuntimeProvider>,
   );

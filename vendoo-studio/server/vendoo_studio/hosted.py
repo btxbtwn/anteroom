@@ -92,21 +92,24 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
         app.state.chat_upload_slots = asyncio.Semaphore(1)
-        worker = scheduler = offers = None
+        worker = scheduler = offers = watchdog = None
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
-            from vendoo_studio.services import hosted_automation_scheduler, hosted_offer_scheduler
+            from vendoo_studio.services import hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler
             from vendoo_studio.services.background_worker import serve
             worker = asyncio.create_task(serve(engine))
             # Automations regenerate through the same draft queue, so both run together.
             scheduler = asyncio.create_task(hosted_automation_scheduler.serve(engine))
             offers = asyncio.create_task(hosted_offer_scheduler.serve(engine))
+            # Frees the marketplace slot a restart left held and reads unconfirmed results.
+            watchdog = asyncio.create_task(hosted_job_watchdog.serve(engine))
         app.state.background_worker = worker
         app.state.offer_scheduler = offers
+        app.state.job_watchdog = watchdog
         try:
             yield
         finally:
-            running = [task for task in (worker, scheduler, offers) if task is not None]
+            running = [task for task in (worker, scheduler, offers, watchdog) if task is not None]
             for task in running:
                 task.cancel()
             await asyncio.gather(*running, return_exceptions=True)
@@ -175,6 +178,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(accounts_router)
     from vendoo_studio.routes.hosted_marketplaces import router as marketplaces_router
     app.include_router(marketplaces_router)
+    from vendoo_studio.routes.hosted_direct_listing import router as direct_listing_router
+    app.include_router(direct_listing_router)
     from vendoo_studio.routes import assistant
     app.include_router(assistant.router)
     from vendoo_studio.routes.hosted_automations import errors_router, router as automations_router
