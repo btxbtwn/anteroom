@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.638 — 2026-11-01
+
+- Prepare the web app to send your approved Poshmark, Mercari, Depop, Sellwild and Vinted actions to Chrome on your computer.
+
 ## 0.1.637 — 2026-11-01
 
 - The Etsy tab now works on the web, and you can list, update and delist on Etsy from there. Each one still asks you to confirm first.
