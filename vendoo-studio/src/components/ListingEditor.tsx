@@ -769,7 +769,7 @@ export function StructuredEditor({
   const formsQuery = useQuery({
     queryKey: ["listing-fields", convId],
     queryFn: () => api.vendooApi.listingFields(convId),
-    enabled: !runtime.hosted && !nativeTab,
+    enabled: !nativeTab,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     placeholderData: (previous) => previous,
@@ -778,7 +778,7 @@ export function StructuredEditor({
   const dropdownQuery = useQuery({
     queryKey: ["catalog-dropdown-options"],
     queryFn: api.catalog.dropdownOptions,
-    enabled: !runtime.hosted && !nativeTab,
+    enabled: !nativeTab,
     staleTime: Infinity,
   });
   const { data: dropdownOptions } = dropdownQuery;

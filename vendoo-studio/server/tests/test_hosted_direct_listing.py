@@ -101,3 +101,36 @@ def test_web_job_watchdog_frees_a_restarted_sellers_marketplace_slot(cloud):  # 
         assert record['state'] == 'not_saved' and 'Nothing reached eBay' in record['error']
     with use(for_seller(BOB)), SessionLocal() as db:
         assert JobRepo(db).get(job_id) is None
+
+
+def test_web_etsy_form_is_built_without_chrome(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, _ = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    from vendoo_studio.services import browser_bridge, marketplace_schemas
+
+    async def no_chrome(*_args, **_kwargs):
+        raise AssertionError('asked Chrome for a schema')
+
+    async def etsy_offline(*_args):
+        raise OSError('offline')
+
+    monkeypatch.setattr(browser_bridge, 'request', no_chrome)
+    monkeypatch.setattr(marketplace_schemas, 'fields', etsy_offline)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Mug'}).json()['id']
+    path = '/api/conversations/' + identity
+    listing = {'title': 'Stoneware mug', 'price': 24, 'quantity': 1,
+               'marketplace_category_ids': {'etsy': '1234'}, 'direct_category_ids': {'etsy': '1234'}}
+    # Category IDs are written by category resolution, not the web's listing editor.
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.repositories.queries import ListingRepo
+    with use(for_seller(USER_ID)), SessionLocal() as db:
+        ListingRepo(db).save_revision(identity, listing, 'test')
+
+    assert 'etsy' in client.get('/api/runtime', headers=alice).json()['marketplace_forms']
+    forms = client.get(path + '/vendoo-api/fields', headers=alice)
+    assert forms.status_code == 200, forms.text
+    assert [(form['marketplace'], form['category_id']) for form in forms.json()['forms']] == [('etsy', '1234')]
+    assert client.get(path + '/vendoo-api/fields', headers=bob).status_code == 404
+    # Etsy List is the seller's confirmed action, like eBay's.
+    assert client.post(path + '/native-marketplaces/etsy/list', headers=alice,
+                       json={'revision_id': 'r1'}).status_code == 400

@@ -1,11 +1,11 @@
-"""List, update and delist on eBay from the web, through its official API.
+"""List, update and delist on eBay and Etsy from the web, through their official APIs.
 
 These are the desktop handlers, run in the signed-in seller's context with
 their own tokens. Every action is one the seller starts: List and Update carry
 ``confirm``, Delist names its marketplaces and carries ``confirm``, and nothing
-here runs on a timer or a retry. Etsy follows once its form is on the web;
-marketplaces reached only through Chrome (Poshmark, Mercari, Depop, Sellwild,
-Vinted) are refused until the web app can drive the seller's Chrome.
+here runs on a timer or a retry. Marketplaces reached only through Chrome
+(Poshmark, Mercari, Depop, Sellwild, Vinted) are refused until the web app can
+drive the seller's Chrome.
 """
 from typing import Literal
 
@@ -13,11 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
+from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.routes import marketplace_listings, native_marketplaces
+from vendoo_studio.routes.vendoo_api import leaf_form
 from vendoo_studio.services.native_marketplaces import NAMES, CheckRequest, ListRequest
 
-ACTION_MARKETPLACES = ('ebay',)
-Direct = Literal['ebay']
+ACTION_MARKETPLACES = ('ebay', 'etsy')
+Direct = Literal['ebay', 'etsy']
 PREFIX = '/api/conversations/{conv_id}'
 
 router = APIRouter()
@@ -71,5 +73,25 @@ async def delist(conv_id: str, body: marketplace_listings.DelistRequest, db: Ses
     browser_only = [name for name in body.marketplaces if name not in ACTION_MARKETPLACES]
     if browser_only:
         names = ', '.join(NAMES.get(name, name) for name in browser_only)
-        raise HTTPException(409, f'Delist from {names} in the Mac app for now. The web app delists from eBay.')
+        raise HTTPException(409, f'Delist from {names} in the Mac app for now. The web app delists from eBay and Etsy.')
     return await marketplace_listings.delist(conv_id, body, db)
+
+
+@router.get(PREFIX + '/vendoo-api/fields')
+async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
+    """The Etsy form: the category's saved fields and Etsy's own properties, built
+    as on the Mac. The web never asks Chrome for a schema, so an unread leaf shows
+    Etsy's live properties and the listing's own values."""
+    from vendoo_studio.models.listing_values import marketplace_dropdown_forms
+    from vendoo_studio.services.category_fields import listing_category_ids, load_fields
+
+    if not ConversationRepo(db).get(conv_id):
+        raise HTTPException(404, 'Conversation not found')
+    revisions = ListingRepo(db).get_revisions(conv_id)
+    listing = revisions[0].listing_json if revisions else {}
+    db.commit()
+    category_id = listing_category_ids(listing).get('etsy')
+    if not category_id:
+        return {'ok': True, 'forms': []}
+    static = marketplace_dropdown_forms().get('etsy') or {}
+    return {'ok': True, 'forms': [await leaf_form(listing, 'etsy', category_id, load_fields('etsy', category_id) or {}, static)]}
