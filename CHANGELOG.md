@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.630 — 2026-11-01
+
+- Keep stock counts working when an older saved listing has no date.
+- Make internal checks stricter about missing listing details and account values.
+
 ## 0.1.629 — 2026-11-01
 
 - The bulk marketplace and share or offer dialogs, the bulk upload box picker and the setup guide's provider picker now use Anteroom's own menus, radio buttons and checkboxes, so they look and work like the rest of the app.
