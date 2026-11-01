@@ -7,6 +7,7 @@ final class InventoryModel {
     let api: AnteroomAPI
     private(set) var listings: [ListingSummary] = []
     private(set) var preferredMarketplaces: [String] = []
+    private(set) var suggestions: [Suggestion] = []
     private(set) var isLoading = false
     private(set) var hasLoaded = false
     var filters = InventoryFilters()
@@ -30,7 +31,8 @@ final class InventoryModel {
         } catch {
             self.error = error.localizedDescription
         }
-        // The filter menu still works from the inventory alone if this fails.
+        // Suggestions and the filter menu's order are extras; inventory works without them.
+        if let ranked = try? await api.suggestions() { suggestions = ranked }
         if let selected = try? await api.selectedMarketplaces() { preferredMarketplaces = selected }
     }
 

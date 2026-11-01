@@ -19,6 +19,8 @@ struct PhotoStrip: View {
 
     private static let limit = 30
     @State private var showAll = false
+    @State private var viewing: String?
+    @State private var arranging = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -39,11 +41,15 @@ struct PhotoStrip: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 8)], spacing: 8) {
                     ForEach(showAll ? photos : Array(photos.prefix(6))) { photo in
-                        RemotePhoto(api: api, photoID: photo.id, maxPixels: 300)
-                            .frame(height: 104)
-                            .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .accessibilityLabel("Listing photo")
+                        Button { viewing = photo.id } label: {
+                            RemotePhoto(api: api, photoID: photo.id, maxPixels: 300, version: photo.version)
+                                .frame(height: 104)
+                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(photo.id == photos.first?.id ? "Cover photo" : "Listing photo")
+                            .accessibilityHint("Opens the photo to view, rotate or adjust it")
                             .overlay(alignment: .topTrailing) {
                                 Button("Delete photo", systemImage: "trash", role: .destructive) { photoToDelete = photo }
                                     .labelStyle(.iconOnly)
@@ -56,9 +62,17 @@ struct PhotoStrip: View {
                             .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
-                if photos.count > 6 {
-                    Button(showAll ? "Show fewer photos" : "Show all \(photos.count) photos") { showAll.toggle() }
-                        .frame(minHeight: 44)
+                HStack {
+                    if photos.count > 6 {
+                        Button(showAll ? "Show fewer photos" : "Show all \(photos.count) photos") { showAll.toggle() }
+                            .frame(minHeight: 44)
+                    }
+                    Spacer()
+                    if photos.count > 1 {
+                        Button("Arrange", systemImage: "arrow.up.arrow.down") { arranging = true }
+                            .frame(minHeight: 44)
+                            .accessibilityHint("Change the photo order and cover")
+                    }
                 }
             }
 
@@ -108,6 +122,12 @@ struct PhotoStrip: View {
             Button("Cancel", role: .cancel) { photoToDelete = nil }
         }
         .padding(.vertical, 4)
+        .fullScreenCover(item: Binding(get: { viewing.map(PhotoSelection.init) }, set: { viewing = $0?.id })) { start in
+            PhotoViewer(api: api, listingID: listingID, photos: $photos, selection: start.id) { delete($0) }
+        }
+        .sheet(isPresented: $arranging) {
+            ArrangePhotosSheet(api: api, listingID: listingID, photos: $photos)
+        }
         .task { await load() }
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
@@ -185,6 +205,7 @@ struct RemotePhoto: View {
     let api: AnteroomAPI
     let photoID: String
     let maxPixels: Int
+    var version: String? = nil
 
     @State private var image: UIImage?
     @State private var failed = false
@@ -202,11 +223,11 @@ struct RemotePhoto: View {
                 ProgressView()
             }
         }
-        .task(id: photoID) { await load() }
+        .task(id: "\(photoID)@\(version ?? "")") { await load() }
     }
 
     private func load() async {
-        let key = "\(photoID)@\(maxPixels)" as NSString
+        let key = "\(photoID)@\(maxPixels)@\(version ?? "")" as NSString
         if let cached = PhotoCache.images.object(forKey: key) {
             image = cached
             return
@@ -236,4 +257,8 @@ enum PhotoCache {
         cache.countLimit = 200
         return cache
     }()
+}
+
+private struct PhotoSelection: Identifiable {
+    let id: String
 }
