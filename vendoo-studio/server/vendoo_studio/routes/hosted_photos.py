@@ -101,7 +101,9 @@ async def upload_photo(draft_id: str, request: Request, marketplace: Literal['po
 @router.get('/{photo_id}')
 def read_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_seller_db)):
     photo = get_photo(db, draft_id, photo_id)
-    data = photos.storage_call('GET', photo.stored_filename, request.headers['authorization'].partition(' ')[2])
+    key = photo.stored_filename
+    db.rollback()
+    data = photos.storage_call('GET', key, request.headers['authorization'].partition(' ')[2])
     return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
 
 

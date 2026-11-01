@@ -21,6 +21,7 @@ import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 import { useVendooEnabled } from "../../vendooMode";
+import { useWorkspaceRuntime } from "../../app/runtime";
 
 function CategoryTreesRow() {
   const queryClient = useQueryClient();
@@ -165,8 +166,14 @@ export function DirectConnectionRow({
   checkError?: string | null;
 }) {
   const queryClient = useQueryClient();
+  const { hosted } = useWorkspaceRuntime();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["direct-connections"] });
-  const connect = useMutation({ mutationFn: () => api.directConnections.connect(marketplace.id), onSettled: refresh });
+  const connect = useMutation({
+    mutationFn: () => api.directConnections.connect(marketplace.id),
+    // The Mac opens the page itself. On the web, this browser does.
+    onSuccess: (result) => { if (hosted) window.open(result.authorizeUrl, "_blank", "noopener,noreferrer"); },
+    onSettled: refresh,
+  });
   const cancel = useMutation({ mutationFn: () => api.directConnections.cancel(marketplace.id), onSettled: refresh });
   const disconnect = useMutation({ mutationFn: () => api.directConnections.disconnect(marketplace.id), onSettled: refresh });
   const state = directAccountState(account);
@@ -215,7 +222,7 @@ export function DirectConnectionRow({
       {checkError ? <SettingsNote tone="error">{checkError}</SettingsNote> : null}
       {account?.pending && account.authorizeUrl ? (
         <SettingsNote>
-          Finish signing in on the {marketplace.name} page that opened in your browser.{" "}
+          {hosted ? `Finish signing in on the ${marketplace.name} page.` : `Finish signing in on the ${marketplace.name} page that opened in your browser.`}{" "}
           <a className="underline underline-offset-2" href={account.authorizeUrl} target="_blank" rel="noreferrer">
             Open it again
           </a>
@@ -460,10 +467,13 @@ function ChromeSessionRow({
 
 function MarketplaceSection() {
   const queryClient = useQueryClient();
+  // The web app has no Chrome extension or sale detection yet: only eBay and Etsy sign-in.
+  const { hosted } = useWorkspaceRuntime();
   const extension = useQuery({
     queryKey: ["extension-status"],
     queryFn: api.extension.status,
     refetchInterval: () => pollMs(EXTENSION_STATUS_POLL_MS),
+    enabled: !hosted,
   });
   const direct = useQuery({
     queryKey: ["direct-connections"],
@@ -477,6 +487,7 @@ function MarketplaceSection() {
     queryKey: ["sale-detection"],
     queryFn: () => api.settings.saleDetection(),
     refetchInterval: 60_000,
+    enabled: !hosted,
   });
   const saveDetection = useMutation({
     mutationFn: ({ marketplace, enabled }: { marketplace: string; enabled: boolean }) =>
@@ -502,6 +513,15 @@ function MarketplaceSection() {
   const listening = DIRECT_MARKETPLACES
     .filter((marketplace) => accounts?.[marketplace.id]?.connected && enabled(marketplace.id))
     .map((marketplace) => marketplace.name);
+  if (hosted) {
+    return (
+      <SettingsSection id="accounts" title="Accounts">
+        {DIRECT_MARKETPLACES.map((marketplace) => (
+          <DirectConnectionRow key={marketplace.id} marketplace={marketplace} account={accounts?.[marketplace.id]} />
+        ))}
+      </SettingsSection>
+    );
+  }
   return (
     <SettingsSection id="accounts" title="Accounts">
       {DIRECT_MARKETPLACES.map((marketplace) => (
@@ -567,6 +587,8 @@ function MarketplaceSection() {
 
 export function ConnectionsSettings() {
   const vendooOn = useVendooEnabled();
+  const { hosted } = useWorkspaceRuntime();
+  if (hosted) return <MarketplaceSection />;
   return (
     <>
       <MarketplaceSection />

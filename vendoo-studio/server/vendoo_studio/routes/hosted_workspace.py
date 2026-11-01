@@ -85,7 +85,7 @@ def runtime(request: Request, db=Depends(get_seller_db)):
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant']
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else []),
-            'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant'], 'marketplace_forms': ['poshmark', 'depop', 'mercari']}
+            'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay']}
 
 
 @router.get('/status')
@@ -347,7 +347,11 @@ def photos(identity: str, marketplace: str | None = None, db=Depends(get_seller_
 def photo_bytes(identity: str, photo_id: str, request: Request, db=Depends(get_seller_db)):
     from vendoo_studio.services.hosted_photos import storage_call
     row = owned_photo(db, identity, photo_id)
-    data = storage_call('GET', row.stored_filename, request.headers['authorization'].partition(' ')[2])
+    key = row.stored_filename
+    # Ownership was verified above. Storage can be slow, so release this read
+    # transaction before its network I/O; retain only the checked object key.
+    db.rollback()
+    data = storage_call('GET', key, request.headers['authorization'].partition(' ')[2])
     return Response(data, media_type='image/jpeg')
 
 
@@ -484,7 +488,7 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
-async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari'],
+async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay'],
                               revision_id: str | None = None, db=Depends(get_seller_db)):
     from starlette.concurrency import run_in_threadpool
     from vendoo_studio.services.native_editor import editor_form
@@ -492,8 +496,9 @@ async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'd
 
     def load():
         # These canonical builders read verified catalogs and the owned
-        # snapshot. Mercari also reads anonymous public shipping quotes. No
-        # browser/account operations or marketplace writes run.
+        # snapshot. Mercari also reads anonymous public shipping quotes, and
+        # eBay reads its category schema and the seller's own policies with
+        # their connected account. No browser or marketplace write runs.
         try:
             current = db.get(Listing, identity)
             if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:

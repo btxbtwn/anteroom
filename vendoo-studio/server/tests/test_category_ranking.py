@@ -36,6 +36,24 @@ class CategoryRankingTest(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
+    def test_catalog_fallback_does_not_hydrate_the_entire_tree(self):
+        from sqlalchemy import event
+        from vendoo_studio.services.catalog_index import _lexical_fallback
+
+        self.db.expunge_all()
+        loaded = []
+
+        def record_load(node, _context):
+            loaded.append(node.category_id)
+
+        event.listen(CategoryTreeNode, "load", record_load)
+        try:
+            hits = _lexical_fallback(self.db, TITLE, marketplace="ebay", kind="category", top_k=15, path_prefix="")
+        finally:
+            event.remove(CategoryTreeNode, "load", record_load)
+        self.assertEqual([hit["id"] for hit in hits], ["3", "0"])
+        self.assertEqual(loaded, [], "Category ranking must not allocate an ORM object for every leaf")
+
     def test_a_token_must_be_a_whole_word(self):
         """"tee" is not a match for "Teepees" — substring scoring put a t-shirt
         under Play Teepees and Fastener Nuts."""
