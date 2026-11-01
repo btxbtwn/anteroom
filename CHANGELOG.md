@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.621 — 2026-11-01
+
+- The web app now has the Marketplaces page: your eBay dashboard, inbox, orders, marketing, listings and research, your Etsy shop, orders and listings, imports from eBay and Etsy, and sale alerts.
+
 ## 0.1.620 — 2026-11-01
 
 - A cleaner, more consistent look across Anteroom: every page uses the same tabs, headings and cards, marketplace colors appear only in their logos, missing figures no longer show in large type, Automations uses proper checkboxes and menus with real marketplace names, and drafts in the sidebar are no longer highlighted in orange.
