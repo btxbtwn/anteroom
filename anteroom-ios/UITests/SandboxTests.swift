@@ -7,10 +7,7 @@ final class SandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         app.launch()
-        let create = app.buttons["New listing"].firstMatch
-        XCTAssertTrue(create.waitForExistence(timeout: 30))
-        create.tap()
-        let title = app.textFields["Listing title"].waitForExistence(timeout: 5) ? app.textFields["Listing title"] : app.textViews["Listing title"]
+        let title = openNewListing(app)
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         title.tap()
         dismissKeyboardIntroduction(app)
@@ -31,10 +28,7 @@ final class SellerInputSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         app.launch()
-        let create = app.buttons["New listing"].firstMatch
-        XCTAssertTrue(create.waitForExistence(timeout: 30))
-        create.tap()
-        let title = app.textFields["Listing title"].waitForExistence(timeout: 5) ? app.textFields["Listing title"] : app.textViews["Listing title"]
+        let title = openNewListing(app)
         let name = "Seller inputs \(UUID().uuidString.prefix(8))"
         title.tap()
         dismissKeyboardIntroduction(app)
@@ -240,6 +234,25 @@ final class DestinationSandboxTests: XCTestCase {
 }
 
 fileprivate extension XCTestCase {
+    @MainActor
+    func openNewListing(_ app: XCUIApplication) -> XCUIElement {
+        // A vertical TextField can appear as either native input type.
+        let title = app.descendants(matching: .any).matching(identifier: "new-listing-title").firstMatch
+        for _ in 0..<2 {
+            if title.exists { return title }
+            let create = app.buttons["New listing"].firstMatch
+            XCTAssertTrue(create.waitForExistence(timeout: 30))
+            XCTAssertTrue(create.isHittable)
+            create.tap()
+            if title.waitForExistence(timeout: 10) { return title }
+            // Only retry opening the sheet while still at Inventory. This
+            // navigation has no write; callers submit Create draft once.
+            XCTAssertTrue(app.navigationBars["Inventory"].exists)
+        }
+        XCTFail("New listing must open its title input before typing")
+        return title
+    }
+
     @MainActor
     func dismissKeyboardIntroduction(_ app: XCUIApplication) {
         // A fresh simulator can present QuickPath onboarding over the first

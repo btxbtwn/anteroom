@@ -18,6 +18,7 @@ struct NewListingView: View {
                         .lineLimit(1...4)
                         .focused($titleFocused)
                         .accessibilityLabel("Listing title")
+                        .accessibilityIdentifier("new-listing-title")
                 } header: {
                     Text("What are you listing?")
                 } footer: {
