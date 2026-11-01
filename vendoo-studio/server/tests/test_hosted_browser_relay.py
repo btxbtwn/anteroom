@@ -8,7 +8,7 @@ from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from vendoo_studio.services import browser_bridge, hosted_browser_relay
-from vendoo_studio.services.extension_connection import current_extension, extension_manager
+from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, current_extension, extension_manager
 from vendoo_studio.services.hosted_context import for_seller
 from vendoo_studio.services.service_context import use
 
@@ -24,16 +24,16 @@ def test_relay_is_per_seller_and_refuses_other_commands():
             assert not relay.connected and 'Open Anteroom in Chrome' in relay.marketplace_actions_refusal()
             assert await relay.next_message(set(), 0.01) is None
             assert relay.marketplace_actions_refusal().startswith('Update Anteroom Bridge')
-            assert await relay.next_message({hosted_browser_relay.CAPABILITY}, 0.01) is None
+            assert await relay.next_message({MARKETPLACE_ACTIONS}, 0.01) is None
             assert relay.connected and relay.marketplace_actions_refusal() is None
             assert not await relay.send_message({'type': 'browser.open'})
             job = SimpleNamespace(id='job1')
             request = asyncio.create_task(browser_bridge.request(job, 'marketplace.execute', {'operation_id': 'op'}, timeout=5))
-            message = await relay.next_message({hosted_browser_relay.CAPABILITY}, 1)
+            message = await relay.next_message({MARKETPLACE_ACTIONS}, 1)
             assert message['type'] == 'marketplace.execute' and message['payload']['operation_id'] == 'op'
         with use(for_seller(BOB)):
             bob = current_extension()
-            assert await bob.next_message({hosted_browser_relay.CAPABILITY}, 0.01) is None
+            assert await bob.next_message({MARKETPLACE_ACTIONS}, 0.01) is None
             assert not bob.is_waiting(message['message_id'])
         relay.resolve_wait(message['message_id'], {'ok': True, 'state': 'draft'})
         assert await request == {'ok': True, 'state': 'draft'}

@@ -1,0 +1,1 @@
+- An earlier Anteroom Bridge in Chrome keeps listing, updating and delisting until a change actually needs the newer one, so you no longer have to update Chrome after every Anteroom update.
