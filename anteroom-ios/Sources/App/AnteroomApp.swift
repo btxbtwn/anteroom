@@ -23,7 +23,7 @@ struct RootView: View {
     var body: some View {
         switch session.state {
         case .loading:
-            ProgressView()
+            StartingView()
         case .missingConfiguration:
             ContentUnavailableView(
                 "Anteroom isn't set up",
@@ -36,6 +36,38 @@ struct RootView: View {
             if let api = session.api {
                 WorkspaceView(api: api).id(session.email)
             }
+        }
+    }
+}
+
+/// Opening restores the saved sign-in. On a slow connection, say so after a
+/// few seconds and offer to try again instead of spinning silently.
+private struct StartingView: View {
+    @Environment(SessionStore.self) private var session
+    @State private var slow = false
+    @State private var retrying = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+            if slow {
+                Text("Connecting to Anteroom is taking longer than usual. Check your connection.")
+                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Button("Try again") {
+                    retrying = true
+                    Task {
+                        await session.retryRestore()
+                        retrying = false
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(retrying)
+            }
+        }
+        .padding(32)
+        .task {
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            slow = true
         }
     }
 }

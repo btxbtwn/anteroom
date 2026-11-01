@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from sqlalchemy.orm import Session
@@ -84,7 +85,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
     # and the request heuristics read them as the text the seller sees.
     user_message_text = citations_to_plain_text(user_message)
 
-    skill_rules = load_skill_rules(user_message_text, db)
+    skill_rules = await asyncio.to_thread(load_skill_rules, user_message_text)
 
     photo_analysis_text = ""
     comps_text = ""
@@ -93,9 +94,9 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
     existing_analysis = latest_photo_analysis(history, fingerprint=fingerprint)
     if photos and existing_analysis and photo_analysis_usable(existing_analysis):
         photo_analysis_text = analysis_with_photo_count(len(photos), existing_analysis)
-        skill_rules = load_skill_rules(
+        skill_rules = await asyncio.to_thread(
+            load_skill_rules,
             f"{user_message_text}\n{photo_analysis_text}\n{seller_item_details(notes)}",
-            db,
         )
     elif photos:
         provider = get_photo_provider()
@@ -116,9 +117,9 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
             )
             repo.add_message(conv_id, "system", analysis_note, photo_fingerprint=fingerprint)
             photo_analysis_text = analysis_with_photo_count(len(photos), analysis_note)
-            skill_rules = load_skill_rules(
+            skill_rules = await asyncio.to_thread(
+                load_skill_rules,
                 f"{user_message_text}\n{photo_analysis_text}\n{seller_item_details(notes)}",
-                db,
             )
             db.commit()
             comps_text = await research_sold_comps(photo_analysis_text, evidence)

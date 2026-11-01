@@ -6,19 +6,15 @@ final class SandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        app.launch()
-        let create = app.buttons["New listing"].firstMatch
-        XCTAssertTrue(create.waitForExistence(timeout: 30))
-        create.tap()
-        let title = app.textFields["Listing title"].waitForExistence(timeout: 5) ? app.textFields["Listing title"] : app.textViews["Listing title"]
+        launchSandbox(app)
+        let title = openNewListing(app)
         XCTAssertTrue(title.waitForExistence(timeout: 10))
-        title.tap()
         let name = "Simulator draft \(UUID().uuidString.prefix(8))"
-        title.typeText(name)
+        enterListingTitle(name, app: app)
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
         app.terminate()
-        app.launch()
+        launchSandbox(app)
         XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 30))
     }
 }
@@ -29,14 +25,10 @@ final class SellerInputSandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        app.launch()
-        let create = app.buttons["New listing"].firstMatch
-        XCTAssertTrue(create.waitForExistence(timeout: 30))
-        create.tap()
-        let title = app.textFields["Listing title"].waitForExistence(timeout: 5) ? app.textFields["Listing title"] : app.textViews["Listing title"]
+        launchSandbox(app)
+        _ = openNewListing(app)
         let name = "Seller inputs \(UUID().uuidString.prefix(8))"
-        title.tap()
-        title.typeText(name)
+        enterListingTitle(name, app: app)
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
 
@@ -65,7 +57,7 @@ final class SellerInputSandboxTests: XCTestCase {
         waitForExpectations(timeout: 15)
 
         app.terminate()
-        app.launch()
+        launchSandbox(app)
         let row = app.staticTexts[name]
         XCTAssertTrue(row.waitForExistence(timeout: 30))
         row.tap()
@@ -140,7 +132,7 @@ final class AppearanceSandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        app.launch()
+        launchSandbox(app)
         for choice in ["Light", "Dark", "System"] {
             openSettings(app)
             let picker = app.buttons["appearance-picker"]
@@ -153,7 +145,7 @@ final class AppearanceSandboxTests: XCTestCase {
             screenshot.lifetime = .keepAlways
             add(screenshot)
             app.terminate()
-            app.launch()
+            launchSandbox(app)
             openSettings(app)
             waitForValue(choice, picker: app.buttons["appearance-picker"])
         }
@@ -185,7 +177,7 @@ final class DestinationSandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        app.launch()
+        launchSandbox(app)
 
         let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'All,'")).firstMatch
         XCTAssertTrue(allTab.waitForExistence(timeout: 30), "Inventory shows its status tabs")
@@ -194,13 +186,18 @@ final class DestinationSandboxTests: XCTestCase {
         let filters = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Filters'")).firstMatch
         XCTAssertTrue(filters.exists)
         filters.tap()
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Not listed'")).firstMatch.waitForExistence(timeout: 5))
+        let notListed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Not listed'")).firstMatch
+        XCTAssertTrue(notListed.waitForExistence(timeout: 5))
         keep(app, "Inventory filters")
+        // The native menu occludes the title and tab bar in the AX tree.
+        // Tap the background outside its popover, then verify dismissal.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: notListed)
+        waitForExpectations(timeout: 5)
 
-        // The first tap outside an open menu only closes the menu.
         let analytics = app.tabBars.buttons["Analytics"]
+        XCTAssertTrue(analytics.isHittable, "The Filters menu must release the tab bar")
         analytics.tap()
-        if !app.buttons["Sales records"].waitForExistence(timeout: 5) { analytics.tap() }
         XCTAssertTrue(app.buttons["Sales records"].waitForExistence(timeout: 15))
         keep(app, "Analytics sales records")
         app.buttons["Inventory analytics"].tap()
@@ -229,5 +226,59 @@ final class DestinationSandboxTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+}
+
+fileprivate extension XCTestCase {
+    @MainActor
+    func enterListingTitle(_ text: String, app: XCUIApplication) {
+        // The sheet focuses this field automatically. Tapping it again can
+        // open the AutoFill edit menu and intercept the next keyboard event.
+        dismissKeyboardIntroduction(app)
+        // SwiftUI's multiline input wrapper can report no keyboard focus or
+        // value while its text view visibly has both. Send keyboard input to
+        // the focused app; creation and reopen assertions verify the title.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        app.typeText(text)
+    }
+
+    @MainActor
+    func launchSandbox(_ app: XCUIApplication) {
+        app.launch()
+        // launch() can return while the disposable account is still signing
+        // in on a cold CI simulator. Screen waits start at workspace readiness.
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 90),
+                      "Sandbox sign-in must finish before interacting with the workspace")
+    }
+
+    @MainActor
+    func openNewListing(_ app: XCUIApplication) -> XCUIElement {
+        // A vertical TextField can appear as either native input type.
+        let title = app.descendants(matching: .any).matching(identifier: "new-listing-title").firstMatch
+        for _ in 0..<2 {
+            if title.exists { return title }
+            let create = app.buttons["New listing"].firstMatch
+            XCTAssertTrue(create.waitForExistence(timeout: 30))
+            XCTAssertTrue(create.isHittable)
+            create.tap()
+            if title.waitForExistence(timeout: 10) { return title }
+            // Only retry opening the sheet while still at Inventory. This
+            // navigation has no write; callers submit Create draft once.
+            XCTAssertTrue(app.navigationBars["Inventory"].exists)
+        }
+        XCTFail("New listing must open its title input before typing")
+        return title
+    }
+
+    @MainActor
+    func dismissKeyboardIntroduction(_ app: XCUIApplication) {
+        // A fresh simulator can present QuickPath onboarding over the first
+        // keyboard. Scope Continue to that system view, never an app action.
+        let introduction = app.otherElements["UIContinuousPathIntroductionView"]
+        if introduction.waitForExistence(timeout: 5) {
+            introduction.buttons["Continue"].tap()
+            expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: introduction)
+            waitForExpectations(timeout: 5)
+        }
     }
 }

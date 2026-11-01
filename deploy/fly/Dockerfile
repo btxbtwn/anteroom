@@ -23,6 +23,7 @@ COPY vendoo-studio/server/vendoo_studio/ /app/vendoo-studio/server/vendoo_studio
 COPY skills/list-this/SKILL.md /app/skills/list-this/SKILL.md
 COPY skills/list-this/references/ /app/skills/list-this/references/
 RUN pip install --no-cache-dir '/app/vendoo-studio[hosted]' \
+    && chmod -R a+rX /app/skills /app/vendoo-studio /app/CHANGELOG.md \
     && useradd --create-home --uid 10001 anteroom
 COPY --from=web /src/vendoo-studio/dist /app/web
 ENV VENDOO_STUDIO_DATA_DIR=/home/anteroom/.local/share/anteroom
