@@ -329,3 +329,11 @@ On `feat/hosted-chrome-actions`, Poshmark, Mercari and Depop List, Update, Save
 draft and Delist run from the web through the seller's connected Chrome tab and
 Bridge 0.2.40 (see `docs/cloud-extension.md`). Sellwild and Vinted follow with
 their forms.
+
+On `feat/hosted-sourcing`, the Sourcing view is on the web. Each seller's
+preferences, research and buy list live in their own `user_preferences` row
+(`sourcing`) instead of the Mac's `sourcing.json`; refresh locks are per seller,
+and the refresh thread carries the request's seller context. Store catalogs are
+public and stay shared. The web refreshes when the seller opens Sourcing and it
+is due; it has no background timer. The assistant's shop summary now reads the
+seller's own sourcing state on the web too.

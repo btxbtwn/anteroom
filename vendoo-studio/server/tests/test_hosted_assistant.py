@@ -31,7 +31,7 @@ def test_assistant_answers_privately_per_seller_without_reading_local_sourcing(c
     monkeypatch.setattr('vendoo_studio.services.hosted_photos.storage_call', storage)
     monkeypatch.setattr('vendoo_studio.services.hosted_storage.photo_call',
                         lambda method, key, data=None: storage(method, key, data=data))
-    monkeypatch.setattr(box_scout, 'read_state', lambda: (_ for _ in ()).throw(AssertionError('read the Mac sourcing file')))
+    monkeypatch.setattr(box_scout, 'state_path', lambda: (_ for _ in ()).throw(AssertionError('read the Mac sourcing file')))
     monkeypatch.setattr(assistant_route, 'get_listing_provider', lambda: Provider(('You sold ', 'one item.')))
     runtime = client.get('/api/runtime', headers=alice).json()
     assert 'assistant' in runtime['views'] and 'assistant' in runtime['features']
