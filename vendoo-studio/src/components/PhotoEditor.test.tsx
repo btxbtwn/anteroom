@@ -41,7 +41,7 @@ it("offers Edit from the enlarged photo and says when it is already edited", () 
 
 it("keeps shared photo edits available without offering an unconnected background worker", () => {
   const html = renderToStaticMarkup(
-    <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(["photo_edits"]), views: new Set(), marketplaceForms: new Set() }}>
+    <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(["photo_edits"]), views: new Set(), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
       <PhotoEditor convId="item" photo={{ ...photo, edits: undefined }} index={0} onSaved={vi.fn()} onClose={vi.fn()} />
     </WorkspaceRuntimeProvider>,
   );

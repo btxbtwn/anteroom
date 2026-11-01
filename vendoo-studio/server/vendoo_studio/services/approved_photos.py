@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import hashlib
 from types import SimpleNamespace
-from uuid import uuid4
 
 from vendoo_studio.services.photo_store import photo_store
-from vendoo_studio.services.photos import MIME_EXTENSIONS
 
 KEY = "_approved_photos"
 
@@ -20,7 +18,8 @@ def capture(photos: list) -> list[dict]:
             checksum = hashlib.sha256(contents).hexdigest()
             if photo.checksum and checksum != photo.checksum:
                 raise ValueError("A photo changed while it was being approved. Review the photos again.")
-            key = f"approved-{uuid4().hex}{MIME_EXTENSIONS[photo.mime_type]}"
+            # A new key beside the source, so it lives in the seller's own Storage folder on the web.
+            key = photo_store().edited_key(photo.stored_filename)
             row = {"id": photo.id, "stored_filename": key, "mime_type": photo.mime_type,
                    "checksum": checksum, "size_bytes": len(contents)}
             captured.append(row)
@@ -42,7 +41,8 @@ def load(snapshot: dict) -> list[SimpleNamespace]:
 
 
 def release(snapshot: dict, *, keep: set[str] | None = None) -> None:
+    """Delete a job's approved copies. Every row is a copy ``capture`` made, never a source photo."""
     for row in snapshot.get(KEY) or []:
         key = row.get("stored_filename", "")
-        if key.startswith("approved-") and (not keep or key not in keep):
+        if key and (not keep or key not in keep):
             photo_store().delete(key)

@@ -9,7 +9,7 @@ it("opens appearance and web release controls without starting the desktop updat
   client.setQueryData(["settings-ui"], { theme: "dark", listing_names: "sku" });
   client.setQueryData(["status"], { version: "99.0.0" });
   const html = renderToStaticMarkup(
-    <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(), views: new Set(["settings"]), marketplaceForms: new Set() }}>
+    <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(), views: new Set(["settings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
       <QueryClientProvider client={client}><SettingsPage section="general" onOpenListing={() => {}} /></QueryClientProvider>
     </WorkspaceRuntimeProvider>,
   );

@@ -37,7 +37,7 @@ describe("AutomationsPage", () => {
 
   it("on the web, shows eBay offers only while the offer timer runs", () => {
     const page = (features: string[]) => renderToStaticMarkup(
-      <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(features as never[]), views: new Set(["automations"]), marketplaceForms: new Set() }}>
+      <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(features as never[]), views: new Set(["automations"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
         <AutomationsPage onOpenListing={vi.fn()} />
       </WorkspaceRuntimeProvider>,
     );
