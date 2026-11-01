@@ -1,1 +1,0 @@
-- Moving your Mac into your account copies photos faster: they shrink to web size first and upload a few at a time. A photo that can't be read is left out and listed in the summary, instead of stopping the move.

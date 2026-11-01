@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.633 — 2026-11-01
+
+- Moving your Mac into your account copies photos faster: they shrink to web size first and upload a few at a time. A photo that can't be read is left out and listed in the summary, instead of stopping the move.
+
 ## 0.1.632 — 2026-11-01
 
 - Moving your Mac into your account no longer makes your other devices reload over and over. They update once, when the move finishes.
