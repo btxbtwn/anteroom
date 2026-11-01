@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 /** The hosted web app; the Mac app's window shows it when the seller signs in. */
-export const HOSTED_ORIGIN = "https://peaceful-meadowstone-6944.fly.dev";
+export const HOSTED_ORIGIN = "https://myanteroom.com";
 
 /** True inside the Mac app's window, which injects `window.pywebview`. */
 export function isMacApp(target: Window = window) {

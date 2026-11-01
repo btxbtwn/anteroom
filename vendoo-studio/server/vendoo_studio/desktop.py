@@ -73,7 +73,7 @@ HEALTH_URL = f"http://{HOST}:{PORT}/api/health"
 APP_URL = f"http://{HOST}:{PORT}"
 # The hosted web app. Signed in, the window shows it, so the Mac sees the same
 # account as the web and iPhone apps.
-HOSTED_URL = "https://peaceful-meadowstone-6944.fly.dev"
+HOSTED_URL = "https://myanteroom.com"
 # Which of the two the window showed last, so the app reopens on it.
 WORKSPACE_FILE = Path(DATA_DIR) / "desktop-workspace.json"
 LOG_PATH = Path.home() / "Library" / "Application Support" / CHANNEL["app_name"] / "logs" / CHANNEL["log"]

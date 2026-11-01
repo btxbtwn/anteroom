@@ -15,7 +15,7 @@ start a marketplace job.
    unpacked installation, reload the extension in `chrome://extensions` after
    updating its folder, then reload the hosted page. Keep only one Bridge copy
    enabled; disable the older copy if you load a separately extracted folder.
-2. Sign in at `https://peaceful-meadowstone-6944.fly.dev`.
+2. Sign in at `https://myanteroom.com`.
 3. Choose **Connect Chrome** and approve **Connect browser** in the extension's
    confirmation window. The web page then shows **Chrome connected**.
 4. **Disconnect** removes that tab's connection. Signing out or changing
