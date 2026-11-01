@@ -1,1 +1,0 @@
-- Behind the scenes: a new automatic check keeps Anteroom's look consistent, so new screens use the same colors, labels and controls as the rest of the app.

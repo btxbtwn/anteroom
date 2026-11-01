@@ -1,2 +1,0 @@
-- With the listing chat open on a wide window, the form now makes room for it instead of running underneath, so no field is hidden behind the chat.
-- The Notes box no longer shows Anteroom's internal settings (such as a chosen category) as if they were your notes.
