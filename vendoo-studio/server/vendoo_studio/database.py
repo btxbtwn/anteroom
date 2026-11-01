@@ -110,6 +110,7 @@ def load_models() -> None:
     from vendoo_studio.models.background_task import BackgroundTask, BackgroundTaskEvent  # noqa: F401
     from vendoo_studio.models.user_secret import UserSecretReference  # noqa: F401
     from vendoo_studio.models.user_preference import UserPreference  # noqa: F401
+    from vendoo_studio.models.seller_change import SellerChange  # noqa: F401
     from vendoo_studio.models.listing_video import ListingVideo  # noqa: F401
     from vendoo_studio.models.conversation import Conversation  # noqa: F401
     from vendoo_studio.models.listing_template import ListingTemplate  # noqa: F401

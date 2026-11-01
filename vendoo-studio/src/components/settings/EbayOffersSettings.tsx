@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { EbayOffer, EbayOfferSelection } from "../../api/ebayOffers";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
+import { Radio, RadioGroup } from "../ui/radio-group";
 import { Spinner } from "../ui/spinner";
 import { useVendooEnabled } from "../../vendooMode";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
@@ -113,12 +115,13 @@ export function EbayOffersSettings() {
         {error ? <p role="alert" className="text-xs text-destructive">{error.message}</p> : null}
         {notice ? <p role="status" className="text-xs text-foreground">{notice}</p> : null}
         {data?.connected ? <>
-          <fieldset className="flex flex-wrap gap-4 text-xs" disabled={busy}>
+          <fieldset className="text-xs" disabled={busy}>
             <legend className="mb-2 font-medium">Listings to include</legend>
-            <label className="flex items-center gap-2"><input type="radio" name="ebay-offer-scope" checked={activeScope === "selected"}
-              onChange={() => { setScope("selected"); changed(); }} />Selected listings</label>
-            <label className="flex items-center gap-2"><input type="radio" name="ebay-offer-scope" checked={activeScope === "all"}
-              onChange={() => { setScope("all"); changed(); }} />All current and future listings</label>
+            <RadioGroup className="flex-row flex-wrap gap-4" name="ebay-offer-scope" value={activeScope} disabled={busy}
+              onValueChange={(next) => { setScope(next as "selected" | "all"); changed(); }}>
+              <label className="flex items-center gap-2"><Radio value="selected" />Selected listings</label>
+              <label className="flex items-center gap-2"><Radio value="all" />All current and future listings</label>
+            </RadioGroup>
           </fieldset>
           {data.allListings.enabled ? <p role="status" className="text-xs text-success-foreground">
             All current and future listings: {data.allListings.discountPercent}% off
@@ -159,8 +162,8 @@ export function EbayOffersSettings() {
           <div className="max-h-80 overflow-y-auto rounded-lg border border-border/60">
             {visible.map((item) => <div key={item.listingId} className="flex flex-wrap items-center gap-3 border-b border-border/50 px-3 py-3 last:border-0">
               <label className="flex min-w-40 flex-1 cursor-pointer items-start gap-2 text-xs">
-                <input type="checkbox" checked={Boolean(selected[item.conversationId])} disabled={busy}
-                  onChange={(event) => { setSelected({ ...selected, [item.conversationId]: event.target.checked }); changed(); }} />
+                <Checkbox checked={Boolean(selected[item.conversationId])} disabled={busy}
+                  onCheckedChange={(next) => { setSelected({ ...selected, [item.conversationId]: next === true }); changed(); }} />
                 <span className="min-w-0"><span className="block font-medium">{item.title}</span>
                   <a className="text-muted-foreground underline" href={`https://www.ebay.com/itm/${item.listingId}`} target="_blank" rel="noreferrer">View on eBay</a>
                   {item.enabled ? <span className="ml-2 text-success-foreground">Auto: {item.discountPercent}% off · minimum ${item.minimumPrice}</span> : null}

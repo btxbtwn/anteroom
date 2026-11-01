@@ -5,11 +5,13 @@ import json
 from uuid import UUID
 
 from fastapi import HTTPException, Request
-from sqlalchemy import event, text
+from sqlalchemy import event, func, inspect, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.ownership import LOCAL_USER_ID, SellerOwned
+from vendoo_studio.models.seller_change import TOPIC_BY_TABLE, SellerChange
 from vendoo_studio.services.seller_sessions import SellerIdentity
 
 
@@ -91,3 +93,43 @@ def _assign_owner(session, flush_context, instances):
     for obj in session.new | session.dirty | session.deleted:
         if isinstance(obj, SellerOwned) and obj.user_id != session.user_id:
             raise ValueError("A seller session cannot write another owner's record")
+    note_changes(session, *(
+        inspect(obj).mapper.local_table.name for obj in session.new | session.deleted
+    ), *(
+        inspect(obj).mapper.local_table.name for obj in session.dirty if session.is_modified(obj)
+    ))
+
+
+# The change feed. Other devices subscribe to seller_changes (Supabase
+# Realtime) and re-read what a topic covers. Topics are written in the same
+# transaction as the data, so a device never hears about an uncommitted change.
+
+def note_changes(session: Session, *tables: str) -> None:
+    topics = {TOPIC_BY_TABLE.get(table) for table in tables} - {None}
+    if topics:
+        session.info.setdefault("changed_topics", set()).update(topics)
+
+
+@event.listens_for(SellerDatabaseSession, "do_orm_execute")
+def _note_statement(state):
+    if state.is_insert or state.is_update or state.is_delete:
+        note_changes(state.session, state.statement.table.name)
+
+
+@event.listens_for(SellerDatabaseSession, "before_commit")
+def _publish_changes(session):
+    session.flush()
+    topics = session.info.pop("changed_topics", None)
+    if not topics:
+        return
+    # Sorted so concurrent commits lock feed rows in the same order.
+    rows = [{"user_id": session.user_id, "topic": topic, "changed_at": func.now()} for topic in sorted(topics)]
+    statement = insert(SellerChange).values(rows)
+    session.connection().execute(statement.on_conflict_do_update(
+        index_elements=["user_id", "topic"], set_={"changed_at": statement.excluded.changed_at}))
+
+
+@event.listens_for(SellerDatabaseSession, "after_soft_rollback")
+def _forget_changes(session, previous_transaction):
+    if previous_transaction.parent is None:
+        session.info.pop("changed_topics", None)

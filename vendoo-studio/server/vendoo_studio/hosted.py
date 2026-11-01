@@ -36,7 +36,7 @@ class SellerSessionMiddleware:
             await send({"type": "websocket.close", "code": 1008})
             return
         if scope["type"] != "http" or (
-            (scope["path"] == "/api/health" and scope["method"] == "GET")
+            (scope["path"] in {"/api/health", "/api/auth-config"} and scope["method"] == "GET")
             or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
                 and (scope["path"] == "/" or scope["path"].startswith("/assets/")))
         ):
@@ -92,19 +92,21 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
         app.state.chat_upload_slots = asyncio.Semaphore(1)
-        worker = scheduler = None
+        worker = scheduler = offers = None
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
-            from vendoo_studio.services import hosted_automation_scheduler
+            from vendoo_studio.services import hosted_automation_scheduler, hosted_offer_scheduler
             from vendoo_studio.services.background_worker import serve
             worker = asyncio.create_task(serve(engine))
             # Automations regenerate through the same draft queue, so both run together.
             scheduler = asyncio.create_task(hosted_automation_scheduler.serve(engine))
+            offers = asyncio.create_task(hosted_offer_scheduler.serve(engine))
         app.state.background_worker = worker
+        app.state.offer_scheduler = offers
         try:
             yield
         finally:
-            running = [task for task in (worker, scheduler) if task is not None]
+            running = [task for task in (worker, scheduler, offers) if task is not None]
             for task in running:
                 task.cancel()
             await asyncio.gather(*running, return_exceptions=True)
@@ -125,7 +127,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co; "
+            "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
             "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         )
         return response
@@ -180,6 +182,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(errors_router)
     from vendoo_studio.routes.hosted_bulk_edit import router as bulk_edit_router
     app.include_router(bulk_edit_router)
+    from vendoo_studio.routes.hosted_account_import import router as account_import_router
+    app.include_router(account_import_router)
     from vendoo_studio.routes.hosted_bulk_delete import router as bulk_delete_router
     app.include_router(bulk_delete_router)
     from vendoo_studio.routes.listings import apply_price_drop
@@ -198,6 +202,13 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         @app.get("/", include_in_schema=False)
         def web_index():
             return FileResponse(web_dir / "cloud.html")
+
+    @app.get("/api/auth-config")
+    def auth_config():
+        # Public browser configuration (also in the web bundle): lets the Mac
+        # app sign in to the same project when it moves its listings.
+        return {"supabase_url": os.environ.get("SUPABASE_URL", ""),
+                "publishable_key": os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")}
 
     @app.get("/api/health")
     def health():

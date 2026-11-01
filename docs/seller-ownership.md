@@ -22,8 +22,12 @@ does not identify a person across different Mac installations.
 
 Linking or importing a Mac into a cloud account must explicitly map that local
 owner to the verified account UUID. Signing in must never automatically claim
-unclaimed records in a shared database. That claim/import operation is still
-to be implemented; this migration does not upload or reassign records.
+unclaimed records in a shared database. The Mac app's move to an account
+(`services/account_move.py`, `routes/hosted_account_import.py`) does this
+mapping: the account writes every moved row under the verified seller, never
+the local owner, and only after the seller signs in and confirms. Because ids
+are unique across accounts, records already moved to one account cannot move
+into another.
 
 Alembic revision `d8b6f2a19c40` upgrades both SQLite and Postgres from
 `3ec056c582ed` (the photo-fingerprint revision). It adds columns and indexes in place, without copying or

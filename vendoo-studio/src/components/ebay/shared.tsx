@@ -6,6 +6,7 @@ import { api } from "../../api/client";
 import type { EbayResult, EbayRow } from "../../api/ebay";
 import { PageError } from "../WorkspacePage";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
 import { ActionForm } from "./ActionForm";
@@ -67,7 +68,7 @@ export function ListingPicker({ selected, onChange }: { selected: string[]; onCh
     <Input nativeInput aria-label="Filter listings" type="search" placeholder="Find a listing…" value={search} onChange={(event) => setSearch(event.target.value)} />
     <div className="ebay-selection-list">
       {visible.map((item) => <label key={item.listingId}>
-        <input type="checkbox" checked={selected.includes(item.listingId)} onChange={(event) => onChange(event.target.checked ? [...selected, item.listingId] : selected.filter((id) => id !== item.listingId))} />{item.title}
+        <Checkbox className="mt-0.5" checked={selected.includes(item.listingId)} onCheckedChange={(next) => onChange(next === true ? [...selected, item.listingId] : selected.filter((id) => id !== item.listingId))} />{item.title}
       </label>)}
       {listings.data && !visible.length ? <p className="text-sm text-muted-foreground py-4">{search ? "No listings match your search." : vendooOn ? "Import listings from Vendoo to select them here." : "Import listings from eBay to select them here."}</p> : null}
     </div>

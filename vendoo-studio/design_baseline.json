@@ -5,9 +5,6 @@
   "src/components/ClaudeLoginTerminal.tsx": {
     "hardcoded-color": 4
   },
-  "src/components/InventoryImport.tsx": {
-    "native-control": 1
-  },
   "src/components/ListingEditor.tsx": {
     "arbitrary-text-size": 2
   },
@@ -17,9 +14,6 @@
   },
   "src/components/MarkdownBlocks.tsx": {
     "gradient": 3
-  },
-  "src/components/MarketplaceAutomations.tsx": {
-    "native-control": 7
   },
   "src/components/MarketplaceMedia.tsx": {
     "arbitrary-text-size": 3
@@ -47,23 +41,8 @@
   "src/components/chat/composerImages.ts": {
     "hardcoded-color": 1
   },
-  "src/components/ebay/ActionForm.tsx": {
-    "native-control": 1
-  },
-  "src/components/ebay/EbayWorkspace.tsx": {
-    "native-control": 1
-  },
-  "src/components/ebay/MarketingPanel.tsx": {
-    "native-control": 1
-  },
   "src/components/ebay/ebay.css": {
     "hardcoded-color": 1
-  },
-  "src/components/ebay/shared.tsx": {
-    "native-control": 1
-  },
-  "src/components/settings/EbayOffersSettings.tsx": {
-    "native-control": 3
   },
   "src/components/settings/LogsSettings.tsx": {
     "uppercase-label": 3

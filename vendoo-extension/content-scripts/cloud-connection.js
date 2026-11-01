@@ -1,6 +1,6 @@
 /* Narrow page-to-extension transport. Never forward arbitrary extension commands. */
 (function () {
-  const ORIGIN = 'https://peaceful-meadowstone-6944.fly.dev';
+  const ORIGIN = 'https://myanteroom.com';
   if (window !== window.top || location.origin !== ORIGIN) return;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let accountId = null;

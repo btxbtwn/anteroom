@@ -18,7 +18,7 @@ from vendoo_studio.version import app_version
 from vendoo_studio.services.local_requests import LocalRequestMiddleware
 from vendoo_studio.routes import marketplace_listings, marketplace_schemas, native_marketplaces
 from vendoo_studio.routes import ebay_offers, listing_promotions, promotion_automations
-from vendoo_studio.routes import ebay
+from vendoo_studio.routes import account_move, ebay
 from vendoo_studio.routes import chrome_import, similar_items
 from vendoo_studio.routes import ai_keys, sales_ledger, bulk_delete, bulk_edit, bulk_marketplace, listing_copies, listing_templates
 from vendoo_studio.routes import automations as automations_route
@@ -249,6 +249,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(LocalRequestMiddleware)
 
 app.include_router(health.router)
+app.include_router(account_move.router)
 app.include_router(marketplace_accounts.router)
 app.include_router(ebay_offers.router)
 app.include_router(listing_promotions.router)

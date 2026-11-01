@@ -14,7 +14,10 @@ import {
   type PromotionAutomationForm,
 } from "./promotionAutomationsFormat";
 import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
+import { Radio, RadioGroup } from "./ui/radio-group";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
 
 const KEY = ["promotion-automations"] as const;
@@ -22,6 +25,21 @@ const FIELD = "h-8 rounded-md border border-border bg-background px-2 text-sm";
 
 function when(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "";
+}
+
+function Choice<T extends string>({ label, value, options, onChange }: {
+  label: string; value: T | null; options: readonly { value: T | null; label: string }[]; onChange: (value: T | null) => void;
+}) {
+  return (
+    <Select value={value} onValueChange={(next) => onChange(next as T | null)}>
+      <SelectTrigger size="sm" aria-label={label}>
+        <SelectValue>{options.find((option) => option.value === value)?.label}</SelectValue>
+      </SelectTrigger>
+      <SelectPopup>
+        {options.map((option) => <SelectItem key={option.value ?? ""} value={option.value}>{option.label}</SelectItem>)}
+      </SelectPopup>
+    </Select>
+  );
 }
 
 function Editor({ form, setForm, labels, waiting, maxCap, busy, onSave, onCancel }: {
@@ -38,14 +56,15 @@ function Editor({ form, setForm, labels, waiting, maxCap, busy, onSave, onCancel
       </label>
       {form.action === "offer" && !form.id ? (
         <label className="flex flex-col gap-1">Marketplace
-          <select className={FIELD} value={form.marketplace} onChange={(event) => set({ marketplace: event.target.value as PromotionMarketplace })}>
-            {offerMarketplaces.map((name) => <option key={name} value={name}>{marketplaceName(name)}{waiting(name, "offer") ? " (not available yet)" : ""}</option>)}
-          </select>
+          <Choice label="Marketplace" value={form.marketplace} onChange={(marketplace) => { if (marketplace) set({ marketplace }); }}
+            options={offerMarketplaces.map((name) => ({ value: name, label: `${marketplaceName(name)}${waiting(name, "offer") ? " (not available yet)" : ""}` }))} />
         </label>
       ) : null}
-      <fieldset className="flex flex-wrap gap-4"><legend className="mb-1">Listings</legend>
-        <label className="flex items-center gap-2"><input type="radio" checked={form.scope === "all"} onChange={() => set({ scope: "all" })} />{form.action === "offer" ? "All current and future listings" : "All live listings"}</label>
-        <label className="flex items-center gap-2"><input type="radio" checked={form.scope === "items"} onChange={() => set({ scope: "items" })} />Only listings I choose</label>
+      <fieldset><legend className="mb-1">Listings</legend>
+        <RadioGroup className="flex-row flex-wrap gap-4" value={form.scope} onValueChange={(scope) => set({ scope: scope as PromotionAutomationForm["scope"] })}>
+          <label className="flex items-center gap-2"><Radio value="all" />{form.action === "offer" ? "All current and future listings" : "All live listings"}</label>
+          <label className="flex items-center gap-2"><Radio value="items" />Only listings I choose</label>
+        </RadioGroup>
       </fieldset>
       <p className="text-xs text-muted-foreground">Choose listings and exclusions under Listings after saving.</p>
       <label className="flex items-center gap-2">Only listings live at least
@@ -60,14 +79,12 @@ function Editor({ form, setForm, labels, waiting, maxCap, busy, onSave, onCancel
         </label>
         <div className="flex flex-wrap gap-3">
           <label className="flex flex-col gap-1">Order
-            <select className={FIELD} value={form.order} onChange={(event) => set({ order: event.target.value as PromotionAutomationForm["order"] })}>
-              {Object.entries(ORDER_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+            <Choice label="Order" value={form.order} onChange={(order) => { if (order) set({ order }); }}
+              options={Object.entries(ORDER_LABELS).map(([value, label]) => ({ value: value as PromotionAutomationForm["order"], label }))} />
           </label>
           <label className="flex flex-col gap-1">Speed
-            <select className={FIELD} value={form.speed} onChange={(event) => set({ speed: event.target.value as PromotionAutomationForm["speed"] })}>
-              {Object.entries(SPEED_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+            <Choice label="Speed" value={form.speed} onChange={(speed) => { if (speed) set({ speed }); }}
+              options={Object.entries(SPEED_LABELS).map(([value, label]) => ({ value: value as PromotionAutomationForm["speed"], label }))} />
           </label>
           <label className="flex flex-col gap-1">Daily cap
             <input className={`${FIELD} w-24`} inputMode="numeric" value={form.dailyCap} onChange={(event) => set({ dailyCap: event.target.value })} />
@@ -89,10 +106,9 @@ function Editor({ form, setForm, labels, waiting, maxCap, busy, onSave, onCancel
         </div>
         {form.marketplace === "poshmark" ? (
           <label className="flex flex-col gap-1">Shipping discount
-            <select className={FIELD} value={form.shippingLabel} onChange={(event) => set({ shippingLabel: event.target.value })}>
-              <option value="">No shipping discount</option>
-              {[...new Set([...labels, ...(form.shippingLabel ? [form.shippingLabel] : [])])].map((label) => <option key={label} value={label}>{label}</option>)}
-            </select>
+            <Choice label="Shipping discount" value={form.shippingLabel || null} onChange={(shippingLabel) => set({ shippingLabel: shippingLabel ?? "" })}
+              options={[{ value: null, label: "No shipping discount" },
+                ...[...new Set([...labels, ...(form.shippingLabel ? [form.shippingLabel] : [])])].map((label) => ({ value: label, label }))]} />
             <span className="text-xs text-muted-foreground">Labels come from offers you reviewed. A listing where Poshmark does not offer this one is skipped.</span>
           </label>
         ) : null}
@@ -133,8 +149,8 @@ function Details({ automation, onSaveListings, busy }: {
           {(coverage.data?.items || []).map((item) => (
             <li key={item.conversation_id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <label className="flex min-w-0 items-center gap-2">
-                <input type="checkbox" checked={included(item.conversation_id)} disabled={busy}
-                  onChange={(event) => setForm(withListing(form, item.conversation_id, event.target.checked))} />
+                <Checkbox checked={included(item.conversation_id)} disabled={busy}
+                  onCheckedChange={(next) => setForm(withListing(form, item.conversation_id, next === true))} />
                 <span className="truncate">{item.title || item.listing_id}</span>
                 <span className="text-muted-foreground">{item.listed_days != null ? `${item.listed_days} d` : ""}{item.too_new ? " · too new" : ""}</span>
               </label>
