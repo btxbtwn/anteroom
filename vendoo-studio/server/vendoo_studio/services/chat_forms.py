@@ -26,7 +26,7 @@ async def forms_prompt(db: Session, conv_id: str, option_catalog=None) -> str:
     markets = set(get_selected_marketplaces()) | {"vinted"} | set(listing.get(native_contract.KEY) or {})
     db.commit()
     native = await native_field_fill.load_forms(db, conv_id, markets)
-    forms = {"general": {"fields": _values(definitions["general"], listing, "general")}}
+    forms: dict[str, dict] = {"general": {"fields": _values(definitions["general"], listing, "general")}}
     for market in sorted(markets):
         if market in native_field_fill.MARKETS:
             form = native.get(market)

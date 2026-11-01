@@ -88,7 +88,7 @@ NUMBERS = ("sellwild_category_id", "sellwild_condition_id")
 def _row(conv_id: str, marketplace: str, binding: dict, now: datetime) -> dict:
     """One notes binding as a table row. Keys the table has no place for (``transport``) are dropped."""
     state = binding.get("state") if binding.get("state") in STATES else "unknown"
-    row = {name: None for name in (*TEXT, *FLAGS, *LISTS, *NUMBERS, "error_code", "error_fields", "marketplace_message",
+    row: dict[str, object] = {name: None for name in (*TEXT, *FLAGS, *LISTS, *NUMBERS, "error_code", "error_fields", "marketplace_message",
                                    "retry_after", "operation_id", "ebay_images", "etsy_image_ids")}
     row.update(id=uuid.uuid4().hex[:12], conversation_id=conv_id, marketplace=marketplace, state=state,
                created_at=now, updated_at=now)

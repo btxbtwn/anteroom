@@ -31,6 +31,7 @@ class FrontendFiles(StaticFiles):
         response = super().file_response(full_path, stat_result, scope, status_code)
         # Starlette hands over the resolved path, so the directory is resolved
         # too: behind a symlink the two would otherwise never share a root.
+        assert self.directory is not None
         relative = os.path.relpath(full_path, os.path.realpath(self.directory))
         response.headers["Cache-Control"] = cache_control(relative)
         return response

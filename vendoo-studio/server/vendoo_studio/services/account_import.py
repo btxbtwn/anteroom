@@ -204,3 +204,11 @@ def import_secrets(values: dict) -> list[str]:
             keychain.write_slot(slot, value)
             saved.append(slot)
     return saved
+
+
+def announce_all(db) -> None:
+    from vendoo_studio.models.seller_change import TOPIC_BY_TABLE
+    from vendoo_studio.services.hosted_database import note_changes
+    db.execute(select(1))  # begin, so the commit publishes
+    note_changes(db, *(table for table, topic in TOPIC_BY_TABLE.items() if topic))
+    db.commit()

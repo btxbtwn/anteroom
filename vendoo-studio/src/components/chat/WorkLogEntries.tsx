@@ -272,12 +272,12 @@ function AgentMemberRow({ agent }: { agent: LiveAgent }) {
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 truncate text-xs font-medium text-foreground">{agent.label}</span>
           {agent.detail !== null && agent.status !== "done" ? (
-            <span className={cn("shrink-0 text-3xs", failed ? "text-destructive" : "text-muted-foreground")}>
+            <span className={cn("shrink-0 text-3xs", failed ? "text-destructive-foreground" : "text-muted-foreground")}>
               {statusLabel}
             </span>
           ) : null}
         </span>
-        <span className={cn("block text-2xs leading-relaxed", failed ? "text-destructive" : "text-muted-foreground")}>
+        <span className={cn("block text-2xs leading-relaxed", failed ? "text-destructive-foreground" : "text-muted-foreground")}>
           <span className="block truncate">{agent.detail ?? statusLabel}</span>
         </span>
       </span>
@@ -324,7 +324,7 @@ export const SubagentGroup = memo(function SubagentGroup({ agents }: { agents: L
           <span
             className={cn(
               "block truncate text-3xs text-muted-foreground",
-              spawn.tone === "working" ? "text-info" : spawn.tone === "failed" && "text-destructive",
+              spawn.tone === "working" ? "text-info" : spawn.tone === "failed" && "text-destructive-foreground",
             )}
           >
             {statusSummary}

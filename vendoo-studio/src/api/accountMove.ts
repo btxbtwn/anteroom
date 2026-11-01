@@ -5,6 +5,8 @@ export interface AccountMoveResult {
   records: number;
   photos: number;
   missing_photos: number;
+  /** Photos the account could not take, such as unreadable files. */
+  refused_photos: number;
   settings: number;
   keys: string[];
   paused_automations: number;

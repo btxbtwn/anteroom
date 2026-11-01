@@ -17,6 +17,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
+from typing import cast
 
 from vendoo_studio.config import skills_dir
 from vendoo_studio.services import live_trace, model_slots
@@ -120,11 +121,13 @@ _PROVIDER_LABELS = {
 def model_search() -> ModelSearch | None:
     """The listing model's native web search, or None when it has none."""
     provider = get_listing_provider()
+    if provider is None:
+        return None
     search = getattr(provider, "web_search", None)
     if not callable(search):
         return None
     label = _PROVIDER_LABELS.get(provider.name) or getattr(KEY_PROVIDERS.get(provider.name), "label", provider.name)
-    return ModelSearch(label, search)
+    return ModelSearch(label, cast(Searcher, search))
 
 
 def comps_search_available() -> bool:

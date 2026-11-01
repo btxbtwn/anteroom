@@ -120,7 +120,7 @@ def package_sides(listing: dict) -> list[float] | None:
         return [ceil(preset[side]) for side in ("length", "width", "height")]
     own = [_positive(_own_package(listing).get(side)) for side in ("depth", "width", "height")]
     if all(side is not None for side in own):
-        return own
+        return [side for side in own if side is not None]
     sides = [float(side) for side in re.findall(r"\d+(?:\.\d+)?", str(listing.get("package_dimensions_in") or ""))]
     return sides if len(sides) == 3 and min(sides) > 0 else None
 

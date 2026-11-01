@@ -469,6 +469,7 @@ async def start_login() -> dict:
 
 async def _complete_login(login: PendingLogin) -> None:
     try:
+        assert login.callback is not None
         params = await asyncio.wait_for(login.callback, LOGIN_TIMEOUT_S)
         await _finish(login, params)
     except asyncio.CancelledError:
@@ -576,7 +577,7 @@ async def logout() -> bool:
     record = get_chatgpt_tokens()
     confirmed = False
     refresh = record.get("refresh_token") if isinstance(record, dict) else None
-    if isinstance(refresh, str) and refresh and isinstance(record.get("client_id"), str):
+    if isinstance(record, dict) and isinstance(refresh, str) and refresh and isinstance(record.get("client_id"), str):
         try:
             endpoints = await _discover()
             revoke = endpoints.get("revocation_endpoint")

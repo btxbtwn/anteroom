@@ -52,7 +52,7 @@ def job_video(job_id: str, video_id: str, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     expected = (job.listing_snapshot or {}).get("_native_video") if job else None
     row = db.get(ListingVideo, video_id)
-    if (not row or not expected or expected.get("id") != video_id or row.conversation_id != job.conversation_id
+    if (not job or not row or not expected or expected.get("id") != video_id or row.conversation_id != job.conversation_id
             or row.checksum != expected.get("checksum")):
         raise HTTPException(404, "Video not found for this job revision")
     return _serve(row)

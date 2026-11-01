@@ -9,8 +9,7 @@
     "arbitrary-text-size": 2
   },
   "src/components/ListingFormControls.tsx": {
-    "arbitrary-text-size": 3,
-    "native-control": 1
+    "arbitrary-text-size": 3
   },
   "src/components/MarkdownBlocks.tsx": {
     "gradient": 3

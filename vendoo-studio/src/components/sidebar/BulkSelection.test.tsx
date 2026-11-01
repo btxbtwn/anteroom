@@ -12,7 +12,7 @@ function bar(hosted: boolean, edits = false) {
   const content = <BulkActionBar bulk={{ run: null, running: false } as BulkRegenerate}
     selection={{ selectedIds: new Set(["coat"]), regenerateIds: ["coat"] } as ListingSelection} eligibleIds={["coat"]} />;
   return renderToStaticMarkup(<QueryClientProvider client={client}>{hosted
-    ? <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set<WorkspaceFeature>(["bulk_actions", "bulk_copy", "bulk_markdowns", ...(edits ? ["bulk_edit" as const] : [])]), views: new Set(["listings"]), marketplaceForms: new Set() }}>{content}</WorkspaceRuntimeProvider>
+    ? <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set<WorkspaceFeature>(["bulk_actions", "bulk_copy", "bulk_markdowns", ...(edits ? ["bulk_edit" as const] : [])]), views: new Set(["listings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>{content}</WorkspaceRuntimeProvider>
     : content}</QueryClientProvider>);
 }
 

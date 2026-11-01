@@ -112,7 +112,7 @@ export function EbayOffersSettings() {
         {data?.lastCheck ? <p className="text-xs text-muted-foreground">Last automatic check: {new Date(data.lastCheck).toLocaleString()}</p> : null}
         {data?.lastError ? <SettingsNote tone="error">{data.lastError}</SettingsNote> : null}
         {status.isPending ? <Spinner /> : null}
-        {error ? <p role="alert" className="text-xs text-destructive">{error.message}</p> : null}
+        {error ? <p role="alert" className="text-xs text-destructive-foreground">{error.message}</p> : null}
         {notice ? <p role="status" className="text-xs text-foreground">{notice}</p> : null}
         {data?.connected ? <>
           <fieldset className="text-xs" disabled={busy}>
@@ -195,7 +195,7 @@ export function EbayOffersSettings() {
           {offers.map((offer, index) => <div key={offer.id ?? index} className="space-y-1 border-t border-border/50 pt-2 text-xs">
             <p className="font-medium">{offer.title || offer.listingId}</p>
             {offer.offerPrice ? <p>${offer.currentPrice} → <strong>${offer.offerPrice}</strong> · minimum ${offer.minimumPrice} · {offer.discountPercent}% off</p> : null}
-            <p className={offer.state === "failed" || offer.state === "unknown" ? "text-destructive" : "text-muted-foreground"}>
+            <p className={offer.state === "failed" || offer.state === "unknown" ? "text-destructive-foreground" : "text-muted-foreground"}>
               {offer.state === "preview" ? (offer.eligible ? "Ready to send to eBay-eligible buyers." : "No eligible buyers yet. You can enable automatic offers for future buyers.") : offer.note || offer.state}
             </p>
           </div>)}

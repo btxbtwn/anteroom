@@ -295,3 +295,20 @@ timer marks each cut-off send unknown and pauses that seller's automation, as
 the Mac does; every 15 minutes it runs each seller's check in their own
 row-secured context with their own token. The last check and its error are
 kept per seller. Like automations, checks only run while the Fly Machine is up.
+
+On `feat/hosted-direct-listing`, the web app lists, updates and delists on eBay
+through its API with the desktop handlers: List and Update carry `confirm`,
+Delist names its marketplaces and carries `confirm`. The runtime's new
+`action_marketplaces` says which rows show actions (`["ebay"]` on the web, while
+the job watchdog runs); Etsy follows with its form, and Chrome-only marketplaces
+are refused. Approved photo copies now sit beside their source photo, so on the
+web they stay in the seller's own Storage folder. A `SECURITY DEFINER` function
+(`unsettled_job_owners`, revision `a6f3d1c8e925`) lets the web job watchdog find
+sellers with a running job or an unconfirmed action; each pass runs in that
+seller's context, fails jobs no process is running, and reads eBay's result.
+
+On `feat/hosted-etsy`, the Etsy tab and Etsy List, Update, Save draft and Delist
+are on the web. The web's `/vendoo-api/fields` builds only the Etsy form, with
+the same `leaf_form` the Mac uses, from the seller's saved category fields and
+Etsy's live properties; it never asks Chrome for a schema. `action_marketplaces`
+is `["ebay", "etsy"]` while the job watchdog runs.

@@ -24,6 +24,7 @@ def attachment(attachment_id: str, size: int | None = None, db=Depends(get_selle
     if size is not None and size not in THUMBNAIL_SIZES:
         raise HTTPException(400, 'Unsupported thumbnail size')
     path = attachment_path(attachment_id)
+    assert path is not None  # The hosted photo store resolves or rejects the key.
     if size is not None:
         path = attachment_thumbnail(path, size)
     return FileResponse(path, media_type='image/jpeg', headers={'Cache-Control': 'no-store'})

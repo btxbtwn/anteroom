@@ -31,6 +31,9 @@ LOGO_FILES = {
     "src/components/MarketplaceLogo.tsx",
     "src/components/providerIcons.tsx",
 }
+# NativeSelect: the one native <select>, kept on purpose for long marketplace option
+# lists so phones show their own picker. Other code uses it instead of a raw <select>.
+NATIVE_SELECT_FILES = {"src/components/ListingFormControls.tsx"}
 
 RULES: dict[str, tuple[str, re.Pattern[str], tuple[str, ...]]] = {
     "hardcoded-color": (
@@ -54,7 +57,7 @@ RULES: dict[str, tuple[str, re.Pattern[str], tuple[str, ...]]] = {
         (".css", ".tsx"),
     ),
     "native-control": (
-        "a native <select>, checkbox or radio; use Select, Checkbox or RadioGroup from ui/",
+        "a native <select>, checkbox or radio; use Select, Checkbox or RadioGroup from ui/ (or NativeSelect for a long marketplace option list)",
         re.compile(r"<select\b|type=\"(?:checkbox|radio)\""),
         (".tsx",),
     ),
@@ -87,6 +90,8 @@ def measure() -> dict[str, dict[str, int]]:
             if rel in TOKEN_FILES and rule in {"hardcoded-color", "heavy-weight"}:
                 continue
             if rel in LOGO_FILES and rule == "hardcoded-color":
+                continue
+            if rel in NATIVE_SELECT_FILES and rule == "native-control":
                 continue
             found = len(pattern.findall(text))
             if found:

@@ -328,6 +328,55 @@ async def _with_live_schema(listing: dict, marketplace: str, fields: list[dict])
     return await overlay_live_fields(listing, marketplace, fields)
 
 
+async def leaf_form(listing: dict, marketplace: str, category_id: str, specs: dict, static: dict) -> dict:
+    """One marketplace's editor form for this listing's leaf, from its schema (empty when unknown)."""
+    from vendoo_studio.services.fill_log import listing_value_for_field
+
+    static_by_fold = {key.casefold(): values for key, values in static.items()}
+    if not specs:
+        # No schema for this leaf, live or cached. Show the marketplace's
+        # own controls and whatever the listing holds, so the form is never
+        # blank and a rejected value is still reachable.
+        fallback = _scraped_only_fields(listing, marketplace, static, [])
+        fallback.extend(_listing_only_fields(listing, marketplace, fallback))
+        fallback = await _with_live_schema(listing, marketplace, fallback)
+        fallback.sort(key=lambda row: row["label"])
+        return {"marketplace": marketplace, "category_id": category_id, "known": False, "fields": fallback}
+    from vendoo_studio.services.form_schema import field_applies, labels_for_spec
+
+    fields = []
+    for spec in specs.values():
+        label = spec.display or spec.key
+        options = labels_for_spec(spec, listing)
+        options_source = "vendoo" if options and (spec.options or spec.scales) else "reference"
+        if not options:
+            # Category schema sometimes omits the closed list; fall back to
+            # the skill scrape so the Forms editor still offers choices.
+            options = list(
+                static.get(spec.key)
+                or static.get(label)
+                or static_by_fold.get(str(spec.key).casefold())
+                or static_by_fold.get(str(label).casefold())
+                or []
+            )
+        fields.append({
+            "key": spec.key,
+            "label": label,
+            "value": listing_value_for_field(listing, marketplace, label),
+            "required": spec.required,
+            "multi": spec.multi,
+            "selection_only": spec.selection_only or bool(spec.scales),
+            "options": options,
+            "options_source": options_source,
+            "on_form": field_applies(label, listing),
+        })
+    fields.extend(_scraped_only_fields(listing, marketplace, static, fields))
+    fields.extend(_listing_only_fields(listing, marketplace, fields))
+    fields = await _with_live_schema(listing, marketplace, fields)
+    fields.sort(key=lambda row: (not row["required"], row["label"]))
+    return {"marketplace": marketplace, "category_id": category_id, "known": True, "fields": fields}
+
+
 @router.get("/api/conversations/{conv_id}/vendoo-api/fields")
 async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
     """Every field each marketplace can hold for this listing's categories.
@@ -339,7 +388,6 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
     own options when it publishes a list.
     """
     from vendoo_studio.services.category_fields import listing_category_ids
-    from vendoo_studio.services.fill_log import listing_value_for_field
     from vendoo_studio.services.vendoo_create import LOOKUP_TIMEOUT_SEC, fetch_leaf_specifics
 
     conv = ConversationRepo(db).get(conv_id)
@@ -371,57 +419,7 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
         for marketplace, category_id in leaves
     ))
     for (marketplace, category_id), specs in zip(leaves, fetched, strict=True):
-        static = static_forms.get(marketplace) or {}
-        static_by_fold = {key.casefold(): values for key, values in static.items()}
-        if not specs:
-            # No schema for this leaf, live or cached. Show the marketplace's
-            # own controls and whatever the listing holds, so the form is never
-            # blank and a rejected value is still reachable.
-            fallback = _scraped_only_fields(listing, marketplace, static, [])
-            fallback.extend(_listing_only_fields(listing, marketplace, fallback))
-            fallback = await _with_live_schema(listing, marketplace, fallback)
-            fallback.sort(key=lambda row: row["label"])
-            out.append({
-                "marketplace": marketplace, "category_id": category_id,
-                "known": False, "fields": fallback,
-            })
-            continue
-        from vendoo_studio.services.form_schema import field_applies, labels_for_spec
-
-        fields = []
-        for spec in specs.values():
-            label = spec.display or spec.key
-            options = labels_for_spec(spec, listing)
-            options_source = "vendoo" if options and (spec.options or spec.scales) else "reference"
-            if not options:
-                # Category schema sometimes omits the closed list; fall back to
-                # the skill scrape so the Forms editor still offers choices.
-                options = list(
-                    static.get(spec.key)
-                    or static.get(label)
-                    or static_by_fold.get(str(spec.key).casefold())
-                    or static_by_fold.get(str(label).casefold())
-                    or []
-                )
-            fields.append({
-                "key": spec.key,
-                "label": label,
-                "value": listing_value_for_field(listing, marketplace, label),
-                "required": spec.required,
-                "multi": spec.multi,
-                "selection_only": spec.selection_only or bool(spec.scales),
-                "options": options,
-                "options_source": options_source,
-                "on_form": field_applies(label, listing),
-            })
-        fields.extend(_scraped_only_fields(listing, marketplace, static, fields))
-        fields.extend(_listing_only_fields(listing, marketplace, fields))
-        fields = await _with_live_schema(listing, marketplace, fields)
-        fields.sort(key=lambda row: (not row["required"], row["label"]))
-        out.append({
-            "marketplace": marketplace, "category_id": category_id,
-            "known": True, "fields": fields,
-        })
+        out.append(await leaf_form(listing, marketplace, category_id, specs, static_forms.get(marketplace) or {}))
     return {"ok": True, "forms": out}
 
 

@@ -86,7 +86,7 @@ describe("eBay offers", () => {
 
 describe("eBay on the web", () => {
   it("leaves out the Offers tab until the web schedules offers", () => {
-    const runtime = { hosted: true, features: new Set([]), views: new Set(["marketplaces"]), marketplaceForms: new Set(["ebay"]) };
+    const runtime = { hosted: true, features: new Set([]), views: new Set(["marketplaces"]), marketplaceForms: new Set(["ebay"]), actionMarketplaces: new Set<string>() };
     const html = renderToStaticMarkup(<WorkspaceRuntimeProvider value={runtime}><EbayWorkspace onOpenListing={vi.fn()} /></WorkspaceRuntimeProvider>);
     expect(html).not.toContain("Offers to interested buyers");
     expect(html).not.toMatch(/>Offers</);

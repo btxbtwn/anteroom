@@ -20,6 +20,7 @@ from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from vendoo_studio.models.validation import etsy_eligible, validate_listing
 from vendoo_studio.repositories import hosted_drafts
+from vendoo_studio.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from vendoo_studio.services import user_settings
 from vendoo_studio.services.hosted_database import get_seller_db
 from vendoo_studio.services.hosted_listing_contract import editable_listing
@@ -83,11 +84,14 @@ def runtime(request: Request, db=Depends(get_seller_db)):
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
     offers = getattr(request.app.state, 'offer_scheduler', None)
+    watchdog = getattr(request.app.state, 'job_watchdog', None)
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant']
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else [])
             + (['ebay_offers'] if offers is not None and not offers.done() else []),
-            'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant', 'marketplaces'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay']}
+            'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant', 'marketplaces'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
+            # eBay and Etsy list through their APIs; a restart's held slot needs the job watchdog.
+            'action_marketplaces': list(ACTION_MARKETPLACES) if watchdog is not None and not watchdog.done() else []}
 
 
 @router.get('/status')
@@ -310,13 +314,6 @@ def reset_conversation(identity: str, request: Request, body: ResetInput | None 
     return conversation_response(conversation(db, identity))
 
 
-@router.get('/conversations/{identity}/native-marketplaces')
-def native_status(identity: str, db=Depends(get_seller_db)):
-    conversation(db, identity)
-    rows = db.scalars(select(MarketplaceListing).where(MarketplaceListing.conversation_id == identity)).all()
-    return {row.marketplace: {'state': row.state, 'listing_url': row.listing_url} for row in rows}
-
-
 
 def photo_response(row):
     return {'id': row.id, 'conversation_id': row.conversation_id, 'original_filename': row.original_filename,
@@ -425,14 +422,6 @@ def photo_thumbnail(photo_id: str, request: Request, size: int = Query(192, ge=3
         output = BytesIO()
         image.save(output, 'JPEG', quality=82)
     return Response(output.getvalue(), media_type='image/jpeg')
-
-
-@router.get('/conversations/{identity}/marketplace-listings')
-def marketplace_listings(identity: str, db=Depends(get_seller_db)):
-    conversation(db, identity)
-    rows = db.scalars(select(MarketplaceListing).where(MarketplaceListing.conversation_id == identity)).all()
-    return {row.marketplace: {'state': row.state, 'listing_url': row.listing_url,
-                             'listing_id': row.listing_id} for row in rows}
 
 
 @router.get('/conversations/{identity}/revisions')

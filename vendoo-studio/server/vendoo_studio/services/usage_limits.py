@@ -278,7 +278,7 @@ def claude_usage_to_limits(response: object, checked_at: str) -> dict:
     return make_limits("claude", checked_at, windows, plan)
 
 
-async def _claude_get_usage() -> dict:
+async def _claude_get_usage() -> dict | None:
     """Ask the seller's Claude Code for its usage through the Agent SDK control
     channel. No prompt is sent, so it costs nothing."""
     from claude_agent_sdk import ClaudeSDKClient

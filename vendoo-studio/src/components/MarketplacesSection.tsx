@@ -197,7 +197,9 @@ export function MarketplacesLayout({
   children?: ReactNode;
 }) {
   const runtime = useWorkspaceRuntime();
-  disabled = disabled || !runtime.features.has("marketplace_actions");
+  // Which marketplaces this app can act on: all of them on the Mac, eBay on the web.
+  const canAct = (marketplace: string) => runtime.actionMarketplaces.has(marketplace);
+  disabled = disabled || runtime.actionMarketplaces.size === 0;
   const queryClient = useQueryClient();
   const paneRef = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef(new Map<string, number>());
@@ -278,12 +280,12 @@ export function MarketplacesLayout({
 
   const etsyCreating = !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
   const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
-    enabled: runtime.features.has("marketplace_actions") && etsyCreating, staleTime: 60_000, retry: false });
+    enabled: canAct("etsy") && etsyCreating, staleTime: 60_000, retry: false });
   const etsyReady = Boolean(etsyDefaults.data?.shipping_profile_id && etsyDefaults.data?.readiness_state_id && etsyDefaults.data?.return_policy_id);
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.preflight(convId),
-    enabled: runtime.features.has("marketplace_actions") && Boolean(revisionId),
+    enabled: runtime.actionMarketplaces.size > 0 && Boolean(revisionId),
     staleTime: 15_000,
     // Every save is a new revision. Keep the last answer on screen until the new one
     // arrives, so the pane above the form does not collapse and shift the form.
@@ -429,7 +431,7 @@ export function MarketplacesLayout({
   const busy = disabled || delist.isPending || mark.isPending || recordSale.isPending || native.isPending || native.isError;
   const statuses = ORDER.map((marketplace) => rowStatus(marketplace, listings[marketplace],
     NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined, revisionId, etsyEligible));
-  const removable = ORDER.filter((marketplace) => deletable(listings[marketplace]));
+  const removable = ORDER.filter((marketplace) => canAct(marketplace) && deletable(listings[marketplace]));
   const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
 
   const running = (marketplace: Marketplace) => isRunning(drafts[marketplace as NativeMarketplace]);
@@ -442,7 +444,7 @@ export function MarketplacesLayout({
     return draft?.error_code === "rate_limited" ? secondsUntil(draft.retry_after, now) : 0;
   };
   function listable(marketplace: Marketplace, status: Status): boolean {
-    if (!NATIVE.has(marketplace) || unconfirmed(marketplace)) return false;
+    if (!NATIVE.has(marketplace) || !canAct(marketplace) || unconfirmed(marketplace)) return false;
     if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || listings[marketplace]?.listing_id) return false;
     // A sold item is not listed anywhere else.
     return !soldSomewhere;
@@ -475,7 +477,7 @@ export function MarketplacesLayout({
   }
 
   function actions(marketplace: Marketplace, status: Status): ReactNode {
-    if (!runtime.features.has("marketplace_actions")) return <span className="text-xs text-muted-foreground">Preview</span>;
+    if (!canAct(marketplace)) return <span className="text-xs text-muted-foreground">Preview</span>;
     const m = marketplace as NativeMarketplace;
     if (running(marketplace)) {
       return <Button size="xs" variant="outline" disabled={startingOn(m)} onClick={() => action.mutate({ marketplace: m, kind: "cancel" })}>Cancel</Button>;
@@ -506,7 +508,7 @@ export function MarketplacesLayout({
   }
 
   function rowMenu(marketplace: Marketplace, status: Status): ReactNode {
-    if (!runtime.features.has("marketplace_actions")) return null;
+    if (!canAct(marketplace)) return null;
     const name = marketplaceName(marketplace);
     const m = marketplace as NativeMarketplace;
     const entry = listings[marketplace];

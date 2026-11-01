@@ -760,7 +760,7 @@ export function StructuredEditor({
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.preflight(convId),
-    enabled: runtime.features.has("marketplace_actions") && nativeTab && Boolean(revisionId) && !saving,
+    enabled: runtime.actionMarketplaces.size > 0 && nativeTab && Boolean(revisionId) && !saving,
     staleTime: 15_000,
     placeholderData: (previous) => previous,
   });
@@ -769,7 +769,7 @@ export function StructuredEditor({
   const formsQuery = useQuery({
     queryKey: ["listing-fields", convId],
     queryFn: () => api.vendooApi.listingFields(convId),
-    enabled: !runtime.hosted && !nativeTab,
+    enabled: !nativeTab,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     placeholderData: (previous) => previous,
@@ -778,7 +778,7 @@ export function StructuredEditor({
   const dropdownQuery = useQuery({
     queryKey: ["catalog-dropdown-options"],
     queryFn: api.catalog.dropdownOptions,
-    enabled: !runtime.hosted && !nativeTab,
+    enabled: !nativeTab,
     staleTime: Infinity,
   });
   const { data: dropdownOptions } = dropdownQuery;

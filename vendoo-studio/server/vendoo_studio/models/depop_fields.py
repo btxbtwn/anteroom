@@ -287,7 +287,9 @@ def infer_depop_occasions(
     season = text_value(ebay.get("season"))
     if season in {"Summer", "Winter"} and season not in blocked and season not in seeded:
         seeded.append(season)
-    depop = listing.get("depop_specifics") if isinstance(listing.get("depop_specifics"), dict) else {}
+    depop = listing.get("depop_specifics")
+    if not isinstance(depop, dict):
+        depop = {}
     style_boosts = {
         "Streetwear": ("Casual", "Going out"),
         "Sportswear": ("Workout", "Casual"),
@@ -338,7 +340,9 @@ def ensure_depop_category_optionals(listing: dict) -> bool:
     if not isinstance(raw, dict):
         return False
     depop = dict(raw)
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     changed = False
     hay = ebay_season_haystack(listing, ebay)
 
@@ -516,7 +520,9 @@ def depop_size_for(size: Any, listing: dict) -> str:
     if depop_is_kids(listing):
         return size_label(depop_category_id(listing), depop_kids_size(size))
     text = text_value(size)
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
     size_type = text_value(listing.get("sizeType") or ebay.get("sizeType")).casefold()
     petite = re.fullmatch(r"p([sml])", text, re.I)
     if size_type in {"petite", "petites"} and petite:

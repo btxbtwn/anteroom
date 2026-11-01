@@ -342,8 +342,9 @@ def apply_price_policy(previous: dict, submitted: dict) -> None:
             if new_number is not None:
                 set_path(submitted, path, new_number)
             continue
-        if _market_locked(locks, market) and path != _market_locked(locks, market):
-            held = price_number(get_path(submitted, _market_locked(locks, market)))
+        held_path = _market_locked(locks, market)
+        if held_path and path != held_path:
+            held = price_number(get_path(submitted, held_path))
             if held is not None and (path in _price_paths(submitted) or path == CANONICAL_PRICE[market]):
                 set_path(submitted, path, held)
             continue
@@ -378,8 +379,9 @@ def sync_unlocked_prices(listing: dict) -> bool:
         market = marketplace_of(path)
         if not market:
             continue
-        if _market_locked(locks, market):
-            held = price_number(get_path(listing, _market_locked(locks, market)))
+        held_path = _market_locked(locks, market)
+        if held_path:
+            held = price_number(get_path(listing, held_path))
             if held is None:
                 continue
             if money(get_path(listing, path)) != money(held):

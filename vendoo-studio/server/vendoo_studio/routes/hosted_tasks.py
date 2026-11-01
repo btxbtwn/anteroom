@@ -37,7 +37,9 @@ def owned_conversation(db, conv_id, *, lock=False):
 
 
 def task_stream(task_id):
-    sessions = current().session_factory
+    context = current()
+    assert context is not None
+    sessions = context.session_factory
 
     def poll(sequence):
         with sessions() as db:

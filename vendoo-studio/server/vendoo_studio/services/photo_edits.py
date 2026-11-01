@@ -55,14 +55,14 @@ class PhotoEdits(BaseModel):
 
     rotate: Literal[0, 90, 180, 270] = 0
     """Quarter turns, clockwise."""
-    straighten: float = Field(0, ge=-45, le=45)
+    straighten: float = Field(default=0, ge=-45, le=45)
     """Degrees clockwise; the frame zooms in so no empty corners show."""
     crop: CropBox | None = None
-    exposure: float = Field(0, ge=-2, le=2)
+    exposure: float = Field(default=0, ge=-2, le=2)
     """Stops: +1 doubles the light."""
-    brightness: float = Field(0, ge=-100, le=100)
-    contrast: float = Field(0, ge=-100, le=100)
-    background: str | None = Field(None, pattern=r"^#[0-9a-fA-F]{6}$")
+    brightness: float = Field(default=0, ge=-100, le=100)
+    contrast: float = Field(default=0, ge=-100, le=100)
+    background: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     """Colour behind the cut-out item; None keeps the photo's own background."""
 
     def is_original(self) -> bool:

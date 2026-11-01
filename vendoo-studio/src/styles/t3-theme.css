@@ -688,9 +688,11 @@
      portaled mobile sheets and settings navigation outside the app sidebar. */
   --sidebar: var(--color-zinc-50);
   --sidebar-foreground: var(--foreground);
-  --sidebar-muted-foreground: var(--muted-foreground);
+  /* One step darker than body muted text: zinc-500 on the zinc-50 sidebar reads too faint. */
+  --sidebar-muted-foreground: var(--color-zinc-600);
   --sidebar-control-surface: var(--color-zinc-100);
-  --sidebar-row-hover: var(--color-zinc-25);
+  /* zinc-25 on zinc-50 was nearly invisible; hover uses the shared hover gray. */
+  --sidebar-row-hover: var(--color-zinc-100);
   --sidebar-row-active: var(--color-white);
   --sidebar-row-selected: var(--color-white);
   --sidebar-border: var(--border);
@@ -733,6 +735,7 @@
     --update-foreground: var(--color-blue-400);
     --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
     --sidebar: var(--card);
+    --sidebar-muted-foreground: var(--muted-foreground);
     --sidebar-control-surface: var(--muted);
     --sidebar-row-hover: var(--accent);
     --sidebar-row-active: var(--accent);
@@ -753,15 +756,16 @@
   --card-foreground: var(--color-zinc-800);
   --accent: var(--color-zinc-100);
   --accent-foreground: var(--color-zinc-900);
-  --muted: var(--color-zinc-50);
+  /* One step off the zinc-50 sidebar, so chips like the "/" shortcut keep their shape. */
+  --muted: var(--color-zinc-100);
   --muted-foreground: var(--color-zinc-500);
   --border: var(--color-zinc-200);
   --input: var(--color-zinc-300);
   --sidebar: var(--color-zinc-50);
   --sidebar-foreground: var(--color-zinc-800);
-  --sidebar-muted-foreground: var(--color-zinc-500);
+  --sidebar-muted-foreground: var(--color-zinc-600);
   --sidebar-control-surface: var(--color-zinc-100);
-  --sidebar-row-hover: var(--color-zinc-25);
+  --sidebar-row-hover: var(--color-zinc-100);
   --sidebar-row-active: var(--color-white);
   --sidebar-row-selected: var(--color-white);
   --sidebar-border: var(--color-zinc-200);
