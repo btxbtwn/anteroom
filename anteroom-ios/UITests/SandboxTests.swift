@@ -9,10 +9,8 @@ final class SandboxTests: XCTestCase {
         launchSandbox(app)
         let title = openNewListing(app)
         XCTAssertTrue(title.waitForExistence(timeout: 10))
-        title.tap()
-        dismissKeyboardIntroduction(app)
         let name = "Simulator draft \(UUID().uuidString.prefix(8))"
-        enterListingTitle(name, into: title)
+        enterListingTitle(name, into: title, app: app)
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
         app.terminate()
@@ -30,9 +28,7 @@ final class SellerInputSandboxTests: XCTestCase {
         launchSandbox(app)
         let title = openNewListing(app)
         let name = "Seller inputs \(UUID().uuidString.prefix(8))"
-        title.tap()
-        dismissKeyboardIntroduction(app)
-        enterListingTitle(name, into: title)
+        enterListingTitle(name, into: title, app: app)
         app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
 
@@ -235,16 +231,15 @@ final class DestinationSandboxTests: XCTestCase {
 
 fileprivate extension XCTestCase {
     @MainActor
-    func enterListingTitle(_ text: String, into field: XCUIElement) {
-        // A cold simulator can drop characters from one batched typeText
-        // event. Wait for each edit before sending the next keyboard event.
-        var entered = ""
-        for character in text {
-            field.typeText(String(character))
-            entered.append(character)
-            expectation(for: NSPredicate(format: "value == %@", entered), evaluatedWith: field)
-            waitForExpectations(timeout: 5)
-        }
+    func enterListingTitle(_ text: String, into field: XCUIElement, app: XCUIApplication) {
+        // The sheet focuses this field automatically. Tapping it again can
+        // open the AutoFill edit menu and intercept the next keyboard event.
+        dismissKeyboardIntroduction(app)
+        expectation(for: NSPredicate(format: "hasKeyboardFocus == true"), evaluatedWith: field)
+        waitForExpectations(timeout: 5)
+        field.typeText(text)
+        expectation(for: NSPredicate(format: "value == %@", text), evaluatedWith: field)
+        waitForExpectations(timeout: 5)
     }
 
     @MainActor
