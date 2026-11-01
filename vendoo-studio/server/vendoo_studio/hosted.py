@@ -125,7 +125,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co; "
+            "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
             "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         )
         return response

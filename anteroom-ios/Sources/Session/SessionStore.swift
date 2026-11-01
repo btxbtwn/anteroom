@@ -17,6 +17,7 @@ final class SessionStore {
     private(set) var state: State = .loading
     private(set) var signInError: String?
     let api: AnteroomAPI?
+    let changes = LiveChanges()
     private let client: SupabaseClient?
 
     init() {
@@ -114,6 +115,17 @@ final class SessionStore {
         } catch {
             signInError = error.localizedDescription
         }
+    }
+
+    /// Follows changes from the seller's other devices while the workspace is open.
+    func followChanges() async {
+        guard let client else { return }
+#if DEBUG
+        // The local sandbox has no Realtime service; screens reload as before.
+        if AppConfig.sandboxURL != nil { return }
+#endif
+        guard let user = try? await client.auth.session.user else { return }
+        await changes.follow(client: client, userID: user.id)
     }
 
     func signOut() async {

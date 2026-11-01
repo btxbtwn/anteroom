@@ -3,6 +3,7 @@ import SwiftUI
 /// Each destination keeps its own navigation state when switching tabs.
 struct WorkspaceView: View {
     let api: AnteroomAPI
+    @Environment(SessionStore.self) private var session
     @Environment(\.scenePhase) private var scenePhase
     @State private var appearance: AppearanceModel
     @State private var views: [String] = []
@@ -29,6 +30,9 @@ struct WorkspaceView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .environment(appearance)
+        .environment(session.changes)
+        // Ends with this workspace: on sign-out or when another account signs in.
+        .task { await session.followChanges() }
         .preferredColorScheme(appearance.theme.colorScheme)
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }

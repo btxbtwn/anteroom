@@ -14,6 +14,7 @@ import { installSoftwareKeyboard } from "../lib/softwareKeyboard";
 import { isMacApp, markMacApp } from "../lib/macApp";
 import { SetPassword, SignIn } from "./SignIn";
 import { linkOpenedElsewhere } from "./authMessages";
+import { followSellerChanges } from "./liveUpdates";
 import "../styles/app.css";
 import "./workspace.css";
 
@@ -91,6 +92,11 @@ function HostedWorkspace({ session }: { session: Session }) {
     }).catch(error => { if (active) setError(error.message); });
     return () => { active = false; remove(); queryClient.clear(); };
   }, [session.user.id, session.user.email, queryClient]);
+  // Changes from the seller's other devices arrive live; polling covers any gap.
+  // supabase-js refreshes the Realtime token itself, so a refresh need not resubscribe.
+  const [liveToken] = useState(session.access_token);
+  useEffect(() => followSellerChanges(supabase, session.user.id, liveToken, queryClient),
+    [session.user.id, liveToken, queryClient]);
   // The Mac app's window has no Chrome extension; its own Chrome connection stays with this Mac's listings.
   const controls = <div className="cloud-account">{!isMacApp() && <ChromeConnection account={{ id: session.user.id, email: session.user.email || "" }}/>}<button type="button" onClick={() => void supabase.auth.signOut({ scope: "local" }).then(({ error }) => { if (error) setError("Could not sign out. Please try again."); })}>Sign out</button></div>;
   if (!runtime) return <main className="cloud-auth" role={error ? "alert" : "status"}>{error || "Opening your workspace…"}</main>;
