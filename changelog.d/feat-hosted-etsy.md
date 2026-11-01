@@ -1,1 +1,0 @@
-- The Etsy tab now works on the web, and you can list, update and delist on Etsy from there. Each one still asks you to confirm first.

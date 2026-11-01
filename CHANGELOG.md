@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.637 — 2026-11-01
+
+- The Etsy tab now works on the web, and you can list, update and delist on Etsy from there. Each one still asks you to confirm first.
+
 ## 0.1.636 — 2026-11-01
 
 - List, update and delist on eBay from the web app. Each one still asks you to confirm first.
