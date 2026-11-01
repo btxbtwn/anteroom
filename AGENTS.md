@@ -75,6 +75,11 @@ Every bug fix, feature and refactor follows the same loop. Component details
 6. **Open the PR** (see **Pull requests** below) and stay with it until CI is
    green.
 
+The type check in `./check.sh` uses CI's locked baseline mode. After fixing a
+recorded type error, regenerate the baseline with `basedpyright --writebaseline`,
+check that it only shrinks, and commit that change with the fix. A locally green
+check must not depend on an uncommitted baseline update.
+
 A feature follows the same loop: the first test describes the behavior the
 seller asked for, and the feature is done when it passes in the sandbox.
 

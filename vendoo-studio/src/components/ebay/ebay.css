@@ -107,7 +107,6 @@
 .ebay-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ebay-field-label { font-size: var(--text-xs); font-weight: 500; color: var(--muted-foreground); display: flex; justify-content: space-between; gap: 12px; }
 .ebay-field-optional, .ebay-field-help { font-size: var(--text-xs); color: var(--muted-foreground); font-weight: 400; }
-.ebay-field select { width: 100%; height: 36px; border-radius: var(--radius-lg); border: 1px solid var(--input); padding: 0 10px; background: var(--background); color: var(--foreground); font-size: var(--text-sm); }
 .ebay-form-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 16px; border-top: 1px solid var(--border); }
 .ebay-form-footer p { color: var(--muted-foreground); font-size: var(--text-xs); }
 .ebay-notice { border-radius: var(--radius-lg); padding: 12px 14px; background: var(--accent); border: 1px solid var(--border); font-size: var(--text-sm); overflow-wrap: anywhere; }
@@ -123,7 +122,6 @@
 .ebay-selection-meta { color: var(--muted-foreground); font-size: var(--text-xs); margin-bottom: 8px; }
 .ebay-selection-list { max-height: 220px; overflow-y: auto; }
 .ebay-selection-list label, .ebay-permission { display: flex; align-items: start; gap: 10px; padding: 10px 4px; min-height: 40px; cursor: pointer; font-size: var(--text-sm); }
-.ebay-selection-list input, .ebay-permission input { margin-top: 3px; }
 .ebay-selection-list label + label { border-top: 1px solid var(--border); }
 .ebay-upload { padding: 16px; border: 1px dashed var(--border); border-radius: var(--radius-xl); }
 .ebay-upload label { display: flex; flex-direction: column; gap: 10px; font-size: var(--text-sm); }
@@ -143,7 +141,7 @@
   .ebay-task-navigation button { flex: 1; }
   .ebay-date-range { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .ebay-date-range label { min-width: 0; }
-  .ebay-workspace [data-slot="input"], .ebay-workspace select, .ebay-workspace textarea { font-size: 16px; }
+  .ebay-workspace [data-slot="input"], .ebay-workspace textarea { font-size: 16px; }
   .ebay-search-form { flex-direction: column; align-items: stretch; }
   .ebay-action-heading, .ebay-action-body, .ebay-data-panel { padding-left: 12px; padding-right: 12px; }
 }

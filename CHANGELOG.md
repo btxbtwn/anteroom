@@ -6,6 +6,35 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.628 — 2026-11-01
+
+- Menus, checkboxes and choices in the eBay tools, marketplace imports, eBay offers and the sharing and offer rules now match the rest of the app.
+
+## 0.1.627 — 2026-11-01
+
+- Your account now lives at myanteroom.com, and sign-in emails come from signin@myanteroom.com. Sign in once more after updating.
+
+## 0.1.626 — 2026-11-01
+
+- The Mac app can move your listings into your account. Choose Sign in, enter your email and password, and Anteroom copies this Mac's listings, photos, history, settings and provider keys, so you see them on the web and iPhone too. This Mac keeps its own copy as a backup, and its automations pause so they run once, from your account. If a move stops, run it again to pick up where it left off. Reconnect eBay and Etsy in your account afterwards.
+
+## 0.1.625 — 2026-11-01
+
+- eBay offers now work on the web: preview and send offers to interested buyers, and turn on automatic offers, from the eBay Offers tab or Automations.
+
+## 0.1.624 — 2026-11-01
+
+- Changes you make on the web, the Mac app or your iPhone now show up on your other devices right away, without refreshing.
+
+## 0.1.623 — 2026-11-01
+
+- Behind the scenes: a new automatic check keeps Anteroom's look consistent, so new screens use the same colors, labels and controls as the rest of the app.
+
+## 0.1.622 — 2026-11-01
+
+- With the listing chat open on a wide window, the form now makes room for it instead of running underneath, so no field is hidden behind the chat.
+- The Notes box no longer shows Anteroom's internal settings (such as a chosen category) as if they were your notes.
+
 ## 0.1.621 — 2026-11-01
 
 - The web app now has the Marketplaces page: your eBay dashboard, inbox, orders, marketing, listings and research, your Etsy shop, orders and listings, imports from eBay and Etsy, and sale alerts.

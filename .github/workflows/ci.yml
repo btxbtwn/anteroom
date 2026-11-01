@@ -188,6 +188,8 @@ jobs:
         run: .venv/bin/lint-imports
       - name: Unused functions, methods and classes
         run: .venv/bin/python scripts/check-dead-code.py
+      - name: Design rules (DESIGN.md; design_baseline.json holds the old cases)
+        run: .venv/bin/python scripts/check-design.py
 
   studio-backend:
     name: Studio backend

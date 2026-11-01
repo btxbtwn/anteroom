@@ -1,6 +1,6 @@
 /* Browser-local site permission only. No cloud credentials or automation messages. */
 (function () {
-  const ORIGIN = 'https://peaceful-meadowstone-6944.fly.dev';
+  const ORIGIN = 'https://myanteroom.com';
   const KEY = 'anteroom_cloud_connections';
   const TTL = 2 * 60 * 1000;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

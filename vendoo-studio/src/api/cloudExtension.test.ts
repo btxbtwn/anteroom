@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cloudExtension } from "./cloudExtension";
-const ORIGIN = "https://peaceful-meadowstone-6944.fly.dev";
+const ORIGIN = "https://myanteroom.com";
 const ACCOUNT = { id: "11111111-1111-4111-8111-111111111111", email: "alice@example.com", access_token: "never-forward-this" };
 function channel(origin = ORIGIN) {
   const listeners = new Set<(event: MessageEvent) => void>();

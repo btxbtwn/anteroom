@@ -60,6 +60,8 @@ the export is loading.
   never enter ordinary JSON preferences, responses, logs or extension messages.
 - Import the Mac's inventory, photos and related records into the authenticated
   account, preserving IDs/relationships safely and checking existing data.
+  Done: the Mac app's **Move this Mac to your account** (see
+  `cloud-architecture.md`, step 2). Videos and chat attachment files remain.
 - Add reviewed Chrome Bridge command contracts for every supported marketplace
   form and approved action. Preserve the shared browser operation locks and the
   app-managed local Bridge build check. Never add an arbitrary API/RPC proxy.
@@ -284,3 +286,12 @@ changes keep the review-then-confirm steps. The eBay Offers tab stays hidden
 until automatic offers have a per-seller scheduler; the offer status read leaves
 out the Mac timer's last check. Poshmark, Mercari, Depop, Sellwild and Vinted
 show their recorded sales; their Chrome imports need marketplace sessions.
+
+On `feat/hosted-ebay-offers`, the eBay Offers tab and the Automations offers
+panel are on the web. A `SECURITY DEFINER` function (`ebay_offer_owners`,
+revision `8d41c6e2f0a9`) lets only the trusted process login list sellers with
+automatic offers on or a send cut off by a restart. At startup the web offer
+timer marks each cut-off send unknown and pauses that seller's automation, as
+the Mac does; every 15 minutes it runs each seller's check in their own
+row-secured context with their own token. The last check and its error are
+kept per seller. Like automations, checks only run while the Fly Machine is up.

@@ -52,8 +52,8 @@ if changed '^vendoo-studio/'; then
   run "Anteroom version and changelog" bash -c "'$PY' vendoo-studio/scripts/check-version-sync.py && '$PY' vendoo-studio/scripts/check-changelog.py"
   run "Anteroom frontend" bash -c "cd vendoo-studio && npm run lint && npm test && npm run build"
   run "Anteroom backend" bash -c "cd vendoo-studio && '$PY' -m ruff check server && VENDOO_STUDIO_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
-  run "Anteroom code health" bash -c "cd vendoo-studio && npm run knip && '$BIN/lint-imports' && '$PY' scripts/check-dead-code.py"
-  run "Anteroom types" bash -c "cd vendoo-studio && '$PY' -m basedpyright"
+  run "Anteroom code health" bash -c "cd vendoo-studio && npm run knip && '$BIN/lint-imports' && '$PY' scripts/check-dead-code.py && '$PY' scripts/check-design.py"
+  run "Anteroom types" bash -c "cd vendoo-studio && CI=true '$PY' -m basedpyright"
   if [[ "$FAST" == "0" ]]; then
     run "Anteroom browser tests (sandbox)" bash -c "cd vendoo-studio && npm run e2e && npm run e2e:hosted"
   fi

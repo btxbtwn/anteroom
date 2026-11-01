@@ -125,11 +125,19 @@ sign-ins on a server and trip marketplace bot checks, so it is not planned.
 
 1. **Accounts and the Mac.** Email-and-password accounts on web, Mac and
    iPhone. The Mac app signs in and shows the account in its window.
-2. **Bring a Mac's listings along.** The first time a Mac with local listings
-   signs in, it offers once to add them to the account (a `VACUUM INTO`
-   snapshot plus photos, mapping the local owner to the account). It never
-   claims records without the seller confirming. The local copy stays as a
-   backup.
+2. **Bring a Mac's listings along.** In the Mac app, **Sign in** offers to move
+   this Mac into the account (`services/account_move.py` on the Mac,
+   `routes/hosted_account_import.py` in the account). The seller signs in with
+   their password; the Mac sends its records table by table, parents first,
+   and the account writes each under the verified seller through row
+   security, skipping rows it already has, so a move can run again. Photos are
+   converted to JPEG into private Storage; settings fill in what the account
+   lacks; provider keys and the ChatGPT sign-in go to Vault without replacing
+   ones set on the web. eBay and Etsy reconnect in the account instead of
+   copying tokens (Etsy rotates refresh tokens, and sales notices must reach
+   the account). Active automations pause on the Mac so they run once. Not
+   moved: videos, chat attachment files, the task queue. The local copy stays
+   as a backup.
 3. **Fills from the web app.** Reviewed Bridge command contracts, so the web
    app fills marketplace forms in the Chrome it runs in, on any computer.
 4. **Queue from the phone.** The extension pulls approved fills whenever Chrome

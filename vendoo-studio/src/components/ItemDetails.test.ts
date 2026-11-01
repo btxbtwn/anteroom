@@ -8,6 +8,15 @@ describe("saved seller notes", () => {
       expect(parseNotes(JSON.stringify(details)).sellerNotes).toBe(notes);
     }
   });
+  it("does not show the server's own notes keys as seller text", () => {
+    for (const notes of [
+      JSON.stringify({ categoryOverride: "Clothing > Men > Shirts > T-Shirts", askingPrice: "25.00" }),
+      JSON.stringify({ vendooItemId: "abc", vendooUrl: "https://web.vendoo.co/app/item/abc" }),
+      JSON.stringify({ titlePinned: true }),
+    ]) {
+      expect(parseNotes(notes).sellerNotes).toBe("");
+    }
+  });
   it("keeps the structured item details and measurements", () => {
     const details = parseNotes(JSON.stringify({ sellerNotes: "Checked", sku: "COAT-1", garment: "shorts" }));
     expect(details.sellerNotes).toBe("Checked");

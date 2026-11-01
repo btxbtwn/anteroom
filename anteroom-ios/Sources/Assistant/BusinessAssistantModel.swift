@@ -1,11 +1,6 @@
 import Foundation
 import Observation
 
-extension Notification.Name {
-    /// Listings changed outside the inventory screen; it reloads.
-    static let anteroomListingsChanged = Notification.Name("anteroomListingsChanged")
-}
-
 /// The business assistant (AssistantPage.tsx): one conversation at a time,
 /// answered from all of the shop's data. An answer may propose listing changes
 /// or draft an automation; nothing is written until the seller applies or
@@ -272,8 +267,6 @@ final class BusinessAssistantModel {
             case .dismissAutomation: saved = try await api.dismissAssistantAutomation(turn.id)
             }
             if let index = turns.firstIndex(where: { $0.id == turn.id }) { turns[index] = saved }
-            // Applied changes reach every screen that shows a listing.
-            if action == .apply { NotificationCenter.default.post(name: .anteroomListingsChanged, object: nil) }
         } catch {
             cardError = (turn.id, error.localizedDescription)
         }

@@ -6,8 +6,10 @@ import {
   hasOpenJob,
   IDLE_POLL_MS,
   jobsPollMs,
+  LIVE_IDLE_POLL_MS,
   LIVE_POLL_MS,
   pollMs,
+  setLiveUpdates,
 } from "./polling";
 
 function focusWindow(focused: boolean) {
@@ -16,6 +18,7 @@ function focusWindow(focused: boolean) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  setLiveUpdates(false);
 });
 
 describe("hasOpenJob", () => {
@@ -37,6 +40,21 @@ describe("pollMs", () => {
     focusWindow(false);
     expect(pollMs(LIVE_POLL_MS)).toBe(IDLE_POLL_MS);
     expect(pollMs(15000)).toBe(15000);
+  });
+});
+
+describe("live updates", () => {
+  it("stretch only the idle pass while subscribed, and polling returns when they stop", () => {
+    focusWindow(true);
+    setLiveUpdates(true);
+    expect(jobsPollMs([{ status: "completed" }])).toBe(LIVE_IDLE_POLL_MS);
+    expect(jobsPollMs([{ status: "queued" }])).toBe(BUSY_POLL_MS);
+    expect(activityPollMs(true)).toBe(LIVE_POLL_MS);
+    focusWindow(false);
+    expect(pollMs(LIVE_POLL_MS)).toBe(IDLE_POLL_MS);
+    setLiveUpdates(false);
+    focusWindow(true);
+    expect(jobsPollMs([{ status: "completed" }])).toBe(IDLE_POLL_MS);
   });
 });
 

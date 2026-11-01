@@ -23,8 +23,9 @@ describe("direct eBay inventory import", () => {
     expect(html).toContain("Variation listings are not supported");
     expect(html).toContain("does not change or publish listings");
     expect(html).not.toContain("Open in Vendoo");
-    expect(html).toMatch(/aria-label="Select Already saved coat"[^>]*disabled/);
-    expect(html).toMatch(/aria-label="Select Shirt with variations"[^>]*disabled/);
+    const checkbox = (name: string) => html.match(new RegExp(`<[^>]*role="checkbox"[^>]*aria-label="${name}"[^>]*>`))?.[0];
+    expect(checkbox("Select Already saved coat")).toContain('aria-disabled="true"');
+    expect(checkbox("Select Shirt with variations")).toContain('aria-disabled="true"');
   });
 
   it("keeps manual import available when loading the active list fails", () => {

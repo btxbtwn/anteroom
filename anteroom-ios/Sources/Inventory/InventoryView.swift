@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InventoryView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(LiveChanges.self) private var live: LiveChanges?
     @State private var model: InventoryModel
     @State private var search = ""
     @State private var path: [ListingSummary] = []
@@ -73,9 +74,11 @@ struct InventoryView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active && model.hasLoaded { Task { await model.reload() } }
             }
-            // The assistant applied changes to listings.
-            .onReceive(NotificationCenter.default.publisher(for: .anteroomListingsChanged)) { _ in
-                if model.hasLoaded { Task { await model.reload() } }
+            // And live, while the app is open; a burst of changes reloads once.
+            .task(id: live?.listings) {
+                guard model.hasLoaded, (live?.listings ?? 0) > 0 else { return }
+                try? await Task.sleep(for: .milliseconds(300))
+                if !Task.isCancelled { await model.reload() }
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {

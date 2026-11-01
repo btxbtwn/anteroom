@@ -6,6 +6,7 @@ import type { EbayPayload, EbayResult, EbayReview } from "../../api/ebay";
 import { PageError } from "../WorkspacePage";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { Spinner } from "../ui/spinner";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
@@ -15,6 +16,22 @@ export type FieldSpec = {
   name: string; label: string; type?: string; initial?: string; options?: (string | { value: string; label: string })[];
   optional?: boolean; min?: string; max?: string; step?: string; maxLength?: number; help?: string; group?: string;
 };
+
+function FieldSelect({ id, options, value, required, disabled, describedBy, onChange }: {
+  id: string; options: NonNullable<FieldSpec["options"]>; value: string; required: boolean; disabled: boolean; describedBy?: string;
+  onChange: (value: string) => void;
+}) {
+  const items = options.map((option) => typeof option === "string" ? { value: option, label: option } : option);
+  return <Select value={value || null} required={required} disabled={disabled} onValueChange={(next) => onChange(next ?? "")}>
+    <SelectTrigger id={id} aria-describedby={describedBy}>
+      <SelectValue>{items.find((item) => item.value === value)?.label ?? "Choose…"}</SelectValue>
+    </SelectTrigger>
+    <SelectPopup>
+      <SelectItem value={null}>Choose…</SelectItem>
+      {items.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+    </SelectPopup>
+  </Select>;
+}
 
 function FormFields({ fields, values, change, disabled }: {
   fields: FieldSpec[]; values: Record<string, string>; change: (name: string, value: string) => void; disabled: boolean;
@@ -26,13 +43,11 @@ function FormFields({ fields, values, change, disabled }: {
     {fields.filter((field) => (field.group || "") === group).map((field) => {
       const fieldId = `${id}-${field.name}`;
       const props = { id: fieldId, required: !field.optional, "aria-describedby": field.help ? `${fieldId}-help` : undefined,
-        value: values[field.name] ?? "", disabled, onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => change(field.name, event.target.value) };
+        value: values[field.name] ?? "", disabled, onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => change(field.name, event.target.value) };
       return <div className="ebay-field" key={field.name}>
         <label htmlFor={fieldId} className="ebay-field-label">{field.label}{field.optional ? <span className="ebay-field-optional">Optional</span> : null}</label>
-        {field.options ? <select {...props}><option value="">Choose…</option>{field.options.map((option) => {
-          const value = typeof option === "string" ? option : option.value;
-          return <option key={value} value={value}>{typeof option === "string" ? option : option.label}</option>;
-        })}</select> : field.type === "textarea" ? <Textarea {...props} rows={4} maxLength={field.maxLength} />
+        {field.options ? <FieldSelect id={fieldId} options={field.options} value={props.value} required={props.required} disabled={disabled}
+          describedBy={props["aria-describedby"]} onChange={(value) => change(field.name, value)} /> : field.type === "textarea" ? <Textarea {...props} rows={4} maxLength={field.maxLength} />
           : <Input {...props} nativeInput type={field.type || "text"} min={field.min} max={field.max} maxLength={field.maxLength}
             step={field.step || (field.type === "number" ? "any" : undefined)} />}
         {field.help ? <p className="ebay-field-help" id={`${fieldId}-help`}>{field.help}</p> : null}

@@ -35,14 +35,16 @@ describe("AutomationsPage", () => {
     expect(html).toContain("No unsold listings with eBay links");
   });
 
-  it("on the web, hides offers and sharing, which need marketplace sessions", () => {
-    const html = renderToStaticMarkup(
-      <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(["inventory"]), views: new Set(["automations"]), marketplaceForms: new Set() }}>
+  it("on the web, shows eBay offers only while the offer timer runs", () => {
+    const page = (features: string[]) => renderToStaticMarkup(
+      <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(features as never[]), views: new Set(["automations"]), marketplaceForms: new Set() }}>
         <AutomationsPage onOpenListing={vi.fn()} />
       </WorkspaceRuntimeProvider>,
     );
+    const html = page(["inventory"]);
     expect(html).toContain("Draft from prompt");
     expect(html).toContain("Waiting for approval");
     expect(html).not.toContain('aria-label="eBay offers"');
+    expect(page(["inventory", "ebay_offers"])).toContain('aria-label="eBay offers"');
   });
 });
