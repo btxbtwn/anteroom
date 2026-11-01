@@ -16,6 +16,7 @@ import { Textarea } from "./ui/textarea";
 import { MarketplaceAutomations } from "./MarketplaceAutomations";
 import { EbayOffersSettings } from "./settings/EbayOffersSettings";
 import { PageHeader, WorkspacePage } from "./WorkspacePage";
+import { useWorkspaceRuntime } from "../app/runtime";
 import {
   AUTOMATION_MARKETPLACES,
   WEEKDAY_LABELS,
@@ -158,6 +159,9 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
     setIssues([]);
   };
 
+  const { features } = useWorkspaceRuntime();
+  // Approving runs a marketplace action. Offers and sharing need the seller's marketplace sessions.
+  const canApprove = features.has("marketplace_actions");
   const approve = async (row: AutomationApproval) => {
     const where = row.marketplaces.length ? row.marketplaces.join(", ") : "the marketplaces this task names";
     const label = row.action === "publish" ? "List" : row.action === "delist" ? "Delist" : "Relist";
@@ -200,7 +204,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
                   {` · ${row.action === "publish" ? "list" : row.action} · ${row.state}`}
                 </span>
                 <Button size="sm" variant="ghost" onClick={() => onOpenListing(row.conversation_id)}>Open item</Button>
-                <Button size="sm" onClick={() => void approve(row)}>Review and approve</Button>
+                <Button size="sm" disabled={!canApprove} title={canApprove ? undefined : "Marketplace actions are not available on the web yet."} onClick={() => void approve(row)}>Review and approve</Button>
                 {Object.entries(row.targets || {}).map(([name,target])=>target.url?<a key={name} href={target.url} target="_blank" rel="noreferrer" className="text-xs underline">{name} listing</a>:null)}
               </li>
             ))}
@@ -448,12 +452,14 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
         </ul>
       )}
 
-      <section aria-label="eBay offers" className="rounded-xl border border-border bg-card p-4">
-        <h2 className="mb-3 font-medium">eBay offers</h2>
-        <EbayOffersSettings />
-      </section>
+      {features.has("marketplace_sessions") ? <>
+        <section aria-label="eBay offers" className="rounded-xl border border-border bg-card p-4">
+          <h2 className="mb-3 font-medium">eBay offers</h2>
+          <EbayOffersSettings />
+        </section>
 
-      <MarketplaceAutomations />
+        <MarketplaceAutomations />
+      </> : null}
     </WorkspacePage>
   );
 }
