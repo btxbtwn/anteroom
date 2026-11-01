@@ -9,6 +9,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 ## 0.1.616 — 2026-11-01
 
 - Keep listing-rule loading from freezing the app and make category searches use less memory.
+- Keep hosted photo loads from blocking settings and other requests.
 
 ## 0.1.615 — 2026-10-31
 
