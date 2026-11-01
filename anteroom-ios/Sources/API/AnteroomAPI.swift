@@ -89,6 +89,16 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/\(marketplace)/form"))
     }
 
+    // MARK: Analytics
+
+    func analytics(range: String, start: Date? = nil, end: Date? = nil) async throws -> InventoryAnalytics {
+        var query = [URLQueryItem(name: "range", value: range)]
+        let day = Date.ISO8601FormatStyle().year().month().day()
+        if let start { query.append(URLQueryItem(name: "start", value: start.formatted(day))) }
+        if let end { query.append(URLQueryItem(name: "end", value: end.formatted(day))) }
+        return try await decode(request("GET", "api/analytics", query: query))
+    }
+
     // MARK: Bulk actions (reviewed first, as on the desktop)
 
     func previewBulkEdit(ids: [String], edits: BulkEdits) async throws -> [BulkEditReviewRow] {

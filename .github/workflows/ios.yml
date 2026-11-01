@@ -54,6 +54,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/API/NativeFormModels.swift Tests/NativeFormTests.swift -o "$RUNNER_TEMP/native-form-tests"
           "$RUNNER_TEMP/native-form-tests"
+      - name: Test analytics contract and wording
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/Analytics/AnalyticsModels.swift Tests/AnalyticsTests.swift -o "$RUNNER_TEMP/analytics-tests"
+          "$RUNNER_TEMP/analytics-tests"
       - name: Test appearance preference contract
         run: |
           xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"
