@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ListingEditorView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(LiveChanges.self) private var live: LiveChanges?
     @Environment(\.dismiss) private var dismiss
     @State private var model: ListingEditorModel
     @State private var confirmDiscard = false
@@ -146,6 +147,12 @@ struct ListingEditorView: View {
         // Pick up changes from other devices, but never over unsaved edits.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && !model.hasChanges && !model.isSaving && !model.isLoading { Task { await model.load() } }
+        }
+        // Edits from another device show up live, unless this one has unsaved changes.
+        .task(id: live?.listings) {
+            guard (live?.listings ?? 0) > 0 else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            if !Task.isCancelled && !model.hasChanges && !model.isSaving && !model.isLoading { await model.load() }
         }
     }
 

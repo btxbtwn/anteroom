@@ -15,7 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from vendoo_studio.models.user_preference import UserPreference
 from vendoo_studio.models.user_secret import UserSecretReference
-from vendoo_studio.services.hosted_database import SellerDatabaseSession
+from vendoo_studio.services.hosted_database import SellerDatabaseSession, note_changes
 from vendoo_studio.services.service_context import ServiceContext
 
 
@@ -92,6 +92,8 @@ class VaultSecretStore:
                            {'identity': f'anteroom-secret:{self.owner}:{account}'})
                 value = mutator(self._read(db, account))
                 db.execute(text('SELECT anteroom_private.secret_write(:slot, :value)'), {'slot': account, 'value': value})
+                # The function writes outside the ORM; announce it like any settings change.
+                note_changes(db, 'user_secret_references')
                 db.commit()
                 self._cache[account] = value
         except SQLAlchemyError:

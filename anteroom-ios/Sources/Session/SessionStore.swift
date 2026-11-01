@@ -23,6 +23,7 @@ final class SessionStore {
     private(set) var state: State = .loading
     private(set) var signInError: String?
     let api: AnteroomAPI?
+    let changes = LiveChanges()
     private let client: SupabaseClient?
 
     init() {
@@ -173,6 +174,17 @@ final class SessionStore {
         } catch {
             signInError = "That link opened somewhere other than where it was asked for, or it expired. If you just confirmed your email, sign in with your password."
         }
+    }
+
+    /// Follows changes from the seller's other devices while the workspace is open.
+    func followChanges() async {
+        guard let client else { return }
+#if DEBUG
+        // The local sandbox has no Realtime service; screens reload as before.
+        if AppConfig.sandboxURL != nil { return }
+#endif
+        guard let user = try? await client.auth.session.user else { return }
+        await changes.follow(client: client, userID: user.id)
     }
 
     func signOut() async {

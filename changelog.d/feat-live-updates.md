@@ -1,0 +1,1 @@
+- Changes you make on the web, the Mac app or your iPhone now show up on your other devices right away, without refreshing.
