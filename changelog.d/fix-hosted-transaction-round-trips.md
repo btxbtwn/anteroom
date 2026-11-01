@@ -1,1 +1,0 @@
-- The web app no longer stalls with "Request failed: 500" when a listing with many photos opens
