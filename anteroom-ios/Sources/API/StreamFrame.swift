@@ -27,3 +27,25 @@ struct StreamFrames {
         return nil
     }
 }
+
+extension AsyncSequence where Element == UInt8 {
+    /// Each event in a byte stream, in order. Foundation's `lines` skips blank
+    /// lines, and a blank line is what ends an SSE event, so lines are split
+    /// here. `body` returns false to stop reading. A last event the server
+    /// closed without a blank line still arrives.
+    func forEachFrame(_ body: (StreamFrame) async throws -> Bool) async throws {
+        var frames = StreamFrames()
+        var line: [UInt8] = []
+        for try await byte in self {
+            guard byte == 0x0A else {
+                line.append(byte)
+                continue
+            }
+            let text = String(decoding: line, as: UTF8.self)
+            line.removeAll(keepingCapacity: true)
+            if let frame = frames.accept(text), try await !body(frame) { return }
+        }
+        if !line.isEmpty, let frame = frames.accept(String(decoding: line, as: UTF8.self)), try await !body(frame) { return }
+        if let frame = frames.accept("") { _ = try await body(frame) }
+    }
+}

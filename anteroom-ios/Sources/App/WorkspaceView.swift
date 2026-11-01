@@ -43,14 +43,16 @@ struct WorkspaceView: View {
         TabView {
             InventoryView(api: api)
                 .tabItem { Label("Inventory", systemImage: "tag.fill") }
+            if views.contains("assistant") {
+                BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
+                    .tabItem { Label("Assistant", systemImage: "bubble.left.and.text.bubble.right.fill") }
+            }
             AnalyticsDestination(api: api)
                 .tabItem { Label("Analytics", systemImage: "chart.bar.fill") }
             if views.contains("automations") {
                 AutomationsView(api: api, canApprove: features.contains("marketplace_actions"))
                     .tabItem { Label("Automations", systemImage: "calendar.badge.clock") }
             }
-            UsageView(api: api)
-                .tabItem { Label("Usage", systemImage: "gauge.with.dots.needle.33percent") }
             SettingsRootView(api: api)
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }

@@ -211,11 +211,14 @@ final class DestinationSandboxTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Inventory today"].waitForExistence(timeout: 30))
         keep(app, "Inventory analytics")
 
-        app.tabBars.buttons["Usage"].tap()
+        app.tabBars.buttons["Settings"].tap()
+        let usage = app.buttons["Usage"].firstMatch
+        XCTAssertTrue(usage.waitForExistence(timeout: 10))
+        usage.tap()
         XCTAssertTrue(app.staticTexts["ChatGPT"].waitForExistence(timeout: 30))
         keep(app, "Usage")
+        app.navigationBars.buttons.firstMatch.tap()
 
-        app.tabBars.buttons["Settings"].tap()
         let listings = app.buttons["Listings"].firstMatch
         XCTAssertTrue(listings.waitForExistence(timeout: 10))
         listings.tap()
@@ -226,6 +229,51 @@ final class DestinationSandboxTests: XCTestCase {
         app.buttons["Providers"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Xiaomi MiMo"].waitForExistence(timeout: 20))
         keep(app, "Settings Providers")
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
+/// The business assistant answers a starter question on the sandbox's fake
+/// provider, streams it in, and keeps the conversation in Chats.
+@MainActor
+final class AssistantSandboxTests: XCTestCase {
+    func testStarterQuestionIsAnsweredAndKept() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        app.tabBars.buttons["Assistant"].tap()
+        let starter = app.buttons["Which brands and categories make me the most profit?"]
+        XCTAssertTrue(starter.waitForExistence(timeout: 20), "A new chat offers starter questions")
+        keep(app, "Assistant starters")
+        starter.tap()
+
+        let answer = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Sandbox Levi'")).firstMatch
+        XCTAssertTrue(answer.waitForExistence(timeout: 60), "The answer streams into the conversation")
+        let send = app.buttons["assistant-send"]
+        expectation(for: NSPredicate(format: "label == 'Send'"), evaluatedWith: send)
+        waitForExpectations(timeout: 60)
+        keep(app, "Assistant answer")
+
+        app.buttons["Chats"].tap()
+        let thread = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Which brands'")).firstMatch
+        XCTAssertTrue(thread.waitForExistence(timeout: 15), "Chats lists the conversation")
+        keep(app, "Assistant chats")
+        app.buttons["Done"].tap()
+
+        app.terminate()
+        launchSandbox(app)
+        app.tabBars.buttons["Assistant"].tap()
+        app.buttons["Chats"].tap()
+        XCTAssertTrue(thread.waitForExistence(timeout: 20))
+        thread.tap()
+        XCTAssertTrue(answer.waitForExistence(timeout: 20), "Reopening the conversation shows the saved answer")
     }
 
     private func keep(_ app: XCUIApplication, _ name: String) {
