@@ -93,7 +93,7 @@ jobs:
         run: sudo xcodebuild -runFirstLaunch
       - name: Install the iOS simulator runtime
         run: xcodebuild -downloadPlatform iOS
-      - name: Create and reopen a draft through the hosted sandbox
+      - name: Run the iPhone app against the hosted sandbox
         run: |
           set -euxo pipefail
           SIMULATOR_ID="$(xcrun simctl create 'Anteroom sandbox tests' 'com.apple.CoreSimulator.SimDeviceType.iPhone-17')"
