@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.635 — 2026-11-01
+
+- Light mode is easier to read: sidebar labels and icons are darker, hovering a sidebar row shows clearly, and warnings, errors and success messages use darker colors that stand out on white.
+
+## 0.1.634 — 2026-11-01
+
+- Behind the scenes: the design rules now say when a phone-style picker is allowed, so long marketplace option lists keep your phone's own picker.
+
 ## 0.1.633 — 2026-11-01
 
 - Moving your Mac into your account copies photos faster: they shrink to web size first and upload a few at a time. A photo that can't be read is left out and listed in the summary, instead of stopping the move.

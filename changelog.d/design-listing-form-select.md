@@ -1,1 +1,0 @@
-- Behind the scenes: the design rules now say when a phone-style picker is allowed, so long marketplace option lists keep your phone's own picker.
