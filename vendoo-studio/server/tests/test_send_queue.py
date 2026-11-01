@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.routes.jobs import SendJobRequest, enqueue_send, cancel_job, get_queue
@@ -50,8 +51,8 @@ class SendQueueTest(unittest.IsolatedAsyncioTestCase):
     def listing(self, title):
         repo = ConversationRepo(self.db)
         conv = repo.create(title=title)
-        ListingRepo(self.db).save_revision(conv.id, {"title": title, "price": 30}, source="model")
-        repo.add_photo(conv.id, "a.jpg", "a.jpg", "image/jpeg", 10)
+        listing_persistence.save_revision(self.db, conv.id, {"title": title, "price": 30}, source="model")
+        listing_persistence.add_photo(repo.db, conv.id, "a.jpg", "a.jpg", "image/jpeg", 10)
         return conv
 
     async def enqueue(self, conv):
@@ -67,7 +68,7 @@ class SendQueueTest(unittest.IsolatedAsyncioTestCase):
     async def test_fifo_snapshots_and_failure_advance(self):
         first, second = self.listing("First"), self.listing("Second")
         a, b = await self.enqueue(first), await self.enqueue(second)
-        ListingRepo(self.db).save_revision(second.id, {"title": "Later edit"}, source="user")
+        listing_persistence.save_revision(self.db, second.id, {"title": "Later edit"}, source="user")
         seen = []
         started, finish = asyncio.Event(), asyncio.Event()
 

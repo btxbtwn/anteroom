@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.main import app
 from vendoo_studio.models.listing import ListingRevision
@@ -33,8 +34,8 @@ def item(db):
     conv = ConversationRepo(db).create(title="Imported coat")
     conv.notes = json.dumps({"vendooItemId": "item1", "vendooLabels": f"{WOMEN}, A19, {LOST}, dirtywhitesportstees"})
     repo = ListingRepo(db)
-    repo.save_revision(conv.id, {"title": "Imported coat", "labels": [A19]}, source="import")
-    repo.save_revision(conv.id, {"title": "Imported coat", "labels": [WOMEN, A19, "A19"]}, source="import")
+    listing_persistence.save_revision(repo.db, conv.id, {"title": "Imported coat", "labels": [A19]}, source="import")
+    listing_persistence.save_revision(repo.db, conv.id, {"title": "Imported coat", "labels": [WOMEN, A19, "A19"]}, source="import")
     db.commit()
     yield conv
     user_settings.set_ui_prefs(label_colors={}, recent_vendoo_labels=[])

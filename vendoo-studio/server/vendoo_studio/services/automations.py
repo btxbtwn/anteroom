@@ -30,6 +30,7 @@ from sqlalchemy import String, cast, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.automation import (
     Automation,
     AutomationApplication,
@@ -442,7 +443,7 @@ def apply_local(db: Session, conv_id: str, actions: list[dict], *, dry_run: bool
     changed = updated != listing
     if dry_run or not changed:
         return {"ok": True, "revision_id": revision.id if revision else None, "changed": changed, "notes": notes, "price": updated.get("price")}
-    saved = ListingRepo(db).save_revision(conv_id, updated, "automation", revision.id if revision else None)
+    saved = listing_persistence.save_revision(db, conv_id, updated, "automation", revision.id if revision else None)
     return {"ok": True, "revision_id": saved.id, "changed": True, "notes": notes, "price": updated.get("price")}
 
 

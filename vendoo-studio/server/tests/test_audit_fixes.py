@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
@@ -21,7 +22,7 @@ from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.models.validation import validate_listing
+from vendoo_studio.services.validation import validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.safe_fetch import UnsafeURLError, validate_fetch_url
 from vendoo_studio.services.vendoo_import import listing_from_vendoo, merge_notes
@@ -282,7 +283,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(any(error["field"] == "ebay_specifics.season" for error in result.errors))
 
     def test_ebay_season_does_not_apply_infers_one_season(self):
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = dict(VALID_LISTING)
         listing["description"] = (
@@ -302,7 +303,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send, result.errors)
 
     def test_ebay_season_does_not_apply_list_infers_one_season(self):
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = dict(VALID_LISTING)
         listing["description"] = (
@@ -323,7 +324,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send, result.errors)
 
     def test_ebay_missing_season_infers_from_item(self):
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = dict(VALID_LISTING)
         listing["description"] = (
@@ -340,7 +341,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send, result.errors)
 
     def test_ebay_multi_season_chips_are_allowed(self):
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = dict(VALID_LISTING)
         listing["ebay_specifics"] = {**VALID_LISTING["ebay_specifics"], "season": ["Spring", "Summer"]}
@@ -353,7 +354,7 @@ class ValidationCasesTest(unittest.TestCase):
     def test_case_variant_specifics_keys_are_healed(self):
         import copy
 
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = copy.deepcopy(VALID_LISTING)
         # Written by an older gap fill that lower-cased the JSON key.
@@ -375,7 +376,7 @@ class ValidationCasesTest(unittest.TestCase):
     def test_depop_source_and_age_case_variants_are_healed(self):
         import copy
 
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = copy.deepcopy(VALID_LISTING)
         listing["depop_specifics"] = {
@@ -397,7 +398,7 @@ class ValidationCasesTest(unittest.TestCase):
         )
 
     def test_vendoo_general_color_aliases_are_healed(self):
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = copy.deepcopy(VALID_LISTING)
         listing["primaryColor"] = "Navy"
@@ -408,7 +409,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertEqual(listing["secondaryColor"], "Red")
 
     def test_vendoo_general_color_case_is_canonicalized(self):
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = copy.deepcopy(VALID_LISTING)
         listing["primaryColor"] = "blue"
@@ -419,7 +420,7 @@ class ValidationCasesTest(unittest.TestCase):
     def test_required_ebay_keys_promote_out_of_category_specifics(self):
         import copy
 
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = copy.deepcopy(VALID_LISTING)
         size_type = listing["ebay_specifics"].pop("sizeType")
@@ -430,7 +431,7 @@ class ValidationCasesTest(unittest.TestCase):
     def test_unknown_specifics_keys_are_left_alone(self):
         import copy
 
-        from vendoo_studio.models.validation import canonicalize_listing_keys
+        from vendoo_studio.services.validation import canonicalize_listing_keys
 
         listing = copy.deepcopy(VALID_LISTING)
         listing["ebay_specifics"]["somethingCustom"] = "keep"
@@ -441,8 +442,8 @@ class ValidationCasesTest(unittest.TestCase):
 
     def test_ebay_category_optionals_take_defaults_and_evidence_only(self):
         from vendoo_studio.models.listing_values import DNA_VALUE
-        from vendoo_studio.models.ebay_fields import ensure_ebay_category_optionals
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.ebay_fields import ensure_ebay_category_optionals
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = dict(VALID_LISTING)
         listing["title"] = "Notations XL Floral Blouse Pink Regular"
@@ -478,7 +479,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send, result.errors)
 
     def test_ebay_aspects_keep_one_copy_at_the_top_level(self):
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = copy.deepcopy(VALID_LISTING)
         listing["title"] = "Columbia XL Hooded Windbreaker Blue"
@@ -503,7 +504,7 @@ class ValidationCasesTest(unittest.TestCase):
             "ebay_specifics.sizeType", "ebay_specifics.neckline", "ebay_specifics.closure", "ebay_specifics.character"}])
 
     def test_ebay_condition_description_is_always_the_fixed_line(self):
-        from vendoo_studio.models.ebay_fields import (
+        from vendoo_studio.services.ebay_fields import (
             EBAY_CONDITION_DESCRIPTION,
             ensure_ebay_category_optionals,
         )
@@ -520,7 +521,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertNotIn("category_specifics", ebay)
 
     def test_ebay_vintage_follows_era_not_style_words(self):
-        from vendoo_studio.models.ebay_fields import ensure_ebay_category_optionals
+        from vendoo_studio.services.ebay_fields import ensure_ebay_category_optionals
 
         listing = dict(VALID_LISTING)
         listing["title"] = "Y2K Graphic Tee Black Vintage Style Streetwear"
@@ -547,7 +548,7 @@ class ValidationCasesTest(unittest.TestCase):
 
     def test_ebay_fabric_weight_clears_junk_keeps_numeric(self):
         from vendoo_studio.models.listing_values import DNA_VALUE
-        from vendoo_studio.models.ebay_fields import (
+        from vendoo_studio.services.ebay_fields import (
             ensure_ebay_category_optionals,
             normalize_ebay_fabric_weight,
         )
@@ -661,7 +662,7 @@ class ValidationCasesTest(unittest.TestCase):
         )
 
     def test_etsy_category_optionals_are_filled_or_dna(self):
-        from vendoo_studio.models.etsy_fields import ensure_etsy_category_optionals
+        from vendoo_studio.services.etsy_fields import ensure_etsy_category_optionals
 
         listing = dict(VALID_LISTING)
         listing["title"] = "Notations XL Floral Blouse Pink Regular"
@@ -715,7 +716,7 @@ class ValidationCasesTest(unittest.TestCase):
         )
 
     def test_depop_category_optionals_are_filled(self):
-        from vendoo_studio.models.depop_fields import ensure_depop_category_optionals
+        from vendoo_studio.services.depop_fields import ensure_depop_category_optionals
 
         listing = dict(VALID_LISTING)
         listing["sizeType"] = "Regular"
@@ -741,7 +742,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send, result.errors)
 
     def test_depop_styles_inferred_from_listing_cues(self):
-        from vendoo_studio.models.depop_fields import ensure_depop_category_optionals, infer_depop_styles
+        from vendoo_studio.services.depop_fields import ensure_depop_category_optionals, infer_depop_styles
 
         street = {
             "title": "Nike Graphic Tee Streetwear Skate",
@@ -778,7 +779,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertEqual(infer_depop_styles(empty), ["Casual", "Minimalist", "Indie"])
 
     def test_depop_size_grouping_required_for_petite(self):
-        from vendoo_studio.models.depop_fields import ensure_depop_category_optionals
+        from vendoo_studio.services.depop_fields import ensure_depop_category_optionals
 
         listing = dict(VALID_LISTING)
         listing["sizeType"] = "Petite"
@@ -795,7 +796,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send, result.errors)
 
     def test_ebay_season_comma_list_is_normalized(self):
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = dict(VALID_LISTING)
         listing["ebay_specifics"] = {**VALID_LISTING["ebay_specifics"], "season": "Spring, Summer"}
@@ -819,7 +820,7 @@ class ValidationCasesTest(unittest.TestCase):
     def test_depop_parcel_size_follows_the_packaged_weight(self):
         import copy
 
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         for weight_lb, weight_oz, expected in (
             (0, 3, "Extra extra small"),
@@ -839,7 +840,7 @@ class ValidationCasesTest(unittest.TestCase):
     def test_depop_parcel_size_keeps_its_value_without_a_weight(self):
         import copy
 
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         listing = copy.deepcopy(VALID_LISTING)
         listing["weight_lb"] = 0
@@ -851,7 +852,7 @@ class ValidationCasesTest(unittest.TestCase):
     def test_depop_material_is_not_guessed_from_ebay(self):
         import copy
 
-        from vendoo_studio.models.depop_fields import ensure_depop_category_optionals
+        from vendoo_studio.services.depop_fields import ensure_depop_category_optionals
 
         listing = copy.deepcopy(VALID_LISTING)
         listing["ebay_specifics"] = {**listing.get("ebay_specifics", {}), "material": "Polyester", "fabricType": "Woven"}
@@ -880,7 +881,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertFalse(any(error["field"] == "depop_specifics.size" for error in result.errors), result.errors)
 
     def test_depop_kids_sizes_are_ages(self):
-        from vendoo_studio.models.depop_fields import depop_kids_size
+        from vendoo_studio.services.depop_fields import depop_kids_size
 
         for tag, age in {"XL (18/20)": "16 years", "XL": "16 years", "M": "10 years", "L (14/16)": "14 years",
                          "XS": "4 years", "4T": "4 years", "10/12": "10 years", "8": "8 years", "12M": "12-18 months",
@@ -1118,7 +1119,7 @@ class ListingIntegrityRouteTest(unittest.TestCase):
             "brand": "Maliparmi",
             "size": "IT 42",
         }
-        original = ListingRepo(self.db).save_revision(self.conv.id, listing, source="user_form")
+        original = listing_persistence.save_revision(self.db, self.conv.id, listing, source="user_form")
         url = f"/api/conversations/{self.conv.id}/listing"
         expected = "Maliparmi IT 42 Bohemian Camisole Red Regular"
         response = self.client.get(url)
@@ -1145,7 +1146,7 @@ class ListingIntegrityRouteTest(unittest.TestCase):
 
     def test_seller_sku_edit_reaches_item_details(self):
         listing = {**copy.deepcopy(VALID_LISTING), "sku": "MODEL-SKU"}
-        ListingRepo(self.db).save_revision(self.conv.id, listing, source="model")
+        listing_persistence.save_revision(self.db, self.conv.id, listing, source="model")
         self.conv.notes = merge_notes(None, {"sellerNotes": "keep"})
         self.db.commit()
         url = f"/api/conversations/{self.conv.id}/listing"
@@ -1166,7 +1167,7 @@ class ListingIntegrityRouteTest(unittest.TestCase):
 
     def test_restore_rejects_cross_conversation_revision(self):
         listing_repo = ListingRepo(self.db)
-        revision = listing_repo.save_revision(self.conv.id, {"title": "Keep"}, source="user_form")
+        revision = listing_persistence.save_revision(listing_repo.db, self.conv.id, {"title": "Keep"}, source="user_form")
         response = self.client.post(
             f"/api/conversations/{self.other.id}/revisions/{revision.id}/restore",
             json={"expected_revision_id": revision.id},
@@ -1188,7 +1189,7 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.other = Conversation(title="B")
         self.db.add_all([self.conv, self.other])
         self.db.commit()
-        ListingRepo(self.db).save_revision(self.conv.id, VALID_LISTING, source="user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, VALID_LISTING, source="user_form")
         self.photo = Photo(
             conversation_id=self.conv.id,
             original_filename="a.jpg",

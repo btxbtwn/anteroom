@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
@@ -102,7 +103,7 @@ def test_import_uses_exact_offering_and_saves_only_public_inventory(imported):
 
 def test_repeat_keeps_local_edits_and_photos(imported):
     first = run(imported).json()
-    ListingRepo(imported.db).save_revision(first["conversation_id"], {"title": "Edited", "price": 99}, "user")
+    listing_persistence.save_revision(imported.db, first["conversation_id"], {"title": "Edited", "price": 99}, "user")
     second = run(imported).json()
     assert second["reused"] and second["conversation_id"] == first["conversation_id"]
     assert len(imported.remote.downloads) == 2

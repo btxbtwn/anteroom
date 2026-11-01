@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.job import JobEvent, VendooDraftCache
@@ -34,7 +35,7 @@ class SyncStateTest(unittest.TestCase):
         Base.metadata.create_all(engine)
         self.db = sessionmaker(bind=engine)()
         self.conv = ConversationRepo(self.db).create(title="Tee")
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Tee"}, source="model")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Tee"}, source="model")
 
     def tearDown(self):
         self.db.close()
@@ -88,7 +89,7 @@ class SyncStateTest(unittest.TestCase):
 
     def test_both_moving_is_a_conflict_not_a_pull(self):
         self.level_with(1000, title="Old")
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Edited here"}, source="user")
         state = sync_state(self.db, self.conv.id, self.item(2000, title="From Vendoo"))
         self.assertEqual(state["action"], "conflict")
         self.assertEqual(state["reason"], "both changed")
@@ -96,7 +97,7 @@ class SyncStateTest(unittest.TestCase):
     def test_studio_edits_survive_status_only_vendoo_list(self):
         """List in Vendoo after a Studio regenerate: keep the regenerate."""
         self.level_with(1000, title="Old")
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Regenerated"}, source="user")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Regenerated"}, source="user")
         state = sync_state(self.db, self.conv.id, self.item(2000, title="Old", listed=True))
         self.assertEqual(state["action"], "label")
 
@@ -107,13 +108,13 @@ class SyncStateTest(unittest.TestCase):
         because the item was listed somewhere.
         """
         self.note(**{SYNCED_AT: "1000", SYNCED_REVISION: "wiped-by-regenerate"})
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Regenerated"}, source="model")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Regenerated"}, source="model")
         state = sync_state(self.db, self.conv.id, self.item(2000, title="Old", listed=True))
         self.assertEqual(state["action"], "label")
 
     def test_studio_moving_alone_does_not_pull(self):
         self.level_with(2000)
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Edited here"}, source="user")
         self.assertEqual(sync_state(self.db, self.conv.id, self.item(2000))["action"], "none")
 
     def test_a_pull_records_where_both_sides_stand(self):
@@ -243,7 +244,7 @@ class SyncConversationTest(unittest.TestCase):
         Base.metadata.create_all(engine)
         self.db = sessionmaker(bind=engine)()
         self.conv = ConversationRepo(self.db).create(title="Tee")
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Tee"}, source="model")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Tee"}, source="model")
         item = {
             "itemID": "itm1",
             "dateLastModified": 1000,
@@ -289,7 +290,7 @@ class SyncConversationTest(unittest.TestCase):
         self.assertEqual(status["revision_id"], result["revision_id"])
 
     def test_status_only_list_keeps_studio_fields(self):
-        edited = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Regenerated"}, source="user")
+        edited = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Regenerated"}, source="user")
         listed = {
             "itemID": "itm1",
             "dateLastModified": 2000,
@@ -386,14 +387,14 @@ class SyncConversationTest(unittest.TestCase):
         self.assertTrue(sync_status(self.db, self.conv.id)["checked_at"])
 
     def test_up_to_date_check_keeps_unsent_studio_edits(self):
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Edited here"}, source="user")
         result = self.sync(stamp=1000)
         self.assertEqual(result["action"], "none")
         self.assertTrue(studio_has_unpushed_edits(self.db, self.conv.id))
         self.assertEqual(sync_status(self.db, self.conv.id)["revision_id"], self.rev.id)
 
     def test_content_change_with_studio_edits_keeps_studio_and_flags_a_conflict(self):
-        edited = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
+        edited = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Edited here"}, source="user")
         vendoo = {
             "itemID": "itm1",
             "dateLastModified": 2000,
@@ -412,7 +413,7 @@ class SyncConversationTest(unittest.TestCase):
         self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id)[0].id, edited.id)
 
     def test_discard_settles_a_conflict(self):
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Edited here"}, source="user")
         vendoo = {"itemID": "itm1", "dateLastModified": 2000, "generalDetails": {"title": "Vendoo rewrote this"}}
         self.sync(item=vendoo)
         apply_pull(self.db, self.conv.id, vendoo, source="vendoo_pull")

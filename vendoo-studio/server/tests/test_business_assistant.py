@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.models.ad_spend import AdSpend
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
@@ -24,7 +25,7 @@ FAILED = re.compile(r"Lookup \w+ failed: ")
 
 def add_listing(db, title, listing, notes=None, box_id=None):
     conv = ConversationRepo(db).create(title=title, notes=json.dumps(notes) if notes else None, box_id=box_id)
-    ListingRepo(db).save_revision(conv.id, {"title": title, **listing}, source="user")
+    listing_persistence.save_revision(db, conv.id, {"title": title, **listing}, source="user")
     return conv
 
 
@@ -69,7 +70,7 @@ def seed(db):
         db, "Carhartt | Chore Coat", {"price": 150, "cost": 25, "brand": "Carhartt", "category_path": "Men > Coats"},
         {"vendooStatus": "active", "vendooDates": {"listed": "2026-07-03T00:00:00+00:00"}},
     )
-    ListingRepo(db).save_revision(coat.id, {"title": coat.title, "price": 120, "cost": 25, "brand": "Carhartt",
+    listing_persistence.save_revision(db, coat.id, {"title": coat.title, "price": 120, "cost": 25, "brand": "Carhartt",
                                             "category_path": "Men > Coats"}, source="user")
     add_listing(db, "Unfinished draft", {"price": 15})
     db.add(AdSpend(marketplace="etsy", start_date=date(2026, 9, 1), end_date=date(2026, 9, 30), spend=31.0))

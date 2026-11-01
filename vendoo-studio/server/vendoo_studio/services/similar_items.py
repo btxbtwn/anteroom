@@ -22,6 +22,7 @@ from typing import Any, cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import json_value
 from vendoo_studio.services.chrome_import import (
     MATCH_THRESHOLD,
@@ -299,7 +300,6 @@ def merge(db: Session, keep_id: str, merge_id: str) -> dict[str, Any]:
     from vendoo_studio.models.marketplace_sale import MarketplaceSale
     from vendoo_studio.repositories.queries import (
         BUSY_LISTING_STATUSES,
-        ListingRepo,
         RevisionConflict,
         _settle,
     )
@@ -368,7 +368,7 @@ def merge(db: Session, keep_id: str, merge_id: str) -> dict[str, Any]:
         try:
             # Commit the new revision and the links, sales and merge decision
             # together. A concurrent editor save rolls the entire merge back.
-            ListingRepo(db).save_revision(keep_id, body, source="merge", parent_revision_id=revision_id,
+            listing_persistence.save_revision(db, keep_id, body, source="merge", parent_revision_id=revision_id,
                                           expected_revision_id=revision_id)
         except RevisionConflict as exc:
             raise MergeError(409, "This listing changed while merging. Review it and try again.") from exc

@@ -6,6 +6,7 @@ import copy
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.listing_generate import (
     extract_listing_json,
@@ -34,7 +35,7 @@ def _sync_category_override(db: Session, conv_id: str, listing: dict) -> None:
 
 
 def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operations: list[dict] | None = None) -> dict:
-    from vendoo_studio.models.validation import normalize_listing_dropdowns
+    from vendoo_studio.services.validation import normalize_listing_dropdowns
     from vendoo_studio.services.listing_generate import align_size_fields, clear_not_applicable_values
 
     updated = align_listing_gender(listing, operations)
@@ -52,7 +53,7 @@ def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operation
 
     preserving_locks(stamped, _normalize)
     parent_id = revisions[0].id if revisions else None
-    revision = ListingRepo(db).save_revision(
+    revision = listing_persistence.save_revision(db,
         conv_id,
         stamped,
         source="model_refinement",
@@ -89,7 +90,7 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict]) 
             model="",
         )
         return False
-    from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
+    from vendoo_studio.services.validation import normalize_listing_dropdowns, validate_listing
     from vendoo_studio.services.listing_generate import align_size_fields
 
     updated = copy.deepcopy(revisions[0].listing_json)

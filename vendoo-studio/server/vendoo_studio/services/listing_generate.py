@@ -7,6 +7,7 @@ import logging
 import re
 from typing import Any
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.registry import RegistryService
@@ -580,8 +581,8 @@ def strip_empty_flaws_from_description(listing: dict) -> bool:
 
 def ensure_physical_description(listing: dict) -> bool:
     """Rewrite description into the trendy-keyword/Measurements formula when markers are missing."""
-    from vendoo_studio.models.validation import _description_follows_formula
-    from vendoo_studio.models.etsy_fields import is_etsy_digital_listing
+    from vendoo_studio.services.validation import _description_follows_formula
+    from vendoo_studio.services.etsy_fields import is_etsy_digital_listing
 
     if not isinstance(listing, dict):
         return False
@@ -866,7 +867,7 @@ def sync_title_size(listing: dict) -> bool:
 
 def ebay_size(listing: dict, block: dict, size: str) -> str:
     """The general size as eBay's form spells it: one of the category's own Size choices when they are known."""
-    from vendoo_studio.models.ebay_fields import ebay_optional_raw, ebay_size_for_type
+    from vendoo_studio.services.ebay_fields import ebay_optional_raw, ebay_size_for_type
     from vendoo_studio.models.sizes import size_choice
 
     spelled = ebay_size_for_type(size, ebay_optional_raw(block, "sizeType") or listing.get("sizeType"))
@@ -912,7 +913,7 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
     if str(listing.get("size") or "").strip() != size:
         listing["size"] = size
     changed = False
-    from vendoo_studio.models.depop_fields import depop_size_for
+    from vendoo_studio.services.depop_fields import depop_size_for
     from vendoo_studio.services.seller_overrides import field_locked
 
     previous = sanitize_size_value(previous_size) if previous_size is not None else None
@@ -946,7 +947,7 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
 
 def apply_send_readiness_fixes(listing: dict) -> bool:
     """Deterministic fixes so generated listings clear common Send blockers."""
-    from vendoo_studio.models.validation import normalize_listing_dropdowns
+    from vendoo_studio.services.validation import normalize_listing_dropdowns
     from vendoo_studio.services.user_settings import get_ebay_inventory_location, package_dimensions_string
 
     if not isinstance(listing, dict):
@@ -986,7 +987,7 @@ def apply_send_readiness_fixes(listing: dict) -> bool:
 
 
 def _validation_blockers(listing: dict) -> list[dict]:
-    from vendoo_studio.models.validation import validate_listing
+    from vendoo_studio.services.validation import validate_listing
     from vendoo_studio.services.marketplaces import get_selected_marketplaces
 
     result = validate_listing(
@@ -1234,7 +1235,7 @@ def listing_save_summary(
     db, conv_id: str, listing: dict, *, waiting: bool = False, repaired: bool = False
 ) -> str:
     """Honest post-save status based on validation and discovered field gaps."""
-    from vendoo_studio.models.validation import validate_listing
+    from vendoo_studio.services.validation import validate_listing
     from vendoo_studio.services.listing_field_gaps import remaining_discovered_gap_count
     from vendoo_studio.services.marketplaces import get_selected_marketplaces
 
@@ -1466,7 +1467,7 @@ def persist_generated_listing(
 
         restore_locked(listing, capture_locked(revisions[0].listing_json))
         materialize_prices(listing)
-    ListingRepo(db).save_revision(conv_id, listing, source=source, expected_revision_id=expected_revision_id)
+    listing_persistence.save_revision(db, conv_id, listing, source=source, expected_revision_id=expected_revision_id)
 
     if announce:
         repo.add_message(
@@ -1536,7 +1537,7 @@ async def persist_generated_listing_with_repair(
         if isinstance(updated, dict) and updated:
             check_photos()
             listing = updated
-            ListingRepo(db).save_revision(conv_id, listing, source="generation_finalize", expected_revision_id=expected_revision_id)
+            listing_persistence.save_revision(db, conv_id, listing, source="generation_finalize", expected_revision_id=expected_revision_id)
             finalized = True
 
     if final_announce:

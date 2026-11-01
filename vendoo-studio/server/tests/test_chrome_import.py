@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation, Photo
@@ -127,7 +128,7 @@ def test_each_chrome_marketplace_imports_with_its_public_link(chrome, marketplac
 
 def test_repeat_import_keeps_local_edits_without_reading_chrome(chrome):
     first = post(chrome, "vinted", "4401").json()
-    ListingRepo(chrome.db).save_revision(first["conversation_id"], {"title": "Edited", "price": 99}, "user")
+    listing_persistence.save_revision(chrome.db, first["conversation_id"], {"title": "Edited", "price": 99}, "user")
     chrome.remote.calls.clear()
     second = post(chrome, "vinted", "https://www.vinted.com/items/4401-denim-jacket").json()
     assert second["reused"] and second["conversation_id"] == first["conversation_id"]
@@ -170,7 +171,7 @@ def test_preview_marks_owned_listings_and_suggests_a_match_for_review(chrome):
     chrome.db.add(MarketplaceListing(conversation_id=owned.id, marketplace="poshmark", state="published",
                                      listing_url=f"https://poshmark.com/listing/{POST}"))
     similar = ConversationRepo(chrome.db).create(title="Levi's Denim Jacket Blue")
-    ListingRepo(chrome.db).save_revision(similar.id, {"title": "Levi's Denim Jacket Blue", "price": 80}, "user")
+    listing_persistence.save_revision(chrome.db, similar.id, {"title": "Levi's Denim Jacket Blue", "price": 80}, "user")
     ConversationRepo(chrome.db).create(title="Wool scarf")
     chrome.db.commit()
     other = "c" * 24
@@ -195,7 +196,7 @@ def test_preview_marks_owned_listings_and_suggests_a_match_for_review(chrome):
 
 def test_linking_a_reviewed_match_keeps_the_item_and_records_the_listing(chrome):
     conv = ConversationRepo(chrome.db).create(title="My jacket")
-    ListingRepo(chrome.db).save_revision(conv.id, {"title": "My jacket", "price": 50}, "user")
+    listing_persistence.save_revision(chrome.db, conv.id, {"title": "My jacket", "price": 50}, "user")
     response = post(chrome, "vinted", "4401", link_conversation_id=conv.id)
     assert response.status_code == 200, response.text
     assert response.json()["linked"] is True

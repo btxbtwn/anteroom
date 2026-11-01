@@ -336,11 +336,11 @@ def deterministic_gap_patches(
             value = str((listing or {}).get("size") or "").strip()
         patch_value: object = value
         if not value and marketplace.lower() == "ebay" and field_lookup_key(field) == "season":
-            from vendoo_studio.models.ebay_fields import infer_ebay_season
+            from vendoo_studio.services.ebay_fields import infer_ebay_season
             patch_value = infer_ebay_season(listing)
             value = str(patch_value)
         if not value and marketplace.lower() == "ebay":
-            from vendoo_studio.models.ebay_fields import (
+            from vendoo_studio.services.ebay_fields import (
                 EBAY_OPTIONAL_DNA_LOOKUPS,
                 ebay_optional_raw,
                 ensure_ebay_category_optionals,
@@ -370,8 +370,8 @@ def deterministic_gap_patches(
                     patch_value = DNA_VALUE
                     value = DNA_VALUE
         if not value and marketplace.lower() == "etsy":
-            from vendoo_studio.models.ebay_fields import ebay_optional_raw
-            from vendoo_studio.models.etsy_fields import (
+            from vendoo_studio.services.ebay_fields import ebay_optional_raw
+            from vendoo_studio.services.etsy_fields import (
                 ETSY_OPTIONAL_DNA_LOOKUPS,
                 ensure_etsy_category_optionals,
             )
@@ -404,7 +404,7 @@ def deterministic_gap_patches(
                     patch_value = DNA_VALUE
                     value = DNA_VALUE
         if not value and marketplace.lower() == "depop":
-            from vendoo_studio.models.depop_fields import (
+            from vendoo_studio.services.depop_fields import (
                 DEPOP_OPTIONAL_DNA_LOOKUPS,
                 ensure_depop_category_optionals,
             )

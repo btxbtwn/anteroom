@@ -224,7 +224,7 @@ def _targets(listing: dict, parsed: dict[str, str]) -> dict[str, str]:
     depop = parsed["numeric"] if kind == "women" and parsed["numeric"] else parsed["waist"]
     if depop:
         # Depop's own list writes a man's waist with inches (36") and a kid's as an age.
-        from vendoo_studio.models.depop_fields import depop_size_for
+        from vendoo_studio.services.depop_fields import depop_size_for
 
         targets["depop_specifics.size"] = depop_size_for(depop, listing)
     grouping = {"Petite": "Petite", "Plus": "Plus size", "Tall": "Tall", "Big & Tall": "Tall", "Maternity": "Maternity"}.get(fit, "")

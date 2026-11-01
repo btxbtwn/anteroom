@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
@@ -47,7 +48,7 @@ class RotatePhotoTest(unittest.TestCase):
         self.conv = repo.create(title="Nike tee")
         contents = _jpeg_with_red_left_half()
         (self.photos_dir / "front.jpg").write_bytes(contents)
-        self.photo = repo.add_photo(
+        self.photo = listing_persistence.add_photo(repo.db,
             self.conv.id, "front.jpg", "front.jpg", "image/jpeg", len(contents),
             checksum="a" * 64, width=400, height=200,
         )

@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.seller_overrides import field_locked, fold_key, get_path, is_locked, set_path
 from vendoo_studio.services import native_contract
@@ -295,7 +296,7 @@ async def record_forms(db: Session, conv_id: str, markets, *, reset_evidence: bo
                                     **native_contract.capture(listing, forms, markets)}
     native_contract.constrain_generated(listing, listing, freeze_categories=False)
     if listing != revision.listing_json:
-        repo.save_revision(conv_id, listing, source="native_schema", parent_revision_id=revision.id, expected_revision_id=revision.id)
+        listing_persistence.save_revision(repo.db, conv_id, listing, source="native_schema", parent_revision_id=revision.id, expected_revision_id=revision.id)
     return listing[native_contract.KEY]
 
 
@@ -422,7 +423,7 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
                 "value": copy.deepcopy(value), "quote": reply["fields"][path]["evidence"]}
     if updated == listing:
         return updated if strict else None
-    listing_repo.save_revision(conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision.id, expected_revision_id=revision.id)
+    listing_persistence.save_revision(listing_repo.db, conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision.id, expected_revision_id=revision.id)
     ConversationRepo(db).add_message(conv_id, "system", filled_message(accepted, rows), provider="system", model="")
     return updated
 

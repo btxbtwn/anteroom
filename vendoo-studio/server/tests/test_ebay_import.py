@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
@@ -142,7 +143,7 @@ def test_import_creates_local_inventory_photos_and_direct_identity_without_vendo
 
 def test_repeated_import_does_not_overwrite_local_edits_or_download_photos_again(imported):
     first = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID}).json()
-    ListingRepo(imported.db).save_revision(first["conversation_id"], {"title": "My edited coat", "price": 99}, "user")
+    listing_persistence.save_revision(imported.db, first["conversation_id"], {"title": "My edited coat", "price": 99}, "user")
     second = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID}).json()
     assert second["reused"] and second["conversation_id"] == first["conversation_id"]
     assert len(imported.downloads) == 2

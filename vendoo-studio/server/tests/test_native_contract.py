@@ -8,6 +8,7 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import native_contract as contract
@@ -76,7 +77,7 @@ class NativeContractTest(unittest.TestCase):
         try:
             with sessionmaker(bind=engine)() as db:
                 conv = ConversationRepo(db).create(title="Tee")
-                ListingRepo(db).save_revision(conv.id, listing, source="native_schema")
+                listing_persistence.save_revision(db, conv.id, listing, source="native_schema")
                 result = validate(conv.id, db)
                 self.assertFalse(any(error["field"] == "ebay_specifics.Size" for error in result.errors))
         finally:
@@ -106,7 +107,7 @@ class NativeContractTest(unittest.TestCase):
         self.assertEqual(updated["etsy_specifics"], listing["etsy_specifics"])
 
     def test_unrelated_edit_does_not_autofill_an_eligible_etsy_form(self):
-        from vendoo_studio.models.validation import validate_listing
+        from vendoo_studio.services.validation import validate_listing
         from vendoo_studio.services.listing_editor import prepared_listing
 
         listing = seed()
@@ -480,20 +481,20 @@ class NativeContractRevisionTest(unittest.TestCase):
         self.db = sessionmaker(bind=self.engine)()
         self.conv = ConversationRepo(self.db).create(title="Pants")
         self.repo = ListingRepo(self.db)
-        self.repo.save_revision(self.conv.id, seed(), "native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, seed(), "native_schema")
 
     def tearDown(self):
         self.db.close()
         self.engine.dispose()
 
     def test_later_model_repairs_cannot_reintroduce_unlisted_fields_or_spoof_the_contract(self):
-        result = self.repo.save_revision(self.conv.id, {"title": "Pants", contract.KEY: {},
+        result = listing_persistence.save_revision(self.repo.db, self.conv.id, {"title": "Pants", contract.KEY: {},
             "mercari_specifics": {"material": "Leather", "unknown": "guess"}}, "generation_finalize")
         self.assertEqual(result.listing_json[contract.KEY], seed()[contract.KEY])
         self.assertEqual(result.listing_json["mercari_specifics"], {})
 
     def test_a_model_cannot_declare_its_guess_seller_verified(self):
-        result = self.repo.save_revision(self.conv.id, {
+        result = listing_persistence.save_revision(self.repo.db, self.conv.id, {
             "mercari_specifics": {"material": "cotton"}, "seller_fields": ["mercari_specifics.material"],
             contract.EVIDENCE_KEY: {"mercari_specifics.material": {"value": "cotton", "quote": "invented"}},
         }, "generation_finalize")
@@ -503,7 +504,7 @@ class NativeContractRevisionTest(unittest.TestCase):
     def test_seller_category_edit_keeps_a_blocker_until_its_form_is_reloaded(self):
         listing = seed()
         listing["direct_category_ids"]["mercari"] = "13"
-        result = self.repo.save_revision(self.conv.id, listing, "user_form")
+        result = listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "user_form")
         self.assertIn("changed", contract.gaps(result.listing_json, "mercari")[0]["message"])
 
     def test_initial_generation_uses_native_fields_instead_of_generic_field_prompts(self):

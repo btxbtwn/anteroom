@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.job import Job
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes, vendoo_binding
@@ -246,7 +247,7 @@ async def prepare_generation_schema(
     if on_status:
         on_status("Loading marketplace categories and fields…")
     await attach_direct_categories(db, seed, f"{analysis}\n{notes}")
-    ListingRepo(db).save_revision(
+    listing_persistence.save_revision(db,
         conv_id, seed, source="category_analysis",
         parent_revision_id=revisions[0].id if revisions else None,
         expected_revision_id=revisions[0].id if revisions else "",

@@ -1,0 +1,1 @@
+- Behind the scenes, listing rules and save operations are separated from database queries, so more architectural mistakes are caught before an update ships.

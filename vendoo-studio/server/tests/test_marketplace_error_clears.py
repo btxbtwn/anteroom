@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.marketplace_listing import MarketplaceListing  # noqa: F401
@@ -26,7 +27,7 @@ class MarketplaceErrorClearsTest(unittest.TestCase):
         self.conv = ConversationRepo(self.db).create(title="Trousers")
         self.listings = ListingRepo(self.db)
         self.records = MarketplaceListingRepo(self.db)
-        self.listings.save_revision(self.conv.id, {"title": "Trousers", "vinted_specifics": {
+        listing_persistence.save_revision(self.listings.db, self.conv.id, {"title": "Trousers", "vinted_specifics": {
             "category": "Women > Activewear > Pants"}}, "test")
 
     def tearDown(self):
@@ -37,7 +38,7 @@ class MarketplaceErrorClearsTest(unittest.TestCase):
                                                    "error_code": "missing_fields", "error_fields": fields})
 
     def _save(self, listing: dict) -> dict:
-        self.listings.save_revision(self.conv.id, listing, "model_refinement")
+        listing_persistence.save_revision(self.listings.db, self.conv.id, listing, "model_refinement")
         return self.records.get(self.conv.id, "vinted")
 
     def test_changing_the_named_field_clears_the_error(self):

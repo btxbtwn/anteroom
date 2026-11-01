@@ -15,6 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.job import Job
@@ -78,8 +79,8 @@ class _RouteTest(unittest.TestCase):
         self.client = TestClient(app)
         repo = ConversationRepo(self.db)
         self.conv = repo.create(title="Jeans")
-        ListingRepo(self.db).save_revision(self.conv.id, LISTING, source="model")
-        repo.add_photo(self.conv.id, "a.jpg", "a.jpg", "image/jpeg", 10, width=1600, height=1200)
+        listing_persistence.save_revision(self.db, self.conv.id, LISTING, source="model")
+        listing_persistence.add_photo(repo.db, self.conv.id, "a.jpg", "a.jpg", "image/jpeg", 10, width=1600, height=1200)
 
     def tearDown(self):
         app.dependency_overrides.clear()
@@ -164,7 +165,7 @@ class CreateRouteTest(_RouteTest):
         edited = {**LISTING, "description": "Newer edit"}
 
         async def create(*args, **kwargs):
-            ListingRepo(self.db).save_revision(self.conv.id, edited, source="manual")
+            listing_persistence.save_revision(self.db, self.conv.id, edited, source="manual")
             return {**CREATED, "prepared_listing": {**LISTING, "_vendoo_preparation": {}}}
 
         with patch("vendoo_studio.services.vendoo_create.create_item", create):
@@ -252,14 +253,14 @@ class CreateRouteTest(_RouteTest):
     def test_refuses_without_photos_or_listing(self):
         bare = ConversationRepo(self.db).create(title="Empty")
         self.assertEqual(self.client.post(f"/api/conversations/{bare.id}/vendoo-api/create").status_code, 400)
-        ListingRepo(self.db).save_revision(bare.id, LISTING, source="model")
+        listing_persistence.save_revision(self.db, bare.id, LISTING, source="model")
         res = self.client.post(f"/api/conversations/{bare.id}/vendoo-api/create")
         self.assertEqual(res.status_code, 400)
         self.assertIn("photo", res.json()["detail"])
 
     def test_refuses_while_chrome_is_busy(self):
         other = ConversationRepo(self.db).create(title="Other")
-        rev = ListingRepo(self.db).save_revision(other.id, LISTING, source="model")
+        rev = listing_persistence.save_revision(self.db, other.id, LISTING, source="model")
         JobRepo(self.db).create(other.id, rev.id, LISTING, status="dispatched")
         res = self.client.post(f"/api/conversations/{self.conv.id}/vendoo-api/create")
         self.assertEqual(res.status_code, 409)
@@ -277,7 +278,7 @@ class CreateRouteTest(_RouteTest):
 
     def test_a_dead_send_does_not_count_as_another_job(self):
         other = ConversationRepo(self.db).create(title="Other")
-        rev = ListingRepo(self.db).save_revision(other.id, LISTING, source="model")
+        rev = listing_persistence.save_revision(self.db, other.id, LISTING, source="model")
         stale = JobRepo(self.db).create(
             other.id, rev.id, {**LISTING, "title": "Old tee"},
             status="dispatched", current_step="vendoo_api_fields",
@@ -417,7 +418,7 @@ class ListRouteTest(_RouteTest):
 
     def test_confirmed_list_sends_only_the_named_marketplaces(self):
         self.bind()
-        ListingRepo(self.db).save_revision(self.conv.id, {
+        listing_persistence.save_revision(self.db, self.conv.id, {
             **LISTING, "marketplace_category_ids": {"ebay": "15687", "poshmark": "shirts"},
         }, "model")
         sent = {}
@@ -449,7 +450,7 @@ class ListRouteTest(_RouteTest):
 
     def test_confirmed_list_with_an_unavailable_native_form_never_reaches_vendoo(self):
         self.bind()
-        ListingRepo(self.db).save_revision(self.conv.id, {
+        listing_persistence.save_revision(self.db, self.conv.id, {
             **LISTING, "marketplace_category_ids": {"ebay": "15687"}, "_native_forms": {"ebay": {"unavailable": True}},
         }, "native_schema")
         with patch("vendoo_studio.services.vendoo_create.run_ops", new_callable=AsyncMock) as run:
@@ -589,13 +590,13 @@ class SaveRouteTest(_RouteTest):
              patch("vendoo_studio.services.listing_provider.provider_is_configured", return_value=True):
             snapshot = prepare_listing_snapshot(self.db, self.conv, listing)
             prepared = asyncio.run(prepare_listing_fields_for_vendoo(None, snapshot, provider=object()))[0]
-            ListingRepo(self.db).save_revision(self.conv.id, prepared, source="vendoo_prepare")
+            listing_persistence.save_revision(self.db, self.conv.id, prepared, source="vendoo_prepare")
             self.assertEqual(model.await_count, 1)
             res = self.client.post(f"/api/conversations/{self.conv.id}/vendoo-api/save")
             self.assertEqual(res.status_code, 200, res.text)
             edited = {**ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json,
                       "price": 40, "description": "Seller's revised copy"}
-            ListingRepo(self.db).save_revision(self.conv.id, edited, source="manual")
+            listing_persistence.save_revision(self.db, self.conv.id, edited, source="manual")
             res = self.client.post(f"/api/conversations/{self.conv.id}/vendoo-api/save")
             self.assertEqual(res.status_code, 200, res.text)
             self.assertEqual(model.await_count, 1)
@@ -801,7 +802,7 @@ class SaveRouteTest(_RouteTest):
         self.assertEqual(notes["vendooRelistPending"], ["ebay"])
 
         # The same item made vintage is one Etsy allows, and owes the relist.
-        ListingRepo(self.db).save_revision(self.conv.id, {
+        listing_persistence.save_revision(self.db, self.conv.id, {
             **LISTING, "etsy_specifics": {"who_made": "someone_else", "when_made": "1990s (Vintage)"},
         }, source="test")
         res = self.save(item)

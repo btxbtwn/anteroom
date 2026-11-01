@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import json_value
 from vendoo_studio.models.conversation import Conversation
-from vendoo_studio.models.etsy_fields import (
+from vendoo_studio.services.etsy_fields import (
     etsy_eligible,
     etsy_when_raw,
     etsy_when_options,

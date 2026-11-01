@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation
@@ -131,7 +132,7 @@ class BottomsAndOfferRouteTest(unittest.TestCase):
         self.db.add(self.conv)
         self.db.commit()
         self.client = _client(self.db)
-        ListingRepo(self.db).save_revision(self.conv.id, copy.deepcopy(JEANS), source="model")
+        listing_persistence.save_revision(self.db, self.conv.id, copy.deepcopy(JEANS), source="model")
 
     def tearDown(self):
         app.dependency_overrides.clear()

@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from vendoo_studio.models.ebay_fields import EBAY_CONDITION_DESCRIPTION
+from vendoo_studio.services.ebay_fields import EBAY_CONDITION_DESCRIPTION
 from vendoo_studio.models.mercari_shipping import (
     DEFAULT_SHIPPING_LABEL,
     ground_advantage,

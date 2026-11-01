@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation, Photo
@@ -49,7 +50,7 @@ def _item(db, title: str, *, brand: str = "", size: str = "", photos: list[tuple
 
     conv = ConversationRepo(db).create(title=title)
     conv.notes = json.dumps({"vendooLabels": labels}) if labels else None
-    ListingRepo(db).save_revision(conv.id, {"title": title, "brand": brand, "size": size, "price": 40, "labels": labels.split(", ") if labels else []}, source="user_form")
+    listing_persistence.save_revision(db, conv.id, {"title": title, "brand": brand, "size": size, "price": 40, "labels": labels.split(", ") if labels else []}, source="user_form")
     Path(PHOTOS_DIR).mkdir(parents=True, exist_ok=True)
     for order, (image, checksum) in enumerate(photos):
         name = f"{uuid.uuid4().hex}.jpg"
@@ -167,15 +168,15 @@ def test_concurrent_listing_edit_rolls_back_the_entire_merge(db, monkeypatch):
     db.add(MarketplaceListing(conversation_id=other_id, marketplace="ebay", state="published", listing_id="race"))
     db.add(MarketplaceSale(marketplace="ebay", order_id="race", line_id="race", conversation_id=other_id))
     db.commit()
-    original_save = ListingRepo.save_revision
+    original_save = listing_persistence.save_revision
 
-    def intervening_save(repo, conv_id, body, source, *args, **kwargs):
+    def intervening_save(session, conv_id, body, source, *args, **kwargs):
         # Another editor's completed save wins before the merge's CAS write.
-        repo.db.rollback()
-        original_save(repo, conv_id, {"title": "New seller edit", "price": 99}, "user")
-        return original_save(repo, conv_id, body, source, *args, **kwargs)
+        session.rollback()
+        original_save(session, conv_id, {"title": "New seller edit", "price": 99}, "user")
+        return original_save(session, conv_id, body, source, *args, **kwargs)
 
-    monkeypatch.setattr(ListingRepo, "save_revision", intervening_save)
+    monkeypatch.setattr(listing_persistence, "save_revision", intervening_save)
     with pytest.raises(similar_items.MergeError) as error:
         similar_items.merge(db, keep_id, other_id)
     assert error.value.status == 409

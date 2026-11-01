@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.listing_evidence import ListingCorrection, SaleSnapshot
@@ -35,7 +36,7 @@ def workspace():
     conv = ConversationRepo(db).create(title="Nike L Cotton Tee")
     listing = {"title": conv.title, "brand": "Nike", "size": "L", "condition": "Pre-Owned - Good",
                "category_path": MEN_TSHIRT_PATH, "price": 32, "quantity": 1}
-    revision = ListingRepo(db).save_revision(conv.id, listing, source="generation")
+    revision = listing_persistence.save_revision(db, conv.id, listing, source="generation")
     app.dependency_overrides[get_db] = lambda: db
     yield db, conv, revision, TestClient(app)
     app.dependency_overrides.pop(get_db, None)
@@ -85,7 +86,7 @@ def test_multi_value_form_edits_survive_save_reload_and_clear(workspace):
 def test_automated_and_legacy_revisions_do_not_become_corrections(workspace):
     db, conv, revision, _client = workspace
     for source in ("user_form", "generation", "dropdown_normalize", "vendoo_import"):
-        ListingRepo(db).save_revision(conv.id, {**revision.listing_json, "size": "M"}, source=source)
+        listing_persistence.save_revision(db, conv.id, {**revision.listing_json, "size": "M"}, source=source)
     assert not corrections_context(db, conv.id, revision.listing_json)["current_item_corrections"]
 
 
@@ -156,7 +157,7 @@ def test_history_matches_snapshot_instead_of_later_edited_brand_and_title(worksp
     other.notes = merge_notes(None, {"vendooStatus": "sold", "vendooSale": vendoo_sale(item), "vendooDates": vendoo_dates(item)})
     db.commit()
     capture_sale_snapshot(db, other.id, item)
-    ListingRepo(db).save_revision(other.id, {**revision.listing_json, "brand": "Adidas", "title": "Edited after sale"}, source="user_form")
+    listing_persistence.save_revision(db, other.id, {**revision.listing_json, "brand": "Adidas", "title": "Edited after sale"}, source="user_form")
     context = seller_history_context(db, conv.id, "- brand: Nike\n- condition: Good", now=datetime(2026, 10, 7, tzinfo=UTC))
     assert context["sales"]["count"] == 1
     example = context["sales"]["examples"][0]

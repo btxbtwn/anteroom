@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
@@ -137,7 +138,7 @@ class PullAfterDirectListingTest(unittest.TestCase):
         self.conv = ConversationRepo(self.db).create(title="Windbreaker")
         repo = ListingRepo(self.db)
         # Studio and Vendoo level at 06:14 (Update Vendoo)...
-        self.synced = repo.save_revision(self.conv.id, {**STUDIO_LISTING, "title": "Older title"}, source="user_form")
+        self.synced = listing_persistence.save_revision(repo.db, self.conv.id, {**STUDIO_LISTING, "title": "Older title"}, source="user_form")
         synced_item = vendoo_item(1000, title="Older title")
         conv = ConversationRepo(self.db).get(self.conv.id)
         conv.notes = merge_notes(conv.notes, {
@@ -148,7 +149,7 @@ class PullAfterDirectListingTest(unittest.TestCase):
         })
         self.db.commit()
         # ...then a refinement Studio published directly to eBay and Depop.
-        self.listed = repo.save_revision(
+        self.listed = listing_persistence.save_revision(repo.db,
             self.conv.id, STUDIO_LISTING, source="model_refinement", parent_revision_id=self.synced.id,
         )
 

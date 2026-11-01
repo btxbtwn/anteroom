@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services import browser_bridge
 from vendoo_studio.services.browser_bridge import BrowserBridgeError
 from vendoo_studio.services.fill_log import (
@@ -487,7 +488,7 @@ class FixAgent:
             revisions = listing_repo.get_revisions(job.conversation_id)
             current = dict(revisions[0].listing_json) if revisions and isinstance(revisions[0].listing_json, dict) else {}
             updated = write_values_into_listing(current, patches)
-            listing_repo.save_revision(
+            listing_persistence.save_revision(listing_repo.db,
                 job.conversation_id,
                 updated,
                 source="browser_fix",

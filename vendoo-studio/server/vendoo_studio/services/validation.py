@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from pydantic import ValidationError
 
-from vendoo_studio.models.depop_fields import (
+from vendoo_studio.services.depop_fields import (
     DEPOP_CATEGORY_OPTIONAL_KEYS,
     VALID_DEPOP_GROUPING,
     VALID_DEPOP_PARCEL,
@@ -14,7 +14,7 @@ from vendoo_studio.models.depop_fields import (
     ensure_depop_category_optionals,
     infer_depop_styles,
 )
-from vendoo_studio.models.ebay_fields import (
+from vendoo_studio.services.ebay_fields import (
     EBAY_CATEGORY_OPTIONAL_KEYS,
     EBAY_FABRIC_WEIGHT_RE,
     EBAY_KEY_ALIASES,
@@ -33,7 +33,7 @@ from vendoo_studio.models.ebay_fields import (
     normalize_ebay_season_value,
     promote_required_ebay_specifics,
 )
-from vendoo_studio.models.etsy_fields import (
+from vendoo_studio.services.etsy_fields import (
     ETSY_CATEGORY_OPTIONAL_KEYS,
     ETSY_INELIGIBLE_NOTICE,
     ETSY_OPTIONAL_DNA_KEYS,
@@ -167,8 +167,8 @@ def ensure_poshmark_style_tags(listing: dict) -> bool:
     tags = as_list(raw.get("styleTags") or raw.get("style_tags"))
     if tags:
         return False
-    from vendoo_studio.models.depop_fields import infer_depop_styles
-    from vendoo_studio.models.ebay_fields import ebay_season_haystack
+    from vendoo_studio.services.depop_fields import infer_depop_styles
+    from vendoo_studio.services.ebay_fields import ebay_season_haystack
     from vendoo_studio.models.listing_values import infer_known_options
 
     depop = listing.get("depop_specifics")

@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.registry import align_listing_gender
 from vendoo_studio.services.category_catalog import remember_path
 
@@ -343,7 +344,7 @@ def apply_resolved_category(db: Session, conv_id: str, path: str) -> dict:
     listing = dict(revisions[0].listing_json) if revisions and isinstance(revisions[0].listing_json, dict) else {}
     listing["category_path"] = path
     listing = align_listing_gender(listing)
-    ListingRepo(db).save_revision(
+    listing_persistence.save_revision(db,
         conv_id,
         listing,
         source="vendoo_category",

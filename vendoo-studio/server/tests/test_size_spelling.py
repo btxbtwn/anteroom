@@ -2,9 +2,9 @@
 
 import pytest
 
-from vendoo_studio.models.ebay_fields import ebay_size_for_type
+from vendoo_studio.services.ebay_fields import ebay_size_for_type
 from vendoo_studio.models.sizes import letter_size, size_choice
-from vendoo_studio.models.validation import validate_listing
+from vendoo_studio.services.validation import validate_listing
 from vendoo_studio.services.direct_preflight import _unresolved
 from vendoo_studio.services.listing_generate import align_size_fields
 from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_scaled, encode_specific

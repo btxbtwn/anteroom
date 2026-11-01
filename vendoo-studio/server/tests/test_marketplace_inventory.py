@@ -6,6 +6,7 @@ import pytest
 import test_ebay_import
 import test_etsy_import
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.listing import ListingRevision
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
@@ -44,7 +45,7 @@ def read_listings(fixture, conv_id):
 def test_etsy_read_reports_exact_remote_differences_without_overwriting_edits(etsy_imported):
     fixture = etsy_imported
     conv_id = import_item(fixture, "etsy")
-    ListingRepo(fixture.db).save_revision(conv_id, {"title": "My coat", "price": 99, "quantity": 8}, "user")
+    listing_persistence.save_revision(fixture.db, conv_id, {"title": "My coat", "price": 99, "quantity": 8}, "user")
     outcome = read_listings(fixture, conv_id)["etsy"]
     assert outcome["ok"] is True
     assert outcome["inventory"]["state"] == "active"

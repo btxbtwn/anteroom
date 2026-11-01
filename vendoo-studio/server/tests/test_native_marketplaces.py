@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import utcnow
@@ -55,8 +56,8 @@ class NativeMarketplacesTest(unittest.TestCase):
         app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title=LISTING["title"])
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, LISTING, "model")
-        ConversationRepo(self.db).add_photo(self.conv.id, "test.jpg", "test.jpg", "image/jpeg", 1)
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, LISTING, "model")
+        listing_persistence.add_photo(self.db, self.conv.id, "test.jpg", "test.jpg", "image/jpeg", 1)
         self.base = f"/api/conversations/{self.conv.id}/native-marketplaces"
         self.bridge = self.enterContext(patch("vendoo_studio.services.native_marketplaces.browser_bridge.request", new_callable=AsyncMock))
         self.manager = SimpleNamespace(connected=True, build="test-build", send_message=AsyncMock(return_value=True))
@@ -102,7 +103,7 @@ class NativeMarketplacesTest(unittest.TestCase):
             {"path": "depop_specifics.size", "label": "Size", "required": True,
              "selection_only": True, "options": ["M", "L"]}]}
         snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"depop": form}, ["depop"])
-        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
         before = copy.deepcopy(revision.listing_json)
         read = AsyncMock(side_effect=AssertionError("Chrome or remote catalog used during editor preflight"))
         with patch("vendoo_studio.services.chrome_catalog.live_preview", new=read):
@@ -134,7 +135,7 @@ class NativeMarketplacesTest(unittest.TestCase):
     def test_list_without_a_category_never_starts_a_marketplace_job(self):
         listing = {**LISTING, "marketplace_category_ids": {}, "marketplace_category_objects": {},
                    "marketplace_categories": {}, "direct_category_ids": {}}
-        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "user_form")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "user_form")
         self.bridge.reset_mock()
         response = self.client.post(f"{self.base}/mercari/list", json={"revision_id": revision.id, "confirm": True})
         self.assertEqual(response.status_code, 200, response.text)
@@ -172,10 +173,10 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(reply.status_code, 200, reply.text)
         job_id = reply.json()["job_id"]
         pinned = JobRepo(self.db).get(job_id).listing_snapshot["_approved_photos"][0]["stored_filename"]
-        repo.delete_photo(self.conv.id, original.id)
+        listing_persistence.delete_photo(repo.db, self.conv.id, original.id)
         photo_store().delete("test.jpg")
         photo_store().put("new.jpg", b"Different product")
-        replacement = repo.add_photo(self.conv.id, "new.jpg", "new.jpg", "image/jpeg", 17)
+        replacement = listing_persistence.add_photo(repo.db, self.conv.id, "new.jpg", "new.jpg", "image/jpeg", 17)
         self.run_jobs()
         payload = self.bridge.call_args.args[2]
         self.assertEqual([photo["id"] for photo in payload["photos"]], [original.id])
@@ -236,10 +237,10 @@ class NativeMarketplacesTest(unittest.TestCase):
     def test_a_form_with_its_own_photos_sends_them_and_every_other_form_keeps_the_item_photos(self):
         repo = ConversationRepo(self.db)
         [front] = repo.get_photos(self.conv.id)
-        back = repo.add_photo(self.conv.id, "back.jpg", "back.jpg", "image/jpeg", 1)
-        collage = repo.add_photo(self.conv.id, "collage.jpg", "collage.jpg", "image/jpeg", 1, marketplace="mercari")
-        repo.add_photo(self.conv.id, "stock.jpg", "stock.jpg", "image/jpeg", 1, marketplace="depop")
-        self.rev = ListingRepo(self.db).save_revision(
+        back = listing_persistence.add_photo(repo.db, self.conv.id, "back.jpg", "back.jpg", "image/jpeg", 1)
+        collage = listing_persistence.add_photo(repo.db, self.conv.id, "collage.jpg", "collage.jpg", "image/jpeg", 1, marketplace="mercari")
+        listing_persistence.add_photo(repo.db, self.conv.id, "stock.jpg", "stock.jpg", "image/jpeg", 1, marketplace="depop")
+        self.rev = listing_persistence.save_revision(self.db,
             self.conv.id, {**LISTING, "marketplace_photos": {"mercari": [collage.id, back.id]}}, "user_form")
         sent = {}
         for platform in URLS:
@@ -408,7 +409,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual((record["state"], record["listing_url"]), ("published", POSH_URL))
         self.assertEqual(self.actions(), ["list"])
         self.assertEqual(self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 409)
-        revised = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
+        revised = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
         self.rev = revised
         self.assertEqual(self.client.post(f"{self.base}/poshmark/update", json={"revision_id": revised.id}).status_code, 400)
         self.bridge.reset_mock()
@@ -430,7 +431,7 @@ class NativeMarketplacesTest(unittest.TestCase):
     def live_on(self, platform, listing_id, url, **record):
         MarketplaceListingRepo(self.db).save(self.conv.id, platform, {
             "state": "published", "listing_id": listing_id, "listing_url": url, "revision_id": self.rev.id, **record})
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
 
     def update(self, platform):
         self.enterContext(patch.object(native.direct_preflight, "gaps", return_value=[]))
@@ -489,7 +490,7 @@ class NativeMarketplacesTest(unittest.TestCase):
     def test_sellwild_requires_a_saved_category_instead_of_matching_one_at_list_time(self):
         mens = {**LISTING, "condition": "Pre-Owned - Good", "category_path": "Clothing, Shoes & Accessories > Men > Coats & Jackets"}
         mens.pop("marketplace_category_ids")
-        rev = ListingRepo(self.db).save_revision(self.conv.id, mens, "model")
+        rev = listing_persistence.save_revision(self.db, self.conv.id, mens, "model")
         with self.assertRaises(native.NativeMarketplaceError):
             native.save_local_sellwild_draft(self.conv.id, native.ListRequest(revision_id=rev.id, sellwild_condition_id=2), self.db)
         native.save_local_sellwild_draft(self.conv.id, native.ListRequest(
@@ -563,7 +564,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         listing = {**LISTING, "title": "Vintage Patagonia fleece jacket", "condition": "Pre-Owned - Good",
                    "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Coats, Jackets & Vests"}
         listing.pop("depop_specifics", None)
-        ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
         result = self.client.get(f"{self.base}/sellwild/options").json()
         self.assertEqual(result["suggested"], {"category_id": 272, "condition_id": 3})
         self.assertEqual(len(result["conditions"]), 5)
@@ -607,7 +608,7 @@ class NativeMarketplacesTest(unittest.TestCase):
 
         self.bridge.side_effect = answer
         listing = {**LISTING, "depop_specifics": {**LISTING["depop_specifics"], "boost": True}}
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, listing, "seller")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, listing, "seller")
         self.list("depop")
         # A plain List stops at publish (test_list_saves_then_publishes_in_one_job_that_holds_the_slot).
         self.assertEqual(self.actions(), ["save_draft", "publish", "update"])
@@ -762,7 +763,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         listing = {**LISTING, "vinted_specifics": {
             "category": "Women > Clothing > Jeans > Straight jeans", "condition": "Good",
         }}
-        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
         draft = "https://www.vinted.com/items/42/edit"
         live = "https://www.vinted.com/items/42"
         self.assertEqual(native.draft_url("vinted", draft + "/"), draft)
@@ -808,7 +809,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         from vendoo_studio.services import approved_photos
 
         listing = {**LISTING, "vinted_specifics": {"category": "Women > Clothing", "condition": "Good"}}
-        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
         old = "https://www.vinted.com/items/42/edit"
         new = "https://www.vinted.com/items/43/edit"
         snapshot = {**listing, approved_photos.KEY: approved_photos.capture(ConversationRepo(self.db).get_photos(self.conv.id))}
@@ -833,7 +834,7 @@ class NativeMarketplacesTest(unittest.TestCase):
 
     def test_a_pasted_vinted_draft_link_is_checked_without_writing(self):
         listing = {**LISTING, "vinted_specifics": {"category": "Women > Clothing", "condition": "Good"}}
-        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
         draft = "https://www.vinted.com/items/42/edit"
         self.bridge.side_effect = BrowserBridgeError("lost")
         with patch.object(native, "SETTLE_DEADLINE_S", 0):
