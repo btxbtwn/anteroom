@@ -408,14 +408,17 @@ final class AnteroomAPI: Sendable {
 
     // MARK: Photos
 
-    func photos(listingID: String) async throws -> [ListingPhoto] {
-        try await decode(request("GET", "api/conversations/\(listingID)/photos"))
+    /// The item's photos, or with `marketplace` the photos added on that form only.
+    func photos(listingID: String, marketplace: String? = nil) async throws -> [ListingPhoto] {
+        try await decode(request("GET", "api/conversations/\(listingID)/photos",
+                                 query: marketplace.map { [URLQueryItem(name: "marketplace", value: $0)] } ?? []))
     }
 
     /// Uploads JPEG bytes. The server re-encodes, strips metadata and limits
     /// size. Like the hosted web app, uploads go to drafts only.
-    func uploadPhoto(listingID: String, jpeg: Data) async throws -> ListingPhoto {
-        var upload = try await request("POST", "api/drafts/\(listingID)/photos")
+    func uploadPhoto(listingID: String, jpeg: Data, marketplace: String? = nil) async throws -> ListingPhoto {
+        var upload = try await request("POST", "api/drafts/\(listingID)/photos",
+                                       query: marketplace.map { [URLQueryItem(name: "marketplace", value: $0)] } ?? [])
         upload.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
         upload.httpBody = jpeg
         return try await decode(upload)
