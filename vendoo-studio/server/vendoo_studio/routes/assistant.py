@@ -346,7 +346,9 @@ def _apply_to_listing(item: dict, db: Session) -> str | None:
             return str(refused)
         except HTTPException as refused:
             return str(refused.detail)
-        ListingRepo(db).get_revision(saved["revision_id"]).source = REVISION_SOURCE
+        saved_revision = ListingRepo(db).get_revision(saved["revision_id"])
+        assert saved_revision is not None
+        saved_revision.source = REVISION_SOURCE
         # A change the assistant wrote is not an example of how the seller edits.
         db.query(ListingCorrection).filter_by(revision_id=saved["revision_id"]).update({"source": REVISION_SOURCE})
     if "box" in to_set:

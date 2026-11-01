@@ -660,7 +660,7 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
     else:
         record({"etsy_video": {"checksum": choice["checksum"], "pending": True}})
         data = await asyncio.to_thread(video_bytes, choice)
-        name = f"{choice['id']}.{_VIDEO_EXTENSIONS.get(choice.get('mime_type'), 'mp4')}"
+        name = f"{choice['id']}.{_VIDEO_EXTENSIONS.get(choice.get('mime_type') or '', 'mp4')}"
         uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/videos", "video",
                                data={"name": name}, files={"video": (name, data, choice.get("mime_type"))}, timeout=300)
     video_id = str(uploaded.get("video_id") or "") if isinstance(uploaded, dict) else ""

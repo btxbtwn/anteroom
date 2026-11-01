@@ -589,15 +589,106 @@ final class AnteroomAPI: Sendable {
             }
             throw APIError(status: http.statusCode, message: Self.message(from: data, status: http.statusCode))
         }
-        var frames = StreamFrames()
-        for try await line in bytes.lines {
+        var finished = false
+        try await bytes.forEachFrame { frame in
             try Task.checkCancellation()
-            guard let frame = frames.accept(line) else { continue }
             if frame.event == "error" { throw APIError(status: 0, message: frame.data) }
-            if frame.data == "[DONE]" { return }
+            if frame.data == "[DONE]" {
+                finished = true
+                return false
+            }
             await receive(frame)
+            return true
         }
-        throw APIError(status: 0, message: "The connection ended. Reconnect to check your draft before trying again.")
+        if !finished {
+            throw APIError(status: 0, message: "The connection ended. Reconnect to check your draft before trying again.")
+        }
+    }
+
+    // MARK: Business assistant
+
+    func assistantThreads() async throws -> [AssistantThread] {
+        try await decode(request("GET", "api/assistant/threads"))
+    }
+
+    func createAssistantThread() async throws -> AssistantThread {
+        try await decode(request("POST", "api/assistant/threads"))
+    }
+
+    func deleteAssistantThread(_ id: String) async throws {
+        _ = try await send(request("DELETE", "api/assistant/threads/\(id)"))
+    }
+
+    func assistantMessages(thread: String) async throws -> [AssistantTurn] {
+        try await decode(request("GET", "api/assistant/messages", query: [URLQueryItem(name: "thread_id", value: thread)]))
+    }
+
+    /// Ask in a conversation and follow the answer. The server keeps writing it
+    /// if this connection drops; `resumeAssistant` picks it back up. Returns the
+    /// assistant's own error, if it reported one. A refusal throws an APIError
+    /// with the HTTP status; any other error is a dropped connection.
+    func askAssistant(_ text: String, attachments: [ChatAttachment], thread: String,
+                      receive: @MainActor @Sendable (StreamFrame) -> Void) async throws -> String? {
+        struct Body: Encodable {
+            let text: String
+            let attachments: [ChatAttachment]
+            let threadID: String
+            enum CodingKeys: String, CodingKey { case text, attachments; case threadID = "thread_id" }
+        }
+        return try await followAssistant(request("POST", "api/assistant/messages",
+                                                 json: Body(text: text, attachments: attachments, threadID: thread)), receive: receive)
+    }
+
+    /// Follow the answer in progress from its start; ends at once when there is none in this conversation.
+    func resumeAssistant(thread: String, receive: @MainActor @Sendable (StreamFrame) -> Void) async throws -> String? {
+        try await followAssistant(request("POST", "api/assistant/messages/resume",
+                                          query: [URLQueryItem(name: "thread_id", value: thread)]), receive: receive)
+    }
+
+    /// Stop the answer in progress; what it had written is kept.
+    func stopAssistant() async throws {
+        _ = try await send(request("POST", "api/assistant/messages/stop"))
+    }
+
+    func applyAssistantChanges(_ messageID: String) async throws -> AssistantTurn {
+        try await decode(request("POST", "api/assistant/messages/\(messageID)/changes/apply"))
+    }
+
+    func dismissAssistantChanges(_ messageID: String) async throws -> AssistantTurn {
+        try await decode(request("POST", "api/assistant/messages/\(messageID)/changes/dismiss"))
+    }
+
+    func confirmAssistantAutomation(_ messageID: String) async throws -> AssistantTurn {
+        try await decode(request("POST", "api/assistant/messages/\(messageID)/automation/confirm"))
+    }
+
+    func dismissAssistantAutomation(_ messageID: String) async throws -> AssistantTurn {
+        try await decode(request("POST", "api/assistant/messages/\(messageID)/automation/dismiss"))
+    }
+
+    private func followAssistant(_ request: URLRequest, receive: @MainActor @Sendable (StreamFrame) -> Void) async throws -> String? {
+        var upload = request
+        upload.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        upload.timeoutInterval = 300
+        let (bytes, response) = try await session.bytes(for: upload)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard (200..<300).contains(http.statusCode) else {
+            var data = Data()
+            for try await byte in bytes {
+                if data.count >= 65536 { break }
+                data.append(byte)
+            }
+            throw APIError(status: http.statusCode, message: Self.message(from: data, status: http.statusCode))
+        }
+        var failure: String?
+        // The answer ends when the server closes the stream.
+        try await bytes.forEachFrame { frame in
+            try Task.checkCancellation()
+            if frame.data == "[DONE]" { return false }
+            if frame.event == "error" { failure = frame.data } else { await receive(frame) }
+            return true
+        }
+        return failure
     }
 
     // MARK: Shared listing history

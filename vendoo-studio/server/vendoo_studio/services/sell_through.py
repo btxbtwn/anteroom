@@ -288,7 +288,7 @@ def _discount_is_evidence(
 _CACHE_LIMIT = 4
 # Keyed weakly on the engine, so a workspace that goes away takes its evidence
 # with it and no two databases can ever collide on a recycled key.
-_outcome_cache: weakref.WeakKeyDictionary[Any, tuple[tuple, list[SoldOutcome]]] = (
+_outcome_cache: weakref.WeakKeyDictionary[Any, tuple[tuple | None, list[SoldOutcome]]] = (
     weakref.WeakKeyDictionary()
 )
 # SQLite binds each id in an IN clause as its own variable; older builds stop

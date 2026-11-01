@@ -726,6 +726,7 @@ def _visible(reply: str) -> str:
         return ""
     if opening.startswith("```"):
         tag = re.match(r"```[ \t]*([A-Za-z_]*)", opening)
+        assert tag is not None  # opening starts with the matched fence.
         language = tag.group(1).lower()
         settled = len(opening) > tag.end()
         # A reply that opens with a bare fence or a lookup is held whole until it ends.

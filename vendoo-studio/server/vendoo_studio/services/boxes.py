@@ -261,7 +261,9 @@ def _totals(entries: list[tuple[SourceBox, list[AnalyticsItem]]], now: datetime)
 def _sellable(entries: list[tuple[SourceBox, list[AnalyticsItem]]]) -> int | None:
     """Sellable pieces across the boxes, when every box's count is known."""
     counts = [box.sellable for box, _items in entries]
-    return sum(counts) if counts and all(count is not None for count in counts) else None
+    if not counts or any(count is None for count in counts):
+        return None
+    return sum(count for count in counts if count is not None)
 
 
 def _sell_through_by_age(entries: list[tuple[SourceBox, list[AnalyticsItem]]], now: datetime) -> list[dict[str, Any]]:

@@ -66,6 +66,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/Automations/AutomationModels.swift Tests/AutomationTests.swift -o "$RUNNER_TEMP/automation-tests"
           "$RUNNER_TEMP/automation-tests"
+      - name: Test business assistant contract and wording
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/API/AssistantModels.swift Sources/Automations/AutomationModels.swift Sources/Assistant/BusinessAssistantModels.swift Tests/BusinessAssistantTests.swift -o "$RUNNER_TEMP/business-assistant-tests"
+          "$RUNNER_TEMP/business-assistant-tests"
       - name: Test appearance preference contract
         run: |
           xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"

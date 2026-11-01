@@ -120,7 +120,9 @@ def _note_statement(state):
 def _publish_changes(session):
     session.flush()
     topics = session.info.pop("changed_topics", None)
-    if not topics:
+    # A Mac moving into the account writes in hundreds of batches; it
+    # announces once when it finishes instead (account_import.finish).
+    if not topics or session.info.get("quiet_changes"):
         return
     # Sorted so concurrent commits lock feed rows in the same order.
     rows = [{"user_id": session.user_id, "topic": topic, "changed_at": func.now()} for topic in sorted(topics)]

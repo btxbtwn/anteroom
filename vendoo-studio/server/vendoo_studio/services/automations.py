@@ -896,7 +896,7 @@ def _normalize_actions(actions: list, schedule: dict | None = None) -> list[dict
         kind = str(raw.get("type") or "").lower()
         if kind not in ACTION_ORDER:
             raise AutomationError(f"Unknown action {kind or '(blank)'}.")
-        action = {"type": kind}
+        action: dict[str, object] = {"type": kind}
         if kind == "price":
             mode = str(raw.get("mode") or "").lower()
             if mode not in {"amount", "percent"}:

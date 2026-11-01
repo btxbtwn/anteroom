@@ -6,6 +6,27 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.633 — 2026-11-01
+
+- Moving your Mac into your account copies photos faster: they shrink to web size first and upload a few at a time. A photo that can't be read is left out and listed in the summary, instead of stopping the move.
+
+## 0.1.632 — 2026-11-01
+
+- Moving your Mac into your account no longer makes your other devices reload over and over. They update once, when the move finishes.
+
+## 0.1.631 — 2026-11-01
+
+- Your account now takes photos up to 50 megapixels, like full-size camera photos, so moving your Mac no longer stops at one. Large photos also upload faster.
+
+## 0.1.630 — 2026-11-01
+
+- Keep stock counts working when an older saved listing has no date.
+- Make internal checks stricter about missing listing details and account values.
+
+## 0.1.629 — 2026-11-01
+
+- The bulk marketplace and share or offer dialogs, the bulk upload box picker and the setup guide's provider picker now use Anteroom's own menus, radio buttons and checkboxes, so they look and work like the rest of the app.
+
 ## 0.1.628 — 2026-11-01
 
 - Menus, checkboxes and choices in the eBay tools, marketplace imports, eBay offers and the sharing and offer rules now match the rest of the app.

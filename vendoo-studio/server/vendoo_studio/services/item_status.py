@@ -72,7 +72,9 @@ def _quantities(db: Session, conv_ids: set[str] | None, first_sales: dict[str, d
     first_sales = first_sales or {}
     best: dict[str, int] = {}
 
-    def add(conv_id, value, created_at):
+    def add(conv_id: str, value: int | None, created_at: datetime | None):
+        if value is None:
+            return
         try:
             number = int(value)
         except (TypeError, ValueError):
@@ -80,7 +82,8 @@ def _quantities(db: Session, conv_ids: set[str] | None, first_sales: dict[str, d
         if number < 1:
             return
         first_sale = first_sales.get(conv_id)
-        if first_sale is None or _time(created_at) <= first_sale or number > best.get(conv_id, 0):
+        when = _time(created_at)
+        if first_sale is None or (when is not None and when <= first_sale) or number > best.get(conv_id, 0):
             best[conv_id] = number
 
     # This scalar is recorded on each immutable revision. JSON extraction here
@@ -116,7 +119,8 @@ def paid_lines(db: Session, conv_ids: set[str] | None = None) -> dict[str, list[
         query = query.filter(MarketplaceSale.conversation_id.in_(conv_ids))
     grouped: dict[str, list[MarketplaceSale]] = {}
     for line in query.all():
-        grouped.setdefault(line.conversation_id, []).append(line)
+        if line.conversation_id is not None:
+            grouped.setdefault(line.conversation_id, []).append(line)
     return grouped
 
 

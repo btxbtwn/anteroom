@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal, overload
 
 
 class ProviderUnavailable(RuntimeError):
@@ -23,7 +25,16 @@ class HostedProvider:
         self.vision_model = provider.vision_model
         self.listing_model = provider.listing_model
 
-    def __getattr__(self, name):
+    @overload
+    def __getattr__(self, name: Literal['test_connection']) -> Callable[..., Awaitable[bool]]: ...
+
+    @overload
+    def __getattr__(self, name: Literal['web_search']) -> Callable[[list[dict]], Awaitable[dict]]: ...
+
+    @overload
+    def __getattr__(self, name: str) -> Callable[..., Any]: ...
+
+    def __getattr__(self, name: str) -> Callable[..., Any]:
         if name not in self._operations:
             raise AttributeError(name)
         operation = getattr(self._provider, name)
