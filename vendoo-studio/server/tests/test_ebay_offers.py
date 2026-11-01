@@ -114,8 +114,7 @@ def offers(tmp_path, monkeypatch, ebay_server):
     monkeypatch.setattr(ebay_offers, "SessionLocal", sessions)
     monkeypatch.setattr(ebay_api, "access_token", AsyncMock(return_value="test-token"))
     monkeypatch.setattr(ebay_api, "API_URL", ebay_server[0])
-    monkeypatch.setattr(ebay_offers, "_last_error", None)
-    monkeypatch.setattr(ebay_offers, "_last_check", None)
+    monkeypatch.setattr(ebay_offers, "_checks", {})
 
     def get_test_db():
         with sessions() as session:
