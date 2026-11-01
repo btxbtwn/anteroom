@@ -1,1 +1,0 @@
-- A cleaner, more consistent look across Anteroom: every page uses the same tabs, headings and cards, marketplace colors appear only in their logos, missing figures no longer show in large type, Automations uses proper checkboxes and menus with real marketplace names, and drafts in the sidebar are no longer highlighted in orange.

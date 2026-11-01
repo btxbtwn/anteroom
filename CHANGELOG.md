@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.620 — 2026-11-01
+
+- A cleaner, more consistent look across Anteroom: every page uses the same tabs, headings and cards, marketplace colors appear only in their logos, missing figures no longer show in large type, Automations uses proper checkboxes and menus with real marketplace names, and drafts in the sidebar are no longer highlighted in orange.
+
 ## 0.1.619 — 2026-11-01
 
 - Accounts now use an email and password. Create an account on the web, confirm your email, then sign in anywhere. Forgot your password? Reset it by email. If you used to sign in by email link, choose Forgot password once to set a password.
