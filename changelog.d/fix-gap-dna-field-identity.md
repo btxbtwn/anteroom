@@ -1,0 +1,1 @@
+- eBay draft repair no longer repeats an optional-field value that already failed or sends duplicate repairs for the same field.
