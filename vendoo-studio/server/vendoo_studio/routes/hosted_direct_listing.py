@@ -34,9 +34,9 @@ for path, handler, methods in (
 
 
 @router.get(PREFIX + '/native-marketplaces/preflight')
-async def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
-                    sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db)):
-    return await native_marketplaces.preflight(conv_id, sellwild_category_id, sellwild_condition_id, db)
+def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
+              sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db)):
+    return native_marketplaces.preflight(conv_id, sellwild_category_id, sellwild_condition_id, db)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/list')
