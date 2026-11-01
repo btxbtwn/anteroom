@@ -23,9 +23,9 @@ class BrowserBridgeError(RuntimeError):
 
 
 def _manager():
-    from vendoo_studio.services.extension_connection import extension_manager
+    from vendoo_studio.services.extension_connection import current_extension
 
-    return extension_manager
+    return current_extension()
 
 
 def _require_draft(job) -> None:

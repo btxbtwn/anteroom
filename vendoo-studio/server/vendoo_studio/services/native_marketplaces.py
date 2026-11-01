@@ -41,7 +41,6 @@ from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRe
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, marketplace_media
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
-from vendoo_studio.services.chrome_bridge import expected_extension_build
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
 from vendoo_studio.services.sellwild_listing import chosen, sellwild_catalog, suggest_sellwild
 
@@ -346,7 +345,7 @@ def _plan(marketplace: str, kind: str, record: dict, revision_id: str) -> list[s
 
 
 async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -> tuple[dict, list]:
-    from vendoo_studio.services.extension_connection import extension_manager
+    from vendoo_studio.services.extension_connection import marketplace_actions_refusal
     from vendoo_studio.services import activity
     from vendoo_studio.services.streaming import active_generation
 
@@ -387,11 +386,8 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
             await EbayClient.connect()
         except SignInRequired as exc:
             raise NativeMarketplaceError(409, "Connect eBay in Settings → Connections before listing.") from exc
-    else:
-        if not extension_manager.connected:
-            raise NativeMarketplaceError(409, "Connect Chrome first.")
-        if getattr(extension_manager, "build", None) != expected_extension_build():
-            raise NativeMarketplaceError(409, "Connect Chrome to load the current Anteroom Bridge before continuing.")
+    elif refusal := marketplace_actions_refusal():
+        raise NativeMarketplaceError(409, refusal)
     photos, warning = _photos(db, conv_id, snapshot, marketplace)
     snapshot["_approved_photo_warning"] = warning
     return snapshot, photos
@@ -614,10 +610,10 @@ def _result_context(db: Session, conv_id: str, marketplace: str, record: dict, s
 
 async def _send_cancel(operation_id: str) -> None:
     from vendoo_studio.models.protocol import ProtocolMessage
-    from vendoo_studio.services.extension_connection import extension_manager
+    from vendoo_studio.services.extension_connection import current_extension
 
     # Chrome journals the action under its operation id, so that is what it cancels.
-    await extension_manager.send_message(ProtocolMessage(
+    await current_extension().send_message(ProtocolMessage(
         type="job.cancel", job_id=operation_id, payload={"job_id": operation_id},
     ).model_dump(mode="json"))
 
@@ -821,7 +817,7 @@ async def _read_result(db: Session, conv_id: str, marketplace: str, record: dict
 
 async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body: CheckRequest | None = None) -> dict:
     """Read-only: ask the marketplace what the last action did, and record it."""
-    from vendoo_studio.services.extension_connection import extension_manager, schedule_advance_job_queue
+    from vendoo_studio.services.extension_connection import current_extension, schedule_advance_job_queue
 
     _conversation(db, conv_id)
     record = _record(db, conv_id, marketplace)
@@ -829,7 +825,7 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
         raise NativeMarketplaceError(409, "No marketplace action to check.")
     if _running(record):
         raise NativeMarketplaceError(409, f"The {NAMES[marketplace]} action is still running. Wait for it to finish.")
-    if marketplace not in API_MARKETPLACES and not extension_manager.connected:
+    if marketplace not in API_MARKETPLACES and not current_extension().connected:
         raise NativeMarketplaceError(409, "Connect Chrome to check the result.")
     action_job = JobRepo(db).get(record["job_id"])
     snapshot = action_job.listing_snapshot if action_job and isinstance(action_job.listing_snapshot, dict) else {}

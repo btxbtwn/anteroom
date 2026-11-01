@@ -88,22 +88,12 @@ def _websocket_allowed(ws: WebSocket) -> bool:
     return host in {"127.0.0.1", "::1", "localhost"} and not origin
 
 
-class ExtensionManager:
+class ReplyWaits:
+    """Requests sent to Chrome that are waiting for its reply, by request id."""
+
     def __init__(self):
-        self.connection: WebSocket | None = None
-        self.paired = False
-        self.version: str | None = None
-        self.build: str | None = None
-        self.reload_generation: str | None = None
-        # The server's event loop, for the sourcing thread to reach Chrome through.
-        self.loop: asyncio.AbstractEventLoop | None = None
-        self._pairing_token: str | None = None
         self._waits: dict[str, asyncio.Future] = {}
         self._wait_jobs: dict[str, str] = {}
-        # Monotonic time of the last accepted pairing, kept across disconnects so
-        # a reconnect loop is visible as one.
-        self._last_handshake_at: float | None = None
-        self._duplicate_refused_at: float | None = None
 
     def register_wait(self, request_id: str, job_id: str | None = None) -> asyncio.Future:
         self.cancel_wait(request_id)
@@ -133,6 +123,23 @@ class ExtensionManager:
         for request_id, wait_job_id in list(self._wait_jobs.items()):
             if wait_job_id == job_id:
                 self.cancel_wait(request_id)
+
+
+class ExtensionManager(ReplyWaits):
+    def __init__(self):
+        self.connection: WebSocket | None = None
+        self.paired = False
+        self.version: str | None = None
+        self.build: str | None = None
+        self.reload_generation: str | None = None
+        # The server's event loop, for the sourcing thread to reach Chrome through.
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self._pairing_token: str | None = None
+        ReplyWaits.__init__(self)
+        # Monotonic time of the last accepted pairing, kept across disconnects so
+        # a reconnect loop is visible as one.
+        self._last_handshake_at: float | None = None
+        self._duplicate_refused_at: float | None = None
 
     def note_handshake(self, now: float | None = None) -> bool:
         """Record an accepted pairing. True when it is not part of a reconnect loop.
@@ -257,6 +264,19 @@ class ExtensionManager:
 
 
 extension_manager = ExtensionManager()
+
+
+def current_extension():
+    """The Chrome this work can reach: the Mac's paired Bridge, or on the web the
+    signed-in seller's own tab relaying to their Bridge."""
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    if context is None:
+        return extension_manager
+    from vendoo_studio.services.hosted_browser_relay import relay_for
+
+    return relay_for(context.seller_id)
 
 
 def _reported_reload_generation(payload: dict) -> str | None:
@@ -1338,3 +1358,21 @@ async def extension_websocket(ws: WebSocket):
         if extension_manager.connection is ws:
             extension_manager._mark_disconnected()
         db.close()
+
+
+def marketplace_actions_refusal() -> str | None:
+    """Why Chrome cannot run a marketplace action now, or None when it can."""
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    if context is not None:
+        from vendoo_studio.services.hosted_browser_relay import relay_for
+
+        return relay_for(context.seller_id).marketplace_actions_refusal()
+    from vendoo_studio.services.chrome_bridge import expected_extension_build
+
+    if not extension_manager.connected:
+        return "Connect Chrome first."
+    if getattr(extension_manager, "build", None) != expected_extension_build():
+        return "Connect Chrome to load the current Anteroom Bridge before continuing."
+    return None

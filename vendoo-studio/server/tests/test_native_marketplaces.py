@@ -61,7 +61,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.bridge = self.enterContext(patch("vendoo_studio.services.native_marketplaces.browser_bridge.request", new_callable=AsyncMock))
         self.manager = SimpleNamespace(connected=True, build="test-build", send_message=AsyncMock(return_value=True))
         self.enterContext(patch("vendoo_studio.services.extension_connection.extension_manager", self.manager))
-        self.enterContext(patch("vendoo_studio.services.native_marketplaces.expected_extension_build", return_value="test-build"))
+        self.enterContext(patch("vendoo_studio.services.chrome_bridge.expected_extension_build", return_value="test-build"))
         self.enterContext(patch("vendoo_studio.services.extension_connection.schedule_advance_job_queue"))
         self.enterContext(patch("vendoo_studio.database.SessionLocal", self.sessions))
         self.enterContext(patch.object(native, "SETTLE_POLL_S", 0))
@@ -1000,7 +1000,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertTrue(restored.json()["running"])
 
     def test_old_bridge_is_rejected_before_making_a_job(self):
-        with patch("vendoo_studio.services.native_marketplaces.expected_extension_build", return_value="new-build"):
+        with patch("vendoo_studio.services.chrome_bridge.expected_extension_build", return_value="new-build"):
             result = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(result.status_code, 409)
         self.assertFalse(JobRepo(self.db).list_all())
