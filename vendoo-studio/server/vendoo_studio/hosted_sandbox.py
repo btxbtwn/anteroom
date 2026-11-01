@@ -170,6 +170,10 @@ async def serve(port: int):
             import_seed(engine)
             local = LocalSupabase()
             os.environ["SUPABASE_SERVER_SECRET_KEY"] = local.server_key
+            # A throwaway command-signing key, so the web Save draft path is on. No
+            # installed extension trusts it; the sandbox has no Chrome to run it anyway.
+            from vendoo_studio.services.browser_commands import KEY_ENV, throwaway_key
+            os.environ[KEY_ENV] = throwaway_key()
             from vendoo_studio.hosted import create_app
             hosted = create_app('https://sandbox.invalid', session_verifier=local.verifier)
             outer = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)

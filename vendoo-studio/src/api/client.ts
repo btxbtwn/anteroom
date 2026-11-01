@@ -82,7 +82,7 @@ import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, FacebookCheck, MarketplaceListings, MarketplaceMark, SalesCheck, SellerSale, SellerSaleResult } from "./marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
+import type { ChromeDraftMarketplace, ChromeDraftStart, NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
@@ -587,6 +587,11 @@ export const api = {
     sellwildOptions: (convId: string) => request<SellwildOptions>(`/conversations/${convId}/native-marketplaces/sellwild/options`),
     saveDraft: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/draft`, {
+        method: "POST", body: JSON.stringify({ revision_id: revisionId }),
+      }),
+    /** Web app: record a Save draft and get the signed command the seller's Chrome runs. */
+    chromeDraft: (convId: string, marketplace: ChromeDraftMarketplace, revisionId: string) =>
+      request<ChromeDraftStart>(`/conversations/${convId}/native-marketplaces/${marketplace}/chrome-draft`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId }),
       }),
     list: (convId: string, marketplace: NativeMarketplace, revisionId: string, sellwild?: SellwildChoice) =>

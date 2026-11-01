@@ -1,4 +1,5 @@
-/* Browser-local site permission only. No cloud credentials or automation messages. */
+/* Browser-local site permission. No cloud credentials. The only marketplace write is a
+   server-signed Save draft (background/cloud-marketplace-drafts.js), checked here first. */
 (function () {
   const ORIGIN = 'https://myanteroom.com';
   const KEY = 'anteroom_cloud_connections';
@@ -7,7 +8,7 @@
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
   const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);
 
-  function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null } = {}) {
+  function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null, drafts = null } = {}) {
     // Serializing state changes prevents two tabs from overwriting each other's
     // session records across asynchronous chrome.storage operations.
     let tail = Promise.resolve();
@@ -22,7 +23,8 @@
     const page = sender => sender.id === api.runtime.id && Number.isInteger(sender.tab?.id)
       && sender.frameId === 0 && typeof sender.documentId === 'string'
       && site(sender.url) && site(sender.tab.url) && (!sender.origin || sender.origin === ORIGIN);
-    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: readForm ? ['poshmark.form.read'] : [] });
+    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version,
+      supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(drafts?.available() ? ['marketplace.save_draft'] : [])] });
     async function read() { return (await api.storage.session.get(KEY))[KEY] || {}; }
     async function write(records) { await api.storage.session.set({ [KEY]: records }); }
     async function closeApproval(record) {
@@ -103,16 +105,13 @@
       await write(records);
       return { ok: true };
     }
-    async function readMarketplace(message, sender) {
-      if (!readForm || !page(sender) || !UUID.test(message.accountId || '')
-          || Object.keys(message).some(key => !['type', 'action', 'accountId', 'listing'].includes(key))) return { ok: false, error_code: 'not_connected' };
-      const listing = CloudMarketplaceProtocol.listing(message.listing);
-      if (!listing) return { ok: false, error_code: 'invalid_input' };
+    // This tab's approved connection for the account, re-checked against the live document.
+    async function connected(message, sender) {
       const connection = await serial(async () => {
         const record = (await read())[sender.tab.id];
         return record?.approved && record.accountId === message.accountId ? record.connectionId : null;
       });
-      if (!connection) return { ok: false, error_code: 'not_connected' };
+      if (!connection) return null;
       async function current() {
         const record = await serial(async () => (await read())[sender.tab.id]);
         if (!record?.approved || record.accountId !== message.accountId || record.connectionId !== connection) return false;
@@ -127,6 +126,15 @@
           });
         } catch { return false; }
       }
+      return current;
+    }
+    async function readMarketplace(message, sender) {
+      if (!readForm || !page(sender) || !UUID.test(message.accountId || '')
+          || Object.keys(message).some(key => !['type', 'action', 'accountId', 'listing'].includes(key))) return { ok: false, error_code: 'not_connected' };
+      const listing = CloudMarketplaceProtocol.listing(message.listing);
+      if (!listing) return { ok: false, error_code: 'invalid_input' };
+      const current = await connected(message, sender);
+      if (!current) return { ok: false, error_code: 'not_connected' };
       if (!await current()) return { ok: false, error_code: 'account_changed' };
       // Catalog I/O stays outside the state queue so sign-out can clear the
       // permission immediately. Recheck both connection and document afterwards.
@@ -134,9 +142,27 @@
       if (!await current()) return { ok: false, error_code: 'account_changed' };
       return result;
     }
+    // A Save draft the hosted API signed for this account. The page cannot choose the
+    // action, marketplace, URLs or photos: all come from the verified command.
+    async function saveDraft(message, sender) {
+      if (!drafts?.available() || !page(sender) || !UUID.test(message.accountId || '')
+          || Object.keys(message).some(key => !['type', 'action', 'accountId', 'command'].includes(key))) return { ok: false, error_code: 'not_connected' };
+      const command = await drafts.verify(message.command, message.accountId);
+      if (!command) return { ok: false, error_code: 'invalid_command' };
+      const current = await connected(message, sender);
+      if (!current || !await current()) {
+        const recorded = await drafts.refuse(command, 'not_connected', 'Connect Chrome to your account, then save the draft again.');
+        return { ok: false, error_code: current ? 'account_changed' : 'not_connected', recorded };
+      }
+      // The save runs outside the state queue, like a form read. Once started it
+      // finishes and reports to Anteroom even if this tab disconnects.
+      return await drafts.run(command);
+    }
     return {
       handle: (message, sender) => message?.type === 'cloud.connection' && message.action === 'poshmark_form'
-        ? readMarketplace(message, sender) : serial(() => handle(message, sender)),
+        ? readMarketplace(message, sender)
+        : message?.type === 'cloud.connection' && message.action === 'marketplace_save_draft'
+          ? saveDraft(message, sender) : serial(() => handle(message, sender)),
       clear: id => serial(() => clear(id)),
       navigated: (id, change) => change.url && !site(change.url) ? serial(() => clear(id)) : Promise.resolve(),
       closedApproval: windowId => serial(async () => {
@@ -151,7 +177,7 @@
   }
   if (typeof module !== 'undefined') module.exports = { createCloudConnection, ORIGIN };
   else {
-    const bridge = createCloudConnection(chrome, { readForm: readCloudPoshmarkForm });
+    const bridge = createCloudConnection(chrome, { readForm: readCloudPoshmarkForm, drafts: cloudDrafts });
     chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (message?.type !== 'cloud.connection') return;
       bridge.handle(message, sender).then(reply).catch(() => reply({ ok: false }));

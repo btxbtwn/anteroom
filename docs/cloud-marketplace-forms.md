@@ -42,6 +42,14 @@ through completion, instead of only checking whether it was free at startup.
 Claims are released after every catalog request has settled, including failures.
 No hosted listing mutation command is exposed by this increment.
 
+## Save draft
+
+The web app's only marketplace write through Chrome is **Save draft** on
+Poshmark, Mercari and Depop (Bridge 0.2.40). Unlike the preview, its listing
+and photos come from the server, in a command the server signs for one
+operation; the page cannot change them. It claims the same per-marketplace scope
+as the Mac. See [Save draft from the web app](cloud-extension.md#save-draft-from-the-web-app-bridge-0240).
+
 ## Verification
 
 Automated tests cover strict payload contracts, connection/document/account

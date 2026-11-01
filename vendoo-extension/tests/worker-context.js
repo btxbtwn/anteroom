@@ -77,6 +77,7 @@ function loadWorker({ apiOrigin } = {}) {
     atob,
     btoa,
     TextEncoder,
+    TextDecoder,
     crypto: globalThis.crypto,
   };
   context.WebSocket.CONNECTING = 0;

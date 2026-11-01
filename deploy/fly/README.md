@@ -157,3 +157,15 @@ The hosted header offers Connect Chrome for Bridge 0.2.38 or later. This is a
 browser-local consent flow, not a server credential or a marketplace job. Users
 must load/reload the updated extension and refresh the page before connecting.
 See [the protocol and manual test](../../docs/cloud-extension.md).
+
+Save draft on Poshmark, Mercari and Depop needs the command-signing key as the
+Fly secret `ANTEROOM_COMMAND_SIGNING_KEY`, with its public key in the Bridge
+(`vendoo-extension/cloud-command-key.js`). Create both at once and stage the
+secret for the next deploy:
+
+```bash
+cd vendoo-studio && .venv/bin/python scripts/command-signing-key.py | fly secrets import --stage -a peaceful-meadowstone-6944
+```
+
+Commit the rewritten `cloud-command-key.js`. Without the secret the web app
+offers no Save draft; without the public key, the Bridge does not.

@@ -1,0 +1,2 @@
+- Save draft on Poshmark, Mercari and Depop now works from your account at myanteroom.com: connect Chrome, choose Save draft, and the draft is saved privately on the marketplace, checked, and shown on the listing. Listing still happens in the Mac app.
+- Update Anteroom Bridge and reload it in Chrome to use Save draft from the web.

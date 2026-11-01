@@ -25,6 +25,11 @@ export interface NativeDraft {
   progress?: { step: string; label: string; index: number; total: number } | null;
 }
 export type NativeDrafts = Partial<Record<NativeMarketplace, NativeDraft>>;
+/** Marketplaces the web app saves drafts on through the seller's Chrome. */
+export type ChromeDraftMarketplace = "poshmark" | "mercari" | "depop";
+/** The server's signed Save draft, relayed unread to the Chrome extension. */
+export interface SignedCommand { body: string; signature: string }
+export interface ChromeDraftStart { record: NativeDraft; command: SignedCommand }
 export interface PreflightGap { field: string; message: string; blocking: boolean }
 export interface NativePreflight {
   revision_id: string | null;

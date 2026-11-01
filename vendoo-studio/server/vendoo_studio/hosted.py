@@ -6,6 +6,7 @@ Unlike the desktop app, this starts no Chrome, Keychain or automation services.
 from __future__ import annotations
 
 import os
+import re
 import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -24,6 +25,8 @@ from vendoo_studio.services.seller_sessions import (
 )
 from vendoo_studio.version import app_version
 
+OPERATION_PHOTO = re.compile(r"/api/operations/[A-Za-z0-9-]{1,64}/photos/[A-Za-z0-9-]{1,64}")
+OPERATION_RESULT = re.compile(r"/api/operations/[A-Za-z0-9-]{1,64}/result")
 
 class SellerSessionMiddleware:
     def __init__(self, app):
@@ -37,6 +40,10 @@ class SellerSessionMiddleware:
             return
         if scope["type"] != "http" or (
             (scope["path"] in {"/api/health", "/api/auth-config"} and scope["method"] == "GET")
+            # The seller's Chrome reads a web Save draft's photos and reports its result
+            # with that operation's own token; the routes verify it (routes/hosted_browser_operations.py).
+            or (scope["method"] == "GET" and OPERATION_PHOTO.fullmatch(scope["path"]))
+            or (scope["method"] == "POST" and OPERATION_RESULT.fullmatch(scope["path"]))
             or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
                 and (scope["path"] == "/" or scope["path"].startswith("/assets/")))
         ):
@@ -180,6 +187,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(marketplaces_router)
     from vendoo_studio.routes.hosted_direct_listing import router as direct_listing_router
     app.include_router(direct_listing_router)
+    from vendoo_studio.routes.hosted_browser_operations import router as browser_operations_router
+    app.include_router(browser_operations_router)
     from vendoo_studio.routes import assistant
     app.include_router(assistant.router)
     from vendoo_studio.routes.hosted_automations import errors_router, router as automations_router

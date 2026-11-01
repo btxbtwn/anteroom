@@ -62,6 +62,10 @@ class Job(SellerOwned, Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
+    # A web Save draft that the seller's Chrome runs: the SHA-256 of its single-use
+    # operation token, cleared once Chrome reports the result, and when the token stops working.
+    operation_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    operation_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class JobEvent(SellerOwned, Base):

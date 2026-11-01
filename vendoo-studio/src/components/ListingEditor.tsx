@@ -760,7 +760,7 @@ export function StructuredEditor({
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.preflight(convId),
-    enabled: runtime.actionMarketplaces.size > 0 && nativeTab && Boolean(revisionId) && !saving,
+    enabled: (runtime.actionMarketplaces.size > 0 || Boolean(runtime.draftMarketplaces?.size)) && nativeTab && Boolean(revisionId) && !saving,
     staleTime: 15_000,
     placeholderData: (previous) => previous,
   });

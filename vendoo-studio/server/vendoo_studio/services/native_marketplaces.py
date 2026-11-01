@@ -39,7 +39,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.marketplace_listing import BUSY_STATES, UNSETTLED_STATES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, marketplace_media
+from vendoo_studio.services import browser_bridge, browser_commands, direct_preflight, etsy_listings, marketplace_media
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
 from vendoo_studio.services.chrome_bridge import expected_extension_build
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
@@ -58,6 +58,8 @@ Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild"
 InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
 API_MARKETPLACES = frozenset({"ebay", "etsy"})
 DRAFT_MARKETPLACES = frozenset({"ebay", "mercari", "depop", "etsy", "poshmark"})
+# Saved as drafts from the web app, through the seller's own Chrome (see save_draft_in_chrome).
+CHROME_DRAFT_MARKETPLACES = ("poshmark", "mercari", "depop")
 NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
 UNKNOWN = "Anteroom could not confirm what happened. Check the result before trying again."
 # How long Chrome has to answer one step, and how long a job then keeps the
@@ -124,8 +126,14 @@ def _store(db: Session, conv_id: str, marketplace: str, values: dict) -> dict:
 _CLEARED_ERROR = {"error": None, "error_code": None, "error_fields": None, "marketplace_message": None, "retry_after": None}
 
 
-def _running(record: dict) -> bool:
-    return bool(record.get("job_id")) and api_job_is_live(record["job_id"])
+def _running(db: Session, record: dict) -> bool:
+    job_id = record.get("job_id")
+    if not job_id:
+        return False
+    if api_job_is_live(job_id):
+        return True
+    # A web Save draft runs in the seller's Chrome, not here: live while its token is.
+    return record.get("state") in BUSY_STATES and browser_commands.live(JobRepo(db).get(job_id))
 
 
 # Listing steps that may run beside a listing step on another marketplace.
@@ -157,7 +165,7 @@ def _busy_message(job, marketplace: str) -> str:
 def running_marketplace(db: Session, conv_id: str) -> str | None:
     """The marketplace a direct action is running on for this item, if any."""
     for marketplace, record in MarketplaceListingRepo(db).for_conversation(conv_id).items():
-        if _running(record):
+        if _running(db, record):
             return NAMES.get(marketplace, marketplace)
     return None
 
@@ -168,7 +176,7 @@ def status(conv_id: str, db: Session) -> dict:
     records = MarketplaceListingRepo(db).for_conversation(conv_id)
     repo = JobRepo(db)
     for record in records.values():
-        record["running"] = _running(record)
+        record["running"] = _running(db, record)
         if record["running"]:
             event = repo.latest_event(record["job_id"], PROGRESS_EVENT)
             record["progress"] = event.payload if event else None
@@ -345,7 +353,10 @@ def _plan(marketplace: str, kind: str, record: dict, revision_id: str) -> list[s
     return ["publish"] if current else ["save_draft", "publish"]
 
 
-async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -> tuple[dict, list]:
+async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest, browser: str = "loopback") -> tuple[dict, list]:
+    """The prepared snapshot and photos. ``browser`` is "cloud" when the web app relays the
+    action to the seller's Chrome: there is no loopback extension to check, and no video
+    (the web app does not carry listing videos)."""
     from vendoo_studio.services.extension_connection import extension_manager
     from vendoo_studio.services import activity
     from vendoo_studio.services.streaming import active_generation
@@ -363,7 +374,11 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
     snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
     from vendoo_studio.services.listing_videos import VIDEO_MARKETPLACES, selected_video
 
-    if marketplace in VIDEO_MARKETPLACES:
+    if browser == "cloud":
+        specifics = snapshot.get(f"{marketplace}_specifics")
+        if isinstance(specifics, dict) and "videoId" in specifics:
+            snapshot[f"{marketplace}_specifics"] = {key: value for key, value in specifics.items() if key != "videoId"}
+    elif marketplace in VIDEO_MARKETPLACES:
         try:
             snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace)
         except ValueError as exc:
@@ -387,7 +402,7 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
             await EbayClient.connect()
         except SignInRequired as exc:
             raise NativeMarketplaceError(409, "Connect eBay in Settings → Connections before listing.") from exc
-    else:
+    elif browser == "loopback":
         if not extension_manager.connected:
             raise NativeMarketplaceError(409, "Connect Chrome first.")
         if getattr(extension_manager, "build", None) != expected_extension_build():
@@ -402,8 +417,12 @@ def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tupl
     return marketplace_media.photos_for(snapshot, ConversationRepo(db).get_all_photos(conv_id), marketplace)
 
 
-async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, db: Session) -> dict:
+async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, db: Session, browser: str = "loopback") -> dict:
+    """Start one action. On the Mac this process runs it; with ``browser="cloud"`` (Save draft
+    only) it returns the signed command the web page hands to the seller's Chrome."""
     name = NAMES[marketplace]
+    if browser == "cloud" and (kind != "save_draft" or marketplace not in CHROME_DRAFT_MARKETPLACES):
+        raise NativeMarketplaceError(400, f"Only Save draft on {name} runs from the web app.")
     if kind == "save_draft" and marketplace not in DRAFT_MARKETPLACES:
         raise NativeMarketplaceError(400, f"Saving a private {name} draft is not supported.")
     if kind != "save_draft" and body.confirm is not True:
@@ -418,12 +437,12 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         existing = listings.get(marketplace) or {}
         if existing.get("listing_id") and existing.get("state") != "deleted":
             raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
-    snapshot, photos = await _preflight(db, conv_id, marketplace, body)
+    snapshot, photos = await _preflight(db, conv_id, marketplace, body, browser)
     if not photos:
         raise NativeMarketplaceError(400, "Add photos before updating the live listing." if kind == "update" else "Add photos before listing.")
     from vendoo_studio.services.chrome_catalog import apply_direct_ids, apply_preview, live_preview, remember_direct_categories
 
-    preview = await live_preview(snapshot) if marketplace in {"poshmark", "depop"} else None
+    preview = await live_preview(snapshot) if marketplace in {"poshmark", "depop"} and browser == "loopback" else None
     if preview and apply_direct_ids(snapshot, preview.get("categories") or {}):
         remember_direct_categories(db, ListingRepo(db).get_revision(body.revision_id), snapshot.get("direct_category_ids") or {})
     found = apply_preview(
@@ -442,6 +461,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
                    "readiness_state_id": body.readiness_state_id or defaults.get("readiness_state_id"),
                    "return_policy_id": body.return_policy_id or defaults.get("return_policy_id"),
                    "package": body.etsy_package.model_dump() if body.etsy_package else listing_package(snapshot)}
+    token, expires_at = "", 0
     with start_gate():
         record = _record(db, conv_id, marketplace)
         if record.get("state") in UNSETTLED_STATES:
@@ -488,15 +508,84 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         except BaseException:
             approved_photos.release(snapshot)
             raise
-        claim_api_job(job.id)
+        if browser == "cloud":
+            token, expires_at = browser_commands.issue(job)
+            db.commit()
+        else:
+            claim_api_job(job.id)
         record = _store(db, conv_id, marketplace, {
             **extra, **_CLEARED_ERROR, "state": STEP_STATE[steps[0]], "action": steps[0], "job_id": job.id,
             "operation_id": job.id, "previous_revision_id": record.get("revision_id"), "revision_id": body.revision_id,
         })
     _progress(db, job.id, marketplace, steps[0], 0, len(steps))
-    _launch(run_job(job.id, conv_id, marketplace, steps, options))
     record["running"] = True
+    if browser == "cloud":
+        return {"record": record, "command": _chrome_command(job, marketplace, record, snapshot, token, expires_at)}
+    _launch(run_job(job.id, conv_id, marketplace, steps, options))
     return record
+
+
+def _chrome_command(job, marketplace: str, record: dict, snapshot: dict, token: str, expires_at: int) -> dict:
+    """The signed Save draft the web page relays to the seller's Chrome.
+
+    The same payload the Mac sends over its socket, minus the server's own
+    bookkeeping (the Storage keys of the approved copies). Photos are named by
+    ID; Chrome reads them with the token from ``/api/operations/{id}/photos/{photo_id}``.
+    """
+    from types import SimpleNamespace
+
+    from vendoo_studio.services import approved_photos
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    if context is None:
+        raise NativeMarketplaceError(409, "Save draft from the web needs a signed-in account.")
+    listing = {key: value for key, value in snapshot.items()
+               if key not in {approved_photos.KEY, "_native_video", "_approved_photo_warning"}}
+    photos = [SimpleNamespace(id=row["id"], mime_type=row["mime_type"]) for row in snapshot[approved_photos.KEY]]
+    payload = _execute_payload(marketplace, "save_draft", record, listing, photos, snapshot.get("_approved_photo_warning") or "")
+    payload.pop("video", None)
+    return browser_commands.sign({
+        "version": 1, "kind": "marketplace.save_draft", "user_id": context.seller_id,
+        "operation_id": job.id, "expires_at": expires_at, "token": token, "payload": payload,
+    })
+
+
+async def save_draft_in_chrome(conv_id: str, marketplace: str, revision_id: str, db: Session) -> dict:
+    """Web Save draft: record the action as the Mac does and return ``{record, command}``.
+
+    The page hands ``command`` to the seller's Chrome extension, which verifies the
+    signature, saves the draft, reads it back and reports to ``record_chrome_result``.
+    Only ``save_draft`` is ever signed; nothing here can publish.
+    """
+    if not browser_commands.configured():
+        raise NativeMarketplaceError(503, "Saving drafts from the web is not set up yet.")
+    return await _start(conv_id, marketplace, ListRequest(revision_id=revision_id), "save_draft", db, browser="cloud")
+
+
+def chrome_operation(db: Session, operation_id: str, token: str):
+    """The running web Save draft this token opens. Raises OperationUnauthorized otherwise."""
+    job = JobRepo(db).get(operation_id)
+    if job is None:
+        raise browser_commands.OperationUnauthorized
+    browser_commands.check(job, token)
+    marketplace = str(job.current_step or "").removeprefix("native_").removesuffix("_save_draft")
+    if job.current_step != f"native_{marketplace}_save_draft" or marketplace not in CHROME_DRAFT_MARKETPLACES:
+        raise browser_commands.OperationUnauthorized
+    return job, marketplace
+
+
+def record_chrome_result(db: Session, operation_id: str, token: str, result: dict) -> dict:
+    """Chrome's answer for a web Save draft. Applied once: the token stops working first."""
+    job, marketplace = chrome_operation(db, operation_id, token)
+    job.operation_token_hash = None
+    db.commit()
+    try:
+        stored = _apply_result(db, job.conversation_id, marketplace, job.id, "save_draft", result)
+    finally:
+        _finish_job(db, job.id, job.conversation_id, marketplace)
+    stored["running"] = False
+    return stored
 
 
 def _context(db: Session, conv_id: str, marketplace: str, body: ListRequest | None = None) -> direct_preflight.Context:
@@ -764,7 +853,7 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
 async def cancel(conv_id: str, marketplace: Marketplace, db: Session) -> dict:
     """Stop a running List or Update at its next safe point. The job keeps the slot until the work stops."""
     record = _record(db, conv_id, marketplace)
-    if not _running(record):
+    if not _running(db, record):
         raise NativeMarketplaceError(409, f"No {NAMES[marketplace]} action is running.")
     await request_cancel(db, record["job_id"], record)
     return status(conv_id, db)[marketplace]
@@ -827,7 +916,7 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
     record = _record(db, conv_id, marketplace)
     if not record.get("job_id"):
         raise NativeMarketplaceError(409, "No marketplace action to check.")
-    if _running(record):
+    if _running(db, record):
         raise NativeMarketplaceError(409, f"The {NAMES[marketplace]} action is still running. Wait for it to finish.")
     if marketplace not in API_MARKETPLACES and not extension_manager.connected:
         raise NativeMarketplaceError(409, "Connect Chrome to check the result.")
@@ -874,7 +963,7 @@ def reset(conv_id: str, marketplace: Marketplace, db: Session) -> dict:
         record = _record(db, conv_id, marketplace)
         if record.get("state") not in UNSETTLED_STATES:
             raise NativeMarketplaceError(409, f"Nothing on {NAMES[marketplace]} is waiting to be confirmed.")
-        if _running(record):
+        if _running(db, record):
             raise NativeMarketplaceError(409, f"The {NAMES[marketplace]} action is still running. Cancel it first.")
         state = "published" if record.get("action") == "update" else _resting_state(marketplace, record)
         values = {**_CLEARED_ERROR, "state": state, "etsy_pending_write": None}

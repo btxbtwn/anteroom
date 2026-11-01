@@ -3,9 +3,10 @@
 These are the desktop handlers, run in the signed-in seller's context with
 their own tokens. Every action is one the seller starts: List and Update carry
 ``confirm``, Delist names its marketplaces and carries ``confirm``, and nothing
-here runs on a timer or a retry. Etsy follows once its form is on the web;
-marketplaces reached only through Chrome (Poshmark, Mercari, Depop, Sellwild,
-Vinted) are refused until the web app can drive the seller's Chrome.
+here runs on a timer or a retry. Etsy follows once its form is on the web.
+Marketplaces reached only through Chrome (Poshmark, Mercari, Depop, Sellwild,
+Vinted) cannot list, update or delist here; Poshmark, Mercari and Depop save
+drafts through the seller's Chrome (``hosted_browser_operations.py``).
 """
 from typing import Literal
 
@@ -18,6 +19,8 @@ from vendoo_studio.services.native_marketplaces import NAMES, CheckRequest, List
 
 ACTION_MARKETPLACES = ('ebay',)
 Direct = Literal['ebay']
+# A web Save draft on these runs in the seller's Chrome; "I checked it myself" settles one left unconfirmed.
+Resettable = Literal['ebay', 'poshmark', 'mercari', 'depop']
 PREFIX = '/api/conversations/{conv_id}'
 
 router = APIRouter()
@@ -62,7 +65,7 @@ async def check_result(conv_id: str, marketplace: Direct, body: CheckRequest | N
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/reset')
-def reset(conv_id: str, marketplace: Direct, body: native_marketplaces.ResetRequest, db: Session = Depends(get_db)):
+def reset(conv_id: str, marketplace: Resettable, body: native_marketplaces.ResetRequest, db: Session = Depends(get_db)):
     return native_marketplaces.reset(conv_id, marketplace, body, db)
 
 

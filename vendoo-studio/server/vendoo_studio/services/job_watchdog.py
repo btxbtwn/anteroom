@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.models.job import ABANDONED_SEND, JobEvent, is_vendoo_api_step
 from vendoo_studio.repositories.queries import JobRepo
+from vendoo_studio.services import browser_commands
 from vendoo_studio.services.api_job_lock import api_job_is_live
 
 log = logging.getLogger("vendoo_studio.job_watchdog")
@@ -103,9 +104,10 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
         last = heard[job.id]
         quiet = moment - last if last else STALL_AFTER
         native = str(job.current_step or "").startswith("native_")
-        if native and api_job_is_live(job.id):
+        if native and (api_job_is_live(job.id) or browser_commands.live(job)):
             # A direct listing job keeps its own deadlines and must keep the slot
-            # until Chrome or the marketplace answers.
+            # until Chrome or the marketplace answers. A web Save draft runs in the
+            # seller's Chrome, so it is live until its operation token expires.
             continue
         if native and quiet >= ORPHAN_GRACE:
             error, reason = "Marketplace action interrupted. Check its result before trying again.", "native_interrupted"

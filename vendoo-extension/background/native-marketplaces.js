@@ -48,9 +48,15 @@ async function nativeWait(tabId, test, deadline) {
   throw new Error('Chrome did not confirm the marketplace navigation.');
 }
 
+// Where a job's photos come from. Anteroom on this Mac by default; a Save draft
+// started in the web app reads its approved photos from the hosted operation,
+// with that operation's own token (background/cloud-marketplace-drafts.js).
+const nativeOperationSources = new Map();
+
 // Binary video delivery is scoped to the job's selected immutable revision.
 async function nativeVideo(jobId, video, deadline) {
   if (!/^[a-f0-9-]+$/i.test(String(video.id))) throw marketplaceError('Invalid video ID.');
+  if (nativeOperationSources.has(String(jobId))) throw marketplaceError('The web app does not send listing videos.');
   let response;
   try {
     response = await fetch(`${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/videos/${encodeURIComponent(video.id)}`,
@@ -66,10 +72,13 @@ async function nativeVideo(jobId, video, deadline) {
 
 async function nativePhoto(jobId, photo, deadline = Date.now() + 30000) {
   if (!/^[a-f0-9-]+$/i.test(String(photo.id))) throw marketplaceError('Invalid photo ID.');
+  const cloud = nativeOperationSources.get(String(jobId));
+  const url = cloud ? `${cloud.origin}/api/operations/${encodeURIComponent(jobId)}/photos/${encodeURIComponent(photo.id)}`
+    : `${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/photos/${encodeURIComponent(photo.id)}`;
   let response;
   try {
-    response = await fetch(`${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/photos/${encodeURIComponent(photo.id)}`,
-      { signal: AbortSignal.timeout(Math.max(1000, Math.min(30000, deadline - Date.now()))) });
+    response = await fetch(url, { ...(cloud ? { headers: { Authorization: `Bearer ${cloud.token}` }, credentials: 'omit' } : {}),
+      signal: AbortSignal.timeout(Math.max(1000, Math.min(30000, deadline - Date.now()))) });
   } catch {
     throw marketplaceError('Anteroom could not load a listing photo in time.', { code: 'network' });
   }
@@ -170,17 +179,23 @@ async function handleNativeMarketplaceMessage(msg) {
     sendBrowserResult(msg, stored?.finished ? { finished: true, result: stored.result } : { finished: false });
     return;
   }
+  sendBrowserResult(msg, await executeNativeOperation(msg, stored));
+}
+
+// Run one journaled marketplace action and return its result. A journaled
+// operation never runs twice: its stored result, or an unconfirmed failure, comes back.
+async function executeNativeOperation(msg, stored) {
+  const operationId = String(msg.payload.operation_id);
+  const key = `native_operation_${operationId}`;
   if (stored) {
-    sendBrowserResult(msg, stored.finished ? stored.result
-      : marketplaceFailure(new Error('This action is already in progress or interrupted. Check its result.'), false));
-    return;
+    return stored.finished ? stored.result
+      : marketplaceFailure(new Error('This action is already in progress or interrupted. Check its result.'), false);
   }
   const marketplace = msg.payload.marketplace;
   const operation = claimNativeOperation(marketplace, operationId);
   if (!operation) {
-    sendBrowserResult(msg, nativeRefusal(activeJob || activePatch || nativeOperations.has('*')
-      ? 'Another automation job is running.' : `Another ${marketplaceLabel(marketplace)} action is running.`));
-    return;
+    return nativeRefusal(activeJob || activePatch || nativeOperations.has('*')
+      ? 'Another automation job is running.' : `Another ${marketplaceLabel(marketplace)} action is running.`);
   }
   try {
     const context = { marketplace: msg.payload.marketplace, action: msg.payload.action, draft_url: msg.payload.draft_url,
@@ -190,7 +205,7 @@ async function handleNativeMarketplaceMessage(msg) {
     const result = await runNativeMarketplace(msg);
     const journal = (await chrome.storage.local.get(key))[key];
     await chrome.storage.local.set({ [key]: { ...journal, finished: true, result } });
-    sendBrowserResult(msg, result);
+    return result;
   } finally { releaseNativeOperation(operation); }
 }
 

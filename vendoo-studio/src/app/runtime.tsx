@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
+import type { CloudBridge } from "../api/cloudExtension";
 
 export type WorkspaceFeature = "inventory" | "listing_fields" | "photos" | "preferences" | "generation" | "assistant" | "suggestions" | "vendoo" | "marketplace_actions" | "marketplace_sessions" | "photo_edits" | "photo_background" | "chat_attachments" | "bulk_actions" | "bulk_edit" | "bulk_copy" | "bulk_delete" | "bulk_regenerate" | "bulk_markdowns" | "catalog_categories" | "ebay_offers";
 export interface WorkspaceRuntime {
@@ -8,6 +9,10 @@ export interface WorkspaceRuntime {
   marketplaceForms: ReadonlySet<string>;
   /** Marketplaces this app can list on, update and delist from. */
   actionMarketplaces: ReadonlySet<string>;
+  /** Web app: marketplaces whose drafts it saves through the seller's Chrome (only Save draft). */
+  draftMarketplaces?: ReadonlySet<string>;
+  /** Web app in desktop Chrome: the extension transport. Absent in the Mac app's window. */
+  chrome?: CloudBridge;
   accountControls?: ReactNode;
 }
 export const desktopRuntime: WorkspaceRuntime = {

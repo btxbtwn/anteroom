@@ -75,3 +75,43 @@ describe("Poshmark form capability", () => {
     expect(c.sent).toHaveLength(2);
   });
 });
+
+describe("Save draft relay", () => {
+  const command = { body: "eyJ2IjoxfQ", signature: "s".repeat(86) };
+  it("relays the signed command unread, without session fields, and returns once Anteroom has the result", async () => {
+    const c = channel(); const bridge = cloudExtension(ACCOUNT, c.target);
+    const pending = bridge.saveDraft({ ...command, extra: "dropped" } as typeof command);
+    expect(c.sent[0].data).toMatchObject({ action: "marketplace_save_draft", accountId: ACCOUNT.id, command });
+    expect(Object.keys(c.sent[0].data.command as object)).toEqual(["body", "signature"]);
+    expect(c.sent[0].data).not.toHaveProperty("email");
+    expect(JSON.stringify(c.sent)).not.toContain("access_token");
+    c.reply({ data: { source: "anteroom-extension", version: 1, requestId: c.sent[0].data.requestId, ok: true, recorded: true } });
+    await expect(pending).resolves.toEqual({ ok: true, recorded: true });
+  });
+  it("says what to do when Chrome refused or could not report", async () => {
+    for (const [reply, message] of [
+      [{ ok: false, recorded: false, error_code: "not_connected" }, "Connect Chrome to save drafts"],
+      [{ ok: false, recorded: false, error_code: "invalid_command", error: "PRIVATE" }, "Update Anteroom Bridge"],
+      [{ ok: true, recorded: false }, "could not tell Anteroom"],
+    ] as const) {
+      const c = channel(); const pending = cloudExtension(ACCOUNT, c.target).saveDraft(command);
+      c.reply({ data: { source: "anteroom-extension", version: 1, requestId: c.sent[0].data.requestId, ...reply } });
+      await expect(pending).rejects.toThrow(message);
+    }
+    // A refusal Chrome reported is on the listing already: no error here.
+    const c = channel(); const pending = cloudExtension(ACCOUNT, c.target).saveDraft(command);
+    c.reply({ data: { source: "anteroom-extension", version: 1, requestId: c.sent[0].data.requestId, ok: false, recorded: true, error_code: "signed_out" } });
+    await expect(pending).resolves.toMatchObject({ ok: false, recorded: true });
+  });
+  it("keeps waiting for a long save, then says Chrome is still working", async () => {
+    const c = channel(); const pending = cloudExtension(ACCOUNT, c.target).saveDraft(command);
+    for (const timer of c.timers.values()) timer();
+    await expect(pending).rejects.toThrow("still working");
+  });
+  it("reports the Save draft capability alongside the form reader", async () => {
+    const c = channel(); const pending = cloudExtension(ACCOUNT, c.target).status();
+    c.reply({ data: { source: "anteroom-extension", version: 1, requestId: c.sent[0].data.requestId, ok: true, state: "connected",
+      supportedActions: ["marketplace.save_draft", "poshmark.form.read", "marketplace.list"] } });
+    await expect(pending).resolves.toMatchObject({ supportedActions: ["marketplace.save_draft", "poshmark.form.read"] });
+  });
+});

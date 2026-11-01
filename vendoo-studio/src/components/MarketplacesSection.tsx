@@ -4,7 +4,8 @@ import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, External
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, FacebookCheck, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from "../api/nativeMarketplaces";
+import type { ChromeDraftMarketplace, NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from "../api/nativeMarketplaces";
+import { SAVE_DRAFT } from "../api/cloudExtension";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
@@ -199,7 +200,10 @@ export function MarketplacesLayout({
   const runtime = useWorkspaceRuntime();
   // Which marketplaces this app can act on: all of them on the Mac, eBay on the web.
   const canAct = (marketplace: string) => runtime.actionMarketplaces.has(marketplace);
-  disabled = disabled || runtime.actionMarketplaces.size === 0;
+  // On the web, Poshmark, Mercari and Depop only save drafts, through the seller's Chrome.
+  const canDraft = (marketplace: string) => !canAct(marketplace) && Boolean(runtime.draftMarketplaces?.has(marketplace));
+  const drafting = Boolean(runtime.draftMarketplaces?.size);
+  disabled = disabled || (runtime.actionMarketplaces.size === 0 && !drafting);
   const queryClient = useQueryClient();
   const paneRef = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef(new Map<string, number>());
@@ -285,12 +289,21 @@ export function MarketplacesLayout({
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.preflight(convId),
-    enabled: runtime.actionMarketplaces.size > 0 && Boolean(revisionId),
+    enabled: (runtime.actionMarketplaces.size > 0 || drafting) && Boolean(revisionId),
     staleTime: 15_000,
     // Every save is a new revision. Keep the last answer on screen until the new one
     // arrives, so the pane above the form does not collapse and shift the form.
     placeholderData: (previous) => previous,
   });
+
+  // Whether this tab's Chrome can take a Save draft: connected, with a Bridge that offers it.
+  const chrome = runtime.chrome;
+  const chromeStatus = useQuery({ queryKey: ["chrome-bridge-status"], queryFn: () => chrome!.status(),
+    enabled: Boolean(chrome) && drafting, refetchInterval: 5000, retry: false });
+  const chromeReady = Boolean(chrome && chromeStatus.data?.ok && chromeStatus.data.state === "connected"
+    && chromeStatus.data.supportedActions?.includes(SAVE_DRAFT));
+  const chromeHint = !chrome ? "Open your account in desktop Chrome to save drafts."
+    : chromeStatus.data?.state === "connected" ? "Update Anteroom Bridge to save drafts." : "Connect Chrome to save drafts.";
 
   // Each marketplace tracks its own request, so starting one never locks the others.
   const [starting, setStarting] = useState<Partial<Record<NativeMarketplace, ActionKind>>>({});
@@ -308,6 +321,14 @@ export function MarketplacesLayout({
         return undefined;
       }
       if (!revisionId) throw new Error("Generate a listing first.");
+      if (kind === "save_draft" && canDraft(marketplace)) {
+        if (!chrome) throw new Error(chromeHint);
+        // The server records the save and signs it; Chrome saves, reads it back and reports.
+        const started = await api.nativeMarketplaces.chromeDraft(convId, marketplace as ChromeDraftMarketplace, revisionId);
+        queryClient.setQueryData<NativeDrafts>(nativeKey, (current) => ({ ...current, [marketplace]: started.record }));
+        await chrome.saveDraft(started.command);
+        return started.record;
+      }
       if (kind === "save_draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId);
       if (kind === "update") return api.nativeMarketplaces.update(convId, marketplace, revisionId);
       return api.nativeMarketplaces.list(convId, marketplace, revisionId);
@@ -444,7 +465,13 @@ export function MarketplacesLayout({
     return draft?.error_code === "rate_limited" ? secondsUntil(draft.retry_after, now) : 0;
   };
   function listable(marketplace: Marketplace, status: Status): boolean {
-    if (!NATIVE.has(marketplace) || !canAct(marketplace) || unconfirmed(marketplace)) return false;
+    return canAct(marketplace) && openToList(marketplace, status);
+  }
+  function draftable(marketplace: Marketplace, status: Status): boolean {
+    return canDraft(marketplace) && openToList(marketplace, status);
+  }
+  function openToList(marketplace: Marketplace, status: Status): boolean {
+    if (!NATIVE.has(marketplace) || unconfirmed(marketplace)) return false;
     if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || listings[marketplace]?.listing_id) return false;
     // A sold item is not listed anywhere else.
     return !soldSomewhere;
@@ -476,7 +503,21 @@ export function MarketplacesLayout({
     return NATIVE.has(marketplace) && status.tone === "live" && status.label === "Listed" && !unconfirmed(marketplace);
   }
 
+  /** The web app's row for a marketplace it saves drafts on through Chrome. Never List. */
+  function chromeDraftActions(marketplace: Marketplace, status: Status): ReactNode {
+    const m = marketplace as NativeMarketplace;
+    if (running(marketplace)) return null;
+    if (unconfirmed(marketplace)) {
+      return <Button size="xs" variant="ghost" disabled={startingOn(m)} onClick={() => void resetNow(m)}>I checked it myself…</Button>;
+    }
+    if (!draftable(marketplace, status)) return null;
+    if (!chromeReady) return <span className="text-xs text-muted-foreground">{chromeHint}</span>;
+    return <Button size="xs" variant="outline" disabled={busy || startingOn(m) || listBlocked(marketplace)}
+      onClick={() => action.mutate({ marketplace: m, kind: "save_draft" })}>{startingOn(m) ? "Saving…" : "Save draft"}</Button>;
+  }
+
   function actions(marketplace: Marketplace, status: Status): ReactNode {
+    if (canDraft(marketplace)) return chromeDraftActions(marketplace, status);
     if (!canAct(marketplace)) return <span className="text-xs text-muted-foreground">Preview</span>;
     const m = marketplace as NativeMarketplace;
     if (running(marketplace)) {
@@ -787,7 +828,7 @@ export function MarketplacesLayout({
             {(() => {
               const draft = NATIVE.has(selectedMarketplace) ? drafts[selectedMarketplace as NativeMarketplace] : undefined;
               const name = railLabel(selectedMarketplace);
-              if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "sellwild" || selectedMarketplace === "ebay") return null;
+              if (draft?.state !== "unknown" || draft.draft_url || !canAct(selectedMarketplace) || selectedMarketplace === "poshmark" || selectedMarketplace === "sellwild" || selectedMarketplace === "ebay") return null;
               return (
                 <div className="flex items-center gap-2">
                   <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the link if one was created"

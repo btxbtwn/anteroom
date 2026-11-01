@@ -21,8 +21,9 @@ from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceLis
 from vendoo_studio.models.validation import etsy_eligible, validate_listing
 from vendoo_studio.repositories import hosted_drafts
 from vendoo_studio.routes.hosted_direct_listing import ACTION_MARKETPLACES
-from vendoo_studio.services import user_settings
+from vendoo_studio.services import browser_commands, user_settings
 from vendoo_studio.services.hosted_database import get_seller_db
+from vendoo_studio.services.native_marketplaces import CHROME_DRAFT_MARKETPLACES
 from vendoo_studio.services.hosted_listing_contract import editable_listing
 from vendoo_studio.version import app_version
 
@@ -91,7 +92,11 @@ def runtime(request: Request, db=Depends(get_seller_db)):
             + (['ebay_offers'] if offers is not None and not offers.done() else []),
             'views': ['listings', 'analytics', 'settings', 'usage', 'automations', 'assistant', 'marketplaces'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay'],
             # eBay lists through its API; a restart's held slot needs the job watchdog.
-            'action_marketplaces': list(ACTION_MARKETPLACES) if watchdog is not None and not watchdog.done() else []}
+            'action_marketplaces': list(ACTION_MARKETPLACES) if watchdog is not None and not watchdog.done() else [],
+            # Save draft through the seller's Chrome: needs signed commands, and the
+            # watchdog to settle one Chrome never reports.
+            'draft_marketplaces': list(CHROME_DRAFT_MARKETPLACES)
+            if watchdog is not None and not watchdog.done() and browser_commands.configured() else []}
 
 
 @router.get('/status')

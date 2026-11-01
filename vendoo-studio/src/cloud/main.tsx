@@ -72,7 +72,9 @@ function CloudApp() {
 
 function HostedWorkspace({ session }: { session: Session }) {
   const [queryClient] = useState(createStudioQueryClient);
-  const [runtime, setRuntime] = useState<{ features: WorkspaceFeature[]; views: string[]; marketplace_forms: string[]; action_marketplaces: string[] } | null>(null);
+  const [runtime, setRuntime] = useState<{ features: WorkspaceFeature[]; views: string[]; marketplace_forms: string[]; action_marketplaces: string[]; draft_marketplaces?: string[] } | null>(null);
+  // The Mac app's window has no Chrome extension to hand a Save draft to.
+  const [chrome] = useState(() => isMacApp() ? undefined : cloudExtension({ id: session.user.id, email: session.user.email || "" }));
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
@@ -100,7 +102,7 @@ function HostedWorkspace({ session }: { session: Session }) {
   // The Mac app's window has no Chrome extension; its own Chrome connection stays with this Mac's listings.
   const controls = <div className="cloud-account">{!isMacApp() && <ChromeConnection account={{ id: session.user.id, email: session.user.email || "" }}/>}<button type="button" onClick={() => void supabase.auth.signOut({ scope: "local" }).then(({ error }) => { if (error) setError("Could not sign out. Please try again."); })}>Sign out</button></div>;
   if (!runtime) return <main className="cloud-auth" role={error ? "alert" : "status"}>{error || "Opening your workspace…"}</main>;
-  return <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(runtime.features), views: new Set(runtime.views), marketplaceForms: new Set(runtime.marketplace_forms), actionMarketplaces: new Set(runtime.action_marketplaces), accountControls: controls }}>
+  return <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(runtime.features), views: new Set(runtime.views), marketplaceForms: new Set(runtime.marketplace_forms), actionMarketplaces: new Set(runtime.action_marketplaces), draftMarketplaces: new Set(runtime.draft_marketplaces ?? []), chrome, accountControls: controls }}>
     <QueryClientProvider client={queryClient}><ToastProvider><AnchoredToastProvider>
       {error && <div role="alert">{error}</div>}<App/>
     </AnchoredToastProvider></ToastProvider></QueryClientProvider>

@@ -306,3 +306,15 @@ web they stay in the seller's own Storage folder. A `SECURITY DEFINER` function
 (`unsettled_job_owners`, revision `a6f3d1c8e925`) lets the web job watchdog find
 sellers with a running job or an unconfirmed action; each pass runs in that
 seller's context, fails jobs no process is running, and reads eBay's result.
+
+On `feat/cloud-save-draft`, Poshmark, Mercari and Depop save drafts from the
+web through the seller's own Chrome (Bridge 0.2.40). The server records the
+action exactly as the Mac does and signs a `save_draft` command for that one
+operation; the page relays it, the Bridge verifies the signature, runs the
+Mac's native save, reads the draft back, and reports the result to the server
+with the operation's single-use token (revision `c7e2a9f4b18d` stores its hash
+on the job and adds `browser_operation_owner`). The runtime's
+`draft_marketplaces` says which rows offer it. A save Chrome never reports is
+left **Unconfirmed** when its token expires; nothing retries it. List, Update,
+Delist and Check on these marketplaces stay in the Mac app, and video is not
+sent. See [cloud-extension.md](cloud-extension.md#save-draft-from-the-web-app-bridge-0240).

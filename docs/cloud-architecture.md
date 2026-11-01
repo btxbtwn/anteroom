@@ -83,8 +83,9 @@ same shape.
   Supabase. Polling gives way to Realtime subscriptions.
 - **Desktop Chrome** will connect the hosted web app directly to the installed
   extension for seller-approved marketplace form work in that browser. This
-  [browser connection and consent](cloud-extension.md) are available; marketplace
-  command contracts and approval/concurrency checks remain before actions ship.
+  [browser connection and consent](cloud-extension.md) are available, and Save
+  draft on Poshmark, Mercari and Depop runs through it with server-signed
+  commands; the other actions need their own contracts before they ship.
   A Mac worker is needed only for desktop capabilities kept in the Mac app or
   for requesting that Mac’s browser work from another device.
 - **Mac app** shows the same web app in its window once the seller signs in
@@ -140,6 +141,11 @@ sign-ins on a server and trip marketplace bot checks, so it is not planned.
    as a backup.
 3. **Fills from the web app.** Reviewed Bridge command contracts, so the web
    app fills marketplace forms in the Chrome it runs in, on any computer.
+   First: **Save draft** on Poshmark, Mercari and Depop. The server signs each
+   command for one operation and seller; the Bridge verifies it, saves through
+   the Mac's native path, and reports with a single-use token
+   ([cloud-extension.md](cloud-extension.md#save-draft-from-the-web-app-bridge-0240)).
+   List and the other actions follow, each with its own contract.
 4. **Queue from the phone.** The extension pulls approved fills whenever Chrome
    is open. Every fill still needs the seller's approval and stops at a draft.
 5. **Live updates.** Supabase Realtime replaces polling.

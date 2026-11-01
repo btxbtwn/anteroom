@@ -35,7 +35,24 @@
       category_id: String(value.category_id || ''), fields };
     try { return JSON.stringify(result).length <= 6_000_000 ? result : null; } catch { return null; }
   }
-  const protocol = { listing, form };
+  // A web Save draft: the server's signed command, relayed unchanged. The worker
+  // verifies the signature; the page and content script only check its shape.
+  function command(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+        || Object.keys(value).length !== 2 || typeof value.body !== 'string' || typeof value.signature !== 'string') return null;
+    if (value.body.length > 2_000_000 || !/^[A-Za-z0-9_-]+$/.test(value.body) || !/^[A-Za-z0-9_-]{86}$/.test(value.signature)) return null;
+    return { body: value.body, signature: value.signature };
+  }
+  const DRAFT_CODES = new Set(['not_connected', 'account_changed', 'invalid_command', 'busy', 'unavailable', 'signed_out', 'challenge',
+    'rate_limited', 'missing_fields', 'rejected', 'uncertain', 'network', 'schema_drift', 'not_found']);
+  // What the page learns: whether the draft was saved and whether Anteroom has the
+  // result. The listing record on the server carries the rest.
+  function draftResult(value) {
+    const ok = value?.ok === true;
+    return { ok, recorded: value?.recorded === true,
+      ...(ok ? {} : { error_code: DRAFT_CODES.has(value?.error_code) ? value.error_code : 'unavailable' }) };
+  }
+  const protocol = { listing, form, command, draftResult };
   if (typeof module !== 'undefined') module.exports = protocol;
   else globalThis.CloudMarketplaceProtocol = protocol;
 })();
