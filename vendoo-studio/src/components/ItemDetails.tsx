@@ -95,11 +95,24 @@ function parseMeasurements(raw: unknown): Measurements {
   return out;
 }
 
+/** Keys the server and the editor write into a listing's notes besides the seller's own details. */
+const MANAGED_NOTE_KEYS = new Set([
+  "categoryOverride", "askingPrice", "titlePinned", "mergedInto", "condition", "poshmarkOriginalPrice",
+  "vendooItemId", "vendooUrl", "vendooCoverUrl", "vendooFormUpdatedAt", "vendooUpdatedAt",
+  "vendooRelistPending", "vendooMarketplaces", "vendooStatus",
+]);
+
+/** Notes saved as an object of Anteroom's keys, as opposed to seller text that happens to be JSON. */
+function isStructuredNotes(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value as object).some((key) => key in DEFAULTS || MANAGED_NOTE_KEYS.has(key));
+}
+
 export function parseNotes(notes: string | null, defaultPackageDimensions = DEFAULTS.packageDimensions): ItemDetailsData {
   if (!notes) return { ...DEFAULTS, packageDimensions: defaultPackageDimensions, measurements: parseMeasurements(null) };
   try {
     const value: unknown = JSON.parse(notes);
-    const parsed = value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).some(key => key in DEFAULTS) ? value as Omit<Partial<ItemDetailsData>, "garment"> & { garment?: string } : { sellerNotes: notes };
+    const parsed = isStructuredNotes(value) ? value as Omit<Partial<ItemDetailsData>, "garment"> & { garment?: string } : { sellerNotes: notes };
     return {
       sku: parsed.sku || "",
       sellerNotes: parsed.sellerNotes || "",
