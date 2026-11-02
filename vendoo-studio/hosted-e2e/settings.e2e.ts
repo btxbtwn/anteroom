@@ -13,4 +13,11 @@ test("on the web, Settings → Connections shows the marketplace accounts", asyn
   await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
   await expect(page.getByText("eBay").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Listing AI" })).toHaveCount(0);
+  // Chrome's marketplace sign-ins are read through this seller's tab; none is connected in the sandbox.
+  for (const name of ["Poshmark", "Mercari", "Depop", "Sellwild", "Vinted", "Facebook"]) {
+    await expect(page.locator(`#chrome-${name.toLowerCase()}`)).toContainText("Connect Chrome first");
+  }
+  await expect(page.getByText("Open Anteroom in Chrome on your computer and connect Chrome first.")).toBeVisible();
+  await page.locator("#chrome-poshmark").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "e2e/results/hosted/connections-desktop.png" });
 });

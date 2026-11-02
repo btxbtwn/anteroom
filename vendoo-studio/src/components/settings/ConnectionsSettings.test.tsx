@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ConnectionsSettings } from "./ConnectionsSettings";
+import { desktopRuntime, WorkspaceRuntimeProvider } from "../../app/runtime";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -15,7 +16,7 @@ beforeEach(() => {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => {
     if (queryKey[0] === "extension-status") return { data: { connected: true } };
     if (queryKey[0] === "marketplace-sessions") {
-      return { data: { sessions: {
+      return { isSuccess: true, data: { sessions: {
         depop: { state: "signed_in", expires_at: null, label: "ada", expiring: false },
         poshmark: { state: "signed_out", expires_at: null, label: null, expiring: false },
         mercari: { state: "expired", expires_at: 10, label: null, expiring: false },
@@ -69,5 +70,38 @@ describe("Connections settings", () => {
     const html = renderToStaticMarkup(<ConnectionsSettings />);
     expect(html).toContain("Reconnect eBay to grant it.");
     expect(html).toContain("Reconnect eBay</button>");
+  });
+
+  it("on the web, shows each Chrome marketplace's sign-in read through the seller's Chrome, without sale detection", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
+    );
+    let cursor = 0;
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted", "Facebook"]) {
+      const at = html.indexOf(name, cursor);
+      expect(at).toBeGreaterThanOrEqual(cursor);
+      cursor = at + name.length;
+    }
+    expect(html).toContain("Signed in as ada");
+    expect(html).toContain("Not signed in");
+    expect(html).toContain("Sign in again");
+    expect(html).toContain("Where the sign-in lives");
+    expect(html).not.toContain("Detect sales");
+    expect(html).not.toContain("this Mac");
+  });
+
+  it("on the web, says why Chrome's sign-ins cannot be read", () => {
+    const base = useQuery.getMockImplementation()!;
+    useQuery.mockImplementation((options: { queryKey: string[] }) => {
+      if (options.queryKey[0] === "marketplace-sessions") {
+        return { isError: true, error: new Error("Open Anteroom in Chrome on your computer and connect Chrome first.") };
+      }
+      return base(options);
+    });
+    const html = renderToStaticMarkup(
+      <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
+    );
+    expect(html).toContain("Open Anteroom in Chrome on your computer and connect Chrome first.");
+    expect(html).toContain("Connect Chrome first");
   });
 });

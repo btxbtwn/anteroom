@@ -937,13 +937,30 @@ def _public_connect(raw: object) -> dict:
     return {"ok": True, "signed_in": session["state"] == "signed_in", **session}
 
 
+async def _web_chrome(command: str, payload: dict, timeout: float) -> dict | None:
+    """On the web, ask the seller's own Chrome through their Anteroom tab; None on the Mac."""
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    if context is None:
+        return None
+    from vendoo_studio.services.hosted_browser_relay import ChromeReadError, relay_for
+
+    try:
+        return await relay_for(context.seller_id).read(command, payload, timeout)
+    except ChromeReadError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 async def marketplace_sessions():
     from types import SimpleNamespace
 
     from vendoo_studio.services import browser_bridge
 
+    raw = await _web_chrome("marketplace.sessions", {}, 25)
     try:
-        raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.sessions", {}, timeout=20)
+        if raw is None:
+            raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.sessions", {}, timeout=20)
     except browser_bridge.BrowserBridgeError as exc:
         status = 409 if "Connect Chrome" in str(exc) else 502
         raise HTTPException(status, "Connect Chrome, then check marketplace sign-in.") from exc
@@ -960,6 +977,9 @@ async def connect_marketplace(marketplace: str):
 
     if marketplace not in set(_SESSION_MARKETS):
         raise HTTPException(404, "Unknown marketplace.")
+    raw = await _web_chrome("marketplace.connect", {"marketplace": marketplace}, 45)
+    if raw is not None:
+        return _public_connect(raw)
     try:
         raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.connect", {"marketplace": marketplace}, timeout=40)
     except browser_bridge.BrowserBridgeError as exc:

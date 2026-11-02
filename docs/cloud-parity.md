@@ -351,3 +351,12 @@ and Sellwild List, Update and Delist are on the web, as on the Mac. The account
 choices the Mac reads in its private Sellwild window come from the seller's
 Chrome through one named read, `marketplace.sellwild_account`, under its own
 Bridge capability, `sellwild.account` (Bridge 0.2.43).
+
+On `feat/hosted-chrome-sessions`, Settings → Connections on the web lists
+Poshmark, Mercari, Depop, Sellwild, Vinted and Facebook under eBay and Etsy, each
+signed in, not signed in, or "Connect Chrome first", as on the Mac. The web reads
+them with `marketplace.sessions` and opens a marketplace's sign-in page in the
+seller's Chrome with `marketplace.connect` when they choose Sign in, both under
+the Bridge capability `marketplace.sessions` (Bridge 0.2.44). The status holds
+only each sign-in's state, expiry and account label, never cookies or tokens.
+Sale detection switches stay on the Mac.
