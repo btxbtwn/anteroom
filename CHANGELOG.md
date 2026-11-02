@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.670 — 2026-11-02
+
+- Open web listings with fewer separate requests for the form, photos and conversation.
+
 ## 0.1.669 — 2026-11-02
 
 - Keep the app responsive while preparing large marketplace category menus and repairing generated listing details.
