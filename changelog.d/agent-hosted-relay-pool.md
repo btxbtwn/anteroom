@@ -1,0 +1,1 @@
+- On the web, starting an eBay or Etsy sign-in, or loading their listing settings, no longer freezes Anteroom while the server is busy, and sign-in errors no longer blame the relay when the relay isn't the problem.
