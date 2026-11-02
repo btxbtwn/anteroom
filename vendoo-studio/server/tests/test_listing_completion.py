@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.catalog import CategoryNode, CategorySchema
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
@@ -37,7 +38,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         self.db = sessionmaker(bind=self.engine)()
         self.conv = ConversationRepo(self.db).create(title="Tee")
         self.listing = {"title": "Tee", "category_path": "Clothing > Tops", "platforms": ["ebay"], "ebay_specifics": {}}
-        self.revision = ListingRepo(self.db).save_revision(self.conv.id, self.listing, source="model")
+        self.revision = listing_persistence.save_revision(self.db, self.conv.id, self.listing, source="model")
         self.job = JobRepo(self.db).create(conv_id=self.conv.id, approved_revision_id=self.revision.id,
             listing_snapshot=self.listing, status="dispatched", vendoo_item_id="saved-123")
         self.verification = {"readback": True, "verified": True, "schema": {
@@ -245,7 +246,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_identical_failed_attempt_is_not_repeated(self):
         self.listing["ebay_specifics"]["Material"] = "Cotton"
-        ListingRepo(self.db).save_revision(self.conv.id, self.listing, source="user")
+        listing_persistence.save_revision(self.db, self.conv.id, self.listing, source="user")
         self.review()
         result = {"fields": [{"marketplace": "ebay", "field": "Material", "value": "Cotton"}]}
         await self.run_completion(result)
@@ -369,7 +370,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
                 "type": "Tank",
             },
         }
-        ListingRepo(self.db).save_revision(self.conv.id, self.job.listing_snapshot, source="completion")
+        listing_persistence.save_revision(self.db, self.conv.id, self.job.listing_snapshot, source="completion")
         self.review()
         await self.run_completion({})
         self.assertEqual(self.job.current_step, "filling_fields")
@@ -444,7 +445,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((event.payload or {}).get("fields")[0]["field"], "Material")
 
     async def test_changed_category_auto_repairs_then_pauses(self):
-        ListingRepo(self.db).save_revision(self.conv.id, {**self.listing, "category_path": "Clothing > Dresses"}, source="user")
+        listing_persistence.save_revision(self.db, self.conv.id, {**self.listing, "category_path": "Clothing > Dresses"}, source="user")
         self.review()
         await self.run_completion({})
         self.assertEqual(self.job.current_step, "filling_fields")
@@ -465,7 +466,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.dispatch.await_count, MAX_CATEGORY_REPAIRS)
 
     async def test_marketplace_category_mismatch_auto_repairs(self):
-        ListingRepo(self.db).save_revision(self.conv.id, {
+        listing_persistence.save_revision(self.db, self.conv.id, {
             **self.listing,
             "marketplace_categories": {"ebay": "Clothing > Dresses"},
         }, source="user")
@@ -585,7 +586,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
             reason="",
             value_preview="Cotton",
         ))
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.conv.id,
             {**self.listing, "ebay_specifics": {"material": "Cotton"}},
             source="model",
@@ -634,7 +635,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         ]))
 
     async def test_complete_job_adopts_observed_instead_of_refilling(self):
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.conv.id,
             {**self.listing, "size": "approx 10", "ebay_specifics": {"size": "approx 10"}},
             source="model",
@@ -667,7 +668,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(latest.listing_json["ebay_specifics"]["size"], "10")
 
     async def test_complete_job_keeps_user_form_size_and_refills(self):
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.conv.id,
             {**self.listing, "size": "12", "ebay_specifics": {"size": "12"}},
             source="user_form",
@@ -706,7 +707,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(latest.listing_json.get("size"), "12")
 
     async def test_known_listing_values_skip_model_pass(self):
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.conv.id,
             {**self.listing, "ebay_specifics": {"material": "Cotton"}},
             source="model",
@@ -1085,7 +1086,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         edited = {**self.listing, "description": "Seller's newer edit"}
 
         async def fill_native(*args, **kwargs):
-            ListingRepo(self.db).save_revision(conv_id, edited, source="manual")
+            listing_persistence.save_revision(self.db, conv_id, edited, source="manual")
             return self.listing
 
         with patch("vendoo_studio.services.listing_generation.SessionLocal", return_value=self.db), \

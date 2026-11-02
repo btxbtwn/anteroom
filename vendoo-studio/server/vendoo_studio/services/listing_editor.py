@@ -6,8 +6,9 @@ import copy
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.etsy_fields import etsy_eligible
-from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
+from vendoo_studio.services import listing_persistence
+from vendoo_studio.services.etsy_fields import etsy_eligible
+from vendoo_studio.services.validation import normalize_listing_dropdowns, validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
 
 CORRUPT_SPECIFIC_KEYS = (
@@ -110,7 +111,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     previous_sku = str((revisions[0].listing_json if revisions else {}).get("sku") or "").strip()
     sku = str(listing_data.get("sku") or "").strip()
 
-    revision = listing_repo.save_revision(
+    revision = listing_persistence.save_revision(listing_repo.db,
         conv_id=conv_id,
         listing_json=listing_data,
         source=source,

@@ -9,11 +9,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.catalog import CategoryFieldSchema, CategorySchema
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services.category_learn import (
     category_seed_from_vendoo_item,
     learn_category_schemas_from_item,
@@ -223,7 +224,7 @@ class SyncConversationLearnsSchemasTest(unittest.TestCase):
         Base.metadata.create_all(engine)
         self.db = sessionmaker(bind=engine)()
         self.conv = ConversationRepo(self.db).create(title="Tee")
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Tee"}, source="model")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Tee"}, source="model")
         conv = ConversationRepo(self.db).get(self.conv.id)
         conv.notes = merge_notes(conv.notes, {
             "vendooItemId": "itm1",

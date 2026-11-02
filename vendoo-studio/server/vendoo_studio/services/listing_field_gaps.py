@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.catalog import CategorySchema
 from vendoo_studio.services.category_fields import listing_category_ids, load_fields
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
@@ -330,7 +331,7 @@ async def fill_listing_field_gaps(
         if photo_fingerprint(repo.get_photos(conv_id)) != fingerprint:
             raise RevisionConflict("Photos changed while filling fields")
         try:
-            revision = listing_repo.save_revision(
+            revision = listing_persistence.save_revision(listing_repo.db,
                 conv_id, updated, source="gap_fill",
                 parent_revision_id=expected_revision_id, expected_revision_id=expected_revision_id,
             )

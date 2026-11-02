@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.cli.catalog import build_catalog_from_app
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.models.automation import AutomationRun, ItemPriceBaseline
@@ -68,7 +69,7 @@ def _item(db, *, title, price, department, category, marketplace, days, status="
     db.add(conv)
     db.commit()
     db.refresh(conv)
-    ListingRepo(db).save_revision(conv.id, {
+    listing_persistence.save_revision(db, conv.id, {
         "title": title, "price": price, "department": department,
         "category_path": category, "brand": brand,
     }, "test")
@@ -280,7 +281,7 @@ def _conversation(db, *, title, price, listed, job=True, markets=("ebay", "poshm
     db.add(conv)
     db.commit()
     db.refresh(conv)
-    ListingRepo(db).save_revision(conv.id, {
+    listing_persistence.save_revision(db, conv.id, {
         "title": title, "price": price, "department": "Men", "category_path": "Tops > T-Shirts", "brand": "Nike",
     }, "test")
     if job:
@@ -356,6 +357,35 @@ def test_a_run_drops_from_the_stored_original_and_a_second_pass_does_not(db):
     assert price == 80.0
     assert calls == []
     assert db.query(Job).filter(Job.current_step == "automation").count() == 2
+
+
+@pytest.mark.parametrize("finished_status", ["completed", "failed"])
+def test_once_schedule_recovers_a_finished_slot_without_replaying_it(db, finished_status):
+    conv = _item(db, title="Nike Men's Tee", price=40, department="Men", category="T-Shirts", marketplace="ebay", days=80)
+    created = automations.create_automation(db, {
+        "timezone": "UTC",
+        "schedule": {"kind": "once", "at": "2026-10-26T09:00"},
+        "filters": {"conversation_ids": [conv.id]},
+        "actions": [{"type": "delist"}],
+        "marketplaces": ["ebay"],
+        "activate": True,
+    }, now=NOW)
+    row = automations.get_automation(db, created["id"])
+    # A restart after the run was committed but before its schedule advanced.
+    db.add(AutomationRun(automation_id=row.id, scheduled_for=row.next_run_at, status=finished_status))
+    db.commit()
+
+    async def executor(*_args, **_kwargs):
+        pytest.fail("A finished slot must never execute again")
+
+    assert asyncio.run(tick(db, now=NOW, executor=executor)) == 0
+    db.refresh(row)
+    assert row.next_run_at is None
+    assert row.status == ("completed" if finished_status == "completed" else "paused")
+    assert db.query(AutomationRun).count() == 1
+    assert db.query(Job).count() == 0
+    assert automations.list_pending_approvals(db) == []
+    assert asyncio.run(tick(db, now=NOW + timedelta(days=1), executor=executor)) == 0
 
 
 def test_ticking_twice_does_not_run_the_same_slot_twice(db):
@@ -807,7 +837,7 @@ def test_changed_item_context_cannot_use_a_stale_marketplace_approval(db, client
     client.post(f"/api/automations/{task['id']}/run",json={})
     approval = client.get("/api/automations/approvals").json()[0]
     if change == "revision":
-        ListingRepo(db).save_revision(conv.id,{"title":"New coat","price":30},"user_form")
+        listing_persistence.save_revision(db, conv.id,{"title":"New coat","price":30},"user_form")
     elif change == "notes":
         conv.notes = '{"sku":"NEW"}'
     elif change == "photo":
@@ -836,7 +866,7 @@ def test_editing_a_photo_cannot_use_a_stale_marketplace_approval(db, client, mon
     Image.new("RGB",(40,30),"gray").save(buffer,"JPEG")
     (tmp_path/"coat.jpg").write_bytes(buffer.getvalue())
     conv = _item(db,title="Coat",price=40,department="Men",category="Coats",marketplace="ebay",days=70)
-    photo = ConversationRepo(db).add_photo(conv.id,"coat.jpg","coat.jpg","image/jpeg",len(buffer.getvalue()),checksum="c"*64,width=40,height=30)
+    photo = listing_persistence.add_photo(db, conv.id,"coat.jpg","coat.jpg","image/jpeg",len(buffer.getvalue()),checksum="c"*64,width=40,height=30)
     task = automations.create_automation(db,{"schedule":{"kind":"daily","time":"09:00"},"filters":{"conversation_ids":[conv.id]},"actions":[{"type":"delist"}],"marketplaces":["ebay"],"activate":True})
     client.post(f"/api/automations/{task['id']}/run",json={})
     approval = client.get("/api/automations/approvals").json()[0]
@@ -852,7 +882,7 @@ def test_new_proposals_supersede_old_cards_without_rewriting_them(db, client):
     task = automations.create_automation(db,{"schedule":{"kind":"daily","time":"09:00"},"filters":{"conversation_ids":[conv.id]},"actions":[{"type":"delist"}],"marketplaces":["ebay"],"activate":True})
     client.post(f"/api/automations/{task['id']}/run",json={})
     old = client.get("/api/automations/approvals").json()[0]
-    revision=ListingRepo(db).save_revision(conv.id,{"title":"Changed coat","price":35},"user_form")
+    revision=listing_persistence.save_revision(db, conv.id,{"title":"Changed coat","price":35},"user_form")
     client.post(f"/api/automations/{task['id']}/run",json={})
     new=client.get("/api/automations/approvals").json()[0]
     assert new["id"] != old["id"] and new["revision_id"] == revision.id
@@ -865,7 +895,7 @@ def test_local_regeneration_without_marketplaces_stops_at_a_saved_draft(db, clie
     calls = []
     async def regenerate(conv_id):
         calls.append(conv_id)
-        ListingRepo(db).save_revision(conv_id, {"title": "New draft", "price": 45}, "generated")
+        listing_persistence.save_revision(db, conv_id, {"title": "New draft", "price": 45}, "generated")
         return {"ok": True}
     monkeypatch.setattr("vendoo_studio.services.automation_actions._regenerate", regenerate)
     conv = _item(db, title="Coat", price=40, department="Men", category="Coats", marketplace="ebay", days=70)

@@ -135,7 +135,7 @@ def saved_as(listing: dict, to_set: dict[str, Any]) -> dict:
     marketplace form and the title, and rewrites dropdown values, so a proposal
     that sets one value can move several.
     """
-    from vendoo_studio.models.validation import normalize_listing_dropdowns
+    from vendoo_studio.services.validation import normalize_listing_dropdowns
     from vendoo_studio.services.size_audit import aligned
 
     previous = listing.get("size")

@@ -8,8 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, load_models
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.routes.sourcing import _response
 from vendoo_studio.services import box_media, box_scout, business_assistant, sourcing_boxes
 
@@ -93,7 +94,7 @@ def add_sale(db, title, category, price, cost, listed, sold_at):
         "vendooSale": {"price": price, "marketplace": "ebay", "soldAt": sold_at, "fees": round(price * 0.13, 2)},
         "vendooDates": {"listed": listed, "sold": sold_at},
     }))
-    ListingRepo(db).save_revision(conv.id, {"title": title, "price": price, "cost": cost,
+    listing_persistence.save_revision(db, conv.id, {"title": title, "price": price, "cost": cost,
                                             "category_path": f"Men > {category}"}, source="user")
 
 

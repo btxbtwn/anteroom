@@ -753,15 +753,6 @@ class RegistryService:
 
         return (value, False, f"'{trimmed}' not in known options: {valid[:5]}...")
 
-    def normalize_category(self, marketplace: str, category: str, listing: dict | None = None) -> tuple[str, bool]:
-        trimmed = (category or "").strip()
-        if marketplace != "general":
-            mapped = CATEGORY_NORMALIZATIONS.get(marketplace, {}).get(trimmed.lower())
-            if mapped:
-                return (mapped, True)
-            return (trimmed, False)
-        mapped = map_vendoo_category_path(trimmed, listing)
-        return (mapped, mapped != trimmed)
 
     def validate_dropdown_fields(
         self,
@@ -794,12 +785,6 @@ class RegistryService:
             listing[f"{marketplace}_specifics"] = specifics
         return warnings
 
-    def build_context(
-        self,
-        marketplace: str,
-        category_path: str | None = None,
-    ) -> str:
-        return self._repo.get_registry_context(marketplace, category_path)
 
     def generation_context(self, category_path: str | None = None) -> str:
         lines = [
@@ -927,16 +912,6 @@ def label_to_json_key(field_label: str) -> str:
     if not parts:
         return ""
     return parts[0] + "".join(part.capitalize() for part in parts[1:])
-
-
-def _has_value(value) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    if isinstance(value, (list, dict)):
-        return bool(value)
-    return True
 
 
 def _tokenize(text: str) -> str:

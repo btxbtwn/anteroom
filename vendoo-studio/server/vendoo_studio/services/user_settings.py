@@ -320,16 +320,6 @@ def record_vendoo_inventory_sync(finished_at: str) -> None:
     update_settings(mutator)
 
 
-def write_settings(payload: dict) -> None:
-    from vendoo_studio.services.service_context import current
-    context = current()
-    if context is not None:
-        context.settings.write(payload)
-        return
-    with _lock:
-        _write_unlocked(payload)
-
-
 def update_settings(mutator) -> dict:
     from vendoo_studio.services.service_context import current
     context = current()
@@ -431,11 +421,6 @@ def get_listing_provider_order() -> tuple[ListingProviderChoice, ListingFallback
     return primary, _other_provider(primary)
 
 
-def get_preferred_listing_provider() -> ListingProviderChoice:
-    """Compatibility alias for the primary listing provider."""
-    return get_listing_provider_order()[0]
-
-
 def set_listing_provider_order(
     primary: object,
     fallback: object | None = None,
@@ -486,12 +471,6 @@ def set_photo_provider_choice(choice: object) -> PhotoProviderChoice:
 
     update_settings(mutator)
     return cleaned  # type: ignore[return-value]
-
-
-def set_preferred_listing_provider(preferred: object) -> ListingProviderChoice:
-    """Set primary and keep the other provider as fallback."""
-    order = set_listing_provider_order(preferred, fallback=None)
-    return order["primary"]  # type: ignore[return-value]
 
 
 def _clean_cursor_model_slug(value: object) -> str | None:

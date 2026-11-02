@@ -11,13 +11,14 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import marketplace_delist
 from vendoo_studio.services.inventory_analytics import inventory_analytics, load_rows
 from vendoo_studio.services.item_status import status_for, statuses
@@ -51,7 +52,7 @@ def env(monkeypatch):
 def item(db, conv_id, *, quantity=1, notes=None, price=40, cost=5):
     db.add(Conversation(id=conv_id, title=f"Item {conv_id}", status="active", notes=json.dumps(notes or {"vendooStatus": "active"})))
     db.commit()
-    ListingRepo(db).save_revision(conv_id, {"title": "Coat", "price": price, "quantity": quantity, "cost": cost}, "user")
+    listing_persistence.save_revision(db, conv_id, {"title": "Coat", "price": price, "quantity": quantity, "cost": cost}, "user")
 
 
 def line(db, conv_id, marketplace="ebay", *, quantity=1, financials=None, order="o1", order_line=None, when=None,
@@ -145,7 +146,7 @@ def test_empty_inventory_status_does_not_query_history(env):
 def test_quantity_history_survives_large_unrelated_listing_fields(env, quantity):
     item(env.db, "tees", quantity=quantity)
     line(env.db, "tees")
-    ListingRepo(env.db).save_revision("tees", {
+    listing_persistence.save_revision(env.db, "tees", {
         "title": "Coat", "quantity": 1, "description": "Long description " * 10000,
     }, "user")
     partial = status(env.db, "tees")
@@ -158,7 +159,7 @@ def test_a_multi_unit_item_is_partly_sold_until_every_unit_sells(env):
     partial = status(env.db, "tees")
     assert (partial.status, partial.units_sold, partial.quantity, partial.partially_sold) == ("active", 1, 3, True)
     # Lowering the quantity afterwards does not make that one sale the last unit.
-    ListingRepo(env.db).save_revision("tees", {"title": "Coat", "price": 40, "quantity": 1}, "user")
+    listing_persistence.save_revision(env.db, "tees", {"title": "Coat", "price": 40, "quantity": 1}, "user")
     assert status(env.db, "tees").status == "active"
     line(env.db, "tees", quantity=2, order="b")
     assert status(env.db, "tees").status == "sold"
@@ -167,7 +168,7 @@ def test_a_multi_unit_item_is_partly_sold_until_every_unit_sells(env):
 def test_quantity_correction_before_a_direct_sale_removes_fictitious_stock(env):
     item(env.db, "corrected", quantity=10, notes={"vendooStatus": "draft"})
     MarketplaceListingRepo(env.db).save("corrected", "ebay", {"state": "published", "listing_url": EBAY_URL})
-    ListingRepo(env.db).save_revision("corrected", {"title": "Coat", "quantity": 1}, "user")
+    listing_persistence.save_revision(env.db, "corrected", {"title": "Coat", "quantity": 1}, "user")
     assert status(env.db, "corrected").quantity == 1
     line(env.db, "corrected", when=datetime.now(UTC) - timedelta(days=2))
     result = status(env.db, "corrected")
@@ -176,10 +177,10 @@ def test_quantity_correction_before_a_direct_sale_removes_fictitious_stock(env):
 
 def test_stock_increases_after_a_partial_sale_do_not_restore_an_old_mistake(env):
     item(env.db, "restocked", quantity=10)
-    ListingRepo(env.db).save_revision("restocked", {"quantity": 3}, "user")
+    listing_persistence.save_revision(env.db, "restocked", {"quantity": 3}, "user")
     line(env.db, "restocked", order="first")
-    ListingRepo(env.db).save_revision("restocked", {"quantity": 5}, "user")
-    ListingRepo(env.db).save_revision("restocked", {"quantity": 1}, "user")
+    listing_persistence.save_revision(env.db, "restocked", {"quantity": 5}, "user")
+    listing_persistence.save_revision(env.db, "restocked", {"quantity": 1}, "user")
     assert (status(env.db, "restocked").quantity, status(env.db, "restocked").units_sold) == (5, 1)
     line(env.db, "restocked", quantity=4, order="last")
     assert status(env.db, "restocked").status == "sold"
@@ -190,18 +191,18 @@ def test_cancelled_sales_do_not_freeze_an_incorrect_stock_baseline(env):
     sale = line(env.db, "cancelled")
     sale.order_status = "cancelled"
     env.db.commit()
-    ListingRepo(env.db).save_revision("cancelled", {"quantity": 1}, "user")
+    listing_persistence.save_revision(env.db, "cancelled", {"quantity": 1}, "user")
     assert status(env.db, "cancelled").quantity == 1
 
 
 def test_legacy_sold_mark_keeps_the_corrected_pre_sale_baseline(env):
     item(env.db, "legacy", quantity=10)
-    ListingRepo(env.db).save_revision("legacy", {"quantity": 3}, "user")
+    listing_persistence.save_revision(env.db, "legacy", {"quantity": 3}, "user")
     conv = env.db.get(Conversation, "legacy")
     conv.notes = json.dumps({"marketplaceMarks": {"ebay": {"state": "sold", "at": datetime.now(UTC).isoformat()}},
                              "vendooStatus": "active"})
     env.db.commit()
-    ListingRepo(env.db).save_revision("legacy", {"quantity": 1}, "user")
+    listing_persistence.save_revision(env.db, "legacy", {"quantity": 1}, "user")
     result = status(env.db, "legacy")
     assert (result.status, result.quantity, result.units_sold) == ("active", 3, 1)
 
@@ -212,7 +213,7 @@ def test_inventory_quantities_do_not_decode_historical_listing_bodies(env):
     from vendoo_studio.services.item_status import _quantities
 
     item(env.db, "tees", quantity=3)
-    ListingRepo(env.db).save_revision("tees", {"quantity": 1, "description": "x" * 100000}, "user")
+    listing_persistence.save_revision(env.db, "tees", {"quantity": 1, "description": "x" * 100000}, "user")
     item(env.db, "coat", quantity=2)
 
     # Reject a full-body SELECT even when SQLAlchemy cached its JSON decoder.

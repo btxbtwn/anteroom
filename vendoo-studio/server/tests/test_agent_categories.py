@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.catalog import CategoryTree, CategoryTreeNode
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
@@ -186,7 +187,7 @@ class AgentCategorySaveTest(unittest.IsolatedAsyncioTestCase):
         self.engine.dispose()
 
     def _save(self, listing, parent=None):
-        return self.repo.save_revision(self.conv.id, listing, source="model_refinement", parent_revision_id=parent)
+        return listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="model_refinement", parent_revision_id=parent)
 
     def _messages(self):
         return [message.text for message in ConversationRepo(self.db).get_messages(self.conv.id)]

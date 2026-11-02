@@ -359,10 +359,6 @@ def set_relay_device(device: dict):
     _set(RELAY_DEVICE_ACCOUNT, json.dumps(device))
 
 
-def delete_relay_device():
-    _delete(RELAY_DEVICE_ACCOUNT)
-
-
 def _update_json(account: str, mutate) -> None:
     """Update an encrypted map atomically without clobbering another save."""
     def change(raw):
