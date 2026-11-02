@@ -386,3 +386,13 @@ in Chrome. Vinted retains the Mac's current limitation: unverified order
 responses are reported as unreadable rather than inferred from listing status.
 The shared `marketplace_sessions` UI capability stays off until the remaining
 automation panels are ported.
+
+On `feat/hosted-chrome-promotions`, the desktop sharing and offers services are
+mounted in the hosted seller context. The seller can save rules off, explicitly
+enable them, pause them and review their own activity. Each connected seller's
+timer uses named commands under `marketplace.promotions` (Bridge 0.2.49): review,
+recent likes, a journal read, and a confirmed share or offer. The desktop
+operation lock, caps, minimums, cooldowns and no-retry journal are retained;
+unconfirmed sends pause their rule. No command lists, publishes or delists.
+The shared `marketplace_sessions` UI capability remains off until the separate
+imports and sale-detection layers are combined with these panels.

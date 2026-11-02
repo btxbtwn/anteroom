@@ -78,3 +78,23 @@ hosted API to Anteroom Bridge (`services/hosted_browser_relay.py`,
 
 A read's `error_code` is one of `signed_out`, `challenge`, `rate_limited`,
 `schema_drift` or `network`; the marketplace's own words stay in Chrome.
+
+### Hosted shares and offers (Bridge 0.2.49)
+
+All four commands require `marketplace.promotions`, a bounded non-null job ID,
+and the matching `job_id` and `request_id` in their payload. Other fields are
+rejected. Marketplace/action/listing combinations are checked: Poshmark permits
+share and offer; Mercari and Depop permit offer only.
+
+| Command | Payload besides correlation IDs | Effect |
+| --- | --- | --- |
+| `marketplace.promotion_check` | `marketplace`, `action`, `listing_id`; offers require integer `discount_percent` (1–99) | Reads current eligibility, price and shipping choices |
+| `marketplace.like_events` | `marketplace`: poshmark or depop | Reads bounded recent likes |
+| `marketplace.promotion_result` | `action_id` | Reads the Bridge's stored result; never retries |
+| `marketplace.promote` | `marketplace`, `action`, `listing_id`, `action_id`, `confirm: true`, positive integer `price_cents`, nullable `offer_price_cents`, `floor_cents`, `shipping_discount_id`; shares may include `gap_ms` (4,000–30,000) | Sends one reviewed share or offer, journaled before the write |
+
+Offers require positive integer offer and floor amounts, with offer at least
+the floor. Shares require both amounts to be null. Shipping choices are null
+or a bounded identifier, never a URL. The existing marketplace handlers check
+ownership and current conditions again. No credentials or arbitrary requests
+are accepted.

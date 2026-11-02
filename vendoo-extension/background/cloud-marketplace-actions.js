@@ -26,6 +26,12 @@ async function runCloudRead(command) {
 // The hosted API approved the action; the handlers still check its confirmation.
 async function runCloudMarketplaceCommand(command, photos) {
   if (Object.hasOwn(CLOUD_READS, command.type)) return runCloudRead(command);
+  if (command.type === 'marketplace.like_events') return readMarketplaceLikes(command.payload);
+  if (['marketplace.promotion_check', 'marketplace.promote', 'marketplace.promotion_result'].includes(command.type)) {
+    let result = null;
+    await handleMarketplacePromotion(command, value => { result = value; });
+    return result || { ok: false, error_code: 'network' };
+  }
   const jobId = String(command.job_id);
   if (command.type === 'job.cancel') {
     await cancelNativeMarketplaceOperation(String(command.payload.job_id));

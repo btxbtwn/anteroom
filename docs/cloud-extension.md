@@ -166,3 +166,21 @@ command accepts one supported marketplace and at most 2,000 settled order IDs;
 it returns normalized order lines without buyer details or credentials.
 Reads preserve seller corrections and frozen Vendoo history. A partial or
 unreadable history cannot clear older listing-only reports.
+
+Bridge 0.2.49 adds `marketplace.promotions`: bounded reads of a listing's share
+or offer eligibility, recent Poshmark/Depop likes, and an action's stored
+result; and a seller-approved share or offer on one Poshmark, Mercari or Depop
+listing. Shares are Poshmark-only. The four commands are
+`marketplace.promotion_check`, `marketplace.like_events`,
+`marketplace.promotion_result` and `marketplace.promote`. The write requires
+`confirm: true`, a named marketplace/action/listing, an action ID and reviewed
+prices and minimums. The Bridge checks the same connection, document and
+account as other relayed commands, rejects extra fields and uses the desktop
+operation lock and durable journal. A repeated action ID never sends again.
+These commands cannot list, publish, update or delist a listing.
+
+The hosted promotion timer uses each connected seller's row-secured context.
+Rules are saved off; enabling one requires the seller's confirmation. Existing
+minimums, daily caps, cooldowns and stop conditions apply. The first timer pass
+waits a full tick; interrupted or unconfirmed sends stay unknown and pause their
+rule. Disconnecting Chrome suspends checks until a capable tab reconnects.
