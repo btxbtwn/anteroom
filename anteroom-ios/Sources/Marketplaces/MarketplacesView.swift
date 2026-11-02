@@ -31,7 +31,8 @@ struct EbayWorkspaceView: View {
     @State private var showingConnection = false
 
     enum Tab: String, CaseIterable, Identifiable {
-        case dashboard = "Dashboard", inbox = "Inbox", orders = "Orders", listings = "Listings", research = "Research", activity = "Activity"
+        case dashboard = "Dashboard", inbox = "Inbox", orders = "Orders", marketing = "Marketing", listings = "Listings"
+        case research = "Research", activity = "Activity"
         var id: String { rawValue }
     }
 
@@ -110,26 +111,33 @@ struct EbayWorkspaceView: View {
                 EbayRemoteList(api: api, section: "inbox") { .conversation($0) }
             } header: { Text("Buyer conversations") } footer: { Text("Fetched directly from eBay.") }
             Section {
-                EbayRemoteList(api: api, section: "feedback")
-            } header: { Text("Feedback to leave") }
+                EbayRemoteList(api: api, section: "feedback") { .feedback($0) }
+            } header: { Text("Feedback to leave") } footer: { Text("Select a completed sale to review positive buyer feedback.") }
         case .orders:
             Section {
                 EbayRemoteList(api: api, section: "orders") { .order($0) }
-            } header: { Text("Orders") }
+            } header: { Text("Orders") } footer: {
+                Text("Select an order to review tracking or a refund. Shipping applies to all remaining unshipped items in that order.")
+            }
             Section {
                 EbayRemoteList(api: api, section: "disputes") { .dispute($0) }
-            } header: { Text("Payment disputes") } footer: { Text("Deadlines and evidence for each dispute.") }
+            } header: { Text("Payment disputes") } footer: {
+                Text("View deadlines, add evidence, and review a response before submitting it to eBay.")
+            }
+        case .marketing:
+            EbayMarketing(api: api)
         case .listings:
             Section {
                 EbayRemoteList(api: api, section: "inventory") { .offers($0) }
             } header: { Text("eBay inventory and offers") } footer: {
                 Text("To list an item on eBay, open it from Inventory and list it there, the same as every other marketplace.")
             }
+            EbayLiveListingEditor(api: api)
         case .research:
             EbayResearch(api: api)
         case .activity:
             Section {
-                EbayRemoteList(api: api, section: "activity")
+                EbayRemoteList(api: api, section: "activity") { .activity($0) }
             } header: { Text("Reviewed actions") } footer: {
                 Text("Only action IDs, fingerprints, and receipts are saved. Message text, buyer details, and image files are not kept in this journal.")
             }
@@ -330,6 +338,141 @@ private struct EbayResearch: View {
             imageRows = try await api.ebayImageSearch(jpeg, mime: "image/jpeg").rows
         } catch {
             imageError = error.localizedDescription
+        }
+    }
+}
+
+/// Edit a live fixed-price eBay listing by its item ID (ListingsPanel "Edit live listing").
+private struct EbayLiveListingEditor: View {
+    let api: AnteroomAPI
+    @State private var itemID = ""
+    @State private var listing: EbayLiveListing?
+    @State private var reading = false
+    @State private var error: String?
+
+    var body: some View {
+        Section {
+            HStack {
+                TextField("eBay item ID", text: $itemID)
+                    .keyboardType(.numberPad)
+                    .onChange(of: itemID) { listing = nil; error = nil }
+                Button("Read") { read() }
+                    .disabled(reading || itemID.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .accessibilityLabel("Read live listing")
+            }
+            if let error { Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red) }
+            if let listing {
+                EbayActionRow(api: api, action: EbayActions.revise(listing)).id(listing.id)
+            }
+        } header: {
+            Text("Edit an existing eBay listing")
+        } footer: {
+            Text("For fixed-price listings created on eBay. Changes affect the live eBay listing.")
+        }
+    }
+
+    private func read() {
+        reading = true
+        Task {
+            defer { reading = false }
+            do { listing = try await api.ebayLiveListing(itemID.trimmingCharacters(in: .whitespaces)) } catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
+/// Discounts, advertising and store emails (MarketingPanel.tsx).
+private struct EbayMarketing: View {
+    let api: AnteroomAPI
+    @State private var task = "Discounts"
+    @State private var listings: [String] = []
+    @State private var audiences: [String] = []
+
+    var body: some View {
+        Section {
+            Picker("Marketing tools", selection: $task) {
+                ForEach(["Discounts", "Advertising", "Store emails"], id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.segmented)
+        }
+        Section {
+            EbayListingPicker(api: api, selection: $listings)
+        } header: { Text("Choose listings") } footer: {
+            Text("New discounts and ads apply only to the listings you select. eBay checks seller eligibility and promotion rules.")
+        }
+        switch task {
+        case "Discounts":
+            let reason = listings.isEmpty ? "Select listings above to continue." : listings.count > 50 ? "Choose up to 50 listings per discount." : nil
+            Section {
+                EbayActionRow(api: api, action: EbayActions.markdown(listings: listings), unavailable: reason).id("markdown-\(listings)")
+                EbayActionRow(api: api, action: EbayActions.quantityDiscount(listings: listings), unavailable: reason).id("quantity-\(listings)")
+            }
+            Section("Discount promotions") { EbayRemoteList(api: api, section: "promotions") { .promotion($0) } }
+            Section("Promotion results") { EbayRemoteList(api: api, section: "promotion-reports") }
+        case "Advertising":
+            Section {
+                EbayRemoteList(api: api, section: "campaigns") { .campaign($0) }
+                EbayActionRow(api: api, action: EbayActions.campaign())
+            } header: { Text("Promoted Listings campaigns") } footer: {
+                Text("General campaigns charge an ad percentage on attributed sales. Creating a campaign does not add listings automatically.")
+            }
+            Section {
+                EbayRemoteList(api: api, section: "ad-reports") { .adReport($0) }
+            } header: { Text("Advertising results") } footer: {
+                Text("Select a completed report to see eBay's campaign metrics. Refresh while eBay generates a new report.")
+            }
+        default:
+            let reason = listings.isEmpty || listings.count > 10 ? "Select 1 to 10 listings above." : audiences.isEmpty ? "Choose at least one audience." : nil
+            Section {
+                EbayAudiencePicker(api: api, selection: $audiences)
+                EbayActionRow(api: api, action: EbayActions.storeEmail(listings: listings, audiences: audiences), unavailable: reason)
+                    .id("email-\(listings)-\(audiences)")
+            } header: { Text("Store email campaigns") } footer: {
+                Text("Store eligibility is required. Emails go to eBay's eligible opted-in audiences at the time you approve.")
+            }
+            Section("Scheduled emails") { EbayRemoteList(api: api, section: "emails") }
+        }
+    }
+}
+
+/// Who receives a store email: eBay's audiences, a page at a time.
+private struct EbayAudiencePicker: View {
+    let api: AnteroomAPI
+    @Binding var selection: [String]
+    @State private var offset = 0
+    @State private var page: EbayPage?
+    @State private var error: String?
+
+    var body: some View {
+        Group {
+            Text("\(selection.count) selected. Choose who should receive this email.").font(.footnote).foregroundStyle(.secondary)
+            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if let page {
+                ForEach(page.rows) { row in
+                    let on = selection.contains(row.id)
+                    Button {
+                        if on { selection.removeAll { $0 == row.id } } else { selection.append(row.id) }
+                    } label: {
+                        HStack {
+                            Image(systemName: on ? "checkmark.circle.fill" : "circle").foregroundStyle(on ? WorkspaceStyle.accent : .secondary)
+                            Text(row.title).foregroundStyle(.primary)
+                        }
+                    }
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+                if offset > 0 || page.nextOffset != nil {
+                    HStack {
+                        Button("Previous") { offset = max(0, offset - 25) }.disabled(offset == 0)
+                        Spacer()
+                        Button("Next") { if let next = page.nextOffset { offset = next } }.disabled(page.nextOffset == nil)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            } else if error == nil {
+                Text("Loading audiences…").font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .task(id: offset) {
+            do { page = try await api.ebayRead("audiences", offset: offset); error = nil } catch { self.error = error.localizedDescription }
         }
     }
 }
