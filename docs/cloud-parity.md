@@ -337,3 +337,11 @@ and the refresh thread carries the request's seller context. Store catalogs are
 public and stay shared. The web refreshes when the seller opens Sourcing and it
 is due; it has no background timer. The assistant's shop summary now reads the
 seller's own sourcing state on the web too.
+
+On `feat/hosted-vinted`, the Vinted tab, its Category and Brand pickers, and
+Vinted List, Update and Delist are on the web, as on the Mac. The Mac reads
+Vinted's categories and brands in its private account window; the web sends
+named, read-only commands (`marketplace.vinted_categories`,
+`marketplace.vinted_brands`) to the seller's Chrome over the same relay, under
+a new Bridge capability, `vinted.choices` (Bridge 0.2.42). Sale detection
+for Vinted stays off on the web, like the other Chrome marketplaces.
