@@ -98,12 +98,12 @@ describe("InventoryAnalyticsView", () => {
     ] });
     expect(html).toContain("2 sales need sales data");
     expect(html).toContain("Across all time");
-    expect(html).toContain("Add the missing details in Vendoo, then resync");
+    expect(html).toContain("Add missing amounts in Sales records");
     expect(render({ ...data, incomplete_sales: [
       { conversation_id: "undated", title: "Undated jacket", missing: ["sale date"] },
-    ] }, { running: false }, false, false)).toContain("Add the missing details on the listing");
+    ] }, { running: false }, false, false)).toContain("Add missing amounts in Sales records");
     expect(render(data, { running: false }, false, false)).not.toContain("Resync Vendoo data");
-    expect(render(data, { running: false }, false, false)).toContain("Sales and inventory from your listings.");
+    expect(render(data, { running: false }, false, false)).toContain("Track sales performance and find inventory that needs attention.");
     expect(html).toContain("Undated jacket");
     expect(html).toContain("Missing sale date, sale price, fees");
     expect(html).toContain("Old boots");
@@ -117,7 +117,7 @@ describe("InventoryAnalyticsView", () => {
   it("shows the weekly view and explains the sell-through percentage", () => {
     const html = render({ ...data, range: "7d" });
     expect(html).toContain("Last 7 days");
-    expect(html).toContain("7 days</button>");
+    expect(html).toContain('aria-label="Sales period"');
     expect(html).toContain("Sell-through rate");
     expect(html).toContain("66.7%");
     expect(html).toContain("Sales in this period ÷ (sales in this period + active listings today)");
@@ -150,7 +150,7 @@ describe("InventoryAnalyticsView", () => {
     expect(html).toContain("Profit margin");
     expect(html).toContain("62.5%");
     expect(html).toContain('aria-label="Chart metric"');
-    expect(html).toContain('aria-label="Rank brands by"');
+    expect(html).toContain('aria-label="Rank breakdowns by"');
     expect(html).toContain("Recorded inventory cost");
     expect(html).toContain("Listed 90+ days");
     expect(html).toContain("Review your oldest listings");
@@ -163,7 +163,7 @@ describe("InventoryAnalyticsView", () => {
 
   it("ranks sales by label with the seller's label colors", () => {
     const html = render(data);
-    expect(html).toContain('aria-label="Rank labels by"');
+    expect(html).toContain('aria-label="Rank breakdowns by"');
     expect(html).toContain("A19");
     expect(html).toContain("bg-teal-500");
     expect(html).toContain("closet");

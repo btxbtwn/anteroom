@@ -295,8 +295,6 @@ function ComboboxGroupLabel({ className, ...props }: ComboboxPrimitive.GroupLabe
 
 const ComboboxCollection = ComboboxPrimitive.Collection;
 
-const useComboboxFilter = ComboboxPrimitive.useFilter;
-
 export {
   Combobox,
   ComboboxInput,
@@ -312,5 +310,5 @@ export {
   ComboboxGroup,
   ComboboxGroupLabel,
   ComboboxCollection,
-  useComboboxFilter,
+
 };

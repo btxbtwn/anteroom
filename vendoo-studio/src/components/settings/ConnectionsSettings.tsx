@@ -402,11 +402,13 @@ const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
 function ChromeSessionRow({
   marketplace,
   chromeReady,
+  unavailable,
   salesSwitch,
   checkError,
 }: {
   marketplace: ExtensionSessionMarket;
   chromeReady: boolean;
+  unavailable?: string | null;
   salesSwitch?: ReactNode;
   checkError?: string | null;
 }) {
@@ -428,7 +430,7 @@ function ChromeSessionRow({
     onError: () => setHint(null),
   });
   const session = sessions.data?.sessions[marketplace];
-  const state = chromeSessionPresentation(session, chromeReady);
+  const state = chromeSessionPresentation(session, chromeReady, undefined, unavailable);
   const name = EXTENSION_SESSION_NAMES[marketplace];
   const error = connect.error?.message || null;
 
@@ -477,7 +479,7 @@ function HostedChromeSessions() {
   return (
     <>
       {CHROME_MARKET_ORDER.map((marketplace) => (
-        <ChromeSessionRow key={marketplace} marketplace={marketplace} chromeReady={chromeReady} />
+        <ChromeSessionRow key={marketplace} marketplace={marketplace} chromeReady={chromeReady} unavailable={sessions.error?.message} />
       ))}
       <SettingsRow
         title="Where the sign-in lives"
