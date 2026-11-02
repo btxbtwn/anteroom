@@ -9,10 +9,10 @@ from vendoo_studio.services import hosted_browser_relay
 READS = 'marketplace.actions,vinted.choices'
 
 
-def _answer(client, alice, reply):
+def _answer(client, alice, reply, capabilities=READS):
     """Act as the seller's Anteroom tab: take the next command for their Chrome and post the Bridge's reply."""
     for _ in range(20):
-        command = client.get('/api/browser-relay/next?capabilities=' + READS, headers=alice)
+        command = client.get('/api/browser-relay/next?capabilities=' + capabilities, headers=alice)
         if command.status_code == 200:
             body = command.json()
             assert client.post('/api/browser-relay/replies', headers=alice,

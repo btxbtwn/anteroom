@@ -345,3 +345,9 @@ named, read-only commands (`marketplace.vinted_categories`,
 `marketplace.vinted_brands`) to the seller's Chrome over the same relay, under
 a new Bridge capability, `vinted.choices` (Bridge 0.2.42). Sale detection
 for Vinted stays off on the web, like the other Chrome marketplaces.
+
+On `feat/hosted-sellwild`, the Sellwild tab, its category and condition choices,
+and Sellwild List, Update and Delist are on the web, as on the Mac. The account
+choices the Mac reads in its private Sellwild window come from the seller's
+Chrome through one named read, `marketplace.sellwild_account`, under its own
+Bridge capability, `sellwild.account` (Bridge 0.2.43).

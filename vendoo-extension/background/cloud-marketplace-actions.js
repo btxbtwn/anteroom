@@ -2,6 +2,7 @@
 const CLOUD_READS = {
   'marketplace.vinted_categories': async () => ({ options: await vintedCategoryOptions() }),
   'marketplace.vinted_brands': async ({ query, category }) => ({ options: await vintedBrandOptions({ query, category }) }),
+  'marketplace.sellwild_account': async () => sellwildAccountChoices(Date.now() + 25000),
 };
 const CLOUD_READ_ERRORS = new Set(['signed_out', 'challenge', 'rate_limited', 'schema_drift', 'network']);
 

@@ -142,3 +142,7 @@ content script and worker reject any other field, URL or command. The Bridge
 answers with the choices or one fixed error code, never the marketplace's own
 response, headers or cookies. Reads are GETs on the marketplace's own sell-page
 endpoints and do not claim the listing-action lock.
+
+Bridge 0.2.43 adds `marketplace.sellwild_account` under `sellwild.account`: the
+three GETs Sellwild's sell page makes for the Shipping From card, the seller's
+discounts and the profile's package, returned as those three values only.

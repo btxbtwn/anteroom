@@ -42,6 +42,7 @@
   const READS = {
     'marketplace.vinted_categories': {},
     'marketplace.vinted_brands': { query: 100, category: 1000 },
+    'marketplace.sellwild_account': {},
   };
   const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
   const MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
