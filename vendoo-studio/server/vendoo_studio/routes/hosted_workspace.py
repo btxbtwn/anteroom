@@ -50,12 +50,13 @@ def check_box(db, box_id):
             raise HTTPException(404, 'Box not found')
 
 
-def conversation_response(row, listing=None, direct=None, *, include_notes=True):
+def conversation_response(row, listing=None, direct=None, *, include_notes=True, missing_sale_data=None):
     result = {'id': row.id, 'title': row.title, 'status': row.status,
             'box_id': row.box_id, 'settled_at': row.settled_at, 'unsettled_at': row.unsettled_at,
             'created_at': row.created_at, 'updated_at': row.updated_at,
             'sku': (listing or {}).get('sku'), 'price': (listing or {}).get('price'),
-            'quantity': (listing or {}).get('quantity'), 'direct_marketplaces': direct or []}
+            'quantity': (listing or {}).get('quantity'), 'direct_marketplaces': direct or [],
+            'missing_sale_data': missing_sale_data or []}
     if include_notes:
         result['notes'] = row.notes
     return result
@@ -131,9 +132,13 @@ def list_conversations(db=Depends(get_seller_db)):
     for identity, market in db.execute(select(MarketplaceListing.conversation_id, MarketplaceListing.marketplace)
                                       .where(MarketplaceListing.state.in_(LIVE_STATES))):
         direct.setdefault(identity, []).append(market)
+    from vendoo_studio.services.sales_records import missing_by_conversation
+
+    missing = missing_by_conversation(db)
     summaries = []
     for row in rows:
-        summary = conversation_response(row, current.get(row.id), direct.get(row.id), include_notes=False)
+        summary = conversation_response(row, current.get(row.id), direct.get(row.id), include_notes=False,
+                                        missing_sale_data=missing.get(row.id, []))
         if row.id in covers:
             from vendoo_studio.services.photos import cover_thumb_url
             summary['cover_photo_url'] = cover_thumb_url(*covers[row.id])
@@ -153,7 +158,10 @@ def create_conversation(body: ConversationInput, db=Depends(get_seller_db)):
 
 @router.get('/conversations/{identity}')
 def get_conversation(identity: str, db=Depends(get_seller_db)):
-    return conversation_response(conversation(db, identity))
+    from vendoo_studio.services.sales_records import missing_by_conversation
+
+    row = conversation(db, identity)
+    return conversation_response(row, missing_sale_data=missing_by_conversation(db, identity).get(identity, []))
 
 
 @router.patch('/conversations/{identity}')
