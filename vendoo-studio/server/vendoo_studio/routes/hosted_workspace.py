@@ -279,7 +279,8 @@ def job_response(row):
 
 @router.get('/jobs')
 def jobs(conversation_id: str | None = None, db=Depends(get_seller_db)):
-    statement = select(Job)
+    # The list shows status only; each job's listing copy is tens of kilobytes.
+    statement = select(Job).options(defer(Job.listing_snapshot, raiseload=True))
     if conversation_id:
         conversation(db, conversation_id)
         statement = statement.where(Job.conversation_id == conversation_id)
