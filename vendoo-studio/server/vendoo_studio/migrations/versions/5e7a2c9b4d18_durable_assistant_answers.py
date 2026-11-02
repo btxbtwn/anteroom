@@ -1,7 +1,7 @@
 """Durable business-assistant answers in the seller's background queue
 
 Revision ID: 5e7a2c9b4d18
-Revises: a6f3d1c8e925
+Revises: d574efabc39a
 Create Date: 2026-11-02 12:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = '5e7a2c9b4d18'
-down_revision = 'a6f3d1c8e925'
+down_revision = 'd574efabc39a'
 branch_labels = None
 depends_on = None
 

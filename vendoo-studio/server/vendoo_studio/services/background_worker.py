@@ -37,6 +37,8 @@ async def _execute(task_id, token):
             db.rollback()
             return await handler(task_id, token, task)
         conversation_id, kind, payload = task.conversation_id, task.kind, task.payload
+        if conversation_id is None:
+            raise ValueError('A draft task needs its listing')
         repo = ConversationRepo(db)
         conversation = repo.get(conversation_id)
         if (conversation is None
