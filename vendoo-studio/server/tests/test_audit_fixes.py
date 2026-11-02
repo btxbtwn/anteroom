@@ -26,11 +26,9 @@ from vendoo_studio.services.validation import validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.safe_fetch import UnsafeURLError, validate_fetch_url
 from vendoo_studio.services.vendoo_import import listing_from_vendoo, merge_notes
-from extension_sources import background_source
 
 
 REPO = Path(__file__).resolve().parents[3]
-EXTENSION_DIR = REPO / "vendoo-extension"
 JPEG_BYTES = bytes([
     0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
     0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,

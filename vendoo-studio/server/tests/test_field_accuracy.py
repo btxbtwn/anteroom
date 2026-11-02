@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 
 from vendoo_studio.services.fill_log import FULL_OPTION_LIMIT, canonical_option, prompt_options
 from vendoo_studio.services.listing_field_gaps import build_missing_fields_request

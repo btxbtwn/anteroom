@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,9 +18,7 @@ from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.listing import Listing, ListingRevision  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from extension_sources import background_source
 
-EXTENSION_DIR = Path(__file__).resolve().parents[3] / "vendoo-extension"
 JPEG_BYTES = bytes([
     0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
     0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,

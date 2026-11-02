@@ -4,7 +4,6 @@ import json
 import subprocess
 import unittest
 from datetime import timedelta
-from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -17,9 +16,7 @@ from vendoo_studio.models.fill_log import FillLogEntry
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services.job_metrics import fill_success_stats, job_timing
-from extension_sources import background_source
 
-EXTENSION = Path(__file__).resolve().parents[3] / "vendoo-extension"
 
 
 def _node(script: str) -> dict:

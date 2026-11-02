@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import json
-import subprocess
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
@@ -27,9 +24,7 @@ from vendoo_studio.services.schema_probe import (
     maybe_start_schema_probe,
     should_probe,
 )
-from extension_sources import background_source
 
-EXTENSION_DIR = Path(__file__).resolve().parents[3] / "vendoo-extension"
 MEN_PATH = "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts"
 
 
