@@ -1,0 +1,1 @@
+- On the web, Sourcing now refreshes your buy list in the background every few hours, like the Mac app, without waiting for you to open the Sourcing page.

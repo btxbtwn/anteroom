@@ -40,6 +40,7 @@ from vendoo_studio.services.sold_comps import MIN_CONFIDENT_COMPS, trim_outliers
 log = logging.getLogger("vendoo_studio.box_scout")
 
 REFRESH_INTERVAL = timedelta(hours=6)
+TIMER_INTERVAL = timedelta(minutes=15)  # how often the background timer checks whether a refresh is due
 TREND_MAX_AGE = timedelta(days=7)
 RESALE_MAX_AGE = timedelta(days=7)
 RESEARCH_RETRY = timedelta(days=1)  # before searching again for a theme the marketplaces could not price
@@ -956,6 +957,20 @@ def refresh_is_due(*, now: datetime | None = None) -> bool:
     return age is None or age < timedelta(0) or age >= REFRESH_INTERVAL
 
 
+def refresh_if_due() -> bool:
+    """Refresh when one is due, unless one is already running. Returns whether it refreshed."""
+    lock = _refresh_lock()
+    if not lock.acquire(blocking=False):
+        return False
+    try:
+        if not refresh_is_due():
+            return False
+        _refresh(recrawl=True, research=True)
+        return True
+    finally:
+        lock.release()
+
+
 def start_sourcing_timer() -> threading.Thread | None:
     """Refresh on startup when one is due, then every REFRESH_INTERVAL."""
     global _timer
@@ -969,7 +984,7 @@ def start_sourcing_timer() -> threading.Thread | None:
                     refresh()
                 except Exception:
                     log.exception("Sourcing refresh failed")
-            if _timer_stop.wait(timedelta(minutes=15).total_seconds()):
+            if _timer_stop.wait(TIMER_INTERVAL.total_seconds()):
                 return
 
     _timer_stop.clear()

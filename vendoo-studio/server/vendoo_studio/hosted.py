@@ -156,7 +156,10 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         background = None
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
-            from vendoo_studio.services import background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler
+            from vendoo_studio.services import (
+                background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler,
+                hosted_sourcing_scheduler,
+            )
             from vendoo_studio.services import background_tasks as queue
             # Background work opens blocking database sessions. It gets its own
             # thread and event loop: waiting for a pooled connection on the
@@ -172,6 +175,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             offers = background.run(hosted_offer_scheduler.serve(engine))
             # Frees the marketplace slot a restart left held and reads unconfirmed results.
             watchdog = background.run(hosted_job_watchdog.serve(engine))
+            # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
+            background.run(hosted_sourcing_scheduler.serve(engine))
         app.state.background_worker = worker
         app.state.offer_scheduler = offers
         app.state.job_watchdog = watchdog

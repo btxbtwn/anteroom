@@ -111,12 +111,17 @@ def _no_sourcing_timer():
     interrupt a refresh underway, so it went on writing ``sourcing.json`` into
     whichever test's data directory was current, and that test's cleanup failed
     with "Directory not empty". Sourcing tests call ``refresh`` themselves.
+    The web app's timer starts with its background worker, so it is off too.
     """
     from unittest import mock
 
-    from vendoo_studio.services import box_scout
+    from vendoo_studio.services import box_scout, hosted_sourcing_scheduler
 
-    with mock.patch.object(box_scout, "start_sourcing_timer", return_value=None):
+    async def no_timer(_engine):
+        return None
+
+    with mock.patch.object(box_scout, "start_sourcing_timer", return_value=None), \
+            mock.patch.object(hosted_sourcing_scheduler, "serve", no_timer):
         yield
 
 
