@@ -30,7 +30,6 @@ EXTENSION_SKIP = {
     ".playwright-mcp",
     "README.md",
     "TROUBLESHOOTING.md",
-    "diagnostic-tool.js",
     "__pycache__",
     "node_modules",
     "sample-listing.json",

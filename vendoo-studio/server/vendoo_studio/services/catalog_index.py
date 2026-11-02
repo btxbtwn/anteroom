@@ -166,20 +166,7 @@ def _skill_files() -> list[Path]:
 
 def _extension_script_files() -> list[Path]:
     root = extension_source_dir()
-    paths = []
-    for rel in (
-        "content-scripts/vendoo.js",
-        "content-scripts/update-all-buttons.js",
-        "content-scripts/marketplace-colors.js",
-        "content-scripts/ebay.js",
-        "content-scripts/poshmark.js",
-        "content-scripts/mercari.js",
-        "content-scripts/depop.js",
-        "background.js",
-    ):
-        path = root / rel
-        if path.is_file():
-            paths.append(path)
+    paths = [root / "background.js"] if (root / "background.js").is_file() else []
     paths.extend(sorted((root / "background").glob("*.js")))
     return paths
 

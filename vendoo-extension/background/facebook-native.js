@@ -142,7 +142,7 @@ async function handleMarketplaceListingState(msg, reply = result => sendBrowserR
     reply(marketplaceFailure(marketplaceError('Name a Facebook listing to check.'), true));
     return;
   }
-  if (nativeOperationsRunning() || activeJob || activePatch) {
+  if (nativeOperationsRunning()) {
     reply(marketplaceFailure(marketplaceError('Another automation job is running.'), true));
     return;
   }

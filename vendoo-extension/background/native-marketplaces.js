@@ -12,9 +12,22 @@ function nativeOperationsRunning() {
   return nativeOperations.size > 0;
 }
 
+// Answers a request from Anteroom. Anteroom matches the reply by request_id.
+function sendBrowserResult(msg, result) {
+  const payload = msg.payload || {};
+  send({
+    version: 1,
+    type: 'browser.result',
+    job_id: msg.job_id || payload.job_id || null,
+    message_id: payload.request_id || Date.now().toString(36),
+    sent_at: new Date().toISOString(),
+    payload: { ...result, request_id: payload.request_id || null },
+  });
+}
+
 // Returns the claimed operation, or null when Chrome is busy for that scope.
 function claimNativeOperation(scope, id) {
-  if (activeJob || activePatch || nativeOperations.has('*') || (scope === '*' ? nativeOperations.size > 0 : nativeOperations.has(scope))) return null;
+  if (nativeOperations.has('*') || (scope === '*' ? nativeOperations.size > 0 : nativeOperations.has(scope))) return null;
   const operation = { id, scope, tabId: null, cancelled: false, controller: new AbortController() };
   nativeOperations.set(scope, operation);
   return operation;
@@ -184,7 +197,7 @@ async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowser
   const marketplace = msg.payload.marketplace;
   const operation = claimNativeOperation(marketplace, operationId);
   if (!operation) {
-    reply(nativeRefusal(activeJob || activePatch || nativeOperations.has('*')
+    reply(nativeRefusal(nativeOperations.has('*')
       ? 'Another automation job is running.' : `Another ${marketplaceLabel(marketplace)} action is running.`));
     return;
   }

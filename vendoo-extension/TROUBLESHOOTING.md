@@ -1,206 +1,24 @@
-# Vendoo Extension Troubleshooting Guide
+# Anteroom Bridge Troubleshooting
 
-## Quick Start (Make sure extension is working)
+## Reload the extension
 
-### 1. Install/Reload Extension
-1. Go to `chrome://extensions/`
-2. Enable "Developer mode" (toggle top right)
-3. Click "Load unpacked" and select the repo's `vendoo-extension/` folder
-4. **Important**: After making any code changes, click the refresh icon on the extension card
+1. Go to `chrome://extensions/` and enable **Developer mode**.
+2. Click **Load unpacked** and select the repo's `vendoo-extension/` folder, or click the refresh icon on its card after a code change.
+3. Keep Anteroom running and use **Connect Chrome**. The extension pairs on its own.
 
-### 2. Test from Anteroom
-1. Keep Anteroom running and use **Connect Chrome**.
-2. Refresh open Vendoo tabs after reloading the extension.
-3. Review a listing in Anteroom and approve a Send to Vendoo.
-4. Follow progress, fill results, and the browser preview in Anteroom. The extension connects automatically and has no separate interface.
+## Anteroom says Chrome is not connected
 
-### 3. Run Diagnostic Tool
-If fields aren't being filled correctly:
+- Make sure Anteroom is running on `127.0.0.1:4318`.
+- Open the service worker's DevTools from the extension card and look for `[BG-Studio]` lines. A `Reconnecting in ...` line means Anteroom did not answer.
+- `Another copy of the Anteroom Bridge is connected` means two copies are loaded. Disable one in `chrome://extensions/`.
 
-1. Open Chrome DevTools (F12) on the Vendoo listing page
-2. Copy and paste the entire contents of `vendoo-extension/diagnostic-tool.js` into the console
-3. Run these commands:
+## A marketplace action failed
 
-```javascript
-// Find all input fields on the page
-vendooDiagnostics.findAllInputs()
+1. Read the result in Anteroom. Each failure names the step and the marketplace's answer.
+2. Check that Chrome is signed in to that marketplace. Anteroom's sign-in check reports it without reading cookie values.
+3. In the service worker's DevTools, filter by the marketplace prefix (`[POSHMARK]`, `[MERCARI]`, `[DEPOP]`, `[SELLWILD]`, `[VINTED]`). Each request logs its status, error code and latency.
+4. The same lines reach Anteroom's log: `GET /api/settings/app-logs?grep=[POSHMARK]`.
 
-// Find a specific field (e.g., Title)
-vendooDiagnostics.findByLabel("Title")
+## The marketplace changed its sell page
 
-// Test filling a field
-vendooDiagnostics.testFill("Title", "Test Product Title")
-
-// See dropdown options for a field
-vendooDiagnostics.findDropdownOptions("Condition")
-
-// Export the full page structure
-vendooDiagnostics.exportStructure()
-```
-
-## Common Issues
-
-### Issue: Anteroom cannot reach the content script
-**Solution:**
-- Refresh the Vendoo page
-- Make sure you're on a Vendoo listing page (URL should contain `/item/` or `/listing/`)
-- Check that the extension has permission to run on vendoo.co (check `chrome://extensions/`> Details > Site access)
-
-### Issue: Fields not being filled
-**Solution:**
-1. Open the listing’s fill results in Anteroom
-2. Look for failed or missing fields
-3. Check Chrome DevTools console (F12) for more detailed `[VENDOO]` logs
-4. Run the diagnostic tool to see what selectors are available
-
-### Issue: Dropdowns not working
-**Common causes:**
-- Dropdown uses React/Material UI with custom components
-- Dropdown options load asynchronously
-- Dropdown requires specific interaction pattern
-
-**Debugging:**
-```javascript
-// In DevTools console after running diagnostic tool
-vendooDiagnostics.findDropdownOptions("Your Field Name")
-```
-
-### Issue: Extension fills wrong fields
-**Solution:**
-- Vendoo's DOM structure may have changed
-- Run `vendooDiagnostics.exportStructure()` and send the output
-- Update selectors in `vendoo-extension/content-scripts/vendoo.js`
-
-## How to Find Correct Selectors
-
-### Method 1: Using Chrome DevTools
-1. Right-click on the field you want to fill
-2. Click "Inspect"
-3. Look at the element:
-   - Does it have an `id` attribute?
-   - Does it have a `name` attribute?
-   - What's the label text near it?
-   - What classes does it have?
-
-### Method 2: Using the Diagnostic Tool
-```javascript
-// Find all inputs with their labels
-vendooDiagnostics.findAllInputs()
-
-// Then look for your specific field
-vendooDiagnostics.findByLabel("Brand")
-```
-
-### Method 3: Manual Testing
-```javascript
-// Test a specific selector
-document.querySelector('#your-selector-id')
-
-// Test filling manually
-document.querySelector('#your-selector-id').value = "Test Value"
-document.querySelector('#your-selector-id').dispatchEvent(new Event('input', { bubbles: true }))
-```
-
-## Updating Selectors
-
-Once you've identified the correct selectors, update `vendoo-extension/content-scripts/vendoo.js`:
-
-```javascript
-// In findInputByLabel function, add new strategies:
-
-// Strategy 6: Search by custom data attribute
-const dataAttrMatch = inputs.find(i => 
-    i.offsetParent !== null && 
-    i.getAttribute('data-testid') && 
-    i.getAttribute('data-testid').includes(labelText.toLowerCase())
-);
-if (dataAttrMatch) {
-    log(`  ✓ Found input via data-testid: "${dataAttrMatch.getAttribute('data-testid')}"`);
-    return dataAttrMatch;
-}
-```
-
-## Testing Changes
-
-1. Make code changes to `vendoo-extension/content-scripts/vendoo.js`
-2. Go to `chrome://extensions/`
-3. Click refresh icon on the Vendoo extension
-4. Hard refresh the Vendoo page (Ctrl+Shift+R or Cmd+Shift+R)
-5. Approve a draft Send from Anteroom and inspect its fill results
-
-## Bundle Path Notes
-
-- Generate fresh listing payloads from the top-level `skills/list-this/SKILL.md`.
-- The top-level `skills/` directory is the source of truth for listing rules.
-
-## Diagnostics
-
-Use Anteroom’s fill results for per-field outcomes and the page’s DevTools console for detailed logs. The extension does not add a debug panel or highlight fields on the page.
-
-## Getting Help
-
-If you're still having issues:
-
-1. **Export page structure:**
-   ```javascript
-   vendooDiagnostics.exportStructure()
-   ```
-   Copy the JSON output and save it to a file
-
-2. **Check console logs:**
-   - Open Chrome DevTools
-   - Go to Console tab
-   - Filter by `[VENDOO]` to see extension logs
-   - Look for red error messages
-
-3. **Document the issue:**
-   - Which field isn't working?
-   - What value are you trying to fill?
-   - What error messages do you see?
-   - Include the page structure export
-
-## JSON Format
-
-Make sure your JSON follows this format:
-
-```json
-{
-  "title": "Your Product Title",
-  "description": "Product description here",
-  "price": 45.00,
-  "brand": "Brand Name",
-  "condition": "Good",
-  "primaryColor": "Blue",
-  "size": "M",
-  "sku": "ITEM-001",
-  "tags": ["vintage", "clothing"]
-}
-```
-
-## Platform-Specific Notes
-
-### Vendoo Main Form
-- Uses Material UI components
-- Dropdowns require special handling
-- Fields may load asynchronously
-
-### eBay Section
-- Within Vendoo's eBay section
-- May have different field names
-- Check `data.ebay_specifics` in your JSON
-
-### Poshmark Section
-- Auto-save mode
-- Just clicks save after filling main form
-
-### Mercari Section
-- Requires shipping selection
-- Runs handleMercari() function
-
-### Depop Section
-- Has specific field requirements
-- Runs handleDepop() function
-
-### Etsy Section
-- Complex field requirements
-- Runs handleEtsy() function
+Run that marketplace's form sweep in `tools/form-sweep/<marketplace>/` on its sell page, then its `compare.js`. Each script's header says how. The compare exits 1 on any difference.
