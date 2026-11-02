@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.677 — 2026-11-02
+
+- On the web, Sourcing now refreshes your buy list in the background every few hours, like the Mac app, without waiting for you to open the Sourcing page.
+
 ## 0.1.676 — 2026-11-02
 
 - Generating a web draft no longer ties up the editor while photos, AI answers, or marketplace categories are loading.
