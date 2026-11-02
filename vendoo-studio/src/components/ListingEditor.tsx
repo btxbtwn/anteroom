@@ -312,20 +312,13 @@ export function ListingEditor({
     }
   }, [listingJob?.mode, listingJob?.status, listingJob?.id, convId, queryClient]);
 
-  // Shared with the Marketplaces rail. An item already on Facebook shows Facebook even when it is not a selected marketplace.
-  const { data: liveListings } = useQuery({
-    queryKey: ["marketplace-listings", convId],
-    queryFn: () => api.marketplaceListings.get(convId),
-  });
-  const onFacebook = Boolean(liveListings?.facebook);
   const tabs = React.useMemo(() => {
     const selected = new Set(marketplaceSettings?.selected ?? ["ebay", "etsy", "poshmark", "mercari", "depop"]);
-    if (onFacebook) selected.add("facebook");
     return [
       "general",
-      ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => (!runtime.hosted || runtime.marketplaceForms.has(id)) && (id === "vinted" || selected.has(id))),
+      ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "sellwild"].filter((id) => (!runtime.hosted || runtime.marketplaceForms.has(id)) && (id === "vinted" || selected.has(id))),
     ];
-  }, [marketplaceSettings?.selected, onFacebook, runtime]);
+  }, [marketplaceSettings?.selected, runtime]);
 
   React.useEffect(() => {
     if (runtime.hosted || !data?.current_revision_id || unsaved || !sessionActive) return;
@@ -1533,7 +1526,6 @@ const CATEGORY_FORM_LABELS: Record<string, string[]> = {
   vinted: ["Title", "Description", "Price", "Vinted price", "Category", "Condition", "Brand", "Size",
     "Color", "Package size", "Material"],
   grailed: ["Title", "Description", "Price", "Condition", "Designer", "Brand"],
-  facebook: ["Title", "Description", "Price", "Condition", "Brand"],
 };
 
 function coreFieldLabel(tab: string, label: string): boolean {
@@ -1771,13 +1763,12 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
     case "vinted":
       return editorFields.vinted;
     case "grailed":
-    case "facebook":
-      // Their fields come from the category Vendoo maps to, once it is chosen.
+      // Its fields come from the category Vendoo maps to, once it is chosen.
       return [
         { key: "price", label: "Price", type: "number" },
         { key: "condition", label: "Condition" },
-        { key: "brand", label: tab === "grailed" ? "Designer" : "Brand" },
-        ...specificsFields(listing?.[`${tab}_specifics`], `${tab}_specifics`),
+        { key: "brand", label: "Designer" },
+        ...specificsFields(listing?.grailed_specifics, "grailed_specifics"),
       ];
     default:
       return [];

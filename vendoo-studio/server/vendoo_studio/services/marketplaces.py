@@ -16,10 +16,10 @@ from vendoo_studio.services.user_settings import read_settings, update_settings
 #     dropped it from that list and the company itself closed in 2022.
 #   * somewhere for the values to go, which is what this list drives.
 #
-# Grailed, Facebook and Sellwild have no seeded category tree: their leaves come
+# Grailed and Sellwild have no seeded category tree: their leaves come
 # from Vendoo mapping the general category, never from a local tree search.
 # Vinted is not filled through Vendoo. List on Vinted publishes on vinted.com.
-FILLABLE_MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "grailed", "facebook", "sellwild")
+FILLABLE_MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "grailed", "sellwild")
 
 # Every marketplace Vendoo lists to (its LISTABLE_MARKETPLACES, with
 # vestiaire/vestiaireApi folded together). Any of them can be selected in
@@ -31,7 +31,6 @@ MARKETPLACE_CATALOG: tuple[tuple[str, str, bool], ...] = (
     ("mercari", "Mercari", True),
     ("depop", "Depop", True),
     ("etsy", "Etsy", True),
-    ("facebook", "Facebook", True),
     ("grailed", "Grailed", True),
     ("vinted", "Vinted", False),
     ("whatnot", "Whatnot", False),
@@ -70,12 +69,11 @@ def normalize_selected(raw: object) -> list[str]:
 
 def get_selected_marketplaces() -> list[str]:
     payload = read_settings()
-    if "marketplaces" not in payload:
+    raw = payload.get("marketplaces")
+    if not isinstance(raw, list):
         return list(DEFAULT_SELECTED)
-    try:
-        return normalize_selected(payload.get("marketplaces"))
-    except ValueError:
-        return list(DEFAULT_SELECTED)
+    # A marketplace Anteroom no longer offers (Facebook) drops out; the rest of the choice stays.
+    return normalize_selected([item for item in raw if str(item).strip().lower() in KNOWN_MARKETPLACES])
 
 
 def set_selected_marketplaces(selected: object) -> list[str]:

@@ -1,28 +1,14 @@
-export type DelistMarketplace = "ebay" | "etsy" | "poshmark" | "mercari" | "depop" | "sellwild" | "vinted" | "facebook";
+export type DelistMarketplace = "ebay" | "etsy" | "poshmark" | "mercari" | "depop" | "sellwild" | "vinted";
 export interface MarketplaceListing {
   url: string | null;
   listing_id: string | null;
   source: "anteroom" | "vendoo" | "seller" | null;
   sold_here: boolean;
   state: "live" | "deleting" | "deleted" | "failed";
-  /** False where the seller deletes the listing on the marketplace itself (Facebook). */
-  can_delist?: boolean;
   error?: string | null;
   /** The marketplace's own words when a delist failed. */
   marketplace_message?: string | null;
   at?: string | null;
-}
-/** A Facebook listing as its own page shows it now, read through Chrome. Nothing on Facebook changes. */
-export interface FacebookCheck {
-  ok: boolean;
-  state?: "live" | "pending" | "sold" | "hidden" | "draft" | "not_live";
-  /** "other" when the listing is on a different Facebook account than the one signed in to Chrome. */
-  owner?: "you" | "other" | null;
-  sale_recorded: boolean;
-  error?: string;
-  error_code?: string;
-  marketplace_message?: string | null;
-  listings: MarketplaceListings;
 }
 /** What reading this item's live listings found just now: a sale it had not recorded yet, if any. */
 export interface SalesCheck {

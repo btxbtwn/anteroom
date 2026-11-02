@@ -171,15 +171,7 @@ class ChromeSaleParsingTest(unittest.TestCase):
 class SaleDetectionRouteTest(unittest.TestCase):
     def tearDown(self):
         user_settings.set_sale_detection("sellwild", True)
-        user_settings.set_sale_detection("facebook", False)
         user_settings.set_autodelist(False)
-
-    def test_facebook_detection_waits_for_the_seller(self):
-        client = TestClient(app)
-        self.assertFalse(client.get("/api/settings/sale-detection").json()["enabled"]["facebook"])
-        saved = client.put("/api/settings/sale-detection", json={"marketplace": "facebook", "enabled": True}).json()
-        self.assertTrue(saved["enabled"]["facebook"])
-        self.assertTrue(user_settings.sale_detection_enabled("facebook"))
 
     def test_sale_detection_can_be_turned_off(self):
         client = TestClient(app)
@@ -280,7 +272,7 @@ class ItemSaleCheckTest(unittest.TestCase):
         Session = sessionmaker(bind=_engine())
         draft = _listing(Session, {})
         listed = _listing(Session, {"vendooListingUrls": {"depop": "https://www.depop.com/products/shop-tee-136d/"}})
-        # Facebook is read page by page, so opening an item never starts that.
+        # A Facebook link left from before has nothing to read.
         facebook = _listing(Session, {"vendooListingUrls": {"facebook": "https://www.facebook.com/marketplace/item/1234567890123456/"}})
 
         with Session() as db:

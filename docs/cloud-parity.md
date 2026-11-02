@@ -363,7 +363,7 @@ Chrome through one named read, `marketplace.sellwild_account`, under its own
 Bridge capability, `sellwild.account` (Bridge 0.2.43).
 
 On `feat/hosted-chrome-sessions`, Settings → Connections on the web lists
-Poshmark, Mercari, Depop, Sellwild, Vinted and Facebook under eBay and Etsy, each
+Poshmark, Mercari, Depop, Sellwild and Vinted under eBay and Etsy, each
 signed in, not signed in, or "Connect Chrome first", as on the Mac. The web reads
 them with `marketplace.sessions` and opens a marketplace's sign-in page in the
 seller's Chrome with `marketplace.connect` when they choose Sign in, both under
@@ -371,13 +371,7 @@ the Bridge capability `marketplace.sessions` (Bridge 0.2.44). The status holds
 only each sign-in's state, expiry and account label, never cookies or tokens.
 Sale detection switches stay on the Mac.
 
-On `feat/hosted-facebook`, Facebook is on the web as it is on the Mac. Anteroom
-does not list on Facebook: the seller links an item already on Facebook with
-Mark as listed, checks it with Check on Facebook, which reads that listing's
-page in their Chrome (`marketplace.listing_state`, Bridge capability
-`facebook.listing`, Bridge 0.2.45), and deletes it on Facebook themselves; a
-Delist names Facebook and gets the Mac's own answer. A check that finds the item
-sold records the sale, as on the Mac. Facebook's sale detection pass stays on
-the Mac. Grailed is not on the web: on the Mac its tab only feeds the old
+Anteroom has no Facebook Marketplace support on the Mac or the web. Grailed is
+not on the web: on the Mac its tab only feeds the old
 cross-lister flow, which the web does not offer, and Anteroom has no direct
 Grailed listing, sign-in or check.

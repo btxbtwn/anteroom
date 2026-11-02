@@ -155,7 +155,6 @@ chooses Sign in: it takes one marketplace from a fixed list and opens that
 marketplace's own sign-in page in Chrome, exactly as the Mac's Sign in does, and
 waits while a listing action is running.
 
-Bridge 0.2.45 adds `marketplace.listing_state` under `facebook.listing`, for
-Check on Facebook on the web. It takes `marketplace: "facebook"` and one numeric
-listing id, reads that listing's page as the Mac's check does, and returns its
-state and whether it is on the signed-in account. Nothing on Facebook changes.
+Bridge 0.2.46 removes Facebook: the `marketplace.listing_state` command and the
+`facebook.listing` capability that 0.2.45 added are gone, and neither name is
+reused.
