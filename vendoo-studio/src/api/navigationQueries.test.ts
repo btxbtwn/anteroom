@@ -71,6 +71,32 @@ it("warms only safe listing reads and reuses them on mount", async () => {
   } finally { client.clear(); }
 });
 
+it("warms every read the listing screen makes on open", async () => {
+  const client = createStudioQueryClient();
+  vi.spyOn(api.conversations, "get").mockResolvedValue({ id: "item" } as never);
+  vi.spyOn(api.conversations, "photos").mockResolvedValue([]);
+  vi.spyOn(api.conversations, "messages").mockResolvedValue([]);
+  const jobs = vi.spyOn(api.jobs, "list").mockResolvedValue([]);
+  const activity = vi.spyOn(api.conversations, "activity").mockResolvedValue({ busy: false } as never);
+  const fields = vi.spyOn(api.vendooApi, "listingFields").mockResolvedValue({ forms: [] } as never);
+  const live = vi.spyOn(api.marketplaceListings, "get").mockResolvedValue({} as never);
+  const native = vi.spyOn(api.nativeMarketplaces, "status").mockResolvedValue({} as never);
+  const sales = vi.spyOn(api.marketplaceSales, "list").mockResolvedValue([] as never);
+  try {
+    await prefetchListingReads(client, "item");
+    expect(jobs).toHaveBeenCalledExactlyOnceWith("item");
+    expect(activity).toHaveBeenCalledExactlyOnceWith("item");
+    expect(fields).toHaveBeenCalledExactlyOnceWith("item");
+    expect(live).toHaveBeenCalledExactlyOnceWith("item");
+    expect(native).toHaveBeenCalledExactlyOnceWith("item");
+    expect(sales).toHaveBeenCalledExactlyOnceWith({ conversationId: "item" });
+    for (const key of [["jobs", "item"], ["activity", "item"], ["listing-fields", "item"], ["marketplace-listings", "item"],
+      ["native-marketplaces", "item"], ["marketplace-sales", "item"]]) {
+      expect(client.getQueryState(key)?.status).toBe("success");
+    }
+  } finally { client.clear(); }
+});
+
 it("mounting a prefetched thread shows its messages synchronously without another request", async () => {
   const client = createStudioQueryClient();
   const messages = [{ id: "answer", role: "assistant" as const, text: "Saved answer", created_at: null }];

@@ -8,6 +8,12 @@ import { currentHostedSession, studioFetch } from "./transport";
  */
 const LIMIT = 400;
 const images = new Map<string, string>();
+/**
+ * Downloads still running, so a warm-up and the photo that mounts share one. A
+ * download stops when every viewer waiting on it has gone and no warm-up wants it.
+ */
+interface Download { promise: Promise<string>; controller: AbortController; viewers: number; kept: boolean }
+const pending = new Map<string, Download>();
 let owner: unknown = null;
 
 function forCurrentSession(): Map<string, string> {
@@ -15,6 +21,8 @@ function forCurrentSession(): Map<string, string> {
   if (owner !== session) {
     for (const url of images.values()) URL.revokeObjectURL(url);
     images.clear();
+    for (const download of pending.values()) download.controller.abort();
+    pending.clear();
     owner = session;
   }
   return images;
@@ -32,10 +40,40 @@ export function cachedPrivateImage(src: string): string | undefined {
   return url;
 }
 
-/** Loads a private image once and keeps it; resolves to an object URL. */
+/**
+ * Loads a private image once and keeps it; resolves to an object URL. A viewer's
+ * `signal` stops only its own wait; the download finishes for the next viewer.
+ */
 export async function loadPrivateImage(src: string, signal?: AbortSignal): Promise<string> {
   const kept = cachedPrivateImage(src);
   if (kept !== undefined) return kept;
+  signal?.throwIfAborted();
+  forCurrentSession();
+  let download = pending.get(src);
+  if (!download) {
+    const controller = new AbortController();
+    const started: Download = { promise: fetchPrivateImage(src, controller.signal), controller, viewers: 0, kept: false };
+    pending.set(src, download = started);
+    void started.promise.catch(() => {}).finally(() => { if (pending.get(src) === started) pending.delete(src); });
+  }
+  if (!signal) {
+    download.kept = true;
+    return download.promise;
+  }
+  const shared = download;
+  shared.viewers += 1;
+  return new Promise((resolve, reject) => {
+    const stop = () => {
+      shared.viewers -= 1;
+      if (shared.viewers === 0 && !shared.kept) shared.controller.abort(signal.reason);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", stop, { once: true });
+    shared.promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
+async function fetchPrivateImage(src: string, signal: AbortSignal): Promise<string> {
   const session = currentHostedSession();
   const response = await studioFetch(src, { signal });
   if (!response.ok) throw new Error("Photo unavailable");

@@ -1,0 +1,1 @@
+- Open a listing on the web faster: pointing at it in the list starts loading its form and photos, and opening another listing no longer reloads your whole account.
