@@ -1,0 +1,1 @@
+- Let concurrent website requests share Supabase database connections through transaction pooling, with session-dependent prepared statements disabled.

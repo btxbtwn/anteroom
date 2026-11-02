@@ -46,6 +46,24 @@ def test_migrations_leave_the_schema_the_models_describe():
         assert compare_metadata(context, Base.metadata) == []
 
 
+def test_postgres_repeated_queries_do_not_require_session_prepared_statements():
+    from vendoo_studio.database import make_engine
+
+    if engine.dialect.name != 'postgresql':
+        pytest.skip('Exercises psycopg automatic statement preparation')
+    isolated = make_engine(engine.url.render_as_string(hide_password=False))
+    try:
+        with isolated.connect() as connection:
+            for value in range(12):
+                assert connection.exec_driver_sql('SELECT %s::integer', (value,)).scalar_one() == value
+                connection.commit()
+            assert connection.exec_driver_sql(
+                "SELECT count(*) FROM pg_prepared_statements WHERE left(name, 5) = '_pg3_'"
+            ).scalar_one() == 0
+    finally:
+        isolated.dispose()
+
+
 def test_hosted_urls_use_the_psycopg_driver():
     assert database_url("postgres://u:p%40ss@db.example:5432/app") == "postgresql+psycopg://u:p%40ss@db.example:5432/app"
     assert database_url("postgresql://u@h/app").startswith("postgresql+psycopg://")
