@@ -1,7 +1,4 @@
-"""Read-only sales view combining imported Vendoo history with direct orders."""
-from datetime import UTC
-import hashlib
-import json
+"""Read-only sales view: every line on the sales ledger."""
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
@@ -9,10 +6,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from vendoo_studio.services import sales_ledger
-from vendoo_studio.services.inventory_analytics import _marketplace, load_rows
-from vendoo_studio.services.sale_matching import matching_sale_index
-from vendoo_studio.services.sell_through import _parse_moment
-from vendoo_studio.services.vendoo_import import VENDOO_MARKETPLACE_ALIASES, parse_notes
+from vendoo_studio.services.inventory_analytics import load_rows
 
 FIELD_LABELS = {"item_revenue": "sale price", "shipping_credit": "shipping collected", "refunds": "refunds",
                 "fees": "fees", "shipping_cost": "shipping cost", "item_cost": "item cost"}
@@ -49,61 +43,27 @@ def _amount(value) -> str | None:
 
 
 def records(db: Session, conversation_id: str | None = None) -> list[dict]:
+    """Every line on the sales ledger. Vendoo's sales are read from the ledger too, where they were kept once."""
+    from vendoo_studio.services.vendoo_sales_archive import ensure_archived
+
+    ensure_archived(db)
     # Reuse Analytics' cost basis, including box allocations and order quantities.
-    costs = {row.sale_id or f"vendoo-{row.conversation_id}": _amount(row.cost)
-             for row in load_rows(db, conversation_id) if row.status == "sold"}
+    costs = {row.sale_id: _amount(row.cost) for row in load_rows(db, conversation_id) if row.status == "sold" and row.sale_id}
     query = db.query(MarketplaceSale, Conversation.title).outerjoin(Conversation, Conversation.id == MarketplaceSale.conversation_id)
-    conversations = db.query(Conversation)
     if conversation_id:
         query = query.filter(MarketplaceSale.conversation_id == conversation_id)
-        conversations = conversations.filter(Conversation.id == conversation_id)
-    rows = {}
-    grouped: dict[str, list[MarketplaceSale]] = {}
+    rows = []
     for line, title in query.order_by(MarketplaceSale.received_at, MarketplaceSale.id).all():
-        rows[line.id] = sales_ledger.sale_out(line, title)
-        if line.conversation_id and line.order_status in PAID_STATUSES:
-            grouped.setdefault(line.conversation_id, []).append(line)
-    for conv in conversations.all():
-        notes = parse_notes(conv.notes)
-        if notes.get("vendooStatus") != "sold":
-            continue
-        sale = notes.get("vendooSale")
-        sale = sale if isinstance(sale, dict) else {}
-        dates = notes.get("vendooDates")
-        dates = dates if isinstance(dates, dict) else {}
-        sold_at = _parse_moment(str(dates.get("sold") or sale.get("soldAt") or ""))
-        marketplace = _marketplace(sale, dates, notes, VENDOO_MARKETPLACE_ALIASES)
-        lines = sorted(grouped.get(conv.id, []), key=lambda line: (line.sold_at or line.received_at, line.id))
-        match = matching_sale_index(lines, marketplace, sold_at)
-        raw = lines[match].financials if match is not None else None
-        if match is not None and sold_at and not (isinstance(raw, dict) and "sold_on" in raw):
-            rows[lines[match].id]["sold_at"] = sold_at.astimezone(UTC).isoformat()
-        # A local financial record, even a partial or stale one, belongs to the seller.
-        if match is not None and lines[match].financials is not None:
-            continue
-        data = {"currency": "USD", "item_revenue": _amount(sale.get("price")),
-                "fees": _amount(sale.get("fees")), "item_cost": _amount(sale.get("cost")),
-                "shipping_cost": _amount(sale.get("shippingCost")),
-                # Vendoo's sale model has no refund field; absent buyer shipping means none.
-                "shipping_credit": _amount(sale.get("shippingCredit")) or "0", "refunds": "0"}
-        if match is not None:
-            record = rows[lines[match].id]
-        else:
-            record = {"id": f"vendoo-{conv.id}", "marketplace": marketplace, "order_id": "Vendoo import", "line_id": conv.id,
-                      "listing_id": None, "quantity": 1, "order_status": "paid", "source": "vendoo", "alert_state": "dismissed",
-                      "conversation_id": conv.id, "title": conv.title, "sold_at": None,
-                      "received_at": sales_ledger._iso(conv.created_at), "financial_revision": 0,
-                      "financials_updated_at": None, "order_basis": ""}
-            rows[record["id"]] = record
-        effective_cost = costs.get(record["id"])
-        if effective_cost is not None and (data["item_cost"] is None or Decimal(effective_cost) != Decimal(data["item_cost"])):
+        record = sales_ledger.sale_out(line, title)
+        data = record["financials"]
+        raw = line.financials if isinstance(line.financials, dict) else {}
+        # Vendoo's kept sales show the item's cost as Analytics counts it, as they always have.
+        effective_cost = costs.get(line.id)
+        if data is not None and raw.get("source") == "vendoo" and effective_cost is not None \
+                and (data["item_cost"] is None or Decimal(effective_cost) != Decimal(data["item_cost"])):
             data["item_cost"] = effective_cost
-        record.update(financials=data, financials_stale=False, financials_source="vendoo")
-        record["net_revenue"], record["profit"] = sales_ledger.totals(data)
-        if sold_at:
-            record["sold_at"] = sold_at.astimezone(UTC).isoformat()
-        if match is None:
-            record["order_basis"] = hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
-    for record in rows.values():
+            record["net_revenue"], record["profit"] = sales_ledger.totals(data, record["financials_stale"])
+        record["financials_source"] = raw.get("source")
         record["missing_sale_data"] = missing_fields(record)
-    return list(rows.values())
+        rows.append(record)
+    return rows

@@ -13,6 +13,7 @@ export interface RelayedCommand { type: string; job_id: string | null; message_i
 export interface RelayedPhoto { id: string; mime_type: string; base64: string }
 // How long each command may take in Chrome, a little past the server's own wait.
 const COMMAND_TIMEOUT_MS: Record<string, number> = {
+  "marketplace.sales_history": 1_210_000,
   "marketplace.execute": 200_000, "marketplace.result": 75_000, "marketplace.delete": 100_000, "job.cancel": 10_000,
   "marketplace.vinted_categories": 45_000, "marketplace.vinted_brands": 45_000, "marketplace.sellwild_account": 45_000, "marketplace.sessions": 30_000, "marketplace.connect": 50_000, "marketplace.listing_state": 55_000,
 };

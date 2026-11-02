@@ -113,13 +113,16 @@ test("generation waits for all four photos and saves the listing from the editor
 
 test("the Mac window hands its account session to the native AI worker and clears it on logout", async ({ page }, info) => {
   test.skip(info.project.name === "phone", "The native Mac bridge is desktop-only");
+  // Logout replaces the document; observe the native boundary across navigation.
+  const calls: { hasToken: boolean; owner: string | null }[] = [];
+  await page.exposeFunction("recordMacAICall", (hasToken: boolean, owner: string | null) => {
+    calls.push({ hasToken, owner });
+    return { ok: true };
+  });
   await page.addInitScript(() => {
-    const calls: { hasToken: boolean; owner: string | null }[] = [];
     Object.assign(window, {
-      macAICalls: calls,
       pywebview: { api: { connect_chatgpt_worker: async (token: string | null, owner: string | null) => {
-        calls.push({ hasToken: Boolean(token), owner });
-        return { ok: true };
+        return (window as unknown as { recordMacAICall: (hasToken: boolean, owner: string | null) => Promise<{ ok: boolean }> }).recordMacAICall(Boolean(token), owner);
       } } },
     });
   });
@@ -127,8 +130,9 @@ test("the Mac window hands its account session to the native AI worker and clear
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  const current = () => page.evaluate(() => (window as unknown as { macAICalls: { hasToken: boolean; owner: string | null }[] }).macAICalls.at(-1));
+  const current = () => calls.at(-1);
   await expect.poll(current).toMatchObject({ hasToken: true, owner: expect.stringMatching(/^[0-9a-f-]{36}$/) });
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page.getByLabel("Email address")).toBeVisible();
   await expect.poll(current).toMatchObject({ hasToken: false, owner: null });
 });
