@@ -90,7 +90,7 @@ extension ISO8601DateFormatter {
 }
 
 /// Usage (UsagePage.tsx): how much of each subscription is left, and when it
-/// resets. On iPhone it opens from Settings, so the tab bar keeps five tabs.
+/// resets. It opens from More.
 struct UsageView: View {
     let api: AnteroomAPI
     @State private var limits: UsageLimits?

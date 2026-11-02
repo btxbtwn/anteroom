@@ -708,6 +708,35 @@ final class AnteroomAPI: Sendable {
         return failure
     }
 
+    // MARK: Marketplaces
+
+    func marketplaceAccounts() async throws -> DirectConnections {
+        try await decode(request("GET", "api/marketplace-accounts"))
+    }
+
+    /// Start eBay sign-in for the chosen tool groups; returns the page the seller opens.
+    func connectEbay(features: [String]) async throws -> URL {
+        struct Answer: Decodable { let authorizeUrl: String }
+        let answer: Answer = try await decode(request("POST", "api/marketplace-accounts/ebay/connect", json: ["features": features]))
+        guard let url = URL(string: answer.authorizeUrl), url.scheme == "https" else {
+            throw APIError(status: 0, message: "eBay sign-in didn't return a page to open.")
+        }
+        return url
+    }
+
+    /// One page of an eBay section, read with the seller's own eBay account.
+    func ebayRead(_ section: String, params: [String: String] = [:], offset: Int = 0) async throws -> EbayPage {
+        var query = params.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        query.append(URLQueryItem(name: "offset", value: String(offset)))
+        return try EbayPage.decode(await send(request("GET", "api/ebay/read/\(section)", query: query)))
+    }
+
+    /// Active eBay listings that look like a photo (JPEG or PNG).
+    func ebayImageSearch(_ image: Data, mime: String) async throws -> EbayPage {
+        try EbayPage.decode(await send(request("POST", "api/ebay/research/image",
+                                               json: ["data": image.base64EncodedString(), "mime": mime])))
+    }
+
     // MARK: Shared listing history
 
     func revisions(_ id: String) async throws -> [ListingRevision] {
