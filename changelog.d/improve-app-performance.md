@@ -1,1 +1,0 @@
-- The job list loads faster by fetching only the details it displays and reading job progress together.

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.658 — 2026-11-02
+
+- The job list loads faster by fetching only the details it displays and reading job progress together.
+
 ## 0.1.657 — 2026-11-02
 
 - Behind the scenes, listing rules and save operations are separated from database queries, so more architectural mistakes are caught before an update ships.
