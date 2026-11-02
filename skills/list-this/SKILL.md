@@ -429,8 +429,9 @@ Before outputting ANY listing, verify:
 - Condition is required and uses Mercari labels (see `vendoo-dropdown-options.md`)
 - shippingLabel must be `USPS Ground Advantage`
 
-**Facebook / Sellwild:**
-- Fields come from the marketplace form Anteroom supplies; put answers in `facebook_specifics` or `sellwild_specifics`
+**Sellwild:**
+- Fields come from the marketplace form Anteroom supplies; put answers in `sellwild_specifics`
+
 - Condition follows the general condition; do not set it per marketplace
 
 **Vinted (direct listing):**

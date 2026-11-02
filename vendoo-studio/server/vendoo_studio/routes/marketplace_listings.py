@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
-from vendoo_studio.services import chrome_sales, facebook_listing, marketplace_delist, sales_ledger
+from vendoo_studio.services import chrome_sales, marketplace_delist, sales_ledger
 
 router = APIRouter(prefix="/api/conversations/{conv_id}/marketplace-listings", tags=["marketplace-listings"])
 
@@ -53,15 +53,6 @@ async def check_sales(conv_id: str, db: Session = Depends(get_db)):
     result = await chrome_sales.check_item(db, conv_id)
     db.expire_all()
     return {**result, "listings": marketplace_delist.listings(db, conv_id)}
-
-
-@router.post("/facebook/check")
-async def check_facebook(conv_id: str, db: Session = Depends(get_db)):
-    """Read the linked Facebook listing's state through Chrome. Changes nothing on Facebook."""
-    try:
-        return await facebook_listing.check(db, conv_id)
-    except marketplace_delist.DelistError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @router.post("/sold")

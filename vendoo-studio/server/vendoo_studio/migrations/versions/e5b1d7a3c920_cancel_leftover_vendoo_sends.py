@@ -1,7 +1,7 @@
 """cancel Send to Vendoo jobs left open when Send to Vendoo was removed
 
 Revision ID: e5b1d7a3c920
-Revises: d574efabc39a
+Revises: 5e7a2c9b4d18
 Create Date: 2026-11-02 12:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = "e5b1d7a3c920"
-down_revision = "d574efabc39a"
+down_revision = "5e7a2c9b4d18"
 branch_labels = None
 depends_on = None
 

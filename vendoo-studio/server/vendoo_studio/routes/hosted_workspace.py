@@ -23,15 +23,14 @@ from vendoo_studio.repositories import hosted_drafts
 from vendoo_studio.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from vendoo_studio.services import user_settings
 from vendoo_studio.services.hosted_database import get_seller_db
-from vendoo_studio.services.hosted_listing_contract import editable_listing
+from vendoo_studio.services.hosted_listing_contract import editable_listing, stored_listing_fields
 from vendoo_studio.version import app_version
 
 router = APIRouter(prefix='/api')
 
 
 def conversation(db, identity, *, lock=False):
-    statement = select(Conversation).where(Conversation.id == identity)
-    row = db.scalar(statement.with_for_update() if lock else statement)
+    row = db.get(Conversation, identity, with_for_update=True if lock else None)
     if row is None:
         raise HTTPException(404, 'Listing not found')
     return row
@@ -65,8 +64,7 @@ def conversation_response(row, listing=None, direct=None, *, include_notes=True)
 def listing_response(db, identity):
     revision = hosted_drafts.current_fields_revision(db, identity)
     raw = revision.listing_json if revision and isinstance(revision.listing_json, dict) else {}
-    from vendoo_studio.services.hosted_listing_contract import ROOTS
-    payload = editable_listing({key: value for key, value in raw.items() if key in ROOTS})
+    payload = stored_listing_fields(raw)
     if 'title' not in payload:
         payload['title'] = conversation(db, identity).title or ''
     count = db.scalar(select(func.count()).select_from(Photo).where(Photo.conversation_id == identity))
@@ -89,7 +87,7 @@ def runtime(request: Request, db=Depends(get_seller_db)):
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else [])
             + (['ebay_offers'] if offers is not None and not offers.done() else []),
-            'views': ['listings', 'analytics', 'settings', 'automations', 'assistant', 'marketplaces', 'sourcing'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy', 'vinted', 'sellwild', 'facebook'],
+            'views': ['listings', 'analytics', 'settings', 'automations', 'assistant', 'marketplaces', 'sourcing'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy', 'vinted', 'sellwild'],
             # eBay and Etsy list through their APIs, the rest through the seller's Chrome; a restart's held slot needs the job watchdog.
             'action_marketplaces': list(ACTION_MARKETPLACES) if watchdog is not None and not watchdog.done() else []}
 
@@ -171,6 +169,19 @@ def edit_conversation(identity: str, body: ConversationInput, db=Depends(get_sel
     return conversation_response(row)
 
 
+@router.get('/conversations/{identity}/screen')
+def listing_screen(identity: str, db=Depends(get_seller_db)):
+    """Core editor reads share one seller transaction; marketplace lookups stay separate."""
+    # Keep the owned row alive in the identity map for the constituent reads.
+    row = conversation(db, identity)
+    loaded_messages = messages(identity, db)
+    return {'conversation': conversation_response(row), 'listing': get_listing(identity, db),
+            'photos': photos(identity, db=db), 'messages': loaded_messages,
+            'jobs': jobs(identity, db),
+            'activity': activity_response(db, identity, len(loaded_messages),
+                loaded_messages[-1]['id'] if loaded_messages else None)}
+
+
 @router.get('/conversations/{identity}/listing')
 def get_listing(identity: str, db=Depends(get_seller_db)):
     conversation(db, identity)
@@ -233,9 +244,13 @@ def messages(identity: str, db=Depends(get_seller_db)):
 @router.get('/conversations/{identity}/activity')
 def activity(identity: str, db=Depends(get_seller_db)):
     conversation(db, identity)
-    jobs = db.scalars(select(Job).where(Job.conversation_id == identity, Job.status.in_(ACTIVE_JOB_STATUSES))).all()
     count = db.scalar(select(func.count()).select_from(Message).where(Message.conversation_id == identity))
     last = db.scalar(select(Message.id).where(Message.conversation_id == identity).order_by(Message.created_at.desc()).limit(1))
+    return activity_response(db, identity, count, last)
+
+
+def activity_response(db, identity, count, last):
+    jobs = db.scalars(select(Job).where(Job.conversation_id == identity, Job.status.in_(ACTIVE_JOB_STATUSES))).all()
     from vendoo_studio.models.background_task import BackgroundTask
     tasks = db.scalars(select(BackgroundTask).where(
         BackgroundTask.conversation_id == identity, BackgroundTask.status.in_(('queued', 'running')))).all()
@@ -446,8 +461,7 @@ def owned_revision(db, identity, revision_id):
 @router.get('/conversations/{identity}/revisions/{revision_id}')
 def get_revision(identity: str, revision_id: str, db=Depends(get_seller_db)):
     row = owned_revision(db, identity, revision_id)
-    from vendoo_studio.services.hosted_listing_contract import ROOTS
-    return {'id': row.id, 'listing': {key: value for key, value in row.listing_json.items() if key in ROOTS}}
+    return {'id': row.id, 'listing': stored_listing_fields(row.listing_json)}
 
 
 class RestoreInput(BaseModel):

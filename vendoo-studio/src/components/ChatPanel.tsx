@@ -1,4 +1,5 @@
 import { Fragment, useState, useRef, useEffect, useCallback } from "react";
+import { usePhotosUploading } from "../photoUploads";
 import { newQueuedChatMessage } from "./chatMessageQueue";
 import { CiteSelectionToolbar } from "./CiteSelectionToolbar";
 import { type ChatCitation } from "./chatCitations";
@@ -41,6 +42,8 @@ function messageRowPadding(m: Message): string {
 }
 
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onStatusChange }: Props) {
+  const uploadingPhotos = usePhotosUploading(convId);
+
   const [input, setInput] = useState("");
   // Quotes live inline in the composer itself, T3 Code style: `input` is the
   // markdown prompt, and a quote inside it is its citation link.
@@ -225,8 +228,8 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
             </EmptyHeader>
             {hasPhotos ? (
               <EmptyContent>
-                <Button type="button" onClick={handleGenerate} disabled={generating || streaming}>
-                  Generate listing
+                <Button type="button" onClick={handleGenerate} disabled={generating || streaming || uploadingPhotos}>
+                  {uploadingPhotos ? "Uploading photos…" : "Generate listing"}
                 </Button>
               </EmptyContent>
             ) : null}

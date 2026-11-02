@@ -164,20 +164,14 @@ export function ListingEditor({
     queryFn: () => api.conversations.get(convId),
   });
 
-  // Shared with the Marketplaces rail. An item already on Facebook shows Facebook even when it is not a selected marketplace.
-  const { data: liveListings } = useQuery({
-    queryKey: ["marketplace-listings", convId],
-    queryFn: () => api.marketplaceListings.get(convId),
-  });
-  const onFacebook = Boolean(liveListings?.facebook);
   const tabs = React.useMemo(() => {
     const selected = new Set(marketplaceSettings?.selected ?? ["ebay", "etsy", "poshmark", "mercari", "depop"]);
-    if (onFacebook) selected.add("facebook");
     return [
       "general",
-      ...["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "facebook", "sellwild"].filter((id) => (!runtime.hosted || runtime.marketplaceForms.has(id)) && (id === "vinted" || selected.has(id))),
+      ...["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild"].filter((id) => (!runtime.hosted || runtime.marketplaceForms.has(id)) && (id === "vinted" || selected.has(id))),
+
     ];
-  }, [marketplaceSettings?.selected, onFacebook, runtime]);
+  }, [marketplaceSettings?.selected, runtime]);
 
   React.useEffect(() => {
     if (runtime.hosted || !data?.current_revision_id || unsaved || !sessionActive) return;
@@ -261,7 +255,7 @@ export function ListingEditor({
         railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}
         railStatus={<>
           {editState.saving && <span role="status" className="text-xs text-muted-foreground">Saving…</span>}
-          {!runtime.hosted && <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>}
+          <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>
         </>}
         onSelect={(id) => {
           setFieldTarget(null);
@@ -1203,7 +1197,7 @@ const CATEGORY_FORM_LABELS: Record<string, string[]> = {
   sellwild: ["Title", "Description", "Price", "Sellwild price", "Category", "Condition"],
   vinted: ["Title", "Description", "Price", "Vinted price", "Category", "Condition", "Brand", "Size",
     "Color", "Package size", "Material"],
-  facebook: ["Title", "Description", "Price", "Condition", "Brand"],
+
 };
 
 function coreFieldLabel(tab: string, label: string): boolean {
@@ -1440,13 +1434,6 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
       );
     case "vinted":
       return editorFields.vinted;
-    case "facebook":
-      return [
-        { key: "price", label: "Price", type: "number" },
-        { key: "condition", label: "Condition" },
-        { key: "brand", label: "Brand" },
-        ...specificsFields(listing?.[`${tab}_specifics`], `${tab}_specifics`),
-      ];
     default:
       return [];
   }

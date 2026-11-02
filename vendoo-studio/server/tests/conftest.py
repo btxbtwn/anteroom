@@ -93,6 +93,15 @@ def _isolate_studio_settings(tmp_path_factory):
         os.environ["VENDOO_STUDIO_DATA_DIR"] = previous
 
 
+@pytest.fixture(autouse=True)
+def _fresh_sales_archive(_isolate_studio_settings):
+    """Each test may seed a new inventory before its first archive read."""
+    from vendoo_studio.services.user_settings import update_settings
+    from vendoo_studio.services.vendoo_sales_archive import ARCHIVED_KEY
+
+    update_settings(lambda settings: settings.pop(ARCHIVED_KEY, None))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _no_sourcing_timer():
     """Keep app startup from refreshing Sourcing in the background.

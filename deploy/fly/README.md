@@ -29,37 +29,26 @@ The cloud build is a separate entry point, not the desktop interface.
 
 ## Region
 
-Run the API in the region closest to the Supabase database. Every query is a
-network round trip, and a page asks for many. The database is in AWS us-west-2
-(Oregon), so the Machine runs in Fly's `sea` (Seattle). From `sjc` (San Jose)
-each `SELECT 1` took 24 ms, and opening one listing costs over a hundred of
-them.
+The API runs in Fly's supported `sjc` (San Jose) region. Supabase is in AWS
+us-west-2 (Oregon); a production `SELECT 1` measured about 27 ms on 2026-11-02.
+Fly rejects new Seattle Machines because `sea` is deprecated, so do not set
+`primary_region` to `sea` or try to clone the running Machine there.
 
-`primary_region` only places new Machines. To move the running one, clone it
-into the new region, check it, then remove the old one. The Machine has no
-volume, so nothing else moves:
+Before changing regions, confirm the destination accepts new Machines and
+measure database latency there. Keep the existing healthy Machine until a
+replacement passes health checks. Changing `primary_region` alone does not
+move a running Machine.
 
-```sh
-fly machine list --config deploy/fly/fly.toml          # note the sjc Machine ID
-fly machine clone <sjc-id> --region sea --config deploy/fly/fly.toml
-fly machine list --config deploy/fly/fly.toml          # wait for the sea Machine's check to pass
-fly machine destroy <sjc-id> --force --config deploy/fly/fly.toml
-```
+## Shutdown during deployments
 
-While both run, the API holds up to twice its usual pool of connections
-(still within Supabase's session limit). Measure the round trip from the new
-Machine:
-
-```sh
-fly ssh console --config deploy/fly/fly.toml -C "python -c \"
-import time; from sqlalchemy import text; from vendoo_studio.database import engine
-with engine.connect() as c:
-    c.execute(text('select 1')); t = time.perf_counter()
-    for _ in range(10): c.execute(text('select 1'))
-    print((time.perf_counter() - t) * 100, 'ms per query')\""
-```
-
-If the Supabase project ever moves, move the Machine with it.
+Fly sends SIGTERM with a 300-second grace period. Uvicorn allows active requests
+120 seconds to finish; the draft worker then stops claiming tasks and has up to
+120 seconds to save its current draft before the background loop is stopped.
+This also drains draft work whose browser has disconnected. Work that exceeds
+the grace period remains protected by its expiring lease and is never marked
+complete or replayed automatically. The seller must review the saved draft and
+retry interrupted work. A new web version offers a Reload app button instead
+of automatically reloading an open editor.
 
 ## Shared category trees
 

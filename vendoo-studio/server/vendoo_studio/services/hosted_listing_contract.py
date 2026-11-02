@@ -4,11 +4,26 @@ from pydantic import ValidationError
 
 from vendoo_studio.services.hosted_fields import DraftFields
 
-MARKETS = frozenset({'ebay', 'poshmark', 'mercari', 'depop', 'etsy', 'sellwild', 'vinted', 'facebook'})
+MARKETS = frozenset({'ebay', 'poshmark', 'mercari', 'depop', 'etsy', 'sellwild', 'vinted'})
+
 ROOTS = frozenset(DraftFields.model_fields) | {'title', 'originalPrice', 'tags', 'material', 'style', 'care', 'flaws', 'measurements', 'direct_category_ids', 'marketplace_photos'} | {f'{market}_specifics' for market in MARKETS}
 BLOCKED = frozenset({'userid', 'conversationid', 'revisionid', 'parentrevisionid', 'apikey', 'token', 'accesstoken', 'refreshtoken',
                      'authorization', 'cookie', 'cookies', 'password', 'headers', 'postid', 'listingid', 'draftid', 'itemid',
                      'storedfilename', 'sourcefilename', 'filename', 'filepath', 'url', 'listingurl', 'drafturl', 'vendooitemid'})
+
+
+def stored_listing_fields(raw):
+    """Project a server-generated revision onto the editable client contract."""
+    payload = {key: value for key, value in raw.items() if key in ROOTS}
+    categories = payload.get('direct_category_ids')
+    if isinstance(categories, dict):
+        # Generation keeps its search query beside the chosen categories.
+        # That provenance is server-owned, not an editable category identity.
+        payload['direct_category_ids'] = {
+            key: value for key, value in categories.items()
+            if key in MARKETS or key.removesuffix('_path') in MARKETS
+        }
+    return editable_listing(payload)
 
 
 def editable_listing(raw):

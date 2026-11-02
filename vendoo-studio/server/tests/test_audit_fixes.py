@@ -239,7 +239,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send)
 
     def test_crosslist_only_marketplace_does_not_block_send(self):
-        result = validate_listing(copy.deepcopy(VALID_LISTING), 5, selected_marketplaces=["ebay", "facebook"])
+        result = validate_listing(copy.deepcopy(VALID_LISTING), 5, selected_marketplaces=["ebay", "shopify"])
         self.assertFalse(any(err["field"].startswith("marketplaces.") for err in result.errors))
 
     def test_invalid_depop_and_etsy_limits(self):

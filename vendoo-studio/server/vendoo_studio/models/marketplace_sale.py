@@ -23,9 +23,10 @@ from vendoo_studio.models.ownership import SellerOwned
 SALE_STATES = ("new", "dismissed")
 ORDER_STATUSES = ("paid", "partially_refunded", "cancelled", "refunded", "cancellation_pending")
 PAID_STATUSES = ("paid", "partially_refunded")
-# Who reported the sale: a marketplace (webhook, order read, Chrome) or the
-# seller through Mark as sold. "other" is a sale off every marketplace.
-SALE_SOURCES = ("marketplace", "seller")
+# Who reported the sale: a marketplace (webhook, order read, Chrome), the
+# seller through Mark as sold, or Vendoo's imported history, kept once (see
+# vendoo_sales_archive). "other" is a sale off every marketplace.
+SALE_SOURCES = ("marketplace", "seller", "vendoo")
 OTHER_MARKETPLACE = "other"
 
 

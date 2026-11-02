@@ -275,19 +275,19 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
     if not conv:
         raise HTTPException(404, "Conversation not found")
 
-    provider = _require_provider()
-    vision_provider = get_photo_provider()
-    vision_name, vision_model = _vision_meta(vision_provider)
-
+    # Provider settings and credentials use their own short sessions.
+    db.close()
     existing = active_generation(conv_id)
     if existing is not None:
-        db.close()
         return stream_generation(existing)
     if resume:
         # Reconnecting after the run ended must not start a second one: that
         # posted a second photo analysis and comps card beside the first.
-        db.close()
         return stream_finished()
+
+    provider = _require_provider()
+    vision_provider = get_photo_provider()
+    vision_name, vision_model = _vision_meta(vision_provider)
 
     photos = repo.get_photos(conv_id)
     if not photos:
@@ -301,13 +301,12 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
     seller_answers = stored_seller_answers(repo, conv_id, item_details)
     if seller_answers:
         item_details += "\nSeller answers:\n" + seller_answers
-    paths = [str(path) for path in await asyncio.to_thread(
-        photo_store().local_paths, [p.stored_filename for p in photos],
-    )]
+    filenames = [p.stored_filename for p in photos]
     analysis_fingerprint = photo_fingerprint(photos)
     photo_count = len(photos)
-    # Release the request-scoped session before background work opens its own.
+    # Private photo downloads must not retain an inventory connection either.
     db.close()
+    paths = [str(path) for path in await asyncio.to_thread(photo_store().local_paths, filenames)]
 
     run = start_generation(conv_id, functools.partial(
         run_listing_generation,

@@ -251,6 +251,8 @@ async def attach_direct_categories(db, listing: dict, evidence: str = "") -> dic
         # A copy, so filling a category here does not clear the sizes generation wrote.
         apply_agent_categories({**copy.deepcopy(listing), "direct_category_ids": chosen},
                                {**native_rows(), "ebay": ebay_tree_leaves(db)}, markets=markets)
+    # Tree reads are complete. Live API/token lookups must have the pool free.
+    db.close()
     if not direct_category_id({"direct_category_ids": chosen}, "ebay"):
         try:
             hit = await _ebay_leaf(query)

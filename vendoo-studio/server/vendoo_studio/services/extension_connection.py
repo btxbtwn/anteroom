@@ -434,7 +434,7 @@ async def reload_extension():
     return {"ok": True, "sent": await request_extension_reload(token) if token else False}
 
 
-_SESSION_MARKETS = ("depop", "poshmark", "mercari", "sellwild", "vinted", "facebook")
+_SESSION_MARKETS = ("depop", "poshmark", "mercari", "sellwild", "vinted")
 _SESSION_STATES = {"signed_in", "expired", "signed_out", "unknown"}
 
 

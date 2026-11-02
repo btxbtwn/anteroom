@@ -75,7 +75,8 @@ export function categorySpecificFieldsStale(
   return String(loadedCategoryId || "") !== categoryKey;
 }
 
-const CATEGORY_MARKETS = ["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "facebook", "sellwild"];
+const CATEGORY_MARKETS = ["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild"];
+
 
 /** Every saved category id. A price or brand edit does not change it. */
 export function listingCategorySignature(listing: ListingData | undefined): string {

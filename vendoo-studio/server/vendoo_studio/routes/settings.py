@@ -123,8 +123,9 @@ class PreferredProviderConfig(BaseModel):
 
 def _chatgpt_status() -> ChatGPTStatus:
     from vendoo_studio.services.service_context import current
-    if current() is not None:
-        return ChatGPTStatus(signed_in=False)
+    if (context := current()) is not None:
+        from vendoo_studio.services.mac_inference import relay_for
+        return ChatGPTStatus(signed_in=relay_for(context.seller_id).connected)
     from vendoo_studio.services import chatgpt_oauth
     from vendoo_studio.services.keychain import get_chatgpt_tokens
 
@@ -159,10 +160,13 @@ def get_provider():
     active = get_listing_provider()
     active_name = getattr(active, "name", None)
 
-    if active_name == "chatgpt":
+    if active_name == "chatgpt" and active is not None:
         from vendoo_studio.providers.chatgpt_codex import resolved_chatgpt_models
 
-        vision_model, listing_model = resolved_chatgpt_models()
+        if current() is not None:
+            vision_model, listing_model = active.vision_model, active.listing_model
+        else:
+            vision_model, listing_model = resolved_chatgpt_models()
         return ProviderStatus(
             provider="chatgpt",
             primary=primary,

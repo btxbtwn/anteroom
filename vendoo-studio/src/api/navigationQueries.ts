@@ -1,4 +1,5 @@
 import { hasHostedApiSession } from "./transport";
+import { batchListingScreenReads } from "./listingScreen";
 import { loadPrivateImage } from "./privateImages";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
@@ -39,7 +40,7 @@ function warmPhotoThumbnails(photos: Photo[]) {
 export function prefetchListingReads(client: QueryClient, id: string) {
   const read = (queryKey: unknown[], queryFn: () => Promise<unknown>) =>
     client.prefetchQuery({ queryKey, queryFn, retry: false });
-  return Promise.all([
+  return batchListingScreenReads(() => Promise.all([
     read(["jobs", id], () => api.jobs.list(id)),
     read(["activity", id], () => api.conversations.activity(id)),
     read(["listing-fields", id], () => api.listings.fields(id)),
@@ -51,7 +52,7 @@ export function prefetchListingReads(client: QueryClient, id: string) {
     client.prefetchQuery({ queryKey: ["photos", id], queryFn: () => api.conversations.photos(id), retry: false })
       .then(() => warmPhotoThumbnails(client.getQueryData<Photo[]>(["photos", id]) ?? [])),
     client.prefetchQuery({ queryKey: ["messages", id], queryFn: () => api.conversations.messages(id), retry: false }),
-  ]);
+  ]));
 }
 
 export function prefetchAssistantThread(client: QueryClient, id: string) {

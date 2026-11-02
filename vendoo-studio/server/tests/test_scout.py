@@ -118,12 +118,18 @@ class ScoutFlowTest(unittest.TestCase):
         self.assertTrue(any(m.text.startswith("Photo analysis:") for m in repo.get_messages(conv.id)))
 
     def test_a_sold_listing_counts_toward_the_track_record(self):
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
         created = self._create(asking="10")
         self._run(created["id"], _comps(40, 50, 60))
         bought = self.client.post(f"/api/scout/{created['id']}/decision", json={"decision": "bought"}).json()
         conv = self.db.get(Conversation, bought["conversation_id"])
-        conv.notes = json.dumps({"vendooStatus": "sold", "vendooSale": {"price": 45}})
-        self.db.commit()
+        response = self.client.post(f"/api/conversations/{conv.id}/marketplace-listings/sold", json={
+            "marketplace": "ebay", "sold_on": datetime.now(UTC).date().isoformat(),
+            "currency": "USD", "item_revenue": "45", "request_id": uuid4().hex,
+        })
+        self.assertEqual(response.status_code, 200, response.text)
 
         listed = self.client.get("/api/scout").json()
         row = next(c for c in listed["checks"] if c["id"] == created["id"])

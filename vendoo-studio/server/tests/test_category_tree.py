@@ -390,7 +390,7 @@ class CatalogIndexTest(unittest.TestCase):
             category_path="Clothing > Men > Shirts > T-Shirts", fields=[{"label": "Sleeve", "key": "sleeve"}],
         ))
         self.db.commit()
-        with patch.object(catalog, "materialize_category_docs", side_effect=AssertionError("re-indexed categories")):
+        with patch.object(catalog, "_write_category_docs", side_effect=AssertionError("re-indexed categories")):
             rebuild_catalog_index(self.db)
         self.assertTrue(any(
             hit.get("general_path") == "Clothing > Men > Shirts > T-Shirts"
@@ -405,7 +405,7 @@ class CatalogIndexTest(unittest.TestCase):
         from vendoo_studio.services import catalog_index as catalog
 
         reset_catalog_index_cache()
-        with patch.object(catalog, "materialize_category_docs", side_effect=AssertionError("re-indexed categories")):
+        with patch.object(catalog, "_write_category_docs", side_effect=AssertionError("re-indexed categories")):
             rebuild_catalog_index(self.db)
         hits = search_catalog(self.db, "women floral blouse tops", kind="category", top_k=5, ensure=False)
         self.assertEqual(hits[0]["id"], "tops")

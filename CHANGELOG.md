@@ -6,6 +6,42 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.676 — 2026-11-02
+
+- Generating a web draft no longer ties up the editor while photos, AI answers, or marketplace categories are loading.
+
+## 0.1.675 — 2026-11-02
+
+- The Mac app can now connect your ChatGPT sign-in to web draft generation.
+
+## 0.1.674 — 2026-11-02
+
+- Keep imported Vendoo sales in Sales records without rereading Vendoo's sale notes after the first archive.
+- Read orders and available amounts from Depop, Poshmark, Mercari and Sellwild, preserving seller corrections and reporting orders whose amounts cannot be read.
+
+## 0.1.673 — 2026-11-02
+
+- Keep draft generation available while the photo catalog rebuilds, and release database connections between generation steps.
+- Wait for all selected photos to finish uploading before enabling Generate listing.
+- Stop requesting the desktop setup-guide endpoint when signed in on the web.
+- Offer a reload when a web update arrives, so it does not reload an open draft automatically.
+- Make Clear listing available from the web editor's More listing actions menu.
+- Give running draft work time to finish during a web deployment before stopping the worker.
+- Refresh generated listing fields in the web editor without rejecting internal category-search metadata.
+- Use ChatGPT on a connected, signed-in Mac for web generation, with ChatGPT credentials kept on the Mac.
+
+## 0.1.672 — 2026-11-02
+
+- Remove Facebook Marketplace: no Facebook tab, Check on Facebook, sign-in row or sale checks. Past Facebook sales stay in Sales records and Analytics.
+
+## 0.1.671 — 2026-11-02
+
+- Assistant answers on the web keep their progress across a disconnected tab. If a server restart interrupts an answer, you can retry the saved question.
+
+## 0.1.670 — 2026-11-02
+
+- Open web listings with fewer separate requests for the form, photos and conversation.
+
 ## 0.1.669 — 2026-11-02
 
 - Keep the app responsive while preparing large marketplace category menus and repairing generated listing details.

@@ -52,17 +52,20 @@ async def prepare_generation_schema(
     override = str(parse_notes(notes).get("categoryOverride") or "").strip()
     revisions = ListingRepo(db).get_revisions(conv_id)
     seed = deepcopy(revisions[0].listing_json) if revisions else {}
+    revision_id = revisions[0].id if revisions else ""
+    conv = ConversationRepo(db).get(conv_id)
+    saved_notes = conv.notes if conv else notes
+    db.close()
     paths = await select_categories(db, provider, analysis, notes, [], override)
     seed["category_path"] = paths["general"]
-    conv = ConversationRepo(db).get(conv_id)
-    seed_general_fields(seed, conv.notes if conv else notes)
+    seed_general_fields(seed, saved_notes)
     if on_status:
         on_status("Loading marketplace categories and fields…")
     await attach_direct_categories(db, seed, f"{analysis}\n{notes}")
     listing_persistence.save_revision(db,
         conv_id, seed, source="category_analysis",
-        parent_revision_id=revisions[0].id if revisions else None,
-        expected_revision_id=revisions[0].id if revisions else "",
+        parent_revision_id=revision_id or None,
+        expected_revision_id=revision_id,
     )
     seed["_schema_source"] = "native"
     return seed
