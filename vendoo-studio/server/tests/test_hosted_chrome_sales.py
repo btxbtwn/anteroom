@@ -94,3 +94,20 @@ def test_sale_detection_settings_are_owned(cloud, signing_keys):  # noqa: F811
     assert result.status_code == 200
     assert result.json()['enabled']['poshmark'] is False
     assert client.get('/api/settings/sale-detection', headers=bob).json()['enabled']['poshmark'] is True
+
+
+def test_failed_check_errors_stay_with_the_seller(monkeypatch):
+    monkeypatch.setattr(chrome_sales, 'sale_detection_enabled', lambda _: True)
+    monkeypatch.setattr(chrome_sales, 'check_marketplace', AsyncMock(side_effect=RuntimeError('unavailable')))
+    chrome_sales._next.clear()
+    chrome_sales._errors.clear()
+    try:
+        with use(for_seller(USER_ID)):
+            asyncio.run(chrome_sales.check_due())
+            assert 'poshmark' in chrome_sales.check_errors()
+        with use(for_seller(BOB)):
+            assert chrome_sales.check_errors() == {}
+        assert chrome_sales.check_errors() == {}
+    finally:
+        chrome_sales._next.clear()
+        chrome_sales._errors.clear()
