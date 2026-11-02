@@ -1,1 +1,0 @@
-- On the web, Settings → Connections now asks you to update Anteroom Bridge when it is too old to check marketplace sign-in, instead of saying Chrome is not connected.

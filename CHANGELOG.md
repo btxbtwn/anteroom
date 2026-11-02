@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.664 — 2026-11-02
+
+- On the web, Settings → Connections now asks you to update Anteroom Bridge when it is too old to check marketplace sign-in, instead of saying Chrome is not connected.
+
 ## 0.1.663 — 2026-11-02
 
 - On the web, starting an eBay or Etsy sign-in, or loading their listing settings, no longer freezes Anteroom while the server is busy, and sign-in errors no longer blame the relay when the relay isn't the problem.
