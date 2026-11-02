@@ -24,7 +24,7 @@ describe("chromeNotice", () => {
 
   it("says the Bridge is missing when nothing answers", () => {
     const notice = chromeNotice(bridge("unavailable", [], false), true);
-    expect(notice.button).toBe("Connect Chrome");
+    expect(notice.button).toBe("Connect Anteroom Extension");
     expect(notice.message.join(" ")).toContain("isn’t answering");
     expect(notice.message.join(" ")).not.toMatch(/ZIP|chrome:\/\/extensions|managed/);
   });
