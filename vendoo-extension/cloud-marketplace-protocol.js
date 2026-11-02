@@ -38,11 +38,14 @@
   }
   // Marketplace commands the hosted API relays, already approved and confirmed there.
   const COMMANDS = new Set(['marketplace.execute', 'marketplace.result', 'marketplace.delete', 'job.cancel']);
-  // Read-only choices for the seller's editor, each with exactly the inputs it takes.
+  // Named commands other than marketplace actions, each with exactly the inputs it takes:
+  // a maximum string length, or the set of values allowed.
   const READS = {
     'marketplace.vinted_categories': {},
     'marketplace.vinted_brands': { query: 100, category: 1000 },
     'marketplace.sellwild_account': {},
+    'marketplace.sessions': {},
+    'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted', 'facebook']) },
   };
   const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
   const MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -56,7 +59,8 @@
       const inputs = READS[value.type];
       for (const [key, item] of Object.entries(payload)) {
         if (key === 'request_id' || (key === 'job_id' && item === null)) continue;
-        if (!Object.hasOwn(inputs, key) || typeof item !== 'string' || item.length > inputs[key]) return null;
+        if (!Object.hasOwn(inputs, key) || typeof item !== 'string') return null;
+        if (inputs[key] instanceof Set ? !inputs[key].has(item) : item.length > inputs[key]) return null;
       }
       return value.job_id === null ? value : null;
     }
