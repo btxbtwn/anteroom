@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 
@@ -21,16 +21,26 @@ from vendoo_studio.services.service_context import ServiceContext, use
 from vendoo_studio.services.suggestions import list_suggestions
 
 
-def test_concurrent_listing_reads_do_not_wait_for_nested_settings_connections(cloud, signing_keys, monkeypatch):  # noqa: F811
+@pytest.fixture(params=[5, 8], ids=['bounded-regression', 'production-burst'])
+def concurrent_cloud(cloud, monkeypatch, request):  # noqa: F811
+    client, database = cloud
+    engine = (create_engine(database.url, pool_size=5, max_overflow=0, pool_timeout=2)
+              if request.param == 5 else database)
+    monkeypatch.setattr('vendoo_studio.database.engine', engine)
+    try:
+        yield client, request.param
+    finally:
+        engine.dispose()
+
+
+def test_concurrent_listing_reads_do_not_wait_for_nested_settings_connections(concurrent_cloud, signing_keys, monkeypatch):  # noqa: F811
     from vendoo_studio.routes import hosted_workspace
 
-    client, engine = cloud
+    client, readers = concurrent_cloud
     alice = headers(signing_keys)
     identity = client.post('/api/drafts', headers=alice, json={'title': 'Tee'}).json()['id']
-    readers = engine.pool.size()
     ready = threading.Barrier(readers, timeout=10)
     validate = hosted_workspace.validate_listing
-    monkeypatch.setattr(engine.pool, '_timeout', 2)
 
     def together(*args, **kwargs):
         ready.wait()
@@ -210,15 +220,15 @@ def test_suggestions_read_settings_before_holding_the_inventory_connection(tmp_p
 
 
 @pytest.mark.parametrize('route', ['draft', 'bytes', 'photo', 'thumb'])
-def test_photo_reads_return_the_database_connection_before_storage(cloud, signing_keys, monkeypatch, route):  # noqa: F811
-    client, engine = cloud
+def test_photo_reads_return_the_database_connection_before_storage(cloud, active_connections, signing_keys, monkeypatch, route):  # noqa: F811
+    client, _engine = cloud
     alice = headers(signing_keys)
     draft = client.post('/api/drafts', headers=alice, json={'title': 'Coat'}).json()['id']
     data = image_bytes()
 
     def storage(method, *_args):
         if method == 'GET':
-            assert engine.pool.checkedout() == 0, 'Private image I/O must not retain the request database connection'
+            assert not active_connections, 'Private image I/O must not retain the request database connection'
         return data
 
     monkeypatch.setattr(hosted_photos, 'storage_call', storage)
@@ -229,3 +239,23 @@ def test_photo_reads_return_the_database_connection_before_storage(cloud, signin
              'bytes': f'/api/conversations/{draft}/photos/{photo}/bytes',
              'photo': f'/api/photos/{photo}', 'thumb': f'/api/photos/{photo}/thumb'}
     assert client.get(paths[route], headers=alice).status_code == 200
+
+
+@pytest.fixture
+def active_connections(cloud):  # noqa: F811
+    _client, engine = cloud
+    active = set()
+
+    def checkout(connection, *_args):
+        active.add(connection)
+
+    def checkin(connection, *_args):
+        active.discard(connection)
+
+    event.listen(engine, 'checkout', checkout)
+    event.listen(engine, 'checkin', checkin)
+    try:
+        yield active
+    finally:
+        event.remove(engine, 'checkout', checkout)
+        event.remove(engine, 'checkin', checkin)

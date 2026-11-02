@@ -9,7 +9,6 @@ from __future__ import annotations
 from contextlib import ExitStack
 
 import pytest
-from sqlalchemy.exc import TimeoutError
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 
@@ -18,20 +17,22 @@ from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.listing import Listing, ListingRevision
 
 
-def test_postgres_bursts_wait_for_a_connection_instead_of_exceeding_session_limit():
+def test_postgres_bursts_can_hold_more_than_five_connections_and_release_them():
     from vendoo_studio.database import make_engine
 
     if engine.dialect.name != 'postgresql':
         pytest.skip('Exercises the real Postgres connection pool')
     isolated = make_engine(engine.url.render_as_string(hide_password=False))
-    isolated.pool._timeout = 0.05
     try:
         with ExitStack() as stack:
-            for _ in range(5):
-                stack.enter_context(isolated.connect())
-            with pytest.raises(TimeoutError):
-                isolated.connect()
-        # Returning a checkout makes the next request succeed again.
+            connections = [stack.enter_context(isolated.connect()) for _ in range(8)]
+            drivers = [connection.connection.driver_connection for connection in connections]
+            backends = {connection.exec_driver_sql('SELECT pg_backend_pid()').scalar_one()
+                        for connection in connections}
+            assert len(backends) == 8
+        # Closing a request must release its client connection to the external
+        # pooler, rather than leave idle connections reserved by this process.
+        assert all(driver.closed for driver in drivers)
         with isolated.connect() as connection:
             assert connection.exec_driver_sql('SELECT 1').scalar_one() == 1
     finally:
