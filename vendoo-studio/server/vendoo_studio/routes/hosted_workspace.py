@@ -30,8 +30,7 @@ router = APIRouter(prefix='/api')
 
 
 def conversation(db, identity, *, lock=False):
-    statement = select(Conversation).where(Conversation.id == identity)
-    row = db.scalar(statement.with_for_update() if lock else statement)
+    row = db.get(Conversation, identity, with_for_update=True if lock else None)
     if row is None:
         raise HTTPException(404, 'Listing not found')
     return row
@@ -174,9 +173,14 @@ def edit_conversation(identity: str, body: ConversationInput, db=Depends(get_sel
 @router.get('/conversations/{identity}/screen')
 def listing_screen(identity: str, db=Depends(get_seller_db)):
     """Core editor reads share one seller transaction; marketplace lookups stay separate."""
-    return {'conversation': get_conversation(identity, db), 'listing': get_listing(identity, db),
-            'photos': photos(identity, db=db), 'messages': messages(identity, db),
-            'jobs': jobs(identity, db), 'activity': activity(identity, db)}
+    # Keep the owned row alive in the identity map for the constituent reads.
+    row = conversation(db, identity)
+    loaded_messages = messages(identity, db)
+    return {'conversation': conversation_response(row), 'listing': get_listing(identity, db),
+            'photos': photos(identity, db=db), 'messages': loaded_messages,
+            'jobs': jobs(identity, db),
+            'activity': activity_response(db, identity, len(loaded_messages),
+                loaded_messages[-1]['id'] if loaded_messages else None)}
 
 
 @router.get('/conversations/{identity}/listing')
@@ -241,9 +245,13 @@ def messages(identity: str, db=Depends(get_seller_db)):
 @router.get('/conversations/{identity}/activity')
 def activity(identity: str, db=Depends(get_seller_db)):
     conversation(db, identity)
-    jobs = db.scalars(select(Job).where(Job.conversation_id == identity, Job.status.in_(ACTIVE_JOB_STATUSES))).all()
     count = db.scalar(select(func.count()).select_from(Message).where(Message.conversation_id == identity))
     last = db.scalar(select(Message.id).where(Message.conversation_id == identity).order_by(Message.created_at.desc()).limit(1))
+    return activity_response(db, identity, count, last)
+
+
+def activity_response(db, identity, count, last):
+    jobs = db.scalars(select(Job).where(Job.conversation_id == identity, Job.status.in_(ACTIVE_JOB_STATUSES))).all()
     from vendoo_studio.models.background_task import BackgroundTask
     tasks = db.scalars(select(BackgroundTask).where(
         BackgroundTask.conversation_id == identity, BackgroundTask.status.in_(('queued', 'running')))).all()

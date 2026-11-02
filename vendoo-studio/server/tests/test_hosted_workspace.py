@@ -318,7 +318,20 @@ def test_screen_matches_core_reads_and_refuses_other_sellers(cloud, signing_keys
     alice = headers(signing_keys)
     identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
     path = '/api/conversations/' + identity
-    response = client.get(path + '/screen', headers=alice)
+    from sqlalchemy import event
+    statements = []
+
+    def record(_connection, _cursor, statement, *_args):
+        statements.append(statement)
+
+    event.listen(_engine, 'before_cursor_execute', record)
+    try:
+        response = client.get(path + '/screen', headers=alice)
+    finally:
+        event.remove(_engine, 'before_cursor_execute', record)
+    # One ownership read; activity reuses the messages already loaded for chat.
+    assert sum('FROM conversations' in sql for sql in statements) == 1
+    assert sum('FROM messages' in sql for sql in statements) == 1
     assert response.status_code == 200, response.text
     for key, suffix in [('conversation', ''), ('listing', '/listing'), ('photos', '/photos'),
                         ('messages', '/messages'), ('activity', '/activity')]:

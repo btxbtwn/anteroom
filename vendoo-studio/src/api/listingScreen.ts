@@ -4,6 +4,14 @@ import { currentHostedSession } from "./transport";
 interface ReadBatch { keys: Set<string>; promise: Promise<Record<string, unknown>> }
 const pending = new Map<string, ReadBatch>();
 let owner = currentHostedSession();
+let batching = false;
+
+/** Navigation warm-up can trade parallel reads for less database work. */
+export function batchListingScreenReads<T>(start: () => T): T {
+  const previous = batching;
+  batching = true;
+  try { return start(); } finally { batching = previous; }
+}
 
 export async function listingScreenRead<T>(path: string, read: <R>(path: string) => Promise<R>): Promise<T> {
   const session = currentHostedSession();
@@ -15,6 +23,7 @@ export async function listingScreenRead<T>(path: string, read: <R>(path: string)
   const id = match ? match[1] : decodeURIComponent(job![1]);
   const key = match ? match[2] || "conversation" : "jobs";
   let batch = pending.get(id);
+  if (!batch && !batching) return read<T>(path);
   if (!batch) {
     const keys = new Set<string>();
     const promise = Promise.resolve().then(async () => {
