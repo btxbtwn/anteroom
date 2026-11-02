@@ -1,13 +1,51 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "./fixtures";
 
-test("Vendoo amounts appear in sales records and missing data marks sold inventory", async ({ page, request, phone }, info) => {
+test("sales search, completeness and loss filters update records and exports", async ({ page, phone, createConversation }, info) => {
+  const prefix = `Filter sale ${info.project.name} ${Date.now()}`;
+  for (const [suffix, fees] of [["missing", null], ["loss", 2]] as const) {
+    const response = await createConversation({ title: `${prefix} ${suffix}`, notes: JSON.stringify({
+      vendooStatus: "sold", vendooSale: { marketplace: "ebay", price: 10, cost: 20, fees, shippingCost: 0, soldAt: new Date().toISOString() },
+    }) });
+    expect(response.ok()).toBe(true);
+  }
+  await page.goto("/");
+  if (phone) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Analytics", exact: true }).click();
+  } else await page.getByRole("button", { name: "Analytics", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Search sales" }).fill(prefix);
+  await expect(page.getByText("1–2 of 2 records · Page 1", { exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "Sales completeness" }).click();
+  await page.getByRole("option", { name: "Losses", exact: true }).click();
+  await expect(page.getByText("1–1 of 1 records · Page 1", { exact: true })).toBeVisible();
+  const panel = page.getByRole("tabpanel", { name: "Sales records", exact: true });
+  await expect(panel.getByText(`${prefix} loss`, { exact: true })).toBeVisible();
+  await expect(panel.getByText(`${prefix} missing`, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Export sales CSV" })).toHaveAttribute("href", /attention=loss/);
+  await page.screenshot({ path: info.outputPath("sales-records-dark.png"), fullPage: true });
+  await page.evaluate(() => document.documentElement.classList.remove("dark"));
+  await page.screenshot({ path: info.outputPath("sales-records-light.png"), fullPage: true });
+  await page.getByRole("combobox", { name: "Sales completeness" }).click();
+  await page.getByRole("option", { name: "Missing sale data", exact: true }).click();
+  await expect(panel.getByText(`${prefix} missing`, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(page.getByRole("searchbox", { name: "Search sales" })).toHaveValue("");
+  await page.getByRole("combobox", { name: "Sales period" }).click();
+  await page.getByRole("option", { name: "Custom dates", exact: true }).click();
+  await expect(page.getByLabel("Sales from (UTC)", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(page.getByLabel("Sales from (UTC)", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Sales period" })).toContainText("Last 30 days");
+});
+
+test("Vendoo amounts appear in sales records and missing data marks sold inventory", async ({ page, request, phone, createConversation }, info) => {
   const today = new Date().toISOString().slice(0, 10);
   const title = `E2E Vendoo sale ${info.project.name} ${Date.now()}`;
   const sale = { marketplace: "ebay", price: 40, cost: 5, shippingCost: 4, soldAt: new Date().toISOString() };
-  const created = await request.post("/api/conversations", { data: {
+  const created = await createConversation({
     title, notes: JSON.stringify({ vendooStatus: "sold", vendooSale: sale }),
-  } });
+  });
   expect(created.ok()).toBe(true);
   const { id } = await created.json();
   const filters = `start=${today}&end=${today}&conversation_id=${id}`;
@@ -64,12 +102,12 @@ test("Vendoo amounts appear in sales records and missing data marks sold invento
   await expect(row.getByText("Missing sale data", { exact: true })).toHaveCount(0);
 });
 
-test("historical imported sales can be corrected entirely in Anteroom", async ({ page, request, phone }, info) => {
+test("historical imported sales can be corrected entirely in Anteroom", async ({ page, phone, createConversation }, info) => {
   const title = `E2E imported sale ${info.project.name} ${Date.now()}`;
-  const created = await request.post("/api/conversations", { data: { title, notes: JSON.stringify({
+  const created = await createConversation({ title, notes: JSON.stringify({
     vendooStatus: "sold", vendooSale: { marketplace: "poshmark", price: 40, cost: 5, fees: 8,
       shippingCost: 4 },
-  }) } });
+  }) });
   expect(created.ok()).toBe(true);
   await page.goto("/");
   if (phone) {

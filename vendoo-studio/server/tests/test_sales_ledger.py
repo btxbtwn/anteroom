@@ -71,6 +71,29 @@ def report(ledger, **params):
     return response.json()
 
 
+def test_search_filters_all_records_and_the_export_not_only_the_current_page(ledger):
+    for index in range(55):
+        ledger.db.add(MarketplaceSale(marketplace="ebay", order_id=f"search-order-{index}", line_id="1", conversation_id="coat"))
+    ledger.db.commit()
+    page = report(ledger, q="search-order-54")
+    assert page["summary"]["lines"] == 1 and len(page["rows"]) == 1
+    assert page["rows"][0]["order_id"] == "search-order-54"
+    response = ledger.client.get("/api/sales-ledger/export/sales.csv", params={**filters(), "q": "search-order-54"})
+    exported = list(csv.DictReader(StringIO(response.text.lstrip("\ufeff"))))
+    assert len(exported) == 1 and exported[0]["order_id"] == "search-order-54"
+
+
+def test_attention_filters_distinguish_unknown_profit_from_a_loss(ledger):
+    assert report(ledger, attention="missing")["summary"]["lines"] == 1
+    assert report(ledger, attention="loss")["rows"] == []
+    assert save(ledger, item_cost="100").status_code == 200
+    page = report(ledger, attention="loss")
+    assert page["summary"]["lines"] == 1 and page["rows"][0]["profit"] == "-61.85"
+    assert report(ledger, attention="review")["rows"] == []
+    response = ledger.client.get("/api/sales-ledger", params={**filters(), "attention": "invalid"})
+    assert response.status_code == 422
+
+
 def imported_sale(ledger, **changes):
     conv = ledger.db.get(Conversation, "coat")
     conv.notes = json.dumps({"vendooStatus": "sold", "vendooSale": {
