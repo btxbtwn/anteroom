@@ -28,6 +28,7 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
     await page.getByRole("button", { name: "Inventory", exact: true }).click();
   }
   await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: title, exact: true }).click();
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
 });
 
