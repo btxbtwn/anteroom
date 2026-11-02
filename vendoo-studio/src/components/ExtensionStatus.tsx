@@ -5,6 +5,7 @@ type ExtensionStatusData = {
   version?: string | null;
   load_path?: string | null;
   duplicate_bridge?: boolean;
+  runs_marketplace_actions?: boolean;
 };
 
 /** What Settings → Connections says about the listing extension. */
@@ -14,7 +15,9 @@ export function extensionConnection(data: ExtensionStatusData | undefined): {
   tone: "success" | "warning" | "muted";
 } {
   const connected = Boolean(data?.connected);
-  const outdated = connected && data?.up_to_date === false;
+  // An earlier Bridge keeps working as long as it can run marketplace actions.
+  const outdated = connected && data?.runs_marketplace_actions === false;
+  const earlier = connected && data?.up_to_date === false;
   if (data?.duplicate_bridge) {
     return {
       label: "Two copies loaded",
@@ -37,7 +40,17 @@ export function extensionConnection(data: ExtensionStatusData | undefined): {
         expected ? `This Anteroom build expects extension ${expected}.` : "This Anteroom build has a newer extension.",
         running ? `Chrome is running ${running}.` : "Chrome is not on Anteroom's copy yet.",
         loadPath ? `Load unpacked from ${loadPath}.` : "Load the unpacked folder below.",
-        "Connect Chrome reloads that folder so it stays in lockstep.",
+        "Connect Chrome reloads that folder.",
+      ].join(" "),
+    };
+  }
+  if (earlier) {
+    return {
+      label: "Connected",
+      tone: "success",
+      detail: [
+        data?.version ? `Chrome is running extension ${data.version}, which still works.` : "Chrome is running an earlier extension, which still works.",
+        "Connect Chrome loads the newer copy when you want it.",
       ].join(" "),
     };
   }
