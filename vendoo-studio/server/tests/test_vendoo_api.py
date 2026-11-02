@@ -145,10 +145,6 @@ class DefaultSectionTest(unittest.TestCase):
         self.assertIn("listedID", default_listing_section("shopify"))
 
 
-class RoundTripTest(unittest.TestCase):
-    """The serializer must survive a trip through Studio's own reader."""
-
-
 class GeneralFormFieldsTest(unittest.TestCase):
     """The general form feeds every marketplace, so its own fields must be
     stored the way Vendoo stores them. Shapes taken from real saved items."""
@@ -163,6 +159,13 @@ class GeneralFormFieldsTest(unittest.TestCase):
         "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
     }
 
+
+    def build(self, **over):
+        from vendoo_studio.services.vendoo_item_build import _general_details
+
+        unresolved = []
+        general = _general_details({**self.LISTING, **over}, None, [], unresolved)
+        return {"generalDetails": general}, unresolved
 
     def test_size_carries_the_category_it_belongs_to(self):
         item, _ = self.build()
