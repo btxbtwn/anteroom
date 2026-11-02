@@ -46,12 +46,12 @@ def test_listing_actions_are_the_sellers_own_and_ebay_only(cloud, signing_keys, 
     assert client.get(base + '/native-marketplaces', headers=bob).status_code == 404
     assert client.post(base + '/native-marketplaces/ebay/list', headers=bob,
                        json={'revision_id': 'r1', 'confirm': True}).status_code == 404
-    # Grailed has no direct listing on the Mac either, and Facebook delisting is not on the web yet.
+    # Grailed has no direct listing on the Mac either, and Facebook listings are deleted on Facebook, as on the Mac.
     assert client.post(base + '/native-marketplaces/grailed/list', headers=alice,
                        json={'revision_id': 'r1', 'confirm': True}).status_code == 422
     refused = client.post(base + '/marketplace-listings/delist', headers=alice,
                           json={'marketplaces': ['facebook'], 'confirm': True})
-    assert refused.status_code == 409 and 'Mac app' in refused.json()['detail']
+    assert refused.status_code == 409 and refused.json()['detail'] == "Anteroom can't delete Facebook listings yet. Delete it on Facebook, then choose Mark as not listed."
     # List needs the seller's confirmation in the same call.
     assert client.post(base + '/native-marketplaces/ebay/list', headers=alice,
                        json={'revision_id': 'r1'}).status_code == 400
