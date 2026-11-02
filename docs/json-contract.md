@@ -70,8 +70,8 @@ hosted API to Anteroom Bridge (`services/hosted_browser_relay.py`,
 | `marketplace.result` | `marketplace.actions` | the job | `operation_id`, `context` | what the action did |
 | `marketplace.delete` | `marketplace.actions` | the job | the confirmed delist | the delist result |
 | `job.cancel` | `marketplace.actions` | the operation | `job_id` | none awaited |
-| `marketplace.vinted_categories` | `marketplace.reads` | `null` | none | `{ok, options}` or `{ok: false, error_code}` |
-| `marketplace.vinted_brands` | `marketplace.reads` | `null` | `query` (≤100), `category` (≤1000) | `{ok, options}` or `{ok: false, error_code}` |
+| `marketplace.vinted_categories` | `vinted.choices` | `null` | none | `{ok, options}` or `{ok: false, error_code}` |
+| `marketplace.vinted_brands` | `vinted.choices` | `null` | `query` (≤100), `category` (≤1000) | `{ok, options}` or `{ok: false, error_code}` |
 
 A read's `error_code` is one of `signed_out`, `challenge`, `rate_limited`,
 `schema_drift` or `network`; the marketplace's own words stay in Chrome.

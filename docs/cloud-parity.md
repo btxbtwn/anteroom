@@ -343,5 +343,5 @@ Vinted List, Update and Delist are on the web, as on the Mac. The Mac reads
 Vinted's categories and brands in its private account window; the web sends
 named, read-only commands (`marketplace.vinted_categories`,
 `marketplace.vinted_brands`) to the seller's Chrome over the same relay, under
-a new Bridge capability, `marketplace.reads` (Bridge 0.2.42). Sale detection
+a new Bridge capability, `vinted.choices` (Bridge 0.2.42). Sale detection
 for Vinted stays off on the web, like the other Chrome marketplaces.

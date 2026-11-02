@@ -6,6 +6,8 @@
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
   const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);
+  // What a relaying Bridge runs: marketplace actions, and each named read under its own name.
+  const RELAY_CAPABILITIES = ['marketplace.actions', 'vinted.choices'];
 
   function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null, runCommand = null } = {}) {
     // Serializing state changes prevents two tabs from overwriting each other's
@@ -22,7 +24,7 @@
     const page = sender => sender.id === api.runtime.id && Number.isInteger(sender.tab?.id)
       && sender.frameId === 0 && typeof sender.documentId === 'string'
       && site(sender.url) && site(sender.tab.url) && (!sender.origin || sender.origin === ORIGIN);
-    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? ['marketplace.actions', 'marketplace.reads'] : [])] });
+    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? RELAY_CAPABILITIES : [])] });
     async function read() { return (await api.storage.session.get(KEY))[KEY] || {}; }
     async function write(records) { await api.storage.session.set({ [KEY]: records }); }
     async function closeApproval(record) {

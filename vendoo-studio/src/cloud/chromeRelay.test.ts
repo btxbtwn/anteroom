@@ -45,8 +45,8 @@ describe("Chrome relay", () => {
     const read = { type: "marketplace.vinted_categories", job_id: null, message_id: "b".repeat(32), payload: { request_id: "b".repeat(32) } };
     responses = [Response.json(read), Response.json({ ok: true })];
     const bridge = { runMarketplaceCommand: vi.fn(async () => ({ ok: true, options: ["Women > Jeans"] })) };
-    await relayOnce(bridge, ["marketplace.actions", "marketplace.reads"]);
-    expect(fetches[0].url).toBe("/api/browser-relay/next?capabilities=marketplace.actions,marketplace.reads");
+    await relayOnce(bridge, ["marketplace.actions", "vinted.choices"]);
+    expect(fetches[0].url).toBe("/api/browser-relay/next?capabilities=marketplace.actions,vinted.choices");
     expect(bridge.runMarketplaceCommand).toHaveBeenCalledWith(read, []);
     expect(JSON.parse(String(fetches[1].options?.body))).toEqual({ request_id: "b".repeat(32), payload: { ok: true, options: ["Women > Jeans"] } });
   });

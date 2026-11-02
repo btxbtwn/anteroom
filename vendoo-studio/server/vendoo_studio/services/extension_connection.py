@@ -53,9 +53,6 @@ DUPLICATE_REPORT_SEC = 300.0
 # need the exact copy this app ships. A change an older Bridge cannot handle
 # gets a new name here and in the Bridge's capabilities.
 MARKETPLACE_ACTIONS = "marketplace.actions"
-# What a Bridge must declare before the web sends it a named read of a
-# marketplace account's own choices (services/hosted_browser_relay.py).
-MARKETPLACE_READS = "marketplace.reads"
 
 
 async def _warm_label_catalog() -> None:

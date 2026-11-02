@@ -25,12 +25,18 @@ import time
 import uuid
 from collections import deque
 
-from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, MARKETPLACE_READS, ReplyWaits
+from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, ReplyWaits
+
+# Each named read has its own Bridge capability, so a later read never changes
+# what an existing name promises (docs/cloud-extension.md).
+VINTED_CHOICES = "vinted.choices"
+# The Bridge version that first declares each capability, and what it lets the web do.
+NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices")}
 
 # Each command, and the capability the Bridge must declare to receive it.
 COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
             "marketplace.delete": MARKETPLACE_ACTIONS, "job.cancel": MARKETPLACE_ACTIONS,
-            "marketplace.vinted_categories": MARKETPLACE_READS, "marketplace.vinted_brands": MARKETPLACE_READS}
+            "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES}
 # A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
 CONTRACT = ("type", "job_id", "message_id", "payload")
 # The page asks again as soon as it answers, and at least this often while idle.
@@ -57,9 +63,8 @@ class BrowserRelay(ReplyWaits):
         if time.monotonic() - self._seen_at >= SEEN_FOR_S:
             return "Open Anteroom in Chrome on your computer and connect Chrome first."
         if capability not in self._capabilities:
-            return ("Update Anteroom Bridge in Chrome to 0.2.42 or later to read these choices from the web."
-                    if capability == MARKETPLACE_READS else
-                    "Update Anteroom Bridge in Chrome to 0.2.40 or later to list on this marketplace from the web.")
+            version, purpose = NEEDS[capability]
+            return f"Update Anteroom Bridge in Chrome to {version} or later to {purpose} from the web."
         return None
 
     async def send_message(self, message: dict) -> bool:
@@ -97,9 +102,10 @@ class BrowserRelay(ReplyWaits):
     async def read(self, command: str, payload: dict, timeout: float) -> dict:
         """One named read in the seller's Chrome, and the Bridge's reply. Raises
         ``ChromeReadError`` when Chrome cannot take it or does not answer in time."""
-        if COMMANDS.get(command) != MARKETPLACE_READS:
+        capability = COMMANDS.get(command)
+        if capability is None or capability == MARKETPLACE_ACTIONS:
             raise ValueError(f"{command} is not a relayed read.")
-        if refusal := self.refusal(MARKETPLACE_READS):
+        if refusal := self.refusal(capability):
             raise ChromeReadError(refusal)
         request_id = uuid.uuid4().hex
         waiter = self.register_wait(request_id)

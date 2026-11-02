@@ -6,7 +6,7 @@ from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from vendoo_studio.services import hosted_browser_relay
 
-READS = 'marketplace.actions,marketplace.reads'
+READS = 'marketplace.actions,vinted.choices'
 
 
 def _answer(client, alice, reply):
