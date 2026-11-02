@@ -123,6 +123,20 @@ class FacebookListingTest(unittest.TestCase):
         self.assertEqual((body["ok"], body["error_code"]), (False, "signed_out"))
         self.assertNotIn("abcdef", json.dumps(body))
 
+    def test_blank_chrome_error_reports_a_failed_read_without_recording_a_sale(self):
+        with patch.object(chrome_sales, "record_reported_sales") as record:
+            for error in (" ", "\t\n", "", None, 42):
+                with self.subTest(error=error):
+                    self.bridge.return_value = {"ok": False, "error_code": "network", "error": error}
+                    response = self.client.post(f"{self.base}/facebook/check")
+                    self.assertEqual(response.status_code, 200, response.text)
+                    body = response.json()
+                    self.assertEqual(body["error"], "Chrome could not read the Facebook listing.")
+                    self.assertEqual(body["error_code"], "network")
+                    self.assertFalse(body["ok"])
+                    self.assertFalse(body["sale_recorded"])
+        record.assert_not_called()
+
     def test_check_needs_a_linked_listing(self):
         self.client.post(f"{self.base}/facebook/mark", json={"state": "not_listed"})
         self.assertEqual(self.client.post(f"{self.base}/facebook/check").status_code, 409)

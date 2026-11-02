@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.659 — 2026-11-02
+
+- Show a clear failed-read message instead of crashing when Chrome returns a blank Facebook listing error.
+
 ## 0.1.658 — 2026-11-02
 
 - The job list loads faster by fetching only the details it displays and reading job progress together.
