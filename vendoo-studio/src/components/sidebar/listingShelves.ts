@@ -17,6 +17,7 @@ export type Listing = {
   direct_marketplaces?: string[];
   removed_marketplaces?: string[];
   units_sold?: number;
+  missing_sale_data?: string[];
   quantity?: number | null;
   vendoo_listed_dates?: Record<string, string>;
   vendoo_sold_dates?: Record<string, string>;

@@ -1,4 +1,5 @@
 import csv
+import json
 from datetime import UTC, datetime, timedelta
 from io import StringIO
 from types import SimpleNamespace
@@ -68,6 +69,159 @@ def report(ledger, **params):
     response = ledger.client.get("/api/sales-ledger", params={**filters(), **params})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def imported_sale(ledger, **changes):
+    conv = ledger.db.get(Conversation, "coat")
+    conv.notes = json.dumps({"vendooStatus": "sold", "vendooSale": {
+        "price": 45.5, "cost": 10, "fees": 6.25, "shippingCost": 4.1,
+        "shippingCredit": 5, "marketplace": "ebay",
+        "soldAt": datetime.now(UTC).isoformat(), **changes,
+    }})
+    ledger.db.commit()
+
+
+def test_vendoo_amounts_appear_on_matching_order_without_writing_to_ledger(ledger):
+    imported_sale(ledger)
+    row = report(ledger)["rows"][0]
+    assert row["financials"]["fees"] == "6.25"
+    assert row["profit"] == "20.15"
+    from vendoo_studio.services.inventory_analytics import load_rows
+
+    analytics_sale = next(item for item in load_rows(ledger.db) if item.sale_id == ledger.sale.id)
+    assert float(row["profit"]) == round(analytics_sale.profit, 2)
+    assert record(ledger)["financials"] == row["financials"]
+    assert ledger.sale.financials is None
+    assert report(ledger)["summary"]["lines"] == 1
+
+
+def test_vendoo_only_sale_is_visible_in_records_and_csv(ledger):
+    imported_sale(ledger, marketplace="poshmark")
+    rows = report(ledger, marketplace="poshmark")["rows"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["source"] == "vendoo"
+    assert row["profit"] == "30.15"
+    assert ledger.client.get(f"/api/sales-ledger/{row['id']}").json() == row
+    csv_response = ledger.client.get("/api/sales-ledger/export/sales.csv", params={**filters(), "marketplace": "poshmark"})
+    exported = list(csv.DictReader(StringIO(csv_response.text.lstrip("\ufeff"))))
+    assert len(exported) == 1 and exported[0]["profit"] == "30.15"
+    assert ledger.db.query(MarketplaceSale).count() == 1
+
+
+def test_local_financials_take_precedence_and_missing_vendoo_fees_stay_unknown(ledger):
+    imported_sale(ledger, fees=None)
+    row = report(ledger)["rows"][0]
+    assert row["financials"]["fees"] is None and row["profit"] is None
+    assert save(ledger).json()["profit"] == "28.15"
+    assert report(ledger)["rows"][0]["profit"] == "28.15"
+
+
+def test_inventory_reports_missing_sale_fields_and_clears_them_when_recorded(ledger):
+    imported_sale(ledger, fees=None, shippingCost=None)
+    response = ledger.client.get("/api/conversations")
+    assert response.status_code == 200, response.text
+    coat = next(row for row in response.json() if row["id"] == "coat")
+    assert coat["missing_sale_data"] == ["fees", "shipping cost"]
+    assert report(ledger)["rows"][0]["missing_sale_data"] == ["fees", "shipping cost"]
+    save(ledger)
+    assert ledger.client.get("/api/conversations/coat").json()["missing_sale_data"] == []
+    assert ledger.client.get("/api/conversations").json()[0]["missing_sale_data"] == []
+
+
+def test_imported_sale_is_editable_locally_and_preserves_corrections(ledger):
+    imported_sale(ledger, marketplace="poshmark")
+    row = report(ledger, marketplace="poshmark")["rows"][0]
+    result = ledger.client.put(f"/api/sales-ledger/{row['id']}/financials", json={
+        **row["financials"], "expected_revision": 0, "expected_order_basis": row["order_basis"],
+    })
+    assert result.status_code == 200, result.text
+    assert result.json()["profit"] == "30.15"
+    assert result.json()["financial_revision"] == 1
+    assert ledger.db.query(MarketplaceSale).count() == 2
+    assert ledger.client.put(f"/api/sales-ledger/{row['id']}/financials", json={
+        **row["financials"], "expected_revision": 0, "expected_order_basis": row["order_basis"],
+    }).status_code == 409
+    imported_sale(ledger, marketplace="poshmark", fees=7)
+    assert ledger.client.get(f"/api/sales-ledger/{row['id']}").json()["financials"]["fees"] == "6.25"
+
+
+def test_matching_uses_all_orders_before_filtering_by_date(ledger):
+    imported_sale(ledger, soldAt="2020-01-01T12:00:00Z")
+    older = MarketplaceSale(marketplace="ebay", order_id="old", line_id="old-line", conversation_id="coat",
+                            sold_at=datetime(2020, 1, 1), received_at=datetime(2020, 1, 1))
+    ledger.db.add(older)
+    ledger.db.commit()
+    assert report(ledger)["rows"][0]["financials"] is None
+    rows = report(ledger, start="2020-01-01", end="2020-01-01")["rows"]
+    assert len(rows) == 1 and rows[0]["id"] == older.id and rows[0]["profit"] == "30.15"
+
+
+def test_cleared_marketplace_listing_does_not_flag_complete_vendoo_sale(ledger):
+    imported_sale(ledger)
+    ledger.db.add(MarketplaceSale(marketplace="depop", order_id="cleared", line_id="cleared", conversation_id="coat"))
+    ledger.db.commit()
+    assert ledger.client.get("/api/conversations").json()[0]["missing_sale_data"] == []
+
+
+def test_import_uses_the_same_recorded_item_cost_as_analytics(ledger):
+    imported_sale(ledger, cost=None)
+    row = report(ledger)["rows"][0]
+    # The saved listing costs $5 per unit and this order has two units.
+    assert float(row["financials"]["item_cost"]) == 10
+    assert row["profit"] == "30.15"
+    assert "item cost" not in row["missing_sale_data"]
+
+
+def test_import_dates_are_filtered_in_utc_and_unknown_dates_are_flagged(ledger):
+    imported_sale(ledger, soldAt="2020-01-01T23:30:00-06:00")
+    rows = report(ledger, start="2020-01-02", end="2020-01-02")["rows"]
+    assert len(rows) == 1 and rows[0]["sold_at"] == "2020-01-02T05:30:00+00:00"
+    imported_sale(ledger, soldAt=None)
+    assert "sale date" in record(ledger)["missing_sale_data"]
+
+
+def test_imported_sale_can_fill_missing_amounts_and_date_without_vendoo(ledger):
+    from vendoo_studio.services.inventory_analytics import load_rows
+
+    ledger.db.delete(ledger.sale)
+    ledger.db.commit()
+    imported_sale(ledger, marketplace="poshmark", fees=None, soldAt=None)
+    row = report(ledger, marketplace="poshmark")["rows"][0]
+    response = ledger.client.put(f"/api/sales-ledger/{row['id']}/financials", json={
+        **row["financials"], "fees": "8", "sold_on": "2020-03-04",
+        "expected_revision": 0, "expected_order_basis": row["order_basis"],
+    })
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert saved["profit"] == "28.4" and saved["missing_sale_data"] == []
+    assert saved["sold_at"].startswith("2020-03-04")
+    assert report(ledger, marketplace="poshmark", start="2020-03-04", end="2020-03-04")["summary"]["lines"] == 1
+    analytics = next(item for item in load_rows(ledger.db) if item.sale_id == row["id"])
+    assert analytics.sold_at.date().isoformat() == "2020-03-04"
+    assert round(analytics.profit, 2) == 28.4
+    assert ledger.client.get("/api/conversations/coat").json()["missing_sale_data"] == []
+
+
+def test_imported_sale_rejects_changes_from_an_outdated_import(ledger):
+    imported_sale(ledger, marketplace="poshmark")
+    row = report(ledger, marketplace="poshmark")["rows"][0]
+    imported_sale(ledger, marketplace="poshmark", fees=10)
+    result = ledger.client.put(f"/api/sales-ledger/{row['id']}/financials", json={
+        **row["financials"], "expected_revision": 0, "expected_order_basis": row["order_basis"],
+    })
+    assert result.status_code == 409
+    assert ledger.db.query(MarketplaceSale).count() == 1
+
+
+def test_local_unknown_amounts_are_not_replaced_with_old_imported_amounts(ledger):
+    from vendoo_studio.services.inventory_analytics import load_rows
+
+    imported_sale(ledger)
+    response = save(ledger, fees=None, item_cost=None, item_revenue=None)
+    assert response.status_code == 200
+    row = next(item for item in load_rows(ledger.db) if item.sale_id == ledger.sale.id)
+    assert row.fees is None and row.cost is None and row.sold_price is None
 
 
 def test_financials_are_saved_on_the_existing_line_and_use_exact_decimal_totals(ledger):

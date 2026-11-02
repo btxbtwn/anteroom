@@ -95,6 +95,9 @@ struct SalesRecordsView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text("Order \(row.orderID) · line \(row.lineID)").font(.caption).foregroundStyle(.secondary)
             Text("Profit: \(SalesLedgerFormat.money(row.profit, row.currency))").font(.caption)
+            if !row.missingSaleData.isEmpty {
+                Text("Missing: \(row.missingSaleData.joined(separator: ", "))").font(.caption).foregroundStyle(.orange)
+            }
             if row.financialsStale {
                 Text("Order changed or recorded amounts need review.").font(.caption).foregroundStyle(.orange)
             }
@@ -168,6 +171,7 @@ private struct SaleAmountsSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var currency = ""
+    @State private var soldOn = ""
     @State private var values: [String: String] = [:]
     @State private var working = false
     @State private var error: String?
@@ -176,13 +180,18 @@ private struct SaleAmountsSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Enter totals for this order line, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures; quantities and marketplace listings stay unchanged.")
+                    Text("Enter totals for this sale, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Save imported sale corrections and new sale amounts here in Anteroom.")
                         .font(.footnote).foregroundStyle(.secondary)
                     if row.financialsStale {
                         Text("This order changed. Review every amount before saving again.").font(.footnote).foregroundStyle(.orange)
                     }
                 }
                 Section {
+                    LabeledContent("Sale date (UTC)") {
+                        TextField("YYYY-MM-DD", text: $soldOn)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                    }
                     LabeledContent("Currency code") {
                         TextField("USD", text: Binding(get: { currency }, set: { currency = String($0.uppercased().prefix(3)) }))
                             .multilineTextAlignment(.trailing)
@@ -198,6 +207,7 @@ private struct SaleAmountsSheet: View {
                 } footer: {
                     Text("\(Marketplaces.name(row.marketplace)) order \(row.orderID) · line \(row.lineID) · quantity \(row.quantity.map(String.init) ?? "unknown") · \(row.orderStatus.replacingOccurrences(of: "_", with: " "))")
                 }
+                .disabled(working)
                 Section { Button("Reload record") { reload() }.disabled(working) }
                 if let error {
                     Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
@@ -220,6 +230,7 @@ private struct SaleAmountsSheet: View {
     }
 
     private func fill(_ record: SalesLedgerRow) {
+        soldOn = record.soldAt.map { String($0.prefix(10)) } ?? ""
         currency = record.currency ?? ""
         values = Dictionary(uniqueKeysWithValues: SalesLedgerRow.fields.map { ($0, (record.financials?[$0] ?? nil) ?? "") })
     }
@@ -235,7 +246,7 @@ private struct SaleAmountsSheet: View {
             defer { working = false }
             do {
                 try await api.saveSaleAmounts(row.id, currency: currency, values: entered,
-                                              revision: row.financialRevision, basis: row.orderBasis)
+                                              revision: row.financialRevision, basis: row.orderBasis, soldOn: soldOn.isEmpty ? nil : soldOn)
                 onSaved()
                 dismiss()
             } catch {

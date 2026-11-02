@@ -58,7 +58,7 @@ export default defineConfig({
     // Runtime files (the database, logs, settings) live under data/. Watching
     // them reloads the page on every API call, which never lets the form settle.
     watch: {
-      ignored: ["**/data/**", "**/.venv/**", "**/__pycache__/**"],
+      ignored: ["**/data/**", "**/.venv/**", "**/__pycache__/**", "**/e2e/results/**", "**/e2e/report/**"],
     },
     proxy: {
       "/api": {

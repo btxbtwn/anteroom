@@ -387,6 +387,15 @@ struct ListingRowContent<Thumbnail: View>: View {
                     }
                 }
                 .font(.caption)
+                if listing.status == "sold", let missing = listing.missingSaleData, !missing.isEmpty {
+                    Text("Missing sale data")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.orange.opacity(0.12), in: Capsule())
+                        .accessibilityLabel("Missing sale data: \(missing.joined(separator: ", "))")
+                }
                 let live = listing.liveMarketplaces
                 if !live.isEmpty {
                     Text(live.map(Marketplaces.name).joined(separator: " · "))
