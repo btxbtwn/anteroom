@@ -31,8 +31,9 @@ class Reply(BaseModel):
 
 
 @router.post('/replies')
-def post_reply(body: Reply):
-    """Chrome's answer to one command this seller's relay sent."""
+async def post_reply(body: Reply):
+    """Chrome's answer to one command this seller's relay sent. Resolved on the event
+    loop that awaits it, so the waiting action wakes at once."""
     relay = _relay()
     if not relay.is_waiting(body.request_id):
         raise HTTPException(404, 'Nothing is waiting for this reply.')
