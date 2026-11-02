@@ -71,6 +71,7 @@ class ConversationSettlementTest(unittest.TestCase):
         self.repo.reconcile_job_statuses()
         self.db.refresh(conv)
         self.assertIsNotNone(conv.settled_at)
+        self.assertEqual(conv.status, "sold")
 
     def test_reconcile_clears_in_progress_when_nothing_runs(self):
         conv = self.repo.create(title="Crop top")

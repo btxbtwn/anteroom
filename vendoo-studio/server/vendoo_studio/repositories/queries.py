@@ -248,7 +248,8 @@ class ConversationRepo:
 
         changed = False
         conversations = self.db.query(Conversation).all()
-        own = statuses(self.db, [(conv.id, parse_notes(conv.notes)) for conv in conversations])
+        notes = {conv.id: parse_notes(conv.notes) for conv in conversations}
+        own = statuses(self.db, list(notes.items()))
         for conv in conversations:
             if conv.status == "in_progress" and (
                 active_generation(conv.id) is not None or activity.running(conv.id)
@@ -259,7 +260,10 @@ class ConversationRepo:
             item_status = own[conv.id].status
             # Nothing is generating, so a leftover busy label goes; so does a
             # label the item's own records disagree with.
-            if conv.status != item_status:
+            if conv.status != item_status and (
+                conv.status not in LISTING_STATUSES or own[conv.id].own
+                or notes[conv.id].get("vendooStatus") in LISTING_STATUSES
+            ):
                 conv.status = item_status
                 changed = True
             if _sync_settlement(conv, conv.status, backfill=True):
