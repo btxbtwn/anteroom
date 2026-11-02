@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.675 — 2026-11-02
+
+- The Mac app can now connect your ChatGPT sign-in to web draft generation.
+
 ## 0.1.674 — 2026-11-02
 
 - Keep imported Vendoo sales in Sales records without rereading Vendoo's sale notes after the first archive.

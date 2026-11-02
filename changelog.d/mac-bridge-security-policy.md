@@ -1,1 +1,0 @@
-- The Mac app can now connect your ChatGPT sign-in to web draft generation.
