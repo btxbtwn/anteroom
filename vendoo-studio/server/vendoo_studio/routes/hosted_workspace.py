@@ -171,6 +171,14 @@ def edit_conversation(identity: str, body: ConversationInput, db=Depends(get_sel
     return conversation_response(row)
 
 
+@router.get('/conversations/{identity}/screen')
+def listing_screen(identity: str, db=Depends(get_seller_db)):
+    """Core editor reads share one seller transaction; marketplace lookups stay separate."""
+    return {'conversation': get_conversation(identity, db), 'listing': get_listing(identity, db),
+            'photos': photos(identity, db=db), 'messages': messages(identity, db),
+            'jobs': jobs(identity, db), 'activity': activity(identity, db)}
+
+
 @router.get('/conversations/{identity}/listing')
 def get_listing(identity: str, db=Depends(get_seller_db)):
     conversation(db, identity)
