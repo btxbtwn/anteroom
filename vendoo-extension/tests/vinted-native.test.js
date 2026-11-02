@@ -464,3 +464,21 @@ test('the category picker offers Vinted\'s leaf breadcrumbs and keeps the read f
   assert.equal(requests.filter(row => row.pathname === '/api/v2/item_upload/catalogs').length, 1);
   assert.ok(requests.every(row => row.method === 'GET'));
 });
+
+// The web app reads the same choices through the seller's connected Anteroom tab.
+test('relayed Vinted reads answer with the choices and only a fixed error code', async () => {
+  const { c, requests } = worker();
+  const id = 'b'.repeat(32);
+  const categories = await c.runCloudMarketplaceCommand({ type: 'marketplace.vinted_categories', job_id: null, message_id: id,
+    payload: { request_id: id } }, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(categories)), { ok: true, options: ['Women > Clothing > Jeans > Straight jeans'] });
+  const brands = await c.runCloudMarketplaceCommand({ type: 'marketplace.vinted_brands', job_id: null, message_id: id,
+    payload: { request_id: id, query: 'Ni', category: listing.vinted_specifics.category } }, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(brands)), { ok: true, options: ['Nike'] });
+  assert.ok(requests.every(row => row.method === 'GET' || row.pathname === '/web/api/auth/refresh'));
+
+  const signedOut = worker({ currentUser: () => reply(401, { message: 'Sign in' }) });
+  const failed = await signedOut.c.runCloudMarketplaceCommand({ type: 'marketplace.vinted_categories', job_id: null, message_id: id,
+    payload: { request_id: id } }, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(failed)), { ok: false, error_code: 'signed_out' });
+});

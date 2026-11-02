@@ -337,3 +337,26 @@ and the refresh thread carries the request's seller context. Store catalogs are
 public and stay shared. The web refreshes when the seller opens Sourcing and it
 is due; it has no background timer. The assistant's shop summary now reads the
 seller's own sourcing state on the web too.
+
+On `feat/hosted-vinted`, the Vinted tab, its Category and Brand pickers, and
+Vinted List, Update and Delist are on the web, as on the Mac. The Mac reads
+Vinted's categories and brands in its private account window; the web sends
+named, read-only commands (`marketplace.vinted_categories`,
+`marketplace.vinted_brands`) to the seller's Chrome over the same relay, under
+a new Bridge capability, `vinted.choices` (Bridge 0.2.42). Sale detection
+for Vinted stays off on the web, like the other Chrome marketplaces.
+
+On `feat/hosted-sellwild`, the Sellwild tab, its category and condition choices,
+and Sellwild List, Update and Delist are on the web, as on the Mac. The account
+choices the Mac reads in its private Sellwild window come from the seller's
+Chrome through one named read, `marketplace.sellwild_account`, under its own
+Bridge capability, `sellwild.account` (Bridge 0.2.43).
+
+On `feat/hosted-chrome-sessions`, Settings → Connections on the web lists
+Poshmark, Mercari, Depop, Sellwild, Vinted and Facebook under eBay and Etsy, each
+signed in, not signed in, or "Connect Chrome first", as on the Mac. The web reads
+them with `marketplace.sessions` and opens a marketplace's sign-in page in the
+seller's Chrome with `marketplace.connect` when they choose Sign in, both under
+the Bridge capability `marketplace.sessions` (Bridge 0.2.44). The status holds
+only each sign-in's state, expiry and account label, never cookies or tokens.
+Sale detection switches stay on the Mac.
