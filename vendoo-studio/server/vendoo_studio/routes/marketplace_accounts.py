@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime
 from typing import Literal, cast
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -92,7 +92,10 @@ def _sale_out(sale: MarketplaceSale, conv: Conversation | None, listings: dict, 
 
 
 @router.get("/api/marketplace-sales")
-def list_sales(state: str | None = "new", conversation_id: str | None = None, db: Session = Depends(get_db)):
+def list_sales(background_tasks: BackgroundTasks, state: str | None = "new", conversation_id: str | None = None, db: Session = Depends(get_db)):
+    from vendoo_studio.services import recent_ebay_orders
+
+    background_tasks.add_task(recent_ebay_orders.refresh)
     query = db.query(MarketplaceSale)
     if state:
         query = query.filter(MarketplaceSale.state == state)
