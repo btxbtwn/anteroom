@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.676 — 2026-11-02
+
+- Generating a web draft no longer ties up the editor while photos, AI answers, or marketplace categories are loading.
+
 ## 0.1.675 — 2026-11-02
 
 - The Mac app can now connect your ChatGPT sign-in to web draft generation.

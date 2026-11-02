@@ -1,1 +1,0 @@
-- Generating a web draft no longer ties up the editor while photos, AI answers, or marketplace categories are loading.
