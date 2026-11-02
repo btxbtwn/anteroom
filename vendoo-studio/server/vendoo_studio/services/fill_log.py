@@ -463,7 +463,6 @@ def summarize_missing_fields(patches: list[dict]) -> str:
         "poshmark": "Poshmark",
         "mercari": "Mercari",
         "depop": "Depop",
-        "facebook": "Facebook",
         "shopify": "Shopify",
     }
     lines: list[str] = []

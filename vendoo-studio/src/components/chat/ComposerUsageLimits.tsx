@@ -14,7 +14,6 @@ import { api } from "../../api/client";
 import { Button } from "../ui/button";
 import { LimitWindows } from "../usage/UsageLimits";
 import { limitsNotice } from "../usage/limitWindows";
-import { USAGE_LIMITS_QUERY_KEY } from "../usage/useUsageLimits";
 import { activeProviderId } from "./useComposerModel";
 
 export function isUsageLimitsCommand(prompt: string): boolean {
@@ -23,7 +22,7 @@ export function isUsageLimitsCommand(prompt: string): boolean {
 
 export function ComposerUsageLimits({ onDismiss }: { onDismiss: () => void }) {
   const status = useQuery({ queryKey: ["settings-provider"], queryFn: api.settings.provider, staleTime: 30_000 });
-  const usage = useQuery({ queryKey: USAGE_LIMITS_QUERY_KEY, queryFn: () => api.settings.usageLimits() });
+  const usage = useQuery({ queryKey: ["usage-limits"], queryFn: () => api.settings.usageLimits() });
   const active = activeProviderId(status.data);
   const limits = usage.data?.providers.find((provider) => provider.provider === active) ?? null;
   // T3 reads the bars against the moment the panel opened; the read time stands in for it.
@@ -60,7 +59,7 @@ export function ComposerUsageLimits({ onDismiss }: { onDismiss: () => void }) {
       ) : notice ? (
         <span className="text-xs text-muted-foreground">{notice}</span>
       ) : (
-        <LimitWindows compact provider={limits.provider} windows={limits.windows} now={now} />
+        <LimitWindows provider={limits.provider} windows={limits.windows} now={now} />
       )}
     </div>
   );

@@ -30,6 +30,11 @@ POSH_URL = "https://poshmark.com/listing/Wool-Coat-65a1b2c3d4e5f6a7b8c9d0e1"
 
 @pytest.fixture
 def env(monkeypatch):
+    from vendoo_studio.services import user_settings
+
+    settings = {}
+    monkeypatch.setattr(user_settings, "read_settings", lambda: settings.copy())
+    monkeypatch.setattr(user_settings, "update_settings", lambda mutate: mutate(settings))
     load_models()
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
@@ -294,6 +299,9 @@ def test_the_same_order_in_vendoo_and_the_ledger_counts_once(env):
     line(env.db, "coat", when=(when + timedelta(minutes=5)).replace(tzinfo=None))
     sold = [row for row in load_rows(env.db) if row.status == "sold"]
     assert len(sold) == 1 and sold[0].sold_price == 38 and sold[0].fees == 4
+    from vendoo_studio.services.sales_records import records
+
+    assert "shipping cost" in records(env.db)[0]["missing_sale_data"]
     assert inventory_analytics(env.db, range_id="30d")["sales"]["count"] == 1
 
 

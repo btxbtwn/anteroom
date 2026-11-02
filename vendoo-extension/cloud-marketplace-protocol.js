@@ -41,12 +41,12 @@
   // Named commands other than marketplace actions, each with exactly the inputs it takes:
   // a maximum string length, the set of values allowed, or the pattern a value must match.
   const READS = {
+    'marketplace.sales_history': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted']), settled: 'order_ids' },
     'marketplace.vinted_categories': {},
     'marketplace.vinted_brands': { query: 100, category: 1000 },
     'marketplace.sellwild_account': {},
     'marketplace.sessions': {},
-    'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted', 'facebook']) },
-    'marketplace.listing_state': { marketplace: new Set(['facebook']), listing_id: /^\d{6,20}$/ },
+    'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted']) },
   };
   const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
   const MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -57,11 +57,17 @@
     const payload = value.payload;
     if (!/^[0-9a-f]{32}$/.test(value.message_id || '') || !plain(payload) || payload.request_id !== value.message_id) return null;
     if (Object.hasOwn(READS, value.type)) {
+      if (value.type === 'marketplace.sales_history' && (!Object.hasOwn(payload, 'marketplace') || !Object.hasOwn(payload, 'settled'))) return null;
       const inputs = READS[value.type];
       for (const [key, item] of Object.entries(payload)) {
         if (key === 'request_id' || (key === 'job_id' && item === null)) continue;
-        if (!Object.hasOwn(inputs, key) || typeof item !== 'string') return null;
+        if (!Object.hasOwn(inputs, key)) return null;
         const rule = inputs[key];
+        if (rule === 'order_ids') {
+          if (!Array.isArray(item) || item.length > 2000 || !item.every(id => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id))) return null;
+          continue;
+        }
+        if (typeof item !== 'string') return null;
         if (rule instanceof Set ? !rule.has(item) : rule instanceof RegExp ? !rule.test(item) : item.length > rule) return null;
       }
       return value.job_id === null ? value : null;

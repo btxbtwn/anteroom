@@ -166,6 +166,7 @@ async def run_listing_generation(
         skill_rules = await asyncio.to_thread(load_skill_rules, item_details)
         evidence: dict = {}
         existing = latest_photo_analysis(stream_repo.get_messages(conv_id), fingerprint=analysis_fingerprint)
+        stream_db.close()
         listing_rules = skill_rules
         if existing:
             analysis_text = existing

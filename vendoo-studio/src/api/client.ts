@@ -1,4 +1,6 @@
+import { listingScreenRead } from "./listingScreen";
 import { studioFetch, hasHostedApiSession } from "./transport";
+import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
 import type { ListingVideo, ListingVideoLibrary, MarketplaceMediaRules } from "./listingVideos";
@@ -81,7 +83,7 @@ import type { Automation, AutomationApproval, AutomationBody, AutomationDraft, A
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
-import type { DelistMarketplace, FacebookCheck, MarketplaceListings, MarketplaceMark, SalesCheck, SellerSale, SellerSaleResult } from "./marketplaceListings";
+import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SalesCheck, SellerSale, SellerSaleResult } from "./marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
@@ -118,6 +120,11 @@ export function errorMessage(body: ErrorBody, fallback: string): string {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  if (!options) return listingScreenRead<T>(path, rawRequest);
+  return rawRequest<T>(path, options);
+}
+
+async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await studioFetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
@@ -408,6 +415,14 @@ export const api = {
         handlers,
         signal,
       ),
+    /** Answer the thread's last question again, when nothing answered it (an interrupted or failed answer). */
+    retry: (handlers: AssistantStreamHandlers, signal: AbortSignal | undefined, threadId: string) =>
+      followAssistant(
+        `/assistant/messages/retry?thread_id=${encodeURIComponent(threadId)}`,
+        undefined,
+        handlers,
+        signal,
+      ),
     /** Stop the answer in progress; what it had written is kept. */
     stop: () => request<{ ok: boolean }>("/assistant/messages/stop", { method: "POST" }),
     /** Write the changes an answer proposed. Resolves with the answer and what became of each listing. */
@@ -560,8 +575,6 @@ export const api = {
       request<SellerSaleResult>(`/conversations/${convId}/marketplace-listings/sold`, {
         method: "POST", body: JSON.stringify(sale),
       }),
-    checkFacebook: (convId: string) =>
-      request<FacebookCheck>(`/conversations/${convId}/marketplace-listings/facebook/check`, { method: "POST" }),
     checkSales: (convId: string) =>
       request<SalesCheck>(`/conversations/${convId}/marketplace-listings/check-sales`, { method: "POST" }),
   },
@@ -819,7 +832,7 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(orderedIds),
       }),
-    uploadPhotos: (convId: string, files: File[], marketplace?: string): Promise<PhotoUploadResult> => {
+    uploadPhotos: (convId: string, files: File[], marketplace?: string): Promise<PhotoUploadResult> => trackPhotoUpload(convId, async () => {
       if (hasHostedApiSession()) return (async () => {
         const ids: string[] = []; const errors: string[] = [];
         for (const file of files) {
@@ -844,7 +857,7 @@ export const api = {
           return data;
         }
       );
-    },
+    }),
   },
 
   imports: {

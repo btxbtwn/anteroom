@@ -82,7 +82,6 @@ MARKETPLACE_LABELS = {
     "poshmark": "Poshmark",
     "mercari": "Mercari",
     "depop": "Depop",
-    "facebook": "Facebook",
     "shopify": "Shopify",
     "vinted": "Vinted",
     "whatnot": "Whatnot",

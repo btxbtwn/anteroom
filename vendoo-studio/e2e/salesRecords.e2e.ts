@@ -1,13 +1,13 @@
-import { randomUUID } from "node:crypto";
-import { expect, test } from "./fixtures";
+import { expect, recordSale, test } from "./fixtures";
 
-test("sales search, completeness and loss filters update records and exports", async ({ page, phone, createConversation }, info) => {
+test("sales search, completeness and loss filters update records and exports", async ({ page, request, phone, createConversation }, info) => {
   const prefix = `Filter sale ${info.project.name} ${Date.now()}`;
   for (const [suffix, fees] of [["missing", null], ["loss", 2]] as const) {
-    const response = await createConversation({ title: `${prefix} ${suffix}`, notes: JSON.stringify({
-      vendooStatus: "sold", vendooSale: { marketplace: "ebay", price: 10, cost: 20, fees, shippingCost: 0, soldAt: new Date().toISOString() },
-    }) });
+    const response = await createConversation({ title: `${prefix} ${suffix}`, notes: "" });
     expect(response.ok()).toBe(true);
+    await recordSale(request, (await response.json()).id, {
+      marketplace: "ebay", item_revenue: "10", item_cost: "20", fees: fees === null ? null : String(fees), shipping_cost: "0",
+    });
   }
   await page.goto("/");
   if (phone) {
@@ -39,27 +39,20 @@ test("sales search, completeness and loss filters update records and exports", a
   await expect(page.getByRole("combobox", { name: "Sales period" })).toContainText("Last 30 days");
 });
 
-test("Vendoo amounts appear in sales records and missing data marks sold inventory", async ({ page, request, phone, createConversation }, info) => {
+test("recorded amounts appear in sales records and missing data marks sold inventory", async ({ page, request, phone, createConversation }, info) => {
   const today = new Date().toISOString().slice(0, 10);
-  const title = `E2E Vendoo sale ${info.project.name} ${Date.now()}`;
-  const sale = { marketplace: "ebay", price: 40, cost: 5, shippingCost: 4, soldAt: new Date().toISOString() };
-  const created = await createConversation({
-    title, notes: JSON.stringify({ vendooStatus: "sold", vendooSale: sale }),
-  });
+  const title = `E2E recorded sale ${info.project.name} ${Date.now()}`;
+  const created = await createConversation({ title, notes: "" });
   expect(created.ok()).toBe(true);
   const { id } = await created.json();
+  await recordSale(request, id, { marketplace: "ebay", item_revenue: "40", item_cost: "5", fees: null, shipping_cost: "4" });
   const filters = `start=${today}&end=${today}&conversation_id=${id}`;
   const imported = await (await request.get(`/api/sales-ledger?${filters}`)).json();
   expect(imported.rows).toHaveLength(1);
   expect(imported.rows[0].financials.item_revenue).toBe("40");
   expect(imported.rows[0].missing_sale_data).toEqual(["fees"]);
 
-  // A seller-confirmed sale gives the inventory its sold status and matches the import.
-  const marked = await request.post(`/api/conversations/${id}/marketplace-listings/sold`, { data: {
-    marketplace: "ebay", sold_on: today, currency: "USD", request_id: randomUUID().replaceAll("-", ""),
-  } });
-  expect(marked.ok()).toBe(true);
-  // The create API makes drafts; a real Vendoo import also sets the stored status.
+  // The create API makes drafts; a settled inventory item also has a stored sold status.
   // Supply that status for this fixture while keeping its real API financial data.
   await page.route("**/api/conversations", async route => {
     const response = await route.fetch();
@@ -102,13 +95,13 @@ test("Vendoo amounts appear in sales records and missing data marks sold invento
   await expect(row.getByText("Missing sale data", { exact: true })).toHaveCount(0);
 });
 
-test("historical imported sales can be corrected entirely in Anteroom", async ({ page, phone, createConversation }, info) => {
-  const title = `E2E imported sale ${info.project.name} ${Date.now()}`;
-  const created = await createConversation({ title, notes: JSON.stringify({
-    vendooStatus: "sold", vendooSale: { marketplace: "poshmark", price: 40, cost: 5, fees: 8,
-      shippingCost: 4 },
-  }) });
+test("historical sales can be corrected entirely in Anteroom", async ({ page, request, phone, createConversation }, info) => {
+  const title = `E2E historical sale ${info.project.name} ${Date.now()}`;
+  const created = await createConversation({ title, notes: "" });
   expect(created.ok()).toBe(true);
+  await recordSale(request, (await created.json()).id, {
+    marketplace: "poshmark", item_revenue: "40", item_cost: "5", fees: "8", shipping_cost: "4", sold_on: null,
+  });
   await page.goto("/");
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();

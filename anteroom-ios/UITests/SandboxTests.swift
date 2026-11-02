@@ -212,12 +212,6 @@ final class DestinationSandboxTests: XCTestCase {
         keep(app, "Inventory analytics")
 
         app.tabBars.buttons["Settings"].tap()
-        let usage = app.buttons["Usage"].firstMatch
-        XCTAssertTrue(usage.waitForExistence(timeout: 10))
-        usage.tap()
-        XCTAssertTrue(app.staticTexts["ChatGPT"].waitForExistence(timeout: 30))
-        keep(app, "Usage")
-        app.navigationBars.buttons.firstMatch.tap()
 
         let listings = app.buttons["Listings"].firstMatch
         XCTAssertTrue(listings.waitForExistence(timeout: 10))

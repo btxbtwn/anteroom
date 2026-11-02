@@ -318,12 +318,6 @@ final class AnteroomAPI: Sendable {
         try await decode(request("PUT", "api/settings/ui", json: change))
     }
 
-    /// Each provider's subscription usage; `refresh` skips the server's short cache.
-    func usageLimits(refresh: Bool) async throws -> UsageLimits {
-        try await decode(request("GET", "api/settings/usage-limits",
-                                 query: refresh ? [URLQueryItem(name: "refresh", value: "1")] : []))
-    }
-
     // MARK: Automations (never publish or delist on their own)
 
     func automations() async throws -> [Automation] {

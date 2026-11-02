@@ -26,10 +26,8 @@ Vendoo's. The losses on cancelling today are:
 1. ~~**Inventory status and Analytics still read Vendoo's data.**~~ Fixed in
    0.1.422: a sale Anteroom records turns the item Sold (or "1 of 3 sold") and
    counts in Analytics.
-2. **23 items are still live on Facebook Marketplace through Vendoo.**
-   Anteroom now links them, shows them, reads their state and can detect a
-   sale (opt-in; not yet verified on a real listing), but cannot delete them:
-   the seller deletes each one on Facebook.
+2. **Facebook Marketplace is not supported.** The seller does not sell there,
+   and Anteroom has no Facebook listing, check, sign-in or sale detection.
 3. **Offers to likers are unverified.** Poshmark sharing and offers to
    likers run on schedules and rules since 0.1.430, Mercari offers since
    0.1.440 and Depop offers since 0.1.445, all on one engine. None is
@@ -75,7 +73,7 @@ and Vinted only on UK and US Enterprise accounts
 | Depop | List, delist, relist, sale detection, refresh, offers | **Partial** | `background/depop-native.js`. Offers to eligible likers, manual and automatic (`checkDepopPromotion`/`offerDepop`, 0.1.445), use the send-all preview and one bulk-offer job. Anteroom waits for job `SUCCESS`, never resubmits an uncertain job, and does not report a delivered count from the preview. Verified against Depop's public client code and automated tests; real sending from Anteroom still needs verification (see gap 4). Depop has no free refresh (paid Boost only); see `docs/direct-form-parity.md` |
 | Vinted | UK/Enterprise only | **Have** | `background/vinted-native.js`, `services/vinted_listing.py`; Anteroom covers more than the seller's Vendoo plan does |
 | Sellwild | Logo only | **Have** | `background/sellwild-native.js`, `services/sellwild_listing.py` |
-| Facebook Marketplace | List, delist, sale detection | **Partial** | Linked from Vendoo's links or the seller's, shown in the Marketplaces panel, state read on request (**Check on Facebook**) and sale detection, opt-in, through the signed-in Chrome session: `background/facebook-native.js`, `services/facebook_listing.py`, `services/chrome_sales.py`. Unit-tested; not yet verified on a real listing. All **23 active items** Vendoo listed there read as live Facebook listings (checked on a copy of the live database). **Missing**: delist, import and List, which need Facebook's GraphQL requests recorded from the signed-in client; see [direct-form-parity.md](direct-form-parity.md#facebook-marketplace) and gap 2 |
+| Facebook Marketplace | List, delist, sale detection | **N/A** | The seller does not sell on Facebook; Anteroom has no Facebook support |
 | Grailed, Shopify, Whatnot, Vestiaire, Kidizen | Supported | **N/A** | Not in the seller's list, and no item in the database was ever listed there through Vendoo |
 
 ## Listing and crosslisting
@@ -197,7 +195,6 @@ listing.
 | `services/vendoo_watch.py`, `services/vendoo_label_sync.py` | Pull Vendoo's draft / active / sold status, dates and sale into `notes.vendooStatus`, `vendooDates`, `vendooSale` | **Still needed** until the inventory status (`repositories/queries.py:345-379`) and Analytics (`services/inventory_analytics.py`) read Anteroom's own listings and sales |
 | `services/vendoo_label_catalog.py` | Vendoo label ID → name, used by the Vendoo import, Send to Vendoo and the one-time conversion | **Remove** with the Vendoo import and Send path. Nothing reads it to show a label: stored labels are names. `vendoo_import.split_vendoo_labels` only splits the stored label string (**Naming**) |
 | `services/vendoo_import.py`, `services/vendoo_bulk_import.py`, `routes/imports.py` (`/vendoo`, `/vendoo/bulk`, `/vendoo/labels`) | Migration from Vendoo | **Still needed** for one final full import before cancelling; then **Remove** |
-| Facebook Marketplace listings (23 active items) | Only Vendoo can delist them | **Still needed** until those items are deleted on Facebook; Anteroom now sees them and their sales |
 | `services/category_tree.py` (trees "used by Vendoo's forms") read by `direct_preflight.seeded_leaf` / `seeded_subcategories` | Stored category trees used by direct List checks | **Still needed** as stored data; refreshing them needs Vendoo. Replace with the native catalogs before removing |
 | `services/category_fields.py`, `services/category_learn.py` (fetch `/api/category/specifics` through Vendoo) | Vendoo field schemas | **Remove** the Vendoo fetch with Send; direct forms use `marketplace_schemas.py` and `chrome_catalog.py` |
 | `routes/vendoo_api.py`, `services/vendoo_create.py`, `vendoo_item_update.py`, `vendoo_send.py`, `vendoo_encodings.py`, `vendoo_api_log.py`, `send_queue.py`, `send_review.py`, `browser_fill.py`, `routes/jobs.py` (`run_ops`) | Send to Vendoo / Update Vendoo, and its troubleshooting log | **Remove** (direct List / Update replaces them) |
@@ -218,16 +215,9 @@ Most important first.
    *Fix:* derive item status from Anteroom's own marketplace listings and
    sales, and have Analytics read `marketplace_sales` (with recorded amounts)
    alongside the imported Vendoo history.
-2. **23 Facebook Marketplace listings can't be delisted from Anteroom.**
-   Anteroom now links all 23 from Vendoo's links, shows them in the
-   Marketplaces panel, reads their state with **Check on Facebook**, and
-   detects their sales once the seller turns Facebook on under Sale detection
-   (unit-tested, not yet verified on a real listing). Auto-delist leaves
-   Facebook out and says so. Delist, import and List on Facebook are not built:
-   Facebook's own requests for them must first be recorded from the signed-in
-   client ([direct-form-parity.md](direct-form-parity.md#facebook-marketplace)).
-   *Fix:* record those requests and add delist; until then, delete each one on
-   Facebook and choose Mark as not listed.
+2. ~~**Facebook Marketplace listings can't be delisted from Anteroom.**~~
+   Not needed: the seller does not sell on Facebook, and Anteroom no longer
+   supports it.
 3. ~~**Poshmark sharing is seller-started only.**~~ Built in 0.1.430:
    scheduled rounds with Vendoo's controls, off by default. Still to do:
    watch one scheduled round on a real account (spacing, daily cap, how

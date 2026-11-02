@@ -30,21 +30,23 @@ class MarketplaceSettingsTest(unittest.TestCase):
         self.assertEqual(marketplaces.selected_fillable_platforms(), ["ebay", "etsy", "poshmark", "mercari", "depop"])
 
     def test_persists_catalog_order_and_keeps_crosslist_only(self):
-        selected = marketplaces.set_selected_marketplaces(["shopify", "ebay", "ebay", "facebook", "poshmark"])
-        self.assertEqual(selected, ["ebay", "poshmark", "facebook", "shopify"])
-        self.assertEqual(marketplaces.get_selected_marketplaces(), ["ebay", "poshmark", "facebook", "shopify"])
+        selected = marketplaces.set_selected_marketplaces(["shopify", "ebay", "ebay", "grailed", "poshmark"])
+        self.assertEqual(selected, ["ebay", "poshmark", "grailed", "shopify"])
+        self.assertEqual(marketplaces.get_selected_marketplaces(), ["ebay", "poshmark", "grailed", "shopify"])
         # Send only fills the marketplaces Studio has form fillers for.
-        self.assertEqual(marketplaces.selected_fillable_platforms(), ["ebay", "poshmark", "facebook"])
+        self.assertEqual(marketplaces.selected_fillable_platforms(), ["ebay", "poshmark", "grailed"])
 
+    def test_a_saved_choice_keeps_its_marketplaces_when_one_is_dropped(self):
+        marketplaces.set_selected_marketplaces(["ebay"])
         payload = json.loads(Path(self.tmp.name, "settings.json").read_text())
-        payload["marketplaces"] = ["ebay", "facebook", "not-a-market"]
+        payload["marketplaces"] = ["ebay", "facebook", "sellwild", "not-a-market"]
         Path(self.tmp.name, "settings.json").write_text(json.dumps(payload))
-        # Unknown on read → defaults.
-        self.assertEqual(marketplaces.get_selected_marketplaces(), marketplaces.DEFAULT_SELECTED)
+        self.assertEqual(marketplaces.get_selected_marketplaces(), ["ebay", "sellwild"])
+        self.assertEqual(marketplaces.selected_fillable_platforms(), ["ebay", "sellwild"])
 
-    def test_grailed_vinted_facebook_are_filled(self):
-        marketplaces.set_selected_marketplaces(["grailed", "vinted", "facebook", "whatnot"])
-        self.assertEqual(marketplaces.selected_fillable_platforms(), ["grailed", "facebook"])
+    def test_grailed_and_vinted_are_filled_through_their_own_paths(self):
+        marketplaces.set_selected_marketplaces(["grailed", "vinted", "whatnot"])
+        self.assertEqual(marketplaces.selected_fillable_platforms(), ["grailed"])
         self.assertNotIn("vinted", marketplaces.selected_fillable_platforms())
 
     def test_sellwild_is_filled(self):
@@ -52,12 +54,13 @@ class MarketplaceSettingsTest(unittest.TestCase):
         self.assertEqual(marketplaces.selected_fillable_platforms(), ["sellwild"])
 
     def test_catalog_covers_vendoo_listable_marketplaces(self):
-        for marketplace_id in ("vinted", "grailed", "whatnot", "vestiaire", "sellwild", "facebook", "shopify"):
+        for marketplace_id in ("vinted", "grailed", "whatnot", "vestiaire", "sellwild", "shopify"):
             self.assertIn(marketplace_id, marketplaces.KNOWN_MARKETPLACES)
 
     def test_rejects_unknown_on_write(self):
-        with self.assertRaises(ValueError):
-            marketplaces.set_selected_marketplaces(["ebay", "not-a-market"])
+        for retired in ("not-a-market", "facebook"):
+            with self.assertRaises(ValueError):
+                marketplaces.set_selected_marketplaces(["ebay", retired])
 
     def test_empty_selection_is_general_only(self):
         self.assertEqual(marketplaces.set_selected_marketplaces([]), [])

@@ -1137,10 +1137,12 @@ def apply_unified_macos_chrome(window, *_args, **_kwargs) -> None:
 
 
 def create_studio_window(webview_module):
+    from vendoo_studio.services.mac_ai_worker import MacAIAPI
     webview_module.settings["ALLOW_DOWNLOADS"] = True
     window = webview_module.create_window(
         APP_NAME,
         html=splash_html(),
+        js_api=MacAIAPI(lambda: _window),
         **studio_window_kwargs(),
     )
     window.events.before_show += apply_unified_macos_chrome
