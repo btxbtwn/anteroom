@@ -1,6 +1,5 @@
 import { ChevronDownIcon, CircleAlertIcon, MessageSquareIcon, WrenchIcon } from "lucide-react";
 import { cn } from "../lib/utils";
-import { useVendooEnabled } from "../vendooMode";
 import { Button } from "./ui/button";
 import { OPTIONS_RULE, optionsForField, type DropdownForms } from "../dropdownOptions";
 
@@ -235,7 +234,6 @@ export function CopyableLlmError({
   issueCount?: number;
   className?: string;
 }) {
-  const vendooOn = useVendooEnabled();
   const body = String(text || "").trim();
   const emptyCount = Math.max(0, Math.floor(Number(emptyFieldsCount) || 0));
   const canFillEmpty = Boolean(onAskChat && emptyFieldsPrompt && emptyCount > 0);
@@ -255,9 +253,7 @@ export function CopyableLlmError({
             <Button
               variant="outline"
               size="xs"
-              title={vendooOn
-                ? "Send the blocking issues to chat. Chat updates this listing. It does not send to Vendoo."
-                : "Send the blocking issues to chat. Chat updates this listing."}
+              title="Send the blocking issues to chat. Chat updates this listing."
               onClick={() => onAskChat(prompt)}
             >
               <WrenchIcon />
@@ -268,9 +264,7 @@ export function CopyableLlmError({
             <Button
               variant="outline"
               size="xs"
-              title={vendooOn
-                ? "Send empty listing fields to chat. Does not change Vendoo yet."
-                : "Send empty listing fields to chat."}
+              title="Send empty listing fields to chat."
               onClick={() => {
                 if (!emptyFieldsPrompt) return;
                 onAskChat(emptyFieldsPrompt);

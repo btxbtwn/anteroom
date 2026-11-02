@@ -980,7 +980,6 @@ class UiPrefsConfig(BaseModel):
     restore_labels: list[str] | None = None
     forget_label: str | None = None
     model_favorites: list[dict] | None = None
-    vendoo_enabled: bool | None = None
     stale_listing_days: int | None = None
     label_colors: dict[str, str] | None = None
 
@@ -1007,7 +1006,6 @@ def put_ui_prefs(config: UiPrefsConfig):
             theme=config.theme,
             listing_names=config.listing_names,
             model_favorites=config.model_favorites,
-            vendoo_enabled=config.vendoo_enabled,
             stale_listing_days=config.stale_listing_days,
             label_colors=config.label_colors,
         )
@@ -1120,31 +1118,6 @@ def disable_tailscale():
         return disable()
     except TailscaleServeError as exc:
         raise HTTPException(400, str(exc)) from exc
-
-
-@router.get("/vendoo-api-logs")
-def get_vendoo_api_logs():
-    from vendoo_studio.services.vendoo_api_log import list_entries
-
-    return {"entries": list_entries()}
-
-
-@router.get("/vendoo-api-logs/{entry_id}")
-def get_vendoo_api_log(entry_id: int):
-    from vendoo_studio.services.vendoo_api_log import get_entry
-
-    entry = get_entry(entry_id)
-    if entry is None:
-        raise HTTPException(404, "That request is no longer in the log")
-    return entry
-
-
-@router.delete("/vendoo-api-logs")
-def delete_vendoo_api_logs():
-    from vendoo_studio.services.vendoo_api_log import clear
-
-    clear()
-    return {"ok": True}
 
 
 @router.get("/error-logs")

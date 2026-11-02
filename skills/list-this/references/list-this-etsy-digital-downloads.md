@@ -23,7 +23,7 @@ The main `list-this` SKILL.md already covers Etsy digital downloads in these sec
 
 | Aspect | Physical | Digital Download |
 |--------|----------|-----------------|
-| Output format | Vendoo-compatible JSON | Copy-pasteable text/markdown |
+| Output format | Listing JSON | Copy-pasteable text/markdown |
 | Title formula | `{BRAND} {SIZE} {VIBE} {ITEM} {COLOR} {FIT}` | `{color/style} {subject} {medium} {room/use case} {decor type} {format}` |
 | Description template | Physical item template | Digital download template |
 | Pricing | `comp × 1.35` rounded to dollar | `comp × 1.35`, often ending in `.99` |

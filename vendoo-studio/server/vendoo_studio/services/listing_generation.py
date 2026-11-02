@@ -34,7 +34,7 @@ from vendoo_studio.services.listing_generate import (
     quick_identity_read,
     require_photo_analysis,
 )
-from vendoo_studio.services.schema_probe import (
+from vendoo_studio.services.generation_schema import (
     prepare_generation_schema,
 )
 from vendoo_studio.services.streaming import (

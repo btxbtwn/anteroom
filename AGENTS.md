@@ -2,7 +2,7 @@
 
 ## Repository Overview
 
-Monorepo combining the `list-this` skill family, the Vendoo Chrome extension, and Anteroom. The skills generate marketplace-ready listings from product photos; the extension fills six platforms from a single JSON payload; Anteroom provides a local interface for listing creation and automation.
+Monorepo combining the `list-this` skill family, the Bridge Chrome extension, and Anteroom. The skills generate marketplace-ready listings from product photos; the extension fills six platforms from a single JSON payload; Anteroom provides a local interface for listing creation and automation.
 
 **Invariant:** Automation must never publish listings. Generation, category
 resolution and draft creation run unattended and stop at a saved draft.
@@ -145,7 +145,7 @@ mix it with a fix or a feature.
 ## Repository Structure
 
 - **`skills/`** — Agent skills for listing generation (`list-this`), sourcing (`box-scout`) and reading measurements from ruler photos (`measure-this`).
-- **`vendoo-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. Content scripts under `content-scripts/` handle Vendoo, eBay, Poshmark, Mercari, Depop, and Etsy. `background.js` routes messages and loads the worker modules in `background/`; the extension runs without its own interface, with review and approved Sends handled in Anteroom. Node unit tests live in `tests/`.
+- **`vendoo-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. Content scripts under `content-scripts/` handle direct marketplace forms. `background.js` routes messages and loads the worker modules in `background/`; the extension runs without its own interface, with review and approved Sends handled in Anteroom. Node unit tests live in `tests/`.
 - **`webhook-relay/`** — Cloudflare Worker that receives eBay and Etsy webhooks, verifies their signatures, keeps only IDs, and holds them in a per-device inbox until that Mac's Anteroom pulls them over an outbound connection. It also brokers eBay and Etsy sign-in and forwards Etsy API calls, so eBay's Cert ID and Etsy's shared secret never ship in the app. See its `README.md`.
 - **`vendoo-studio/`** — React + TypeScript frontend (`src/`) and FastAPI Python backend (`server/vendoo_studio/`). Frontend API clients live under `src/api/`. Backend routes live under `server/vendoo_studio/routes/`; domain behavior lives in `server/vendoo_studio/services/` and `server/vendoo_studio/repositories/`.
 - **`anteroom-ios/`** — Native SwiftUI iPhone app on the hosted API and Supabase. The Xcode project is generated from `project.yml` with XcodeGen and not tracked; it builds only on macOS.
@@ -211,8 +211,8 @@ When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduc
 - Never commit API keys, OAuth credentials, listing photos, generated diagnostics, or private exports.
 - API keys and sign-in tokens never enter the database in plain text, logs, frontend responses, or extension messages. On the Mac they live in macOS Keychain. When the hosted API takes over generation (step 4 of `docs/cloud-architecture.md`), they move to Supabase Vault, encrypted at rest, and are never returned to any client.
 - On the Mac, bind Anteroom only to `127.0.0.1`. The hosted API on Fly.io is the only part that accepts connections from outside, and it requires a Supabase session on every request except health checks and marketplace webhooks. The Mac worker connects to it outbound and binds nothing. Optional private Tailscale Serve (Settings → Connections) may proxy Tailnet HTTPS to that loopback port; never Funnel and never bind to `0.0.0.0`.
-- Require human approval before sending to Vendoo.
-- Allow one Vendoo automation job at a time. Additional approved Sends may wait in a FIFO queue and start when the current job finishes, fails, or is cancelled. Direct marketplace List, Update and Save draft actions may run side by side, one per marketplace, but never alongside a Vendoo job, a delist or a page inspection.
+- Publishing and delisting require the seller to name the marketplaces explicitly and provide `confirm`. Automation stops at a saved draft.
+- Direct marketplace List, Update and Save draft actions may run side by side, one per marketplace, but never alongside a delist or a page inspection.
 - Do not introduce Redis, MongoDB, Celery, or provider substitutions unless explicitly requested.
 - Approved cloud services (2026-10-26, see `docs/cloud-architecture.md`):
   - **Supabase** for accounts, Postgres, photo storage, Realtime and Vault. Every seller table has row-level security keyed to the seller's `user_id`.

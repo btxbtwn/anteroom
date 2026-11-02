@@ -6,7 +6,7 @@ range and by month, the leading brands and categories, the listings that have
 sat longest and the latest sales, the boxes bought and what they returned, the
 current buy list with its best boxes, ad spend, sale events, and sourcing
 checks — and the exact tables it can look the rest up in. The brief is read
-fresh each time, so an answer is never older than the last Vendoo sync.
+fresh each time, so an answer reflects Anteroom's records as they are now.
 
 Every row behind the summary can be looked up. Each listing with its
 description and full field values, every Sourcing-tab box, and the sales
@@ -17,8 +17,8 @@ seller's model usage on rows it never needed.
 
 It reads, and it proposes. A reply may end with changes to listings, which are
 kept with the reply for the seller to apply or dismiss
-(``services/assistant_changes.py``). Nothing here writes a listing, calls
-Vendoo, or reaches a marketplace.
+(``services/assistant_changes.py``). Nothing here writes a listing or reaches
+a marketplace.
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ LOOKUP_CHARS = 24_000
 INSTRUCTIONS = (
     "You are the business assistant inside Anteroom, talking to a reseller about their own shop. "
     "They sell clothing and similar goods on marketplaces such as eBay, Poshmark, Mercari, Depop and Etsy, "
-    "cross-listed through Vendoo.\n\n"
+    "listed on each one directly from Anteroom.\n\n"
     "Below is a summary of the business, taken now: the totals Analytics shows and the few rows most often "
     "wanted. Every row behind it is in the lookup tables described below.\n"
     "- Answer from the summary only when it holds everything the question needs. When the question needs rows "
@@ -181,8 +181,8 @@ CHANGES_INSTRUCTIONS = (
     "they were made.\n"
     "- Propose only what was asked for. Do not propose changes the seller has not asked for or agreed to; "
     "suggest them in words first.\n"
-    "- Applied changes are saved in Anteroom. A listing already on Vendoo keeps its old values there until the "
-    "seller sends it again from the listing.\n"
+    "- Applied changes are saved in Anteroom. A listing already live on a marketplace keeps its old values there "
+    "until the seller updates it from the listing.\n"
     "- Condition, colour, category and other marketplace-specific fields are changed in that listing's own chat; "
     "link the listing instead.\n"
     "- An Anteroom note after one of your earlier replies says what you proposed and whether the seller applied it. "
@@ -492,15 +492,14 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         for range_id, payload in ranges.items() for position, bucket in enumerate(payload["periods"], 1)
     ]
     sections = [
-        f"Today is {clock.date().isoformat()} (UTC). "
-        f"Sales and statuses were last synced from Vendoo at {everything['last_updated_at'] or 'an unknown time'}.",
+        f"Today is {clock.date().isoformat()} (UTC).",
         _section("Inventory now", {
             **everything["inventory"],
             "aging_of_active_listings": [
                 {key: bucket[key] for key in ("label", "count", "asking_value")} for bucket in everything["aging"]
             ],
             "sold_listings_missing_a_sale_date": everything["undated_sales"],
-            "sales_missing_details_in_vendoo": len(everything["incomplete_sales"]),
+            "sales_missing_details": len(everything["incomplete_sales"]),
         }),
         _sales_by_range(ranges),
         _sales_over_time(everything["periods"]),

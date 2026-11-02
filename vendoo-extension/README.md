@@ -1,6 +1,6 @@
 # Anteroom Bridge
 
-The extension runs in the background and connects Chrome to Anteroom. Listing review, approved Sends, progress, and diagnostics live in Anteroom. The extension has no toolbar popup, on-page panel, or field highlighting. Hosted connections use a separate approval window.
+The extension runs in the background and connects Chrome to Anteroom. Listing review, the seller's List, Update and Delist actions, progress, and diagnostics live in Anteroom. The extension has no toolbar popup, on-page panel, or field highlighting. Hosted connections use a separate approval window.
 
 ## Installation
 
@@ -18,8 +18,8 @@ Bridge 0.2.38 adds **Connect Chrome** at the hosted Anteroom site. Reload the up
 ## Usage
 
 1. Create or import a listing in Anteroom and review it there.
-2. Approve **Send to Vendoo** in Anteroom to start a draft job.
-3. Follow the browser preview and fill results in Anteroom. Automation stops at a saved draft.
+2. On a marketplace's tab in Anteroom, choose **List**, **Update** or **Save draft** and confirm it. The extension carries out that one action on Poshmark, Mercari, Depop, Sellwild or Vinted; eBay and Etsy go through their APIs from Anteroom.
+3. Follow progress and results in Anteroom. Nothing is published without the seller's confirmation.
 
 Chrome still shows the extension in its extensions menu for browser-managed permissions and removal. Clicking its icon does not open an extension interface.
 
@@ -69,11 +69,6 @@ After updating the extension, reload it in `chrome://extensions/` and refresh op
 
 ## Platform Notes
 
-### Vendoo (Primary)
-- Fills most fields directly
-- Category selection may need manual completion
-- Images not yet implemented
-
 ### eBay
 - Multi-step wizard flow
 - Category requires tree navigation
@@ -94,11 +89,6 @@ After updating the extension, reload it in `chrome://extensions/` and refresh op
 - Color chips need clicking
 - UK-focused sizing
 
-### Etsy
-- "Who made it" / "When made" dropdowns
-- Tags are important for search
-- Multiple listing types
-
 ## Permissions
 
 Every permission in `manifest.json` has a caller. Remove a permission when its last caller goes away.
@@ -108,11 +98,11 @@ Every permission in `manifest.json` has a caller. Remove a permission when its l
 | `alarms` | Wakes the worker to reconnect to Anteroom. |
 | `storage` | Keeps the Anteroom pairing token, the active job, the preview window id, and diagnostic observations. |
 | `scripting` | Injects fill helpers and the diagnostic collector into marketplace tabs. |
-| `tabs` | Finds, opens, and focuses the Vendoo tab for a fill job. |
+| `tabs` | Finds, opens, and focuses marketplace tabs for a job. |
 | `debugger` | Streams the live browser preview into Anteroom through the DevTools protocol. |
 | `system.display` | Places the automation window inside a real display work area. |
 
-Host permissions cover Vendoo, eBay, Poshmark, Mercari, Depop, Sellwild, Vinted, the Amazon S3 buckets their presigned photo uploads go to (`*.s3.amazonaws.com`, `*.s3-accelerate.amazonaws.com`), and Anteroom on `127.0.0.1:4318`. Direct marketplace requests go through `background/marketplace-fetch.js`, which bounds each request by the operation's deadline, retries only reads and photo uploads, and logs one `[POSHMARK]`/`[MERCARI]`/`[DEPOP]`/`[SELLWILD]`/`[VINTED]` line per step (status, error code, latency; never cookies, tokens or listing text). Vinted listing saves a draft and then publishes it from the extension background, with no Vinted tab, and only after the seller confirms List. A lost reply is read back and does not create the draft again. Vinted delist runs from the extension background, with no Vinted tab, and only after the seller confirms. The extension never opens or fills etsy.com; Etsy listings are filled in Vendoo's Etsy section. The Chrome sign-in check for Depop, Poshmark, Mercari, Sellwild, and Vinted reports only whether the session is present. Cookie values and tokens stay in Chrome.
+Host permissions cover eBay, Poshmark, Mercari, Depop, Sellwild, Vinted, the Amazon S3 buckets their presigned photo uploads go to (`*.s3.amazonaws.com`, `*.s3-accelerate.amazonaws.com`), and Anteroom on `127.0.0.1:4318`. Direct marketplace requests go through `background/marketplace-fetch.js`, which bounds each request by the operation's deadline, retries only reads and photo uploads, and logs one `[POSHMARK]`/`[MERCARI]`/`[DEPOP]`/`[SELLWILD]`/`[VINTED]` line per step (status, error code, latency; never cookies, tokens or listing text). Vinted listing saves a draft and then publishes it from the extension background, with no Vinted tab, and only after the seller confirms List. A lost reply is read back and does not create the draft again. Vinted delist runs from the extension background, with no Vinted tab, and only after the seller confirms. The extension never opens or fills etsy.com; Etsy listings go through Etsy's API from Anteroom. The Chrome sign-in check for Depop, Poshmark, Mercari, Sellwild, and Vinted reports only whether the session is present. Cookie values and tokens stay in Chrome.
 
 ## Development
 
@@ -143,8 +133,8 @@ They load `background.js` and its `background/` modules into one Node VM with a 
 
 For live pages:
 1. Reload the extension in `chrome://extensions/` and refresh the marketplace page.
-2. Approve a draft Send from Anteroom and inspect its browser preview and fill results.
-3. Open browser DevTools and filter by `[VENDOO]` or the marketplace prefix for detailed logs.
+2. Run **Save draft** from Anteroom and inspect its progress and results.
+3. Open browser DevTools and filter by the marketplace prefix (`[POSHMARK]`, `[MERCARI]`, …) for detailed logs.
 4. For manual form inspection, paste `diagnostic-tool.js` into the page's DevTools console and use `vendooDiagnostics.exportStructure()`. Anteroom also receives diagnostic observations from the worker.
 
 ### Icons

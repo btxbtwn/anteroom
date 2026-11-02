@@ -366,8 +366,8 @@ private struct NativeFieldControl: View {
     }
 }
 
-/// Which photos this marketplace sends, in order, like Vendoo's Photo
-/// Manager (services/marketplace_media.py). Without a pick the form sends the
+/// Which photos this marketplace sends, in order
+/// (services/marketplace_media.py). Without a pick the form sends the
 /// item's photos in item order, up to the marketplace's limit.
 private struct MarketplacePhotoPicker: View {
     @Bindable var model: ListingEditorModel

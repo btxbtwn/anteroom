@@ -21,7 +21,6 @@ from vendoo_studio.models.diagnostics import DiagnosticRun, FieldObservation
 from vendoo_studio.models.fill_log import FillLogEntry
 from vendoo_studio.models.job import (
     ACTIVE_JOB_STATUSES,
-    DISPATCHABLE_JOB_STATUSES,
     RUNNING_JOB_STATUSES,
     Job,
     JobEvent,
@@ -38,15 +37,11 @@ BULKY_EVENT_KEYS = ("item", "schema", "fill_log", "verification")
 SANITIZED_EVENT_TYPES = ("step_completed", "step_failed")
 # One row each: the newest progress is the only progress worth having, and the
 # stored review already carries every schema section read so far.
-UPSERT_EVENT_TYPES = ("progress", "completion_review", "vendoo_api_checkpoint", "vendoo_api_timing", "vendoo_api_progress",
-                      "native_progress")
+UPSERT_EVENT_TYPES = ("progress", "native_progress")
 
 BUSY_LISTING_STATUSES = ("in_progress", "listing")
-# Vendoo's own inventory labels, plus the one state Vendoo has no name for.
-# Studio reports these; nothing outside it sets one.
-LISTING_STATUSES = ("draft", "active", "sold", "failed")
-# Statuses a Vendoo item can report for itself.
-VENDOO_LISTING_STATUSES = ("draft", "active", "sold")
+# An item's inventory labels (``services/item_status.py``).
+LISTING_STATUSES = ("draft", "active", "sold")
 
 
 def _settle(conv: Conversation, when, *, backfill: bool = False, force: bool = False) -> bool:
@@ -105,57 +100,6 @@ class ConversationRepo:
 
     def get(self, conv_id: str) -> Conversation | None:
         return self.db.query(Conversation).filter(Conversation.id == conv_id).first()
-
-    def find_by_vendoo_item_id(
-        self, item_id: str, *, exclude_conv_id: str | None = None,
-    ) -> Conversation | None:
-        item_id = (item_id or "").strip()
-        if not item_id:
-            return None
-        from vendoo_studio.services.vendoo_import import vendoo_binding
-        rows = (
-            self.db.query(Conversation)
-            .filter(Conversation.notes.contains(item_id))
-            .order_by(Conversation.updated_at.desc())
-            .all()
-        )
-        for conv in rows:
-            if conv.id == exclude_conv_id:
-                continue
-            if vendoo_binding(conv.notes).get("vendooItemId") == item_id:
-                return conv
-        return None
-
-    def duplicate_vendoo_links(self) -> list[dict[str, Any]]:
-        """Group listings that share a saved Vendoo item, including settled ones."""
-        from vendoo_studio.services.vendoo_import import vendoo_binding
-
-        groups: dict[str, list[dict[str, str]]] = {}
-        rows = self.db.query(Conversation.id, Conversation.title, Conversation.notes).order_by(
-            Conversation.created_at, Conversation.id,
-        ).all()
-        for conv_id, title, notes in rows:
-            item_id = vendoo_binding(notes).get("vendooItemId")
-            if item_id:
-                groups.setdefault(item_id, []).append({"id": conv_id, "title": title or "Untitled"})
-        return [
-            {
-                "vendoo_item_id": item_id,
-                "vendoo_url": f"https://web.vendoo.co/app/item/{item_id}",
-                "listings": listings,
-            }
-            for item_id, listings in sorted(groups.items()) if len(listings) > 1
-        ]
-
-    def vendoo_bound_item_ids(self) -> dict[str, str]:
-        """``{conversation id: Vendoo item id}`` for every listing bound to one."""
-        from vendoo_studio.services.vendoo_import import vendoo_binding
-        bound: dict[str, str] = {}
-        for conv_id, notes in self.db.query(Conversation.id, Conversation.notes).all():
-            item_id = vendoo_binding(notes).get("vendooItemId")
-            if item_id:
-                bound[conv_id] = item_id
-        return bound
 
     def list_all(self) -> list[Conversation]:
         return self.db.query(Conversation).order_by(Conversation.updated_at.desc()).all()
@@ -291,48 +235,19 @@ class ConversationRepo:
         self.db.refresh(conv)
         return conv
 
-    def _latest_jobs(self) -> dict[str, tuple[str | None, Any]]:
-        """Newest job status per conversation, as ``{conv_id: (status, updated_at)}``.
-
-        The sidebar reconciles every row on each refresh, so this reads the two
-        columns it needs rather than whole jobs with their listing snapshots.
-        """
-        latest: dict[str, tuple[str | None, Any]] = {}
-        # Direct marketplace jobs are not Vendoo sends: the Marketplaces
-        # section shows them, and their failures never relabel the listing.
-        rows = (
-            self.db.query(Job.conversation_id, Job.status, Job.updated_at)
-            .filter(or_(Job.current_step.is_(None), ~Job.current_step.like("native\\_%", escape="\\")))
-            .order_by(Job.conversation_id, Job.created_at.desc())
-            .all()
-        )
-        for conv_id, status, updated_at in rows:
-            latest.setdefault(conv_id, (status, updated_at))
-        return latest
-
     def reconcile_job_statuses(self) -> None:
-        """Keep each listing's label in step with its job, its listings and its sales.
+        """Keep each listing's label in step with its listings and its sales.
 
         A listing wears its own inventory label (draft / active / sold, see
-        ``services/item_status.py``): Vendoo's, unless Anteroom's own listings
-        or sales say otherwise. A send in flight reads ``listing`` and a send
-        that broke reads ``failed``.
+        ``services/item_status.py``), except while it is generating.
         """
         from vendoo_studio.services import activity
         from vendoo_studio.services.streaming import active_generation
         from vendoo_studio.services.vendoo_import import parse_notes
-
-        busy_map = {
-            "queued": "listing",
-            "awaiting_extension": "listing",
-            "dispatched": "listing",
-        }
         from vendoo_studio.services.item_status import statuses
 
-        latest_jobs = self._latest_jobs()
         changed = False
         conversations = self.db.query(Conversation).all()
-        # Vendoo's label, overruled by Anteroom's own listings and sales.
         own = statuses(self.db, [(conv.id, parse_notes(conv.notes)) for conv in conversations])
         for conv in conversations:
             if conv.status == "in_progress" and (
@@ -341,51 +256,13 @@ class ConversationRepo:
                 if _sync_settlement(conv, conv.status):
                     changed = True
                 continue
-            vendoo_status = own[conv.id].status
-            if conv.status == "in_progress":
-                # Nothing is generating: a stopped chat, a dropped stream or a
-                # quit mid-run left the label behind, and it blocks Send.
-                conv.status = vendoo_status
-                changed = True
-            latest_job = latest_jobs.get(conv.id)
-            if latest_job:
-                job_status, job_updated_at = latest_job
-                # A newer conversation stamp must not freeze a finished send on
-                # ``listing``: that busy label is only valid while a job is open.
-                skip_job = (
-                    conv.status not in BUSY_LISTING_STATUSES
-                    and conv.updated_at
-                    and job_updated_at
-                    and job_updated_at < conv.updated_at
-                )
-                if not skip_job:
-                    if job_status in busy_map:
-                        next_status = busy_map[job_status]
-                    elif vendoo_status == "sold":
-                        # A sale outranks a send that broke before it: the item
-                        # is sold whatever happened to the copy that failed.
-                        next_status = "sold"
-                    elif job_status == "failed":
-                        next_status = "failed"
-                    else:
-                        next_status = vendoo_status
-                    if conv.status != next_status:
-                        conv.status = next_status
-                        changed = True
-                elif vendoo_status == "sold" and conv.status != "sold":
-                    # An old job's label cannot outrank a sale either.
-                    conv.status = "sold"
-                    changed = True
-            elif conv.status == "listing":
-                # No job left to own the busy label — wear Vendoo's inventory tab.
-                conv.status = vendoo_status
-                changed = True
-            elif own[conv.id].own and conv.status in VENDOO_LISTING_STATUSES and conv.status != vendoo_status:
-                # A sale or listing Anteroom recorded itself, which Vendoo never hears about.
-                conv.status = vendoo_status
-                changed = True
-            if conv.status not in LISTING_STATUSES + BUSY_LISTING_STATUSES:
-                conv.status = vendoo_status
+            item_status = own[conv.id].status
+            # Nothing is generating, so a leftover busy label goes; so does a
+            # label the item's own records disagree with.
+            if conv.status != item_status and (
+                conv.status not in LISTING_STATUSES or own[conv.id].own
+            ):
+                conv.status = item_status
                 changed = True
             if _sync_settlement(conv, conv.status, backfill=True):
                 changed = True
@@ -586,8 +463,6 @@ class JobRepo:
         conv_id: str,
         approved_revision_id: str,
         listing_snapshot: dict,
-        vendoo_item_id: str | None = None,
-        vendoo_url: str | None = None,
         *,
         status: str = "queued",
         current_step: str | None = None,
@@ -596,8 +471,6 @@ class JobRepo:
             conversation_id=conv_id,
             approved_revision_id=approved_revision_id,
             listing_snapshot=listing_snapshot,
-            vendoo_item_id=vendoo_item_id,
-            vendoo_url=vendoo_url,
             status=status,
             current_step=current_step if current_step is not None else ("queued" if status == "queued" else status),
         )
@@ -626,79 +499,6 @@ class JobRepo:
             .all()
         )
 
-    def get_dispatchable(self) -> list[Job]:
-        return (
-            self.db.query(Job)
-            .filter(Job.status.in_(DISPATCHABLE_JOB_STATUSES))
-            .order_by(Job.created_at.asc())
-            .all()
-        )
-
-    def requeue_interrupted(self) -> list[Job]:
-        from vendoo_studio.models.job import RECONNECTED_SEND, is_vendoo_api_step
-
-        jobs = self.db.query(Job).filter(Job.status == "dispatched").all()
-        for job in jobs:
-            if str(job.current_step or "").startswith("native_"):
-                from vendoo_studio.services.api_job_lock import api_job_is_live
-                if api_job_is_live(job.id):
-                    continue
-                job.status = "failed"
-                job.last_error = "Marketplace action interrupted. Check its result before trying again."
-                from vendoo_studio.services.native_marketplaces import mark_interrupted
-
-                mark_interrupted(self.db, job.id)
-            elif is_vendoo_api_step(job.current_step):
-                # Must not become a form-filler queue entry — that path opens a
-                # Vendoo tab and fills the SPA instead of calling createItem.
-                # The caller resumes it once its worker has stopped.
-                job.status = "failed"
-                job.last_error = RECONNECTED_SEND
-            elif job.current_step in {"filling_fields", "resolving_fields", "verifying_draft"}:
-                job.status = "failed"
-                job.last_error = (
-                    "Chrome disconnected during leftover field fill. "
-                    "Retry the leftover fill from Fields."
-                )
-            else:
-                job.status = "queued"
-                job.current_step = "queued"
-                job.last_error = None
-        if jobs:
-            self.db.commit()
-            for job in jobs:
-                self.db.refresh(job)
-        return jobs
-
-    def requeue_interrupted_send(self, job_id: str) -> bool:
-        """Put an interrupted Vendoo API send back in the queue, once.
-
-        Only a send that failed because it was cut off qualifies, and only the
-        first time. Returns True when the job is queued again.
-        """
-        from vendoo_studio.models.job import (
-            AUTO_RETRY_EVENT,
-            INTERRUPTED_SEND_ERRORS,
-            is_vendoo_api_step,
-        )
-
-        job = self.db.query(Job).filter(Job.id == job_id).first()
-        if (
-            not job
-            or job.status != "failed"
-            or job.last_error not in INTERRUPTED_SEND_ERRORS
-            or not is_vendoo_api_step(job.current_step)
-            or self.latest_event(job.id, AUTO_RETRY_EVENT)
-        ):
-            return False
-        interrupted_at, reason = job.current_step, job.last_error
-        job.status = "queued"
-        job.current_step = "vendoo_api_queued"
-        job.last_error = None
-        self.db.commit()
-        self.add_event(job.id, AUTO_RETRY_EVENT, interrupted_at, {"reason": reason})
-        return True
-
     def list_all(self) -> list[Job]:
         return self.db.query(Job).order_by(Job.created_at.desc()).limit(50).all()
 
@@ -723,24 +523,10 @@ class JobRepo:
             summaries.append(SimpleNamespace(**values))
         return summaries
 
-    def latest_summary_events(self, job_ids: list[str]) -> dict:
-        if not job_ids:
-            return {}
-        types = ("vendoo_api_progress", "vendoo_api_started", "completion_blocked", "awaiting_answers")
-        ranked = self.db.query(
-            JobEvent.id,
-            func.row_number().over(
-                partition_by=(JobEvent.job_id, JobEvent.event_type),
-                order_by=JobEvent.sequence.desc(),
-            ).label("rank"),
-        ).filter(JobEvent.job_id.in_(job_ids), JobEvent.event_type.in_(types)).subquery()
-        events = self.db.query(JobEvent).join(ranked, ranked.c.id == JobEvent.id).filter(ranked.c.rank == 1).all()
-        return {(event.job_id, event.event_type): event for event in events}
-
     def list_by_conversation(self, conv_id: str) -> list[Job]:
         return self.db.query(Job).filter(Job.conversation_id == conv_id).order_by(Job.created_at.desc()).all()
 
-    def update_status(self, job_id: str, status: str, current_step: str | None = None, error: str | None = None, vendoo_item_id: str | None = None, vendoo_url: str | None = None) -> Job | None:
+    def update_status(self, job_id: str, status: str, current_step: str | None = None, error: str | None = None) -> Job | None:
         from vendoo_studio.models.job import is_terminal_job_status
 
         job = self.db.query(Job).filter(Job.id == job_id).first()
@@ -754,10 +540,6 @@ class JobRepo:
             job.current_step = current_step
         if error is not None:
             job.last_error = error
-        if vendoo_item_id is not None:
-            job.vendoo_item_id = vendoo_item_id
-        if vendoo_url is not None:
-            job.vendoo_url = vendoo_url
         self.db.commit()
         self.db.refresh(job)
         return job
@@ -860,22 +642,6 @@ class JobRepo:
             .first()
         )
 
-    def pending_vendoo_send(self, conv_id: str) -> dict | None:
-        """Reuse the reserved draft id after a failed or interrupted API send."""
-        event = (
-            self.db.query(JobEvent, Job.status)
-            .join(Job, Job.id == JobEvent.job_id)
-            .filter(
-                Job.conversation_id == conv_id,
-                JobEvent.event_type == "vendoo_api_checkpoint",
-            )
-            .order_by(Job.created_at.desc(), JobEvent.sequence.desc())
-            .first()
-        )
-        if not event or event[1] == "completed":
-            return None
-        return dict(event[0].payload) if isinstance(event[0].payload, dict) else None
-
     def latest_vendoo_drafts(self, job_ids: list[str]) -> dict[str, dict]:
         """Cached Vendoo status for many jobs at once.
 
@@ -899,39 +665,6 @@ class JobRepo:
             if draft_has_status_signal(row.payload)
         }
 
-    def save_vendoo_draft(
-        self,
-        job_id: str,
-        *,
-        item: dict | None = None,
-        form: dict | None = None,
-        item_id: str | None = None,
-        url: str | None = None,
-        source: str | None = None,
-        step: str | None = None,
-        statuses: dict | None = None,
-    ) -> VendooDraftCache:
-        """Record where Vendoo says this job's item stands, one row per job.
-
-        Only the status slices are kept. Everything else a draft carries is
-        read live by the panel that needs it.
-        """
-        from vendoo_studio.services.draft_cache import slim_vendoo_draft_payload
-
-        row = self.db.query(VendooDraftCache).filter(VendooDraftCache.job_id == job_id).first()
-        if row is None:
-            row = VendooDraftCache(job_id=job_id)
-            self.db.add(row)
-        row.item_id = item_id
-        row.url = url
-        row.source = source or "cache"
-        row.step = step
-        row.payload = slim_vendoo_draft_payload(item=item, form=form, statuses=statuses)
-        row.updated_at = utcnow()
-        self.db.commit()
-        self.db.refresh(row)
-        return row
-
     def prune_stale_vendoo_drafts(self) -> int:
         """Drop the ``vendoo_draft`` events earlier builds appended per pull."""
         deleted = (
@@ -941,11 +674,6 @@ class JobRepo:
         )
         self.db.commit()
         return int(deleted or 0)
-
-    def get_vendoo_draft(self, job_id: str) -> dict | None:
-        row = self.db.query(VendooDraftCache).filter(VendooDraftCache.job_id == job_id).first()
-        return _draft_cache_response(row) if row else None
-
 
 class DiagnosticRepo:
     def __init__(self, db: Session):

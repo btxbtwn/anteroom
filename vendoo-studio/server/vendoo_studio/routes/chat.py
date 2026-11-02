@@ -15,7 +15,6 @@ from vendoo_studio.services import activity
 from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.chat_citations import (
     citations_to_plain_text,
-    expand_citations_for_provider,
 )
 from vendoo_studio.routes.attachments import AttachmentUpload, store_uploads
 from vendoo_studio.services.chat_attachments import attach_to_last_user_turn
@@ -76,76 +75,9 @@ log = logging.getLogger("vendoo_studio.chat")
 router = APIRouter(tags=["chat"])
 
 
-class BrowserChatField(BaseModel):
-    marketplace: str = Field(max_length=20)
-    label: str = Field(min_length=1, max_length=120)
-    value: str = Field(default="", max_length=2000)
-
-
-class BrowserChatContext(BaseModel):
-    """The draft open in Studio's browser and the fields the seller pointed at."""
-
-    job_id: str = Field(min_length=1, max_length=64)
-    fields: list[BrowserChatField] = Field(default_factory=list, max_length=60)
-
-
 class ChatMessage(BaseModel):
     text: str
-    browser: BrowserChatContext | None = None
     attachments: list[AttachmentUpload] = Field(default_factory=list)
-
-
-def _browser_message_text(body: ChatMessage) -> str:
-    if not body.browser or not body.browser.fields:
-        return body.text
-    from vendoo_studio.services.browser_agent import market_label
-
-    names = ", ".join(f"{market_label(item.marketplace)} / {item.label}" for item in body.browser.fields)
-    return f"{body.text}\n\nPointed at in the Vendoo browser: {names}".strip()
-
-
-async def _browser_fix_stream(conv_id: str, body: ChatMessage, provider, provider_name: str, provider_model: str):
-    from vendoo_studio.services.browser_agent import FixAgent, FixRequest
-
-    assert body.browser is not None
-    request = FixRequest(
-        job_id=body.browser.job_id,
-        conversation_id=conv_id,
-        instruction=expand_citations_for_provider(body.text),
-        picked=[item.model_dump() for item in body.browser.fields],
-    )
-    final = ""
-    work = activity.begin(conv_id, "Fixing the Vendoo draft…")
-    try:
-        async for item in iter_with_keepalives(FixAgent(request, provider, db_factory=SessionLocal).run()):
-            if work.cancelled:
-                break
-            if item is None:
-                yield KEEPALIVE
-                continue
-            kind, text = item
-            if kind == "status":
-                yield sse_event("status", text)
-            else:
-                final = text
-                yield sse_data(text)
-    except Exception as exc:
-        log.exception("browser fix agent failed for %s", conv_id)
-        final = f"Error: {str(exc).strip() or type(exc).__name__}"
-        yield sse_data(final)
-    finally:
-        activity.end(work)
-    if work.cancelled:
-        yield "data: [DONE]\n\n"
-        return
-    stream_db = SessionLocal()
-    try:
-        if final:
-            ConversationRepo(stream_db).add_message(conv_id, "assistant", final, provider=provider_name, model=provider_model)
-    finally:
-        stream_db.close()
-    yield sse_event("listing_updated", "1")
-    yield "data: [DONE]\n\n"
 
 
 async def _persist_chat_result(conv_id: str, full_text: str, provider, *, field_paths=None, **kwargs):
@@ -179,15 +111,8 @@ async def run_message(conv_id: str, body: ChatMessage, db: Session, *, stored_at
     if not conv:
         raise HTTPException(404, "Conversation not found")
 
-    if body.browser:
-        from vendoo_studio.repositories.queries import JobRepo
-
-        job = JobRepo(db).get(body.browser.job_id)
-        if not job or job.conversation_id != conv_id:
-            raise HTTPException(404, "That Vendoo draft does not belong to this listing")
-
     attachments = stored_attachments if stored_attachments is not None else store_uploads(body.attachments, collection_id=conv_id)
-    repo.add_message(conv_id, "user", _browser_message_text(body), attachments=attachments)
+    repo.add_message(conv_id, "user", body.text, attachments=attachments)
     provider = get_listing_provider()
     if provider is None:
         repo.add_message(
@@ -203,16 +128,6 @@ async def run_message(conv_id: str, body: ChatMessage, db: Session, *, stored_at
             "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key.",
         )
     provider_name, provider_model = _provider_meta(provider)
-
-    if body.browser:
-        # FastAPI keeps a yield dependency open until the response finishes, so
-        # the request session would hold a pool connection for the whole stream.
-        db.close()
-        return StreamingResponse(
-            _browser_fix_stream(conv_id, body, provider, provider_name, provider_model),
-            media_type="text/event-stream",
-            headers=SSE_HEADERS,
-        )
 
     revisions = ListingRepo(db).get_revisions(conv_id)
     if repo.get_photos(conv_id) and (not revisions or revisions[0].source == "category_analysis"
@@ -425,9 +340,6 @@ async def cancel_generate_listing(conv_id: str):
 
 @router.post("/api/conversations/{conv_id}/messages/cancel")
 async def cancel_chat_message(conv_id: str):
-    from vendoo_studio.services.browser_agent import cancel as cancel_browser_fix
-
-    cancel_browser_fix(conv_id)
     db = SessionLocal()
     try:
         ConversationRepo(db).update_status(conv_id, "draft")
@@ -439,13 +351,10 @@ async def cancel_chat_message(conv_id: str):
 @router.post("/api/conversations/{conv_id}/stop")
 async def stop_everything(conv_id: str, db: Session = Depends(get_db)):
     """Chat's Stop: end every piece of work that can still write to this listing."""
-    from vendoo_studio.services.browser_agent import cancel as cancel_browser_fix
-
     from vendoo_studio.routes.conversations import cancel_conversation_jobs
 
     stop_generation(conv_id)
     activity.cancel(conv_id)
-    cancel_browser_fix(conv_id)
     await cancel_conversation_jobs(db, conv_id)
     ConversationRepo(db).update_status(conv_id, "draft")
     return {"ok": True}

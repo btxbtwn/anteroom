@@ -25,7 +25,7 @@ from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.services.validation import validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.safe_fetch import UnsafeURLError, validate_fetch_url
-from vendoo_studio.services.vendoo_import import listing_from_vendoo, merge_notes
+from vendoo_studio.services.vendoo_import import merge_notes
 from extension_sources import background_source
 
 
@@ -1206,7 +1206,7 @@ class JobSafetyRouteTest(unittest.TestCase):
         app.dependency_overrides.clear()
         self.db.close()
 
-    def test_user_form_refresh_sanitizes_size_and_job_snapshot(self):
+    def test_seller_edit_keeps_historical_send_snapshot(self):
         job = Job(
             conversation_id=self.conv.id,
             approved_revision_id="rev1",
@@ -1227,9 +1227,9 @@ class JobSafetyRouteTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.db.refresh(job)
-        self.assertEqual(job.listing_snapshot.get("size"), "10")
-        # The save set eBay's size itself, so that value stays.
-        self.assertEqual(job.listing_snapshot.get("ebay_specifics", {}).get("size"), "M")
+        self.assertEqual(job.listing_snapshot.get("size"), "XL")
+        # Historical jobs keep the values they originally sent.
+        self.assertEqual(job.listing_snapshot.get("ebay_specifics", {}), VALID_LISTING["ebay_specifics"])
         self.assertEqual(job.listing_snapshot.get("platforms"), ["ebay"])
         latest = ListingRepo(self.db).get_revisions(self.conv.id)[0]
         self.assertEqual(latest.source, "user_form")
@@ -1264,7 +1264,7 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.assertEqual(updated.status, "cancelled")
         self.assertIsNone(updated.last_error)
 
-    def test_job_response_includes_blocker_fields(self):
+    def test_historical_job_response_keeps_failure_details(self):
         job = Job(
             conversation_id=self.conv.id,
             approved_revision_id="rev1",
@@ -1291,13 +1291,7 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["current_step"], "completion_blocked")
-        self.assertEqual(
-            body["blocker_fields"],
-            [
-                {"marketplace": "ebay", "field": "Package weight", "expected": "8 oz"},
-                {"marketplace": "ebay", "field": "Package dimensions"},
-            ],
-        )
+        self.assertEqual(body["last_error"], job.last_error)
 
     def test_merge_notes_keeps_vendoo_binding(self):
         existing = json.dumps({"vendooItemId": "abc123", "vendooUrl": "https://web.vendoo.co/app/item/abc123", "condition": "Good"})
@@ -1306,26 +1300,6 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.assertEqual(merged["condition"], "Fair")
 
 
-class ImportIntegrityTest(unittest.TestCase):
-    def test_resolves_root_label_ids_to_names(self):
-        item = {
-            "itemID": "abc123",
-            "labels": ["UOYZA8oYMxY5fwBzyP2Q"],
-            "labelDetails": [{"id": "UOYZA8oYMxY5fwBzyP2Q", "name": "To List"}],
-            "generalDetails": {
-                "title": "Imported blouse",
-                "description": "Size: XL\nCondition: Good\nMeasurements: 22.5",
-                "price": 14,
-                "primaryColor": "Multi",
-                "labels": ["A19"],
-            },
-        }
-        listing = listing_from_vendoo(item, None)
-        # Opaque Firestore ids become display names when labelDetails is present.
-        self.assertNotIn("UOYZA8oYMxY5fwBzyP2Q", listing["labels"])
-        self.assertIn("To List", listing["labels"])
-        self.assertIn("A19", listing["labels"])
-        self.assertEqual(listing["primaryColor"], "Multi")
 
 
 class PhotoMimeTest(unittest.TestCase):
@@ -1640,20 +1614,6 @@ console.log(JSON.stringify({ blouse, tee }));
         self.assertNotIn("Ask chat for fields generation could not resolve", panel)
         self.assertIn("emptyFieldsButtonLabel", panel)
 
-    def test_send_blocker_ask_chat_uses_validation_prompt(self):
-        source = (
-            Path(__file__).resolve().parents[2] / "src" / "components" / "CopyableLlmError.tsx"
-        ).read_text(encoding="utf-8")
-        self.assertIn("export function validationErrorsPrompt", source)
-        self.assertIn("Fix these Anteroom validation errors", source)
-        self.assertIn("Update EVERY field listed below", source)
-        editor = (
-            Path(__file__).resolve().parents[2] / "src" / "components" / "ListingEditor.tsx"
-        ).read_text(encoding="utf-8")
-        # Send blockers use the shared validation prompt in the active editor.
-        self.assertIn("validationErrorsPrompt", editor)
-        self.assertNotIn("completionBlockerPrompt", editor)
-        self.assertIn("onAskChat={onAskChat}", editor)
 
 
 if __name__ == "__main__":

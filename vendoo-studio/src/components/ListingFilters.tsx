@@ -1,6 +1,5 @@
-/** Vendoo Inventory's filter bar, sized for Studio's sidebar. */
+/** The inventory filter bar, sized for Studio's sidebar. */
 import { labelColor, labelDotClass, type LabelColor } from "../labelColors";
-import { useVendooEnabled } from "../vendooMode";
 
 import type { ReactNode } from "react";
 import { ChevronDownIcon, ListFilterIcon, XIcon } from "lucide-react";
@@ -96,7 +95,6 @@ export function ListingFilters({
   marketplaces,
   marketplaceCounts,
   notListedCount,
-  needsRelistCount,
   unsentCount,
   staleCounts,
   onChange,
@@ -112,17 +110,14 @@ export function ListingFilters({
   /** What each marketplace row would keep: listed there, or missing from there under Not listed. */
   marketplaceCounts: Record<string, number>;
   notListedCount: number;
-  /** How many live listings are behind the last write Studio made to Vendoo. */
-  needsRelistCount: number;
-  /** How many listings hold edits the Vendoo form has not been given. */
+  /** How many listings hold edits not yet sent to a marketplace. */
   unsentCount: number;
   /** How many listings each staleness cutoff would keep, keyed by its days. */
   staleCounts: Record<number, number>;
   onChange: (next: Filters) => void;
 }) {
   const chosen = activeFilterCount(filters);
-  const vendooOn = useVendooEnabled();
-  // Vendoo hides the tab it has nothing for; "failed" is Studio's own state.
+  // "Failed" shows only when something failed.
   const tabs: ListingStatusFilter[] = [
     "all",
     ...LISTING_STATUS_TABS.filter((status) => status !== "failed" || counts.failed),
@@ -216,22 +211,10 @@ export function ListingFilters({
                 )
               }
             />
-            {vendooOn ? (
-              <FilterRow
-                checked={filters.needsRelist}
-                count={needsRelistCount}
-                title="Live listings still showing the copy from before Anteroom's last update — delist and relist them in Vendoo"
-                glyph={<Dot tone="warning" />}
-                label="Needs relist"
-                onSelect={() => onChange({ ...filters, needsRelist: !filters.needsRelist })}
-              />
-            ) : null}
             <FilterRow
               checked={filters.unsent}
               count={unsentCount}
-              title={vendooOn
-                ? "Edited in Anteroom since Vendoo last had this listing — press Update Vendoo"
-                : "Edited in Anteroom since this listing was last saved"}
+              title="Edited in Anteroom since this listing was last saved"
               glyph={<Dot tone="info" />}
               label="Unsent edits"
               onSelect={() => onChange({ ...filters, unsent: !filters.unsent })}
@@ -257,7 +240,7 @@ export function ListingFilters({
               <>
                 <MenuSeparator />
                 <MenuGroup>
-                  <MenuGroupLabel>{vendooOn ? "Vendoo labels" : "Labels"}</MenuGroupLabel>
+                  <MenuGroupLabel>{"Labels"}</MenuGroupLabel>
                   {labels.map((label) => (
                     <FilterRow
                       key={label}

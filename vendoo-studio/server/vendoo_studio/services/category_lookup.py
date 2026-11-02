@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
-import uuid
-from typing import Any
 
 from sqlalchemy.orm import Session
 
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.registry import align_listing_gender
-from vendoo_studio.services.category_catalog import remember_path
 
 log = logging.getLogger("vendoo_studio.category_lookup")
 
-CATEGORY_SEARCH_TIMEOUT_SEC = 45
 
 # Shorts stays plural: "Short-sleeve" is a sleeve, and reading it as shorts
 # sent a short-sleeve tee's search to Pants & Shorts.
@@ -321,18 +316,6 @@ def pick_category_path(
     return fallback[0] if fallback else ""
 
 
-def _job_for_conversation(db: Session, conv_id: str):
-    from vendoo_studio.repositories.queries import JobRepo
-
-    jobs = JobRepo(db).list_by_conversation(conv_id)
-    for job in jobs:
-        if job.status == "cancelled":
-            continue
-        if job.vendoo_item_id or job.vendoo_url:
-            return job
-    return None
-
-
 def apply_resolved_category(db: Session, conv_id: str, path: str) -> dict:
     from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
     from vendoo_studio.services.vendoo_import import merge_notes
@@ -355,73 +338,3 @@ def apply_resolved_category(db: Session, conv_id: str, path: str) -> dict:
         conv.notes = merge_notes(conv.notes, {"categoryOverride": path})
         db.commit()
     return listing
-
-
-async def resolve_listing_category(
-    db: Session,
-    conv_id: str,
-    *,
-    query: str | None = None,
-    job: Any = None,
-) -> dict[str, Any]:
-    """Search the live Vendoo category picker and save the matching leaf onto the listing."""
-    from vendoo_studio.repositories.queries import ListingRepo
-    from vendoo_studio.services.extension_connection import (
-        dispatch_search_categories,
-        extension_manager,
-    )
-
-    job = job or _job_for_conversation(db, conv_id)
-    if not job or not (job.vendoo_item_id or job.vendoo_url):
-        return {"ok": False, "skipped": True, "error": "No Vendoo draft is available yet. Send the listing first."}
-    if job.status == "dispatched" and job.current_step == "filling_fields":
-        return {"ok": False, "skipped": True, "error": "A Vendoo fill is already running."}
-    if not extension_manager.connected:
-        return {"ok": False, "skipped": True, "error": "Chrome is not connected"}
-
-    revisions = ListingRepo(db).get_revisions(conv_id)
-    listing = dict(revisions[0].listing_json) if revisions and isinstance(revisions[0].listing_json, dict) else {}
-    search = category_search_query(listing, query)
-    if not search:
-        return {"ok": False, "error": "No category search query"}
-
-    request_id = uuid.uuid4().hex[:12]
-    waiter = extension_manager.register_wait(request_id)
-    try:
-        sent = await dispatch_search_categories(job, request_id, search)
-        if not sent:
-            return {"ok": False, "error": "Could not reach the Chrome extension"}
-        try:
-            payload = await asyncio.wait_for(waiter, timeout=CATEGORY_SEARCH_TIMEOUT_SEC)
-        except TimeoutError:
-            return {
-                "ok": False,
-                "error": "Chrome did not return Vendoo category matches in time. Open the listing tab and try again.",
-            }
-    finally:
-        extension_manager.cancel_wait(request_id)
-
-    matches = payload.get("matches") if isinstance(payload.get("matches"), list) else []
-    for match in matches:
-        if _match_path(match):
-            remember_path(db, "general", _match_path(match))
-    db.commit()
-    path = pick_category_path(matches, listing, search, str(payload.get("path") or "").strip())
-    if not payload.get("ok") and not path:
-        return {
-            "ok": False,
-            "query": search,
-            "matches": matches,
-            "error": payload.get("error") or "No matching Vendoo category",
-        }
-    if not path:
-        return {"ok": False, "query": search, "matches": matches, "error": "No matching Vendoo category"}
-
-    saved = apply_resolved_category(db, conv_id, path)
-    return {
-        "ok": True,
-        "query": search,
-        "path": path,
-        "matches": matches,
-        "listing": saved,
-    }

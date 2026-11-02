@@ -1,21 +1,18 @@
 import { ListingTemplatesDialog } from "../ListingTemplatesDialog";
 import { CopyListingDialog } from "../CopyListingDialog";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
-import { marketplacesNeedingRelist, relistStage } from "../relistStatus";
-import { marketplaceName } from "../marketplaceNames";
 import { LayoutTemplateIcon, CopyIcon, EllipsisIcon, PencilIcon, Trash2Icon, XIcon } from "lucide-react";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
 import { displayCoverUrl } from "./coverSrc";
-import { mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
-import { inventoryStatus, listedFromImport, marketplaceStatusesFromDraft, partialSale, statusHint, withDirectListings } from "./listingStatus";
+import { statusIsListed } from "../fillLog/marketplaces";
+import { inventoryStatus, listedFromImport, partialSale, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
-import { useVendooEnabled } from "../../vendooMode";
 import { prefetchListingReads } from "../../api/navigationQueries";
 import { preloadListingCode } from "../../app/pageLoaders";
 import { useNavigationIntent } from "../../lib/useNavigationIntent";
@@ -28,8 +25,6 @@ export const ListingRow = memo(function ListingRow({
   listing,
   selected,
   settled,
-  jobId,
-  statusDraft,
   visibleMarketplaces,
   nameBySku = false,
   selecting = false,
@@ -43,8 +38,6 @@ export const ListingRow = memo(function ListingRow({
   listing: Listing;
   selected: boolean;
   settled: boolean;
-  jobId?: string;
-  statusDraft?: Record<string, unknown>;
   visibleMarketplaces?: Set<string>;
   nameBySku?: boolean;
   selecting?: boolean;
@@ -58,7 +51,7 @@ export const ListingRow = memo(function ListingRow({
   const title = listing.title || "Untitled";
   // Named by SKU, a listing without one still shows its title.
   const name = (nameBySku && listing.sku?.trim()) || title;
-  // A bulk-imported listing has no local photos yet; Vendoo's own image stands in.
+  // A bulk-imported listing has no local photos yet; the imported image stands in.
   const coverUrl = displayCoverUrl(listing.cover_photo_url || listing.vendoo_cover_url);
   const status = inventoryStatus(listing);
   const partial = partialSale(listing, status);
@@ -68,11 +61,10 @@ export const ListingRow = memo(function ListingRow({
     preloadListingCode();
     void prefetchListingReads(queryClient, listing.id);
   });
-  const vendooOn = useVendooEnabled();
   const statusTitle = partial ? `Active · ${partial}`
     : status === "active" && String(listing.status || "draft") !== "active"
       ? "Listed directly from Anteroom."
-      : statusHint(status, vendooOn);
+      : statusHint(status);
   const settledAt = settled ? compactRelativeTime(listing.settled_at || listing.updated_at) : "";
   const itemRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -90,43 +82,21 @@ export const ListingRow = memo(function ListingRow({
     },
   });
 
-  // Observe Fields-panel cache without fetching.
-  const cachedDraftQuery = useQuery({
-    queryKey: ["vendoo-item", jobId || ""],
-    queryFn: () => api.jobs.vendooItem(jobId || ""),
-    enabled: false,
-  });
-
-  const draft = useMemo(
-    () => mergeStatusDrafts(cachedDraftQuery.data, statusDraft),
-    [cachedDraftQuery.data, statusDraft],
-  );
-  const marketplaceStatuses = useMemo(
-    () => marketplaceStatusesFromDraft(draft, visibleMarketplaces),
-    [draft, visibleMarketplaces],
-  );
-  // A cached Vendoo draft that names any marketplace is the live word and wins,
-  // even when it says the listing is live nowhere. Only a draft with nothing to
-  // say hands over to what the import recorded. Anteroom's own publish still
-  // shows, because Vendoo does not know about that listing.
+  // What the import recorded, plus Anteroom's own listings.
   const importedRows = useMemo(
     () => listedFromImport(listing, visibleMarketplaces),
     [listing, visibleMarketplaces],
   );
   const popupStatuses = useMemo(
     () => withDirectListings(
-      marketplaceStatuses.length ? marketplaceStatuses : importedRows,
+      importedRows,
       listing.direct_marketplaces,
       visibleMarketplaces,
       listing.removed_marketplaces,
     ),
-    [marketplaceStatuses, importedRows, listing.direct_marketplaces, visibleMarketplaces, listing.removed_marketplaces],
+    [importedRows, listing.direct_marketplaces, visibleMarketplaces, listing.removed_marketplaces],
   );
   const listedMarketplaces = popupStatuses.filter((row) => row.id !== "general" && statusIsListed(row.status));
-  // "active" alone would read as done. These listings are live on copy older
-  // than Studio's last write, and only a delist + relist in Vendoo fixes that.
-  const relistMarketplaces = useMemo(() => marketplacesNeedingRelist(listing), [listing]);
-  const relistStageNow = useMemo(() => relistStage(listing), [listing]);
   const activate = () => {
     // While selecting on a phone the whole row is the checkbox, as in Mail's edit mode.
     if (selecting && !canHover()) {
@@ -251,18 +221,6 @@ export const ListingRow = memo(function ListingRow({
               </ListingTag>
             ) : null}
             {partial ? <span className="truncate text-2xs text-sidebar-muted-foreground">{partial}</span> : null}
-            {vendooOn && relistMarketplaces.length ? (
-              <ListingTag
-                tone="warning"
-                title={relistStageNow === "list"
-                  ? "Delisted in Vendoo and not listed again yet, so it is live nowhere."
-                    + ` List it again to finish: ${relistMarketplaces.map(marketplaceName).join(", ")}.`
-                  : `Updated in Anteroom after ${relistMarketplaces.map(marketplaceName).join(", ")} went live.`
-                    + " Delist and relist in Vendoo to publish the new version."}
-              >
-                relist
-              </ListingTag>
-            ) : null}
             {settledAt ? <span className="text-2xs font-medium text-sidebar-muted-foreground">{settledAt}</span> : null}
           </div>
           {listedMarketplaces.length ? (

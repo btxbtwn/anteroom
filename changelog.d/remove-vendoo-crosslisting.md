@@ -1,0 +1,1 @@
+- Remove Send to Vendoo and Grailed from Anteroom so listings use direct marketplace connections.

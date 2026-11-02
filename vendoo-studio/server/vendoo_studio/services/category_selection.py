@@ -17,7 +17,6 @@ from vendoo_studio.services.category_lookup import (
     is_apparel_general,
     is_non_apparel_path,
 )
-from vendoo_studio.services.listing_completion import parse_resolution
 from vendoo_studio.services.registry import WOMEN_TOPS_SEEDS, _names_jersey_garment
 
 log = logging.getLogger("vendoo_studio.category_selection")
@@ -203,7 +202,12 @@ async def _ask_model(provider, analysis: str, notes: str, choices: dict) -> dict
     except TimeoutError:
         log.warning("category selection model timed out; using catalog ranking")
         return {"categories": {}, "question": ""}
-    return parse_resolution(text)
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    try:
+        result = json.loads(match.group(1) if match else text)
+    except (ValueError, TypeError):
+        return {}
+    return result if isinstance(result, dict) else {}
 
 
 def _escape_like(text: str) -> str:

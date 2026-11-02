@@ -17,11 +17,7 @@ from vendoo_studio.models.marketplace_listing import MarketplaceListing  # noqa:
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.routes.conversations import _conv_response, _extras
-from vendoo_studio.services.vendoo_import import (
-    split_vendoo_labels,
-    vendoo_listed_marketplaces,
-    vendoo_listing_urls,
-)
+from vendoo_studio.services.vendoo_import import split_vendoo_labels
 
 
 class ListingFacetsTest(unittest.TestCase):
@@ -138,67 +134,9 @@ class ListingFacetsTest(unittest.TestCase):
         self.assertEqual(response.removed_marketplaces, ["ebay", "poshmark"])
         self.assertEqual(response.status, "active")
 
-    def test_listed_marketplaces_follow_vendoo_status_flags(self):
-        item = {
-            "listings": {
-                "ebay": {"status": {"listed": True}},
-                "poshmark": {"status": {"listed": False}},
-                "etsy": {"status": {"sold": True}},
-                "depop": {"status": {"shipped": True}},
-                "vestiaireApi": {"status": {"listed": True}},
-                "validate": {"status": {"listed": True}},
-            }
-        }
-        self.assertEqual(
-            vendoo_listed_marketplaces(item, None),
-            ["depop", "ebay", "etsy", "vestiaire"],
-        )
 
-    def test_direct_listings_count_as_live_on_that_marketplace(self):
-        item = {
-            "listings": {"ebay": {"status": {"notListed": True}}},
-            "externalListings": {
-                "poshmark": {
-                    "status": {"listed": True},
-                    "listingURL": "https://poshmark.com/listing/windbreaker",
-                },
-                "mercari": {
-                    "status": {"notListed": True},
-                    "listingURL": "https://www.mercari.com/us/item/gone/",
-                },
-            },
-        }
-        self.assertEqual(vendoo_listed_marketplaces(item, None), ["poshmark"])
-        self.assertEqual(
-            vendoo_listing_urls(item, None),
-            {"poshmark": "https://poshmark.com/listing/windbreaker"},
-        )
 
-    def test_listed_marketplaces_are_empty_without_listings(self):
-        self.assertEqual(vendoo_listed_marketplaces(None, None), [])
-        self.assertEqual(vendoo_listed_marketplaces({"listings": "nope"}, None), [])
 
-    def test_listing_urls_come_from_live_and_sold_listings(self):
-        item = {
-            "listings": {
-                "ebay": {"status": {"listed": True}, "listingURL": "https://www.ebay.com/itm/123"},
-                "poshmark": {
-                    "status": {"sold": True},
-                    "listingURL": "https://poshmark.com/listing/abc",
-                },
-                # Delisted: the page is gone even if a stale URL lingers.
-                "mercari": {"status": {"notListed": True}, "listingURL": "https://www.mercari.com/us/item/m1/"},
-                "etsy": {"status": {"listed": True}, "listingURL": ""},
-                "depop": {"status": {"listed": True}, "listingURL": "javascript:alert(1)"},
-                "vestiaireApi": {"status": {"listed": True}, "listingURL": "https://vestiairecollective.com/x"},
-            }
-        }
-        self.assertEqual(vendoo_listing_urls(item, None), {
-            "ebay": "https://www.ebay.com/itm/123",
-            "poshmark": "https://poshmark.com/listing/abc",
-            "vestiaire": "https://vestiairecollective.com/x",
-        })
-        self.assertEqual(vendoo_listing_urls(None, None), {})
 
     def test_response_carries_listing_urls(self):
         conv = self.convs.create(title="Nike tee")

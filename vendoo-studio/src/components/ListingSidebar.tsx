@@ -3,7 +3,6 @@ import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { mergeRegenerateIds } from "../bulkRegenerate";
-import { jobsPollMs } from "../api/polling";
 import type { SettingsSearchItem, SettingsSectionId } from "./settingsNav";
 import { ListingFilters } from "./ListingFilters";
 import { SuggestionsPanel } from "./SuggestionsPanel";
@@ -22,7 +21,6 @@ import {
   marketplaceOptions,
   notListedCount,
   notListedOnCounts,
-  needsRelistCount,
   unsentCount,
   staleCounts,
   sortListings,
@@ -115,20 +113,6 @@ export function ListingSidebar({
   });
   const nameBySku = uiPrefs?.listing_names === "sku";
 
-  const { data: jobs } = useQuery({
-    queryKey: ["jobs"],
-    queryFn: () => api.jobs.list(),
-    refetchInterval: (query) => jobsPollMs(query.state.data),
-  });
-  const jobIdByConversation = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const job of jobs || []) {
-      if (!job?.conversation_id || job.status === "cancelled") continue;
-      if (!job.vendoo_item_id && !job.vendoo_url) continue;
-      if (!map.has(job.conversation_id)) map.set(job.conversation_id, job.id);
-    }
-    return map;
-  }, [jobs]);
 
   // Keep the controlled search input responsive while filtering large inventories.
   const deferredQuery = useDeferredValue(listingQuery);
@@ -199,7 +183,7 @@ export function ListingSidebar({
     [marketplaceSettings],
   );
   // The filter bar offers what the inventory actually holds: the statuses it
-  // wears, the marketplaces it sits on, and the Vendoo labels it carries.
+  // wears, the marketplaces it sits on, and the labels it carries.
   const searched = useMemo(
     () => (conversations || []).filter((listing) => matchesSearch(listing, needle)),
     [conversations, needle],
@@ -225,30 +209,8 @@ export function ListingSidebar({
   const filterNotListedCount = useMemo(() => notListedCount(facetSource), [facetSource]);
   const staleThreshold = uiPrefs?.stale_listing_days;
   const filterStaleCounts = useMemo(() => staleCounts(facetSource, undefined, staleThreshold), [facetSource, staleThreshold]);
-  const filterRelistCount = useMemo(() => needsRelistCount(facetSource), [facetSource]);
   const filterUnsentCount = useMemo(() => unsentCount(facetSource), [facetSource]);
   const labels = useMemo(() => labelOptions(conversations || []), [conversations]);
-  // Cached Vendoo statuses for every rendered thread, so rows can badge where
-  // they're listed without hovering. Reads the server cache only.
-  const renderedJobIds = useMemo(
-    () =>
-      shownListings
-        .map((listing) => jobIdByConversation.get(listing.id))
-        .filter((id): id is string => Boolean(id))
-        .sort(),
-    [shownListings, jobIdByConversation],
-  );
-  const { data: statusDrafts } = useQuery({
-    queryKey: ["marketplace-statuses", renderedJobIds.join(",")],
-    queryFn: () => api.jobs.marketplaceStatuses(renderedJobIds),
-    enabled: renderedJobIds.length > 0,
-    refetchInterval: 15000,
-    placeholderData: (previous) => previous,
-  });
-  const statusDraftFor = (conversationId: string) => {
-    const jobId = jobIdByConversation.get(conversationId);
-    return jobId ? statusDrafts?.[jobId] : undefined;
-  };
   const settingsSearch = useSettingsSearch(settingsMode, onSettingsSearchResult);
   const {
     settingsSearchRef,
@@ -414,7 +376,6 @@ export function ListingSidebar({
             marketplaces={filterMarketplaces}
             marketplaceCounts={filterMarketplaceCounts}
             notListedCount={filterNotListedCount}
-            needsRelistCount={filterRelistCount}
             unsentCount={filterUnsentCount}
             staleCounts={filterStaleCounts}
             onChange={handleFiltersChange}
@@ -426,8 +387,6 @@ export function ListingSidebar({
                 listing={listing}
                 selected={selectedConvId === listing.id && activeView === "listings"}
                 settled={false}
-                jobId={jobIdByConversation.get(listing.id)}
-                statusDraft={statusDraftFor(listing.id)}
                 visibleMarketplaces={visibleMarketplaces}
                 nameBySku={nameBySku}
                 selecting={selecting}

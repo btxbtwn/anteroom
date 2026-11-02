@@ -78,12 +78,10 @@ def apply_price_drop(
     expected_revision_id: str | None = None,
 ) -> dict[str, Any]:
     """Save a confirmed whole-dollar price as a ``price_drop`` revision and commit."""
-    from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
     from vendoo_studio.services.listing_generate import (
         propagate_general_size,
         sanitize_listing_sizes,
     )
-    from vendoo_studio.services.schema_probe import is_schema_probe_job
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.background_task import BackgroundTask
 
@@ -121,17 +119,6 @@ def apply_price_drop(
     if current_row:
         current_row.validation_status = "valid" if validation.valid else "error"
         current_row.validation_errors = validation.errors + validation.warnings
-
-    refresh_statuses = set(ACTIVE_JOB_STATUSES) | {"failed"}
-    for job in JobRepo(db).list_by_conversation(conv_id):
-        if (job.status not in refresh_statuses or is_schema_probe_job(job)
-                or str(job.current_step or "").startswith("native_")):
-            continue
-        platforms = (job.listing_snapshot or {}).get("platforms") if isinstance(job.listing_snapshot, dict) else None
-        snapshot = dict(updated)
-        if isinstance(platforms, list):
-            snapshot["platforms"] = platforms
-        job.listing_snapshot = snapshot
 
     db.commit()
     return {

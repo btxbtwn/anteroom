@@ -22,37 +22,6 @@ from vendoo_studio.services.catalog_index import (
 )
 from vendoo_studio.services.category_selection import select_categories, _candidate_query
 from vendoo_studio.services.category_lookup import condense_category_search_query
-from vendoo_studio.services.category_tree import store_children
-
-
-class CategoryTreeTest(unittest.TestCase):
-    def setUp(self):
-        self.engine = create_engine("sqlite://")
-        Base.metadata.create_all(self.engine)
-        self.db = Session(self.engine)
-        self.db.add(CategoryTree(marketplace="general"))
-        self.db.commit()
-
-    def tearDown(self):
-        self.db.close()
-        self.engine.dispose()
-
-    def test_branch_completion_waits_for_children_and_is_idempotent(self):
-        root = {"nodes": [{"id": "women", "label": "Women", "path": ["Women"],
-                           "is_leaf": False, "has_children": True}]}
-        store_children(self.db, "general", "__root", root)
-        store_children(self.db, "general", "__root", root)
-        self.assertEqual(self.db.query(CategoryTreeNode).count(), 1)
-        self.assertFalse(self.db.get(CategoryTreeNode, ("general", "women")).children_loaded)
-        store_children(self.db, "general", "women", {"nodes": [{"id": "tees", "label": "Tees",
-            "path": ["Women", "Tees"], "is_leaf": True, "has_children": False}]})
-        self.assertEqual(self.db.query(CategoryTreeNode).filter_by(children_loaded=False).count(), 0)
-        self.assertEqual(self.db.get(CategoryTreeNode, ("general", "tees")).path, "Women > Tees")
-
-    def test_empty_response_does_not_mark_tree_complete(self):
-        with self.assertRaises(ValueError):
-            store_children(self.db, "general", "__root", {"nodes": []})
-        self.assertFalse(self.db.get(CategoryTree, "general").roots_loaded)
 
 
 class CandidateQueryTest(unittest.TestCase):

@@ -335,18 +335,6 @@ export interface Job {
   updated_at: string;
 }
 
-export interface VendooItemResult {
-  ok: boolean;
-  source?: string | null;
-  item_id?: string | null;
-  url?: string | null;
-  error?: string | null;
-  api_error?: string | null;
-  item?: Record<string, unknown> | null;
-  form?: Record<string, unknown> | null;
-  statuses?: Record<string, unknown> | null;
-}
-
 /** A Sign in with ChatGPT waiting on the browser; the page can open it again. */
 export interface ChatGPTPendingLogin {
   authorize_url: string;
@@ -459,7 +447,7 @@ export interface ProviderTestResult {
   error?: string;
 }
 
-/** One Vendoo HTTP call as the log list shows it. Credentials in the URL are masked. */
+/** One warning or error from Anteroom's own log. */
 export interface StudioErrorLogEntry {
   id: number;
   at: string;
@@ -467,27 +455,6 @@ export interface StudioErrorLogEntry {
   source: string;
   message: string;
   detail: string | null;
-}
-
-export interface VendooApiLogEntry {
-  id: number;
-  at: string;
-  method: string;
-  url: string;
-  host: string;
-  path: string;
-  status: number | null;
-  duration_ms: number;
-  ok: boolean;
-  error: string | null;
-}
-
-/** The full call: headers and bodies, with tokens, keys, and cookies masked. */
-export interface VendooApiLogDetail extends VendooApiLogEntry {
-  request_headers: Record<string, string>;
-  request_body: string | null;
-  response_headers: Record<string, string>;
-  response_body: string | null;
 }
 
 export interface FillLogEntry {
@@ -649,44 +616,6 @@ export interface MarketplaceForm {
   fields: MarketplaceFormField[];
 }
 
-
-/** Progress of a whole-inventory Vendoo import. */
-export interface VendooBulkImport {
-  running: boolean;
-  total: number;
-  processed: number;
-  imported: number;
-  updated: number;
-  skipped: number;
-  failed: number;
-  deleted: number;
-  photos: number;
-  current_title: string;
-  started_at: string;
-  finished_at: string;
-  cancelled: boolean;
-  error: string;
-  failures: { item_id: string; title: string; error: string }[];
-}
-
-/** Quiet pass that only refreshes draft / active / sold for bound listings. */
-export interface VendooLabelSync {
-  running: boolean;
-  checked: number;
-  updated: number;
-  skipped: boolean;
-  reason: string;
-  started_at: string;
-  finished_at: string;
-  error: string;
-}
-
-/** Stored labels that are Vendoo IDs: how many were (or can be) renamed, and the IDs with no known name. */
-export interface VendooLabelConversion {
-  items: number;
-  converted: number;
-  unknown: string[];
-}
 
 export interface SimilarItem {
   id: string;

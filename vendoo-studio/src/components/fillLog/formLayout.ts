@@ -329,7 +329,7 @@ export function organizeFields(marketplace: string, fields: DraftField[], leftov
     const key = normalizeFieldName(entry.field);
     if (key && seenExtras.has(key)) return [];
     if (key) seenExtras.add(key);
-    const label = entry.field.replace(/^(ebay|etsy|poshmark|mercari|depop|grailed|vinted|facebook|sellwild|vendoo)\s+/i, "").trim() || entry.field;
+    const label = entry.field.replace(/^(ebay|etsy|poshmark|mercari|depop|vinted|facebook|sellwild|vendoo)\s+/i, "").trim() || entry.field;
     if (entry.status === "not_applicable") {
       return [notApplicableField({
         key: entry.id,

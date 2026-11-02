@@ -256,12 +256,11 @@ class UiInput(BaseModel):
     forget_label: str | None = None
     model_favorites: list[dict] | None = None
     label_colors: dict[str, Literal["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]] | None = Field(None, max_length=200)
-    vendoo_enabled: Literal[False] | None = None
 
 
 @router.get('/settings/ui')
 def ui(db=Depends(get_seller_db)):
-    return {'ok': True, **user_settings.get_ui_prefs(), 'vendoo_enabled': False}
+    return {'ok': True, **user_settings.get_ui_prefs()}
 
 
 @router.put('/settings/ui')

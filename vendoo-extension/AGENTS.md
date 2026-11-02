@@ -13,7 +13,8 @@ diagnosing and testing the extension.
   Keep the platform prefixes (`[EBAY]`, `[POSHMARK]`, ...) on new log lines so
   this keeps working.
 - For live form structure, use the DevTools diagnostic tool
-  (`diagnostic-tool.js`, see `TROUBLESHOOTING.md`).
+  (`diagnostic-tool.js`: paste it into the page console and call
+  `vendooDiagnostics.exportStructure()`).
 - A marketplace may have changed its sell page. Run that marketplace's form
   sweep (`tools/form-sweep/<marketplace>/`, see the root `AGENTS.md`,
   **Verification**).

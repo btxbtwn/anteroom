@@ -61,5 +61,5 @@ export async function openListing(page: Page, phone: boolean, title: string): Pr
 /** The editor's Title box; on a phone it is on the Listing tab. */
 export async function titleBox(page: Page, phone: boolean) {
   if (phone) await page.getByRole("tab", { name: "Listing" }).click();
-  return page.getByRole("group", { name: "Vendoo listing fields" }).getByRole("textbox", { name: "Title", exact: true });
+  return page.getByRole("group", { name: "General listing fields" }).getByRole("textbox", { name: "Title", exact: true });
 }

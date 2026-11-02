@@ -1,6 +1,6 @@
 # Anteroom
 
-Local Mac app for generating Vendoo marketplace listings with ChatGPT or Xiaomi MiMo, then filling a draft in Chrome. It never publishes.
+Local Mac app for generating marketplace listings with ChatGPT or Xiaomi MiMo and listing them directly: eBay and Etsy through their APIs, Poshmark, Mercari, Depop, Sellwild and Vinted through the Anteroom Bridge extension in Chrome. It publishes, updates or delists only when you confirm that action.
 
 ## Share a Mac app
 
@@ -33,7 +33,7 @@ The recipient:
 1. Unzips the archive and moves **Anteroom** into Applications.
 2. Control-clicks the app and chooses **Open** the first time (not notarized).
 3. Signs in with ChatGPT or enters a Xiaomi MiMo API key in Settings.
-4. Clicks **Connect Chrome**. Anteroom opens Vendoo in everyday Chrome and copies the listing extension into an Anteroom-managed folder. Load that unpacked folder once from Settings → Connections (`chrome://extensions/` → Developer mode → Load unpacked).
+4. Clicks **Connect Chrome**. Anteroom opens everyday Chrome and copies the listing extension into an Anteroom-managed folder. Load that unpacked folder once from Settings → Connections (`chrome://extensions/` → Developer mode → Load unpacked).
 
 They need macOS 13+ and Google Chrome.
 
@@ -61,8 +61,8 @@ Then:
 
 1. Open **Settings**.
 2. Sign in with ChatGPT, or save a Xiaomi MiMo API key and test it.
-3. Click **Connect Chrome**, then load unpacked from the folder shown in Settings → Connections so Chrome stays on Anteroom's copy.
-4. Sign in to Vendoo. The status bar shows **Extension connected**.
+3. Click **Connect Chrome**, then load unpacked from the folder shown in Settings → Connections so Chrome stays on Anteroom's copy. The status bar shows **Extension connected**.
+4. Connect the marketplaces you sell on under Settings → Connections, and sign in to the browser-based ones (Poshmark, Mercari, Depop, Sellwild, Vinted) in that Chrome.
 
 ## Command line
 
@@ -104,10 +104,10 @@ anteroom boxes create --store Goodwill --title "Monday coats" --price 40
 
 `--json` on any command prints one object on stdout: `ok`, `status`, `data`, and `error` when the call failed. Exit codes are `0` success, `1` the server returned an error, `2` bad usage, `3` could not connect, `4` the command is destructive and `--confirm` was missing.
 
-Delete, publish, delist, price changes, live-listing updates, and anything else the API treats as undoable or seller-confirmed are refused until you pass `--confirm`. Publishing still requires the marketplaces by name. The CLI does not fill them in, and it does not publish on its own:
+Delete, publish, delist, price changes, live-listing updates, and anything else the API treats as undoable or seller-confirmed are refused until you pass `--confirm`. Publishing still names the marketplace. The CLI does not fill it in, and it does not publish on its own:
 
 ```bash
-anteroom vendoo-api conversations-list --conv-id CONV --marketplaces ebay --confirm
+anteroom native-marketplaces conversations-list --conv-id CONV --marketplace ebay --revision-id REV --confirm
 anteroom boxes delete --box-id BOX --confirm
 ```
 
@@ -153,8 +153,7 @@ Each HTTP route is a tool. Destructive tools require `"confirm": true` and still
 3. Optionally add notes (cost, flaws, measurements).
 4. Chat to analyze the photos and generate a listing.
 5. Review the listing in the right panel.
-6. Click **Send to Vendoo**. Anteroom opens a background Vendoo tab in everyday Chrome, fills and saves a draft, closes the tab, and stops before publishing.
-7. Open the Vendoo draft to review and publish manually.
+6. Open a marketplace's tab and choose **List** (or **Save draft** where the marketplace offers one). Each action covers that one marketplace and runs only after you confirm it; Anteroom never lists everywhere at once on its own.
 
 ### Importing directly from eBay
 
@@ -172,7 +171,7 @@ their edits and photos are never replaced. Conflicting duplicate inventory is
 reported instead of guessing an owner.
 
 Imports use eBay's read APIs and local storage only. They do not publish, revise,
-delist, migrate eBay's listing format, or contact Vendoo. No eBay credentials or
+delist or migrate eBay's listing format. No eBay credentials or
 raw account responses are stored with the imported listing.
 
 ### Direct eBay earnings and performance
@@ -209,7 +208,7 @@ and price. Multiple products or offerings are rejected instead of being combined
 
 Existing linked items keep their edits and photos. Conflicting identities are
 reported, and missing photos are shown for follow-up. Importing reads Etsy and
-saves local inventory; it never changes a live listing or contacts Vendoo.
+saves local inventory; it never changes a live listing.
 
 ### Importing from Poshmark, Mercari, Depop, Sellwild and Vinted
 
@@ -292,23 +291,10 @@ stock check can show remaining stock there too.
 
 ### Editing something that is already listed
 
-Anteroom writes the Vendoo **form**. Vendoo carries a form change onto a live
-marketplace listing only when the listing is taken down and posted again, so
-after **Update Vendoo** the buyer still sees the old copy until you delist and
-relist in Vendoo (the ⋮ menu beside Vendoo Form → **Delist Item**, which takes
-the item off every marketplace at once, then list it again).
-
-Anteroom labels every step of that rather than leaving it to memory. A blue
-**unsent** chip says the edit has not reached the Vendoo form yet — press
-**Update Vendoo** and it clears. After that the listing wears an amber
-**relist** badge in the sidebar, the editor shows which marketplaces are behind,
-and **Filters → Unsent edits / Needs relist** collect each set. The Draft tab holds
-only listings that are live nowhere; a live listing with unsent edits stays in
-Active with its chip. The badge survives the
-delist itself — in that middle window Vendoo reports the item as a draft, because
-it is live nowhere, and the banner switches to "list it again to finish". It
-clears itself once Vendoo reports a listing date newer than Anteroom's last write,
-or on **Done** in the banner for a relist Anteroom cannot see.
+Edits are saved in Anteroom first; a live listing does not change until you
+send them. Open that marketplace's tab and choose **Update**. Each Update writes
+to that one marketplace, after you confirm it, and the others keep their copy
+until you update them too.
 
 ## Architecture
 
@@ -339,7 +325,7 @@ vendoo-studio/           Local web app (FastAPI + React)
 - API keys and ChatGPT tokens live in macOS Keychain, never in SQLite, browser storage, or logs.
 - Never sent to the React frontend or Chrome extension.
 - Photos are served only through the Anteroom origin (`GET /api/photos/{id}`).
-- No publication automation — only draft saving.
+- No publication automation: generation and drafts run on their own, but List, Update and Delist run only when you confirm them, one named marketplace (or an explicit set, for Delist) at a time.
 
 ## Development
 
@@ -352,7 +338,7 @@ PYTHONPATH=server .venv/bin/python -m pytest -q server/tests
 
 Set `VENDOO_STUDIO_DEV=1` if you start the backend yourself and want auto-reload.
 
-The extension connects to `ws://127.0.0.1:4318/api/extension/ws`. **Connect Chrome** opens Vendoo in everyday Chrome and reloads Anteroom's listing extension. Load unpacked from the folder shown in Settings → Connections (`data/vendoo-extension/` in development).
+The extension connects to `ws://127.0.0.1:4318/api/extension/ws`. **Connect Chrome** opens everyday Chrome and reloads Anteroom's listing extension. Load unpacked from the folder shown in Settings → Connections (`data/vendoo-extension/` in development).
 
 ## Database
 

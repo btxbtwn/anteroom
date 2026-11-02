@@ -20,68 +20,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
-import { useVendooEnabled } from "../../vendooMode";
 import { useWorkspaceRuntime } from "../../app/runtime";
-
-function CategoryTreesRow() {
-  const queryClient = useQueryClient();
-  const { data, error } = useQuery({
-    queryKey: ["category-trees"],
-    queryFn: api.catalog.status,
-    refetchInterval: 3000,
-  });
-  const sync = useMutation({
-    mutationFn: api.catalog.sync,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["category-trees"] }),
-  });
-  const trees = Object.entries(data?.marketplaces || {});
-  return (
-    <SettingsRow
-      id="category-trees"
-      title="Marketplace category trees"
-      description="Extract the full General, eBay, Poshmark, Mercari, Depop, and Etsy trees from Vendoo. Keep Chrome connected. Interrupted extraction resumes from its last saved branch."
-      control={
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={data?.running || data?.complete || sync.isPending}
-          onClick={() => sync.mutate()}
-        >
-          {data?.running ? <Spinner /> : null}
-          {data?.complete ? "Complete" : data?.running ? "Extracting" : "Extract / resume"}
-        </Button>
-      }
-    >
-      {trees.length ? (
-        <ul className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60">
-          {trees.map(([marketplace, tree]) => (
-            <li key={marketplace} className="flex min-w-0 items-center gap-2.5 px-3 py-2 text-xs">
-              <MarketplaceLogo id={marketplace === "general" ? "vendoo" : marketplace} label={marketplace} size={16} />
-              <span className="min-w-20 font-medium capitalize text-foreground">{marketplace}</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                {tree.nodes.toLocaleString()} categories
-                {tree.pending_branches > 0 ? ` · ${tree.pending_branches} branches remaining` : ""}
-                {tree.error ? ` · ${tree.error}` : ""}
-              </span>
-              <span
-                className={
-                  tree.error
-                    ? "text-destructive-foreground"
-                    : tree.status === "complete"
-                      ? "text-success-foreground"
-                      : "text-muted-foreground"
-                }
-              >
-                {tree.status}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {error || sync.error ? <SettingsNote tone="error">{(error || sync.error)?.message}</SettingsNote> : null}
-    </SettingsRow>
-  );
-}
 
 function ExtensionConnectionRow() {
   const { data } = useQuery({
@@ -613,19 +552,16 @@ function MarketplaceSection() {
 }
 
 export function ConnectionsSettings() {
-  const vendooOn = useVendooEnabled();
   const { hosted } = useWorkspaceRuntime();
   if (hosted) return <MarketplaceSection />;
   return (
     <>
       <MarketplaceSection />
-      <SettingsSection id="connections" title={vendooOn ? "Vendoo" : "Chrome"}>
+      <SettingsSection id="connections" title="Chrome">
         <ExtensionConnectionRow />
         <SettingsRow
-          title={vendooOn ? "Vendoo in Chrome" : "Chrome"}
-          description={vendooOn
-            ? "Connect Chrome opens Vendoo in your everyday Chrome and reloads Anteroom's listing extension so it matches this build. Send to Vendoo creates or updates a draft over Vendoo's API using that signed-in session."
-            : "Connect Chrome is still required. Listing on a marketplace opens that marketplace in this Chrome."}
+          title="Chrome"
+          description="Connect Chrome is still required. Listing on a marketplace opens that marketplace in this Chrome."
           control={<ConnectChromeButton className={buttonVariants({ size: "xs", variant: "outline" })} />}
         />
         <SettingsRow
@@ -635,7 +571,6 @@ export function ConnectionsSettings() {
         >
           <ExtensionLoadPath compact hideHint />
         </SettingsRow>
-        {vendooOn ? <CategoryTreesRow /> : null}
       </SettingsSection>
       <SettingsSection id="remote-access" title="Remote access">
         <TailscaleHttpsRow />
