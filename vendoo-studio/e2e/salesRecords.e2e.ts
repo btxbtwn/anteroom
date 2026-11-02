@@ -112,7 +112,8 @@ test("historical sales can be corrected entirely in Anteroom", async ({ page, re
   await page.getByRole("tab", { name: "Inventory analytics", exact: true }).click();
   await page.getByText("Review sales with missing data", { exact: true }).click();
   const analytics = page.getByRole("tabpanel", { name: "Inventory analytics", exact: true });
-  await expect(analytics.getByText(title, { exact: true })).toBeVisible();
+  const missingSales = analytics.getByRole("region", { name: "Missing sales data", exact: true });
+  await expect(missingSales.getByText(title, { exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("analytics-missing-sales.png"), fullPage: true });
   await page.getByRole("button", { name: "Open sales records", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Sales period" })).toContainText("All time");
@@ -132,7 +133,7 @@ test("historical sales can be corrected entirely in Anteroom", async ({ page, re
   await expect(row.getByText("Missing:", { exact: false })).toHaveCount(0);
   await page.getByRole("tab", { name: "Inventory analytics", exact: true }).click();
   await expect(page.getByText("Track sales performance and find inventory that needs attention.")).toBeVisible();
-  await expect(analytics.getByText(title, { exact: true })).toHaveCount(0);
+  await expect(missingSales.getByText(title, { exact: true })).toHaveCount(0);
   await page.reload();
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();
