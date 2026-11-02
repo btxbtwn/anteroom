@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import AsyncIterator, Callable
 
 from sqlalchemy import or_
 
@@ -75,9 +76,9 @@ def _terminal_node(db, marketplace: str, path: str) -> CategoryTreeNode | None:
     return node
 
 
-def _selection_stream(provider, messages: list[dict]):
+def _selection_stream(provider, messages: list[dict]) -> AsyncIterator[object]:
     """The provider's fastest path that still streams, reasoning skipped."""
-    quick = getattr(provider, "quick_chat", None)
+    quick: Callable[[list[dict]], AsyncIterator[object]] | None = getattr(provider, "quick_chat", None)
     if callable(quick):
         return quick(messages)
     return provider.chat(messages, stream=True)

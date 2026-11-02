@@ -582,7 +582,7 @@ def _comp_from_dict(raw: object) -> SoldComp | None:
 
 
 def comps_from_markdown(text: str | None) -> list[SoldComp]:
-    comps: list[SoldComp] = []
+    comps: list[SoldComp | None] = []
     lines = (text or "").splitlines()
     for index, line in enumerate(lines):
         stripped = line.strip()

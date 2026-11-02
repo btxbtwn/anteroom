@@ -640,6 +640,7 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
     same = choice is not None and saved.get("checksum") == choice["checksum"]
     known = str(saved.get("video_id") or "") if same else ""
     if same and saved.get("pending") and not known and active:
+        assert choice is not None
         if len(active) > 1:
             raise ValueError("Etsy has more than one video on this listing and has not confirmed which Anteroom uploaded. "
                              "Check the listing in Etsy before trying again.")
