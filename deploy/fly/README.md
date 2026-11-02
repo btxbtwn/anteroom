@@ -93,6 +93,11 @@ This is a public certificate, not a private key. Renew it if Supabase rotates
 the issuer. Supply the runtime URI via Fly secrets as `ANTEROOM_DATABASE_URL`;
 never put the URI or its password in fly.toml, source, logs or the frontend.
 
+The API uses SQLAlchemy `NullPool`: closing a session releases its client
+connection instead of retaining an idle connection or waiting for one of five
+application slots. Supabase still enforces its own connection limits; this does
+not raise those limits or change the project's compute plan.
+
 The hosted API exposes only draft inventory and its General fields/photos. Full Mac inventory import and marketplace actions remain separate increments.
 
 The migration-version table intentionally has RLS enabled without a permissive
