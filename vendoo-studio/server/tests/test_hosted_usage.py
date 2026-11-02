@@ -1,4 +1,4 @@
-"""The Usage page on the web reads each seller's own providers and never starts a CLI."""
+"""Usage limits on the web read each seller's own providers and never starts a CLI."""
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import jwks, signing_keys  # noqa: F401
@@ -27,5 +27,5 @@ def test_usage_is_per_seller_and_never_probes_the_servers_claude_login(cloud, si
     assert rows['alice']['claude']['unavailable']['message'] == 'Claude sign-in usage is shown in the Mac app.'
     # A cached answer for one seller is never served to another.
     assert rows['alice']['cursor']['windows'][0]['id'] != rows['bob']['cursor']['windows'][0]['id']
-    assert 'usage' in client.get('/api/runtime', headers=alice).json()['views']
+    assert 'usage' not in client.get('/api/runtime', headers=alice).json()['views']
     usage_limits.clear_cache()

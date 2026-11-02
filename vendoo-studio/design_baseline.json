@@ -68,7 +68,6 @@
     "arbitrary-text-size": 1
   },
   "src/components/usage/UsageLimits.tsx": {
-    "gradient": 1,
     "hardcoded-color": 2
   },
   "src/styles/base.css": {

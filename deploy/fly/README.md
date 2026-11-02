@@ -27,6 +27,40 @@ The root URL and built `/assets/` files serve the public sign-in UI. All data
 routes require bearer authentication. Open `/api/health` to check the service.
 The cloud build is a separate entry point, not the desktop interface.
 
+## Region
+
+Run the API in the region closest to the Supabase database. Every query is a
+network round trip, and a page asks for many. The database is in AWS us-west-2
+(Oregon), so the Machine runs in Fly's `sea` (Seattle). From `sjc` (San Jose)
+each `SELECT 1` took 24 ms, and opening one listing costs over a hundred of
+them.
+
+`primary_region` only places new Machines. To move the running one, clone it
+into the new region, check it, then remove the old one. The Machine has no
+volume, so nothing else moves:
+
+```sh
+fly machine list --config deploy/fly/fly.toml          # note the sjc Machine ID
+fly machine clone <sjc-id> --region sea --config deploy/fly/fly.toml
+fly machine list --config deploy/fly/fly.toml          # wait for the sea Machine's check to pass
+fly machine destroy <sjc-id> --force --config deploy/fly/fly.toml
+```
+
+While both run, the API holds up to twice its usual pool of connections
+(still within Supabase's session limit). Measure the round trip from the new
+Machine:
+
+```sh
+fly ssh console --config deploy/fly/fly.toml -C "python -c \"
+import time; from sqlalchemy import text; from vendoo_studio.database import engine
+with engine.connect() as c:
+    c.execute(text('select 1')); t = time.perf_counter()
+    for _ in range(10): c.execute(text('select 1'))
+    print((time.perf_counter() - t) * 100, 'ms per query')\""
+```
+
+If the Supabase project ever moves, move the Machine with it.
+
 ## Shared category trees
 
 The six category trees are shared reference data, not seller rows. The runtime

@@ -1,9 +1,7 @@
 import SwiftUI
 
 /// Settings with the hosted workspace's sections: General, Listings and
-/// Providers (SettingsSidebarNav.tsx), Usage, then the account. Usage is a
-/// page of its own on the web; here it sits in Settings so the tab bar keeps
-/// five tabs and never folds Settings into More.
+/// Providers (SettingsSidebarNav.tsx), then the account.
 struct SettingsRootView: View {
     let api: AnteroomAPI
     @Environment(SessionStore.self) private var session
@@ -22,9 +20,6 @@ struct SettingsRootView: View {
                     }
                     NavigationLink { ProvidersSettingsView(api: api) } label: {
                         Label("Providers", systemImage: "sparkles")
-                    }
-                    NavigationLink { UsageView(api: api) } label: {
-                        Label("Usage", systemImage: "gauge.with.dots.needle.33percent")
                     }
                 }
                 Section("Account") {
