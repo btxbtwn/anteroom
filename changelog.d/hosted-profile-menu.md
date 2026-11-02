@@ -1,1 +1,0 @@
-- Your account now lives behind a profile button, with Connect Anteroom Extension and Sign out inside.
