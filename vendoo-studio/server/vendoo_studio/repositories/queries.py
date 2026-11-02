@@ -259,9 +259,7 @@ class ConversationRepo:
             item_status = own[conv.id].status
             # Nothing is generating, so a leftover busy label goes; so does a
             # label the item's own records disagree with.
-            if conv.status != item_status and (
-                conv.status not in LISTING_STATUSES or own[conv.id].own
-            ):
+            if conv.status != item_status:
                 conv.status = item_status
                 changed = True
             if _sync_settlement(conv, conv.status, backfill=True):
@@ -780,7 +778,7 @@ class DiagnosticRepo:
 
 
 def _step_to_marketplace(step: str) -> str:
-    for mp in ("general", "ebay", "etsy", "poshmark", "mercari", "depop", "facebook", "grailed", "whatnot", "shopify"):
+    for mp in ("general", "ebay", "etsy", "poshmark", "mercari", "depop", "facebook", "whatnot", "shopify"):
         if mp in step.lower():
             return mp
     return "unknown"

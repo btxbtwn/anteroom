@@ -7,9 +7,10 @@ Monorepo combining the `list-this` skill family, the Bridge Chrome extension, an
 **Invariant:** Automation must never publish listings. Generation, category
 resolution and draft creation run unattended and stop at a saved draft.
 Publishing and delisting happen only when the seller asks for them: the
-`vendoo-api/list` and `vendoo-api/delist` routes require the marketplaces to be
-named explicitly and the call to carry `confirm`, and nothing in Anteroom calls
-them on its own. No code path may publish everywhere by default, on a queue, on
+`native-marketplaces/{marketplace}/list|update` and `marketplace-listings/delist`
+routes require the marketplaces to be named explicitly and the call to carry
+`confirm`. eBay actions require explicit seller confirmation too. Nothing in
+Anteroom calls publishing or delisting on its own. No code path may publish everywhere by default, on a queue, on
 a retry, or as a side effect of any other action.
 
 ## Source of Truth
@@ -145,7 +146,7 @@ mix it with a fix or a feature.
 ## Repository Structure
 
 - **`skills/`** — Agent skills for listing generation (`list-this`), sourcing (`box-scout`) and reading measurements from ruler photos (`measure-this`).
-- **`vendoo-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. Content scripts under `content-scripts/` handle direct marketplace forms. `background.js` routes messages and loads the worker modules in `background/`; the extension runs without its own interface, with review and approved Sends handled in Anteroom. Node unit tests live in `tests/`.
+- **`vendoo-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. Content scripts under `content-scripts/` handle direct marketplace forms. `background.js` routes messages and loads the worker modules in `background/`; the extension runs without its own interface, with review and confirmed marketplace actions handled in Anteroom. Node unit tests live in `tests/`.
 - **`webhook-relay/`** — Cloudflare Worker that receives eBay and Etsy webhooks, verifies their signatures, keeps only IDs, and holds them in a per-device inbox until that Mac's Anteroom pulls them over an outbound connection. It also brokers eBay and Etsy sign-in and forwards Etsy API calls, so eBay's Cert ID and Etsy's shared secret never ship in the app. See its `README.md`.
 - **`vendoo-studio/`** — React + TypeScript frontend (`src/`) and FastAPI Python backend (`server/vendoo_studio/`). Frontend API clients live under `src/api/`. Backend routes live under `server/vendoo_studio/routes/`; domain behavior lives in `server/vendoo_studio/services/` and `server/vendoo_studio/repositories/`.
 - **`anteroom-ios/`** — Native SwiftUI iPhone app on the hosted API and Supabase. The Xcode project is generated from `project.yml` with XcodeGen and not tracked; it builds only on macOS.
@@ -197,7 +198,7 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 - **Anteroom backend:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
 - **Anteroom code health:** knip (in the frontend job) and basedpyright, import-linter and the dead-code check (in **Studio code health**). Commands above; details in `vendoo-studio/AGENTS.md`.
 - **Anteroom browser tests:** `cd vendoo-studio && npx playwright install chromium && npm run e2e`. They run against the sandbox at desktop and phone sizes; on failure, the report, screenshots and traces are in `vendoo-studio/e2e/report` and `e2e/results`, and CI uploads them as an artifact.
-- **Extension:** `node --check` on changed JS files, `node --test 'vendoo-extension/tests/*.test.js'`, and `python -m json.tool vendoo-extension/manifest.json`. Then reload the unpacked extension and test affected marketplace flows manually. Use platform-prefixed console logs (`[EBAY]`, `[POSHMARK]`, etc.), the DevTools diagnostic tool for live form structure, and Anteroom’s fill results for per-field outcomes.
+- **Extension:** `node --check` on changed JS files, `node --test 'vendoo-extension/tests/*.test.js'`, and `python -m json.tool vendoo-extension/manifest.json`. Then reload the unpacked extension and test affected marketplace flows manually. Use platform-prefixed console logs (`[EBAY]`, `[POSHMARK]`, etc.), the marketplace form-sweep tools for live form structure, and Anteroom’s fill results for per-field outcomes.
 - **Skills:** Confirm `skills/list-this/SKILL.md` exists and `python -m json.tool skills/list-this/references/vendoo-dropdown-options.json` succeeds.
 - **Marketplace forms (not in CI, needs a signed-in browser):** after changing a native form builder, or to check whether a marketplace changed its sell page, run `vendoo-extension/tools/form-sweep/<marketplace>/sweep.js` on that marketplace's sell page (Depop, Mercari, Poshmark, Sellwild), then `node vendoo-extension/tools/form-sweep/<marketplace>/compare.js <downloads folder>`. Each script's header says how; the compare exits 1 on any difference.
 - **Secrets:** Do not track `.env`, key files, photos, or private exports. CI scans the working tree with gitleaks.

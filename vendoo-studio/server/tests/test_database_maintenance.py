@@ -33,7 +33,7 @@ class _DbTest(unittest.TestCase):
         self.rev = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Tee"}, source="model")
         self.repo = JobRepo(self.db)
         self.job = self.repo.create(
-            self.conv.id, self.rev.id, {"title": "Tee"}, vendoo_item_id="itm1", status="completed",
+            self.conv.id, self.rev.id, {"title": "Tee"},  status="completed",
         )
 
     def tearDown(self):
@@ -82,16 +82,13 @@ class SlimPayloadTest(unittest.TestCase):
 
 
 class EventBloatTest(_DbTest):
-    def test_progress_and_review_keep_one_row_each(self):
+    def test_progress_keeps_one_row(self):
         for step in ("filling_general", "saving_general", "filling_ebay"):
             self.repo.add_event(self.job.id, "progress", step, {"step": step})
-        self.repo.add_event(self.job.id, "completion_review", "verifying_draft", {"readback": True})
-        self.repo.add_event(self.job.id, "completion_review", "verifying_draft", {"readback": False})
 
         events = self.repo.get_events(self.job.id)
-        self.assertEqual([event.event_type for event in events], ["progress", "completion_review"])
+        self.assertEqual([event.event_type for event in events], ["progress"])
         self.assertEqual(events[0].step, "filling_ebay")
-        self.assertEqual(events[1].payload, {"readback": False})
 
     def test_step_results_keep_their_timings_and_drop_their_blobs(self):
         self.repo.add_event(self.job.id, "step_completed", "filling_ebay", {

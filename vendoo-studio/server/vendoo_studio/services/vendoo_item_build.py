@@ -1,19 +1,6 @@
-"""Build Vendoo items in the exact shape Vendoo's own form produces.
+"""Stored field shapes and encodings retained by the native marketplace form builder.
 
-Vendoo's create-item form never fills anything: it builds an item object,
-uploads photos through the inventory microservice, mints a Firestore id and
-calls the ``items`` Cloud Function with ``{type: "createItem"}``. Studio does the
-same (``vendoo_create``), so a generated listing is stored as data with every
-marketplace section exactly as computed.
-
-See ``docs/vendoo-listing-architecture.md``. This module is the inverse of
-``vendoo_import.listing_from_vendoo`` and mirrors Vendoo's ``getInit*Form``
-defaults, which is what makes the result indistinguishable from a form save.
-
-Vendoo's coded vocabularies (condition codes, colour codes) are not guessed.
-``observe_item_schema`` learns them from the user's own existing items, and
-``build_vendoo_item`` reports any field it could not encode confidently rather
-than storing a value that looks right and is wrong.
+These helpers shape listing data; they do not contact Vendoo or publish listings.
 """
 
 from __future__ import annotations

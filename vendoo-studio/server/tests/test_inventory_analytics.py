@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import UTC, date, datetime, timedelta
-from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -573,7 +572,7 @@ class LoadAnalyticsTest(unittest.TestCase):
         self.assertIn("fees_known", body["sales"])
         self.assertIn("revenue_known", body["sales"])
         self.assertIn("days_known", body["sales"])
-        self.assertIn("last_updated_at", body)
+        self.assertNotIn("last_updated_at", body)
         self.assertIn("incomplete_sales", body)
         self.assertIsNone(body["previous"])
         month = client.get("/api/analytics?range=30d").json()
@@ -586,14 +585,6 @@ class LoadAnalyticsTest(unittest.TestCase):
         bad = client.get("/api/analytics?range=nope")
         self.assertEqual(bad.status_code, 400)
 
-    def test_recalculating_analytics_uses_the_saved_sync_time(self):
-        client = TestClient(app)
-        with patch("vendoo_studio.services.user_settings.vendoo_inventory_synced_at", return_value="2026-10-05T12:30:00Z"):
-            for range_id in ("7d", "all"):
-                body = client.get(f"/api/analytics?range={range_id}").json()
-                self.assertEqual(body["last_updated_at"], "2026-10-05T12:30:00Z")
-        with patch("vendoo_studio.services.user_settings.vendoo_inventory_synced_at", return_value=None):
-            self.assertIsNone(client.get("/api/analytics").json()["last_updated_at"])
 
 
 class StaleListingsTest(unittest.TestCase):

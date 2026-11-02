@@ -81,7 +81,7 @@ _META_RE = re.compile(
 )
 _HEADING_RE = re.compile(r"(?m)^#{1,3}\s+.+$")
 _FILL_FN_RE = re.compile(
-    r"(?m)^(?:async\s+)?function\s+(fill\w*|select\w*|set\w*Field\w*|choose\w*)\s*\("
+    r"(?m)^(?:async\s+)?function\s+(fill\w*|select\w*|set\w*Field\w*|choose\w*|(?:ebay|etsy|poshmark|mercari|depop|sellwild|vinted)\w*)\s*\("
     r"|^(?:const|let|var)\s+(fill\w*|select\w*|set\w*Field\w*)\s*=\s*(?:async\s*)?(?:function|\()"
 )
 _FORM_MARKETPLACE = {
@@ -345,7 +345,7 @@ def _materialize_skills(root: Path) -> int:
 
 
 def _marketplace_from_script(path: Path) -> str:
-    name = path.stem.casefold()
+    name = path.stem.casefold().split("-")[0]
     if name in MARKETPLACES or name == "vendoo":
         return "general" if name == "vendoo" else name
     return "extension"

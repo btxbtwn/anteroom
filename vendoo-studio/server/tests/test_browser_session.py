@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -56,8 +56,7 @@ class BrowserResultOverWebSocketTest(unittest.TestCase):
              patch.object(manager, "verify_token", return_value=True), \
              patch.object(manager, "resolve_wait", side_effect=record), \
              patch("vendoo_studio.services.extension_connection._websocket_allowed", return_value=True), \
-             patch("vendoo_studio.services.extension_connection.handshake_extension", side_effect=handshake), \
-             patch("vendoo_studio.services.extension_connection.dispatch_queued_jobs", AsyncMock()):
+             patch("vendoo_studio.services.extension_connection.handshake_extension", side_effect=handshake):
             client = TestClient(app)
             with client.websocket_connect("/api/extension/ws") as ws:
                 ws.send_json({"type": "extension.ready", "payload": {"token": "test"}})
@@ -83,7 +82,7 @@ class FinishedJobRepliesTest(unittest.TestCase):
         conv = ConversationRepo(db).create(title="Tee")
         revision = listing_persistence.save_revision(db, conv.id, {"title": "Tee"}, source="user")
         job = JobRepo(db).create(conv_id=conv.id, approved_revision_id=revision.id, listing_snapshot={"title": "Tee"},
-                                 vendoo_item_id="draft-1", status=status)
+                                  status=status)
         job_id = job.id
         db.close()
         manager = ExtensionManager()
@@ -99,13 +98,12 @@ class FinishedJobRepliesTest(unittest.TestCase):
              patch("vendoo_studio.services.extension_connection.extension_manager", manager), \
              patch.object(manager, "verify_token", return_value=True), \
              patch("vendoo_studio.services.extension_connection._websocket_allowed", return_value=True), \
-             patch("vendoo_studio.services.extension_connection.handshake_extension", side_effect=handshake), \
-             patch("vendoo_studio.services.extension_connection.dispatch_queued_jobs", AsyncMock()):
+             patch("vendoo_studio.services.extension_connection.handshake_extension", side_effect=handshake):
             client = TestClient(app)
             with client.websocket_connect("/api/extension/ws") as ws:
                 ws.send_json({"type": "extension.ready", "payload": {"token": "test"}})
-                ws.send_json({"type": "job.vendoo_api_result", "job_id": job_id, "message_id": "req-1", "payload": {
-                    "request_id": "req-1", "ok": True, "results": [{"op": "get_item", "ok": True, "item": {"itemID": "draft-1"}}],
+                ws.send_json({"type": "browser.result", "job_id": job_id, "message_id": "req-1", "payload": {
+                    "request_id": "req-1", "ok": True, "state": "published",
                 }})
                 ws.send_json({"type": "pong"})
                 for _ in range(50):
@@ -117,13 +115,13 @@ class FinishedJobRepliesTest(unittest.TestCase):
 
     def test_reply_reaches_waiter_for_completed_job(self):
         resolved, events = self._run("completed", wait=True)
-        self.assertEqual(resolved["req-1"]["results"][0]["item"]["itemID"], "draft-1")
+        self.assertEqual(resolved["req-1"]["state"], "published")
         self.assertNotIn("ignored_late_result", events)
 
     def test_unrequested_reply_for_completed_job_is_dropped(self):
         resolved, events = self._run("completed", wait=False)
         self.assertEqual(resolved, {})
-        self.assertIn("ignored_late_result", events)
+        self.assertEqual(events, [])
 
 
 

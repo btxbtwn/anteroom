@@ -36,8 +36,7 @@ test("generating from photos fills the listing", async ({ page, phone, request }
 test("the sandbox refuses to publish or delist", async ({ request }, info) => {
   const id = await createListing(request, `E2E publish ${info.project.name} ${Date.now()}`);
   for (const path of [
-    `/api/conversations/${id}/vendoo-api/list`,
-    `/api/conversations/${id}/vendoo-api/delist`,
+    `/api/conversations/${id}/marketplace-listings/delist`,
     `/api/conversations/${id}/native-marketplaces/ebay/list`,
   ]) {
     const response = await request.post(path, { data: { marketplaces: ["ebay"], confirm: true } });

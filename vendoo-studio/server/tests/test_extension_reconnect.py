@@ -70,41 +70,33 @@ class ReconnectWorkTest(unittest.IsolatedAsyncioTestCase):
         """Stand the bridge up around a manager and watch the reconnect work."""
         self.enterContext(patch("vendoo_studio.services.extension_connection.extension_manager", manager))
         self.enterContext(patch("vendoo_studio.services.extension_connection.RECONNECT_SETTLE_SEC", settle))
-        resume = self.enterContext(patch("vendoo_studio.services.extension_connection._resume_interrupted_sends"))
-        warm = self.enterContext(
-            patch("vendoo_studio.services.extension_connection._warm_label_catalog", new=AsyncMock())
-        )
-        # Imported inside the work, so it is patched where it is defined.
-        self.enterContext(
-            patch("vendoo_studio.services.native_marketplaces.reconcile_then_dispatch", new=AsyncMock())
-        )
-        return resume, warm
+        return self.enterContext(patch(
+            "vendoo_studio.services.native_marketplaces.reconcile_after_reconnect", new=AsyncMock(),
+        ))
 
-    async def test_a_settled_pairing_resumes_and_reconciles(self):
+    async def test_a_settled_pairing_checks_unconfirmed_actions(self):
         manager = ExtensionManager()
         manager.connection = FakeSocket()
         manager.paired = True
-        resume, warm = self._patch_work(manager)
+        reconcile = self._patch_work(manager)
         self.assertTrue(_run_reconnect_work(self.db))
         await asyncio.sleep(0)
-        resume.assert_called_once()
-        warm.assert_called_once()
+        reconcile.assert_called_once()
 
     async def test_a_flapping_pairing_holds_the_work_until_it_settles(self):
         manager = ExtensionManager()
         ws = FakeSocket()
         manager.connection = ws
         manager.paired = True
-        resume, warm = self._patch_work(manager, settle=0.5)
+        reconcile = self._patch_work(manager, settle=0.5)
         manager.note_handshake()  # the pairing that just flapped
         _after_pairing(self.db, ws)
-        resume.assert_not_called()
+        reconcile.assert_not_called()
         # The socket outlives the window, so the work runs after it. Shorten the
         # window now: the deferred check reads it when it wakes.
         self.enterContext(patch("vendoo_studio.services.extension_connection.RECONNECT_SETTLE_SEC", 0.01))
         await asyncio.sleep(0.1)
-        resume.assert_called_once()
-        warm.assert_called_once()
+        reconcile.assert_called_once()
         self.assertEqual(_reconnect_tasks, set())
 
     async def test_a_flapping_pairing_that_drops_again_does_nothing(self):
@@ -112,12 +104,11 @@ class ReconnectWorkTest(unittest.IsolatedAsyncioTestCase):
         ws = FakeSocket()
         manager.connection = ws
         manager.paired = True
-        resume, warm = self._patch_work(manager, settle=0.5)
+        reconcile = self._patch_work(manager, settle=0.5)
         manager.note_handshake()  # the pairing that just flapped
         _after_pairing(self.db, ws)
         manager.connection = FakeSocket()  # the worker paired again already
         self.enterContext(patch("vendoo_studio.services.extension_connection.RECONNECT_SETTLE_SEC", 0.01))
         await asyncio.sleep(0.1)
-        resume.assert_not_called()
-        warm.assert_not_called()
+        reconcile.assert_not_called()
         self.assertEqual(_reconnect_tasks, set())

@@ -296,8 +296,8 @@ class BuildItemTest(unittest.TestCase):
         self.assertEqual(etsy["categorySpecifics"], {})
         self.assertEqual(etsy["overrides"]["brand"], "Levi's")
 
-        self.assertTrue(listings["grailed"]["marketplaceSpecifics"]["buynow"])
-        self.assertEqual(listings["whatnot"]["marketplaceSpecifics"], {})
+        self.assertNotIn("grailed", listings)
+        self.assertNotIn("whatnot", listings)
 
 
     def test_unbranded_sets_ebay_brand_and_mercari_no_brand(self):
@@ -728,34 +728,28 @@ class BuildItemTest(unittest.TestCase):
                 self.assertEqual(marketplace_condition(None, "poshmark", code), poshmark)
                 self.assertEqual(marketplace_condition(None, "mercari", code), mercari)
 
-    def test_grailed_vinted_and_facebook_use_vendoos_condition_codes(self):
-        for code, grailed, vinted, facebook in (
-            ("v_newWithTagsBox", "is_new", 6, "new"),
-            ("v_newWithOutTags", "is_new", 1, "used_like_new"),
-            ("v_preowned", "is_used", 3, "used_good"),
-            ("v_poor", "is_worn", 4, "used_fair"),
+    def test_vinted_and_facebook_read_imported_condition_codes(self):
+        for code, vinted, facebook in (
+            ("v_newWithTagsBox", 6, "new"),
+            ("v_newWithOutTags", 1, "used_like_new"),
+            ("v_preowned", 3, "used_good"),
+            ("v_poor", 4, "used_fair"),
         ):
             with self.subTest(code=code):
-                self.assertEqual(marketplace_condition(None, "grailed", code), grailed)
                 self.assertEqual(marketplace_condition(None, "vinted", code), vinted)
                 self.assertEqual(marketplace_condition(None, "facebook", code), facebook)
 
-    def test_grailed_vinted_and_facebook_sections_carry_leaf_condition_and_designer(self):
+    def test_vinted_and_facebook_sections_carry_leaf_and_condition(self):
         item, unresolved = build_vendoo_item({
             "title": "Vintage Harley Davidson Tee",
             "brand": "Harley Davidson",
             "condition": "Pre-Owned - Good",
             "marketplace_category_objects": {
-                "grailed": {"id": "g1", "displayPath": ["Menswear", "Tops", "Short Sleeve T-Shirts"]},
                 "vinted": {"id": "77"},
                 "facebook": {"id": "fb1"},
             },
         })
         listings = item["listings"]
-        self.assertEqual(listings["grailed"]["overrides"]["condition"], "is_used")
-        self.assertEqual(listings["grailed"]["overrides"]["brand"], "Harley Davidson")
-        self.assertEqual(listings["grailed"]["overrides"]["categoryV2"]["id"], "g1")
-        self.assertEqual(listings["grailed"]["marketplaceSpecifics"]["shipping"]["us"], {"amount": 30, "enabled": True})
         self.assertEqual(listings["vinted"]["overrides"]["condition"], 3)
         self.assertEqual(listings["vinted"]["listedID"], "")
         self.assertEqual(listings["facebook"]["overrides"]["condition"], "used_good")

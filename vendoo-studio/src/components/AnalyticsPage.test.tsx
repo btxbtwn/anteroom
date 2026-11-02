@@ -17,7 +17,7 @@ const sales = {
 };
 const data: InventoryAnalytics = {
   range: "30d", undated_sales: 1, periods_truncated: false,
-  last_updated_at: "2026-10-05T12:30:00Z", incomplete_sales: [],
+  incomplete_sales: [],
   inventory: { active: 1, draft: 0, sold: 2, failed: 0, working: 0, asking_value: 60, cost_value: 8, cost_known: 1, stale_count: 1, stale_value: 60, undated_count: 0 },
   sell_through_rate: 66.7,
   sales,
@@ -62,12 +62,11 @@ function render(payload: InventoryAnalytics) {
 }
 
 describe("InventoryAnalyticsView", () => {
-  it("shows when the analytics were last updated", () => {
+  it("shows current inventory without an obsolete sync timestamp", () => {
     const html = render(data);
-    expect(html).toContain("Last updated on");
-    expect(html).toContain('dateTime="2026-10-05T12:30:00Z"');
+    expect(html).toContain("Current inventory:");
     expect(html).not.toContain("Vendoo");
-    expect(render({ ...data, last_updated_at: null })).toContain("Last updated on: not recorded yet.");
+    expect(html).not.toContain("Last updated on");
   });
 
   it("reminds the seller to complete missing sales details across all time", () => {

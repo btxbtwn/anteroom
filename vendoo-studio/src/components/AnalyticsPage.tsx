@@ -75,13 +75,6 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
       >
         {data ? (
           <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            <p>
-              {data.last_updated_at ? <>
-                {"Last updated on "}
-                <time dateTime={data.last_updated_at}>{new Date(data.last_updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time>
-                {"."}
-              </> : "Last updated on: not recorded yet."}
-            </p>
             <InventoryStrip inventory={data.inventory} />
           </div>
         ) : null}

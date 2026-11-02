@@ -1,1 +1,0 @@
-- The Chrome extension no longer fills Vendoo or runs on Vendoo's site, and no longer asks for access to Vendoo or Grailed.

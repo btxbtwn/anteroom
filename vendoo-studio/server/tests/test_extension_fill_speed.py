@@ -32,7 +32,7 @@ class _DbTest(unittest.TestCase):
         revision = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Tee"}, source="model")
         self.job = JobRepo(self.db).create(
             conv_id=self.conv.id, approved_revision_id=revision.id,
-            listing_snapshot={"title": "Tee"}, status="completed", vendoo_item_id="item-1",
+            listing_snapshot={"title": "Tee"}, status="completed",
         )
 
 

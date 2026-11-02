@@ -29,7 +29,6 @@ EXTENSION_SKIP = {
     ".gitignore",
     ".playwright-mcp",
     "README.md",
-    "TROUBLESHOOTING.md",
     "__pycache__",
     "node_modules",
     "sample-listing.json",

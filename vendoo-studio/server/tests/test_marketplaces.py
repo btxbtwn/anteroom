@@ -29,11 +29,11 @@ class MarketplaceSettingsTest(unittest.TestCase):
         self.assertEqual(marketplaces.get_selected_marketplaces(), marketplaces.DEFAULT_SELECTED)
         self.assertEqual(marketplaces.selected_fillable_platforms(), ["ebay", "etsy", "poshmark", "mercari", "depop"])
 
-    def test_persists_catalog_order_and_keeps_crosslist_only(self):
-        selected = marketplaces.set_selected_marketplaces(["shopify", "ebay", "ebay", "facebook", "poshmark"])
-        self.assertEqual(selected, ["ebay", "poshmark", "facebook", "shopify"])
-        self.assertEqual(marketplaces.get_selected_marketplaces(), ["ebay", "poshmark", "facebook", "shopify"])
-        # Send only fills the marketplaces Studio has form fillers for.
+    def test_persists_direct_marketplaces_in_catalog_order(self):
+        selected = marketplaces.set_selected_marketplaces(["vinted", "ebay", "ebay", "facebook", "poshmark"])
+        self.assertEqual(selected, ["ebay", "poshmark", "facebook", "vinted"])
+        self.assertEqual(marketplaces.get_selected_marketplaces(), ["ebay", "poshmark", "facebook", "vinted"])
+        # Category-field generation covers the configured forms.
         self.assertEqual(marketplaces.selected_fillable_platforms(), ["ebay", "poshmark", "facebook"])
 
         payload = json.loads(Path(self.tmp.name, "settings.json").read_text())
@@ -42,17 +42,17 @@ class MarketplaceSettingsTest(unittest.TestCase):
         # Unknown on read → defaults.
         self.assertEqual(marketplaces.get_selected_marketplaces(), marketplaces.DEFAULT_SELECTED)
 
-    def test_grailed_vinted_facebook_are_filled(self):
-        marketplaces.set_selected_marketplaces(["grailed", "vinted", "facebook", "whatnot"])
-        self.assertEqual(marketplaces.selected_fillable_platforms(), ["grailed", "facebook"])
-        self.assertNotIn("vinted", marketplaces.selected_fillable_platforms())
+    def test_grailed_is_no_longer_available(self):
+        with self.assertRaises(ValueError):
+            marketplaces.set_selected_marketplaces(["grailed"])
+        self.assertNotIn("grailed", marketplaces.KNOWN_MARKETPLACES)
 
     def test_sellwild_is_filled(self):
-        marketplaces.set_selected_marketplaces(["sellwild", "shopify"])
+        marketplaces.set_selected_marketplaces(["sellwild", "vinted"])
         self.assertEqual(marketplaces.selected_fillable_platforms(), ["sellwild"])
 
-    def test_catalog_covers_vendoo_listable_marketplaces(self):
-        for marketplace_id in ("vinted", "grailed", "whatnot", "vestiaire", "sellwild", "facebook", "shopify"):
+    def test_catalog_covers_direct_listing_marketplaces(self):
+        for marketplace_id in ("ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild", "facebook"):
             self.assertIn(marketplace_id, marketplaces.KNOWN_MARKETPLACES)
 
     def test_rejects_unknown_on_write(self):
@@ -92,11 +92,11 @@ class MarketplaceSettingsRouteTest(unittest.TestCase):
 
         crosslist = self.client.put(
             "/api/settings/marketplaces",
-            json={"selected": ["poshmark", "whatnot"]},
+            json={"selected": ["poshmark", "sellwild"]},
         )
         self.assertEqual(crosslist.status_code, 200)
-        self.assertEqual(crosslist.json()["selected"], ["poshmark", "whatnot"])
-        self.assertEqual(crosslist.json()["fillable"], ["poshmark"])
+        self.assertEqual(crosslist.json()["selected"], ["poshmark", "sellwild"])
+        self.assertEqual(crosslist.json()["fillable"], ["poshmark", "sellwild"])
 
         rejected = self.client.put("/api/settings/marketplaces", json={"selected": ["ebay", "nope"]})
         self.assertEqual(rejected.status_code, 400)

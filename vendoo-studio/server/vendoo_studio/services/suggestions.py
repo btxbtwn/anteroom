@@ -86,7 +86,6 @@ MARKETPLACE_LABELS = {
     "shopify": "Shopify",
     "vinted": "Vinted",
     "whatnot": "Whatnot",
-    "grailed": "Grailed",
     "vestiaire": "Vestiaire Collective",
     "vestiaireApi": "Vestiaire Collective",
     "sellwild": "Sellwild",
@@ -307,7 +306,7 @@ def _card_for(
 
     if status == KIND_FAILED:
         kind = KIND_FAILED
-        reason = "The last send to Vendoo failed"
+        reason = "The last listing task failed"
         score = KIND_BASE_SCORE[KIND_FAILED]
     elif status == "draft" and photo_count > 0 and not has_revision:
         kind = KIND_READY_TO_GENERATE
@@ -315,7 +314,7 @@ def _card_for(
         score = KIND_BASE_SCORE[KIND_READY_TO_GENERATE]
     elif has_revision and listing is not None and str(listing.get("validation_status") or "") == "error":
         kind = KIND_FIX_VALIDATION
-        reason = "Listing fields need to be fixed before sending"
+        reason = "Listing fields need to be fixed before listing"
         score = KIND_BASE_SCORE[KIND_FIX_VALIDATION]
     elif status == "active":
         days = _listed_days_ago(notes, now)

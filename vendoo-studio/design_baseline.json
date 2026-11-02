@@ -6,7 +6,7 @@
     "hardcoded-color": 4
   },
   "src/components/ListingEditor.tsx": {
-    "arbitrary-text-size": 2
+    "arbitrary-text-size": 1
   },
   "src/components/ListingFormControls.tsx": {
     "arbitrary-text-size": 3
@@ -44,7 +44,7 @@
     "hardcoded-color": 1
   },
   "src/components/settings/LogsSettings.tsx": {
-    "uppercase-label": 3
+    "uppercase-label": 1
   },
   "src/components/sidebar/ListingRow.tsx": {
     "gradient": 2

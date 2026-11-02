@@ -19,7 +19,7 @@ export const SUGGESTION_KIND_LABELS: Record<SuggestionKind, string> = {
   ready_to_generate: "Generate listing",
   fix_validation: "Fix listing fields",
   stale_active: "Refresh or consider price drop",
-  ready_to_review: "Review and send",
+  ready_to_review: "Review listing",
 };
 
 export function suggestionKindLabel(kind: string): string {

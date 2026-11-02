@@ -95,9 +95,9 @@ def test_catalog_matches_every_route(catalog_file):
     assert by_path[("DELETE", "/api/boxes/{box_id}")]["name"] == "boxes delete"
     assert by_path[("GET", "/api/conversations")]["name"] == "conversations list"
     assert by_path[("DELETE", "/api/conversations/{conv_id}")]["destructive"] is True
-    publish = by_path[("POST", "/api/conversations/{conv_id}/vendoo-api/list")]
+    publish = by_path[("POST", "/api/conversations/{conv_id}/native-marketplaces/{marketplace}/list")]
     assert publish["destructive"] is True
-    assert any(item["name"] == "marketplaces" and item["required"] for item in publish["parameters"])
+    assert any(item["name"] == "marketplace" and item["required"] for item in publish["parameters"])
     assert by_path[("WEBSOCKET", "/api/extension/ws")]["supported"] is False
     assert {item["path"] for item in catalog["skipped"]} == set(mounts)
 
@@ -191,28 +191,28 @@ def test_delete_and_publish_require_confirm(catalog_file, config_dir, capsys):
     assert payload["ok"] is False
 
     code = main(
-        ["vendoo-api", "conversations-list", "--conv-id", "c1", "--marketplaces", "ebay", "--json"],
+        ["native-marketplaces", "conversations-list", "--conv-id", "c1", "--marketplace", "ebay", "--revision-id", "r1", "--json"],
         transport=_transport(handler),
     )
     assert code == 4
     assert called["n"] == 0
 
     code = main(
-        ["vendoo-api", "conversations-list", "--conv-id", "c1", "--body", '{"confirm": true, "marketplaces": ["ebay"]}', "--json"],
+        ["native-marketplaces", "conversations-list", "--conv-id", "c1", "--marketplace", "ebay", "--body", '{"confirm": true, "revision_id": "r1"}', "--json"],
         transport=_transport(handler),
     )
     assert code == 4
     assert called["n"] == 0
 
     code = main(
-        ["vendoo-api", "conversations-list", "--conv-id", "c1", "--marketplaces", "ebay", "--marketplaces", "etsy", "--confirm", "--json"],
+        ["native-marketplaces", "conversations-list", "--conv-id", "c1", "--marketplace", "ebay", "--revision-id", "r1", "--confirm", "--json"],
         transport=_transport(handler),
     )
     assert code == 0
     assert called["n"] == 1
-    assert called["path"] == "/api/conversations/c1/vendoo-api/list"
+    assert called["path"] == "/api/conversations/c1/native-marketplaces/ebay/list"
     assert called["body"]["confirm"] is True
-    assert called["body"]["marketplaces"] == ["ebay", "etsy"]
+    assert called["body"]["revision_id"] == "r1"
 
 
 def test_api_request_escape_hatch(catalog_file, config_dir, capsys):
@@ -419,8 +419,8 @@ def test_mcp_lists_tools_and_calls_health(catalog_file, config_dir):
     assert "anteroom_commands" in names
     assert "anteroom_api_request" in names
     assert "health__get" in names
-    assert "vendoo-api__conversations-list" in names
-    publish = next(tool for tool in listed["result"]["tools"] if tool["name"] == "vendoo-api__conversations-list")
+    assert "native-marketplaces__conversations-list" in names
+    publish = next(tool for tool in listed["result"]["tools"] if tool["name"] == "native-marketplaces__conversations-list")
     assert "confirm" in publish["inputSchema"]["required"]
 
     refused = handle_message({

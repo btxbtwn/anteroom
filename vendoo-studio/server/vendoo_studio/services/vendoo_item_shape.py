@@ -1,9 +1,6 @@
-"""The shape of a Vendoo item, and Vendoo's own defaults for one.
+"""Stored field shapes and encodings retained by the native marketplace form builder.
 
-Keys, the marketplaces an item carries a section for, and what Vendoo's
-``getInitGeneralDetails`` / ``getInit*Form`` seed before anything is filled
-in, plus the small value helpers every other piece of the item is built with.
-See ``docs/vendoo-listing-architecture.md``.
+These helpers shape listing data; they do not contact Vendoo or publish listings.
 """
 
 from __future__ import annotations
@@ -42,8 +39,7 @@ CURRENT_ITEM_VERSION = 10
 
 # Every marketplace Vendoo's new-item factory seeds a listings section for.
 ALL_MARKETPLACES = (
-    "ebay", "etsy", "poshmark", "mercari", "grailed", "depop", "tradesy", "kidizen",
-    "facebook", "shopify", "sellhound", "vestiaire", "vinted", "whatnot", "sellwild", "vestiaireApi",
+    "ebay", "etsy", "poshmark", "mercari", "depop", "facebook", "vinted", "sellwild",
 )
 
 # generalDetails fields Vendoo stores as a coded object with a display label.
@@ -56,12 +52,10 @@ _VALUE_KEYS = ("value", "id", "key", "code")
 # The tier follows the package weight — see ``models.mercari_shipping``.
 MERCARI_GROUND_ADVANTAGE_LABEL = DEFAULT_SHIPPING_LABEL
 
-# Grailed ships per region; US is the one Vendoo turns on by default.
-GRAILED_SHIPPING_REGIONS = ("ca", "uk", "eu", "au", "asia", "other")
 
 SPECIFICS_SOURCES = {
     mp: f"{mp}_specifics"
-    for mp in ("ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild")
+    for mp in ("ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "facebook", "sellwild")
 }
 
 # Studio names its listing fields in camelCase; Vendoo names the same fields
@@ -159,17 +153,6 @@ def _marketplace_specific_defaults(marketplace: str) -> dict[str, Any]:
             "age": [], "source": [], "style": [],
             "location": {"geoLat": 0, "geoLng": 0, "address": "", "countryCode": "", "id": "", "zipCode": ""},
         }
-    if marketplace == "grailed":
-        # Vendoo's form ships US at $30 and every other region off; the seller
-        # sets the real rate on the form.
-        shipping = {region: {"amount": 0, "enabled": False} for region in GRAILED_SHIPPING_REGIONS}
-        shipping["us"] = {"amount": 30, "enabled": True}
-        return {
-            "makeoffer": False, "paypal_id": "", "buynow": True, "currency": "USD",
-            "minimum_price": "", "smart_price": False, "measurementType": "cm", "measurements": {},
-            "shipping": shipping,
-            "shippingForm": {"label": "", "method": "", "address": "", "freeShipping": False},
-        }
     return {}
 
 
@@ -182,7 +165,7 @@ def default_listing_section(marketplace: str) -> dict[str, Any]:
         "type": "listing",
         "status": {"notListed": True},
         "overrides": _weight_dims_overrides() if marketplace in ("ebay", "etsy", "poshmark", "mercari", "sellwild") else (
-            {"quantity": "1"} if marketplace in ("depop", "grailed", "vinted", "facebook") else {}
+            {"quantity": "1"} if marketplace in ("depop", "vinted", "facebook") else {}
         ),
         "categorySpecifics": {},
         "listingAttemptMessages": [],

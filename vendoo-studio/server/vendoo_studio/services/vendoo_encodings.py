@@ -200,15 +200,6 @@ _VENDOO_MARKETPLACE_CONDITIONS: dict[str, dict[str, str | int]] = {
         "v_preowned_fair": "used_fair",
         "v_poor": "used_fair",
     },
-    "grailed": {
-        "v_newWithTagsBox": "is_new",
-        "v_newWithOutTags": "is_new",
-        "v_newWithDefects": "is_gently_used",
-        "v_preowned_excellent": "is_gently_used",
-        "v_preowned": "is_used",
-        "v_preowned_fair": "is_used",
-        "v_poor": "is_worn",
-    },
     # Vendoo leaves New with imperfections unmapped for Facebook; Used - Good
     # is the nearest of its four.
     "facebook": {

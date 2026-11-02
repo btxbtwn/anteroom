@@ -20,7 +20,7 @@ _GARMENT_RE = re.compile(
 )
 _TEE_LEAF_RE = re.compile(r"\bt-?shirts?\b|\btees?\b", re.I)
 _SWEAT_RE = re.compile(r"\bsweatshirts?\b|\bhoodies?\b|\bsweaters?\b", re.I)
-# Grailed and Depop root their trees at Menswear / Womenswear.
+# Depop roots its tree at Menswear / Womenswear.
 _WOMEN_RE = re.compile(r"\bwomen(?:['’]s|swear)?\b", re.I)
 _MEN_RE = re.compile(r"\bmen(?:['’]s|swear)?\b", re.I)
 # Girls'/boys' items were read as having no gender at all, which threw away

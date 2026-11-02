@@ -1305,10 +1305,7 @@ console.log(JSON.stringify(result));
         self.assertNotIn("Set Vendoo category", panel)
         self.assertIn("function leftoverGeneratedValue", panel)
         self.assertIn("isAlreadySetEntry", panel)
-        self.assertIn(
-            'const FILL_FAILURE_STATUSES = new Set(["invalid", "failed", "not_found", "uncertain"]);',
-            panel,
-        )
+
         self.assertNotIn("Ask chat to retry", panel)
         # One bulk Ask-chat button under Update Vendoo (full draft schema), not a
         # second listing-JSON-only copy in the Fields panel.

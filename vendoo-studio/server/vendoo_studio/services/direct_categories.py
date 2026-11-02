@@ -1,10 +1,4 @@
-"""Each marketplace's own categories, kept beside the Vendoo ones.
-
-Send to Vendoo keeps ``marketplace_category_ids`` and Vendoo's field names.
-Direct List, generation, and the eBay and Etsy editor sections read
-``direct_category_ids``: the leaf each site's own taxonomy names for this item,
-and that leaf's own fields.
-"""
+"""Each direct marketplace's taxonomy leaf and category-specific fields."""
 from __future__ import annotations
 
 import copy
@@ -194,7 +188,7 @@ def live_fields_prompt(listing: dict) -> str:
     return (
         "\n\n--- eBay and Etsy category fields ---\n"
         "These are the fields eBay and Etsy list for this category. Fill them under the names above. "
-        "Keep filling Vendoo's own field names as well; Send to Vendoo reads those, not these.\n\n"
+        "Use each marketplace's exact field names and dropdown choices.\n\n"
         + "\n\n".join(blocks)
     )
 

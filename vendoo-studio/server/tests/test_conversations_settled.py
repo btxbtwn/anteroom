@@ -170,7 +170,7 @@ class ConversationSettlementTest(unittest.TestCase):
         self.db.refresh(conv)
         self.assertEqual(conv.status, "active")
 
-    def test_reconcile_keeps_listing_while_job_is_dispatched(self):
+    def test_historical_send_does_not_keep_the_listing_busy(self):
         conv = self.repo.create(title="Hurley polo", notes='{"vendooStatus": "active"}')
         self.repo.update_status(conv.id, "listing")
         older = datetime.now(UTC) - timedelta(hours=1)
@@ -185,7 +185,7 @@ class ConversationSettlementTest(unittest.TestCase):
         self.db.commit()
         self.repo.reconcile_job_statuses()
         self.db.refresh(conv)
-        self.assertEqual(conv.status, "listing")
+        self.assertEqual(conv.status, "active")
 
 
 if __name__ == "__main__":
