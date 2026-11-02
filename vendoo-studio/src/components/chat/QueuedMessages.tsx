@@ -11,9 +11,7 @@ export function QueuedMessages({ queue, onRemove }: { queue: QueuedChatMessage[]
         <div key={queued.id} className="pb-4" data-queued-message-id={queued.id}>
           <UserMessageRow
             queued
-            text={queued.text || (queued.browserFields?.length
-              ? `${queued.browserFields.length} field${queued.browserFields.length === 1 ? "" : "s"} from the browser`
-              : "Empty message")}
+            text={queued.text || "Empty message"}
             footer={
               <div className="mt-1.5 flex items-center gap-2">
                 <span

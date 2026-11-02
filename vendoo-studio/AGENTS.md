@@ -13,10 +13,9 @@ in the Mac app. The sandbox prints its own data folder.
 |---|---|
 | Server error, failed request, crash | `GET /api/settings/error-logs` (recent warnings and errors), `GET /api/settings/app-logs?level=&since=&grep=` (server and extension log, survives restarts; file `<data>/logs/anteroom.jsonl`), or `anteroom logs --grep ...` |
 | Mac app will not start | `<data>/logs/Anteroom.log` (stdout and stderr of the packaged app) |
-| A Send, fill or marketplace job went wrong | `GET /api/jobs/{id}` (status and blocker fields), `/api/jobs/{id}/events`, `/api/jobs/{id}/fill-log` (field by field), `/api/jobs/{id}/logs` (both); files in `<data>/fill-logs/<job_id>.md` |
-| Job slow or stuck | `/api/jobs/{id}/timing`, `/api/jobs/queue`; `services/job_watchdog.py` fails jobs that go silent |
+| A fill or marketplace job went wrong | `GET /api/jobs/{id}` (status and blocker fields), `/api/jobs/{id}/events`, `/api/jobs/{id}/fill-log` (field by field), `/api/jobs/{id}/logs` (both); files in `<data>/fill-logs/<job_id>.md` |
+| Job slow or stuck | `/api/jobs/{id}/timing`; `services/job_watchdog.py` fails jobs that go silent |
 | Generation slow | `GET /api/analytics/generation-timings` (seconds per stage) |
-| Vendoo API call failed | `GET /api/settings/vendoo-api-logs` (the extension's Vendoo calls, headers and bodies redacted) |
 | Setup state: provider, extension, data folder, sandbox | `GET /api/status` |
 
 The `anteroom` CLI (`server/vendoo_studio/cli/`) wraps every route:

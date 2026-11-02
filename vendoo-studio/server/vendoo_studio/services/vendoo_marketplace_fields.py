@@ -46,8 +46,7 @@ ETSY_LIVE_LISTING = "active"
 
 # Marketplace form brand fields live on overrides, not categorySpecifics. The
 # Chrome filler writes `#listings.<mp>.overrides.brand`; create must too.
-# Grailed calls it the designer; its form reads the same override.
-_BRAND_OVERRIDE_MARKETPLACES = frozenset({"ebay", "etsy", "poshmark", "mercari", "depop", "grailed"})
+_BRAND_OVERRIDE_MARKETPLACES = frozenset({"ebay", "etsy", "poshmark", "mercari", "depop"})
 
 # Values that mean "there is no brand" on Mercari — check No Brand/Not sure.
 _MERCARI_NO_BRAND_TOKENS = frozenset({

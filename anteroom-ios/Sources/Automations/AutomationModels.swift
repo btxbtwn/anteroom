@@ -328,7 +328,7 @@ enum AutomationFormat {
     static func listedSource(_ source: String?) -> String {
         switch source {
         case "publish_job": "publish job"
-        case "vendoo_job": "Vendoo"
+        case "vendoo_job": "imported Vendoo date"
         case "item_listed": "item date"
         case "marketplace_listing": "marketplace record"
         default: "listed date"

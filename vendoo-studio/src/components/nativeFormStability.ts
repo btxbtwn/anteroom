@@ -43,7 +43,7 @@ function textOf(value: unknown): string {
  */
 export function nativeFormCategoryKey(listing: ListingData | undefined, marketplace: string): string {
   if (marketplace === "sellwild") return textOf(asRecord(listing?.sellwild_specifics).nativeCategoryId);
-  // The tab's own category only. Vendoo's category ids belong to Send to Vendoo.
+  // The tab's own category only. Imported category ids are historical values.
   return textOf(asRecord(listing?.direct_category_ids)[marketplace]);
 }
 
@@ -75,7 +75,8 @@ export function categorySpecificFieldsStale(
   return String(loadedCategoryId || "") !== categoryKey;
 }
 
-const CATEGORY_MARKETS = ["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "grailed", "sellwild"];
+const CATEGORY_MARKETS = ["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild"];
+
 
 /** Every saved category id. A price or brand edit does not change it. */
 export function listingCategorySignature(listing: ListingData | undefined): string {

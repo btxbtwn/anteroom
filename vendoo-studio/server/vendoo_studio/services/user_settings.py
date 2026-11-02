@@ -14,14 +14,12 @@ SETUP_GUIDE_DISMISSED_KEY = "setup_guide_dismissed"
 LISTING_PROVIDER_KEY = "listing_provider"
 PHOTO_PROVIDER_KEY = "photo_provider"
 UI_PREFS_KEY = "ui"
-VENDOO_INVENTORY_SYNCED_AT_KEY = "vendoo_inventory_synced_at"
 RECENT_LABELS_KEY = "recent_vendoo_labels"
 SETTLED_SHELF_KEY = "settled_shelf_expanded"
 HIDDEN_LABELS_KEY = "hidden_vendoo_labels"
 THEME_KEY = "theme"
 LISTING_NAMES_KEY = "listing_names"
 MODEL_FAVORITES_KEY = "model_favorites"
-VENDOO_ENABLED_KEY = "vendoo_enabled"
 STALE_DAYS_KEY = "stale_listing_days"
 LABEL_COLORS_KEY = "label_colors"
 # Vendoo lets sellers pick 15 to 120 days; 60 was Anteroom's fixed threshold.
@@ -305,19 +303,6 @@ def read_settings() -> dict:
         return context.settings.read()
     with _lock:
         return _read_unlocked()
-
-
-def vendoo_inventory_synced_at() -> str | None:
-    value = read_settings().get(VENDOO_INVENTORY_SYNCED_AT_KEY)
-    return value if isinstance(value, str) and value else None
-
-
-def record_vendoo_inventory_sync(finished_at: str) -> None:
-    """Persist the last complete inventory sync across Studio restarts."""
-    def mutator(payload: dict) -> None:
-        payload[VENDOO_INVENTORY_SYNCED_AT_KEY] = finished_at
-
-    update_settings(mutator)
 
 
 def update_settings(mutator) -> dict:
@@ -815,20 +800,10 @@ def normalize_theme(value: object) -> ThemeChoice:
     return DEFAULT_THEME
 
 
-def vendoo_enabled() -> bool:
-    """Settings → Listings → Send to Vendoo. Missing means on."""
-    from vendoo_studio.services.service_context import current
-    context = current()
-    if context is not None and not context.vendoo_available:
-        return False
-    return bool(get_ui_prefs()[VENDOO_ENABLED_KEY])
-
-
 def get_ui_prefs() -> dict:
     ui = _ui_prefs()
     settled = ui.get(SETTLED_SHELF_KEY)
     names = ui.get(LISTING_NAMES_KEY)
-    vendoo_enabled = ui.get(VENDOO_ENABLED_KEY)
     return {
         RECENT_LABELS_KEY: _clean_recent_labels(ui.get(RECENT_LABELS_KEY)),
         SETTLED_SHELF_KEY: DEFAULT_SETTLED_SHELF_EXPANDED if not isinstance(settled, bool) else settled,
@@ -837,8 +812,6 @@ def get_ui_prefs() -> dict:
         # The sidebar names each listing by its title, or by its SKU where it has one.
         LISTING_NAMES_KEY: names if names in LISTING_NAME_CHOICES else "title",
         MODEL_FAVORITES_KEY: _clean_model_favorites(ui.get(MODEL_FAVORITES_KEY)),
-        # Off hides Send to Vendoo for sellers who list without Vendoo.
-        VENDOO_ENABLED_KEY: vendoo_enabled if isinstance(vendoo_enabled, bool) else True,
         STALE_DAYS_KEY: _clean_stale_days(ui.get(STALE_DAYS_KEY)),
         LABEL_COLORS_KEY: _clean_label_colors(ui.get(LABEL_COLORS_KEY)),
     }
@@ -851,7 +824,6 @@ def set_ui_prefs(
     theme: object | None = None,
     listing_names: object | None = None,
     model_favorites: object | None = None,
-    vendoo_enabled: object | None = None,
     stale_listing_days: object | None = None,
     label_colors: object | None = None,
 ) -> dict:
@@ -861,7 +833,6 @@ def set_ui_prefs(
         and theme is None
         and listing_names is None
         and model_favorites is None
-        and vendoo_enabled is None
         and stale_listing_days is None
         and label_colors is None
     ):
@@ -889,10 +860,6 @@ def set_ui_prefs(
             ui[LISTING_NAMES_KEY] = listing_names
         if favorites is not None:
             ui[MODEL_FAVORITES_KEY] = favorites
-        if vendoo_enabled is not None:
-            if not isinstance(vendoo_enabled, bool):
-                raise ValueError("vendoo_enabled must be a boolean")
-            ui[VENDOO_ENABLED_KEY] = vendoo_enabled
         if stale_listing_days is not None:
             ui[STALE_DAYS_KEY] = stale_listing_days
         if colors is not None:

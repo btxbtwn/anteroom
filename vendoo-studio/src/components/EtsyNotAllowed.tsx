@@ -33,7 +33,7 @@ export function EtsyNotAllowed({ onOpenListing }: { onOpenListing: (id: string) 
       title="Not allowed on Etsy"
       description={<>
         Live on Etsy, but modern resale, which Etsy removes under its Creativity Standards. Repeat removals put Star Seller
-        at risk. Delist these on Etsy yourself; Anteroom never delists. Based on Anteroom's last Vendoo sync.
+        at risk. Review these listings on Etsy. Anteroom only delists when you explicitly ask. Based on the last recorded listing status.
       </>}
     >
       {query.isError ? <PageError message={(query.error as Error).message || "Could not load Etsy listings."} /> : null}

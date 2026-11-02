@@ -22,9 +22,6 @@ from vendoo_studio.main import app
 from vendoo_studio.services.etsy_fields import etsy_eligible
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.etsy_audit import etsy_not_allowed_live
-from vendoo_studio.services.vendoo_item_build import build_vendoo_item, marketplaces_left_empty
-from vendoo_studio.services.vendoo_item_shape import default_listing_section
-from vendoo_studio.services.vendoo_item_update import apply_update_all, changed_fields
 from vendoo_studio.services.vendoo_marketplace_fields import _etsy_when_code
 
 MODERN = {"who_made": "Another company or person", "what_is": "A finished product", "when_made": "2010 - 2019 (Recently)"}
@@ -70,67 +67,6 @@ class EtsyEligibleTest(unittest.TestCase):
         self.assertTrue(etsy_eligible(listing({**MODERN, "listing_type": "Digital files"})))
 
 
-class SendLeavesEtsyEmptyTest(unittest.TestCase):
-    def test_modern_resale_gets_vendoos_untouched_etsy_form(self):
-        item, unresolved = build_vendoo_item(listing(MODERN, etsy_specifics={**MODERN, "categoryPath": "Clothing > Tops"}))
-        etsy = item["listings"]["etsy"]
-        self.assertEqual(etsy, default_listing_section("etsy"))
-        # Unstamped and uncategorised: Vendoo does not count it as filled out.
-        self.assertEqual(etsy["dateCreated"], "")
-        self.assertNotIn("categoryV2", etsy["overrides"])
-        self.assertFalse([row for row in unresolved if "etsy" in row["field"]])
-        # Everything else is sent as before.
-        self.assertEqual(item["generalDetails"]["title"], "Johnson Motors Biker Tee")
-
-    def test_vintage_still_fills_etsy(self):
-        item, _ = build_vendoo_item(listing({**VINTAGE, "categoryPath": "Clothing > Tops"}))
-        etsy = item["listings"]["etsy"]
-        self.assertEqual(etsy["overrides"]["categoryV2"]["displayPath"], ["Clothing", "Tops"])
-        self.assertEqual(etsy["marketplaceSpecifics"]["whenMade"], "1990s")
-        self.assertEqual(etsy["marketplaceSpecifics"]["tags"], ["biker", "tee"])
-        self.assertTrue(etsy["dateCreated"])
-
-    def test_left_out_marketplaces(self):
-        self.assertEqual(marketplaces_left_empty(listing(MODERN)), frozenset({"etsy"}))
-        self.assertEqual(marketplaces_left_empty(listing(VINTAGE)), frozenset())
-
-
-class PrepareSkipsEtsyTest(unittest.TestCase):
-    """No Etsy field is gap-filled or warned about for a form Send leaves empty."""
-
-    def prepare(self, source: dict):
-        import asyncio
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock, patch
-
-        from vendoo_studio.services import vendoo_create
-        from vendoo_studio.services.vendoo_specifics import FieldSpec
-
-        resolved = vendoo_create.ResolvedFields(
-            paths={},
-            listing=source,
-            specifics={"ebay": {"Color": FieldSpec("Color")}, "etsy": {"Sleeve": FieldSpec("Sleeve", required=True)}},
-            unresolved=[{"field": "category:etsy", "value": "Clothing"}, {"field": "category:ebay", "value": "Tops"}],
-        )
-        fill = AsyncMock(side_effect=lambda listing, specifics, provider, evidence="": (listing, []))
-        with patch.object(vendoo_create, "resolve_listing_fields", AsyncMock(return_value=resolved)), \
-             patch.object(vendoo_create, "fill_listing_specifics", fill):
-            _, specifics, _, unresolved, _ = asyncio.run(
-                vendoo_create.prepare_listing_fields_for_vendoo(SimpleNamespace(id=None), source)
-            )
-        return specifics, unresolved
-
-    def test_modern_resale_drops_etsy_fields_and_warnings(self):
-        specifics, unresolved = self.prepare(listing(MODERN))
-        self.assertEqual(sorted(specifics), ["ebay"])
-        self.assertEqual([row["field"] for row in unresolved], ["category:ebay"])
-
-    def test_vintage_keeps_them(self):
-        specifics, unresolved = self.prepare(listing(VINTAGE))
-        self.assertEqual(sorted(specifics), ["ebay", "etsy"])
-        self.assertEqual(len(unresolved), 2)
-
-
 class EtsyWhenCodeTest(unittest.TestCase):
     def test_vintage_decades_keep_their_code(self):
         # These all used to be sent as 2020_2026, which tells Etsy the piece is new.
@@ -149,39 +85,6 @@ class EtsyWhenCodeTest(unittest.TestCase):
         for label, code in cases.items():
             with self.subTest(label=label):
                 self.assertEqual(_etsy_when_code(label), code)
-
-
-class UpdateLeavesEtsyAloneTest(unittest.TestCase):
-    def current(self) -> dict:
-        return {
-            "generalDetails": {"title": "Old title", "price": "20"},
-            "listings": {
-                "ebay": {"marketplaceID": "ebay", "overrides": {"title": "Old title"}},
-                "etsy": {
-                    "marketplaceID": "etsy",
-                    "status": {"listed": True},
-                    "overrides": {"title": "Old title", "price": "20"},
-                    "marketplaceSpecifics": {"whoMade": "someone_else", "whenMade": "2010_2019", "tags": ["old"]},
-                },
-            },
-        }
-
-    def test_no_etsy_path_is_written_for_modern_resale(self):
-        source = listing(MODERN, title="New title")
-        desired, _ = build_vendoo_item(source)
-        current = self.current()
-        apply_update_all(current, desired, leave=marketplaces_left_empty(source))
-        updates = changed_fields(current, desired)
-        self.assertIn("listings.ebay.overrides.title", updates)
-        self.assertFalse([path for path in updates if path.startswith("listings.etsy.")], updates)
-
-    def test_vintage_updates_etsy_as_before(self):
-        source = listing(VINTAGE, title="New title")
-        desired, _ = build_vendoo_item(source)
-        current = self.current()
-        apply_update_all(current, desired, leave=marketplaces_left_empty(source))
-        updates = changed_fields(current, desired)
-        self.assertEqual(updates["listings.etsy.overrides.title"], "New title")
 
 
 class NotAllowedReportTest(unittest.TestCase):

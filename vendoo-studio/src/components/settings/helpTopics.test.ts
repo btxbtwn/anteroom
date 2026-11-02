@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HELP_TOPICS, helpTopicMarkdown, helpTopicsForMode } from "./helpTopics";
+import { HELP_TOPICS, helpTopicMarkdown } from "./helpTopics";
 
 describe("help topics", () => {
   it("have unique ids and a few steps each", () => {
@@ -11,18 +11,13 @@ describe("help topics", () => {
     expect(helpTopicMarkdown({ id: "t", title: "T", steps: ["One", "Two"] })).toBe("1. One\n2. Two");
   });
 
-  it("tell the seller Studio never publishes on its own", () => {
-    const send = HELP_TOPICS.find((topic) => topic.id === "help-send-to-vendoo");
-    expect(send && helpTopicMarkdown(send)).toMatch(/never publishes/);
+  it("tell the seller an agent cannot publish without confirmation", () => {
+    const agent = HELP_TOPICS.find((topic) => topic.id === "help-connect-agent");
+    expect(agent && helpTopicMarkdown(agent)).toMatch(/cannot publish or delete unless you confirm/);
   });
 
-  it("hides the send guide and drops Vendoo sentences when Send to Vendoo is off", () => {
-    const topics = helpTopicsForMode(false);
-    expect(topics.map((topic) => topic.id)).not.toContain("help-send-to-vendoo");
-    expect(HELP_TOPICS.map((topic) => topic.id)).toContain("help-send-to-vendoo");
-    const regenerate = topics.find((topic) => topic.id === "help-regenerate");
-    expect(regenerate?.steps.join("\n")).not.toMatch(/Vendoo/);
-    expect(topics.find((topic) => topic.id === "help-connect-chrome")?.steps.join("\n")).not.toMatch(/Vendoo/);
-    expect(helpTopicsForMode(true)).toBe(HELP_TOPICS);
+  it("do not mention Vendoo", () => {
+    const text = HELP_TOPICS.map(helpTopicMarkdown).join("\n").replace(/vendoo-studio/g, "");
+    expect(text).not.toMatch(/Vendoo/i);
   });
 });

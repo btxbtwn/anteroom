@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const vm = require('node:vm');
 const { loadWorker } = require('./worker-context');
 const protocol = require('../cloud-marketplace-protocol');
 const { createCloudConnection, ORIGIN } = require('../background/cloud-connection');
@@ -65,7 +64,7 @@ test('native reads reserve the existing exclusive operation scope and release it
   c.readPoshmarkEditorForm = async () => { throw { code: 'signed_out', message: 'PRIVATE diagnostic' }; };
   assert.deepEqual(JSON.parse(JSON.stringify(await c.readCloudPoshmarkForm({}))), { ok: false, error_code: 'signed_out' });
   assert.equal(c.nativeOperationsRunning(), false);
-  vm.runInContext('activeJob = {job_id: "vendoo"}', c);
+  c.claimNativeOperation('*', 'delist');
   assert.equal((await c.readCloudPoshmarkForm({})).error_code, 'busy');
 });
 

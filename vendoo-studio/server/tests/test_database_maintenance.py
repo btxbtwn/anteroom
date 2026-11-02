@@ -11,11 +11,17 @@ from sqlalchemy.pool import StaticPool
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
-from vendoo_studio.models.job import JobEvent, VendooDraftCache
+from vendoo_studio.models.job import JobEvent
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
-from vendoo_studio.services.draft_cache import draft_has_status_signal, slim_vendoo_draft_payload
+from vendoo_studio.services.draft_cache import draft_has_status_signal
+from importlib import import_module
+
 from vendoo_studio.services.maintenance import prune_event_bloat, table_sizes
+
+slim_vendoo_draft_payload = import_module(
+    "vendoo_studio.migrations.versions.a8f2c91d4e10_vendoo_draft_cache"
+).slim_vendoo_draft_payload
 
 
 class _DbTest(unittest.TestCase):
@@ -27,7 +33,7 @@ class _DbTest(unittest.TestCase):
         self.rev = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Tee"}, source="model")
         self.repo = JobRepo(self.db)
         self.job = self.repo.create(
-            self.conv.id, self.rev.id, {"title": "Tee"}, vendoo_item_id="itm1", status="completed",
+            self.conv.id, self.rev.id, {"title": "Tee"},  status="completed",
         )
 
     def tearDown(self):
@@ -76,16 +82,13 @@ class SlimPayloadTest(unittest.TestCase):
 
 
 class EventBloatTest(_DbTest):
-    def test_progress_and_review_keep_one_row_each(self):
+    def test_progress_keeps_one_row(self):
         for step in ("filling_general", "saving_general", "filling_ebay"):
             self.repo.add_event(self.job.id, "progress", step, {"step": step})
-        self.repo.add_event(self.job.id, "completion_review", "verifying_draft", {"readback": True})
-        self.repo.add_event(self.job.id, "completion_review", "verifying_draft", {"readback": False})
 
         events = self.repo.get_events(self.job.id)
-        self.assertEqual([event.event_type for event in events], ["progress", "completion_review"])
+        self.assertEqual([event.event_type for event in events], ["progress"])
         self.assertEqual(events[0].step, "filling_ebay")
-        self.assertEqual(events[1].payload, {"readback": False})
 
     def test_step_results_keep_their_timings_and_drop_their_blobs(self):
         self.repo.add_event(self.job.id, "step_completed", "filling_ebay", {
@@ -124,19 +127,6 @@ class EventBloatTest(_DbTest):
         self.assertEqual(pruned["duplicate_events"], 3)
         self.assertEqual(self.db.query(JobEvent).count(), 1)
 
-    def test_a_pull_per_minute_cannot_grow_the_database(self):
-        """The regression that filled a disk: one cache row, no events, ever."""
-        for _ in range(50):
-            self.repo.save_vendoo_draft(
-                self.job.id,
-                item={"itemID": "itm1", "listings": {"ebay": {"status": {"listed": True}}}},
-                item_id="itm1",
-                source="vendoo_sync",
-            )
-        self.assertEqual(self.db.query(VendooDraftCache).count(), 1)
-        self.assertEqual(
-            self.db.query(JobEvent).filter(JobEvent.event_type == "vendoo_draft").count(), 0
-        )
 
 
 class TableSizesTest(_DbTest):

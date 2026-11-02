@@ -11,26 +11,15 @@ import {
   useChatBusy,
 } from "./chat/liveChatStore";
 import { RefreshCwIcon } from "lucide-react";
-import { useVendooEnabled } from "../vendooMode";
 import { RegeneratePriceDialog } from "./RegeneratePriceDialog";
 import { Button } from "./ui/button";
 
 const CLEAR_WARNING = [
   "Clear this listing and start over?",
-  "Photos, chat, generated fields, and item details will be removed. This listing stays in the sidebar as a blank draft. If it was imported from Vendoo, that connection is kept. Anything already saved on Vendoo is not deleted.",
-].join("\n");
-
-const REGENERATE_WARNING = [
-  "Rewrite this listing from scratch?",
-  "Chat and every generated field are discarded, then the listing is written again from your photos and item details. Measurements, flaws, COG, labels and notes are kept. Vendoo is unchanged until you send again.",
-].join("\n");
-
-const CLEAR_WARNING_DIRECT = [
-  "Clear this listing and start over?",
   "Photos, chat, generated fields, and item details will be removed. This listing stays in the sidebar as a blank draft.",
 ].join("\n");
 
-const REGENERATE_WARNING_DIRECT = [
+const REGENERATE_WARNING = [
   "Rewrite this listing from scratch?",
   "Chat and every generated field are discarded, then the listing is written again from your photos and item details. Measurements, flaws, COG, labels and notes are kept.",
 ].join("\n");
@@ -39,7 +28,6 @@ export async function refreshAfterReset(queryClient: QueryClient, convId: string
   queryClient.invalidateQueries({ queryKey: ["conversations"] });
   queryClient.invalidateQueries({ queryKey: ["jobs"] });
   queryClient.invalidateQueries({ queryKey: ["fill-log"] });
-  queryClient.invalidateQueries({ queryKey: ["vendoo-item"] });
   queryClient.invalidateQueries({ queryKey: ["settings-hidden-fields"] });
   queryClient.invalidateQueries({ queryKey: ["listing-fields", convId] });
   await Promise.all([
@@ -54,7 +42,6 @@ export async function refreshAfterReset(queryClient: QueryClient, convId: string
     mutation must outlive the menu popup the click came from. */
 export function useClearListing(convId: string, onCleared?: () => void) {
   const queryClient = useQueryClient();
-  const vendooOn = useVendooEnabled();
   const reset = useMutation({
     mutationFn: () => api.conversations.reset(convId),
     onSuccess: () => {
@@ -75,7 +62,7 @@ export function useClearListing(convId: string, onCleared?: () => void) {
   return {
     isPending: reset.isPending,
     async clear() {
-      const confirmed = await confirmDialog(vendooOn ? CLEAR_WARNING : CLEAR_WARNING_DIRECT, {
+      const confirmed = await confirmDialog(CLEAR_WARNING, {
         variant: "destructive",
         confirmLabel: "Clear listing",
       });
@@ -106,7 +93,6 @@ export function RegenerateListingButton({
   onRegenerated?: () => void;
 }) {
   const queryClient = useQueryClient();
-  const vendooOn = useVendooEnabled();
   const busy = useChatBusy(convId);
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const { data: photos } = useQuery({
@@ -123,8 +109,8 @@ export function RegenerateListingButton({
   const regenerate = useMutation({
     mutationFn: async () => {
       resetChatLive(convId);
-      // The wipe can take a moment on a Vendoo-linked listing; show it as a
-      // phase in the chat instead of leaving an empty panel.
+      // The wipe can take a moment; show it as a phase in the chat instead
+      // of leaving an empty panel.
       markChatResetting(convId, true);
       await api.conversations.reset(convId, { keepInputs: true });
       // Chat must see the empty listing before it starts, or it reads the old
@@ -159,7 +145,7 @@ export function RegenerateListingButton({
   });
 
   async function confirmFullRegenerate() {
-    const confirmed = await confirmDialog(vendooOn ? REGENERATE_WARNING : REGENERATE_WARNING_DIRECT, {
+    const confirmed = await confirmDialog(REGENERATE_WARNING, {
       variant: "destructive",
       confirmLabel: "Rewrite",
     });

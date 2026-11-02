@@ -25,7 +25,6 @@ from vendoo_studio.services.sell_through import (
     pick_cohort,
     target_discount,
 )
-from vendoo_studio.services.vendoo_import import vendoo_sale
 
 
 def _sold(category="jeans", brand="levi's", first=50.0, sold=40.0, days=30, known=True):
@@ -399,38 +398,7 @@ class CollectOutcomesCostTest(unittest.TestCase):
         self.assertEqual(sorted(o.first_price for o in outcomes), [50, 51, 52, 53, 54])
 
 
-class VendooSaleTest(unittest.TestCase):
-    def test_it_reads_the_sale_record(self):
-        sale = vendoo_sale({"saleRecord": {"marketplace": "poshmark", "price_sold": 24}})
-        self.assertEqual(sale["price"], 24)
-        self.assertEqual(sale["marketplace"], "poshmark")
 
-    def test_it_falls_back_to_a_listing_sale(self):
-        item = {"listings": {"ebay": {"sales": [{"price_sold": 31}]}}}
-        self.assertEqual(vendoo_sale(item)["price"], 31)
-
-    def test_it_keeps_what_the_sale_cost(self):
-        sale = vendoo_sale({"saleRecord": {
-            "marketplace": "ebay",
-            "price_sold": 40,
-            "product_cost": 10,
-            "marketplace_fees": 6,
-            "other_fees": 0.5,
-            "shipping_cost": 7,
-            "shipping_credit": 0,
-        }})
-        self.assertEqual(sale["cost"], 10)
-        self.assertEqual(sale["fees"], 6.5)
-        self.assertEqual(sale["shippingCost"], 7)
-        self.assertEqual(sale["shippingCredit"], 0)
-
-    def test_unrecorded_fees_stay_unknown(self):
-        sale = vendoo_sale({"saleRecord": {"price_sold": 24}})
-        self.assertNotIn("fees", sale)
-        self.assertNotIn("shippingCost", sale)
-
-    def test_an_unsold_item_has_no_sale(self):
-        self.assertEqual(vendoo_sale({"listings": {"ebay": {"status": {"listed": True}}}}), {})
 
 
 class ListingAgeTest(unittest.TestCase):

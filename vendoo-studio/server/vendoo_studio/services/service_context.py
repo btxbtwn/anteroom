@@ -35,7 +35,6 @@ class ServiceContext:
     photos: Any
     catalog: Any = None
     provider_factory: Callable[[str], Any] | None = None
-    vendoo_available: bool = False
     spawned_tasks: set[Any] = field(default_factory=set, compare=False)
 
 

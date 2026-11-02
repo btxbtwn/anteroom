@@ -5,7 +5,7 @@
  * the model and effort pickers on the left and attach / send / stop on the right.
  */
 import { useWorkspaceRuntime } from "../../app/runtime";
-import { useState, type ReactNode, type RefObject } from "react";
+import { useState, type RefObject } from "react";
 import { cn } from "../../lib/utils";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { ComposerAttachButton, ComposerImageChips, type useComposerImages } from "./ComposerAttachments";
@@ -60,12 +60,8 @@ interface Props {
   onInputChange: (value: string) => void;
   placeholder: string;
   images: ReturnType<typeof useComposerImages>;
-  /** Shown above the prompt inside the surface (fields picked in the browser). */
-  header?: ReactNode;
   busy: boolean;
   stopping?: boolean;
-  /** Something besides typed text can be sent (picked browser fields). */
-  hasOtherContent?: boolean;
   onSend: () => void;
   onStop?: () => void;
   stopLabel?: string;
@@ -80,10 +76,8 @@ export function ChatComposer({
   onInputChange,
   placeholder,
   images,
-  header,
   busy,
   stopping = false,
-  hasOtherContent = false,
   onSend,
   onStop,
   stopLabel,
@@ -103,7 +97,7 @@ export function ChatComposer({
     setUsageOpen(false);
     onSend();
   };
-  const canSubmit = Boolean(input.trim() || images.images.length || hasOtherContent);
+  const canSubmit = Boolean(input.trim() || images.images.length);
   const addImages = (files: File[]) => {
     if (!runtime.features.has("chat_attachments")) return;
     if (images.addFiles(files)) composerRef.current?.focus();
@@ -138,7 +132,6 @@ export function ChatComposer({
             >
               <div data-chat-composer-body="true" className="relative px-3 pb-2 pt-3.5 sm:px-4 sm:pt-4">
                 {usageOpen ? <ComposerUsageLimits onDismiss={() => setUsageOpen(false)} /> : null}
-                {header}
                 <ComposerImageChips images={images.images} onRemove={images.remove} />
                 <ComposerPromptEditor
                   handleRef={composerRef}

@@ -1,4 +1,4 @@
-/** T3 Code-style settings categories for Vendoo Studio. */
+/** T3 Code-style settings categories for Anteroom. */
 
 export type SettingsSectionId = "general" | "listings" | "assistant" | "providers" | "connections" | "agents" | "data" | "logs" | "help";
 
@@ -68,13 +68,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["assistant", "memory", "memories", "facts", "forget", "remove"],
   },
   {
-    id: "duplicate-vendoo-links",
-    title: "Duplicate check",
-    section: "listings",
-    targetId: "duplicate-vendoo-links",
-    searchTerms: ["duplicate", "vendoo", "links", "same item"],
-  },
-  {
     id: "similar-items",
     title: "Similar items",
     section: "listings",
@@ -94,13 +87,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "general",
     targetId: "listing-names",
     searchTerms: ["sku", "sidebar", "rename", "listing title", "name by sku"],
-  },
-  {
-    id: "vendoo",
-    title: "Send to Vendoo",
-    section: "listings",
-    targetId: "vendoo",
-    searchTerms: ["vendoo", "send to vendoo", "hide vendoo", "turn off vendoo", "disable vendoo"],
   },
   {
     id: "where-you-list",
@@ -143,13 +129,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "general",
     targetId: "setup-guide",
     searchTerms: ["tutorial", "onboarding", "first run", "chatgpt", "claude", "mimo", "cursor", "brave"],
-  },
-  {
-    id: "vendoo-sync",
-    title: "Sync from Vendoo",
-    section: "data",
-    targetId: "vendoo-sync",
-    searchTerms: ["vendoo", "sync", "import", "inventory", "resync", "pull", "download"],
   },
   {
     id: "backups",
@@ -237,7 +216,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: "chrome",
-    title: "Vendoo in Chrome",
+    title: "Chrome",
     section: "connections",
     targetId: "connections",
     searchTerms: ["extension", "connect chrome", "browser"],
@@ -248,13 +227,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "connections",
     targetId: "extension-folder",
     searchTerms: ["load unpacked", "chrome extensions", "developer mode"],
-  },
-  {
-    id: "category-trees",
-    title: "Marketplace category trees",
-    section: "connections",
-    targetId: "category-trees",
-    searchTerms: ["categories", "extract", "sync", "taxonomy"],
   },
   {
     id: "accounts",
@@ -306,13 +278,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["error", "warning", "failed", "problem", "log", "debug", "crash"],
   },
   {
-    id: "vendoo-api-logs",
-    title: "Vendoo API logs",
-    section: "logs",
-    targetId: "vendoo-api-logs",
-    searchTerms: ["api", "request", "http", "live", "log", "vendoo", "debug", "troubleshooting"],
-  },
-  {
     id: "help",
     title: "How-to guides",
     section: "help",
@@ -320,21 +285,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["help", "how to", "guide", "steps", "instructions", "faq"],
   },
 ];
-
-const VENDOO_ONLY_SEARCH_IDS = new Set([
-  "duplicate-vendoo-links",
-  "vendoo-api-logs",
-  "category-trees",
-  "vendoo-sync",
-]);
-
-/** Search rows that only exist while Send to Vendoo is on. The switch itself stays. */
-export function settingsSearchItemsForMode(vendooOn: boolean): readonly SettingsSearchItem[] {
-  if (vendooOn) return SETTINGS_SEARCH_ITEMS;
-  return SETTINGS_SEARCH_ITEMS
-    .filter((item) => !VENDOO_ONLY_SEARCH_IDS.has(item.id))
-    .map((item) => (item.id === "chrome" ? { ...item, title: "Chrome" } : item));
-}
 
 function normalize(text: string): string {
   return text.trim().toLowerCase().replace(/\s+/g, " ");

@@ -1,28 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { inventoryStatus, listedFromImport, marketplaceStatusesFromDraft, statusHint, withDirectListings } from "./sidebar/listingStatus";
+import { inventoryStatus, listedFromImport, statusHint, withDirectListings } from "./sidebar/listingStatus";
 
 describe("statusHint", () => {
-  it("says where each Vendoo label comes from", () => {
+  it("explains each inventory status", () => {
     expect(statusHint("draft")).toBe("Not listed on any marketplace");
     expect(statusHint("active")).toBe("Listed on a marketplace");
     expect(statusHint("sold")).toBe("Sold");
-  });
-
-  it("explains the states Studio itself causes", () => {
-    expect(statusHint("failed")).toBe("The last send to Vendoo failed");
-    expect(statusHint("listing")).toBe("Anteroom is sending this listing to Vendoo");
+    expect(statusHint("failed")).toBe("The last send failed");
+    expect(statusHint("listing")).toBe("Anteroom is sending this listing");
     expect(statusHint("in_progress")).toBe("Anteroom is working on this listing");
   });
 
-  it("still names Vendoo for a status it does not know", () => {
-    expect(statusHint("some_new_state")).toBe("some new state · follows Vendoo");
-  });
-
-  it("drops the Vendoo clause when Send to Vendoo is off", () => {
-    expect(statusHint("failed", false)).toBe("The last send failed");
-    expect(statusHint("listing", false)).toBe("Anteroom is sending this listing");
-    expect(statusHint("draft", false)).toBe("Not listed on any marketplace");
-    expect(statusHint("some_new_state", false)).toBe("some new state");
+  it("spells out a status it does not know", () => {
+    expect(statusHint("some_new_state")).toBe("some new state");
   });
 });
 
@@ -50,39 +40,6 @@ describe("listedFromImport", () => {
 
   it("has nothing to say for a listing that was never imported", () => {
     expect(listedFromImport({})).toEqual([]);
-  });
-});
-
-describe("marketplaceStatusesFromDraft", () => {
-  it("shows a direct listing as listed when the nav says not listed", () => {
-    const rows = marketplaceStatusesFromDraft({
-      statuses: {
-        ebay: "NOT LISTED",
-        etsy: "NOT LISTED",
-        poshmark: "NOT LISTED",
-        mercari: "NOT LISTED",
-        depop: "NOT LISTED",
-        sellwild: "NOT LISTED",
-      },
-      item: {
-        listings: {
-          ebay: { status: { notListed: true } },
-          mercari: { status: { listed: true } },
-        },
-        externalListings: {
-          poshmark: { status: { listed: true } },
-          sellwild: { status: { listed: true } },
-        },
-      },
-    });
-    expect(rows.filter((row) => row.id !== "general").map((row) => [row.id, row.status])).toEqual([
-      ["ebay", "NOT LISTED"],
-      ["etsy", "NOT LISTED"],
-      ["poshmark", "LISTED"],
-      ["mercari", "LISTED"],
-      ["depop", "NOT LISTED"],
-      ["sellwild", "LISTED"],
-    ]);
   });
 });
 

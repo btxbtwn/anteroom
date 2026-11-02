@@ -395,7 +395,7 @@ def card_condition(listing: dict, category_id: str) -> tuple[str, list[dict]] | 
 
 
 def ebay_category_id(listing: dict) -> str:
-    """The eBay tab's own category. Vendoo's eBay category is Send to Vendoo's alone."""
+    """The eBay tab's own category. Historical imported category ids are not eBay taxonomy ids."""
     from vendoo_studio.services.direct_categories import direct_category_id
 
     category = direct_category_id(listing, "ebay")

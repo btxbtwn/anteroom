@@ -4,9 +4,9 @@ import { expect, it } from "vitest";
 import { WorkspaceRuntimeProvider } from "../../app/runtime";
 import { SettingsPage } from "../SettingsPage";
 
-it("opens the shared listing controls in the hosted workspace without Vendoo automation setup", () => {
+it("opens the shared listing controls in the hosted workspace", () => {
   const client = new QueryClient();
-  client.setQueryData(["settings-ui"], { vendoo_enabled: false, recent_vendoo_labels: ["Closet"], label_colors: { Closet: "teal" }, stale_listing_days: 45 });
+  client.setQueryData(["settings-ui"], { recent_vendoo_labels: ["Closet"], label_colors: { Closet: "teal" }, stale_listing_days: 45 });
   client.setQueryData(["listing-templates"], { templates: [] });
   client.setQueryData(["settings-marketplaces"], { available: [{ id: "depop", label: "Depop", fillable: true }], selected: ["depop"] });
   client.setQueryData(["settings-package-dimensions"], { length: 12, width: 10, height: 3 });

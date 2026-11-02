@@ -136,7 +136,7 @@ def test_native_fill_discards_evidence_if_photos_change_while_loading_forms(draf
 
 
 def test_category_selection_cannot_overwrite_a_newer_seller_edit(draft, monkeypatch):
-    from vendoo_studio.services import schema_probe
+    from vendoo_studio.services import generation_schema
 
     db, conv_id = draft
     listings = ListingRepo(db)
@@ -151,7 +151,7 @@ def test_category_selection_cannot_overwrite_a_newer_seller_edit(draft, monkeypa
     monkeypatch.setattr("vendoo_studio.services.marketplaces.selected_fillable_platforms", lambda: [])
     monkeypatch.setattr("vendoo_studio.services.direct_categories.attach_direct_categories", AsyncMock())
     with pytest.raises(RevisionConflict):
-        asyncio.run(schema_probe.prepare_generation_schema(db, conv_id, object(), "Cotton tee", ""))
+        asyncio.run(generation_schema.prepare_generation_schema(db, conv_id, object(), "Cotton tee", ""))
     assert listings.get_revisions(conv_id)[0].listing_json == seller
     assert len(listings.get_revisions(conv_id)) == 2
 

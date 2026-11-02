@@ -17,8 +17,6 @@ from vendoo_studio.services.seller_overrides import (
     marketplace_text,
     prepare_user_listing,
 )
-from vendoo_studio.services.vendoo_item_build import _listing_section
-from vendoo_studio.services.vendoo_item_update import apply_update_all
 
 
 class IndependentFormsTest(unittest.TestCase):
@@ -95,18 +93,6 @@ class IndependentFormsTest(unittest.TestCase):
         self.assertEqual(aspects["Size"], ["L"])
         self.assertEqual(aspects["Brand"], ["Nike"])
 
-    def test_vendoo_keeps_a_marketplace_title_and_still_fills_the_others_from_general(self):
-        general = {"title": "General", "description": "About it", "quantity": "1"}
-        ebay = _listing_section("ebay", {"title": "General", "description": "About it", "ebay_specifics": {"title": "eBay only"}}, general)
-        depop = _listing_section("depop", {"title": "General", "description": "About it"}, general)
-        self.assertEqual(ebay["overrides"]["title"], "eBay only")
-        self.assertNotIn("title", depop["overrides"])
-        current = {"generalDetails": general, "listings": {"ebay": {"overrides": {}}, "depop": {"overrides": {"quantity": "1"}}}}
-        desired = {"generalDetails": general, "listings": {"ebay": ebay, "depop": depop}}
-        apply_update_all(current, desired)
-        self.assertEqual(desired["listings"]["ebay"]["overrides"]["title"], "eBay only")
-        self.assertEqual(desired["listings"]["depop"]["overrides"]["title"], "General")
-        self.assertEqual(desired["listings"]["depop"]["overrides"]["description"], "About it")
 
     def test_setting_an_override_back_to_general_makes_that_field_follow_again(self):
         previous = {

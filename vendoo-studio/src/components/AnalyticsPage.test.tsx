@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { InventoryAnalytics, VendooBulkImport } from "../api/types";
+import type { InventoryAnalytics } from "../api/types";
 import { InventoryAnalyticsView } from "./AnalyticsPage";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
@@ -17,7 +17,7 @@ const sales = {
 };
 const data: InventoryAnalytics = {
   range: "30d", undated_sales: 1, periods_truncated: false,
-  last_updated_at: "2026-10-05T12:30:00Z", incomplete_sales: [],
+  incomplete_sales: [],
   inventory: { active: 1, draft: 0, sold: 2, failed: 0, working: 0, asking_value: 60, cost_value: 8, cost_known: 1, stale_count: 1, stale_value: 60, undated_count: 0 },
   sell_through_rate: 66.7,
   sales,
@@ -55,40 +55,18 @@ const data: InventoryAnalytics = {
   ads: { spend: 0, profit: 50, profit_after_ads: 50, marketplaces: [] },
 };
 
-function render(
-  payload: InventoryAnalytics,
-  run: Partial<VendooBulkImport> = { running: false },
-  starting = false,
-  vendooOn = true,
-) {
-  useMutation.mockReturnValue({ mutate: vi.fn(), isPending: starting });
-  useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) =>
-    queryKey[0] === "vendoo-bulk-import" ? { data: run }
-      : queryKey[0] === "settings-ui" ? { data: { vendoo_enabled: vendooOn } }
-      : { data: payload, isLoading: false, isError: false, isFetching: false },
-  );
+function render(payload: InventoryAnalytics) {
+  useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
+  useQuery.mockImplementation(() => ({ data: payload, isLoading: false, isError: false, isFetching: false }));
   return renderToStaticMarkup(<InventoryAnalyticsView onOpenListing={vi.fn()} />);
 }
 
 describe("InventoryAnalyticsView", () => {
-  it("shows the last completed Vendoo sync and offers a real resync", () => {
+  it("shows current inventory without an obsolete sync timestamp", () => {
     const html = render(data);
-    expect(html).toContain("Last updated on");
-    expect(html).toContain('dateTime="2026-10-05T12:30:00Z"');
-    expect(html).toContain("Resync Vendoo data");
-    expect(html).not.toContain("Refresh</button>");
-    expect(render({ ...data, last_updated_at: null })).toContain("Last updated on: not recorded yet.");
-  });
-
-  it("shows sync progress and a stop control instead of starting a second sync", () => {
-    const html = render(data, { running: true, total: 20, processed: 5, photos: 2 });
-    expect(html).toContain("Syncing 5 of 20 · 2 photos");
-    expect(html).toContain('role="status"');
-    expect(html).toContain("Stop</button>");
-    expect(html).not.toContain("Resync Vendoo data</button>");
-    const pending = render(data, { running: false }, true);
-    expect(pending).toContain('aria-busy="true" disabled=""');
-    expect(pending).toContain("Starting sync…");
+    expect(html).toContain("Current inventory:");
+    expect(html).not.toContain("Vendoo");
+    expect(html).not.toContain("Last updated on");
   });
 
   it("reminds the seller to complete missing sales details across all time", () => {
@@ -99,11 +77,8 @@ describe("InventoryAnalyticsView", () => {
     expect(html).toContain("2 sales need sales data");
     expect(html).toContain("Across all time");
     expect(html).toContain("Add missing amounts in Sales records");
-    expect(render({ ...data, incomplete_sales: [
-      { id: "s1", conversation_id: "undated", title: "Undated jacket", missing: ["sale date"] },
-    ] }, { running: false }, false, false)).toContain("Add missing amounts in Sales records");
-    expect(render(data, { running: false }, false, false)).not.toContain("Resync Vendoo data");
-    expect(render(data, { running: false }, false, false)).toContain("Track sales performance and find inventory that needs attention.");
+    expect(render(data)).toContain("Track sales performance and find inventory that needs attention.");
+
     expect(html).toContain("Undated jacket");
     expect(html).toContain("Missing sale date, sale price, fees");
     expect(html).toContain("Old boots");

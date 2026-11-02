@@ -78,7 +78,7 @@ it("warms every read the listing screen makes on open", async () => {
   vi.spyOn(api.conversations, "messages").mockResolvedValue([]);
   const jobs = vi.spyOn(api.jobs, "list").mockResolvedValue([]);
   const activity = vi.spyOn(api.conversations, "activity").mockResolvedValue({ busy: false } as never);
-  const fields = vi.spyOn(api.vendooApi, "listingFields").mockResolvedValue({ forms: [] } as never);
+  const fields = vi.spyOn(api.listings, "fields").mockResolvedValue({ forms: [] } as never);
   const live = vi.spyOn(api.marketplaceListings, "get").mockResolvedValue({} as never);
   const native = vi.spyOn(api.nativeMarketplaces, "status").mockResolvedValue({} as never);
   const sales = vi.spyOn(api.marketplaceSales, "list").mockResolvedValue([] as never);

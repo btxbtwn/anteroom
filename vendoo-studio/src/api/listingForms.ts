@@ -19,7 +19,7 @@ export function nativeFormOptions(convId: string, tab: string, listing: ListingD
 export function prefetchListingForm(client: QueryClient, convId: string, tab: string, listing: ListingData, revisionId: string) {
   if (DIRECT_FORM_MARKETS.has(tab)) return client.prefetchQuery(nativeFormOptions(convId, tab, listing, revisionId));
   return Promise.all([
-    client.prefetchQuery({ queryKey: ["listing-fields", convId], queryFn: () => api.vendooApi.listingFields(convId), staleTime: Infinity, retry: false }),
+    client.prefetchQuery({ queryKey: ["listing-fields", convId], queryFn: () => api.listings.fields(convId), staleTime: Infinity, retry: false }),
     client.prefetchQuery({ queryKey: ["catalog-dropdown-options"], queryFn: api.catalog.dropdownOptions, staleTime: Infinity, retry: false }),
   ]);
 }

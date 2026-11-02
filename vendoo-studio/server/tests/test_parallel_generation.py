@@ -291,60 +291,6 @@ class GenerationTimingTest(unittest.TestCase):
         self.assertEqual(summary["median_total_sec"], 40.0)
 
 
-class ParallelSpecificsFillTest(unittest.TestCase):
-    def test_each_marketplace_fills_concurrently_and_merges_once(self):
-        from vendoo_studio.services import specifics_fill
-
-        fields = {
-            "ebay": _specs(Department=(["Women", "Men"], True, False)),
-            "poshmark": _specs(Style=(["Tee", "Tank"], True, False)),
-        }
-        running = 0
-        peak = 0
-        asked: list[set[str]] = []
-
-        async def reply(provider, *, listing, gaps, evidence):
-            nonlocal running, peak
-            asked.append({gap["marketplace"] for gap in gaps})
-            running += 1
-            peak = max(peak, running)
-            await asyncio.sleep(0.02)
-            running -= 1
-            marketplace = gaps[0]["marketplace"]
-            value = "Women" if marketplace == "ebay" else "Tee"
-            # A stray answer for another marketplace must not land.
-            stray = {"marketplace": "poshmark" if marketplace == "ebay" else "ebay",
-                     "field": "Department" if marketplace == "poshmark" else "Style", "value": "Men"}
-            return [{"marketplace": marketplace, "field": gaps[0]["field"], "value": value}, stray]
-
-        with mock.patch("vendoo_studio.services.listing_field_gaps._request_missing_field_values", reply):
-            listing, remaining = asyncio.run(specifics_fill.fill_listing_specifics(
-                {"title": "Tee"}, fields, provider=object(),
-            ))
-        self.assertEqual(remaining, [])
-        self.assertEqual(peak, 2)
-        self.assertEqual(sorted(map(sorted, asked)), [["ebay"], ["poshmark"]])
-        self.assertEqual(listing["title"], "Tee")
-        self.assertEqual(listing["ebay_specifics"]["department"], "Women")
-        self.assertEqual(listing["poshmark_specifics"]["style"], "Tee")
-
-    def test_one_marketplace_failing_keeps_the_others(self):
-        from vendoo_studio.services import specifics_fill
-
-        fields = {
-            "ebay": _specs(Department=(["Women", "Men"], True, False)),
-            "poshmark": _specs(Style=(["Tee", "Tank"], True, False)),
-        }
-
-        async def reply(provider, *, listing, gaps, evidence):
-            if gaps[0]["marketplace"] == "ebay":
-                raise RuntimeError("model down")
-            return [{"marketplace": "poshmark", "field": "Style", "value": "Tee"}]
-
-        with mock.patch("vendoo_studio.services.listing_field_gaps._request_missing_field_values", reply):
-            listing, remaining = asyncio.run(specifics_fill.fill_listing_specifics({}, fields, provider=object()))
-        self.assertEqual(listing["poshmark_specifics"]["style"], "Tee")
-        self.assertEqual([(row["marketplace"], row["field"]) for row in remaining], [("ebay", "Department")])
 
 
 def _specs(**fields):
@@ -365,38 +311,6 @@ def _specs(**fields):
     return normalize_specifics(raw)
 
 
-class ApplyResolvedFieldsTest(unittest.TestCase):
-    def resolved(self):
-        from vendoo_studio.services.vendoo_create import ResolvedFields
-
-        return ResolvedFields(
-            paths={"general": "Women > Tops", **{key: "" for key in ("ebay", "etsy", "poshmark", "mercari", "depop", "grailed", "vinted", "facebook", "sellwild")}},
-            listing={
-                "category_path": "Women > Tops",
-                "category_id": "g1",
-                "marketplace_category_ids": {"ebay": "e1"},
-                "ebay_specifics": {"categoryId": "e1", "categoryPath": ["Women", "Tops"]},
-            },
-            specifics={},
-            unresolved=[],
-        )
-
-    def test_carries_leaf_ids_onto_the_gap_filled_listing(self):
-        from vendoo_studio.services.vendoo_create import apply_resolved_fields
-
-        filled = {"category_path": "Women > Tops", "ebay_specifics": {"material": "Cotton"}}
-        applied = apply_resolved_fields(filled, self.resolved())
-        self.assertEqual(applied["category_id"], "g1")
-        self.assertEqual(applied["marketplace_category_ids"], {"ebay": "e1"})
-        self.assertEqual(applied["ebay_specifics"], {
-            "material": "Cotton", "categoryId": "e1", "categoryPath": ["Women", "Tops"],
-        })
-        self.assertNotIn("category_id", filled)
-
-    def test_changed_categories_need_a_fresh_resolution(self):
-        from vendoo_studio.services.vendoo_create import apply_resolved_fields
-
-        self.assertIsNone(apply_resolved_fields({"category_path": "Men > Shirts"}, self.resolved()))
 
 
 if __name__ == "__main__":
