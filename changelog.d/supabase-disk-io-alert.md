@@ -1,1 +1,0 @@
-- Reduce database work when loading your jobs list, while keeping saved listing copies available for jobs.
