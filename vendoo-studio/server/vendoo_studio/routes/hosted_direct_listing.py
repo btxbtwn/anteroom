@@ -1,13 +1,13 @@
 """List, update and delist from the web: eBay and Etsy through their APIs, and
-Poshmark, Mercari, Depop and Vinted through the seller's own Chrome.
+Poshmark, Mercari, Depop, Vinted and Sellwild through the seller's own Chrome.
 
 These are the desktop handlers, run in the signed-in seller's context with
 their own tokens. Every action is one the seller starts: List and Update carry
 ``confirm``, Delist names its marketplaces and carries ``confirm``, and nothing
 here runs on a timer or a retry. Chrome actions go through the seller's
 signed-in Anteroom tab (``services/hosted_browser_relay.py``), and so do the
-reads of Vinted's own categories and brands. Sellwild follows once its form is
-on the web.
+reads of Vinted's own categories and brands and of the seller's Sellwild
+account choices.
 """
 from typing import Literal
 
@@ -20,8 +20,8 @@ from vendoo_studio.routes import marketplace_listings, native_marketplaces
 from vendoo_studio.routes.vendoo_api import leaf_form
 from vendoo_studio.services.native_marketplaces import NAMES, CheckRequest, ListRequest
 
-ACTION_MARKETPLACES = ('ebay', 'etsy', 'poshmark', 'mercari', 'depop', 'vinted')
-Direct = Literal['ebay', 'etsy', 'poshmark', 'mercari', 'depop', 'vinted']
+ACTION_MARKETPLACES = ('ebay', 'etsy', 'poshmark', 'mercari', 'depop', 'vinted', 'sellwild')
+Direct = Literal['ebay', 'etsy', 'poshmark', 'mercari', 'depop', 'vinted', 'sellwild']
 PREFIX = '/api/conversations/{conv_id}'
 
 router = APIRouter()
@@ -32,6 +32,7 @@ for path, handler, methods in (
     ('/marketplace-listings/sold', marketplace_listings.record_sale, ['POST']),
     ('/native-marketplaces/vinted/categories', native_marketplaces.vinted_categories, ['GET']),
     ('/native-marketplaces/vinted/brands', native_marketplaces.vinted_brands, ['GET']),
+    ('/native-marketplaces/sellwild/options', native_marketplaces.sellwild_options, ['GET']),
 ):
     router.add_api_route(PREFIX + path, handler, methods=methods)
 
@@ -77,7 +78,7 @@ async def delist(conv_id: str, body: marketplace_listings.DelistRequest, db: Ses
     browser_only = [name for name in body.marketplaces if name not in ACTION_MARKETPLACES]
     if browser_only:
         names = ', '.join(NAMES.get(name, name) for name in browser_only)
-        raise HTTPException(409, f'Delist from {names} in the Mac app for now. The web app delists from eBay, Etsy, Poshmark, Mercari, Depop and Vinted.')
+        raise HTTPException(409, f'Delist from {names} in the Mac app for now. The web app delists from eBay, Etsy, Poshmark, Mercari, Depop, Vinted and Sellwild.')
     return await marketplace_listings.delist(conv_id, body, db)
 
 

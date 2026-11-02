@@ -72,6 +72,7 @@ hosted API to Anteroom Bridge (`services/hosted_browser_relay.py`,
 | `job.cancel` | `marketplace.actions` | the operation | `job_id` | none awaited |
 | `marketplace.vinted_categories` | `vinted.choices` | `null` | none | `{ok, options}` or `{ok: false, error_code}` |
 | `marketplace.vinted_brands` | `vinted.choices` | `null` | `query` (≤100), `category` (≤1000) | `{ok, options}` or `{ok: false, error_code}` |
+| `marketplace.sellwild_account` | `sellwild.account` | `null` | none | `{ok, ship_from, default_parcel, coupons}` or `{ok: false, error_code}` |
 
 A read's `error_code` is one of `signed_out`, `challenge`, `rate_limited`,
 `schema_drift` or `network`; the marketplace's own words stay in Chrome.

@@ -11,7 +11,8 @@ List, Update or Save draft (``marketplace.execute``), reading what one did
 (``marketplace.result``), a confirmed Delist (``marketplace.delete``), and
 cancelling one (``job.cancel``). Besides those, a few named reads fill the
 seller's editor with their marketplace account's own choices, the ones the Mac
-reads in its private account windows (Vinted's categories and brands). Each is
+reads in its private account windows (Vinted's categories and brands, and
+Sellwild's address, discounts and package). Each is
 a fixed command with fixed inputs; none takes a URL or a script. A command
 waits in the relay only while the tab is answering; when no tab has asked
 recently, Chrome counts as disconnected and the action is refused before it
@@ -30,13 +31,16 @@ from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, Rep
 # Each named read has its own Bridge capability, so a later read never changes
 # what an existing name promises (docs/cloud-extension.md).
 VINTED_CHOICES = "vinted.choices"
+SELLWILD_ACCOUNT = "sellwild.account"
 # The Bridge version that first declares each capability, and what it lets the web do.
-NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices")}
+NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
+         SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices")}
 
 # Each command, and the capability the Bridge must declare to receive it.
 COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
             "marketplace.delete": MARKETPLACE_ACTIONS, "job.cancel": MARKETPLACE_ACTIONS,
-            "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES}
+            "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES,
+            "marketplace.sellwild_account": SELLWILD_ACCOUNT}
 # A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
 CONTRACT = ("type", "job_id", "message_id", "payload")
 # The page asks again as soon as it answers, and at least this often while idle.

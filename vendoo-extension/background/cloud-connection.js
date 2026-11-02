@@ -7,7 +7,7 @@
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
   const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);
   // What a relaying Bridge runs: marketplace actions, and each named read under its own name.
-  const RELAY_CAPABILITIES = ['marketplace.actions', 'vinted.choices'];
+  const RELAY_CAPABILITIES = ['marketplace.actions', 'vinted.choices', 'sellwild.account'];
 
   function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null, runCommand = null } = {}) {
     // Serializing state changes prevents two tabs from overwriting each other's
