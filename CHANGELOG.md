@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.662 — 2026-11-02
+
+- Behind the scenes, retired panels and unused interface helpers have been removed, and the unused-code check now runs without exceptions.
+
 ## 0.1.661 — 2026-11-02
 
 - Show imported Vendoo sale amounts, fees and profit in Sales records and sales CSV exports, without counting matching marketplace orders twice.
