@@ -146,3 +146,16 @@ endpoints and do not claim the listing-action lock.
 Bridge 0.2.43 adds `marketplace.sellwild_account` under `sellwild.account`: the
 three GETs Sellwild's sell page makes for the Shipping From card, the seller's
 discounts and the profile's package, returned as those three values only.
+
+Bridge 0.2.44 adds `marketplace.sessions` and `marketplace.connect` under the
+capability `marketplace.sessions`, for Settings → Connections on the web. The
+first returns each Chrome marketplace's sign-in state, expiry and account label,
+as the Mac's Connections shows them. The second runs only when the seller
+chooses Sign in: it takes one marketplace from a fixed list and opens that
+marketplace's own sign-in page in Chrome, exactly as the Mac's Sign in does, and
+waits while a listing action is running.
+
+Bridge 0.2.45 adds `marketplace.listing_state` under `facebook.listing`, for
+Check on Facebook on the web. It takes `marketplace: "facebook"` and one numeric
+listing id, reads that listing's page as the Mac's check does, and returns its
+state and whether it is on the signed-in account. Nothing on Facebook changes.

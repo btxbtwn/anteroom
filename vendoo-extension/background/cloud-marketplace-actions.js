@@ -1,8 +1,16 @@
-// Read-only choices for the seller's editor, from their own marketplace sessions.
+// Named commands other than marketplace actions: read-only choices for the seller's
+// editor and Connections, from their own marketplace sessions, and opening a sign-in page.
 const CLOUD_READS = {
   'marketplace.vinted_categories': async () => ({ options: await vintedCategoryOptions() }),
   'marketplace.vinted_brands': async ({ query, category }) => ({ options: await vintedBrandOptions({ query, category }) }),
   'marketplace.sellwild_account': async () => sellwildAccountChoices(Date.now() + 25000),
+  // Settings → Connections: sign-in status only, never cookie or token values.
+  'marketplace.sessions': async () => ({ sessions: await readExtensionSessions() }),
+  // The seller asked to sign in: open that marketplace's sign-in page in this Chrome, as the Mac does.
+  'marketplace.connect': ({ marketplace }) => new Promise(resolve => handleMarketplaceConnect({ payload: { marketplace } }, resolve)),
+  // Check on Facebook: one linked listing's own page, read as the Mac reads it. Nothing on Facebook changes.
+  'marketplace.listing_state': ({ marketplace, listing_id }) =>
+    new Promise(resolve => handleMarketplaceListingState({ payload: { marketplace, listing_id } }, resolve)),
 };
 const CLOUD_READ_ERRORS = new Set(['signed_out', 'challenge', 'rate_limited', 'schema_drift', 'network']);
 
