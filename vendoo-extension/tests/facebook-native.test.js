@@ -94,6 +94,17 @@ test('a listing check names one Facebook listing and waits for a running action'
   assert.deepEqual(results.at(-1), { ok: true, state: 'live', owner: 'you' });
 });
 
+// Check on Facebook from the web reaches the same read through the seller's connected Anteroom tab.
+test('a relayed Facebook check reads the same listing page and answers the hosted API', async () => {
+  const { c, calls, results } = worker({ pages: { [LISTING]: itemPage(LISTING) } });
+  const id = 'e'.repeat(32);
+  const reply = await c.runCloudMarketplaceCommand({ type: 'marketplace.listing_state', job_id: null, message_id: id,
+    payload: { request_id: id, marketplace: 'facebook', listing_id: LISTING } }, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(reply)), { ok: true, state: 'live', owner: 'you' });
+  assert.equal(calls.length, 1);
+  assert.equal(results.length, 0);
+});
+
 test('a sale pass reads a few listings, reports the seller\'s own sold ones, and never retries a page', async () => {
   const ids = Array.from({ length: 8 }, (_, index) => `${LISTING.slice(0, -1)}${index}`);
   const pages = Object.fromEntries(ids.map(id => [id, itemPage(id)]));
