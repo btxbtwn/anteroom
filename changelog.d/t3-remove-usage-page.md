@@ -1,0 +1,1 @@
+- Remove the Usage page from the sidebar, the phone menu and the iPhone app. Type /usage-limits in a chat to see how much of your plan is left.
