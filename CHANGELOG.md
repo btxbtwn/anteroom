@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.672 — 2026-11-02
+
+- Remove Facebook Marketplace: no Facebook tab, Check on Facebook, sign-in row or sale checks. Past Facebook sales stay in Sales records and Analytics.
+
 ## 0.1.671 — 2026-11-02
 
 - Assistant answers on the web keep their progress across a disconnected tab. If a server restart interrupts an answer, you can retry the saved question.
