@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.684 — 2026-11-02
+
+- Show the Missing sale data badge on sold inventory in the web app, and clear it after you record the missing amounts.
+
 ## 0.1.683 — 2026-11-02
 
 - Let concurrent website requests share Supabase database connections through transaction pooling, with session-dependent prepared statements disabled.

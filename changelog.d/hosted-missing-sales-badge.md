@@ -1,1 +1,0 @@
-- Show the Missing sale data badge on sold inventory in the web app, and clear it after you record the missing amounts.
