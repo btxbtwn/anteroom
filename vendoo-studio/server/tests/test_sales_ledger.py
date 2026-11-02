@@ -23,6 +23,11 @@ from vendoo_studio.services import marketplace_accounts
 
 @pytest.fixture
 def ledger(monkeypatch):
+    from vendoo_studio.services import user_settings
+
+    settings = {}
+    monkeypatch.setattr(user_settings, "read_settings", lambda: settings.copy())
+    monkeypatch.setattr(user_settings, "update_settings", lambda mutate: mutate(settings))
     load_models()
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
@@ -104,7 +109,7 @@ def imported_sale(ledger, **changes):
     ledger.db.commit()
 
 
-def test_vendoo_amounts_appear_on_matching_order_without_writing_to_ledger(ledger):
+def test_vendoo_amounts_are_frozen_on_matching_order(ledger):
     imported_sale(ledger)
     row = report(ledger)["rows"][0]
     assert row["financials"]["fees"] == "6.25"
@@ -114,7 +119,7 @@ def test_vendoo_amounts_appear_on_matching_order_without_writing_to_ledger(ledge
     analytics_sale = next(item for item in load_rows(ledger.db) if item.sale_id == ledger.sale.id)
     assert float(row["profit"]) == round(analytics_sale.profit, 2)
     assert record(ledger)["financials"] == row["financials"]
-    assert ledger.sale.financials is None
+    assert ledger.sale.financials["source"] == "vendoo"
     assert report(ledger)["summary"]["lines"] == 1
 
 
@@ -129,7 +134,46 @@ def test_vendoo_only_sale_is_visible_in_records_and_csv(ledger):
     csv_response = ledger.client.get("/api/sales-ledger/export/sales.csv", params={**filters(), "marketplace": "poshmark"})
     exported = list(csv.DictReader(StringIO(csv_response.text.lstrip("\ufeff"))))
     assert len(exported) == 1 and exported[0]["profit"] == "30.15"
-    assert ledger.db.query(MarketplaceSale).count() == 1
+    assert ledger.db.query(MarketplaceSale).count() == 2
+
+
+def test_frozen_vendoo_sale_does_not_read_later_note_changes(ledger):
+    imported_sale(ledger, marketplace="poshmark")
+    original = report(ledger, marketplace="poshmark")["rows"][0]
+    imported_sale(ledger, marketplace="poshmark", fees=999, price=999)
+    frozen = report(ledger, marketplace="poshmark")["rows"][0]
+    assert frozen["financials"] == original["financials"]
+    assert frozen["id"] == original["id"]
+    assert ledger.db.query(MarketplaceSale).count() == 2
+
+
+def test_marketplace_order_keeps_seller_corrections_when_replacing_manual_sale(ledger):
+    from decimal import Decimal
+
+    from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+    from vendoo_studio.services.order_history import Line, Order, save_orders
+
+    slug = "shop-wool-coat-136d"
+    ledger.sale.marketplace = "depop"
+    ledger.sale.source = "seller"
+    ledger.sale.listing_id = slug
+    ledger.db.commit()
+    MarketplaceListingRepo(ledger.db).save("coat", "depop", {
+        "state": "published", "listing_url": f"https://www.depop.com/products/{slug}/",
+    })
+    assert save(ledger).status_code == 200
+    corrected = dict(ledger.sale.financials)
+    order = Order("receipt", "paid", False, datetime.now(UTC).replace(tzinfo=None), "USD",
+                  {field: Decimal("1") for field in
+                   ("item_revenue", "shipping_credit", "refunds", "fees", "shipping_cost")},
+                  (Line("receipt-line", slug, (), Decimal("1"), None),))
+    result = save_orders(ledger.db, "depop", [order], datetime.now(UTC).replace(tzinfo=None))
+    assert result["replaced"] == 1
+    sale = ledger.db.query(MarketplaceSale).one()
+    assert sale.order_id == "receipt"
+    assert sale.financials["source"] == "seller"
+    for field in ("item_revenue", "fees", "item_cost", "shipping_cost"):
+        assert sale.financials[field] == corrected[field]
 
 
 def test_local_financials_take_precedence_and_missing_vendoo_fees_stay_unknown(ledger):
@@ -156,11 +200,11 @@ def test_imported_sale_is_editable_locally_and_preserves_corrections(ledger):
     imported_sale(ledger, marketplace="poshmark")
     row = report(ledger, marketplace="poshmark")["rows"][0]
     result = ledger.client.put(f"/api/sales-ledger/{row['id']}/financials", json={
-        **row["financials"], "expected_revision": 0, "expected_order_basis": row["order_basis"],
+        **row["financials"], "expected_revision": row["financial_revision"], "expected_order_basis": row["order_basis"],
     })
     assert result.status_code == 200, result.text
     assert result.json()["profit"] == "30.15"
-    assert result.json()["financial_revision"] == 1
+    assert result.json()["financial_revision"] == row["financial_revision"] + 1
     assert ledger.db.query(MarketplaceSale).count() == 2
     assert ledger.client.put(f"/api/sales-ledger/{row['id']}/financials", json={
         **row["financials"], "expected_revision": 0, "expected_order_basis": row["order_basis"],
@@ -201,7 +245,7 @@ def test_import_dates_are_filtered_in_utc_and_unknown_dates_are_flagged(ledger):
     rows = report(ledger, start="2020-01-02", end="2020-01-02")["rows"]
     assert len(rows) == 1 and rows[0]["sold_at"] == "2020-01-02T05:30:00+00:00"
     imported_sale(ledger, soldAt=None)
-    assert "sale date" in record(ledger)["missing_sale_data"]
+    assert record(ledger)["sold_at"] == rows[0]["sold_at"]
 
 
 def test_imported_sale_can_fill_missing_amounts_and_date_without_vendoo(ledger):
@@ -213,7 +257,7 @@ def test_imported_sale_can_fill_missing_amounts_and_date_without_vendoo(ledger):
     row = report(ledger, marketplace="poshmark")["rows"][0]
     response = ledger.client.put(f"/api/sales-ledger/{row['id']}/financials", json={
         **row["financials"], "fees": "8", "sold_on": "2020-03-04",
-        "expected_revision": 0, "expected_order_basis": row["order_basis"],
+        "expected_revision": row["financial_revision"], "expected_order_basis": row["order_basis"],
     })
     assert response.status_code == 200, response.text
     saved = response.json()
@@ -234,7 +278,7 @@ def test_imported_sale_rejects_changes_from_an_outdated_import(ledger):
         **row["financials"], "expected_revision": 0, "expected_order_basis": row["order_basis"],
     })
     assert result.status_code == 409
-    assert ledger.db.query(MarketplaceSale).count() == 1
+    assert ledger.db.query(MarketplaceSale).count() == 2
 
 
 def test_local_unknown_amounts_are_not_replaced_with_old_imported_amounts(ledger):

@@ -39,7 +39,15 @@ and delisting cannot enter this queue. The hosted draft worker is enabled in the
 The branch now mounts the canonical provider-key/model settings, analytics,
 sales ledger/CSV exports, sale calendar, box records, and photo-edit handlers.
 Hosted API-key providers use Vault and sanitize request/stream errors. SDK
-sign-ins still require the registered-worker integration. Photo rotate,
+sign-ins other than ChatGPT still require worker integration. ChatGPT can use
+the outbound Mac inference worker: sign into the same account in an updated Mac
+app, connect ChatGPT in the Mac's settings, and select ChatGPT in web provider
+settings. ChatGPT credentials stay on the Mac; the worker receives only that
+account's inference calls and private photos. Keep the Mac awake with Anteroom
+open. Models and reasoning follow the Mac's settings. Offline Macs produce an
+explicit error, and inference calls are cancelled rather than replayed when
+their draft stops. This requires coordinated Mac and hosted releases; it is
+implemented locally and is not yet deployed. Photo rotate,
 adjustment previews, saved edits and reset use private Storage and retain the
 original. Mac Vision background removal still needs the worker.
 
@@ -124,7 +132,7 @@ PRs #982, #983, #985 and #986 are merged. The tested release image is
 (digest `sha256:7cc3134596e0853b16212dbfc705c92e0e7dfb146454e4987a1e2e6f7af9f43f`).
 It passed private Fly startup, bundled assets, canonical rules and authentication
 checks on a temporary Machine in `ord`, exiting 0. Both temporary test Machines
-were removed. Version 0.1.574 is deployed; public health/assets/authentication and the deployed worker/database isolation checks passed. Production is migrated to `56b5ee7250ec`, with a private consistent recovery copy of the prior public application records. Fly trial billing still affects uptime.
+were removed. Version 0.1.574 is deployed; public health/assets/authentication and the deployed worker/database isolation checks passed. Production is migrated to `56b5ee7250ec`, with a private consistent recovery copy of the prior public application records.
 
 Fly configuration enables the existing draft worker and keeps one Machine
 running. An idle-stop policy cannot guarantee work continues after a browser
@@ -178,7 +186,6 @@ Its release image also passed private startup, assets and synthetic-owner
 settings/database checks with the production runtime role, creating no account
 data. The API now runs in `ord` after a stalled image pull on its prior host;
 that stopped, stateless Machine was removed after the replacement was healthy.
-Fly's trial limit still requires billing for reliable uptime.
 
 PR #995 is merged and deployed in 0.1.582. Public health/version and unsigned
 settings/duplicate-review rejection checks passed. General settings are being
@@ -256,16 +263,17 @@ lets only the trusted process login list sellers with due or unfinished runs;
 each tick then runs in that seller's row-secured context. Regenerate queues the
 seller's durable draft task. Marketplace writes stay approvals, and approving
 one is refused until web marketplace actions exist. Offers and sharing panels
-need marketplace sessions and stay hidden. Fly's trial stops the Machine after
-five minutes, so schedules only fire while it is running.
+need marketplace sessions and stay hidden.
 
 On `feat/hosted-assistant`, the Assistant view mounts the canonical assistant
-routes. Answers stay in-process like desktop, but the run key and its thread
-are per seller, so one account never blocks or follows another's answer.
+routes. Hosted answers use the seller-owned durable task queue with leased workers
+and a persisted event journal, so tabs can reconnect without starting another answer.
 Images are stored under the seller's own assistant thread and readable only by
 its owner; deleting a thread releases them. Applying proposed changes takes the
 item's row lock first. The shop summary skips the Mac's local sourcing file,
-which the web app does not have yet. Answers do not survive an API restart.
+which the web app does not have yet. Expired answers are marked interrupted after an API restart and can be retried
+by the seller. Saving an answer and completing its task is one transaction;
+interrupted work is never replayed automatically.
 
 On `feat/hosted-marketplace-accounts`, Settings → Connections shows eBay and
 Etsy sign-in on the web. Each seller registers as their own relay device and
@@ -294,7 +302,7 @@ automatic offers on or a send cut off by a restart. At startup the web offer
 timer marks each cut-off send unknown and pauses that seller's automation, as
 the Mac does; every 15 minutes it runs each seller's check in their own
 row-secured context with their own token. The last check and its error are
-kept per seller. Like automations, checks only run while the Fly Machine is up.
+kept per seller.
 
 On `feat/hosted-direct-listing`, the web app lists, updates and delists on eBay
 through its API with the desktop handlers: List and Update carry `confirm`,
@@ -335,8 +343,14 @@ preferences, research and buy list live in their own `user_preferences` row
 (`sourcing`) instead of the Mac's `sourcing.json`; refresh locks are per seller,
 and the refresh thread carries the request's seller context. Store catalogs are
 public and stay shared. The web refreshes when the seller opens Sourcing and it
-is due; it has no background timer. The assistant's shop summary now reads the
-seller's own sourcing state on the web too.
+is due, and in the background like the Mac's timer: a `SECURITY DEFINER`
+function (`due_sourcing_owners`, revision `e4b7c2d9f1a3`) lets only the trusted
+process login list sellers whose saved buy list is older than six hours or was
+built for different plan settings. Every 15 minutes the web timer refreshes
+each of them in their own row-secured context, skipping a seller whose refresh
+is already running. A refresh only reads stores and marketplaces; it never buys
+or lists. The assistant's shop summary now reads the seller's own sourcing state
+on the web too.
 
 On `feat/hosted-vinted`, the Vinted tab, its Category and Brand pickers, and
 Vinted List, Update and Delist are on the web, as on the Mac. The Mac reads
@@ -353,7 +367,7 @@ Chrome through one named read, `marketplace.sellwild_account`, under its own
 Bridge capability, `sellwild.account` (Bridge 0.2.43).
 
 On `feat/hosted-chrome-sessions`, Settings → Connections on the web lists
-Poshmark, Mercari, Depop, Sellwild, Vinted and Facebook under eBay and Etsy, each
+Poshmark, Mercari, Depop, Sellwild and Vinted under eBay and Etsy, each
 signed in, not signed in, or "Connect Chrome first", as on the Mac. The web reads
 them with `marketplace.sessions` and opens a marketplace's sign-in page in the
 seller's Chrome with `marketplace.connect` when they choose Sign in, both under
@@ -361,13 +375,7 @@ the Bridge capability `marketplace.sessions` (Bridge 0.2.44). The status holds
 only each sign-in's state, expiry and account label, never cookies or tokens.
 Sale detection switches stay on the Mac.
 
-On `feat/hosted-facebook`, Facebook is on the web as it is on the Mac. Anteroom
-does not list on Facebook: the seller links an item already on Facebook with
-Mark as listed, checks it with Check on Facebook, which reads that listing's
-page in their Chrome (`marketplace.listing_state`, Bridge capability
-`facebook.listing`, Bridge 0.2.45), and deletes it on Facebook themselves; a
-Delist names Facebook and gets the Mac's own answer. A check that finds the item
-sold records the sale, as on the Mac. Facebook's sale detection pass stays on
-the Mac. Grailed is not on the web: on the Mac its tab only feeds the old
+Anteroom has no Facebook Marketplace support on the Mac or the web. Grailed is
+not on the web: on the Mac its tab only feeds the old
 cross-lister flow, which the web does not offer, and Anteroom has no direct
 Grailed listing, sign-in or check.

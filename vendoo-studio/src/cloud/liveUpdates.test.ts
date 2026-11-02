@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IDLE_POLL_MS, LIVE_IDLE_POLL_MS, pollMs, setLiveUpdates } from "../api/polling";
+import { createStudioQueryClient, LIVE_STALE_MS, STALE_MS } from "../api/queryClient";
 import { followSellerChanges, invalidateTopics, queryKeyMatchesTopic, TOPIC_QUERY_KEYS } from "./liveUpdates";
 
 afterEach(() => {
@@ -82,6 +83,23 @@ describe("followSellerChanges", () => {
     stop();
     expect(pollMs(IDLE_POLL_MS)).toBe(IDLE_POLL_MS);
     expect(fake.client.removeChannel).toHaveBeenCalledWith(fake.channel);
+  });
+
+  it("keeps read data for a minute only while the feed is subscribed", async () => {
+    const fake = fakeSupabase();
+    const client = createStudioQueryClient();
+    const stale = () => client.getDefaultOptions().queries?.staleTime;
+    const stop = followSellerChanges(fake.client as never, "seller-1", "token", client);
+    await Promise.resolve();
+    expect(stale()).toBe(STALE_MS);
+    fake.status("SUBSCRIBED");
+    expect(stale()).toBe(LIVE_STALE_MS);
+    expect(client.getDefaultOptions().queries?.networkMode).toBe("always");
+    fake.status("CHANNEL_ERROR");
+    expect(stale()).toBe(STALE_MS);
+    fake.status("SUBSCRIBED");
+    stop();
+    expect(stale()).toBe(STALE_MS);
   });
 
   it("refreshes the topic's screens once per burst", async () => {

@@ -1,4 +1,5 @@
 import { Fragment, useState, useRef, useEffect, useCallback } from "react";
+import { usePhotosUploading } from "../photoUploads";
 import { newQueuedChatMessage } from "./chatMessageQueue";
 import { CiteSelectionToolbar } from "./CiteSelectionToolbar";
 import { type ChatCitation } from "./chatCitations";
@@ -47,6 +48,7 @@ function messageRowPadding(m: Message): string {
 }
 
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, browser, onBrowserFieldsChange, onStatusChange }: Props) {
+  const uploadingPhotos = usePhotosUploading(convId);
   const vendooOn = useVendooEnabled();
   const [input, setInput] = useState("");
   // Quotes live inline in the composer itself, T3 Code style: `input` is the
@@ -253,8 +255,8 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
             </EmptyHeader>
             {hasPhotos ? (
               <EmptyContent>
-                <Button type="button" onClick={handleGenerate} disabled={generating || streaming}>
-                  Generate listing
+                <Button type="button" onClick={handleGenerate} disabled={generating || streaming || uploadingPhotos}>
+                  {uploadingPhotos ? "Uploading photos…" : "Generate listing"}
                 </Button>
               </EmptyContent>
             ) : null}

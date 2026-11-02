@@ -223,7 +223,7 @@ def _write_category_doc(root: Path, marketplace: str, category_id: str, path: st
     )
 
 
-def _write_schema_doc(root: Path, row: CategorySchema) -> None:
+def _write_schema_doc(root: Path, row: Any) -> None:
     fields = row.fields if isinstance(row.fields, list) else []
     labels = []
     for field in fields:
@@ -418,18 +418,60 @@ def _fresh_dir(docs: Path) -> None:
     docs.mkdir(parents=True, exist_ok=True)
 
 
-def materialize_category_docs(db: Session, root: Path | None = None) -> Path:
+@dataclass(frozen=True)
+class _SchemaRow:
+    id: str | None
+    marketplace: str
+    general_path: str
+    category_path: str
+    fields: Any
+
+
+@dataclass(frozen=True)
+class CatalogSnapshot:
+    """Everything a rebuild reads from the database, held in memory.
+
+    Writing tens of thousands of docs and tokenizing them takes minutes; the
+    rows they come from take a moment to read. Building from a snapshot keeps
+    a pooled connection out only for the reads.
+    """
+
+    fingerprint: dict[str, Any]
+    category_rows: list[tuple[str, str, str, str]]
+    schema_rows: list[_SchemaRow]
+
+
+def _category_rows(db: Session) -> list[tuple[str, str, str, str]]:
+    return [
+        (row.marketplace, row.category_id, row.path, row.label)
+        for row in _leaf_query(db).with_entities(
+            CategoryTreeNode.marketplace, CategoryTreeNode.category_id, CategoryTreeNode.path, CategoryTreeNode.label,
+        ).order_by(CategoryTreeNode.marketplace, CategoryTreeNode.path)
+    ]
+
+
+def _schema_rows(db: Session) -> list[_SchemaRow]:
+    return [
+        _SchemaRow(row.id, row.marketplace, row.general_path, row.category_path, row.fields)
+        for row in db.query(
+            CategorySchema.id, CategorySchema.marketplace, CategorySchema.general_path,
+            CategorySchema.category_path, CategorySchema.fields,
+        ).order_by(CategorySchema.marketplace, CategorySchema.general_path)
+    ]
+
+
+def _write_category_docs(rows: list[tuple[str, str, str, str]], root: Path | None = None) -> Path:
     docs = root or category_docs_dir()
     _fresh_dir(docs)
-    for node in _leaf_query(db).order_by(CategoryTreeNode.marketplace, CategoryTreeNode.path):
-        _write_category_doc(docs, node.marketplace, node.category_id, node.path, node.label)
+    for marketplace, category_id, path, label in rows:
+        _write_category_doc(docs, marketplace, category_id, path, label)
     return docs
 
 
-def materialize_catalog_docs(db: Session, root: Path | None = None) -> Path:
+def _write_catalog_docs(rows: list[_SchemaRow], root: Path | None = None) -> Path:
     docs = root or catalog_docs_dir()
     _fresh_dir(docs)
-    for row in db.query(CategorySchema).order_by(CategorySchema.marketplace, CategorySchema.general_path):
+    for row in rows:
         _write_schema_doc(docs, row)
         for field in (row.fields if isinstance(row.fields, list) else []):
             if not isinstance(field, dict):
@@ -480,7 +522,7 @@ def _index_docs(docs: Path):
         return None
 
 
-def _category_index(db: Session, trees_text: str):
+def _category_index(rows: list[tuple[str, str, str, str]], trees_text: str):
     """The category-leaf index: from memory, else from disk, else built and saved.
 
     Caller holds ``_REBUILD_LOCK``.
@@ -499,7 +541,7 @@ def _category_index(db: Session, trees_text: str):
         except Exception:
             log.warning("saved category index unreadable; rebuilding", exc_info=True)
     if index is None:
-        index = _index_docs(materialize_category_docs(db))
+        index = _index_docs(_write_category_docs(rows))
         shutil.rmtree(saved, ignore_errors=True)
         if index is not None:
             try:
@@ -522,15 +564,19 @@ def _merged(category_index, catalog_index):
     ])
 
 
-def _rebuild_unlocked(db: Session) -> dict[str, Any]:
-    """Materialize and tokenize without holding the reader lock.
+def catalog_snapshot(db: Session) -> CatalogSnapshot:
+    return CatalogSnapshot(fingerprint(db), _category_rows(db), _schema_rows(db))
+
+
+def _build_unlocked(snapshot: CatalogSnapshot) -> dict[str, Any]:
+    """Materialize and tokenize without holding the reader lock or a connection.
 
     Caller holds ``_REBUILD_LOCK``. Publishing the finished index is the only
     moment readers wait, and that wait is a pointer swap.
     """
-    fp = fingerprint(db)
-    categories = _category_index(db, json.dumps(fp["trees"], sort_keys=True))
-    docs = materialize_catalog_docs(db)
+    fp = snapshot.fingerprint
+    categories = _category_index(snapshot.category_rows, json.dumps(fp["trees"], sort_keys=True))
+    docs = _write_catalog_docs(snapshot.schema_rows)
     try:
         index = _merged(categories, _index_docs(docs))
     except Exception:
@@ -555,7 +601,12 @@ def _rebuild_unlocked(db: Session) -> dict[str, Any]:
 def rebuild_catalog_index(db: Session) -> dict[str, Any]:
     """Export catalog/skill/fill docs and rebuild the Semble index."""
     with _REBUILD_LOCK:
-        return _rebuild_unlocked(db)
+        return _build_unlocked(catalog_snapshot(db))
+
+
+def build_catalog_index(snapshot: CatalogSnapshot) -> dict[str, Any]:
+    with _REBUILD_LOCK:
+        return _build_unlocked(snapshot)
 
 
 def _kick_rebuild() -> None:
@@ -572,7 +623,9 @@ def _kick_rebuild() -> None:
             from vendoo_studio.database import SessionLocal
 
             with SessionLocal() as session:
-                rebuild_catalog_index(session)
+                snapshot = catalog_snapshot(session)
+            # The session is closed: the slow part runs without a pooled connection.
+            build_catalog_index(snapshot)
         except Exception:
             log.exception("catalog index rebuild failed")
         finally:

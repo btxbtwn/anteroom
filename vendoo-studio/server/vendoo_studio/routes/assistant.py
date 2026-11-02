@@ -10,18 +10,25 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+from collections.abc import Callable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from vendoo_studio.database import SessionLocal, get_db
 from vendoo_studio.models.assistant import AssistantMessage, AssistantThread
 from vendoo_studio.routes.attachments import AttachmentUpload, store_uploads
-from vendoo_studio.services import assistant_changes, assistant_memory, business_assistant
+from vendoo_studio.services import assistant_changes, assistant_memory, background_tasks, business_assistant
 from vendoo_studio.services.chat_attachments import attach_to_last_user_turn
 from vendoo_studio.services.listing_provider import get_listing_provider
 from vendoo_studio.services.streaming import (
+    KEEPALIVE,
+    SSE_HEADERS,
     GenerationRun,
     active_generation,
     await_with_pulses,
@@ -87,10 +94,17 @@ def create_thread(db: Session = Depends(get_db)):
 def remove_thread(thread_id: str, db: Session = Depends(get_db)):
     from vendoo_studio.services.chat_attachments import delete_attachments
 
-    if thread_id == _answering_thread_ids.get(_answer_run()) and active_generation(_answer_run()) is not None:
+    if _queued():
+        answering = background_tasks.active_answer(db)
+        if answering is not None and answering.assistant_thread_id == thread_id:
+            raise HTTPException(409, "That conversation is still being answered.")
+    elif thread_id == _answering_thread_ids.get(_answer_run()) and active_generation(_answer_run()) is not None:
         raise HTTPException(409, "That conversation is still being answered.")
     images = [item for (batch,) in db.query(AssistantMessage.attachments).filter(AssistantMessage.thread_id == thread_id)
               for item in (batch or [])]
+    if db.get(AssistantThread, thread_id) is None:
+        raise HTTPException(404, "That conversation is gone.")
+    background_tasks.delete_answers(db, thread_id)
     if not business_assistant.delete_thread(db, thread_id):
         raise HTTPException(404, "That conversation is gone.")
     # The conversation is gone; its images go with it.
@@ -154,7 +168,7 @@ def _prepare(question: str, attachments: list[dict] | None = None, thread_id: st
 
 async def _answer(
     run: GenerationRun, provider, question: str, attachments: list[dict] | None = None,
-    thread_id: str | None = None,
+    thread_id: str | None = None, settle: Callable[[Session], None] | None = None,
 ) -> None:
     """Answer in the background and publish each piece to whoever is following.
 
@@ -213,12 +227,14 @@ async def _answer(
         # Off the event loop: a save that waits on SQLite's write lock must not
         # freeze every other request, or hold this answer's stream open.
         if answer.strip():
-            await asyncio.to_thread(_save_answer, provider, answer, changes, memory_block, automation_block, thread_id)
+            await asyncio.to_thread(
+                _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
+            )
 
 
 def _save_answer(
     provider, answer: str, changes: dict | None, memory_block: str | None,
-    automation_block: str | None, thread_id: str | None,
+    automation_block: str | None, thread_id: str | None, settle: Callable[[Session], None] | None = None,
 ) -> None:
     save_db = SessionLocal()
     try:
@@ -237,6 +253,9 @@ def _save_answer(
             except Exception:
                 log.exception("could not read the automation the assistant drafted")
                 automation = {"status": "proposed", "proposal": {"ready": False, "issues": ["That automation could not be read."], "actions": []}}
+        if settle is not None:
+            # A queued answer completes in the same commit that saves it.
+            settle(save_db)
         business_assistant.add_message(
             save_db, "assistant", answer,
             provider=getattr(provider, "name", None),
@@ -250,16 +269,16 @@ def _save_answer(
 
 
 @router.post("/messages")
-async def ask(body: AssistantQuestion, db: Session = Depends(get_db)):
+async def ask(body: AssistantQuestion, request: Request, db: Session = Depends(get_db)):
     question = body.text.strip()
     if not question and not body.attachments:
         raise HTTPException(422, "Ask a question first.")
+    if _queued():
+        return await run_in_threadpool(_queue_question, request, db, question, body)
     key = _answer_run()
     if active_generation(key) is not None:
         raise HTTPException(409, "The assistant is still answering your last question.")
-    provider = get_listing_provider()
-    if provider is None:
-        raise HTTPException(400, "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key.")
+    provider = _require_provider()
     try:
         thread = business_assistant.resolve_thread(db, body.thread_id)
     except business_assistant.UnknownThread:
@@ -270,6 +289,10 @@ async def ask(body: AssistantQuestion, db: Session = Depends(get_db)):
     thread_id = thread.id
     # Release the request-scoped session before background work opens its own.
     db.close()
+    return await _start_answer(key, provider, question, attachments, thread_id)
+
+
+async def _start_answer(key: str, provider, question: str, attachments: list[dict] | None, thread_id: str):
     _answering_thread_ids[key] = thread_id
     run = start_generation(
         key,
@@ -279,12 +302,50 @@ async def ask(body: AssistantQuestion, db: Session = Depends(get_db)):
     return stream_generation(run)
 
 
+def _require_provider():
+    provider = get_listing_provider()
+    if provider is None:
+        raise HTTPException(400, "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key.")
+    return provider
+
+
+def _unanswered(db: Session, thread_id: str) -> AssistantMessage:
+    """The thread's last turn, when it is a question nothing answered."""
+    if db.get(AssistantThread, thread_id) is None:
+        raise HTTPException(404, "That conversation is gone.")
+    turns = business_assistant.list_messages(db, thread_id)
+    if not turns or turns[-1].role != "user":
+        raise HTTPException(409, "That question was already answered.")
+    return turns[-1]
+
+
+@router.post("/messages/retry")
+async def retry(thread_id: str, request: Request, db: Session = Depends(get_db)):
+    """Answer the thread's last question again, after an answer was interrupted or failed.
+
+    The question is not asked twice: it is already saved, and only a thread
+    whose last turn is still unanswered can be retried.
+    """
+    if _queued():
+        return await run_in_threadpool(_queue_retry, request, db, thread_id)
+    key = _answer_run()
+    if active_generation(key) is not None:
+        raise HTTPException(409, "The assistant is still answering your last question.")
+    provider = _require_provider()
+    turn = _unanswered(db, thread_id)
+    question, attachments = turn.text, turn.attachments or None
+    db.close()
+    return await _start_answer(key, provider, question, attachments, thread_id)
+
+
 @router.post("/messages/resume")
-async def resume(thread_id: str | None = None):
+async def resume(thread_id: str | None = None, db: Session = Depends(get_db)):
     """Follow the answer in progress from its start, or finish at once when there is none.
 
     A thread only hears the answer that was asked in it.
     """
+    if _queued():
+        return await run_in_threadpool(_follow_queued, db, thread_id)
     run = active_generation(_answer_run())
     if run is None or (thread_id and thread_id != _answering_thread_ids.get(_answer_run())):
         return stream_finished()
@@ -292,11 +353,193 @@ async def resume(thread_id: str | None = None):
 
 
 @router.post("/messages/stop")
-async def stop():
+async def stop(db: Session = Depends(get_db)):
+    if _queued():
+        await run_in_threadpool(_stop_queued, db)
+        return {"ok": True}
     stop_generation(_answer_run())
     # What was written so far is saved as the run unwinds; answer once it is there to read.
     await wait_generation(_answer_run())
     return {"ok": True}
+
+
+# On the web, an answer is a task in the seller's durable queue (the draft
+# worker, services/background_worker.py). Its events are journaled, so any tab
+# or Machine can follow it, and it survives a dropped connection. An answer an
+# API restart cut off saved nothing; it is marked interrupted for the seller to
+# retry, never replayed on its own. The worker completes the task in the same
+# commit that saves the answer, so a saved answer is never retried twice.
+
+
+def _queued() -> bool:
+    from vendoo_studio.services.service_context import current
+
+    return current() is not None
+
+
+def _queue_question(request: Request, db: Session, question: str, body: AssistantQuestion):
+    from vendoo_studio.routes.hosted_tasks import require_worker
+    from vendoo_studio.services.chat_attachments import delete_attachments
+
+    require_worker(request)
+    if background_tasks.active_answer(db) is not None:
+        raise HTTPException(409, "The assistant is still answering your last question.")
+    _require_provider()
+    try:
+        thread = business_assistant.resolve_thread(db, body.thread_id)
+    except business_assistant.UnknownThread:
+        raise HTTPException(404, "That conversation is gone.") from None
+    thread_id = thread.id
+    attachments = store_uploads(body.attachments, collection_id=thread_id)
+    task = background_tasks.add_answer(db, thread_id, {"question": question, "attachments": attachments})
+    try:
+        # The question and its task commit together.
+        business_assistant.add_message(db, "user", question, attachments=attachments, thread_id=thread_id)
+    except IntegrityError:
+        db.rollback()
+        delete_attachments(attachments)
+        raise HTTPException(409, "The assistant is still answering your last question.") from None
+    return _follow_task(db, task.id)
+
+
+def _queue_retry(request: Request, db: Session, thread_id: str):
+    from vendoo_studio.routes.hosted_tasks import require_worker
+
+    require_worker(request)
+    _require_provider()
+    # Two Retry presses serialize on the thread's row.
+    db.scalar(select(AssistantThread.id).where(AssistantThread.id == thread_id).with_for_update())
+    turn = _unanswered(db, thread_id)
+    if background_tasks.active_answer(db) is not None:
+        raise HTTPException(409, "The assistant is still answering your last question.")
+    task = background_tasks.add_answer(db, thread_id, {"question": turn.text, "attachments": turn.attachments or []})
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "The assistant is still answering your last question.") from None
+    return _follow_task(db, task.id)
+
+
+def _follow_task(db: Session, task_id: str):
+    from vendoo_studio.routes.hosted_tasks import task_stream
+
+    db.rollback()
+    return task_stream(task_id)
+
+
+def _follow_queued(db: Session, thread_id: str | None):
+    task = background_tasks.active_answer(db)
+    if task is not None and (not thread_id or task.assistant_thread_id == thread_id):
+        return _follow_task(db, task.id)
+    if thread_id:
+        latest = background_tasks.latest_answer(db, thread_id)
+        turns = business_assistant.list_messages(db, thread_id)
+        if latest is not None and latest.status == "failed" and turns and turns[-1].role == "user":
+            # Say why the last question has no answer, so the seller can retry it.
+            return _said(sse_event("error", latest.error or "This answer did not finish. Retry to ask again."))
+    db.rollback()
+    return stream_finished()
+
+
+def _said(*frames: str) -> StreamingResponse:
+    async def stream():
+        for frame in frames:
+            yield frame
+        yield "data: [DONE]\n\n"
+    return StreamingResponse(stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+def _stop_queued(db: Session) -> None:
+    task = background_tasks.active_answer(db, lock=True)
+    if task is None:
+        db.rollback()
+        return
+    # Keep what was written so far, as on the Mac. The worker's own save waits
+    # on this row lock and then finds its task cancelled, so only one is kept.
+    written = journal_text(background_tasks.journal(db, task.id))
+    task.status, task.lease_token, task.leased_until = "cancelled", None, None
+    if written.strip():
+        business_assistant.add_message(db, "assistant", written, thread_id=task.assistant_thread_id)
+    else:
+        db.commit()
+
+
+def journal_text(frames: list[str]) -> str:
+    """The answer's words in journaled SSE frames, without status or other named events."""
+    pieces = []
+    for frame in frames:
+        lines = frame.rstrip("\n").split("\n")
+        if not lines or lines[0].startswith("event:"):
+            continue
+        pieces.append("\n".join(line[6:] if line.startswith("data: ") else line[5:]
+                                for line in lines if line.startswith("data:")))
+    return "".join(pieces)
+
+
+class _Journal(GenerationRun):
+    """Collects what an answer publishes, for the worker to append to the task's journal."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.pending: list[str] = []
+
+    def publish(self, item: str, *, record: bool = True) -> None:
+        # Pulses only keep a live connection open; followers poll the journal.
+        if record and item != KEEPALIVE:
+            self.pending.append(item)
+
+    def take(self) -> list[str]:
+        taken, self.pending = self.pending, []
+        return taken
+
+
+async def answer_task(task_id: str, token: str, task) -> bool:
+    """Run one queued answer in the claimed seller's context; settle the task either way."""
+    journal = _Journal()
+    settled = shutting_down = False
+
+    def settle(db: Session) -> None:
+        nonlocal settled
+        if shutting_down:
+            # A restart cut the answer off: save nothing, so it reads as interrupted.
+            raise RuntimeError("The API is stopping")
+        background_tasks.complete_in(db, task_id, token, journal.take())
+        settled = True
+
+    payload = task.payload or {}
+    work = None
+    try:
+        provider = _require_provider()
+        work = asyncio.create_task(_answer(
+            journal, provider, payload.get("question", ""), payload.get("attachments") or None,
+            task.assistant_thread_id, settle=settle,
+        ))
+        while not work.done():
+            await asyncio.wait({work}, timeout=.25)
+            if not settled and (frames := journal.take()):
+                # Fails once the seller stops the answer, which ends the work below.
+                await asyncio.to_thread(background_tasks.append_events, task_id, token, frames)
+        await work
+        if not settled:
+            await asyncio.to_thread(background_tasks.append_events, task_id, token, journal.take())
+            await asyncio.to_thread(background_tasks.finish, task_id, token)
+    except asyncio.CancelledError:
+        shutting_down = True
+        raise
+    except Exception as exc:
+        if not isinstance(exc, background_tasks.TaskLeaseExpired):
+            log.exception("queued assistant answer failed")
+        try:
+            await asyncio.to_thread(background_tasks.finish, task_id, token,
+                                    error="The assistant stopped before it finished. Retry to ask again.")
+        except background_tasks.TaskLeaseExpired:
+            pass
+    finally:
+        if work is not None and not work.done():
+            work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
+    return True
 
 
 def _proposal(message_id: str, db: Session) -> AssistantMessage:

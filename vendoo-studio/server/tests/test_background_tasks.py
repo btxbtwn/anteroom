@@ -81,3 +81,24 @@ def test_cancelled_worker_cannot_write_and_expired_work_is_never_replayed(storag
         assert row.status == 'failed'
         assert 'Review the saved draft' in row.error
         assert db.scalar(select(Conversation.title).where(Conversation.id == identity)) == 'My draft'
+
+
+def test_assistant_task_finishes_without_a_listing(storage):  # noqa: F811
+    from vendoo_studio.models.assistant import AssistantThread
+
+    engine, sessions = storage
+    owner = str(uuid.uuid4())
+    with sessions(owner)() as db:
+        thread = AssistantThread()
+        db.add(thread)
+        db.flush()
+        task = queue.add_answer(db, thread.id, {'question': 'What sold?'})
+        db.commit()
+        task_id = task.id
+    assert queue.claim(engine)[:2] == (task_id, owner)
+    with sessions(owner)() as db:
+        token = db.get(BackgroundTask, task_id).lease_token
+    with service_context.use(replace(runtime(owner), session_factory=sessions(owner))):
+        queue.finish(task_id, token, error='Interrupted')
+    with sessions(owner)() as db:
+        assert db.get(BackgroundTask, task_id).status == 'failed'

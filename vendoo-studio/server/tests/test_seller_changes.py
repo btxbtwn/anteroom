@@ -142,3 +142,17 @@ def test_previous_release_upgrades_to_the_feed(migration_engine):  # noqa: F811
     with migration_engine.connect() as connection:
         assert connection.scalar(text("SELECT title FROM conversations WHERE id = 'before-feed'")) == "Coat"
         assert connection.scalar(text("SELECT count(*) FROM seller_changes")) == 0
+
+
+def test_reading_a_committed_row_does_not_take_a_pooled_connection_back(feed_engine):
+    # Generation commits a message, then reads its id and waits minutes on a
+    # provider. An expired read there kept a connection out of the five-slot
+    # Supabase pool for the whole wait, and a few drafts starved every request.
+    with SellerDatabaseSession(bind=feed_engine, user_id=ALICE) as db:
+        message = Message(id="held", conversation_id="coat", role="user", text="hi")
+        db.add(Conversation(id="coat", title="Coat"))
+        db.flush()
+        db.add(message)
+        db.commit()
+        assert message.id == "held" and message.text == "hi"
+        assert not db.in_transaction()

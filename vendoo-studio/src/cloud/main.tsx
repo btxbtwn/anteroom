@@ -39,6 +39,15 @@ function CloudApp() {
   const [error, setError] = useState("");
   const [newPassword, setNewPassword] = useState(false);
   useEffect(() => {
+    const connect = () => {
+      const native = (window as unknown as { pywebview?: { api?: { connect_chatgpt_worker?: (token: string | null, owner: string | null) => Promise<unknown> } } }).pywebview?.api;
+      void native?.connect_chatgpt_worker?.(session?.access_token ?? null, session?.user.id ?? null)?.catch(() => {});
+    };
+    connect();
+    window.addEventListener("pywebviewready", connect);
+    return () => window.removeEventListener("pywebviewready", connect);
+  }, [session?.access_token]);
+  useEffect(() => {
     let active = true;
     let received = false;
     let previous: string | undefined;

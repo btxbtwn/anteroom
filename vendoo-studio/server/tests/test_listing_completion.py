@@ -1041,6 +1041,7 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
     async def test_generation_does_not_reuse_vendoo_schema_categories(self):
         self.manager.connected = False
         remember_schema(self.db, "Clothing > Tops", self.verification["schema"])
+        job_id = self.job.id
         statuses: list[str] = []
         with patch("vendoo_studio.services.marketplaces.selected_fillable_platforms", return_value=["ebay"]), \
              patch("vendoo_studio.services.category_selection.select_categories", new=AsyncMock(
@@ -1058,7 +1059,11 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seed["_schema_source"], "native")
         self.assertFalse(any("Vendoo" in message or "cached" in message for message in statuses))
         self.manager.register_wait.assert_not_called()
-        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [self.job])
+        jobs = JobRepo(self.db).list_by_conversation(self.conv.id)
+        self.assertEqual(
+            [(job.id, job.status, job.vendoo_item_id, job.listing_snapshot) for job in jobs],
+            [(job_id, "dispatched", "saved-123", self.listing)],
+        )
 
     async def test_generation_finishes_from_native_forms_without_vendoo_reads(self):
         from vendoo_studio.services.listing_generation import _finish_generation_background

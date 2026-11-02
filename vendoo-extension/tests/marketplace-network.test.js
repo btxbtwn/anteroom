@@ -123,7 +123,7 @@ test('Vinted draft, photo, wardrobe and package-size calls each have their own r
   c.chrome.declarativeNetRequest.updateSessionRules = async value => { updates.push(value); };
   await c.ensureMarketplaceRequestContext();
   const rules = Object.fromEntries(updates[0].addRules.map(rule => [rule.id, rule]));
-  assert.deepEqual(JSON.parse(JSON.stringify(updates[0].removeRuleIds.filter(id => id >= 17025))), [17025, 17026, 17027, 17028, 17029, 17030]);
+  assert.deepEqual(JSON.parse(JSON.stringify(updates[0].removeRuleIds.filter(id => id >= 17025))), [17025, 17026, 17027, 17028, 17030]);
   const cases = [
     [17025, [
       'https://www.vinted.com/api/v2/item_upload/catalogs',

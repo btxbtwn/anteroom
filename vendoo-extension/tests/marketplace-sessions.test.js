@@ -164,7 +164,7 @@ test('relayed sign-in checks report every marketplace without cookie values, and
   const id = 'd'.repeat(32);
   const result = await c.runCloudMarketplaceCommand({ type: 'marketplace.sessions', job_id: null, message_id: id, payload: { request_id: id } }, []);
   assert.equal(result.ok, true);
-  assert.deepEqual(Object.keys(result.sessions).sort(), ['depop', 'facebook', 'mercari', 'poshmark', 'sellwild', 'vinted']);
+  assert.deepEqual(Object.keys(result.sessions).sort(), ['depop', 'mercari', 'poshmark', 'sellwild', 'vinted']);
   assert.equal(result.sessions.depop.state, 'signed_in');
   assert.equal(JSON.stringify(result).includes(secret), false);
 

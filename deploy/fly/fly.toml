@@ -4,7 +4,10 @@
 #
 
 app = 'peaceful-meadowstone-6944'
+# Seattle no longer accepts new Machines; use the supported West Coast region.
 primary_region = 'sjc'
+kill_signal = 'SIGTERM'
+kill_timeout = 300
 
 [build]
   dockerfile = 'Dockerfile'

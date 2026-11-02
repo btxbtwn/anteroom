@@ -6,6 +6,64 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.679 — 2026-11-02
+
+- Analytics' missing sales data list now matches the Missing sale data filter in Sales records, including marketplace orders without amounts, and a sale drops off once you fill it in.
+- Open sales records from that list to see every sale with missing data across all time.
+
+## 0.1.678 — 2026-11-02
+
+- Opening listing panels together no longer blocks web draft generation while they load your settings.
+
+## 0.1.677 — 2026-11-02
+
+- On the web, Sourcing now refreshes your buy list in the background every few hours, like the Mac app, without waiting for you to open the Sourcing page.
+
+## 0.1.676 — 2026-11-02
+
+- Generating a web draft no longer ties up the editor while photos, AI answers, or marketplace categories are loading.
+
+## 0.1.675 — 2026-11-02
+
+- The Mac app can now connect your ChatGPT sign-in to web draft generation.
+
+## 0.1.674 — 2026-11-02
+
+- Keep imported Vendoo sales in Sales records without rereading Vendoo's sale notes after the first archive.
+- Read orders and available amounts from Depop, Poshmark, Mercari and Sellwild, preserving seller corrections and reporting orders whose amounts cannot be read.
+
+## 0.1.673 — 2026-11-02
+
+- Keep draft generation available while the photo catalog rebuilds, and release database connections between generation steps.
+- Wait for all selected photos to finish uploading before enabling Generate listing.
+- Stop requesting the desktop setup-guide endpoint when signed in on the web.
+- Offer a reload when a web update arrives, so it does not reload an open draft automatically.
+- Make Clear listing available from the web editor's More listing actions menu.
+- Give running draft work time to finish during a web deployment before stopping the worker.
+- Refresh generated listing fields in the web editor without rejecting internal category-search metadata.
+- Use ChatGPT on a connected, signed-in Mac for web generation, with ChatGPT credentials kept on the Mac.
+
+## 0.1.672 — 2026-11-02
+
+- Remove Facebook Marketplace: no Facebook tab, Check on Facebook, sign-in row or sale checks. Past Facebook sales stay in Sales records and Analytics.
+
+## 0.1.671 — 2026-11-02
+
+- Assistant answers on the web keep their progress across a disconnected tab. If a server restart interrupts an answer, you can retry the saved question.
+
+## 0.1.670 — 2026-11-02
+
+- Open web listings with fewer separate requests for the form, photos and conversation.
+
+## 0.1.669 — 2026-11-02
+
+- Keep the app responsive while preparing large marketplace category menus and repairing generated listing details.
+- Stop the hosted sandbox's private database when the sandbox closes, so repeated test runs keep working.
+
+## 0.1.668 — 2026-11-02
+
+- Open a listing on the web faster: pointing at it in the list starts loading its form and photos, and opening another listing no longer reloads your whole account.
+
 ## 0.1.667 — 2026-11-02
 
 - Reduce database work when loading your jobs list, while keeping saved listing copies available for jobs.
