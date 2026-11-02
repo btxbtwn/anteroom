@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import os
 import asyncio
+import concurrent.futures
+import logging
+import threading
+import traceback
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -14,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlalchemy import event
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
 
@@ -73,6 +78,58 @@ class SellerSessionMiddleware:
         await response(scope, receive, send)
 
 
+class BackgroundLoop:
+    """An event loop on its own thread for work that must not share the request loop."""
+
+    def __init__(self):
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self.loop.run_forever, name="anteroom-background", daemon=True)
+        self.thread.start()
+
+    def run(self, coroutine) -> concurrent.futures.Future:
+        return asyncio.run_coroutine_threadsafe(coroutine, self.loop)
+
+    def stop(self) -> None:
+        async def cancel_all():
+            tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        try:
+            asyncio.run_coroutine_threadsafe(cancel_all(), self.loop).result(timeout=10)
+        except concurrent.futures.TimeoutError:
+            pass
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(timeout=10)
+        if not self.thread.is_alive():
+            self.loop.close()
+
+
+class LoopCheckoutWarning:
+    """Log each place that takes a pooled connection on the request loop.
+
+    That checkout blocks every request while it waits, so each one found here
+    belongs in a worker thread.
+    """
+
+    def __init__(self, engine):
+        self.engine, self.loop_thread, self.seen = engine, threading.get_ident(), set()
+        event.listen(engine, "checkout", self.checkout)
+
+    def checkout(self, *_args):
+        if threading.get_ident() != self.loop_thread:
+            return
+        frames = [frame for frame in traceback.extract_stack() if "/vendoo_studio/" in frame.filename]
+        site = " < ".join(f"{Path(frame.filename).name}:{frame.lineno}" for frame in reversed(frames[-4:]))
+        if site not in self.seen:
+            self.seen.add(site)
+            logging.getLogger(__name__).warning("Database connection taken on the request event loop: %s", site)
+
+    def close(self):
+        event.remove(self.engine, "checkout", self.checkout)
+
+
 class AccountResponse(BaseModel):
     user_id: str
 
@@ -92,27 +149,33 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
         app.state.chat_upload_slots = asyncio.Semaphore(1)
-        worker = scheduler = offers = watchdog = None
+        from vendoo_studio.database import engine as database_engine
+        loop_checkouts = LoopCheckoutWarning(database_engine)
+        worker = offers = watchdog = None
+        background = None
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
-            from vendoo_studio.services import hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler
-            from vendoo_studio.services.background_worker import serve
-            worker = asyncio.create_task(serve(engine))
+            from vendoo_studio.services import background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler
+            # Background work opens blocking database sessions. It gets its own
+            # thread and event loop: waiting for a pooled connection on the
+            # request loop froze every request, including the ones that would
+            # have returned their connections, until the pool timed out.
+            background = BackgroundLoop()
+            worker = background.run(background_worker.serve(engine))
             # Automations regenerate through the same draft queue, so both run together.
-            scheduler = asyncio.create_task(hosted_automation_scheduler.serve(engine))
-            offers = asyncio.create_task(hosted_offer_scheduler.serve(engine))
+            background.run(hosted_automation_scheduler.serve(engine))
+            offers = background.run(hosted_offer_scheduler.serve(engine))
             # Frees the marketplace slot a restart left held and reads unconfirmed results.
-            watchdog = asyncio.create_task(hosted_job_watchdog.serve(engine))
+            watchdog = background.run(hosted_job_watchdog.serve(engine))
         app.state.background_worker = worker
         app.state.offer_scheduler = offers
         app.state.job_watchdog = watchdog
         try:
             yield
         finally:
-            running = [task for task in (worker, scheduler, offers, watchdog) if task is not None]
-            for task in running:
-                task.cancel()
-            await asyncio.gather(*running, return_exceptions=True)
+            loop_checkouts.close()
+            if background is not None:
+                await asyncio.to_thread(background.stop)
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,

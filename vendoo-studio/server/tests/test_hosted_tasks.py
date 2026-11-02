@@ -79,3 +79,50 @@ def test_durable_chat_finishes_preparation_before_done_and_isolates_other_accoun
             assert events[0].user_id == USER_ID
         # A reconnect to completed work must not enqueue another generation.
         assert client.post(path + '/generate?resume=true', headers=alice).text == 'data: [DONE]\n\n'
+
+
+def test_background_work_runs_off_the_request_event_loop(monkeypatch):
+    # Background work uses blocking database sessions. On the request loop, a
+    # wait for a pooled connection froze every request, including the ones that
+    # would have returned connections, until the pool timed out.
+    import threading
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    seen = {}
+
+    def recorder(name):
+        async def serve(_engine):
+            seen[name] = (threading.get_ident(), asyncio.get_running_loop())
+            await asyncio.Event().wait()
+        return serve
+
+    monkeypatch.setattr('vendoo_studio.services.background_worker.serve', recorder('drafts'))
+    monkeypatch.setattr('vendoo_studio.services.hosted_automation_scheduler.serve', recorder('automations'))
+    monkeypatch.setattr('vendoo_studio.services.hosted_offer_scheduler.serve', recorder('offers'))
+    monkeypatch.setattr('vendoo_studio.services.hosted_job_watchdog.serve', recorder('watchdog'))
+    with TestClient(create_app('https://example.supabase.co')) as client:
+        request_thread = client.portal.call(threading.get_ident)
+        for _ in range(100):
+            if len(seen) == 4:
+                break
+            threading.Event().wait(.01)
+        assert set(seen) == {'drafts', 'automations', 'offers', 'watchdog'}
+        assert all(thread != request_thread for thread, _loop in seen.values())
+        assert not client.app.state.background_worker.done()
+    assert client.app.state.background_worker.done()
+
+
+def test_a_connection_taken_on_the_request_loop_is_logged(monkeypatch, caplog):
+    import logging
+    from vendoo_studio import database
+
+    monkeypatch.delenv('ANTEROOM_BACKGROUND_WORKER', raising=False)
+    with TestClient(create_app('https://example.supabase.co')) as client, caplog.at_level(logging.WARNING):
+        def on_loop():
+            with database.engine.connect():
+                pass
+        client.portal.call(on_loop)
+        client.portal.call(on_loop)
+    warnings = [record for record in caplog.records if 'request event loop' in record.getMessage()]
+    assert len(warnings) == 1
+    assert 'test_hosted_tasks.py' not in warnings[0].getMessage()
