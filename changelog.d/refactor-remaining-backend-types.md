@@ -1,1 +1,0 @@
-- Behind the scenes, draft editing, listing repair, measurements and marketplace jobs have clearer type contracts so more mistakes are caught before an update ships.

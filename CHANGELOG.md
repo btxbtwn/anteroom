@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.660 — 2026-11-02
+
+- Behind the scenes, draft editing, listing repair, measurements and marketplace jobs have clearer type contracts so more mistakes are caught before an update ships.
+
 ## 0.1.659 — 2026-11-02
 
 - Show a clear failed-read message instead of crashing when Chrome returns a blank Facebook listing error.
