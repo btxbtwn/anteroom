@@ -45,8 +45,12 @@ interface Props {
 
 export function AnalyticsPage({ onOpenListing }: Props) {
   const [view, setView] = useState("Sales records");
-  return <WorkspacePage width="expanded"><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics"]} value={view} onChange={setView}>
-    {view === "Sales records" ? <SalesLedger onOpenListing={onOpenListing} /> : <InventoryAnalyticsView onOpenListing={onOpenListing} onOpenSalesRecords={() => setView("Sales records")} />}
+  const [missingOnly, setMissingOnly] = useState(false);
+  const changeView = (next: string) => { setView(next); setMissingOnly(false); };
+  return <WorkspacePage width="expanded"><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics"]} value={view} onChange={changeView}>
+    {view === "Sales records"
+      ? <SalesLedger key={String(missingOnly)} onOpenListing={onOpenListing} missingOnly={missingOnly} />
+      : <InventoryAnalyticsView onOpenListing={onOpenListing} onOpenSalesRecords={() => { setView("Sales records"); setMissingOnly(true); }} />}
   </WorkspaceTabs></WorkspacePage>;
 }
 
@@ -153,12 +157,12 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
               {onOpenSalesRecords ? <Button size="sm" variant="outline" onClick={onOpenSalesRecords}>Open sales records</Button> : null}
               <Disclosure summary="Review sales with missing data">
                 <RowList className="max-h-80 overflow-y-auto">
-                    {data.incomplete_sales.map((sale) => (
+                    {data.incomplete_sales.map(({ id, conversation_id: listing, title, missing }) => (
                       <ListRow
-                        key={sale.conversation_id}
-                        title={sale.title}
-                        meta={`Missing ${sale.missing.join(", ")}`}
-                        onClick={() => onOpenListing(sale.conversation_id)}
+                        key={id}
+                        title={title}
+                        meta={`Missing ${missing.join(", ")}`}
+                        onClick={listing ? () => onOpenListing(listing) : onOpenSalesRecords}
                       />
                     ))}
                 </RowList>

@@ -91,9 +91,13 @@ def test_background_work_runs_off_the_request_event_loop(monkeypatch):
     seen = {}
 
     def recorder(name):
-        async def serve(_engine):
+        async def serve(_engine, stopping=None):
             seen[name] = (threading.get_ident(), asyncio.get_running_loop())
-            await asyncio.Event().wait()
+            if stopping is None:
+                await asyncio.Event().wait()
+            else:
+                while not stopping.is_set():
+                    await asyncio.sleep(.01)
         return serve
 
     monkeypatch.setattr('vendoo_studio.services.background_worker.serve', recorder('drafts'))

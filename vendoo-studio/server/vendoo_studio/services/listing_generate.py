@@ -1013,7 +1013,10 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
     from vendoo_studio.services.seller_overrides import get_path, locked_paths
     from vendoo_studio.services.skill_formulas import listing_formula_rules
 
-    blockers = _validation_blockers(copy.deepcopy(listing))
+    def validation_errors(snapshot: dict) -> list[dict]:
+        return _validation_blockers(copy.deepcopy(snapshot))
+
+    blockers = await asyncio.to_thread(validation_errors, listing)
     locked = locked_paths(listing)
     protected = {"category_path", "category_id", "marketplace_categories", "marketplace_category_ids",
                  "marketplace_category_objects", "direct_category_ids", "sku", "seller_fields"}
@@ -1085,13 +1088,14 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
            or "value" not in op for op in patches):
         log.warning("discarding validation repair outside allowed fields")
         return None
-    updated = apply_json_patch(listing, patches)
+    updated = await asyncio.to_thread(apply_json_patch, listing, patches)
     if "/description" in allowed:
         from vendoo_studio.services.vendoo_import import parse_notes
 
         apply_seller_description_facts(updated, parse_notes(notes))
     before = {(error["field"], error["message"]) for error in blockers}
-    after = {(error["field"], error["message"]) for error in _validation_blockers(copy.deepcopy(updated))}
+    checked_errors = await asyncio.to_thread(validation_errors, updated)
+    after = {(error["field"], error["message"]) for error in checked_errors}
     if after - before or not before - after:
         return None
     return updated

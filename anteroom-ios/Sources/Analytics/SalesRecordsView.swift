@@ -5,7 +5,7 @@ import SwiftUI
 struct SalesRecordsView: View {
     let api: AnteroomAPI
 
-    private static let markets = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "facebook", "other"]
+    private static let markets = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "other"]
 
     @State private var start = Calendar.current.date(byAdding: .day, value: -29, to: Date()) ?? Date()
     @State private var end = Date()

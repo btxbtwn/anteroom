@@ -110,3 +110,29 @@ def test_relayed_commands_are_ones_the_bridge_accepts():
     assert _bridge_accepts(execute)
     assert cancel['type'] == 'job.cancel' and cancel['payload']['job_id'] == 'op-1'
     assert _bridge_accepts(cancel)
+
+
+def test_sales_history_uses_only_the_connected_sellers_capable_bridge():
+    from vendoo_studio.services.order_history import bridge_can_read
+
+    hosted_browser_relay._relays.clear()
+    capabilities = {MARKETPLACE_ACTIONS, hosted_browser_relay.SALES_HISTORY}
+
+    async def scenario():
+        with use(for_seller(USER_ID)):
+            relay = current_extension()
+            await relay.next_message({MARKETPLACE_ACTIONS}, 0.01)
+            assert not bridge_can_read()
+            await relay.next_message(capabilities, 0.01)
+            assert bridge_can_read()
+            request = asyncio.create_task(browser_bridge.request(SimpleNamespace(id=None), 'marketplace.sales_history',
+                                                                 {'marketplace': 'depop', 'settled': ['receipt-1']}, timeout=5))
+            command = await relay.next_message(capabilities, 1)
+            assert _bridge_accepts(command)
+            assert command['payload']['settled'] == ['receipt-1']
+        with use(for_seller(BOB)):
+            assert not current_extension().is_waiting(command['message_id'])
+        relay.resolve_wait(command['message_id'], {'ok': True, 'orders': []})
+        assert await request == {'ok': True, 'orders': []}
+
+    asyncio.run(scenario())

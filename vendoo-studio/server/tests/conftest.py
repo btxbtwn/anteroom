@@ -93,6 +93,15 @@ def _isolate_studio_settings(tmp_path_factory):
         os.environ["VENDOO_STUDIO_DATA_DIR"] = previous
 
 
+@pytest.fixture(autouse=True)
+def _fresh_sales_archive(_isolate_studio_settings):
+    """Each test may seed a new inventory before its first archive read."""
+    from vendoo_studio.services.user_settings import update_settings
+    from vendoo_studio.services.vendoo_sales_archive import ARCHIVED_KEY
+
+    update_settings(lambda settings: settings.pop(ARCHIVED_KEY, None))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _no_sourcing_timer():
     """Keep app startup from refreshing Sourcing in the background.
@@ -102,12 +111,17 @@ def _no_sourcing_timer():
     interrupt a refresh underway, so it went on writing ``sourcing.json`` into
     whichever test's data directory was current, and that test's cleanup failed
     with "Directory not empty". Sourcing tests call ``refresh`` themselves.
+    The web app's timer starts with its background worker, so it is off too.
     """
     from unittest import mock
 
-    from vendoo_studio.services import box_scout
+    from vendoo_studio.services import box_scout, hosted_sourcing_scheduler
 
-    with mock.patch.object(box_scout, "start_sourcing_timer", return_value=None):
+    async def no_timer(_engine):
+        return None
+
+    with mock.patch.object(box_scout, "start_sourcing_timer", return_value=None), \
+            mock.patch.object(hosted_sourcing_scheduler, "serve", no_timer):
         yield
 
 

@@ -17,15 +17,40 @@ The Dockerfile path is relative to the configuration directory; the build
 context is the repository root. The allowlist in `.dockerignore` excludes
 local data, photos, databases, credentials, tests and the extension.
 
-The configuration uses one shared CPU, 2 GB memory, HTTPS, a health check,
-automatic start and stop, and zero minimum running Machines. Supabase's project
-URL is public configuration. No database password, service-role key, provider
-key or seller data is needed for this first deployment. Later hosted data
-routes require the remaining cloud work in `docs/cloud-architecture.md`.
+The configuration uses one shared CPU, 2 GB memory, HTTPS, a health check, and
+a paid plan with one Machine kept running (`auto_stop_machines = 'off'`,
+`min_machines_running = 1`), so the draft worker and the scheduled automations,
+offer checks and Sourcing refreshes keep running. Supabase's project URL is
+public configuration. No database password, service-role key, provider key or
+seller data is needed for this first deployment. Later hosted data routes
+require the remaining cloud work in `docs/cloud-architecture.md`.
 
 The root URL and built `/assets/` files serve the public sign-in UI. All data
 routes require bearer authentication. Open `/api/health` to check the service.
 The cloud build is a separate entry point, not the desktop interface.
+
+## Region
+
+The API runs in Fly's supported `sjc` (San Jose) region. Supabase is in AWS
+us-west-2 (Oregon); a production `SELECT 1` measured about 27 ms on 2026-11-02.
+Fly rejects new Seattle Machines because `sea` is deprecated, so do not set
+`primary_region` to `sea` or try to clone the running Machine there.
+
+Before changing regions, confirm the destination accepts new Machines and
+measure database latency there. Keep the existing healthy Machine until a
+replacement passes health checks. Changing `primary_region` alone does not
+move a running Machine.
+
+## Shutdown during deployments
+
+Fly sends SIGTERM with a 300-second grace period. Uvicorn allows active requests
+120 seconds to finish; the draft worker then stops claiming tasks and has up to
+120 seconds to save its current draft before the background loop is stopped.
+This also drains draft work whose browser has disconnected. Work that exceeds
+the grace period remains protected by its expiring lease and is never marked
+complete or replayed automatically. The seller must review the saved draft and
+retry interrupted work. A new web version offers a Reload app button instead
+of automatically reloading an open editor.
 
 ## Shared category trees
 

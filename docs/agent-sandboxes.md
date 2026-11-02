@@ -4,6 +4,8 @@ Use sample data before proposing changes to the real app. All local launchers
 bind to loopback. They never use the installed app's database, account or keys.
 Listing, delisting and marketplace update routes are refused.
 
+Use Python 3.12 for the sandbox developer environment, matching CI.
+
 ## Desktop workspace
 
 Run `./sandbox.sh`. The desktop API is on 4319 and UI on 5174. The existing

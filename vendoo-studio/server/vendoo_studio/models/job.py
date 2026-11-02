@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
@@ -48,6 +49,8 @@ class Job(SellerOwned, Base):
         UniqueConstraint("user_id", "id", name="uq_jobs_seller_id"),
         ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
             name="fk_jobs_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+        # A seller's newest jobs, without sorting every job they have.
+        Index("ix_jobs_seller_created_at", "user_id", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)

@@ -30,4 +30,4 @@ ENV VENDOO_STUDIO_DATA_DIR=/home/anteroom/.local/share/anteroom
 USER anteroom
 EXPOSE 8080
 # Authentication callbacks can contain one-use codes; do not log request URLs.
-CMD ["python", "-m", "uvicorn", "vendoo_studio.hosted:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]
+CMD ["python", "-m", "uvicorn", "vendoo_studio.hosted:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log", "--timeout-graceful-shutdown", "120"]
