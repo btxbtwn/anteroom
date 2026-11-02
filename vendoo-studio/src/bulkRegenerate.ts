@@ -2,8 +2,8 @@
  * Rewrite or generate several listings from their photos and item details.
  * Each listing uses the same reset as Regenerate (keep photos, measurements,
  * flaws, COG, labels and notes) and then the generate stream. A confirmed
- * price drop is saved first, so the rewrite reuses that price. The next listing
- * waits for a worker whose stream and leftover field fill have finished.
+ * price drop is saved first, so the rewrite reuses that price. Independent
+ * listings overlap; each waits for its own stream and field preparation.
  */
 import { studioFetch } from "./api/transport";
 
@@ -118,8 +118,6 @@ export type BulkRegenerateControl = {
   onSettled?(id: string): void;
 };
 
-export const BULK_GENERATE_CONCURRENCY = 3;
-
 const DEFAULT_POLL_MS = 1000;
 const DEFAULT_MAX_PENDING_POLLS = 600;
 
@@ -201,7 +199,7 @@ export function bulkRegenerateWarning(count: number): string {
   const each = count === 1 ? "the listing is" : "each listing is";
   return [
     `Rewrite ${noun} from scratch?`,
-    `Chat and every generated field are discarded, then ${each} written again from its photos and item details. Measurements, flaws, COG, labels and notes are kept. Anteroom rewrites one listing at a time.`,
+    `Chat and every generated field are discarded, then ${each} written again from its photos and item details. Measurements, flaws, COG, labels and notes are kept. Independent listings are rewritten concurrently.`,
   ].join("\n");
 }
 
@@ -297,7 +295,7 @@ export async function runBulkRegenerate(
       }
     }
   }
-  const concurrency = Math.min(ids.length, Math.max(1, Math.floor(control.concurrency ?? 1)));
+  const concurrency = Math.min(ids.length, Math.max(1, Math.floor(control.concurrency ?? ids.length)));
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   result.cancelled ||= control.cancelled();
   return result;

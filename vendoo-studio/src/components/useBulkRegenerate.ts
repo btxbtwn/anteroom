@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import {
-  BULK_GENERATE_CONCURRENCY,
   followListingGeneration,
   runBulkRegenerate,
   type BulkPriceDrop,
@@ -31,8 +30,10 @@ export type BulkRegenerateRun = BulkRegenerateProgress & {
 
 export type BulkRegenerate = ReturnType<typeof useBulkRegenerate>;
 
+type Batch = { cancelled: boolean; remaining: Set<string>; run: BulkRegenerateRun };
+
 /**
- * Rewrites listings one at a time, or generates fresh drafts concurrently.
+ * Independent listings and batches generate concurrently.
  * Lives in App, so collapsing the sidebar does not drop a run. The open chat hears about the
  * run after the server has registered it, and attaches to that same stream.
  */
@@ -42,10 +43,22 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
   useEffect(() => {
     chatOpenRef.current = chatOpen;
   }, [chatOpen]);
-  const cancelRef = useRef(false);
-  const runningRef = useRef(false);
+  const batches = useRef(new Set<Batch>());
   const [run, setRun] = useState<BulkRegenerateRun | null>(null);
   const [pendingIds, setPendingIds] = useState<string[]>([]);
+
+  function refresh() {
+    const current = [...batches.current];
+    const latest = current[current.length - 1];
+    setPendingIds([...new Set(current.flatMap((batch) => [...batch.remaining]))]);
+    setRun(latest ? {
+      ...latest.run,
+      total: current.reduce((sum, batch) => sum + batch.run.total, 0),
+      finished: current.reduce((sum, batch) => sum + batch.run.finished, 0),
+      active: new Map(current.flatMap((batch) => [...batch.run.active])),
+      cancelRequested: current.every((batch) => batch.cancelled),
+    } : null);
+  }
 
   async function start(
     ids: string[],
@@ -53,16 +66,15 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
     mode: BulkRunMode = "rewrite",
     drops?: ReadonlyMap<string, BulkPriceDrop>,
   ): Promise<BulkRegenerateResult | null> {
-    if (runningRef.current || ids.length === 0) return null;
-    runningRef.current = true;
-    cancelRef.current = false;
+    const pending = new Set([...batches.current].flatMap((batch) => [...batch.remaining]));
+    ids = [...new Set(ids)].filter((id) => !pending.has(id));
+    if (ids.length === 0) return null;
     const marked = new Set<string>();
     const remaining = new Set(ids);
     const active = new Map<string, BulkRegenerateProgress>();
     const planned = mode === "rewrite" && drops && drops.size > 0 ? drops : undefined;
     const titleOf = (id: string) => titles.get(id) || "listing";
-    setPendingIds(ids);
-    setRun({
+    const batch: Batch = { cancelled: false, remaining, run: {
       index: 0,
       total: ids.length,
       id: ids[0] || "",
@@ -72,7 +84,9 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
       title: titleOf(ids[0] || ""),
       active: new Map(),
       finished: 0,
-    });
+    } };
+    batches.current.add(batch);
+    refresh();
     try {
       return await runBulkRegenerate(ids, {
         willDrop: planned ? (id) => planned.has(id) : undefined,
@@ -147,34 +161,31 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
         },
         sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       }, {
-        cancelled: () => cancelRef.current,
-        concurrency: mode === "generate" ? BULK_GENERATE_CONCURRENCY : 1,
+        cancelled: () => batch.cancelled,
         onProgress: (progress) => {
           active.set(progress.id, progress);
-          setRun({
-            ...progress, cancelRequested: cancelRef.current, mode, title: titleOf(progress.id),
+          batch.run = {
+            ...progress, cancelRequested: batch.cancelled, mode, title: titleOf(progress.id),
             active: new Map(active), finished: ids.length - remaining.size,
-          });
+          };
+          refresh();
         },
         onSettled: (id) => {
           remaining.delete(id);
           active.delete(id);
-          setPendingIds([...remaining]);
-          setRun((current) => current ? {
-            ...current, active: new Map(active), finished: ids.length - remaining.size,
-          } : current);
+          batch.run = { ...batch.run, active: new Map(active), finished: ids.length - remaining.size };
+          refresh();
         },
       });
     } finally {
-      runningRef.current = false;
-      setRun(null);
-      setPendingIds([]);
+      batches.current.delete(batch);
+      refresh();
     }
   }
 
   function cancel() {
-    cancelRef.current = true;
-    setRun((current) => (current ? { ...current, cancelRequested: true } : current));
+    for (const batch of batches.current) batch.cancelled = true;
+    refresh();
   }
 
   return {

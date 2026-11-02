@@ -249,7 +249,7 @@ export function ListingSidebar({
             data-active={selecting}
             aria-pressed={selecting}
             aria-label={selecting ? "Stop selecting" : "Select listings"}
-            disabled={bulk.running || !runtime.features.has("bulk_actions")}
+            disabled={!runtime.features.has("bulk_actions")}
             onClick={() => {
               if (selecting) exitSelecting();
               else setSelecting(true);
@@ -333,9 +333,8 @@ export function ListingSidebar({
               title={selecting ? "Stop selecting" : "Select listings"}
               aria-label={selecting ? "Stop selecting" : "Select listings"}
               aria-pressed={selecting}
-              disabled={bulk.running || !runtime.features.has("bulk_actions")}
+              disabled={!runtime.features.has("bulk_actions")}
               onClick={() => {
-                if (bulk.running) return;
                 if (selecting) exitSelecting();
                 else setSelecting(true);
               }}
@@ -360,7 +359,7 @@ export function ListingSidebar({
             onSelect={onSelect}
             selecting={selecting}
             selectedIds={selectedIds}
-            selectLocked={bulk.running}
+            selectLocked={false}
             canSelect={(suggestion) => suggestionEligibleIds.includes(suggestion.conversation_id)}
             onToggleSelect={(id, shift) => toggleSelect(id, shift, suggestionEligibleIds)}
           />}
@@ -390,7 +389,7 @@ export function ListingSidebar({
                 selecting={selecting}
                 checked={selectedIds.has(listing.id)}
                 canSelect={true}
-                selectLocked={bulk.running}
+                selectLocked={false}
                 onToggleSelect={selecting ? toggleListingSelect : undefined}
                 onSelect={onSelect}
                 onDelete={onDelete}

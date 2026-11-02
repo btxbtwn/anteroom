@@ -79,7 +79,7 @@ class MacInference:
         identity = uuid.uuid4().hex
         future = concurrent.futures.Future()
         with self.condition:
-            if not self.connected or len(self.pending) >= 16:
+            if not self.connected:
                 raise MacUnavailable()
             self.pending[identity] = future
             self.outbox.append({'id': identity, 'operation': operation, 'args': args, 'kwargs': kwargs})
