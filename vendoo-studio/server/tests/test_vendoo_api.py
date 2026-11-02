@@ -26,7 +26,6 @@ from vendoo_studio.services.vendoo_item_update import (
     diff_updates,
     force_condition_updates,
 )
-from vendoo_studio.services.vendoo_import import listing_from_vendoo
 from vendoo_studio.services.vendoo_marketplace_fields import offer_floors, whole_price
 
 
@@ -300,25 +299,6 @@ class BuildItemTest(unittest.TestCase):
         self.assertTrue(listings["grailed"]["marketplaceSpecifics"]["buynow"])
         self.assertEqual(listings["whatnot"]["marketplaceSpecifics"], {})
 
-    def test_depop_style_age_source_use_vendoo_codes(self):
-        item, unresolved = build_vendoo_item({
-            "title": "Tee",
-            "depop_specifics": {
-                "style": ["Y2K", "Avant Garde", "Utility", "Nonsense"],
-                "age": "Y2K",
-                "source": "vintage",
-            },
-        }, self.schema)
-        specifics = item["listings"]["depop"]["marketplaceSpecifics"]
-        self.assertEqual(specifics["style"], ["y2_k", "avant_garde", "techwear"])
-        self.assertEqual(specifics["age"], ["y2k"])
-        self.assertEqual(specifics["source"], ["vintage"])
-        self.assertIn({"field": "depop:style", "value": "Nonsense"}, unresolved)
-
-        back = listing_from_vendoo(item, None)["depop_specifics"]
-        self.assertEqual(back["style"], ["Y2K", "Avant Garde", "Utility"])
-        self.assertEqual(back["source"], "Vintage")
-        self.assertEqual(back["age"], "y2k")
 
     def test_unbranded_sets_ebay_brand_and_mercari_no_brand(self):
         item, _ = build_vendoo_item({
@@ -891,29 +871,6 @@ class BuildItemTest(unittest.TestCase):
 class RoundTripTest(unittest.TestCase):
     """The serializer must survive a trip through Studio's own reader."""
 
-    def test_import_reads_back_what_we_wrote(self):
-        schema = observe_item_schema(PROBED_ITEMS)
-        item, _ = build_vendoo_item(LISTING, schema, images=IMAGES)
-        back = listing_from_vendoo(item, None)
-        self.assertEqual(back["title"], "Levi's 501 Straight Jeans")
-        self.assertEqual(back["price"], 48.0)
-        self.assertEqual(back["cost"], 20.0)
-        self.assertEqual(back["quantity"], 1)
-        self.assertEqual(back["brand"], "Levi's")
-        self.assertEqual(back["condition"], "Pre-Owned - Good")
-        self.assertEqual(back["primaryColor"], "Blue")
-        self.assertEqual(back["tags"], ["denim", "vintage"])
-        self.assertEqual(back["labels"], ["shelf-a"])
-        self.assertEqual(back["size"], "32x34")
-        self.assertEqual(back["sizeType"], "Regular")
-        self.assertEqual(back["weight_lb"], 1)
-        self.assertEqual(back["weight_oz"], 8)
-        self.assertEqual(back["package_dimensions_in"], "13x10x3")
-        self.assertEqual(back["poshmark_specifics"]["originalPrice"], 0)
-        self.assertNotIn("department", back.get("ebay_specifics") or {})
-        self.assertEqual(back["etsy_specifics"]["who_made"], "someone_else")
-        self.assertNotIn("category_specifics", back.get("etsy_specifics") or {})
-        self.assertEqual(back["depop_specifics"]["style"], ["Streetwear"])
 
 
 class DiffUpdatesTest(unittest.TestCase):

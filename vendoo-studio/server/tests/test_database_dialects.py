@@ -16,7 +16,6 @@ from alembic.migration import MigrationContext
 from vendoo_studio.database import Base, SessionLocal, database_url, engine, json_text, json_value, load_models
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.listing import Listing, ListingRevision
-from vendoo_studio.models.listing_evidence import SaleSnapshot
 
 
 def test_postgres_bursts_wait_for_a_connection_instead_of_exceeding_session_limit():

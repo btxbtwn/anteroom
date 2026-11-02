@@ -5,7 +5,7 @@ from sqlalchemy.engine import CursorResult
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
