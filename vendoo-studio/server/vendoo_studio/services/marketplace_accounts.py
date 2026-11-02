@@ -74,6 +74,12 @@ def _on_web() -> bool:
     return current() is not None
 
 
+async def _accounts() -> dict:
+    """Saved accounts, read in a worker thread: on the web this is a database read,
+    and waiting for a pooled connection on the request loop stalls every request."""
+    return await asyncio.to_thread(get_marketplace_accounts)
+
+
 def _check(marketplace: str) -> str:
     if marketplace not in MARKETPLACES:
         raise ValueError(f"Unknown marketplace: {marketplace}")
@@ -115,7 +121,7 @@ async def _wait_for_sign_in(pending: PendingSignIn) -> None:
             if result.get("error"):
                 pending.error = result["error"]
                 return
-            set_marketplace_account(pending.marketplace, _account_record(result))
+            await asyncio.to_thread(set_marketplace_account, pending.marketplace, _account_record(result))
             for warning in result.get("warnings") or []:
                 log.warning("%s sign-in: %s", name, warning)
             start_listening()
@@ -168,14 +174,14 @@ async def disconnect(marketplace: str) -> None:
     """Unlink the account on the relay and forget its tokens here."""
     _check(marketplace)
     cancel_sign_in(marketplace)
-    account = get_marketplace_accounts().get(marketplace)
-    if account and account.get("accountId") and get_relay_device():
+    account = (await _accounts()).get(marketplace)
+    if account and account.get("accountId") and await asyncio.to_thread(get_relay_device):
         try:
             await relay_request("DELETE", f"/studio/accounts/{marketplace}/{account['accountId']}")
         except Exception as exc:  # noqa: BLE001 - forget locally regardless
             log.warning("could not unlink %s on the relay: %s", marketplace, exc)
-    delete_marketplace_account(marketplace)
-    if not get_marketplace_accounts() and not _on_web():
+    await asyncio.to_thread(delete_marketplace_account, marketplace)
+    if not await _accounts() and not _on_web():
         relay_client.stop_stream()
 
 
@@ -231,14 +237,14 @@ async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
     ``rejected`` is a token the marketplace just refused: refresh even though it
     has not expired, unless another caller already replaced it.
     """
-    account = get_marketplace_accounts().get(_check(marketplace))
+    account = (await _accounts()).get(_check(marketplace))
     if not account or not account.get("accessToken"):
         raise SignInRequired(f"{NAMES[marketplace]} isn't connected.")
     if _fresh(account, rejected):
         return account["accessToken"]
     async with _refresh_lock(marketplace):
         # Whoever held the lock may have refreshed already; use what it stored.
-        account = get_marketplace_accounts().get(marketplace)
+        account = (await _accounts()).get(marketplace)
         if not account or not account.get("accessToken"):
             raise SignInRequired(f"{NAMES[marketplace]} isn't connected.")
         if _fresh(account, rejected):
@@ -254,7 +260,7 @@ async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
             raise SignInRequired(f"Sign in to {NAMES[marketplace]} again.")
         if resp.status_code != 200:
             raise RelayError(f"Could not refresh the {NAMES[marketplace]} sign-in ({resp.status_code}).", resp.status_code)
-        current = get_marketplace_accounts().get(marketplace)
+        current = (await _accounts()).get(marketplace)
         if not current or any(current.get(key) != account.get(key) for key in ("accountId", "connectedAt", "refreshToken")):
             # Disconnect or a new sign-in during the request revokes this refresh.
             # Never recreate the connection using a response for its old grant.
@@ -268,7 +274,7 @@ async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
             "refreshToken": tokens.get("refreshToken") or account["refreshToken"],
             "expiresAt": now + tokens["expiresIn"] if tokens.get("expiresIn") else None,
         }
-        set_marketplace_account(marketplace, account)
+        await asyncio.to_thread(set_marketplace_account, marketplace, account)
         return account["accessToken"]
 
 

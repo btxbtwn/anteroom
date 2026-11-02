@@ -6,6 +6,37 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.669 — 2026-11-02
+
+- Keep the app responsive while preparing large marketplace category menus and repairing generated listing details.
+- Stop the hosted sandbox's private database when the sandbox closes, so repeated test runs keep working.
+
+## 0.1.668 — 2026-11-02
+
+- Open a listing on the web faster: pointing at it in the list starts loading its form and photos, and opening another listing no longer reloads your whole account.
+
+## 0.1.667 — 2026-11-02
+
+- Reduce database work when loading your jobs list, while keeping saved listing copies available for jobs.
+
+## 0.1.666 — 2026-11-02
+
+- Remove the Usage page from the sidebar, the phone menu and the iPhone app. Type /usage-limits in a chat to see how much of your plan is left.
+
+## 0.1.665 — 2026-11-02
+
+- Make sale amounts, fees, profit and dates easier to scan, with search, date presets, sorting and filters for missing data, reviews and losses.
+- Keep sales totals and CSV exports in sync with the selected filters across every page.
+- Simplify Inventory analytics periods, search and rank breakdowns together, and jump straight to inventory that needs attention.
+
+## 0.1.664 — 2026-11-02
+
+- On the web, Settings → Connections now asks you to update Anteroom Bridge when it is too old to check marketplace sign-in, instead of saying Chrome is not connected.
+
+## 0.1.663 — 2026-11-02
+
+- On the web, starting an eBay or Etsy sign-in, or loading their listing settings, no longer freezes Anteroom while the server is busy, and sign-in errors no longer blame the relay when the relay isn't the problem.
+
 ## 0.1.662 — 2026-11-02
 
 - Behind the scenes, retired panels and unused interface helpers have been removed, and the unused-code check now runs without exceptions.

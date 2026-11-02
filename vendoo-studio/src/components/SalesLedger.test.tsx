@@ -32,7 +32,7 @@ describe("local sales records", () => {
     const html = renderToStaticMarkup(<SalesLedger onOpenListing={vi.fn()} />);
     expect(html).toContain("partially refunded");
     expect(html).toContain("quantity 2");
-    expect(html).toContain("Profit: Not recorded");
+    expect(html.replace(/<[^>]+>/g, "")).toContain("Profit: Not recorded");
     expect(html).toContain("Order changed or recorded amounts need review");
     expect(html).toContain("/api/sales-ledger/export/sales.csv?start=");
     expect(html).toContain("/api/sales-ledger/export/inventory.csv");

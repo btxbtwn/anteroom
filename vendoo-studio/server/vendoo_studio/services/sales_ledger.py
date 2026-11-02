@@ -177,17 +177,27 @@ def save_financials(db: Session, sale_id: str, body: FinancialSave) -> dict:
     return get_sale(db, sale_id)
 
 
-def sale_records(db: Session, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None):
+def sale_records(db: Session, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None,
+                 q: str = "", attention: str = "all", sort: str = "newest"):
     from vendoo_studio.services.sales_records import records
 
     if start > end or start < date(1970, 1, 1) or end > datetime.now(UTC).date():
         raise LedgerError("Choose a valid UTC date range from 1970 through today.")
     if marketplace is not None and marketplace not in SALE_MARKETPLACES:
         raise LedgerError("Choose a supported marketplace.")
+    if attention not in {"all", "missing", "review", "loss"} or sort not in {"newest", "oldest", "title"}:
+        raise LedgerError("Choose a supported sales filter and sort order.")
+    search = q.strip().casefold()
     rows = [row for row in records(db, conversation_id)
             if start.isoformat() <= str(row["sold_at"] or row["received_at"])[:10] <= end.isoformat()
-            and (marketplace is None or row["marketplace"] == marketplace)]
-    return sorted(rows, key=lambda row: (row["sold_at"] or row["received_at"], row["id"]), reverse=True)
+            and (marketplace is None or row["marketplace"] == marketplace)
+            and (not search or search in " ".join(str(row.get(key) or "") for key in ("title", "order_id", "line_id", "marketplace")).casefold())
+            and (attention == "all" or attention == "missing" and bool(row["missing_sale_data"])
+                 or attention == "review" and row["financials_stale"]
+                 or attention == "loss" and row["profit"] is not None and Decimal(row["profit"]) < 0)]
+    if sort == "title":
+        return sorted(rows, key=lambda row: ((row["title"] or "").casefold(), row["id"]))
+    return sorted(rows, key=lambda row: (row["sold_at"] or row["received_at"], row["id"]), reverse=sort == "newest")
 
 
 def summary(rows) -> dict:
@@ -218,8 +228,9 @@ def summary(rows) -> dict:
             "currencies": [groups[key] for key in sorted(groups)]}
 
 
-def list_sales(db: Session, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None, page: int = 1) -> dict:
-    records = sale_records(db, start, end, marketplace, conversation_id)
+def list_sales(db: Session, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None, page: int = 1,
+               q: str = "", attention: str = "all", sort: str = "newest") -> dict:
+    records = sale_records(db, start, end, marketplace, conversation_id, q, attention, sort)
     totals = summary(records)
     rows = records[(page - 1) * PAGE_SIZE:page * PAGE_SIZE]
     return {"rows": rows, "summary": totals, "page": page, "has_more": page * PAGE_SIZE < totals["lines"]}

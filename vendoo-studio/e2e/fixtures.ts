@@ -1,4 +1,4 @@
-import { expect, test as base, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test as base, type APIRequestContext, type APIResponse, type Page } from "@playwright/test";
 
 // A 1x1 white PNG, enough for an upload; the sandbox provider never reads photos.
 const PIXEL = Buffer.from(
@@ -6,7 +6,22 @@ const PIXEL = Buffer.from(
   "base64",
 );
 
-export const test = base.extend<{ phone: boolean }>({
+export const test = base.extend<{ phone: boolean; createConversation: (data: { title: string; notes: string }) => Promise<APIResponse> }>({
+  // Device projects share a sandbox; remove only the inventory items this test creates.
+  createConversation: async ({ request }, use) => {
+    const status = await (await request.get("/api/status")).json();
+    expect(status.sandbox, "browser tests only run against the sandbox").toBe(true);
+    const ids: string[] = [];
+    await use(async data => {
+      const response = await request.post("/api/conversations", { data });
+      if (response.ok()) ids.push((await response.json()).id);
+      return response;
+    });
+    for (const id of ids.reverse()) {
+      const response = await request.delete(`/api/conversations/${id}`);
+      expect(response.ok(), "Remove this test's inventory item").toBe(true);
+    }
+  },
   phone: async ({ isMobile }, use) => {
     await use(isMobile);
   },
