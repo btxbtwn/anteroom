@@ -124,7 +124,7 @@ PRs #982, #983, #985 and #986 are merged. The tested release image is
 (digest `sha256:7cc3134596e0853b16212dbfc705c92e0e7dfb146454e4987a1e2e6f7af9f43f`).
 It passed private Fly startup, bundled assets, canonical rules and authentication
 checks on a temporary Machine in `ord`, exiting 0. Both temporary test Machines
-were removed. Version 0.1.574 is deployed; public health/assets/authentication and the deployed worker/database isolation checks passed. Production is migrated to `56b5ee7250ec`, with a private consistent recovery copy of the prior public application records. Fly trial billing still affects uptime.
+were removed. Version 0.1.574 is deployed; public health/assets/authentication and the deployed worker/database isolation checks passed. Production is migrated to `56b5ee7250ec`, with a private consistent recovery copy of the prior public application records.
 
 Fly configuration enables the existing draft worker and keeps one Machine
 running. An idle-stop policy cannot guarantee work continues after a browser
@@ -178,7 +178,6 @@ Its release image also passed private startup, assets and synthetic-owner
 settings/database checks with the production runtime role, creating no account
 data. The API now runs in `ord` after a stalled image pull on its prior host;
 that stopped, stateless Machine was removed after the replacement was healthy.
-Fly's trial limit still requires billing for reliable uptime.
 
 PR #995 is merged and deployed in 0.1.582. Public health/version and unsigned
 settings/duplicate-review rejection checks passed. General settings are being
@@ -256,8 +255,7 @@ lets only the trusted process login list sellers with due or unfinished runs;
 each tick then runs in that seller's row-secured context. Regenerate queues the
 seller's durable draft task. Marketplace writes stay approvals, and approving
 one is refused until web marketplace actions exist. Offers and sharing panels
-need marketplace sessions and stay hidden. Fly's trial stops the Machine after
-five minutes, so schedules only fire while it is running.
+need marketplace sessions and stay hidden.
 
 On `feat/hosted-assistant`, the Assistant view mounts the canonical assistant
 routes. Answers stay in-process like desktop, but the run key and its thread
@@ -294,7 +292,7 @@ automatic offers on or a send cut off by a restart. At startup the web offer
 timer marks each cut-off send unknown and pauses that seller's automation, as
 the Mac does; every 15 minutes it runs each seller's check in their own
 row-secured context with their own token. The last check and its error are
-kept per seller. Like automations, checks only run while the Fly Machine is up.
+kept per seller.
 
 On `feat/hosted-direct-listing`, the web app lists, updates and delists on eBay
 through its API with the desktop handlers: List and Update carry `confirm`,
@@ -335,8 +333,14 @@ preferences, research and buy list live in their own `user_preferences` row
 (`sourcing`) instead of the Mac's `sourcing.json`; refresh locks are per seller,
 and the refresh thread carries the request's seller context. Store catalogs are
 public and stay shared. The web refreshes when the seller opens Sourcing and it
-is due; it has no background timer. The assistant's shop summary now reads the
-seller's own sourcing state on the web too.
+is due, and in the background like the Mac's timer: a `SECURITY DEFINER`
+function (`due_sourcing_owners`, revision `e4b7c2d9f1a3`) lets only the trusted
+process login list sellers whose saved buy list is older than six hours or was
+built for different plan settings. Every 15 minutes the web timer refreshes
+each of them in their own row-secured context, skipping a seller whose refresh
+is already running. A refresh only reads stores and marketplaces; it never buys
+or lists. The assistant's shop summary now reads the seller's own sourcing state
+on the web too.
 
 On `feat/hosted-vinted`, the Vinted tab, its Category and Brand pickers, and
 Vinted List, Update and Delist are on the web, as on the Mac. The Mac reads
