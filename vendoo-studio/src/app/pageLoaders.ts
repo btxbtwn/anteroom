@@ -6,7 +6,6 @@ export const pageLoaders = {
   analytics: () => import("../components/AnalyticsPage").then(m => ({ default: m.AnalyticsPage })),
   assistant: () => import("../components/AssistantPage").then(m => ({ default: m.AssistantPage })),
   marketplaces: () => import("../components/MarketplacesPage").then(m => ({ default: m.MarketplacesPage })),
-  usage: () => import("../components/UsagePage").then(m => ({ default: m.UsagePage })),
   automations: () => import("../components/AutomationsPage").then(m => ({ default: m.AutomationsPage })),
   sourcing: () => import("../components/SourcingPage").then(m => ({ default: m.SourcingPage })),
 };

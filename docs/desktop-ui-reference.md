@@ -27,8 +27,7 @@ Observed at 1440 × 900 in dark and light appearance:
 - Condition choice control and an eBay form's disconnected/error state.
 - Standalone Assistant, Analytics, Sourcing, Marketplaces and Automations.
 - Settings General, Listings, Assistant, Providers, Connections, Agents, Data,
-  Logs and Help. Usage was observed in its loading state; its populated account
-  view was not verified. Empty and disconnected states are sandbox evidence,
+  Logs and Help. Empty and disconnected states are sandbox evidence,
   not proof that external integrations work.
 
 A 390 × 844 responsive-web sample was also captured. It is not evidence that
@@ -75,7 +74,7 @@ Paths below are relative to `vendoo-studio/`.
 | Concern | Primary source | What must carry into iPhone |
 | --- | --- | --- |
 | Workspace and view lifecycle | `src/app/App.tsx`, `src/components/WorkspaceTopbar.tsx`, `src/styles/layout.css` | Selected listing context, title and navigation state; adapt columns to native stacks |
-| Primary destinations | `src/components/sidebar/SidebarFooter.tsx`, `src/components/MobileNav.tsx`, `src/components/workspaceCrumbs.ts` | Assistant, Inventory, Sourcing, Analytics, Marketplaces, Automations, Usage, Settings; enable only working destinations |
+| Primary destinations | `src/components/sidebar/SidebarFooter.tsx`, `src/components/MobileNav.tsx`, `src/components/workspaceCrumbs.ts` | Assistant, Inventory, Sourcing, Analytics, Marketplaces, Automations, Settings; enable only working destinations |
 | Inventory | `src/components/ListingSidebar.tsx`, `src/components/sidebar/ListingRow.tsx`, `ListingBits.tsx`, `inventoryFilters.ts` | Suggestions, status shelves/tabs, counts, search, filtering, sorting, covers, selection and row actions |
 | Listing context and marketplace status | `src/components/MarketplacesSection.tsx`, `ListingEditor.tsx` | General versus marketplace selection, eligibility, connection/busy/error state, named-platform actions |
 | Seller inputs | `src/components/PhotoTray.tsx`, `ItemDetails.tsx`, `garmentMeasurements.ts` | Photos, SKU, notes, flaws, labels, COG, package inputs and garment measurements |
@@ -176,8 +175,6 @@ conversation. Never auto-retry a mutation merely because a view reappears.
   connection state; do not transplant a desktop multi-column table unchanged.
 - Automations: visibly separate configuration, work awaiting review and run
   outcomes. Scheduling never becomes permission to publish or delist.
-- Usage: show readable subscription/provider state and refresh/error feedback;
-  the sandbox loading view is insufficient to specify populated charts.
 
 ## Prioritized remaining work and acceptance
 
