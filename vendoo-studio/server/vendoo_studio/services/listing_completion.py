@@ -143,11 +143,6 @@ def marketplace_optional_blocks_silent_skip(field: dict) -> bool:
     return label in DEPOP_OPTIONAL_MUST_FILL_LOOKUPS and label not in DEPOP_OPTIONAL_DNA_LOOKUPS
 
 
-def ebay_optional_blocks_silent_skip(field: dict) -> bool:
-    """Backward-compatible alias for marketplace_optional_blocks_silent_skip."""
-    return marketplace_optional_blocks_silent_skip(field)
-
-
 def disposition_clears_gap(field: dict, *, exempt_keys: set, no_evidence_keys: set) -> bool:
     if str(field.get("error") or "") != "Empty field":
         return False

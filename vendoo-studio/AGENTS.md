@@ -55,16 +55,17 @@ in the sandbox.
 
 ## Code health checks
 
-Five checks guard refactors and the design. Each started with the problems already in the
-code recorded, so it fails only on new ones. The records may only shrink: when
+Five checks guard refactors and the design. Where pre-existing problems are
+recorded, those records may only shrink: when
 you fix a recorded problem, remove it from the record in the same PR, and never
-add to a record to make a check pass.
+add to a record to make a check pass. The backend unused-code check has no
+baseline: every unused declaration fails it.
 
 | Check | Command | Record of existing problems |
 |---|---|---|
 | Types (basedpyright, standard mode) | `basedpyright` | `.basedpyright/baseline.json`; after fixing errors, `basedpyright --writebaseline` and check the diff only removes entries |
 | Layers: routes, then services, then repositories, then models; a lower one never imports a higher one | `lint-imports` | `ignore_imports` in `pyproject.toml` |
-| Unused backend functions, methods, classes and properties (vulture) | `python scripts/check-dead-code.py` | `server/dead_code_baseline.py`; `--write-baseline` after deleting code |
+| Unused backend functions, methods, classes and properties (vulture) | `python scripts/check-dead-code.py` | None: all unused declarations fail; tests and maintenance scripts count as callers |
 | Unused frontend files, exports and dependencies | `npm run knip` | `ignoreIssues` in `knip.json` |
 | Design rules from `DESIGN.md`: hard-coded colors, uppercase labels, weights above 600, gradients, native selects and checkboxes, arbitrary text sizes | `python scripts/check-design.py` | `design_baseline.json`; `--write-baseline` after fixing a recorded case |
 

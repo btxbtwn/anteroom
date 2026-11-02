@@ -1222,9 +1222,3 @@ def _naive(value: datetime | None) -> datetime | None:
 def _iso(value: datetime | None) -> str | None:
     stamp = as_utc(value)
     return stamp.isoformat() if stamp else None
-
-
-def jobs_for_run(db: Session, run_id: str) -> list[Job]:
-    """Jobs whose snapshot names this run. History reads the run summary; this is the check that the log exists."""
-    rows = db.query(Job).filter(Job.current_step == "automation").all()
-    return [row for row in rows if isinstance(row.listing_snapshot, dict) and row.listing_snapshot.get("run_id") == run_id]

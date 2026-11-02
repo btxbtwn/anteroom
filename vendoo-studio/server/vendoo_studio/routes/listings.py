@@ -20,13 +20,6 @@ from vendoo_studio.services.price_markdown import PriceDropError, current_listin
 
 router = APIRouter(tags=["listings"])
 
-def _first_error(validation) -> str:
-    for err in validation.errors:
-        message = err.get("message") or ""
-        if message:
-            return message
-    return "Listing is invalid"
-
 
 class ListingUpdate(BaseModel):
     listing: dict
