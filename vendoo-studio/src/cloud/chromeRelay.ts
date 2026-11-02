@@ -21,14 +21,18 @@ function approvedPhotos(command: RelayedCommand): { id: string; mime_type: strin
     typeof photo?.id === "string" && typeof photo?.mime_type === "string");
 }
 
+/** What a Bridge may declare it runs for the hosted API: marketplace actions, and each named read. */
+export const RELAY_CAPABILITIES = ["marketplace.actions", "vinted.choices"] as const;
+
 /** One relay turn: wait for the next command, run it in Chrome, post the reply. False when nothing came. */
-export async function relayOnce(bridge: RelayBridge, capable: boolean): Promise<boolean> {
-  const next = await studioFetch(`/api/browser-relay/next?capabilities=${capable ? "marketplace.actions" : ""}`);
+export async function relayOnce(bridge: RelayBridge, capabilities: readonly string[]): Promise<boolean> {
+  const declared = RELAY_CAPABILITIES.filter((capability) => capabilities.includes(capability));
+  const next = await studioFetch(`/api/browser-relay/next?capabilities=${declared.join(",")}`);
   if (next.status === 204 || !next.ok) return false;
   const command = await next.json() as RelayedCommand;
   let reply: Record<string, unknown>;
   try {
-    const photos = await Promise.all(approvedPhotos(command).map((photo) => photoData(command.job_id, photo)));
+    const photos = await Promise.all(approvedPhotos(command).map((photo) => photoData(String(command.job_id), photo)));
     reply = await bridge.runMarketplaceCommand(command, photos);
   } catch {
     // Nothing reached the marketplace: the photos never got to Chrome.
@@ -42,11 +46,11 @@ export async function relayOnce(bridge: RelayBridge, capable: boolean): Promise<
 }
 
 /** Relay until stopped. A failed request waits a few seconds before asking again. */
-export function startChromeRelay(bridge: RelayBridge, capable: boolean): () => void {
+export function startChromeRelay(bridge: RelayBridge, capabilities: readonly string[]): () => void {
   let active = true;
   void (async () => {
     while (active) {
-      try { await relayOnce(bridge, capable); }
+      try { await relayOnce(bridge, capabilities); }
       catch { await new Promise((resolve) => window.setTimeout(resolve, 3000)); }
     }
   })();

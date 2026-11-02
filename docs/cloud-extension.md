@@ -127,3 +127,18 @@ Bridge's reply goes back to the hosted API, which records what the marketplace
 did. Supabase tokens never reach the extension. The Bridge advertises
 `marketplace.actions`; an older Bridge leaves these actions refused with an
 update message.
+
+## Marketplace reads from the web (Bridge 0.2.42)
+
+Some marketplace forms need choices only the seller's own account can read.
+The Mac reads Vinted's categories and brands in its private account window; the
+web reads them in the seller's Chrome. The hosted API queues a named read
+(`marketplace.vinted_categories`, `marketplace.vinted_brands`) on the same
+relay, with its own capability, `vinted.choices`, so an older Bridge is
+asked to update instead of being sent a command it cannot run. Each later read
+gets its own capability name (`NEEDS` in `hosted_browser_relay.py`). A read carries
+no job and only the inputs listed for it in `docs/json-contract.md`; the
+content script and worker reject any other field, URL or command. The Bridge
+answers with the choices or one fixed error code, never the marketplace's own
+response, headers or cookies. Reads are GETs on the marketplace's own sell-page
+endpoints and do not claim the listing-action lock.
