@@ -22,7 +22,7 @@
     const page = sender => sender.id === api.runtime.id && Number.isInteger(sender.tab?.id)
       && sender.frameId === 0 && typeof sender.documentId === 'string'
       && site(sender.url) && site(sender.tab.url) && (!sender.origin || sender.origin === ORIGIN);
-    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? ['marketplace.actions'] : [])] });
+    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? ['marketplace.actions', 'marketplace.reads'] : [])] });
     async function read() { return (await api.storage.session.get(KEY))[KEY] || {}; }
     async function write(records) { await api.storage.session.set({ [KEY]: records }); }
     async function closeApproval(record) {

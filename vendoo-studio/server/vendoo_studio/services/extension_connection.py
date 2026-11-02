@@ -53,6 +53,9 @@ DUPLICATE_REPORT_SEC = 300.0
 # need the exact copy this app ships. A change an older Bridge cannot handle
 # gets a new name here and in the Bridge's capabilities.
 MARKETPLACE_ACTIONS = "marketplace.actions"
+# What a Bridge must declare before the web sends it a named read of a
+# marketplace account's own choices (services/hosted_browser_relay.py).
+MARKETPLACE_READS = "marketplace.reads"
 
 
 async def _warm_label_catalog() -> None:
@@ -1384,7 +1387,7 @@ def marketplace_actions_refusal() -> str | None:
     if context is not None:
         from vendoo_studio.services.hosted_browser_relay import relay_for
 
-        return relay_for(context.seller_id).marketplace_actions_refusal()
+        return relay_for(context.seller_id).refusal()
     if not extension_manager.connected:
         return "Connect Chrome first."
     if MARKETPLACE_ACTIONS not in extension_manager.capabilities:

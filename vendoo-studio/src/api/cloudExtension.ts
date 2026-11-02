@@ -9,11 +9,12 @@ export interface CloudConnection {
 }
 export interface BrowserAccount { id: string; email: string }
 /** A marketplace command the hosted API relays to this seller's Chrome. */
-export interface RelayedCommand { type: string; job_id: string; message_id: string; payload: Record<string, unknown> }
+export interface RelayedCommand { type: string; job_id: string | null; message_id: string; payload: Record<string, unknown> }
 export interface RelayedPhoto { id: string; mime_type: string; base64: string }
 // How long each command may take in Chrome, a little past the server's own wait.
 const COMMAND_TIMEOUT_MS: Record<string, number> = {
   "marketplace.execute": 200_000, "marketplace.result": 75_000, "marketplace.delete": 100_000, "job.cancel": 10_000,
+  "marketplace.vinted_categories": 45_000, "marketplace.vinted_brands": 45_000,
 };
 const ERRORS: Record<string, string> = {
   not_connected: "Connect Chrome before loading the Poshmark form.",
@@ -44,7 +45,7 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
         }
         finish({ ok: data.ok === true, state: ["connected", "disconnected", "pending"].includes(data.state) ? data.state : "unavailable",
           extensionVersion: typeof data.extensionVersion === "string" ? data.extensionVersion.slice(0, 30) : "",
-          supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item: unknown) => item === "poshmark.form.read" || item === "marketplace.actions") : [] });
+          supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item: unknown) => item === "poshmark.form.read" || item === "marketplace.actions" || item === "marketplace.reads") : [] });
       };
       const timeout = relay ? COMMAND_TIMEOUT_MS[relay.command.type] ?? 10_000 : action === "poshmark_form" ? 35000 : 2000;
       const timer = channel.setTimeout(() => finish({ ok: false, state: "unavailable", extensionVersion: "" }), timeout);
