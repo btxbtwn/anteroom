@@ -77,11 +77,12 @@ describe("Connections settings", () => {
       <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
     );
     let cursor = 0;
-    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted", "Facebook"]) {
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
       const at = html.indexOf(name, cursor);
       expect(at).toBeGreaterThanOrEqual(cursor);
       cursor = at + name.length;
     }
+    expect(html).not.toContain("Facebook");
     expect(html).toContain("Signed in as ada");
     expect(html).toContain("Not signed in");
     expect(html).toContain("Sign in again");

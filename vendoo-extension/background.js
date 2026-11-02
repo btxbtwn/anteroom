@@ -58,7 +58,6 @@ importScripts('background/marketplace-network.js');
 importScripts('background/poshmark-native.js');
 importScripts('background/sellwild-native.js');
 importScripts('background/vinted-native.js');
-importScripts('background/facebook-native.js');
 importScripts('background/native-marketplaces.js');
 importScripts('background/marketplace-delete.js');
 importScripts('background/marketplace-promotions.js');
@@ -699,11 +698,6 @@ async function handleStudioMessage(msg) {
 
     case 'marketplace.delete': {
       await handleMarketplaceDelete(msg);
-      break;
-    }
-
-    case 'marketplace.listing_state': {
-      await handleMarketplaceListingState(msg);
       break;
     }
 

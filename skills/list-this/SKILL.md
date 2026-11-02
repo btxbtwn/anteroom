@@ -429,9 +429,9 @@ Before outputting ANY listing, verify:
 - Condition is required and uses Mercari labels (see `vendoo-dropdown-options.md`)
 - shippingLabel must be `USPS Ground Advantage`
 
-**Grailed / Facebook / Sellwild:**
+**Grailed / Sellwild:**
 - No category of their own to choose: Vendoo maps the general category to each one
-- Fields come from that mapped category's live schema; put answers in `grailed_specifics`, `facebook_specifics`, or `sellwild_specifics`
+- Fields come from that mapped category's live schema; put answers in `grailed_specifics` or `sellwild_specifics`
 - Grailed's Designer is the listing brand; it must be the real maker, never a store or reseller name
 - Condition follows the general condition; do not set it per marketplace
 

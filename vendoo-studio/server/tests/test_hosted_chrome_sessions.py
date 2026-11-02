@@ -31,7 +31,7 @@ def test_connections_read_chrome_sign_ins_through_the_sellers_tab(cloud, signing
     thread.join(10)
     assert command['type'] == 'marketplace.sessions' and command['payload'] == {'request_id': command['message_id']}
     sessions = result['response'].json()['sessions']
-    assert set(sessions) == {'depop', 'poshmark', 'mercari', 'sellwild', 'vinted', 'facebook'}
+    assert set(sessions) == {'depop', 'poshmark', 'mercari', 'sellwild', 'vinted'}
     assert sessions['poshmark'] == {'state': 'signed_in', 'expires_at': 1900000000, 'label': 'pat', 'expiring': False}
     assert sessions['vinted']['state'] == 'signed_out' and sessions['depop']['state'] == 'unknown'
     assert 'secret-cookie' not in result['response'].text

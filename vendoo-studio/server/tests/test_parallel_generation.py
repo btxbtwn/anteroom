@@ -370,7 +370,7 @@ class ApplyResolvedFieldsTest(unittest.TestCase):
         from vendoo_studio.services.vendoo_create import ResolvedFields
 
         return ResolvedFields(
-            paths={"general": "Women > Tops", **{key: "" for key in ("ebay", "etsy", "poshmark", "mercari", "depop", "grailed", "vinted", "facebook", "sellwild")}},
+            paths={"general": "Women > Tops", **{key: "" for key in ("ebay", "etsy", "poshmark", "mercari", "depop", "grailed", "vinted", "sellwild")}},
             listing={
                 "category_path": "Women > Tops",
                 "category_id": "g1",

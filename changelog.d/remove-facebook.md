@@ -1,0 +1,1 @@
+- Remove Facebook Marketplace: no Facebook tab, Check on Facebook, sign-in row or sale checks. Past Facebook sales stay in Sales records and Analytics.

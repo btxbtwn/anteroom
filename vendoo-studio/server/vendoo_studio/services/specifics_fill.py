@@ -44,7 +44,6 @@ MARKETPLACE_LABELS = {
     "mercari": "Mercari",
     "depop": "Depop",
     "etsy": "Etsy",
-    "facebook": "Facebook",
     "grailed": "Grailed",
 }
 
