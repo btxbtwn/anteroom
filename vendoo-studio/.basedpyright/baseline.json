@@ -114,16 +114,6 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/automations.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 20,
-                    "endColumn": 28,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/category_selection.py": [
             {
                 "code": "reportGeneralTypeIssues",
@@ -152,43 +142,7 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/completion_gaps.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 82,
-                    "endColumn": 87,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 79,
-                    "endColumn": 84,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./server/vendoo_studio/services/etsy_listings.py": [
-            {
-                "code": "reportOptionalSubscript",
-                "range": {
-                    "startColumn": 43,
-                    "endColumn": 49,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/extension_connection.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 52,
-                    "endColumn": 59,
-                    "lineCount": 1
-                }
-            },
             {
                 "code": "reportGeneralTypeIssues",
                 "range": {
@@ -208,40 +162,12 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/inventory_analytics.py": [
-            {
-                "code": "reportOperatorIssue",
-                "range": {
-                    "startColumn": 23,
-                    "endColumn": 45,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/listing_completion.py": [
             {
                 "code": "reportOptionalMemberAccess",
                 "range": {
                     "startColumn": 40,
                     "endColumn": 45,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./server/vendoo_studio/services/listing_editor.py": [
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 106,
-                    "endColumn": 111,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 74,
-                    "endColumn": 79,
                     "lineCount": 1
                 }
             }
@@ -257,46 +183,6 @@
             }
         ],
         "./server/vendoo_studio/services/listing_promotions.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 49,
-                    "endColumn": 59,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 48,
-                    "endColumn": 58,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 49,
-                    "endColumn": 64,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 47,
-                    "endColumn": 49,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 31,
-                    "endColumn": 33,
-                    "lineCount": 1
-                }
-            },
             {
                 "code": "reportArgumentType",
                 "range": {
@@ -334,16 +220,6 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/measure_read.py": [
-            {
-                "code": "reportOptionalSubscript",
-                "range": {
-                    "startColumn": 68,
-                    "endColumn": 73,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/mercari_api.py": [
             {
                 "code": "reportAttributeAccessIssue",
@@ -354,25 +230,7 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/native_editor.py": [
-            {
-                "code": "reportOptionalOperand",
-                "range": {
-                    "startColumn": 45,
-                    "endColumn": 57,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/native_marketplaces.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 36,
-                    "endColumn": 56,
-                    "lineCount": 1
-                }
-            },
             {
                 "code": "reportOptionalMemberAccess",
                 "range": {
@@ -386,16 +244,6 @@
                 "range": {
                     "startColumn": 44,
                     "endColumn": 55,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./server/vendoo_studio/services/order_recovery.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 108,
-                    "endColumn": 140,
                     "lineCount": 1
                 }
             }
@@ -426,40 +274,6 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/promotion_automations.py": [
-            {
-                "code": "reportCallIssue",
-                "range": {
-                    "startColumn": 21,
-                    "endColumn": 71,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 46,
-                    "endColumn": 57,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 63,
-                    "endColumn": 81,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 41,
-                    "endColumn": 59,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/relay_sales.py": [
             {
                 "code": "reportArgumentType",
@@ -470,68 +284,12 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/sold_comps.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 12,
-                    "endColumn": 13,
-                    "lineCount": 7
-                }
-            }
-        ],
         "./server/vendoo_studio/services/sold_listings.py": [
             {
                 "code": "reportArgumentType",
                 "range": {
                     "startColumn": 71,
                     "endColumn": 93,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./server/vendoo_studio/services/vendoo_create.py": [
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 55,
-                    "endColumn": 64,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 32,
-                    "endColumn": 42,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./server/vendoo_studio/services/vendoo_item_update.py": [
-            {
-                "code": "reportOperatorIssue",
-                "range": {
-                    "startColumn": 62,
-                    "endColumn": 13,
-                    "lineCount": 3
-                }
-            }
-        ],
-        "./server/vendoo_studio/services/vendoo_send.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 33,
-                    "endColumn": 39,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 19,
-                    "endColumn": 25,
                     "lineCount": 1
                 }
             }

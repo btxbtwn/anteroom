@@ -975,6 +975,7 @@ async def prepare_listing_fields_for_vendoo(
 
     # A form Send leaves empty (Etsy, for modern resale) has nothing to fill
     # and nothing to warn about.
+    assert resolved is not None
     left_out = marketplaces_left_empty(listing)
     specifics = {mp: fields for mp, fields in resolved.specifics.items() if mp not in left_out}
     category_unresolved = [

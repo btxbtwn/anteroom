@@ -734,7 +734,7 @@ def _oldest(items: list[AnalyticsItem], now: datetime) -> list[dict[str, Any]]:
         "title": item.title,
         "price": _money(item.price),
         "days_listed": (now - item.listed_at).days,
-    } for item in stale[:_RECENT]]
+    } for item in stale[:_RECENT] if item.listed_at is not None]
 
 
 def _window(

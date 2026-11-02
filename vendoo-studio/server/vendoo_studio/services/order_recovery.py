@@ -123,7 +123,7 @@ async def _ebay_payment(client: EbayClient, lines: list[OrderLine]) -> list[Orde
     detail = await client.request("GET", f"/sell/fulfillment/v1/order/{lines[0].order_id}")
     if not isinstance(detail, dict) or detail.get("orderId") != lines[0].order_id:
         raise RecoveryError("eBay did not verify this order's payment identity. This page was not saved.")
-    status = {"PAID": "paid", "FULLY_REFUNDED": "refunded", "PARTIALLY_REFUNDED": "partially_refunded"}.get(detail.get("orderPaymentStatus"))
+    status = {"PAID": "paid", "FULLY_REFUNDED": "refunded", "PARTIALLY_REFUNDED": "partially_refunded"}.get(detail.get("orderPaymentStatus") or "")
     if status is None:
         return []
     modified = _time(detail.get("lastModifiedDate"))
