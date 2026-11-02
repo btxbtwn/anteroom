@@ -79,7 +79,7 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
           </div>
           <p className={cn("shrink-0 text-xs tabular-nums", row.profit == null && "text-muted-foreground")}>Profit: {ledgerMoney(row.profit, row.financials?.currency)}</p>
           <div className="flex flex-wrap gap-2">{row.conversation_id ? <Button size="xs" variant="ghost" onClick={() => onOpenListing(row.conversation_id!)}>Open item</Button> : null}
-            <Button size="xs" variant="outline" onClick={() => { setSelected(row); setEditor((value) => value + 1); }}>{row.editable === false ? "View amounts" : "Record amounts"}</Button></div>
+            <Button size="xs" variant="outline" onClick={() => { setSelected(row); setEditor((value) => value + 1); }}>Record amounts</Button></div>
         </li>)}</ul> : <EmptyRow>No recorded orders in this period. Recover orders from a marketplace’s Orders tab to add missing sales.</EmptyRow>}
         <div className="flex items-center gap-2 text-xs"><span>Page {page}</span><Button size="xs" variant="outline" disabled={page === 1 || query.isFetching} onClick={() => setPage(page - 1)}>Previous</Button><Button size="xs" variant="outline" disabled={!data.has_more || query.isFetching} onClick={() => setPage(page + 1)}>Next</Button></div>
       </PageSection>
@@ -97,24 +97,27 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
 }
 
 function FinancialEditor({ row, onClose, onSaved, onReload }: { row: SalesLedgerRow; onClose: () => void; onSaved: () => void; onReload: (row: SalesLedgerRow) => void }) {
+  const [soldOn, setSoldOn] = useState(row.sold_at?.slice(0, 10) || "");
   const [currency, setCurrency] = useState(row.financials?.currency || "");
   const [values, setValues] = useState<Record<FinancialField, string>>(() => Object.fromEntries(FINANCIAL_FIELDS.map((field) => [field, row.financials?.[field] || ""])) as Record<FinancialField, string>);
   const save = useMutation({ mutationFn: () => api.salesLedger.save(row.id, {
+    sold_on: soldOn || null,
     currency, ...Object.fromEntries(FINANCIAL_FIELDS.map((field) => [field, values[field].trim() || null])) as Omit<FinancialEntry, "currency">,
     expected_revision: row.financial_revision, expected_order_basis: row.order_basis,
   }), retry: false, onSuccess: onSaved });
   const reload = useMutation({ mutationFn: () => api.salesLedger.get(row.id), retry: false, onSuccess: onReload });
   const busy = save.isPending || reload.isPending;
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
-    <DialogPopup className="sm:max-w-xl"><DialogHeader className="shrink-0"><DialogTitle>{row.editable === false ? "View sale amounts" : "Record sale amounts"}</DialogTitle><DialogDescription>{marketplaceName(row.marketplace)} order {row.order_id} · line {row.line_id} · quantity {row.quantity ?? "unknown"} · {row.order_status.replace(/_/g, " ")}</DialogDescription></DialogHeader>
+    <DialogPopup className="sm:max-w-xl"><DialogHeader className="shrink-0"><DialogTitle>Record sale amounts</DialogTitle><DialogDescription>{marketplaceName(row.marketplace)} order {row.order_id} · line {row.line_id} · quantity {row.quantity ?? "unknown"} · {row.order_status.replace(/_/g, " ")}</DialogDescription></DialogHeader>
       <form className="flex min-h-0 flex-col" onSubmit={(event) => { event.preventDefault(); if (!busy) save.mutate(); }}><DialogPanel className="space-y-4">
-        <PageNote>{row.editable === false ? "Imported from Vendoo. Edit this sale in Vendoo and import again to update its amounts." : "Enter totals for this order line, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures locally; quantities and marketplace listings stay unchanged."}</PageNote>
-        {row.financials_source === "vendoo" && row.editable !== false ? <PageNote>These amounts come from Vendoo. Saving records your own amounts for this order.</PageNote> : null}
+        <PageNote>Enter totals for this sale, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures in Anteroom; quantities and marketplace listings stay unchanged.</PageNote>
+        {row.financials_source === "vendoo" ? <PageNote>These are imported historical sale details. Save corrections here in Anteroom.</PageNote> : null}
         {row.financials_stale ? <PageNote>This order changed. Review every amount before saving again.</PageNote> : null}
-        <label className="block space-y-1 text-xs">Currency code<Input required pattern="[A-Z]{3}" maxLength={3} value={currency} placeholder="USD" disabled={busy || row.editable === false} onChange={(event) => setCurrency(event.target.value.toUpperCase())} /></label>
-        <div className="grid gap-3 sm:grid-cols-2">{FINANCIAL_FIELDS.map((field) => <label key={field} className="space-y-1 text-xs">{LABELS[field]}<Input inputMode="decimal" value={values[field]} placeholder="Unknown" disabled={busy || row.editable === false} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}</div>
+        <label className="block space-y-1 text-xs">Sale date (UTC)<Input type="date" min="1970-01-01" max={new Date().toISOString().slice(0, 10)} value={soldOn} disabled={busy} onChange={event => setSoldOn(event.target.value)} /></label>
+        <label className="block space-y-1 text-xs">Currency code<Input required pattern="[A-Z]{3}" maxLength={3} value={currency} placeholder="USD" disabled={busy} onChange={(event) => setCurrency(event.target.value.toUpperCase())} /></label>
+        <div className="grid gap-3 sm:grid-cols-2">{FINANCIAL_FIELDS.map((field) => <label key={field} className="space-y-1 text-xs">{LABELS[field]}<Input inputMode="decimal" value={values[field]} placeholder="Unknown" disabled={busy} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}</div>
         {save.error ? <PageError message={save.error.message} /> : null}{reload.error ? <PageError message={reload.error.message} /> : null}
-      </DialogPanel><DialogFooter className="shrink-0"><Button type="button" variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Reload record</Button><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{row.editable === false ? "Close" : "Cancel"}</Button>{row.editable !== false ? <Button type="submit" disabled={busy || !/^[A-Z]{3}$/.test(currency)}>{save.isPending ? "Saving…" : "Save amounts"}</Button> : null}</DialogFooter></form>
+      </DialogPanel><DialogFooter className="shrink-0"><Button type="button" variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Reload record</Button><Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" disabled={busy || !/^[A-Z]{3}$/.test(currency)}>{save.isPending ? "Saving…" : "Save amounts"}</Button></DialogFooter></form>
     </DialogPopup>
   </Dialog>;
 }

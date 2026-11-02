@@ -294,6 +294,13 @@ def _item_sales(base: AnalyticsItem, vendoo: AnalyticsItem | None, lines: list, 
     if match is None:
         return [vendoo, *rows]
     ledger = rows[match]
+    raw = ordered[match].financials
+    local_date = isinstance(raw, dict) and "sold_on" in raw
+    if raw is not None:
+        # A saved local record is authoritative, including deliberately unknown amounts.
+        rows[match] = replace(ledger, sold_at=ledger.sold_at if local_date else vendoo.sold_at or ledger.sold_at,
+                              days_listed=ledger.days_listed if local_date else vendoo.days_listed)
+        return rows
     recorded = ledger.sold_price is not None or ledger.fees is not None
     rows[match] = replace(
         ledger,
@@ -302,8 +309,8 @@ def _item_sales(base: AnalyticsItem, vendoo: AnalyticsItem | None, lines: list, 
         shipping_cost=ledger.shipping_cost if recorded else vendoo.shipping_cost,
         shipping_credit=ledger.shipping_credit if recorded else vendoo.shipping_credit,
         cost=ledger.cost if ledger.cost is not None else vendoo.cost,
-        sold_at=vendoo.sold_at or ledger.sold_at,
-        days_listed=vendoo.days_listed if vendoo.days_listed is not None else ledger.days_listed,
+        sold_at=ledger.sold_at if local_date else vendoo.sold_at or ledger.sold_at,
+        days_listed=ledger.days_listed if local_date else vendoo.days_listed if vendoo.days_listed is not None else ledger.days_listed,
         missing_sale_details=() if recorded else vendoo.missing_sale_details,
     )
     return rows
@@ -314,6 +321,8 @@ def _ledger_row(base: AnalyticsItem, line, listed_text: str, days_between) -> An
     from vendoo_studio.services.sales_ledger import financial_values
 
     moment = line.sold_at or line.received_at
+    if isinstance(line.financials, dict) and "sold_on" in line.financials and line.financials["sold_on"] is None:
+        moment = None
     sold_at = moment.replace(tzinfo=UTC) if moment and moment.tzinfo is None else moment
     data, stale = financial_values(line)
     # Analytics totals are in dollars; another currency is a sale with no amount here.
@@ -333,7 +342,7 @@ def _ledger_row(base: AnalyticsItem, line, listed_text: str, days_between) -> An
         shipping_cost=_amount(data.get("shipping_cost")) or 0.0,
         shipping_credit=_amount(data.get("shipping_credit")) or 0.0,
         refunds=refunds or 0.0,
-        cost=item_cost if item_cost is not None else (base.cost * units if base.cost is not None else None),
+        cost=item_cost if line.financials is not None else (base.cost * units if base.cost is not None else None),
         sale_id=line.id,
     )
 

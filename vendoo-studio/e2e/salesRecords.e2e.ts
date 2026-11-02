@@ -64,11 +64,11 @@ test("Vendoo amounts appear in sales records and missing data marks sold invento
   await expect(row.getByText("Missing sale data", { exact: true })).toHaveCount(0);
 });
 
-test("imported-only sales show their recorded amounts and profit", async ({ page, request, phone }, info) => {
+test("historical imported sales can be corrected entirely in Anteroom", async ({ page, request, phone }, info) => {
   const title = `E2E imported sale ${info.project.name} ${Date.now()}`;
   const created = await request.post("/api/conversations", { data: { title, notes: JSON.stringify({
     vendooStatus: "sold", vendooSale: { marketplace: "poshmark", price: 40, cost: 5, fees: 8,
-      shippingCost: 4, soldAt: new Date().toISOString() },
+      shippingCost: 4 },
   }) } });
   expect(created.ok()).toBe(true);
   await page.goto("/");
@@ -80,11 +80,21 @@ test("imported-only sales show their recorded amounts and profit", async ({ page
   }
   const row = page.getByRole("listitem").filter({ has: page.getByText(title, { exact: true }) });
   await expect(row.getByText("Profit: USD 23", { exact: true })).toBeVisible();
-  await row.getByRole("button", { name: "View amounts", exact: true }).click();
+  await row.getByRole("button", { name: "Record amounts", exact: true }).click();
   await expect(page.getByLabel("Net fees", { exact: true })).toHaveValue("8");
   await expect(page.getByLabel("Item revenue total", { exact: true })).toHaveValue("40");
-  await expect(page.getByLabel("Net fees", { exact: true })).toBeDisabled();
-  await expect(page.getByText("Imported from Vendoo.", { exact: false })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save amounts", exact: true })).toHaveCount(0);
+  await page.getByLabel("Net fees", { exact: true }).fill("9");
+  await page.getByLabel("Sale date (UTC)", { exact: true }).fill(new Date().toISOString().slice(0, 10));
   await page.screenshot({ path: info.outputPath("imported-vendoo-details.png") });
+  await page.getByRole("button", { name: "Save amounts", exact: true }).click();
+  await expect(row.getByText("Profit: USD 22", { exact: true })).toBeVisible();
+  await expect(row.getByText("Missing:", { exact: false })).toHaveCount(0);
+  await page.reload();
+  if (phone) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Analytics", exact: true }).click();
+  } else {
+    await page.getByRole("button", { name: "Analytics", exact: true }).click();
+  }
+  await expect(row.getByText("Profit: USD 22", { exact: true })).toBeVisible();
 });

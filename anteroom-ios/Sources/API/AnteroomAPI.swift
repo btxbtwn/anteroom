@@ -404,9 +404,10 @@ final class AnteroomAPI: Sendable {
     }
 
     /// Saves amounts for one order line; blank fields stay unknown.
-    func saveSaleAmounts(_ id: String, currency: String, values: [String: String?], revision: Int, basis: String) async throws {
+    func saveSaleAmounts(_ id: String, currency: String, values: [String: String?], revision: Int, basis: String, soldOn: String?) async throws {
         var body: [String: JSONValue] = ["currency": .string(currency), "expected_revision": .int(revision),
                                          "expected_order_basis": .string(basis)]
+        body["sold_on"] = soldOn.map(JSONValue.string) ?? .null
         for (field, value) in values { body[field] = value.map(JSONValue.string) ?? .null }
         _ = try await send(request("PUT", "api/sales-ledger/\(id)/financials", json: body))
     }

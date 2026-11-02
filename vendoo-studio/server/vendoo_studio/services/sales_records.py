@@ -1,5 +1,7 @@
 """Read-only sales view combining imported Vendoo history with direct orders."""
 from datetime import UTC
+import hashlib
+import json
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
@@ -73,7 +75,8 @@ def records(db: Session, conversation_id: str | None = None) -> list[dict]:
         marketplace = _marketplace(sale, dates, notes, VENDOO_MARKETPLACE_ALIASES)
         lines = sorted(grouped.get(conv.id, []), key=lambda line: (line.sold_at or line.received_at, line.id))
         match = matching_sale_index(lines, marketplace, sold_at)
-        if match is not None and sold_at:
+        raw = lines[match].financials if match is not None else None
+        if match is not None and sold_at and not (isinstance(raw, dict) and "sold_on" in raw):
             rows[lines[match].id]["sold_at"] = sold_at.astimezone(UTC).isoformat()
         # A local financial record, even a partial or stale one, belongs to the seller.
         if match is not None and lines[match].financials is not None:
@@ -90,7 +93,7 @@ def records(db: Session, conversation_id: str | None = None) -> list[dict]:
                       "listing_id": None, "quantity": 1, "order_status": "paid", "source": "vendoo", "alert_state": "dismissed",
                       "conversation_id": conv.id, "title": conv.title, "sold_at": None,
                       "received_at": sales_ledger._iso(conv.created_at), "financial_revision": 0,
-                      "financials_updated_at": None, "order_basis": "0" * 64, "editable": False}
+                      "financials_updated_at": None, "order_basis": ""}
             rows[record["id"]] = record
         effective_cost = costs.get(record["id"])
         if effective_cost is not None and (data["item_cost"] is None or Decimal(effective_cost) != Decimal(data["item_cost"])):
@@ -99,6 +102,8 @@ def records(db: Session, conversation_id: str | None = None) -> list[dict]:
         record["net_revenue"], record["profit"] = sales_ledger.totals(data)
         if sold_at:
             record["sold_at"] = sold_at.astimezone(UTC).isoformat()
+        if match is None:
+            record["order_basis"] = hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
     for record in rows.values():
         record["missing_sale_data"] = missing_fields(record)
     return list(rows.values())

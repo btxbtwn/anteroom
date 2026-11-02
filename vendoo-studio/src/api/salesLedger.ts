@@ -2,7 +2,6 @@ export const FINANCIAL_FIELDS = ["item_revenue", "shipping_credit", "refunds", "
 export type FinancialField = (typeof FINANCIAL_FIELDS)[number];
 export type FinancialEntry = { currency: string } & Record<FinancialField, string | null>;
 export interface SalesLedgerRow {
-  editable?: boolean;
   financials_source?: string;
   missing_sale_data?: string[];
   id: string;
@@ -26,7 +25,7 @@ export interface SalesLedgerRow {
   profit: string | null;
 }
 export interface SalesLedgerFilters { start: string; end: string; marketplace?: string; conversation_id?: string }
-export interface FinancialSave extends FinancialEntry { expected_revision: number; expected_order_basis: string }
+export interface FinancialSave extends FinancialEntry { expected_revision: number; expected_order_basis: string; sold_on?: string | null }
 export interface SalesLedgerPage {
   rows: SalesLedgerRow[];
   page: number;
