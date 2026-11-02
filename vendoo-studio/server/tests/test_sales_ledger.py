@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation
@@ -27,7 +28,7 @@ def ledger(monkeypatch):
     db = sessionmaker(bind=engine)()
     db.add(Conversation(id="coat", title="Wool coat", status="active", notes='{"private":"never-export"}'))
     db.commit()
-    ListingRepo(db).save_revision("coat", {"title": "Wool coat", "price": 45.5, "quantity": 3, "cost": 5, "sku": "COAT-1", "description": "Wool coat"}, "user")
+    listing_persistence.save_revision(db, "coat", {"title": "Wool coat", "price": 45.5, "quantity": 3, "cost": 5, "sku": "COAT-1", "description": "Wool coat"}, "user")
     sale = MarketplaceSale(marketplace="ebay", order_id="order", line_id="line", listing_id="123456789012", quantity=2, conversation_id="coat")
     db.add(sale)
     db.commit()

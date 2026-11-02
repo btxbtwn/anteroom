@@ -4,6 +4,7 @@ import unittest
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.category_lookup import (
     category_search_query,
     condense_category_search_query,
@@ -145,7 +146,7 @@ class ApplyResolvedCategoryTest(unittest.TestCase):
         from vendoo_studio.models.job import Job  # noqa: F401
         from vendoo_studio.models.listing import Listing, ListingRevision  # noqa: F401
         from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-        from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+        from vendoo_studio.repositories.queries import ConversationRepo
 
         engine = create_engine(
             "sqlite://",
@@ -155,7 +156,7 @@ class ApplyResolvedCategoryTest(unittest.TestCase):
         Base.metadata.create_all(engine)
         self.db = sessionmaker(bind=engine)()
         self.conv = ConversationRepo(self.db).create(title="Sweatshirt")
-        ListingRepo(self.db).save_revision(self.conv.id, {
+        listing_persistence.save_revision(self.db, self.conv.id, {
             "title": "Fruit of the Loom M Retro Graphic Sweatshirt",
             "department": "Men",
             "category_path": MEN_TSHIRT_PATH,
@@ -210,7 +211,7 @@ class ResolveCategorySnapshotTest(unittest.IsolatedAsyncioTestCase):
                 "department": "Men",
                 "category_path": MEN_TSHIRT_PATH,
             }
-            ListingRepo(db).save_revision(conv.id, original, source="model")
+            listing_persistence.save_revision(db, conv.id, original, source="model")
             job = Job(
                 conversation_id=conv.id,
                 approved_revision_id="rev1",

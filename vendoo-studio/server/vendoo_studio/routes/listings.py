@@ -11,8 +11,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
-from vendoo_studio.models.etsy_fields import etsy_eligible
-from vendoo_studio.models.validation import validate_listing
+from vendoo_studio.services.etsy_fields import etsy_eligible
+from vendoo_studio.services.validation import validate_listing
 from vendoo_studio.repositories.queries import ListingRepo, ConversationRepo
 from vendoo_studio.services import price_markdown
 from vendoo_studio.services.price_drop import build_preview

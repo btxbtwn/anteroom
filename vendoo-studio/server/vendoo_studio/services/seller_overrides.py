@@ -478,7 +478,7 @@ def propagated_size(listing: dict | None, marketplace: str) -> str:
     if marketplace == "ebay":
         return ebay_size(listing, block, size)
     if marketplace == "depop":
-        from vendoo_studio.models.depop_fields import depop_size_for
+        from vendoo_studio.services.depop_fields import depop_size_for
 
         return depop_size_for(size, listing)
     return size

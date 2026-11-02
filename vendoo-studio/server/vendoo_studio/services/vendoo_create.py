@@ -981,7 +981,7 @@ async def prepare_listing_fields_for_vendoo(
         row for row in resolved.unresolved
         if str(row.get("field") or "").removeprefix("category:") not in left_out
     ]
-    from vendoo_studio.models.ebay_fields import normalize_ebay_sizes
+    from vendoo_studio.services.ebay_fields import normalize_ebay_sizes
 
     normalize_ebay_sizes(listing)
     if mark:

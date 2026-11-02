@@ -8,9 +8,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 
 
 class EnsureDraftJobTest(unittest.TestCase):
@@ -38,7 +39,7 @@ class EnsureDraftJobTest(unittest.TestCase):
             "vendooUrl": "https://web.vendoo.co/app/item/QVzIZuKs",
         })
         self.db.commit()
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Gildan Tee"}, source="user")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Gildan Tee"}, source="user")
 
     def tearDown(self):
         app.dependency_overrides.clear()
@@ -63,6 +64,6 @@ class EnsureDraftJobTest(unittest.TestCase):
 
     def test_ensure_requires_bound_draft(self):
         bare = ConversationRepo(self.db).create(title="Bare")
-        ListingRepo(self.db).save_revision(bare.id, {"title": "Bare"}, source="user")
+        listing_persistence.save_revision(self.db, bare.id, {"title": "Bare"}, source="user")
         response = self.client.post("/api/jobs/ensure-draft", json={"conversation_id": bare.id})
         self.assertEqual(response.status_code, 400)

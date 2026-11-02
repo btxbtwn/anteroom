@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import get_db
 from vendoo_studio.repositories.queries import JobRepo, ConversationRepo, ListingRepo
 from vendoo_studio.services.photo_store import photo_store
@@ -164,7 +165,7 @@ def ensure_draft_job(body: EnsureDraftJobRequest, db: Session = Depends(get_db))
     revisions = listing_repo.get_revisions(body.conversation_id)
     if not revisions:
         # A blank listing can still attach; linking imports the draft's fields next.
-        listing_repo.save_revision(body.conversation_id, {}, source="vendoo_link")
+        listing_persistence.save_revision(listing_repo.db, body.conversation_id, {}, source="vendoo_link")
         revisions = listing_repo.get_revisions(body.conversation_id)
     snapshot = dict(revisions[0].listing_json or {})
     job = job_repo.create(

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import unittest
 
-from vendoo_studio.models.depop_fields import ensure_depop_category_optionals, infer_depop_occasions
-from vendoo_studio.models.ebay_fields import ensure_ebay_category_optionals
-from vendoo_studio.models.etsy_fields import ensure_etsy_category_optionals
+from vendoo_studio.services.depop_fields import ensure_depop_category_optionals, infer_depop_occasions
+from vendoo_studio.services.ebay_fields import ensure_ebay_category_optionals
+from vendoo_studio.services.etsy_fields import ensure_etsy_category_optionals
 from vendoo_studio.models.listing_values import dropdown_field_options, infer_known_option
-from vendoo_studio.models.validation import ensure_poshmark_style_tags
+from vendoo_studio.services.validation import ensure_poshmark_style_tags
 
 
 class KnownOptionInferenceTest(unittest.TestCase):
