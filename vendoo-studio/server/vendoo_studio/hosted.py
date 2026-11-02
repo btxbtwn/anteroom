@@ -158,7 +158,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             from vendoo_studio.database import engine
             from vendoo_studio.services import (
                 background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler,
-                hosted_sourcing_scheduler,
+                hosted_sourcing_scheduler, hosted_sale_checks,
             )
             from vendoo_studio.services import background_tasks as queue
             # Background work opens blocking database sessions. It gets its own
@@ -177,6 +177,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             watchdog = background.run(hosted_job_watchdog.serve(engine))
             # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
             background.run(hosted_sourcing_scheduler.serve(engine))
+            # Only connected sellers can read Chrome marketplaces, in their own browser.
+            background.run(hosted_sale_checks.serve())
         app.state.background_worker = worker
         app.state.offer_scheduler = offers
         app.state.job_watchdog = watchdog

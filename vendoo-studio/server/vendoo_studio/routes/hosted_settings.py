@@ -40,6 +40,8 @@ for path, handler, methods in (
     ('/ebay-inventory-location', settings.set_ebay_inventory_location, ['PUT']),
     ('/formulas', settings.get_listing_formulas, ['GET']),
     ('/formulas', settings.put_listing_formulas, ['PUT']),
+    ('/sale-detection', settings.get_sale_detection_route, ['GET']),
+    ('/sale-detection', settings.put_sale_detection, ['PUT']),
 ):
     router.add_api_route(path, handler, methods=methods)
 

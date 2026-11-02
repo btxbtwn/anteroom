@@ -375,3 +375,14 @@ only each sign-in's state, expiry and account label, never cookies or tokens.
 Sale detection switches stay on the Mac.
 
 Anteroom has no Facebook Marketplace or Grailed support on the Mac or the web.
+
+On `feat/hosted-chrome-sale-detection`, connected web sellers get the Mac's
+Chrome order-history checks on the same uneven schedule. Each seller has their
+own schedule, errors and sale-detection settings; disconnected tabs and Bridges
+without `marketplace.sales_history` are skipped. The hosted reader uses the
+existing named Bridge 0.2.47 command, with no desktop socket envelope, and saves
+orders under the seller's row-secured context. Sign-in cookies and tokens stay
+in Chrome. Vinted retains the Mac's current limitation: unverified order
+responses are reported as unreadable rather than inferred from listing status.
+The shared `marketplace_sessions` UI capability stays off until the remaining
+automation panels are ported.

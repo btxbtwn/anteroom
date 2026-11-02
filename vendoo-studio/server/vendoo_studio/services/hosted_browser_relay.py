@@ -61,6 +61,7 @@ class BrowserRelay(ReplyWaits):
         self._ready = asyncio.Event()
         self._seen_at = 0.0
         self._capabilities: frozenset[str] = frozenset()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _can(self, capability: str) -> bool:
         return capability in self._capabilities and time.monotonic() - self._seen_at < SEEN_FOR_S
@@ -100,6 +101,7 @@ class BrowserRelay(ReplyWaits):
         """The next command for this seller's Chrome, waiting up to ``timeout`` seconds."""
         self._seen_at = time.monotonic()
         self._capabilities = frozenset(capabilities)
+        self._loop = asyncio.get_running_loop()
         deadline = time.monotonic() + timeout
         while not self._outbox:
             remaining = deadline - time.monotonic()
@@ -123,6 +125,11 @@ class BrowserRelay(ReplyWaits):
             raise ValueError(f"{command} is not a relayed read.")
         if refusal := self.refusal(capability):
             raise ChromeReadError(refusal)
+        loop = self._loop
+        if loop is not None and loop is not asyncio.get_running_loop():
+            if loop.is_closed():
+                raise ChromeReadError("Open Anteroom in Chrome and connect Chrome first.")
+            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.read(command, payload, timeout), loop))
         request_id = uuid.uuid4().hex
         waiter = self.register_wait(request_id)
         if not await self.send_message({"type": command, "job_id": None, "message_id": request_id,
@@ -149,3 +156,10 @@ _lock = threading.Lock()
 def relay_for(seller_id: str) -> BrowserRelay:
     with _lock:
         return _relays.setdefault(seller_id, BrowserRelay())
+
+
+def ready_sellers(capability: str) -> list[str]:
+    """Sellers with a recently connected tab and the required Bridge capability."""
+    with _lock:
+        relays = list(_relays.items())
+    return [seller for seller, relay in relays if relay.refusal(capability) is None]
