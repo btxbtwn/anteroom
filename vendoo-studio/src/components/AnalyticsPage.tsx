@@ -16,6 +16,7 @@ import { EtsyNotAllowed } from "./EtsyNotAllowed";
 import { useVendooEnabled } from "../vendooMode";
 import { VendooImportButton } from "./VendooImportButton";
 import { Input } from "./ui/input";
+import { Button, buttonVariants } from "./ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
@@ -39,18 +40,21 @@ const PERIODS: { id: AnalyticsRange; label: string }[] = [
 
 interface Props {
   onOpenListing: (id: string) => void;
+  onOpenSalesRecords?: () => void;
 }
 
 export function AnalyticsPage({ onOpenListing }: Props) {
   const [view, setView] = useState("Sales records");
   return <WorkspacePage width="expanded"><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics"]} value={view} onChange={setView}>
-    {view === "Sales records" ? <SalesLedger onOpenListing={onOpenListing} /> : <InventoryAnalyticsView onOpenListing={onOpenListing} />}
+    {view === "Sales records" ? <SalesLedger onOpenListing={onOpenListing} /> : <InventoryAnalyticsView onOpenListing={onOpenListing} onOpenSalesRecords={() => setView("Sales records")} />}
   </WorkspaceTabs></WorkspacePage>;
 }
 
-export function InventoryAnalyticsView({ onOpenListing }: Props) {
+export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Props) {
   const vendooOn = useVendooEnabled();
   const [range, setRange] = useState<AnalyticsRange>("12m");
+  const [breakdownSearch, setBreakdownSearch] = useState("");
+  const [rankMetric, setRankMetric] = useState<RankMetric>("revenue");
   const [customStart, setCustomStart] = useState(() => isoDay(addDays(new Date(), -29)));
   const [customEnd, setCustomEnd] = useState(() => isoDay(new Date()));
   const custom = range === "custom";
@@ -70,7 +74,7 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
     <>
       <PageHeader
         title="Analytics"
-        description={vendooOn ? "Sales and inventory from the listings imported from Vendoo." : "Sales and inventory from your listings."}
+        description="Track sales performance and find inventory that needs attention."
         actions={vendooOn ? <VendooImportButton variant="analytics" /> : undefined}
       >
         {data ? (
@@ -79,28 +83,23 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
               {data.last_updated_at ? <>
                 {"Last updated on "}
                 <time dateTime={data.last_updated_at}>{new Date(data.last_updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time>
-                {vendooOn ? " from Vendoo." : "."}
+                {vendooOn ? " from the historical import." : "."}
               </> : vendooOn
-                ? "Last updated on: not recorded yet. Resync Vendoo data to record an update."
+                ? "Last updated on: not recorded yet. Sales entered in Anteroom are included automatically."
                 : "Last updated on: not recorded yet."}
             </p>
             <InventoryStrip inventory={data.inventory} />
           </div>
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
-          <ToggleGroup
-            aria-label="Sales period"
-            className="flex-wrap"
-            value={[range]}
-            onValueChange={(next) => {
-              const value = next[0] as AnalyticsRange | undefined;
-              if (value) setRange(value);
-            }}
-          >
-            {PERIODS.map((item) => (
-              <Toggle key={item.id} value={item.id}>{item.label}</Toggle>
-            ))}
-          </ToggleGroup>
+          <label className="block space-y-1 text-xs"><span className="block">Sales period</span>
+            <Select value={range} onValueChange={value => { if (value) setRange(value as AnalyticsRange); }}>
+              <SelectTrigger aria-label="Sales period" className="w-48"><SelectValue>{PERIODS.find(item => item.id === range)?.label}</SelectValue></SelectTrigger>
+              <SelectPopup>{PERIODS.map(item => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectPopup>
+            </Select>
+          </label>
+          <Button size="sm" variant="ghost" disabled={query.isFetching || (custom && !customValid)} onClick={() => void query.refetch()}>Refresh analytics</Button>
+          {data ? <a href="#inventory-today" className={buttonVariants({ size: "sm", variant: "ghost" })}>Review inventory today</a> : null}
           {query.isFetching && data ? (
             <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
               <Spinner size="xs" aria-hidden role={undefined} />
@@ -110,10 +109,9 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
         </div>
         {custom ? (
           <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-            <label className="flex items-center gap-2">
-              From
+            <label className="block space-y-1">
+              <span className="block">From</span>
               <Input
-                nativeInput
                 size="compact"
                 type="date"
                 className="w-auto"
@@ -122,10 +120,9 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
                 onChange={(event) => setCustomStart(event.target.value)}
               />
             </label>
-            <label className="flex items-center gap-2">
-              To
+            <label className="block space-y-1">
+              <span className="block">To</span>
               <Input
-                nativeInput
                 size="compact"
                 type="date"
                 className="w-auto"
@@ -150,12 +147,10 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
               className="rounded-xl border border-warning/32 bg-warning-surface p-4"
               title={`${data.incomplete_sales.length} ${data.incomplete_sales.length === 1 ? "sale needs" : "sales need"} sales data`}
               description={<>
-                {vendooOn
-                  ? "Across all time. Add the missing details in Vendoo, then resync to update your analytics."
-                  : "Across all time. Add the missing details on the listing to update your analytics."}
-                Missing prices, costs, or fees leave revenue and profit incomplete.
+                Across all time. Add missing amounts in Sales records. Missing prices, costs, or fees leave revenue and profit incomplete.
               </>}
             >
+              {onOpenSalesRecords ? <Button size="sm" variant="outline" onClick={onOpenSalesRecords}>Open sales records</Button> : null}
               <Disclosure summary="Review sales with missing data">
                 <RowList className="max-h-80 overflow-y-auto">
                     {data.incomplete_sales.map((sale) => (
@@ -197,21 +192,33 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
             <SalesChart periods={data.periods} />
           </PageSection>
 
-          <div className="grid gap-8 @3xl/page:grid-cols-2 @3xl/page:gap-6">
-            <PerformanceList title="Marketplaces" rows={data.marketplaces} marketplace />
-            <PerformanceList title="Categories" rows={data.categories} />
-            <PerformanceList title="Brands" rows={data.brands} />
-            <PerformanceList title="Labels" rows={data.labels} />
-          </div>
+          <PageSection title="Sales breakdowns" description="Search names across marketplaces, categories, brands and labels. Each list shows its top six matches for the selected sales period.">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block space-y-1 text-xs">Search breakdowns<Input type="search" placeholder="Marketplace, category, brand or label" value={breakdownSearch} onChange={event => setBreakdownSearch(event.target.value)} /></label>
+              <label className="block space-y-1 text-xs">Rank breakdowns by<Select value={rankMetric} onValueChange={value => { if (value) setRankMetric(value as RankMetric); }}>
+                <SelectTrigger aria-label="Rank breakdowns by" className="w-full"><SelectValue>{RANK_METRICS.find(item => item.value === rankMetric)?.label}</SelectValue></SelectTrigger>
+                <SelectPopup>{RANK_METRICS.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectPopup>
+              </Select></label>
+            </div>
+            {breakdownSearch ? <Button size="sm" variant="ghost" onClick={() => setBreakdownSearch("")}>Clear breakdown search</Button> : null}
+            <div className="grid gap-8 @3xl/page:grid-cols-2 @3xl/page:gap-6">
+              <PerformanceList title="Marketplaces" rows={data.marketplaces} marketplace metric={rankMetric} search={breakdownSearch} />
+              <PerformanceList title="Categories" rows={data.categories} metric={rankMetric} search={breakdownSearch} />
+              <PerformanceList title="Brands" rows={data.brands} metric={rankMetric} search={breakdownSearch} />
+              <PerformanceList title="Labels" rows={data.labels} metric={rankMetric} search={breakdownSearch} />
+            </div>
+          </PageSection>
 
           <PriceTiers tiers={data.price_tiers} />
 
           <PageSection
+            id="inventory-today"
+            className="scroll-mt-4"
             aria-label="Inventory today"
             title="Inventory today"
             description="Current active listings, across all sales periods."
           >
-            <StatGrid>
+            <StatGrid className="grid-cols-2">
               <Stat label="Active listings" value={String(data.inventory.active)} />
               <Stat label="Asking value" value={formatMoney(data.inventory.asking_value)} hint="Total asking prices; potential revenue" />
               <Stat label="Recorded inventory cost" value={data.inventory.cost_known ? formatMoney(data.inventory.cost_value) : "—"} hint={`Cost recorded on ${data.inventory.cost_known} of ${data.inventory.active} active listings`} />
@@ -348,7 +355,7 @@ function SalesStats({ data }: { data: InventoryAnalytics }) {
   const profitComplete = previous && sales.profit_known === sales.count && previous.profit_known === previous.count
     && sales.fees_known === sales.count && previous.fees_known === previous.count;
   return (
-    <StatGrid>
+    <StatGrid className="grid-cols-2">
       <Stat label="Revenue" value={formatMoney(sales.revenue)}
         hint={`${sales.revenue_known} of ${sales.count} sales with recorded prices`}
         change={previous ? (revenueComplete ? formatChange(sales.revenue, previous.revenue, formatMoney) : "Comparison unavailable: missing prices") : undefined}
@@ -438,7 +445,7 @@ function SalesChart({ periods }: { periods: InventoryAnalytics["periods"] }) {
                 <div className="absolute inset-x-0 border-t border-border" style={{ bottom: baseline }} />
                 <div
                   className={cn(
-                    "absolute inset-x-1 rounded-sm transition-colors",
+                    "absolute inset-x-1 mx-auto max-w-16 rounded-sm transition-colors",
                     negative ? "bg-destructive/70 group-hover/bar:bg-destructive" : "bg-primary/70 group-hover/bar:bg-primary",
                   )}
                   style={{ height, bottom: negative ? baseline - height : baseline }}
@@ -460,13 +467,14 @@ const RANK_METRICS: { value: RankMetric; label: string }[] = [
   { value: "count", label: "Sales" },
 ];
 
-function PerformanceList({ title, rows, marketplace = false }: {
+function PerformanceList({ title, rows, marketplace = false, metric, search }: {
+  metric: RankMetric;
+  search: string;
   title: string;
   rows: (AnalyticsGroup & { color?: LabelColor | null })[];
   marketplace?: boolean;
 }) {
-  const [metric, setMetric] = useState<RankMetric>("revenue");
-  const ranked = [...rows].sort((a, b) => {
+  const ranked = rows.filter(row => (marketplace ? marketplaceName(row.id) : row.label).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).sort((a, b) => {
     const first = a[metric];
     const second = b[metric];
     if (first == null) return second == null ? a.label.localeCompare(b.label) : 1;
@@ -477,18 +485,8 @@ function PerformanceList({ title, rows, marketplace = false }: {
     <PageSection
       aria-label={title}
       title={title}
-      actions={
-        <Select value={metric} onValueChange={(value) => setMetric(value as RankMetric)}>
-          <SelectTrigger aria-label={`Rank ${title.toLowerCase()} by`} size="compact" variant="ghost" className="w-auto min-w-0">
-            <SelectValue>{RANK_METRICS.find((item) => item.value === metric)?.label}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            {RANK_METRICS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-          </SelectPopup>
-        </Select>
-      }
     >
-      {ranked.length === 0 ? <EmptyRow>No {title.toLowerCase()} recorded on sales in this period.</EmptyRow> : (
+      {ranked.length === 0 ? <EmptyRow>{search.trim() ? `No matching ${title.toLowerCase()}. Try another name or clear the search.` : `No ${title.toLowerCase()} recorded on sales in this period.`}</EmptyRow> : (
         <RowList>
           {ranked.map((row) => (
             <ListRow

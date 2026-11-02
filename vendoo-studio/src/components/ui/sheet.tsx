@@ -129,19 +129,6 @@ function SheetPopup({
   );
 }
 
-function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn(
-        "flex flex-col gap-2 p-6 in-[[data-slot=sheet-popup]:has([data-slot=sheet-panel])]:pb-3 max-sm:pb-4",
-        className,
-      )}
-      data-slot="sheet-header"
-      {...props}
-    />
-  );
-}
-
 function SheetTitle({ className, ...props }: SheetPrimitive.Title.Props) {
   return (
     <SheetPrimitive.Title
@@ -152,24 +139,13 @@ function SheetTitle({ className, ...props }: SheetPrimitive.Title.Props) {
   );
 }
 
-function SheetDescription({ className, ...props }: SheetPrimitive.Description.Props) {
-  return (
-    <SheetPrimitive.Description
-      className={cn("text-muted-foreground text-sm", className)}
-      data-slot="sheet-description"
-      {...props}
-    />
-  );
-}
-
 export {
   Sheet,
   SheetPortal,
   SheetBackdrop,
-  SheetBackdrop as SheetOverlay,
+
   SheetPopup,
-  SheetPopup as SheetContent,
-  SheetHeader,
+
   SheetTitle,
-  SheetDescription,
+
 };

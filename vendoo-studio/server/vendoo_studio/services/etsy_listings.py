@@ -55,13 +55,13 @@ def edit_url(item_id: str) -> str:
 
 
 async def listing_profiles() -> dict[str, list[dict]]:
-    shop_id = connected_shop_id()
+    shop_id = await asyncio.to_thread(connected_shop_id)
     shipping, processing, returns = await asyncio.gather(
         marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/shipping-profiles"),
         marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/readiness-state-definitions", params={"limit": 100}),
         marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/policies/return"),
     )
-    if connected_shop_id() != shop_id:
+    if await asyncio.to_thread(connected_shop_id) != shop_id:
         raise ValueError("The connected Etsy shop changed. Load its shipping profiles again.")
     return {
         "shipping": [{"id": str(p["shipping_profile_id"]), "title": str(p.get("title") or "Shipping profile")[:200],

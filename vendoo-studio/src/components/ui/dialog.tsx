@@ -216,9 +216,9 @@ export {
   DialogPortal,
   DialogClose,
   DialogBackdrop,
-  DialogBackdrop as DialogOverlay,
+
   DialogPopup,
-  DialogPopup as DialogContent,
+
   DialogHeader,
   DialogFooter,
   DialogTitle,

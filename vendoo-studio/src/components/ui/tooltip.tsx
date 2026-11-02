@@ -2,15 +2,7 @@
 // (c) 2026 T3 Tools Inc. Adapted only where it imported T3-specific modules.
 
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
-import {
-  createContext,
-  use,
-  useEffect,
-  useRef,
-  useState,
-  type ComponentProps,
-  type RefObject,
-} from "react";
+import { createContext, use, useEffect, useRef, type RefObject } from "react";
 
 import { cn } from "../../lib/utils";
 
@@ -47,21 +39,6 @@ function createTooltipHoverTracker() {
 type TooltipHoverTracker = ReturnType<typeof createTooltipHoverTracker>;
 const TooltipHoverContext = createContext<TooltipActionsRef | null>(null);
 const TooltipScrollContext = createContext<TooltipHoverTracker | null>(null);
-
-function TooltipScrollDismissArea({ onScrollCapture, ...props }: ComponentProps<"div">) {
-  const [tracker] = useState(createTooltipHoverTracker);
-  return (
-    <TooltipScrollContext value={tracker}>
-      <div
-        {...props}
-        onScrollCapture={(event) => {
-          onScrollCapture?.(event);
-          tracker.dismissUnfocused();
-        }}
-      />
-    </TooltipScrollContext>
-  );
-}
 
 function Tooltip<Payload>(props: TooltipPrimitive.Root.Props<Payload>) {
   const tracker = use(TooltipScrollContext);
@@ -163,4 +140,4 @@ function TooltipPopup({
   );
 }
 
-export { TooltipProvider, Tooltip, TooltipTrigger, TooltipPopup, TooltipScrollDismissArea };
+export { TooltipProvider, Tooltip, TooltipTrigger, TooltipPopup,  };

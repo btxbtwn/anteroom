@@ -1,4 +1,3 @@
-import { EBAY_CATEGORY_CORE } from "../../marketplaceFields";
 import type { DraftField } from "./formModel";
 
 const UNFILLABLE_FIELDS = new Set(["photos", "images", "videos", "image"]);
@@ -207,18 +206,4 @@ export function isInventoryLocationField(field: DraftField | string): boolean {
 export function fieldMatchKey(field: DraftField): string {
   if (isInventoryLocationField(field)) return "zip code";
   return normalizeFieldName(field.label) || normalizeFieldName(field.key.split(".").pop() || field.key);
-}
-
-/** Cascade fields that must stay visible so optionals can mount on Vendoo. */
-const PROTECTED_EBAY_CORE_NAMES = new Set(
-  EBAY_CATEGORY_CORE.filter((field) =>
-    ["department", "size", "sizeType", "type"].includes(field.key),
-  ).map((field) => normalizeFieldName(field.label)),
-);
-
-export function isProtectedEbayField(marketplace: string, field: DraftField | string): boolean {
-  if (marketplace.toLowerCase() !== "ebay") return false;
-  const name =
-    typeof field === "string" ? normalizeFieldName(field) : fieldMatchKey(field) || normalizeFieldName(field.label);
-  return PROTECTED_EBAY_CORE_NAMES.has(name);
 }
