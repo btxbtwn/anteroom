@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from unittest import mock
 
 from vendoo_studio.models.facebook_shipping import package_weight_label
 from vendoo_studio.services.vendoo_encodings import observe_item_schema
@@ -175,18 +174,7 @@ class VintedPackageTest(unittest.TestCase):
         self.assertEqual(heavy["listings"]["vinted"]["categorySpecifics"]["77_packageSizeId"], "3")
 
 
-class LearnShippingChoicesTest(unittest.TestCase):
-    def test_a_hand_filled_draft_is_remembered_once(self):
-        from vendoo_studio.services import vendoo_create
 
-        saved: dict = {}
-        with mock.patch.object(vendoo_create, "load_schema", side_effect=lambda: saved.get("schema")), \
-                mock.patch.object(vendoo_create, "save_schema", side_effect=lambda s: saved.update(schema=s)):
-            self.assertTrue(vendoo_create.learn_shipping_choices(_seller_item()))
-            self.assertFalse(vendoo_create.learn_shipping_choices(_seller_item()))
-        markets = saved["schema"]["marketplaces"]
-        self.assertEqual(markets["facebook"]["shippingCarrier"], {"0.5-1 lbs": CARRIER})
-        self.assertEqual(markets["vinted"]["packageSize"], {"8": "2"})
 
 
 if __name__ == "__main__":

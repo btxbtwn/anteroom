@@ -203,16 +203,6 @@ export interface ListingChange {
   after: unknown;
 }
 
-export interface SendPreview {
-  review_id: string;
-  revision_id: string;
-  mode: "create" | "update";
-  changes: ListingChange[];
-  photo_count: number;
-  photo_action: "keep" | "upload";
-  warnings: string[];
-}
-
 export interface PriceDropHistoryEvent {
   from_price: number;
   to_price: number;

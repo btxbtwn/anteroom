@@ -62,7 +62,7 @@ def _unsettle(conv: Conversation, when) -> bool:
     return True
 
 
-def _sync_settlement(conv: Conversation, status: str, *, backfill: bool = False) -> bool:
+def _sync_settlement(conv: Conversation, status: str | None, *, backfill: bool = False) -> bool:
     now = utcnow()
     if status in BUSY_LISTING_STATUSES:
         return _unsettle(conv, now)
@@ -929,18 +929,6 @@ class RegistryRepo:
             result[entry.normalized_label] = sorted(entry.known_options)
         return result
 
-    def get_best_selectors(self, marketplace: str, field_label: str, category_path: str | None = None) -> list[dict]:
-        label = _normalize_label(field_label)
-        entry = self.get_by_identity(marketplace, category_path, label)
-        if not entry and category_path:
-            entry = self.get_by_identity(marketplace, None, label)
-        if not entry or not entry.known_selectors:
-            return []
-        selectors = sorted(
-            entry.known_selectors,
-            key=lambda s: -(s.get("success_count", 0) - s.get("failure_count", 0) * 2),
-        )
-        return [s["selector"] for s in selectors if s.get("selector")]
 
     def record_fill_result(self, marketplace: str, field_label: str, selector: str, success: bool, category_path: str | None = None):
         label = _normalize_label(field_label)

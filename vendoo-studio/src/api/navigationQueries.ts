@@ -42,7 +42,7 @@ export function prefetchListingReads(client: QueryClient, id: string) {
   return Promise.all([
     read(["jobs", id], () => api.jobs.list(id)),
     read(["activity", id], () => api.conversations.activity(id)),
-    read(["listing-fields", id], () => api.vendooApi.listingFields(id)),
+    read(["listing-fields", id], () => api.listings.fields(id)),
     read(["marketplace-listings", id], () => api.marketplaceListings.get(id)),
     read(["native-marketplaces", id], () => api.nativeMarketplaces.status(id)),
     read(["marketplace-sales", id], () => api.marketplaceSales.list({ conversationId: id })),

@@ -95,40 +95,6 @@ class SendLeavesEtsyEmptyTest(unittest.TestCase):
         self.assertEqual(marketplaces_left_empty(listing(VINTAGE)), frozenset())
 
 
-class PrepareSkipsEtsyTest(unittest.TestCase):
-    """No Etsy field is gap-filled or warned about for a form Send leaves empty."""
-
-    def prepare(self, source: dict):
-        import asyncio
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock, patch
-
-        from vendoo_studio.services import vendoo_create
-        from vendoo_studio.services.vendoo_specifics import FieldSpec
-
-        resolved = vendoo_create.ResolvedFields(
-            paths={},
-            listing=source,
-            specifics={"ebay": {"Color": FieldSpec("Color")}, "etsy": {"Sleeve": FieldSpec("Sleeve", required=True)}},
-            unresolved=[{"field": "category:etsy", "value": "Clothing"}, {"field": "category:ebay", "value": "Tops"}],
-        )
-        fill = AsyncMock(side_effect=lambda listing, specifics, provider, evidence="": (listing, []))
-        with patch.object(vendoo_create, "resolve_listing_fields", AsyncMock(return_value=resolved)), \
-             patch.object(vendoo_create, "fill_listing_specifics", fill):
-            _, specifics, _, unresolved, _ = asyncio.run(
-                vendoo_create.prepare_listing_fields_for_vendoo(SimpleNamespace(id=None), source)
-            )
-        return specifics, unresolved
-
-    def test_modern_resale_drops_etsy_fields_and_warnings(self):
-        specifics, unresolved = self.prepare(listing(MODERN))
-        self.assertEqual(sorted(specifics), ["ebay"])
-        self.assertEqual([row["field"] for row in unresolved], ["category:ebay"])
-
-    def test_vintage_keeps_them(self):
-        specifics, unresolved = self.prepare(listing(VINTAGE))
-        self.assertEqual(sorted(specifics), ["ebay", "etsy"])
-        self.assertEqual(len(unresolved), 2)
 
 
 class EtsyWhenCodeTest(unittest.TestCase):

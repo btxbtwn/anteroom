@@ -62,7 +62,6 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.bridge = self.enterContext(patch("vendoo_studio.services.native_marketplaces.browser_bridge.request", new_callable=AsyncMock))
         self.manager = SimpleNamespace(connected=True, capabilities=frozenset({"marketplace.actions"}), send_message=AsyncMock(return_value=True))
         self.enterContext(patch("vendoo_studio.services.extension_connection.extension_manager", self.manager))
-        self.enterContext(patch("vendoo_studio.services.extension_connection.schedule_advance_job_queue"))
         self.enterContext(patch("vendoo_studio.database.SessionLocal", self.sessions))
         self.enterContext(patch.object(native, "SETTLE_POLL_S", 0))
         self.launched = []
@@ -687,22 +686,18 @@ class NativeMarketplacesTest(unittest.TestCase):
 
     # --- lost replies, check, reset ------------------------------------------------
 
-    def test_a_late_chrome_reply_keeps_the_slot_until_chrome_reports_then_a_queued_send_can_start(self):
+    def test_a_late_chrome_reply_keeps_the_slot_until_chrome_reports(self):
         replies = iter([{"finished": False}, {"finished": True, "result": self.published("mercari")}])
         running_during_wait = []
 
         async def bridge(job, kind, payload, timeout=None):
             if kind == "marketplace.execute":
                 if payload["action"] == "save_draft":
-                    # The seller approves a Vendoo Send while the List runs: it waits in the queue.
-                    queued.append(JobRepo(self.sessions()).create(self.conv.id, self.rev.id, LISTING, status="queued",
-                                                                  current_step="vendoo_api_queued").id)
                     return {"ok": True, "state": "draft", "draft_url": URLS["mercari"]}
                 raise BrowserBridgeError("Chrome did not answer in time.")
             running_during_wait.append([j.current_step for j in JobRepo(self.sessions()).get_running()])
             return next(replies)
 
-        queued = []
         self.bridge.side_effect = bridge
         record = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True}).json()
         self.run_jobs()
@@ -711,9 +706,8 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual((cancel["type"], cancel["job_id"]), ("job.cancel", f"{record['job_id']}-2"))
         self.assertEqual(running_during_wait, [["native_mercari_publish"], ["native_mercari_publish"]])
         self.assertEqual(self.record("mercari")["state"], "published")
-        # Only now is the slot free for the queued Send.
+        # Only now is the direct-action slot free.
         self.assertFalse(JobRepo(self.db).get_running())
-        self.assertEqual([job.id for job in JobRepo(self.db).get_dispatchable()], queued)
 
     def test_no_journal_is_surfaced_and_the_seller_can_reset(self):
         async def bridge(job, kind, payload, timeout=None):
@@ -1024,9 +1018,9 @@ class NativeMarketplacesTest(unittest.TestCase):
         job = repo.create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step="native_poshmark_list")
         MarketplaceListingRepo(self.db).save(self.conv.id, "poshmark", {"state": "publishing", "action": "list", "job_id": job.id,
                                                                        "operation_id": job.id})
-        repo.requeue_interrupted()
+        fail_stalled_jobs(self.db, now=utcnow() + timedelta(seconds=6))
         self.assertEqual(job.status, "failed")
-        self.assertFalse(repo.requeue_interrupted_send(job.id))
+        self.assertEqual(fail_stalled_jobs(self.db), [])
         self.assertEqual(self.record("poshmark")["state"], "unknown")
         self.bridge.return_value = {"finished": True, "result": {"ok": True, "state": "published", "listing_url": POSH_URL}}
         # Startup reconciles eBay and Etsy only; Chrome's records wait for Chrome.
@@ -1052,14 +1046,14 @@ class NativeMarketplacesTest(unittest.TestCase):
         finally:
             release_api_job(live.id)
         self.assertEqual(self.record("mercari")["state"], "unknown")
-        self.assertFalse(repo.get_dispatchable())
+        self.assertFalse(any(job.status == "queued" for job in repo.list_by_conversation(self.conv.id)))
 
     def test_reconnect_keeps_a_native_action_running_in_this_process(self):
         repo = JobRepo(self.db)
         job = repo.create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step="native_mercari_publish")
         claim_api_job(job.id)
         try:
-            repo.requeue_interrupted()
+            fail_stalled_jobs(self.db, now=utcnow() + timedelta(seconds=6))
             self.assertEqual(job.status, "dispatched")
         finally:
             release_api_job(job.id)

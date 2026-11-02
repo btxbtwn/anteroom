@@ -982,53 +982,6 @@ def relevant_skill_rules(db: Session | None, query: str, *, max_chars: int = 200
     return with_pinned_formulas("\n\n".join(chosen), max_chars=max_chars)
 
 
-def enrich_gaps_with_catalog_options(db: Session, gaps: list[dict], *, top_k: int = 3) -> list[dict]:
-    """Attach verified dropdown options from the catalog index onto repair gaps."""
-    enriched: list[dict] = []
-    for gap in gaps:
-        if not isinstance(gap, dict):
-            continue
-        copy = dict(gap)
-        existing = _option_labels(copy.get("options"))
-        if copy.get("options_complete") and existing:
-            enriched.append(copy)
-            continue
-        marketplace = str(copy.get("marketplace") or "general")
-        field = str(copy.get("field") or "").strip()
-        if not field:
-            enriched.append(copy)
-            continue
-        search_mp = "general" if marketplace in {"vendoo", "general"} else marketplace
-        try:
-            hits = search_catalog(
-                db,
-                f"{search_mp} {field} dropdown options",
-                marketplace=search_mp,
-                kind="option",
-                top_k=top_k,
-            )
-        except Exception:
-            log.exception("catalog option enrichment failed for %s/%s", marketplace, field)
-            enriched.append(copy)
-            continue
-        field_key = field.casefold()
-        merged = list(existing)
-        matched_dropdown = False
-        for hit in hits:
-            hit_field = str(hit.get("field") or "").casefold()
-            if hit_field != field_key and field_key not in hit_field and hit_field not in field_key:
-                continue
-            for option in hit.get("options") or []:
-                if option not in merged:
-                    merged.append(option)
-            if str(hit.get("id") or "").endswith(":dropdown_json") and hit_field == field_key:
-                matched_dropdown = True
-        if merged:
-            copy["options"] = merged[:60]
-            if matched_dropdown:
-                copy["options_complete"] = True
-        enriched.append(copy)
-    return enriched
 
 
 def fill_helpers_for_fields(
