@@ -20,15 +20,16 @@ def _run(operation):
 
 @router.get("")
 def records(response: Response, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None,
-            page: int = Query(1, ge=1), db: Session = Depends(get_db)):
+            page: int = Query(1, ge=1), q: str = "", attention: str = "all", sort: str = "newest", db: Session = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
-    return _run(lambda: sales_ledger.list_sales(db, start, end, marketplace, conversation_id, page))
+    return _run(lambda: sales_ledger.list_sales(db, start, end, marketplace, conversation_id, page, q, attention, sort))
 
 
 @router.get("/export/sales.csv")
 def export_sales(start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None,
+                 q: str = "", attention: str = "all", sort: str = "newest",
                  db: Session = Depends(get_db, scope="request")):
-    records = _run(lambda: sales_ledger.sale_records(db, start, end, marketplace, conversation_id))
+    records = _run(lambda: sales_ledger.sale_records(db, start, end, marketplace, conversation_id, q, attention, sort))
     return _download(ledger_exports.sales_csv(records), "sales")
 
 

@@ -1,6 +1,44 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "./fixtures";
 
+test("sales search, completeness and loss filters update records and exports", async ({ page, request, phone }, info) => {
+  const prefix = `Filter sale ${info.project.name} ${Date.now()}`;
+  for (const [suffix, fees] of [["missing", null], ["loss", 2]] as const) {
+    const response = await request.post("/api/conversations", { data: { title: `${prefix} ${suffix}`, notes: JSON.stringify({
+      vendooStatus: "sold", vendooSale: { marketplace: "ebay", price: 10, cost: 20, fees, shippingCost: 0, soldAt: new Date().toISOString() },
+    }) } });
+    expect(response.ok()).toBe(true);
+  }
+  await page.goto("/");
+  if (phone) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Analytics", exact: true }).click();
+  } else await page.getByRole("button", { name: "Analytics", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Search sales" }).fill(prefix);
+  await expect(page.getByText("1–2 of 2 records · Page 1", { exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "Sales completeness" }).click();
+  await page.getByRole("option", { name: "Losses", exact: true }).click();
+  await expect(page.getByText("1–1 of 1 records · Page 1", { exact: true })).toBeVisible();
+  const panel = page.getByRole("tabpanel", { name: "Sales records", exact: true });
+  await expect(panel.getByText(`${prefix} loss`, { exact: true })).toBeVisible();
+  await expect(panel.getByText(`${prefix} missing`, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Export sales CSV" })).toHaveAttribute("href", /attention=loss/);
+  await page.screenshot({ path: info.outputPath("sales-records-dark.png"), fullPage: true });
+  await page.evaluate(() => document.documentElement.classList.remove("dark"));
+  await page.screenshot({ path: info.outputPath("sales-records-light.png"), fullPage: true });
+  await page.getByRole("combobox", { name: "Sales completeness" }).click();
+  await page.getByRole("option", { name: "Missing sale data", exact: true }).click();
+  await expect(panel.getByText(`${prefix} missing`, { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(page.getByRole("searchbox", { name: "Search sales" })).toHaveValue("");
+  await page.getByRole("combobox", { name: "Sales period" }).click();
+  await page.getByRole("option", { name: "Custom dates", exact: true }).click();
+  await expect(page.getByLabel("Sales from (UTC)", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(page.getByLabel("Sales from (UTC)", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Sales period" })).toContainText("Last 30 days");
+});
+
 test("Vendoo amounts appear in sales records and missing data marks sold inventory", async ({ page, request, phone }, info) => {
   const today = new Date().toISOString().slice(0, 10);
   const title = `E2E Vendoo sale ${info.project.name} ${Date.now()}`;

@@ -1,5 +1,5 @@
 import { cn } from "../lib/utils";
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { DownloadLink } from "./DownloadLink";
@@ -22,14 +22,17 @@ export function ledgerMoney(value: string | null | undefined, currency: string |
 
 export function SalesLedgerSummary({ summary }: { summary: SalesLedgerPage["summary"] }) {
   return <>
-    <PageNote>{summary.lines} sale records · {summary.unrecorded} without recorded amounts · {summary.needs_review} need review · {summary.unmatched} need an inventory link. Totals cover the full filtered period; currencies stay separate.</PageNote>
-    {summary.currencies.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <PageNote>{summary.lines} sale records · {summary.unrecorded} without recorded amounts · {summary.needs_review} need review · {summary.unmatched} need an inventory link.</PageNote>
+    {summary.currencies.length ? <div className="grid gap-3">
       {summary.currencies.map((group) => <Panel key={group.currency} className="space-y-2 p-3" divided={false}>
         <p className="text-sm font-medium">{group.currency}</p>
-        <p className="text-xs">Net revenue: {ledgerMoney(group.net_revenue, group.currency)} · known on {group.net_known} of {group.lines} lines</p>
-        <p className="text-xs">Recorded profit: {ledgerMoney(group.profit, group.currency)} · known on {group.profit_known} of {group.lines} lines</p>
+        <dl className="grid grid-cols-2 gap-4 tabular-nums">
+          <div><dt className="text-xs text-muted-foreground">Net revenue</dt><dd className={cn("mt-1", group.net_revenue == null ? "text-sm text-muted-foreground" : "text-xl font-semibold")}>{ledgerMoney(group.net_revenue, group.currency)}</dd><dd className="mt-1 text-xs text-muted-foreground">known on {group.net_known} of {group.lines} lines</dd></div>
+          <div><dt className="text-xs text-muted-foreground">Recorded profit</dt><dd className={cn("mt-1", group.profit == null ? "text-sm text-muted-foreground" : "text-xl font-semibold")}>{ledgerMoney(group.profit, group.currency)}</dd><dd className="mt-1 text-xs text-muted-foreground">known on {group.profit_known} of {group.lines} lines</dd></div>
+        </dl>
       </Panel>)}
     </div> : null}
+    {summary.currencies.length ? <PageNote>Totals reflect all matching records, with currencies kept separate. Profit includes only records with complete financial amounts.</PageNote> : null}
   </>;
 }
 
@@ -40,10 +43,15 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
   const [start, setStart] = useState(() => new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
   const [end, setEnd] = useState(today);
   const [marketplace, setMarketplace] = useState("all");
+  const [search, setSearch] = useState("");
+  const q = useDeferredValue(search.trim());
+  const [attention, setAttention] = useState("all");
+  const [sort, setSort] = useState("newest");
+  const [period, setPeriod] = useState("30");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<SalesLedgerRow | null>(null);
   const [editor, setEditor] = useState(0);
-  const filters = { start, end, ...(marketplace !== "all" ? { marketplace } : {}) };
+  const filters = { start, end, q, attention, sort, ...(marketplace !== "all" ? { marketplace } : {}) };
   const valid = Boolean(start && end && start >= "1970-01-01" && start <= end && end <= today);
   const query = useQuery({ queryKey: ["sales-ledger", filters, page], queryFn: () => api.salesLedger.list(filters, page),
     enabled: valid, retry: false, refetchInterval: () => pollMs(15000) });
@@ -55,13 +63,31 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
       <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.inventoryCsv()} filename="anteroom-inventory.csv">Export inventory CSV</DownloadLink>
       {valid ? <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.salesCsv(filters)} filename="anteroom-sales.csv">Export sales CSV</DownloadLink> : <Button size="sm" variant="outline" disabled>Export sales CSV</Button>}
     </div>}>
-      <div className="flex flex-wrap items-end gap-3 text-xs">
-        <label className="space-y-1">Sales from (UTC)<Input type="date" min="1970-01-01" max={end || today} value={start} onChange={(event) => { setStart(event.target.value); setPage(1); }} /></label>
-        <label className="space-y-1">Through (UTC)<Input type="date" min={start || "1970-01-01"} max={today} value={end} onChange={(event) => { setEnd(event.target.value); setPage(1); }} /></label>
+      <div className="grid grid-cols-2 items-end gap-3 text-xs lg:grid-cols-4">
+        <label className="col-span-2 block space-y-1">Search sales<Input type="search" placeholder="Item title or order number" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} /></label>
+        <label className="block space-y-1">Period<Select value={period} onValueChange={value => {
+          if (!value) return;
+          setPeriod(value); setPage(1);
+          if (value !== "custom") { setEnd(today); setStart(value === "all" ? "1970-01-01" : new Date(Date.parse(today) - (Number(value) - 1) * 86400000).toISOString().slice(0, 10)); }
+        }}><SelectTrigger aria-label="Sales period" className="w-full"><SelectValue>{({ "30": "Last 30 days", "90": "Last 90 days", "365": "Last year", all: "All time", custom: "Custom dates" } as Record<string, string>)[period]}</SelectValue></SelectTrigger><SelectPopup>
+          <SelectItem value="30">Last 30 days</SelectItem><SelectItem value="90">Last 90 days</SelectItem><SelectItem value="365">Last year</SelectItem><SelectItem value="all">All time</SelectItem><SelectItem value="custom">Custom dates</SelectItem>
+        </SelectPopup></Select></label>
+        {period === "custom" ? <><label className="block space-y-1">Sales from (UTC)<Input type="date" min="1970-01-01" max={end || today} value={start} onChange={(event) => { setStart(event.target.value); setPage(1); }} /></label>
+        <label className="block space-y-1">Through (UTC)<Input type="date" min={start || "1970-01-01"} max={today} value={end} onChange={(event) => { setEnd(event.target.value); setPage(1); }} /></label></> : null}
+        <label className="block space-y-1">Marketplace
         <Select value={marketplace} onValueChange={(value) => { if (value) setMarketplace(value); setPage(1); }}>
-          <SelectTrigger aria-label="Sales marketplace" className="w-40"><SelectValue>{marketplace === "all" ? "All marketplaces" : marketplaceName(marketplace)}</SelectValue></SelectTrigger>
+          <SelectTrigger aria-label="Sales marketplace" className="w-full"><SelectValue>{marketplace === "all" ? "All marketplaces" : marketplaceName(marketplace)}</SelectValue></SelectTrigger>
           <SelectPopup><SelectItem value="all">All marketplaces</SelectItem>{MARKETS.map((market) => <SelectItem key={market} value={market}>{marketplaceName(market)}</SelectItem>)}</SelectPopup>
         </Select>
+        </label>
+        <label className="block space-y-1">Show<Select value={attention} onValueChange={value => { if (value) setAttention(value); setPage(1); }}>
+          <SelectTrigger aria-label="Sales completeness" className="w-full"><SelectValue>{({ all: "All records", missing: "Missing sale data", review: "Needs review", loss: "Losses" } as Record<string, string>)[attention]}</SelectValue></SelectTrigger><SelectPopup>
+            <SelectItem value="all">All records</SelectItem><SelectItem value="missing">Missing sale data</SelectItem><SelectItem value="review">Needs review</SelectItem><SelectItem value="loss">Losses</SelectItem>
+          </SelectPopup></Select></label>
+        <label className="block space-y-1">Sort<Select value={sort} onValueChange={value => { if (value) setSort(value); setPage(1); }}>
+          <SelectTrigger aria-label="Sort sales" className="w-full"><SelectValue>{({ newest: "Newest first", oldest: "Oldest first", title: "Item title" } as Record<string, string>)[sort]}</SelectValue></SelectTrigger><SelectPopup><SelectItem value="newest">Newest first</SelectItem><SelectItem value="oldest">Oldest first</SelectItem><SelectItem value="title">Item title</SelectItem></SelectPopup>
+        </Select></label>
+        {search || attention !== "all" || marketplace !== "all" || sort !== "newest" || period !== "30" ? <Button size="sm" variant="ghost" onClick={() => { setSearch(""); setAttention("all"); setMarketplace("all"); setSort("newest"); setPeriod("30"); setEnd(today); setStart(new Date(Date.parse(today) - 29 * 86400000).toISOString().slice(0, 10)); setPage(1); }}>Clear filters</Button> : null}
         <Button size="sm" variant="ghost" disabled={!valid || query.isFetching} onClick={() => void query.refetch()}>Refresh records</Button>
       </div>
     </PageHeader>
@@ -72,16 +98,20 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
       <PageSection title="Sales records" description="Imported sales and marketplace order lines, including cancellations and refunds. Record totals after discounts; leave an amount blank if unknown and enter 0 once confirmed.">
         {data.rows.length ? <ul className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/60 bg-card/40">{data.rows.map((row) => <li key={row.id} className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 text-sm">
           <div className="flex min-w-0 flex-1 basis-48 flex-col gap-0.5 break-words"><p className="font-medium">{row.title || `${marketplaceName(row.marketplace)} order ${row.order_id}`}</p>
-            <p className="text-xs text-muted-foreground">{marketplaceName(row.marketplace)} · {row.order_status.replace(/_/g, " ")} · quantity {row.quantity ?? "unknown"}</p>
-            <p className="font-mono text-2xs text-muted-foreground/80">Order {row.order_id} · line {row.line_id}</p>
+            <p className="text-xs text-muted-foreground">{row.sold_at ? row.sold_at.slice(0, 10) : "Sale date missing"} · {marketplaceName(row.marketplace)} · {row.order_status.replace(/_/g, " ")} · quantity {row.quantity ?? "unknown"}</p>
+            <details className="text-2xs text-muted-foreground"><summary className="cursor-pointer">Order details</summary><p className="font-mono">Order {row.order_id} · line {row.line_id}</p></details>
             {row.missing_sale_data?.length ? <p className="text-xs text-warning-foreground">Missing: {row.missing_sale_data.join(", ")}</p> : null}
             {row.financials_stale ? <p className="text-xs text-warning-foreground">Order changed or recorded amounts need review.</p> : null}
           </div>
-          <p className={cn("shrink-0 text-xs tabular-nums", row.profit == null && "text-muted-foreground")}>Profit: {ledgerMoney(row.profit, row.financials?.currency)}</p>
+          <dl className="grid w-full grid-cols-3 gap-4 text-right text-xs tabular-nums sm:w-72">
+            <div><dt className="text-muted-foreground">Item revenue</dt><dd className="mt-1">{ledgerMoney(row.financials?.item_revenue, row.financials?.currency)}</dd></div>
+            <div><dt className="text-muted-foreground">Fees</dt><dd className="mt-1">{ledgerMoney(row.financials?.fees, row.financials?.currency)}</dd></div>
+            <div><dt className="text-muted-foreground">Profit</dt><dd className={cn("mt-1 font-medium", row.profit == null ? "text-muted-foreground" : Number(row.profit) < 0 && "text-destructive-foreground")}><span className="sr-only">Profit: </span>{ledgerMoney(row.profit, row.financials?.currency)}</dd></div>
+          </dl>
           <div className="flex flex-wrap gap-2">{row.conversation_id ? <Button size="xs" variant="ghost" onClick={() => onOpenListing(row.conversation_id!)}>Open item</Button> : null}
             <Button size="xs" variant="outline" onClick={() => { setSelected(row); setEditor((value) => value + 1); }}>Record amounts</Button></div>
-        </li>)}</ul> : <EmptyRow>No recorded orders in this period. Recover orders from a marketplace’s Orders tab to add missing sales.</EmptyRow>}
-        <div className="flex items-center gap-2 text-xs"><span>Page {page}</span><Button size="xs" variant="outline" disabled={page === 1 || query.isFetching} onClick={() => setPage(page - 1)}>Previous</Button><Button size="xs" variant="outline" disabled={!data.has_more || query.isFetching} onClick={() => setPage(page + 1)}>Next</Button></div>
+        </li>)}</ul> : <EmptyRow>No sales match these filters. Widen the date range or clear filters.</EmptyRow>}
+        <div className="flex flex-wrap items-center gap-2 text-xs"><span role="status">{data.summary.lines ? `${(page - 1) * 50 + 1}–${Math.min(page * 50, data.summary.lines)} of ${data.summary.lines} records` : "0 records"} · Page {page}</span><Button size="xs" variant="outline" disabled={page === 1 || query.isFetching} onClick={() => setPage(page - 1)}>Previous</Button><Button size="xs" variant="outline" disabled={!data.has_more || query.isFetching} onClick={() => setPage(page + 1)}>Next</Button></div>
       </PageSection>
     </> : null}
     {selected ? <FinancialEditor key={`${selected.id}:${editor}`} row={selected} onClose={() => setSelected(null)}

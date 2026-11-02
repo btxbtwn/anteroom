@@ -20,7 +20,8 @@ export function Stat({
       <div className="text-xs text-muted-foreground">{label}</div>
       <div
         className={cn(
-          "text-2xl font-semibold tracking-tight text-foreground tabular-nums",
+          "tabular-nums",
+          value === "—" ? "text-sm text-muted-foreground" : "text-2xl font-semibold tracking-tight text-foreground",
           negative && "text-destructive-foreground",
         )}
       >
@@ -33,6 +34,6 @@ export function Stat({
 }
 
 /** The grid the stat cards sit in. */
-export function StatGrid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-1 gap-3 @lg/page:grid-cols-2 @3xl/page:grid-cols-3">{children}</div>;
+export function StatGrid({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("grid grid-cols-1 gap-3 @lg/page:grid-cols-2 @3xl/page:grid-cols-3", className)}>{children}</div>;
 }
