@@ -65,6 +65,22 @@ def placeholder(db):
     return sale.id
 
 
+@pytest.mark.parametrize("code,expected", [
+    ("signed_out", "Sign in"), ("challenge", "browser check"),
+    ("rate_limited", "limiting"), ("network", "did not answer"),
+    ("schema_drift", "can't read"), ("rejected", "refused"),
+])
+def test_history_failure_explains_action_and_preserves_records(history_db, monkeypatch, code, expected):
+    with history_db() as db:
+        sale_id = placeholder(db)
+    monkeypatch.setattr("vendoo_studio.services.browser_bridge.request", AsyncMock(return_value={"ok": False, "error": code}))
+    result = asyncio.run(order_history.sync("depop", session_factory=history_db))
+    assert result["ok"] is False
+    assert expected in result["error"]
+    with history_db() as db:
+        assert db.get(MarketplaceSale, sale_id) is not None
+
+
 @pytest.mark.parametrize("partial", [{"more": True}, {"unreadable": 1}])
 def test_partial_history_preserves_old_listing_reports(history_db, monkeypatch, partial):
     with history_db() as db:

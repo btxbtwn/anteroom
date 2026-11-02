@@ -24,6 +24,28 @@ function worker(routes, cookies = {}) {
 
 const read = async (c, marketplace, settled = []) => JSON.parse(JSON.stringify(await c.readMarketplaceOrderHistory(marketplace, settled)));
 
+test('sales reads classify a refused Depop session', async () => {
+  const { c } = worker({ 'receipts/?role=seller': [401, {}] }, { access_token: 'expired' });
+  assert.equal((await read(c, 'depop')).error, 'signed_out');
+});
+
+test('sales reads retry a transient Depop failure', async () => {
+  let attempts = 0;
+  const { c } = worker({ 'receipts/?role=seller': () => ++attempts === 1
+    ? [503, {}] : [200, { objects: [], page_info: { has_more: false } }] }, { access_token: 'token' });
+  assert.equal((await read(c, 'depop')).ok, true);
+  assert.equal(attempts, 2);
+});
+
+test('Mercari sales start with a fresh session rather than a cached account', async () => {
+  const { c } = worker({});
+  let refreshed;
+  c.mercariCurrentSession = async (_deadline, fresh) => { refreshed = fresh; return { user: { userId: 1 } }; };
+  c.mercariRequest = async () => ({ userItems: { items: [], pagination: { hasNext: false } } });
+  assert.equal((await read(c, 'mercari')).ok, true);
+  assert.equal(refreshed, true);
+});
+
 test('unreadable money stays unknown instead of becoming zero', () => {
   const { c } = worker({});
   for (const value of [null, undefined, '', '$', ' ', [], {}, true]) {
@@ -221,4 +243,13 @@ test('Vinted reports orders as unreadable until their format is confirmed', asyn
   const { c } = worker({ '/api/v2/my_orders': [200, { my_orders: [{ id: 1 }], pagination: { total_entries: 1 } }] },
     { access_token_web: token });
   assert.deepEqual(await read(c, 'vinted'), { ok: true, orders: [], more: false, unreadable: 1 });
+});
+
+test('Vinted with no sales returns an empty history successfully', async () => {
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  const token = `x.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.y`;
+  const { c, calls } = worker({ '/api/v2/my_orders': [200, { my_orders: [], pagination: { total_entries: 0 }, order_details_enabled: false }] },
+    { access_token_web: token });
+  assert.deepEqual(await read(c, 'vinted'), { ok: true, orders: [], more: false, unreadable: 0 });
+  assert.equal(calls.at(-1).options.headers.Accept, 'application/json');
 });
