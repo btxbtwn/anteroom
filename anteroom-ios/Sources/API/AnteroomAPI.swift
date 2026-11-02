@@ -86,6 +86,23 @@ final class AnteroomAPI: Sendable {
         return payload.marketplace_forms ?? []
     }
 
+    /// A marketplace's synced category tree (eBay's is about 20,000 nodes).
+    func catalogCategories(marketplace: String) async throws -> CatalogCategories {
+        try await decode(request("GET", "api/catalog/categories", query: [URLQueryItem(name: "marketplace", value: marketplace)]))
+    }
+
+    /// eBay's own category search, through the seller's connected account.
+    func searchEbayCategories(_ query: String) async throws -> [CategoryLeaf] {
+        struct Page: Decodable {
+            struct Row: Decodable { let id: String; let title: String?; let subtitle: String? }
+            let rows: [Row]?
+        }
+        let page: Page = try await decode(request("GET", "api/ebay/read/categories", query: [URLQueryItem(name: "q", value: query)]))
+        return (page.rows ?? []).map { row in
+            CategoryLeaf(id: row.id, path: [row.subtitle, row.title].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " › "))
+        }
+    }
+
     func nativeForm(_ id: String, marketplace: String) async throws -> NativeForm {
         try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/\(marketplace)/form"))
     }

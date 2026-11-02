@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSettingsSectionId, searchSettings, settingsSearchItemsForMode, SETTINGS_NAV_ITEMS, SETTINGS_SEARCH_ITEMS } from "./settingsNav";
+import { HOSTED_SETTINGS_SECTIONS, isSettingsSectionId, searchSettings, settingsSectionFor, settingsSearchItemsForMode, SETTINGS_NAV_ITEMS, SETTINGS_SEARCH_ITEMS } from "./settingsNav";
 
 describe("searchSettings", () => {
   it("returns nothing for a blank query", () => {
@@ -47,5 +47,17 @@ describe("searchSettings", () => {
 
   it("finds both the listing checklist and the sign-in accounts", () => {
     expect(searchSettings("marketplaces").map((item) => item.id).sort()).toEqual(["accounts", "where-you-list"]);
+  });
+});
+
+describe("settings on the web", () => {
+  it("opens every section the web sidebar offers, Connections included", () => {
+    for (const id of HOSTED_SETTINGS_SECTIONS) expect(settingsSectionFor(id, true)).toBe(id);
+    expect(HOSTED_SETTINGS_SECTIONS).toContain("connections");
+  });
+
+  it("sends desktop-only sections to Providers on the web, and changes nothing on the Mac", () => {
+    expect(settingsSectionFor("logs", true)).toBe("providers");
+    expect(settingsSectionFor("logs", false)).toBe("logs");
   });
 });
