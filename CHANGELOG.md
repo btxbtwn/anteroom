@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.657 — 2026-11-02
+
+- Behind the scenes, listing rules and save operations are separated from database queries, so more architectural mistakes are caught before an update ships.
+
 ## 0.1.656 — 2026-11-02
 
 - Behind the scenes, unused backend helpers and old protocol definitions have been removed, and new unused code is now caught without a baseline of exceptions.
