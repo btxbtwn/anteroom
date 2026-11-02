@@ -737,6 +737,31 @@ final class AnteroomAPI: Sendable {
                                                json: ["data": image.base64EncodedString(), "mime": mime])))
     }
 
+    /// What an eBay account change would do. Nothing is changed until `confirmEbay`.
+    func previewEbay(kind: String, payload: [String: JSONValue]) async throws -> EbayReview {
+        struct Body: Encodable { let kind: String; let payload: [String: JSONValue] }
+        return try await decode(request("POST", "api/ebay/actions/preview", json: Body(kind: kind, payload: payload)))
+    }
+
+    /// Make the change the seller reviewed. `confirm` is the seller's explicit approval.
+    func confirmEbay(reviewID: String, kind: String, payload: [String: JSONValue]) async throws -> EbayResult {
+        struct Body: Encodable { let id: String; let kind: String; let payload: [String: JSONValue]; let confirm = true }
+        return try await decode(request("POST", "api/ebay/actions/confirm", json: Body(id: reviewID, kind: kind, payload: payload)))
+    }
+
+    /// The seller checked in eBay that an action whose outcome was unknown went through. Nothing is repeated.
+    func markEbayActionChecked(_ id: String) async throws {
+        _ = try await send(request("POST", "api/ebay/actions/\(id)/checked", json: ["confirm": true]))
+    }
+
+    func ebayLiveListing(_ id: String) async throws -> EbayLiveListing {
+        try await decode(request("GET", "api/ebay/listing/\(id)"))
+    }
+
+    func ebayOfferListings() async throws -> EbayOfferListings {
+        try await decode(request("GET", "api/ebay-offers"))
+    }
+
     // MARK: Shared listing history
 
     func revisions(_ id: String) async throws -> [ListingRevision] {

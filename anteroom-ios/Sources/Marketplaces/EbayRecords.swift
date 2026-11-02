@@ -1,11 +1,18 @@
 import SwiftUI
 
-/// Where a record opens: the conversation, order, dispute or inventory item behind it.
+/// Where a record opens: the conversation, order, dispute or item behind it,
+/// with the actions the web offers once it is selected.
 enum EbayDestination: Hashable {
     case conversation(EbayRow)
     case order(EbayRow)
     case dispute(EbayRow)
     case offers(EbayRow)
+    case offer(EbayRow)
+    case feedback(EbayRow)
+    case promotion(EbayRow)
+    case campaign(EbayRow)
+    case adReport(EbayRow)
+    case activity(EbayRow)
 }
 
 /// One eBay record as the web's RowCards draws it: title and ID, status,
@@ -141,38 +148,6 @@ struct EbayRemoteList: View {
         } catch is CancellationError {
         } catch {
             self.error = error.localizedDescription
-        }
-    }
-}
-
-/// A conversation, an order, a dispute, or an inventory item's offers.
-struct EbayRecordDetail: View {
-    let api: AnteroomAPI
-    let destination: EbayDestination
-
-    var body: some View {
-        List {
-            switch destination {
-            case .conversation(let row):
-                Section("Messages") { EbayRemoteList(api: api, section: "messages", params: ["target": row.id]) }
-            case .order(let row):
-                Section("Order") { EbayRemoteList(api: api, section: "order", params: ["target": row.id]) }
-            case .dispute(let row):
-                Section("Dispute") { EbayRemoteList(api: api, section: "dispute", params: ["target": row.id]) }
-            case .offers(let row):
-                Section("Offers for \(row.id)") { EbayRemoteList(api: api, section: "offers", params: ["target": row.id]) }
-            }
-        }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var title: String {
-        switch destination {
-        case .conversation(let row): return row.title.isEmpty ? "Conversation" : row.title
-        case .order(let row): return "Order \(row.id)"
-        case .dispute(let row): return "Dispute \(row.id)"
-        case .offers(let row): return row.title.isEmpty ? row.id : row.title
         }
     }
 }

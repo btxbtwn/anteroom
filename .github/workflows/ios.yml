@@ -62,6 +62,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/Marketplaces/MarketplaceModels.swift Tests/MarketplaceTests.swift -o "$RUNNER_TEMP/marketplace-tests"
           "$RUNNER_TEMP/marketplace-tests"
+      - name: Test eBay action payloads
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/Marketplaces/MarketplaceModels.swift Sources/Marketplaces/EbayActionModels.swift Tests/EbayActionTests.swift -o "$RUNNER_TEMP/ebay-action-tests"
+          "$RUNNER_TEMP/ebay-action-tests"
       - name: Test analytics contract and wording
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/Analytics/AnalyticsModels.swift Tests/AnalyticsTests.swift -o "$RUNNER_TEMP/analytics-tests"
