@@ -520,6 +520,7 @@ class ExtensionStatusRouteTest(unittest.TestCase):
         manager = ExtensionManager()
         manager.version = "0.2.5"
         manager.reload_generation = None
+        manager.capabilities = frozenset({"marketplace.actions"})
         with patch("vendoo_studio.services.extension_connection.extension_manager", manager), patch(
             "vendoo_studio.services.extension_connection.extension_build_status",
             return_value={
@@ -535,6 +536,8 @@ class ExtensionStatusRouteTest(unittest.TestCase):
         build.assert_called_once_with("0.2.5", None, None)
         self.assertFalse(payload["connected"])
         self.assertFalse(payload["up_to_date"])
+        # An earlier copy that declares marketplace actions can still run them.
+        self.assertTrue(payload["runs_marketplace_actions"])
         self.assertEqual(payload["expected_version"], "0.2.6")
         self.assertEqual(payload["version"], "0.2.5")
 

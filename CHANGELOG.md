@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.646 — 2026-11-02
+
+- An earlier Anteroom Bridge in Chrome keeps listing, updating and delisting until a change actually needs the newer one, so you no longer have to update Chrome after every Anteroom update.
+
 ## 0.1.645 — 2026-11-01
 
 - Load listing photos faster on the web and iPhone, and stop them reloading when you scroll back.
