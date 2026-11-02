@@ -9,6 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import inventory_facets
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.marketplace_listing import MarketplaceListing  # noqa: F401
@@ -39,34 +41,34 @@ class ListingFacetsTest(unittest.TestCase):
 
     def test_facets_read_sku_and_price_from_the_current_revision(self):
         conv = self.convs.create(title="Nike tee")
-        self.listings.save_revision(conv.id, {"title": "Nike tee", "sku": "NIKE-TEE-M", "price": 24.5}, "test")
-        facets = self.convs.listing_facets()
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Nike tee", "sku": "NIKE-TEE-M", "price": 24.5}, "test")
+        facets = inventory_facets.listing_facets(self.convs.db)
         expected = {"sku": "NIKE-TEE-M", "price": 24.5, "etsy_eligible": False}
         self.assertEqual(facets[conv.id], expected)
-        self.assertEqual(self.convs.listing_facet(conv.id), expected)
+        self.assertEqual(inventory_facets.listing_facet(self.convs.db, conv.id), expected)
 
     def test_facets_are_empty_without_a_listing(self):
         conv = self.convs.create(title="Bare draft")
-        self.assertNotIn(conv.id, self.convs.listing_facets())
+        self.assertNotIn(conv.id, inventory_facets.listing_facets(self.convs.db))
         # Nothing known about the item: no reason to hide Etsy.
-        self.assertEqual(self.convs.listing_facet(conv.id), {"sku": None, "price": None, "etsy_eligible": True})
+        self.assertEqual(inventory_facets.listing_facet(self.convs.db, conv.id), {"sku": None, "price": None, "etsy_eligible": True})
 
     def test_facets_read_etsy_eligibility_from_the_listing(self):
         modern = self.convs.create(title="Modern tee")
-        self.listings.save_revision(modern.id, {"title": "Tee", "etsy_specifics": {
+        listing_persistence.save_revision(self.listings.db, modern.id, {"title": "Tee", "etsy_specifics": {
             "who_made": "Another company or person", "when_made": "2010 - 2019 (Recently)",
         }}, "test")
         vintage = self.convs.create(title="90s tee")
-        self.listings.save_revision(vintage.id, {"title": "Tee", "etsy_specifics": {
+        listing_persistence.save_revision(self.listings.db, vintage.id, {"title": "Tee", "etsy_specifics": {
             "who_made": "someone_else", "when_made": "1990s",
         }}, "test")
         dated_by_ebay = self.convs.create(title="80s tee")
-        self.listings.save_revision(dated_by_ebay.id, {
+        listing_persistence.save_revision(self.listings.db, dated_by_ebay.id, {
             "title": "Tee",
             "etsy_specifics": {"who_made": "Another company or person"},
             "ebay_specifics": {"yearManufactured": "1985"},
         }, "test")
-        facets = self.convs.listing_facets()
+        facets = inventory_facets.listing_facets(self.convs.db)
         self.assertFalse(facets[modern.id]["etsy_eligible"])
         self.assertTrue(facets[vintage.id]["etsy_eligible"])
         self.assertTrue(facets[dated_by_ebay.id]["etsy_eligible"])
@@ -81,8 +83,8 @@ class ListingFacetsTest(unittest.TestCase):
             "vendooMarketplaces": ["ebay", "etsy"],
         })
         self.db.commit()
-        self.listings.save_revision(conv.id, {"title": "Nike tee", "sku": "NIKE-TEE-M", "price": 24.5}, "test")
-        response = _conv_response(conv, _extras(None, self.convs.listing_facet(conv.id)))
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Nike tee", "sku": "NIKE-TEE-M", "price": 24.5}, "test")
+        response = _conv_response(conv, _extras(None, inventory_facets.listing_facet(self.convs.db, conv.id)))
         self.assertEqual(response.sku, "NIKE-TEE-M")
         self.assertEqual(response.price, 24.5)
         self.assertEqual(response.vendoo_labels, ["A19", "To List"])

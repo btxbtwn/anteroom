@@ -8,11 +8,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Photo
 from vendoo_studio.models.listing_video import ListingVideo
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services import listing_videos
 from vendoo_studio.services.automations import approval_snapshot
 
@@ -27,7 +28,7 @@ class ListingVideosTest(unittest.TestCase):
         app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title="Private video test")
-        self.revision = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Private video test"}, "user_form")
+        self.revision = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Private video test"}, "user_form")
         self.directory = self.enterContext(tempfile.TemporaryDirectory())
         self.enterContext(patch.object(listing_videos, "VIDEOS_DIR", Path(self.directory)))
         self.base = f"/api/conversations/{self.conv.id}/videos"
@@ -95,10 +96,10 @@ class ListingVideosTest(unittest.TestCase):
         listing = {"poshmark_specifics": {"videoId": video["id"]}}
         with self.assertRaisesRegex(ValueError, "shorter than 15"):
             listing_videos.selected_video(self.db, self.conv.id, listing, "poshmark")
-        ListingRepo(self.db).save_revision(self.conv.id, listing, "user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, listing, "user_form")
         endpoint = f"{self.base}/{video['id']}"
         self.assertEqual(self.client.delete(endpoint).status_code, 409)
-        ListingRepo(self.db).save_revision(self.conv.id, {"poshmark_specifics": {"videoId": ""}}, "user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, {"poshmark_specifics": {"videoId": ""}}, "user_form")
         job = JobRepo(self.db).create(self.conv.id, self.revision.id, {}, status="dispatched")
         self.assertEqual(self.client.delete(endpoint).status_code, 409)
         job.status = "completed"

@@ -10,6 +10,7 @@ from copy import deepcopy
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
 from vendoo_studio.repositories.queries import (
@@ -76,7 +77,7 @@ def dna_fill_allowed(field: dict) -> bool:
     if label == "season":
         return False
     if marketplace == "ebay":
-        from vendoo_studio.models.ebay_fields import (
+        from vendoo_studio.services.ebay_fields import (
             EBAY_OPTIONAL_DNA_LOOKUPS,
             EBAY_OPTIONAL_MUST_FILL_LOOKUPS,
         )
@@ -85,7 +86,7 @@ def dna_fill_allowed(field: dict) -> bool:
         if label in EBAY_OPTIONAL_DNA_LOOKUPS:
             return True
     if marketplace == "etsy":
-        from vendoo_studio.models.etsy_fields import (
+        from vendoo_studio.services.etsy_fields import (
             ETSY_OPTIONAL_DNA_LOOKUPS,
             ETSY_OPTIONAL_MUST_FILL_LOOKUPS,
         )
@@ -94,7 +95,7 @@ def dna_fill_allowed(field: dict) -> bool:
         if label in ETSY_OPTIONAL_DNA_LOOKUPS:
             return True
     if marketplace == "depop":
-        from vendoo_studio.models.depop_fields import (
+        from vendoo_studio.services.depop_fields import (
             DEPOP_OPTIONAL_DNA_LOOKUPS,
             DEPOP_OPTIONAL_MUST_FILL_LOOKUPS,
         )
@@ -116,17 +117,17 @@ def marketplace_optional_blocks_silent_skip(field: dict) -> bool:
     if str(field.get("error") or "") != "Empty field":
         return False
     label = field_lookup_key(str(field.get("field") or field.get("label") or ""))
-    from vendoo_studio.models.depop_fields import (
+    from vendoo_studio.services.depop_fields import (
         DEPOP_OPTIONAL_DNA_LOOKUPS,
         DEPOP_OPTIONAL_EVIDENCE_KEYS,
         DEPOP_OPTIONAL_MUST_FILL_LOOKUPS,
     )
-    from vendoo_studio.models.ebay_fields import (
+    from vendoo_studio.services.ebay_fields import (
         EBAY_OPTIONAL_DNA_LOOKUPS,
         EBAY_OPTIONAL_EVIDENCE_KEYS,
         EBAY_OPTIONAL_MUST_FILL_LOOKUPS,
     )
-    from vendoo_studio.models.etsy_fields import (
+    from vendoo_studio.services.etsy_fields import (
         ETSY_OPTIONAL_DNA_LOOKUPS,
         ETSY_OPTIONAL_MUST_FILL_LOOKUPS,
     )
@@ -339,7 +340,7 @@ async def complete_job(db: Session, job_id: str) -> None:
         prefer_listing=prefer_listing,
     )
     if adopted:
-        ListingRepo(db).save_revision(
+        listing_persistence.save_revision(db,
             job.conversation_id,
             listing,
             source="vendoo_observed",
@@ -716,7 +717,7 @@ async def complete_job(db: Session, job_id: str) -> None:
     if exemptions or no_evidence:
         _persist_dispositions(db, job, exemptions=exemptions, no_evidence=no_evidence)
     snapshot = write_values_into_listing(listing, patches)
-    ListingRepo(db).save_revision(job.conversation_id, snapshot, source="completion_repair",
+    listing_persistence.save_revision(db, job.conversation_id, snapshot, source="completion_repair",
                                  parent_revision_id=revisions[0].id if revisions else None)
     job.listing_snapshot = {**snapshot, "platforms": (job.listing_snapshot or {}).get("platforms") or []}
     job.current_step = "filling_fields"

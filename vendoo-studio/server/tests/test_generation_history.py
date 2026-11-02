@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.chat_prompts import listing_generation_messages
@@ -54,7 +55,7 @@ class GenerationHistoryTest(unittest.TestCase):
             payload.update(notes)
         conv.notes = json.dumps(payload)
         self.db.commit()
-        ListingRepo(self.db).save_revision(conv.id, {
+        listing_persistence.save_revision(self.db, conv.id, {
             "title": conv.title, "price": price, "brand": brand,
             "category_path": category, "condition": condition, "size": "M",
             "quantity": 1,
@@ -69,7 +70,7 @@ class GenerationHistoryTest(unittest.TestCase):
         for days, amount in enumerate((20, 22, 24, 26, 28), start=1):
             self.add_item(sold_price=amount, sold_at=NOW - timedelta(days=days))
         another = self.add_item(sold_price=30, sold_at=NOW - timedelta(days=6))
-        ListingRepo(self.db).save_revision(another.id, {
+        listing_persistence.save_revision(self.db, another.id, {
             "title": "Nike Tee", "brand": "Nike", "condition": "Good",
             "category_path": MEN_TSHIRT_PATH, "price": 999,
             "quantity": 1,

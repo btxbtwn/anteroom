@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.config import FILL_LOGS_DIR
 from vendoo_studio.models.fill_log import FillLogEntry
 from vendoo_studio.models.job import Job
@@ -915,7 +916,7 @@ class FillLogService:
         if not added:
             return
 
-        listing_repo.save_revision(
+        listing_persistence.save_revision(listing_repo.db,
             job.conversation_id,
             listing,
             source="fill_learned_fields",

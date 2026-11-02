@@ -7,9 +7,10 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.main import app
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services.inventory_analytics import AnalyticsItem, load_rows, summarize
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=UTC)
@@ -466,7 +467,7 @@ class LoadAnalyticsTest(unittest.TestCase):
         repo = ConversationRepo(self.db)
         self.sold = repo.create(title="Imported tee")
         self.busy = repo.create(title="Sending")
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.sold.id,
             {
                 "title": "Imported tee",
@@ -529,7 +530,7 @@ class LoadAnalyticsTest(unittest.TestCase):
 
         merged = ConversationRepo(self.db).create(title="Duplicate tee")
         merged.notes = json.dumps({"mergedInto": self.sold.id})
-        ListingRepo(self.db).save_revision(merged.id, {"title": "Duplicate tee", "quantity": 3}, source="import")
+        listing_persistence.save_revision(self.db, merged.id, {"title": "Duplicate tee", "quantity": 3}, source="import")
         self.db.add(MarketplaceSale(marketplace="depop", order_id="o9", line_id="l9", listing_id="shop-tee-136d",
                                     conversation_id=merged.id, quantity=1))
         self.db.commit()

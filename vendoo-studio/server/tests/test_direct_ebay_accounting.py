@@ -4,9 +4,9 @@ import pytest
 import test_ebay_workspace
 
 from ebay_workspace_fake import ITEM_ID
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
-from vendoo_studio.repositories.queries import ListingRepo
 from vendoo_studio.services import ebay_workspace
 
 workspace = test_ebay_workspace.workspace
@@ -56,7 +56,7 @@ def test_ambiguous_direct_identity_keeps_cost_and_profit_unknown(workspace):
     direct(workspace, listing_id=ITEM_ID)
     workspace.db.add(Conversation(id="duplicate", title="Different item", status="active"))
     workspace.db.commit()
-    ListingRepo(workspace.db).save_revision("duplicate", {"title": "Different item", "price": 99, "cost": 50}, "user")
+    listing_persistence.save_revision(workspace.db, "duplicate", {"title": "Different item", "price": 99, "cost": 50}, "user")
     MarketplaceListingRepo(workspace.db).save("duplicate", "ebay", {"state": "published", "ebay_listing_id": ITEM_ID})
     result = finance(workspace)
     assert result["amount"] == "40.00"
@@ -73,7 +73,7 @@ def test_ambiguous_direct_and_seller_links_do_not_guess_a_cost(workspace):
 
 def test_missing_direct_cost_stays_unknown(workspace):
     direct(workspace, listing_id=ITEM_ID)
-    ListingRepo(workspace.db).save_revision("coat", {"title": "Coat", "price": 50}, "user")
+    listing_persistence.save_revision(workspace.db, "coat", {"title": "Coat", "price": 50}, "user")
     assert finance(workspace)["fields"]["Profit"] is None
 
 

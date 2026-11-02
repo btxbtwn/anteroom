@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
@@ -32,9 +33,9 @@ class ListingReviewTest(unittest.TestCase):
         app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title="Review fixture")
-        self.old = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 40}, source="model")
-        self.current = ListingRepo(self.db).save_revision(self.conv.id, LISTING, source="model", parent_revision_id=self.old.id)
-        ConversationRepo(self.db).add_photo(self.conv.id, "fixture.jpg", "fixture.jpg", "image/jpeg", 10)
+        self.old = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "price": 40}, source="model")
+        self.current = listing_persistence.save_revision(self.db, self.conv.id, LISTING, source="model", parent_revision_id=self.old.id)
+        listing_persistence.add_photo(self.db, self.conv.id, "fixture.jpg", "fixture.jpg", "image/jpeg", 10)
         self.remote, _ = build_vendoo_item({**LISTING, "price": 40}, images=[{"id": "remote-photo", "version": 3}])
         self.remote["_studio_update_time"] = "version-1"
         self.ops = []
@@ -122,12 +123,12 @@ class ListingReviewTest(unittest.TestCase):
         for change in ("revision", "notes", "photos"):
             preview = self.preview()
             if change == "revision":
-                ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 20}, source="user_form")
+                listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "price": 20}, source="user_form")
             elif change == "notes":
                 self.conv.notes = merge_notes(self.conv.notes, {"sku": "NEW-SKU"})
                 self.db.commit()
             else:
-                ConversationRepo(self.db).add_photo(self.conv.id, "b.jpg", "b.jpg", "image/jpeg", 10)
+                listing_persistence.add_photo(self.db, self.conv.id, "b.jpg", "b.jpg", "image/jpeg", 10)
             response = self.approve(preview)
             self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(self.approve({"review_id": "unknown"}).status_code, 409)

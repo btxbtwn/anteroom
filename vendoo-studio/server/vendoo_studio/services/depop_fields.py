@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from vendoo_studio.models.ebay_fields import (
+from vendoo_studio.services.ebay_fields import (
     ebay_optional_blank,
     ebay_season_haystack,
 )

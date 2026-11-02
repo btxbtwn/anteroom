@@ -77,6 +77,13 @@ baseline: every unused declaration fails it.
 - ORM fields use `Mapped[...] = mapped_column(...)`. Keep database nullability
   explicit: a Python type refactor must not silently change existing tables.
   Type checking blocks CI on new errors; its baseline may only shrink.
+- Listing normalization and validation live in `services/ebay_fields.py`,
+  `depop_fields.py`, `etsy_fields.py` and `validation.py`; `models/` owns schemas
+  and database rows. Save revisions and add or remove photos through
+  `services/listing_persistence.py`, which preserves validation and follow-up
+  work around repository inserts and atomic revision updates. Inventory facet
+  queries stay in repositories; `services/inventory_facets.py` derives their
+  display values.
 - The extension bridge and connection state live in `services/extension_connection.py`.
   Import that service from other services; `routes/extension.py` only registers
   the HTTP and WebSocket endpoints.

@@ -10,6 +10,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.config import MAX_PHOTO_COUNT
 from vendoo_studio.models.mercari_shipping import DEFAULT_SHIPPING_LABEL
 from vendoo_studio.models.schema import DEPOP_OPTION_CODES, ListingSchema
@@ -475,7 +476,7 @@ async def import_vendoo_draft(
 
     capture_sale_snapshot(db, conv_id, item, form)
     current = listing_repo.get_current(conv_id)
-    revision = listing_repo.save_revision(
+    revision = listing_persistence.save_revision(listing_repo.db,
         conv_id=conv_id,
         listing_json=listing,
         source="vendoo_import",
@@ -506,7 +507,7 @@ async def import_vendoo_draft(
         urls = image_urls_from_vendoo(item, form, image_urls)
         imported = await download_vendoo_photos(urls, conv_id)
         for meta in imported:
-            conv_repo.add_photo(
+            listing_persistence.add_photo(conv_repo.db,
                 conv_id=conv_id,
                 original_filename=meta["original_filename"],
                 stored_filename=meta["stored_filename"],
@@ -1033,14 +1034,13 @@ async def import_vendoo_item(
             LOOKUP_TIMEOUT_SEC,
             resolve_label_display_names,
         )
-        from vendoo_studio.repositories.queries import ListingRepo
 
         named = await resolve_label_display_names(
             job, listing["labels"], timeout=LOOKUP_TIMEOUT_SEC
         )
         if named != list(listing["labels"]):
             listing = {**listing, "labels": named}
-            named_revision = ListingRepo(db).save_revision(
+            named_revision = listing_persistence.save_revision(db,
                 conv.id,
                 listing,
                 source="vendoo_import",
@@ -1103,7 +1103,7 @@ async def attach_vendoo_photos(db: Any, conv_id: str, item: dict | None, form: d
 
     imported = await download_vendoo_photos(urls, conv_id)
     for meta in imported:
-        conv_repo.add_photo(
+        listing_persistence.add_photo(conv_repo.db,
             conv_id=conv_id,
             original_filename=meta["original_filename"],
             stored_filename=meta["stored_filename"],

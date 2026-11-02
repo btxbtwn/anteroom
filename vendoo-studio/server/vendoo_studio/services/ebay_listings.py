@@ -22,7 +22,7 @@ import time
 from typing import Any
 
 from vendoo_studio.services.photo_store import photo_store
-from vendoo_studio.models.ebay_fields import EBAY_CONDITION_DESCRIPTION
+from vendoo_studio.services.ebay_fields import EBAY_CONDITION_DESCRIPTION
 from vendoo_studio.services.ebay_api import dollars, money_cents
 import httpx
 
@@ -187,7 +187,7 @@ def _aspect_key(name: str) -> str:
 
 def _specifics(listing: dict) -> dict:
     """The listing's eBay specifics, one copy per aspect (``flatten_ebay_specifics``)."""
-    from vendoo_studio.models.ebay_fields import flatten_ebay_specifics
+    from vendoo_studio.services.ebay_fields import flatten_ebay_specifics
 
     specifics = listing.get("ebay_specifics")
     if not isinstance(specifics, dict):

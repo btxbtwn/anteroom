@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import native_field_fill
@@ -133,7 +134,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.db = sessionmaker(bind=self.engine)()
         self.conv = ConversationRepo(self.db).create(title="Jeans")
         self.repo = ListingRepo(self.db)
-        self.repo.save_revision(self.conv.id, {"title": "Levi's 505 jeans", "brand": "Levi's"}, source="model")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, {"title": "Levi's 505 jeans", "brand": "Levi's"}, source="model")
 
     def tearDown(self):
         self.db.close()
@@ -152,7 +153,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         ]}
         listing = {"title": "Jeans", "direct_category_ids": {"ebay": "11483"}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
-        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         replies = ['{"fields":{}}', json.dumps({"fields": {"ebay_specifics.Style": {
             "value": "Relaxed straight", "evidence": "Sawyer relaxed straight"}}})]
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
@@ -172,7 +173,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             row("ebay_specifics.Style", "Style", ["Casual"], required=True, selection_only=False)]}
         listing = {"title": "Jeans", "direct_category_ids": {"ebay": "11483"}, "ebay_specifics": {"Style": ""}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
-        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields":{}}')) as ask:
             saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="No style evidence")
@@ -189,7 +190,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                 option_values={label: str(i) for i, label in enumerate(labels)}, category_specific=True)]}
         listing = {"title": "Racing tank", "direct_category_ids": {"ebay": "12"}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
-        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         evidence = "Graphic reads Tony Stewart."
         provider = Provider([
             json.dumps({"_option_search": [{"marketplace": "ebay", "field": "ebay_specifics.Player",
@@ -219,7 +220,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                    "depop_specifics": {"occasion": ["Work"], "source": ["Preloved"],
                                        "age": ["Modern"], "style": ["Preppy"]}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
-        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         values = {"nativeSizeId": "103", "attributes.occasion": ["Work"],
                   "source": ["Preloved"], "age": ["Modern"], "style": ["Preppy"]}
         evidence = "Seller: size M, Work, Preloved, Modern, Preppy."
@@ -242,7 +243,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         listing = {"title": "Pants", "direct_category_ids": {"mercari": "12"},
                    "mercari_specifics": {"material": "Wool"}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"mercari": form}, ["mercari"])
-        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         reply = json.dumps({"fields": {"mercari_specifics.material": {"value": "Wool", "evidence": "100% wool"}}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"mercari": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
@@ -261,7 +262,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
         listing[native_contract.EVIDENCE_KEY] = {
             "ebay_specifics.Material": {"value": "Cotton", "quote": "100% cotton"}}
-        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         reply = json.dumps({"fields": {"ebay_specifics.Rise": {"value": "High", "evidence": "high rise"}}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
@@ -284,7 +285,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         form = {"fields": [row("ebay_specifics.Rise", "Rise", ["High"], required=True)]}
         listing = {"ebay_specifics": {"Rise": "High"}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
-        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         for reply in ("", "Provider unavailable", '{"error": "Unavailable"}', '{"fields": []}'):
             with self.subTest(reply=reply), \
                     patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
@@ -308,7 +309,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         listing = {"title": "Pants", "ebay_specifics": {"Size Type": "Regular", "Size": "S"}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
         listing[native_contract.EVIDENCE_KEY] = {"ebay_specifics.Size": {"value": "S", "quote": "size S"}}
-        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         replies = [json.dumps({"fields": {"ebay_specifics.Size Type": {"value": "Petites", "evidence": "Petites"}}}),
                    json.dumps({"fields": {"ebay_specifics.Size Type": {"value": "Petites", "evidence": "Petites"},
                                           "ebay_specifics.Size": {"value": "M", "evidence": "size M"}}})]
@@ -397,7 +398,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_seller_edit_during_the_fill_wins(self):
         async def edit_then_reply(*_args, **_kwargs):
-            self.repo.save_revision(self.conv.id, {"title": "Seller's title"}, source="editor")
+            listing_persistence.save_revision(self.repo.db, self.conv.id, {"title": "Seller's title"}, source="editor")
             return json.dumps({"fields": {"ebay_specifics.Rise": "High"}})
 
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": EBAY})), \
@@ -416,7 +417,7 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
         self.conv = ConversationRepo(self.db).create(title="Jeans")
         self.repo = ListingRepo(self.db)
         self.base = {"title": "Levi's jeans", "direct_category_ids": {"depop": "menswear_jeans", "ebay": "11483"}}
-        self.repo.save_revision(self.conv.id, self.base, source="model")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, self.base, source="model")
         self.fills: list[set[str]] = []
 
         async def fake_fill(conv_id, markets):
@@ -438,7 +439,7 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
     def save(self, change: dict, source="user_form"):
         listing = json.loads(json.dumps(self.base))
         listing["direct_category_ids"].update(change)
-        self.repo.save_revision(self.conv.id, listing, source=source)
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source=source)
         self.base = listing
 
     async def settle(self):
@@ -456,7 +457,7 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_fill_when_the_category_is_unchanged(self):
         listing = {**self.base, "title": "Levi's 505 jeans"}
-        self.repo.save_revision(self.conv.id, listing, source="user_form")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="user_form")
         await self.settle()
         self.assertEqual(self.fills, [])
 
@@ -464,13 +465,13 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
         listing = {**self.base, "ebay_specifics": {"Style": "Bootcut"}, "_native_forms": {
             "ebay": {"fields": [row("ebay_specifics.Style", "Style", ["Bootcut", "Straight"], required=True)]},
         }}
-        self.repo.save_revision(self.conv.id, listing, source="model_refinement")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="model_refinement")
         await self.settle()
         self.assertEqual(self.fills, [{"ebay"}])
         self.fills.clear()
         listing["_native_field_evidence"] = {"ebay_specifics.Style": {"value": "Bootcut", "quote": "Bootcut jeans"}}
-        self.repo.save_revision(self.conv.id, listing, source="native_fields")
-        self.repo.save_revision(self.conv.id, listing, source="model_refinement")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="native_fields")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="model_refinement")
         await self.settle()
         self.assertEqual(self.fills, [])
 
@@ -485,7 +486,7 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
         listing = {**self.base, "brand": "Levi's", "condition": "Good",
                    "depop_specifics": {"style": ["Preppy"]}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
-        self.repo.save_revision(self.conv.id, listing, source="native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="native_schema")
 
         _, saved = apply_listing_payload(self.db, self.conv.id, json.dumps([
             {"op": "replace", "path": "/depop_specifics/style", "value": styles},
@@ -530,21 +531,21 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
                                clears=["depop_specifics.attributes"])]}
         listing = {**self.base, "depop_specifics": {"type": "Jeans"}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
-        self.repo.save_revision(self.conv.id, listing, source="native_schema")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="native_schema")
         listing["depop_specifics"]["type"] = "Chinos"
-        self.repo.save_revision(self.conv.id, listing, source="user_form")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="user_form")
         await self.settle()
         self.assertEqual(self.fills, [{"depop"}])
 
         # The form refresh may be unavailable or still in flight. Later edits
         # must compare with the preceding revision, not that old form snapshot.
         listing["title"] = "Updated jeans title"
-        self.repo.save_revision(self.conv.id, listing, source="user_form")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="user_form")
         await self.settle()
         self.assertEqual(self.fills, [{"depop"}])
 
         listing["depop_specifics"]["type"] = "Jeans"
-        self.repo.save_revision(self.conv.id, listing, source="user_form")
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="user_form")
         await self.settle()
         self.assertEqual(self.fills, [{"depop"}, {"depop"}])
 
@@ -569,7 +570,7 @@ class CategoryFillLocksTest(unittest.IsolatedAsyncioTestCase):
         Base.metadata.create_all(engine)
         db = sessionmaker(bind=engine)()
         conv = ConversationRepo(db).create(title="Jeans")
-        ListingRepo(db).save_revision(conv.id, {"title": "Levi's", "seller_fields": ["depop_specifics.attributes.bottom-fit"]},
+        listing_persistence.save_revision(db, conv.id, {"title": "Levi's", "seller_fields": ["depop_specifics.attributes.bottom-fit"]},
                                       source="model")
         reply = json.dumps({"fields": {"depop_specifics.attributes.bottom-fit": ["Ripped"],
                                        "depop_specifics.age": ["90s"], "ebay_specifics.Rise": "High"}})

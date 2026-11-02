@@ -8,11 +8,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.job import JobEvent, VendooDraftCache
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services.draft_cache import draft_has_status_signal, slim_vendoo_draft_payload
 from vendoo_studio.services.maintenance import prune_event_bloat, table_sizes
 
@@ -23,7 +24,7 @@ class _DbTest(unittest.TestCase):
         Base.metadata.create_all(engine)
         self.db = sessionmaker(bind=engine)()
         self.conv = ConversationRepo(self.db).create(title="Tee")
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Tee"}, source="model")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Tee"}, source="model")
         self.repo = JobRepo(self.db)
         self.job = self.repo.create(
             self.conv.id, self.rev.id, {"title": "Tee"}, vendoo_item_id="itm1", status="completed",

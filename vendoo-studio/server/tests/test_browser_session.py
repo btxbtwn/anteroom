@@ -11,9 +11,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services.extension_connection import ExtensionManager
 from vendoo_studio.services.preview_hub import sanitize_frame
 
@@ -42,7 +43,7 @@ class BrowserRouteTest(unittest.TestCase):
         conv = ConversationRepo(self.db).create(title="Tee")
         self.conv_id = conv.id
         listing = {"title": "Tee", "category_path": "Clothing > Tops", "ebay_specifics": {"neckline": ""}}
-        revision = ListingRepo(self.db).save_revision(conv.id, listing, source="user")
+        revision = listing_persistence.save_revision(self.db, conv.id, listing, source="user")
         job = JobRepo(self.db).create(
             conv_id=conv.id,
             approved_revision_id=revision.id,
@@ -205,7 +206,7 @@ class PreviewFrameForFinishedDraftTest(unittest.TestCase):
         Session = sessionmaker(bind=engine)
         db = Session()
         conv = ConversationRepo(db).create(title="Tee")
-        revision = ListingRepo(db).save_revision(conv.id, {"title": "Tee"}, source="user")
+        revision = listing_persistence.save_revision(db, conv.id, {"title": "Tee"}, source="user")
         job = JobRepo(db).create(conv_id=conv.id, approved_revision_id=revision.id, listing_snapshot={"title": "Tee"},
                                  vendoo_item_id="draft-1", status="completed")
         job_id = job.id
@@ -252,7 +253,7 @@ class FinishedJobRepliesTest(unittest.TestCase):
         Session = sessionmaker(bind=engine)
         db = Session()
         conv = ConversationRepo(db).create(title="Tee")
-        revision = ListingRepo(db).save_revision(conv.id, {"title": "Tee"}, source="user")
+        revision = listing_persistence.save_revision(db, conv.id, {"title": "Tee"}, source="user")
         job = JobRepo(db).create(conv_id=conv.id, approved_revision_id=revision.id, listing_snapshot={"title": "Tee"},
                                  vendoo_item_id="draft-1", status=status)
         job_id = job.id
