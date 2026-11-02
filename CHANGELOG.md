@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.661 — 2026-11-02
+
+- Show imported Vendoo sale amounts, fees and profit in Sales records and sales CSV exports, without counting matching marketplace orders twice.
+- Flag sold items with a Missing sale data badge so I can see which amounts still need adding.
+- Correct imported sale amounts and missing sale dates directly in Anteroom, without going back to Vendoo.
+
 ## 0.1.660 — 2026-11-02
 
 - Behind the scenes, draft editing, listing repair, measurements and marketplace jobs have clearer type contracts so more mistakes are caught before an update ships.
