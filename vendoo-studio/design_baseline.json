@@ -1,6 +1,6 @@
 {
   "src/cloud/workspace.css": {
-    "hardcoded-color": 3
+    "hardcoded-color": 1
   },
   "src/components/ClaudeLoginTerminal.tsx": {
     "hardcoded-color": 4

@@ -1,0 +1,1 @@
+- On the web, Connect Chrome now says whether the Bridge is missing, wasn't approved, or is too old to list, and the note closes when you click away.

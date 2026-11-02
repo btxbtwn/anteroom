@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cloudExtension, type BrowserAccount, type CloudConnection } from "../api/cloudExtension";
+import { Popover, PopoverPopup } from "../components/ui/popover";
+import { chromeNotice } from "./chromeNotice";
 import { startChromeRelay } from "./chromeRelay";
 
 export function ChromeConnection({ account }: { account: BrowserAccount }) {
@@ -7,6 +9,8 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
   const [connection, setConnection] = useState<CloudConnection | null>(null);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let active = true;
     const check = () => { void bridge.status().then(status => { if (active) setConnection(status); }); };
@@ -25,23 +29,28 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
   // While this tab is connected, it carries the seller's approved marketplace commands and reads to Chrome.
   useEffect(() => connectedNow ? startChromeRelay(bridge, capabilities.split(",")) : undefined, [bridge, connectedNow, capabilities]);
   async function connect() {
-    setBusy(true); setExpanded(true);
+    setBusy(true); setAttempted(true); setExpanded(true);
     try { setConnection(await bridge.connect()); } finally { setBusy(false); }
   }
   async function disconnect() {
     setBusy(true);
     try { setConnection(await bridge.disconnect()); } finally { setBusy(false); }
   }
-  const connected = connection?.ok && connection.state === "connected";
   const pending = connection?.ok && connection.state === "pending";
-  return <div className="chrome-connection"><div className="connection-controls">
-    <button type="button" disabled={busy || pending} onClick={() => connected ? setExpanded(value => !value) : void connect()}>
-      {connected ? "Chrome connected" : pending ? "Approve in Chrome…" : busy ? "Connecting…" : "Connect Chrome"}
+  const notice = chromeNotice(connection, attempted);
+  return <div className="chrome-connection"><div ref={anchor} className="connection-controls">
+    <button type="button" disabled={busy || pending} onClick={() => connectedNow ? setExpanded(value => !value) : void connect()}>
+      {busy && !pending ? "Connecting…" : notice.button}
     </button>
-    {connected && <button type="button" className="subtle" disabled={busy} onClick={() => void disconnect()}>Disconnect</button>}
-  </div>{expanded && <div className="connection-help" role="status">
-    {connected ? <p>This Chrome tab is connected to your account.{connection.extensionVersion ? ` Bridge ${connection.extensionVersion}.` : ""}</p>
-      : pending ? <p>Choose Connect browser in the Anteroom Bridge window. Keep this page open.</p>
-      : <><p>Use desktop Chrome with Anteroom Bridge 0.2.38 or later.</p><p>Using the local Anteroom app? Update it and choose Connect Chrome there, then keep its managed Bridge enabled. Standalone web-test ZIPs do not support local marketplace actions. For web-only use, load the updated Bridge in chrome://extensions, then reload this page.</p></>}
-  </div>}</div>;
+    {connectedNow && <button type="button" className="subtle" disabled={busy} onClick={() => void disconnect()}>Disconnect</button>}
+  </div>
+  <Popover open={expanded} onOpenChange={(open, details) => {
+    // The buttons beside the panel open and close it themselves.
+    if (!open && details.reason === "outside-press" && details.event.target instanceof Node && anchor.current?.contains(details.event.target)) return;
+    setExpanded(open);
+  }}>
+    <PopoverPopup anchor={anchor} align="end" sideOffset={8} width="md" touchBackdrop>
+      <div className="connection-help" role="status">{notice.message.map(line => <p key={line}>{line}</p>)}</div>
+    </PopoverPopup>
+  </Popover></div>;
 }
