@@ -1,0 +1,1 @@
+- After a restart, a finished one-time task is marked completed or paused without crashing the scheduler or repeating its actions.
