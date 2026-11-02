@@ -1,5 +1,5 @@
 /* The hosted page's data contracts: form reads, and the seller's relayed marketplace commands.
-   No credentials or arbitrary URLs. Commands are only the four the hosted API relays. */
+   No credentials or arbitrary URLs. Commands are only the ones the hosted API relays. */
 (function () {
   const strings = new Set(['title', 'description', 'brand', 'condition', 'primaryColor', 'secondaryColor', 'size', 'sku', 'zipCode', 'category_path', 'department', 'package_dimensions_in']);
   const numbers = new Set(['price', 'cost', 'quantity', 'weight_oz']);
@@ -38,6 +38,12 @@
   }
   // Marketplace commands the hosted API relays, already approved and confirmed there.
   const COMMANDS = new Set(['marketplace.execute', 'marketplace.result', 'marketplace.delete', 'job.cancel']);
+  // Read-only choices for the seller's editor, each with exactly the inputs it takes.
+  const READS = {
+    'marketplace.vinted_categories': {},
+    'marketplace.vinted_brands': { query: 100, category: 1000 },
+    'marketplace.sellwild_account': {},
+  };
   const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
   const MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
   function plain(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
@@ -45,8 +51,16 @@
   function command(value) {
     if (!plain(value) || Object.keys(value).some(key => !['type', 'job_id', 'message_id', 'payload'].includes(key))) return null;
     const payload = value.payload;
-    if (!COMMANDS.has(value.type) || !/^[0-9a-f]{32}$/.test(value.message_id || '') || !plain(payload)
-        || payload.request_id !== value.message_id || !/^[A-Za-z0-9-]{1,64}$/.test(String(value.job_id || ''))
+    if (!/^[0-9a-f]{32}$/.test(value.message_id || '') || !plain(payload) || payload.request_id !== value.message_id) return null;
+    if (Object.hasOwn(READS, value.type)) {
+      const inputs = READS[value.type];
+      for (const [key, item] of Object.entries(payload)) {
+        if (key === 'request_id' || (key === 'job_id' && item === null)) continue;
+        if (!Object.hasOwn(inputs, key) || typeof item !== 'string' || item.length > inputs[key]) return null;
+      }
+      return value.job_id === null ? value : null;
+    }
+    if (!COMMANDS.has(value.type) || !/^[A-Za-z0-9-]{1,64}$/.test(String(value.job_id || ''))
         || size(value) > 2_000_000) return null;
     if (value.type === 'job.cancel') return /^[A-Za-z0-9-]{1,64}$/.test(String(payload.job_id || '')) ? value : null;
     // Video is not part of the web app; a relayed List never carries one.

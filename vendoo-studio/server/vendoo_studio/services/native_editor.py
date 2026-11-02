@@ -10,8 +10,10 @@ from vendoo_studio.services import direct_preflight
 from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
 
-async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, db: Session, *, refresh: bool = False) -> dict:
-    """Never start a job or save a draft just to display the form."""
+async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, db: Session, *, refresh: bool = False,
+                      sellwild_account: dict | None = None) -> dict:
+    """Never start a job or save a draft just to display the form. On the web, Sellwild's
+    account choices come in ``sellwild_account``, read from the seller's Chrome."""
     conv = ConversationRepo(db).get(conv_id)
     if not conv:
         raise NativeMarketplaceError(404, "Conversation not found")
@@ -37,14 +39,14 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     if marketplace == "sellwild":
         from vendoo_studio.services.sellwild_browser import account_choices
 
-        session = await asyncio.to_thread(account_choices)
+        session = sellwild_account if sellwild_account is not None else await asyncio.to_thread(account_choices)
         result = sellwild_form(snapshot, conv_id, db, ship_from=session["ship_from"], coupons=session["coupons"],
                                default_parcel=session["default_parcel"])
         result["account_connected"] = len(session.get("unavailable", [])) < 3
         if session.get("unavailable"):
             result["notes"] = ["Some Sellwild account choices are unavailable. Reload choices to try again."
                                if result["account_connected"] else
-                               "Sign in to Sellwild in Anteroom to load your account choices."]
+                               session.get("reason") or "Sign in to Sellwild in Anteroom to load your account choices."]
         return result
     if not refresh:
         from vendoo_studio.services import native_contract
@@ -392,7 +394,8 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
 
 def _ship_from_row(ship_from: str | None, section: str) -> dict:
     # A card on Sellwild's page; the address is changed in Sellwild's Address Book.
-    help_text = ("Sign in to Sellwild in Anteroom, then reload choices to show your address." if ship_from is None
+    help_text = (f"Sign in to Sellwild in {'Chrome' if _web_seller() else 'Anteroom'}, then reload choices to show your address."
+                 if ship_from is None
                  else "Add a Shipping From address in Sellwild's Address Book." if not ship_from else None)
     return field("sellwild_specifics.shipFrom", "Shipping From", ship_from or "", input_type="textarea", locked=True,
                  section=section, **({"help": help_text} if help_text else {}))
@@ -524,30 +527,88 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
 
 
 async def vinted_categories(conv_id: str, db: Session) -> dict:
-    """Vinted's native categories, through Anteroom's private account window."""
-    import asyncio
+    """Vinted's native categories: the Mac reads them in its private account window,
+    the web in the seller's own Chrome."""
     from vendoo_studio.services import vinted_browser
 
     if not ConversationRepo(db).get(conv_id):
         raise NativeMarketplaceError(404, "Conversation not found")
-    try:
-        rows = await asyncio.to_thread(vinted_browser.category_rows)
-        options = vinted_browser.category_options(rows)
-        if not options:
-            raise vinted_browser.VintedConnectionError("Vinted returned no category choices.")
-        return {"options": options}
-    except vinted_browser.VintedConnectionError as exc:
-        raise NativeMarketplaceError(409, str(exc)) from exc
+    if seller := _web_seller():
+        options = await _chrome_read(seller, "Vinted","marketplace.vinted_categories", {})
+    else:
+        try:
+            options = vinted_browser.category_options(await asyncio.to_thread(vinted_browser.category_rows))
+        except vinted_browser.VintedConnectionError as exc:
+            raise NativeMarketplaceError(409, str(exc)) from exc
+    if not options:
+        raise NativeMarketplaceError(409, "Vinted returned no category choices.")
+    return {"options": options}
 
 
 async def vinted_brands(conv_id: str, query: str, category: str, db: Session) -> dict:
-    """Vinted brand choices, without Chrome or an extension message."""
-    import asyncio
+    """Vinted brand choices, read where its categories are."""
     from vendoo_studio.services import vinted_browser
 
     if not ConversationRepo(db).get(conv_id):
         raise NativeMarketplaceError(404, "Conversation not found")
+    if seller := _web_seller():
+        return {"options": await _chrome_read(seller, "Vinted","marketplace.vinted_brands", {"query": query, "category": category})}
     try:
         return {"options": await asyncio.to_thread(vinted_browser.brands, query, category)}
     except vinted_browser.VintedConnectionError as exc:
         raise NativeMarketplaceError(409, str(exc)) from exc
+
+
+def _web_seller() -> str | None:
+    """The signed-in seller on the web; None on the Mac."""
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    return context.seller_id if context is not None else None
+
+
+# What the seller can do when their Chrome could not read a marketplace's choices.
+_READ_ERRORS = {
+    "signed_out": "Sign in to {name} in Chrome, then reload {name}'s choices.",
+    "challenge": "Open {name} in Chrome and finish its check, then reload {name}'s choices.",
+    "rate_limited": "{name} asked Chrome to wait. Reload its choices in a few minutes.",
+    "schema_drift": "{name}'s choices changed. Anteroom needs an update to read them.",
+}
+
+
+async def _chrome_read(seller: str, name: str, command: str, payload: dict) -> list[str]:
+    """The choices one named read returns from the seller's Chrome, through their Anteroom tab."""
+    from vendoo_studio.services.hosted_browser_relay import ChromeReadError, relay_for
+
+    try:
+        reply = await relay_for(seller).read(command, payload, timeout=40)
+    except ChromeReadError as exc:
+        raise NativeMarketplaceError(409, str(exc)) from exc
+    options = reply.get("options")
+    if reply.get("ok") is not True or not isinstance(options, list):
+        message = _READ_ERRORS.get(str(reply.get("error_code")), "Chrome could not read {name}'s choices. Reload them to try again.")
+        raise NativeMarketplaceError(409, message.format(name=name))
+    return list(dict.fromkeys(item.strip() for item in options if isinstance(item, str) and item.strip()))
+
+
+async def web_sellwild_account() -> dict:
+    """Sellwild's account choices from the seller's own Chrome, shaped as the Mac's private
+    window returns them. Without them, the form's product fields still load."""
+    from vendoo_studio.services.hosted_browser_relay import ChromeReadError, relay_for
+
+    seller = _web_seller()
+    missing = {"ship_from": None, "coupons": [], "default_parcel": "", "unavailable": ["address", "parcel", "coupons"]}
+    if seller is None:
+        return missing
+    try:
+        reply = await relay_for(seller).read("marketplace.sellwild_account", {}, timeout=40)
+    except ChromeReadError as exc:
+        return {**missing, "reason": str(exc)}
+    if reply.get("ok") is not True:
+        message = _READ_ERRORS.get(str(reply.get("error_code")), "Chrome could not read {name}'s choices. Reload them to try again.")
+        return {**missing, "reason": message.format(name="Sellwild")}
+    coupons = [{"id": row["id"], "name": str(row.get("name") or "")[:100], "discountType": str(row.get("discountType") or "")[:20],
+                "discountValue": row.get("discountValue") if isinstance(row.get("discountValue"), int | float | str) else None}
+               for row in reply.get("coupons") or [] if isinstance(row, dict) and isinstance(row.get("id"), int | str)][:50]
+    return {"ship_from": str(reply.get("ship_from") or "")[:500], "default_parcel": str(reply.get("default_parcel") or "")[:100],
+            "coupons": coupons, "unavailable": []}

@@ -46,11 +46,11 @@ def test_listing_actions_are_the_sellers_own_and_ebay_only(cloud, signing_keys, 
     assert client.get(base + '/native-marketplaces', headers=bob).status_code == 404
     assert client.post(base + '/native-marketplaces/ebay/list', headers=bob,
                        json={'revision_id': 'r1', 'confirm': True}).status_code == 404
-    # Sellwild and Vinted are not on the web yet.
-    assert client.post(base + '/native-marketplaces/vinted/list', headers=alice,
+    # Grailed has no direct listing on the Mac either, and Facebook delisting is not on the web yet.
+    assert client.post(base + '/native-marketplaces/grailed/list', headers=alice,
                        json={'revision_id': 'r1', 'confirm': True}).status_code == 422
     refused = client.post(base + '/marketplace-listings/delist', headers=alice,
-                          json={'marketplaces': ['vinted'], 'confirm': True})
+                          json={'marketplaces': ['facebook'], 'confirm': True})
     assert refused.status_code == 409 and 'Mac app' in refused.json()['detail']
     # List needs the seller's confirmation in the same call.
     assert client.post(base + '/native-marketplaces/ebay/list', headers=alice,
