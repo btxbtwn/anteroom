@@ -430,7 +430,7 @@ function ChromeSessionRow({
     onError: () => setHint(null),
   });
   const session = sessions.data?.sessions[marketplace];
-  const state = chromeSessionPresentation(session, chromeReady, Date.now(), unavailable);
+  const state = chromeSessionPresentation(session, chromeReady, undefined, unavailable);
   const name = EXTENSION_SESSION_NAMES[marketplace];
   const error = connect.error?.message || null;
 
