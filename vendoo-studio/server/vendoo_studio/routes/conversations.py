@@ -86,6 +86,7 @@ class ConversationSummary(BaseModel):
     # False for modern resale: Etsy removes those, so Send leaves its form
     # empty and no reminder asks for an Etsy relist.
     etsy_eligible: bool = True
+    missing_sale_data: list[str] = []
 
 
 class ConversationResponse(ConversationSummary):
@@ -147,10 +148,13 @@ def list_conversations(db: Session = Depends(get_db)):
     from vendoo_studio.services.item_status import sold_units
 
     sold = sold_units(db, conversations)
+    from vendoo_studio.services.sales_records import missing_by_conversation
+
+    missing = missing_by_conversation(db)
     return [
         _conv_response(c, _extras(
             _cover_photo_url(covers.get(c.id)), facets.get(c.id), revisions.get(c.id), c.id in unsent,
-            live.get(c.id, []), links.get(c.id, {}), sold.get(c.id),
+            live.get(c.id, []), links.get(c.id, {}), sold.get(c.id), missing.get(c.id, []),
         ))
         for c in conversations
     ]
@@ -648,6 +652,7 @@ def _extras(
     direct_marketplaces: list[str] | None = None,
     direct_listing_urls: dict[str, str] | None = None,
     sold=None,
+    missing_sale_data: list[str] | None = None,
 ) -> dict:
     """The per-row fields the sidebar needs alongside the conversation itself."""
     return {
@@ -661,6 +666,7 @@ def _extras(
         "direct_listing_urls": dict(direct_listing_urls or {}),
         "units_sold": sold.units_sold if sold else 0,
         "quantity": sold.quantity if sold else None,
+        "missing_sale_data": missing_sale_data or [],
     }
 
 
@@ -673,6 +679,7 @@ def _extras_for(db: Session, conv_id: str) -> dict:
 
     records = MarketplaceListingRepo(db)
     from vendoo_studio.services.item_status import sold_units
+    from vendoo_studio.services.sales_records import missing_by_conversation
 
     return _extras(
         _cover_photo_url(repo.cover_photo(conv_id)),
@@ -682,6 +689,7 @@ def _extras_for(db: Session, conv_id: str) -> dict:
         records.live_marketplaces(conv_id).get(conv_id, []),
         records.listing_urls(conv_id).get(conv_id, {}),
         sold_units(db, [conv] if conv else []).get(conv_id),
+        missing_by_conversation(db, conv_id).get(conv_id, []),
     )
 
 
@@ -808,6 +816,7 @@ def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
         removed_marketplaces=removed_marketplaces(notes, row.get("direct_listing_urls") or {}),
         units_sold=int(row.get("units_sold") or 0),
         quantity=row.get("quantity"),
+        missing_sale_data=row.get("missing_sale_data", []),
         vendoo_listing_urls=_listing_urls(notes),
         unsent_edits=bool(row.get("unsent_edits")),
         etsy_eligible=bool(row.get("etsy_eligible", True)),

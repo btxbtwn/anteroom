@@ -1,0 +1,2 @@
+- Show imported Vendoo sale amounts, fees and profit in Sales records and sales CSV exports, without counting matching marketplace orders twice.
+- Flag sold items with a Missing sale data badge so I can see which amounts still need adding.

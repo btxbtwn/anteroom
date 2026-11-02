@@ -54,11 +54,14 @@ struct SalesLedgerRow: Decodable, Identifiable, Sendable {
     let financialRevision: Int
     let orderBasis: String
     let profit: String?
+    let editable: Bool
+    let missingSaleData: [String]
 
     var currency: String? { financials?["currency"] ?? nil }
 
     enum CodingKeys: String, CodingKey {
-        case id, marketplace, quantity, title, financials, profit
+        case id, marketplace, quantity, title, financials, profit, editable
+        case missingSaleData = "missing_sale_data"
         case orderID = "order_id", lineID = "line_id", orderStatus = "order_status"
         case conversationID = "conversation_id", financialsStale = "financials_stale"
         case financialRevision = "financial_revision", orderBasis = "order_basis"

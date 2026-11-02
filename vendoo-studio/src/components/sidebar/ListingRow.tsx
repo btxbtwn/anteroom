@@ -245,6 +245,11 @@ export const ListingRow = memo(function ListingRow({
           )}
           <div className="mt-0.5 flex items-center gap-2">
             <ListingStatusLabel status={status} title={statusTitle} />
+            {status === "sold" && listing.missing_sale_data?.length ? (
+              <ListingTag tone="warning" title={`Missing: ${listing.missing_sale_data.join(", ")}`}>
+                Missing sale data
+              </ListingTag>
+            ) : null}
             {partial ? <span className="truncate text-2xs text-sidebar-muted-foreground">{partial}</span> : null}
             {vendooOn && relistMarketplaces.length ? (
               <ListingTag

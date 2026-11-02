@@ -95,6 +95,9 @@ struct SalesRecordsView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text("Order \(row.orderID) · line \(row.lineID)").font(.caption).foregroundStyle(.secondary)
             Text("Profit: \(SalesLedgerFormat.money(row.profit, row.currency))").font(.caption)
+            if !row.missingSaleData.isEmpty {
+                Text("Missing: \(row.missingSaleData.joined(separator: ", "))").font(.caption).foregroundStyle(.orange)
+            }
             if row.financialsStale {
                 Text("Order changed or recorded amounts need review.").font(.caption).foregroundStyle(.orange)
             }
@@ -104,7 +107,7 @@ struct SalesRecordsView: View {
                         .font(.footnote)
                 }
                 Spacer()
-                Button("Record amounts") { editing = row }.font(.footnote).buttonStyle(.bordered)
+                Button(row.editable ? "Record amounts" : "View amounts") { editing = row }.font(.footnote).buttonStyle(.bordered)
             }
         }
         .padding(.vertical, 4)
@@ -176,7 +179,7 @@ private struct SaleAmountsSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Enter totals for this order line, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures; quantities and marketplace listings stay unchanged.")
+                    Text(row.editable ? "Enter totals for this order line, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures; quantities and marketplace listings stay unchanged." : "Imported from Vendoo. Edit this sale in Vendoo and import again to update its amounts.")
                         .font(.footnote).foregroundStyle(.secondary)
                     if row.financialsStale {
                         Text("This order changed. Review every amount before saving again.").font(.footnote).foregroundStyle(.orange)
@@ -198,19 +201,22 @@ private struct SaleAmountsSheet: View {
                 } footer: {
                     Text("\(Marketplaces.name(row.marketplace)) order \(row.orderID) · line \(row.lineID) · quantity \(row.quantity.map(String.init) ?? "unknown") · \(row.orderStatus.replacingOccurrences(of: "_", with: " "))")
                 }
+                .disabled(!row.editable || working)
                 Section { Button("Reload record") { reload() }.disabled(working) }
                 if let error {
                     Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Record sale amounts")
+            .navigationTitle(row.editable ? "Record sale amounts" : "View sale amounts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working) }
                 ToolbarItem(placement: .confirmationAction) {
-                    if working { ProgressView() } else {
-                        Button("Save") { save() }.fontWeight(.semibold)
-                            .disabled(currency.count != 3 || !currency.allSatisfy(\.isLetter))
+                    if row.editable {
+                        if working { ProgressView() } else {
+                            Button("Save") { save() }.fontWeight(.semibold)
+                                .disabled(currency.count != 3 || !currency.allSatisfy(\.isLetter))
+                        }
                     }
                 }
             }

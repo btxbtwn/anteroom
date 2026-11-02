@@ -1,0 +1,104 @@
+"""Read-only sales view combining imported Vendoo history with direct orders."""
+from datetime import UTC
+from decimal import Decimal, InvalidOperation
+
+from sqlalchemy.orm import Session
+
+from vendoo_studio.models.conversation import Conversation
+from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
+from vendoo_studio.services import sales_ledger
+from vendoo_studio.services.inventory_analytics import _marketplace, load_rows
+from vendoo_studio.services.sale_matching import matching_sale_index
+from vendoo_studio.services.sell_through import _parse_moment
+from vendoo_studio.services.vendoo_import import VENDOO_MARKETPLACE_ALIASES, parse_notes
+
+FIELD_LABELS = {"item_revenue": "sale price", "shipping_credit": "shipping collected", "refunds": "refunds",
+                "fees": "fees", "shipping_cost": "shipping cost", "item_cost": "item cost"}
+
+
+def missing_fields(record: dict) -> list[str]:
+    data = record["financials"] or {}
+    missing = [label for field, label in FIELD_LABELS.items() if data.get(field) is None]
+    return missing + (["sale date"] if not record["sold_at"] else [])
+
+
+def missing_by_conversation(db: Session, conversation_id: str | None = None) -> dict[str, list[str]]:
+    grouped: dict[str, list[dict]] = {}
+    for row in records(db, conversation_id):
+        if row["conversation_id"] and row["order_status"] in PAID_STATUSES:
+            grouped.setdefault(row["conversation_id"], []).append(row)
+    result = {}
+    for conv_id, rows in grouped.items():
+        # Listings cleared on other marketplaces are not additional sales.
+        backed = [row for row in rows if row["financials"] is not None or row["order_id"] != row["line_id"]]
+        missing = {field for row in (backed or rows) for field in missing_fields(row)}
+        result[conv_id] = [label for label in [*FIELD_LABELS.values(), "sale date"] if label in missing]
+    return result
+
+
+def _amount(value) -> str | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        amount = Decimal(str(value))
+    except InvalidOperation:
+        return None
+    return format(amount, "f") if amount.is_finite() else None
+
+
+def records(db: Session, conversation_id: str | None = None) -> list[dict]:
+    # Reuse Analytics' cost basis, including box allocations and order quantities.
+    costs = {row.sale_id or f"vendoo-{row.conversation_id}": _amount(row.cost)
+             for row in load_rows(db, conversation_id) if row.status == "sold"}
+    query = db.query(MarketplaceSale, Conversation.title).outerjoin(Conversation, Conversation.id == MarketplaceSale.conversation_id)
+    conversations = db.query(Conversation)
+    if conversation_id:
+        query = query.filter(MarketplaceSale.conversation_id == conversation_id)
+        conversations = conversations.filter(Conversation.id == conversation_id)
+    rows = {}
+    grouped: dict[str, list[MarketplaceSale]] = {}
+    for line, title in query.order_by(MarketplaceSale.received_at, MarketplaceSale.id).all():
+        rows[line.id] = sales_ledger.sale_out(line, title)
+        if line.conversation_id and line.order_status in PAID_STATUSES:
+            grouped.setdefault(line.conversation_id, []).append(line)
+    for conv in conversations.all():
+        notes = parse_notes(conv.notes)
+        if notes.get("vendooStatus") != "sold":
+            continue
+        sale = notes.get("vendooSale")
+        sale = sale if isinstance(sale, dict) else {}
+        dates = notes.get("vendooDates")
+        dates = dates if isinstance(dates, dict) else {}
+        sold_at = _parse_moment(str(dates.get("sold") or sale.get("soldAt") or ""))
+        marketplace = _marketplace(sale, dates, notes, VENDOO_MARKETPLACE_ALIASES)
+        lines = sorted(grouped.get(conv.id, []), key=lambda line: (line.sold_at or line.received_at, line.id))
+        match = matching_sale_index(lines, marketplace, sold_at)
+        if match is not None and sold_at:
+            rows[lines[match].id]["sold_at"] = sold_at.astimezone(UTC).isoformat()
+        # A local financial record, even a partial or stale one, belongs to the seller.
+        if match is not None and lines[match].financials is not None:
+            continue
+        data = {"currency": "USD", "item_revenue": _amount(sale.get("price")),
+                "fees": _amount(sale.get("fees")), "item_cost": _amount(sale.get("cost")),
+                "shipping_cost": _amount(sale.get("shippingCost")),
+                # Vendoo's sale model has no refund field; absent buyer shipping means none.
+                "shipping_credit": _amount(sale.get("shippingCredit")) or "0", "refunds": "0"}
+        if match is not None:
+            record = rows[lines[match].id]
+        else:
+            record = {"id": f"vendoo-{conv.id}", "marketplace": marketplace, "order_id": "Vendoo import", "line_id": conv.id,
+                      "listing_id": None, "quantity": 1, "order_status": "paid", "source": "vendoo", "alert_state": "dismissed",
+                      "conversation_id": conv.id, "title": conv.title, "sold_at": None,
+                      "received_at": sales_ledger._iso(conv.created_at), "financial_revision": 0,
+                      "financials_updated_at": None, "order_basis": "0" * 64, "editable": False}
+            rows[record["id"]] = record
+        effective_cost = costs.get(record["id"])
+        if effective_cost is not None and (data["item_cost"] is None or Decimal(effective_cost) != Decimal(data["item_cost"])):
+            data["item_cost"] = effective_cost
+        record.update(financials=data, financials_stale=False, financials_source="vendoo")
+        record["net_revenue"], record["profit"] = sales_ledger.totals(data)
+        if sold_at:
+            record["sold_at"] = sold_at.astimezone(UTC).isoformat()
+    for record in rows.values():
+        record["missing_sale_data"] = missing_fields(record)
+    return list(rows.values())

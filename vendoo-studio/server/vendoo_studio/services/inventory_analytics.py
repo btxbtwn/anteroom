@@ -149,7 +149,7 @@ def inventory_analytics(
     }
 
 
-def load_rows(db) -> list[AnalyticsItem]:
+def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
     """Every listing as analytics rows. Current revision only.
 
     An item that is not sold is one row. Each sale is a row of its own with
@@ -176,6 +176,7 @@ def load_rows(db) -> list[AnalyticsItem]:
                 json_value(ListingRevision.listing_json, "category_path"),
             )
             .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
+            .filter(Listing.conversation_id == conversation_id if conversation_id else True)
             .all()
         )
     }
@@ -191,10 +192,10 @@ def load_rows(db) -> list[AnalyticsItem]:
             Conversation.status,
             Conversation.notes,
             Conversation.box_id,
-        ).all()
+        ).filter(Conversation.id == conversation_id if conversation_id else True).all()
     ]
     own = statuses(db, [(conv_id, notes) for conv_id, _title, _status, notes, _box in conversations])
-    lines = paid_lines(db)
+    lines = paid_lines(db, {conversation_id} if conversation_id else None)
     for conv_id, title, status, notes, box_id in conversations:
         price, cost, brand, category = facets.get(conv_id, (None, None, None, None))
         dates = notes.get("vendooDates")
@@ -287,16 +288,11 @@ def _item_sales(base: AnalyticsItem, vendoo: AnalyticsItem | None, lines: list, 
     rows = [_ledger_row(base, line, listed_text, _days_between) for line in ordered]
     if vendoo is None:
         return rows
-    candidates = [index for index, line in enumerate(ordered)
-                  if vendoo.marketplace == "unknown" or line.marketplace == vendoo.marketplace]
-    if not candidates:
+    from vendoo_studio.services.sale_matching import matching_sale_index
+
+    match = matching_sale_index(ordered, vendoo.marketplace, vendoo.sold_at)
+    if match is None:
         return [vendoo, *rows]
-
-    def distance(index: int) -> float:
-        moment = rows[index].sold_at
-        return abs((moment - vendoo.sold_at).total_seconds()) if moment and vendoo.sold_at else float(index)
-
-    match = min(candidates, key=distance)
     ledger = rows[match]
     recorded = ledger.sold_price is not None or ledger.fees is not None
     rows[match] = replace(

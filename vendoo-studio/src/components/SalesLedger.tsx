@@ -22,7 +22,7 @@ export function ledgerMoney(value: string | null | undefined, currency: string |
 
 export function SalesLedgerSummary({ summary }: { summary: SalesLedgerPage["summary"] }) {
   return <>
-    <PageNote>{summary.lines} order lines · {summary.unrecorded} without recorded amounts · {summary.needs_review} need review · {summary.unmatched} need an inventory link. Totals cover the full filtered period; currencies stay separate.</PageNote>
+    <PageNote>{summary.lines} sale records · {summary.unrecorded} without recorded amounts · {summary.needs_review} need review · {summary.unmatched} need an inventory link. Totals cover the full filtered period; currencies stay separate.</PageNote>
     {summary.currencies.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {summary.currencies.map((group) => <Panel key={group.currency} className="space-y-2 p-3" divided={false}>
         <p className="text-sm font-medium">{group.currency}</p>
@@ -50,7 +50,7 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
   const data = valid ? query.data : undefined;
   return <>
     <PageHeader title="Analytics" description={vendooOn
-      ? "Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales without Vendoo."
+      ? "Review imported Vendoo sales and recorded marketplace orders, fees and profit."
       : "Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales from here."} actions={<div className="flex flex-wrap gap-2">
       <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.inventoryCsv()} filename="anteroom-inventory.csv">Export inventory CSV</DownloadLink>
       {valid ? <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.salesCsv(filters)} filename="anteroom-sales.csv">Export sales CSV</DownloadLink> : <Button size="sm" variant="outline" disabled>Export sales CSV</Button>}
@@ -69,16 +69,17 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
     {query.error ? <PageError message={query.error.message} /> : null}
     {data ? <>
       <SalesLedgerSummary summary={data.summary} />
-      <PageSection title="Sales records" description="One record per order line, including cancellations and refunds. Record totals after discounts; leave an amount blank if unknown and enter 0 once confirmed.">
+      <PageSection title="Sales records" description="Imported sales and marketplace order lines, including cancellations and refunds. Record totals after discounts; leave an amount blank if unknown and enter 0 once confirmed.">
         {data.rows.length ? <ul className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/60 bg-card/40">{data.rows.map((row) => <li key={row.id} className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 text-sm">
           <div className="flex min-w-0 flex-1 basis-48 flex-col gap-0.5 break-words"><p className="font-medium">{row.title || `${marketplaceName(row.marketplace)} order ${row.order_id}`}</p>
             <p className="text-xs text-muted-foreground">{marketplaceName(row.marketplace)} · {row.order_status.replace(/_/g, " ")} · quantity {row.quantity ?? "unknown"}</p>
             <p className="font-mono text-2xs text-muted-foreground/80">Order {row.order_id} · line {row.line_id}</p>
+            {row.missing_sale_data?.length ? <p className="text-xs text-warning-foreground">Missing: {row.missing_sale_data.join(", ")}</p> : null}
             {row.financials_stale ? <p className="text-xs text-warning-foreground">Order changed or recorded amounts need review.</p> : null}
           </div>
           <p className={cn("shrink-0 text-xs tabular-nums", row.profit == null && "text-muted-foreground")}>Profit: {ledgerMoney(row.profit, row.financials?.currency)}</p>
           <div className="flex flex-wrap gap-2">{row.conversation_id ? <Button size="xs" variant="ghost" onClick={() => onOpenListing(row.conversation_id!)}>Open item</Button> : null}
-            <Button size="xs" variant="outline" onClick={() => { setSelected(row); setEditor((value) => value + 1); }}>Record amounts</Button></div>
+            <Button size="xs" variant="outline" onClick={() => { setSelected(row); setEditor((value) => value + 1); }}>{row.editable === false ? "View amounts" : "Record amounts"}</Button></div>
         </li>)}</ul> : <EmptyRow>No recorded orders in this period. Recover orders from a marketplace’s Orders tab to add missing sales.</EmptyRow>}
         <div className="flex items-center gap-2 text-xs"><span>Page {page}</span><Button size="xs" variant="outline" disabled={page === 1 || query.isFetching} onClick={() => setPage(page - 1)}>Previous</Button><Button size="xs" variant="outline" disabled={!data.has_more || query.isFetching} onClick={() => setPage(page + 1)}>Next</Button></div>
       </PageSection>
@@ -87,6 +88,9 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
       onReload={(row) => { setSelected(row); setEditor((value) => value + 1); }} onSaved={() => {
         void queryClient.invalidateQueries({ queryKey: ["sales-ledger"] });
         void queryClient.invalidateQueries({ queryKey: ["marketplace-sales"] });
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["conversation", selected.conversation_id] });
+        void queryClient.invalidateQueries({ queryKey: ["analytics"] });
         setSelected(null);
       }} /> : null}
   </>;
@@ -102,14 +106,15 @@ function FinancialEditor({ row, onClose, onSaved, onReload }: { row: SalesLedger
   const reload = useMutation({ mutationFn: () => api.salesLedger.get(row.id), retry: false, onSuccess: onReload });
   const busy = save.isPending || reload.isPending;
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
-    <DialogPopup className="sm:max-w-xl"><DialogHeader className="shrink-0"><DialogTitle>Record sale amounts</DialogTitle><DialogDescription>{marketplaceName(row.marketplace)} order {row.order_id} · line {row.line_id} · quantity {row.quantity ?? "unknown"} · {row.order_status.replace(/_/g, " ")}</DialogDescription></DialogHeader>
+    <DialogPopup className="sm:max-w-xl"><DialogHeader className="shrink-0"><DialogTitle>{row.editable === false ? "View sale amounts" : "Record sale amounts"}</DialogTitle><DialogDescription>{marketplaceName(row.marketplace)} order {row.order_id} · line {row.line_id} · quantity {row.quantity ?? "unknown"} · {row.order_status.replace(/_/g, " ")}</DialogDescription></DialogHeader>
       <form className="flex min-h-0 flex-col" onSubmit={(event) => { event.preventDefault(); if (!busy) save.mutate(); }}><DialogPanel className="space-y-4">
-        <PageNote>Enter totals for this order line, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures locally; quantities and marketplace listings stay unchanged.</PageNote>
+        <PageNote>{row.editable === false ? "Imported from Vendoo. Edit this sale in Vendoo and import again to update its amounts." : "Enter totals for this order line, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures locally; quantities and marketplace listings stay unchanged."}</PageNote>
+        {row.financials_source === "vendoo" && row.editable !== false ? <PageNote>These amounts come from Vendoo. Saving records your own amounts for this order.</PageNote> : null}
         {row.financials_stale ? <PageNote>This order changed. Review every amount before saving again.</PageNote> : null}
-        <label className="block space-y-1 text-xs">Currency code<Input required pattern="[A-Z]{3}" maxLength={3} value={currency} placeholder="USD" disabled={busy} onChange={(event) => setCurrency(event.target.value.toUpperCase())} /></label>
-        <div className="grid gap-3 sm:grid-cols-2">{FINANCIAL_FIELDS.map((field) => <label key={field} className="space-y-1 text-xs">{LABELS[field]}<Input inputMode="decimal" value={values[field]} placeholder="Unknown" disabled={busy} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}</div>
+        <label className="block space-y-1 text-xs">Currency code<Input required pattern="[A-Z]{3}" maxLength={3} value={currency} placeholder="USD" disabled={busy || row.editable === false} onChange={(event) => setCurrency(event.target.value.toUpperCase())} /></label>
+        <div className="grid gap-3 sm:grid-cols-2">{FINANCIAL_FIELDS.map((field) => <label key={field} className="space-y-1 text-xs">{LABELS[field]}<Input inputMode="decimal" value={values[field]} placeholder="Unknown" disabled={busy || row.editable === false} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}</div>
         {save.error ? <PageError message={save.error.message} /> : null}{reload.error ? <PageError message={reload.error.message} /> : null}
-      </DialogPanel><DialogFooter className="shrink-0"><Button type="button" variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Reload record</Button><Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" disabled={busy || !/^[A-Z]{3}$/.test(currency)}>{save.isPending ? "Saving…" : "Save amounts"}</Button></DialogFooter></form>
+      </DialogPanel><DialogFooter className="shrink-0"><Button type="button" variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Reload record</Button><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{row.editable === false ? "Close" : "Cancel"}</Button>{row.editable !== false ? <Button type="submit" disabled={busy || !/^[A-Z]{3}$/.test(currency)}>{save.isPending ? "Saving…" : "Save amounts"}</Button> : null}</DialogFooter></form>
     </DialogPopup>
   </Dialog>;
 }

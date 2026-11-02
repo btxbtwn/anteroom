@@ -2,6 +2,9 @@ export const FINANCIAL_FIELDS = ["item_revenue", "shipping_credit", "refunds", "
 export type FinancialField = (typeof FINANCIAL_FIELDS)[number];
 export type FinancialEntry = { currency: string } & Record<FinancialField, string | null>;
 export interface SalesLedgerRow {
+  editable?: boolean;
+  financials_source?: string;
+  missing_sale_data?: string[];
   id: string;
   marketplace: string;
   order_id: string;

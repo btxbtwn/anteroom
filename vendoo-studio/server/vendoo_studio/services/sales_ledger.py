@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import cast as type_cast
 from sqlalchemy.engine import CursorResult
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 import hashlib
 import json
 import re
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from sqlalchemy import func, update
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation, utcnow
@@ -105,17 +105,27 @@ def sale_out(sale: MarketplaceSale, title: str | None) -> dict:
             "sold_at": _iso(sale.sold_at), "received_at": _iso(sale.received_at),
             "financials": financials, "financials_stale": stale, "financial_revision": sale.financial_revision,
             "financials_updated_at": raw.get("updated_at"), "order_basis": order_basis(sale),
-            "net_revenue": net, "profit": profit}
+            "net_revenue": net, "profit": profit, "editable": True}
 
 
 def get_sale(db: Session, sale_id: str) -> dict:
+    from vendoo_studio.services.sales_records import records
+
+    if sale_id.startswith("vendoo-"):
+        rows = records(db, sale_id.removeprefix("vendoo-"))
+        for row in rows:
+            if row["id"] == sale_id:
+                return row
+        raise LedgerError("Sale record not found.", 404)
     row = db.query(MarketplaceSale, Conversation.title).outerjoin(Conversation, Conversation.id == MarketplaceSale.conversation_id).filter(MarketplaceSale.id == sale_id).first()
     if row is None:
         raise LedgerError("Sale record not found.", 404)
-    return sale_out(*row)
+    return next(record for record in records(db, row[0].conversation_id) if record["id"] == sale_id)
 
 
 def save_financials(db: Session, sale_id: str, body: FinancialSave) -> dict:
+    if sale_id.startswith("vendoo-"):
+        raise LedgerError("This sale was imported from Vendoo. Edit it in Vendoo and import again.")
     with start_gate():
         sale = db.get(MarketplaceSale, sale_id, populate_existing=True)
         if sale is None:
@@ -141,29 +151,26 @@ def save_financials(db: Session, sale_id: str, body: FinancialSave) -> dict:
     return get_sale(db, sale_id)
 
 
-def sale_query(db: Session, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None):
+def sale_records(db: Session, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None):
+    from vendoo_studio.services.sales_records import records
+
     if start > end or start < date(1970, 1, 1) or end > datetime.now(UTC).date():
         raise LedgerError("Choose a valid UTC date range from 1970 through today.")
     if marketplace is not None and marketplace not in SALE_MARKETPLACES:
         raise LedgerError("Choose a supported marketplace.")
-    moment = func.coalesce(MarketplaceSale.sold_at, MarketplaceSale.received_at)
-    query = db.query(MarketplaceSale, Conversation.title).outerjoin(Conversation, Conversation.id == MarketplaceSale.conversation_id).filter(
-        moment >= datetime.combine(start, time.min), moment < datetime.combine(end + timedelta(days=1), time.min),
-    )
-    if marketplace:
-        query = query.filter(MarketplaceSale.marketplace == marketplace)
-    if conversation_id:
-        query = query.filter(MarketplaceSale.conversation_id == conversation_id)
-    return query.order_by(moment.desc(), MarketplaceSale.id)
+    rows = [row for row in records(db, conversation_id)
+            if start.isoformat() <= str(row["sold_at"] or row["received_at"])[:10] <= end.isoformat()
+            and (marketplace is None or row["marketplace"] == marketplace)]
+    return sorted(rows, key=lambda row: (row["sold_at"] or row["received_at"], row["id"]), reverse=True)
 
 
-def summary(query) -> dict:
+def summary(rows) -> dict:
     groups = {}
     count, unmatched, unrecorded, stale_count = 0, 0, 0, 0
-    for sale, _title in query.yield_per(500):
+    for row in rows:
         count += 1
-        unmatched += sale.conversation_id is None
-        data, stale = financial_values(sale)
+        unmatched += row["conversation_id"] is None
+        data, stale = row["financials"], row["financials_stale"]
         stale_count += stale
         if data is None or not any(data[key] is not None for key in AMOUNTS):
             unrecorded += 1
@@ -186,9 +193,9 @@ def summary(query) -> dict:
 
 
 def list_sales(db: Session, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None, page: int = 1) -> dict:
-    query = sale_query(db, start, end, marketplace, conversation_id)
-    totals = summary(query)
-    rows = [sale_out(*row) for row in query.offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).all()]
+    records = sale_records(db, start, end, marketplace, conversation_id)
+    totals = summary(records)
+    rows = records[(page - 1) * PAGE_SIZE:page * PAGE_SIZE]
     return {"rows": rows, "summary": totals, "page": page, "has_more": page * PAGE_SIZE < totals["lines"]}
 
 
