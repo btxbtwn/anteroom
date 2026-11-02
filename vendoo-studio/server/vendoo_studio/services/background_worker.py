@@ -119,16 +119,33 @@ async def run_claimed(task_id, owner, token):
 
 
 async def serve(engine, stopping):
-    while not stopping.is_set():
-        try:
-            claimed = await asyncio.to_thread(queue.claim, engine)
-        except SQLAlchemyError:
-            # This retries queue availability, never a claimed task or a
-            # marketplace action. Database diagnostics can include parameters.
-            logging.getLogger(__name__).warning('Draft queue database is temporarily unavailable')
-            await asyncio.sleep(5)
-            continue
-        if claimed is None:
-            await asyncio.sleep(1)
-        else:
-            await run_claimed(*claimed)
+    active = set()
+
+    def settled(task):
+        active.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            # Exception text can contain private database parameters.
+            logging.getLogger(__name__).warning('Draft task worker stopped unexpectedly')
+
+    try:
+        while not stopping.is_set():
+            try:
+                claimed = await asyncio.to_thread(queue.claim, engine)
+            except SQLAlchemyError:
+                # Retry queue availability, never a claimed task or marketplace action.
+                logging.getLogger(__name__).warning('Draft queue database is temporarily unavailable')
+                await asyncio.sleep(5)
+                continue
+            if claimed is None:
+                await asyncio.sleep(1)
+            else:
+                task = asyncio.create_task(run_claimed(*claimed))
+                active.add(task)
+                task.add_done_callback(settled)
+        # Stop claiming on shutdown, but let every claimed draft save first.
+        await asyncio.gather(*active, return_exceptions=True)
+    finally:
+        remaining = list(active)
+        for task in remaining:
+            task.cancel()
+        await asyncio.gather(*remaining, return_exceptions=True)

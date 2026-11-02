@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// Rewrite selected listings from their photos and item details, one at a
-/// time (bulkRegenerate.ts). Each uses Regenerate's wipe, which keeps photos,
-/// measurements, flaws, cost, labels and notes, then generates. The next
-/// listing starts once the previous one's work has finished on the server.
+/// Rewrite independent listings concurrently, keeping seller inputs and photos.
 struct BulkRegenerateView: View {
     let api: AnteroomAPI
     let listings: [ListingSummary]
@@ -47,8 +44,9 @@ struct BulkRegenerateView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     if running {
-                        Button(stopRequested ? "Stopping…" : "Stop after current") { stopRequested = true }
+                        Button(stopRequested ? "Finishing…" : "Finish active") { stopRequested = true }
                             .disabled(stopRequested)
+                        Button("Close") { onFinished(); dismiss() }
                     } else {
                         Button(started ? "Done" : "Cancel") {
                             if started { onFinished() }
@@ -64,7 +62,6 @@ struct BulkRegenerateView: View {
             }
             .task { await check() }
         }
-        .interactiveDismissDisabled(running)
     }
 
     private var summary: String {
@@ -113,31 +110,34 @@ struct BulkRegenerateView: View {
         running = true
         Task {
             defer { running = false }
-            for listing in listings {
-                if stopRequested { states[listing.id] = .skipped; continue }
-                // A listing without photos has nothing to rewrite from (listingCanRegenerate).
-                guard listing.coverPhotoID != nil, listing.settledAt == nil else {
-                    states[listing.id] = .skipped
-                    continue
-                }
-                do {
-                    states[listing.id] = .working("Clearing the generated listing…")
-                    try await api.resetListing(listing.id, keepInputs: true)
-                    states[listing.id] = .working("Generating…")
-                    try await api.runAssistant(listing.id, action: .generate) { frame in
-                        if frame.event == "status" { states[listing.id] = .working(frame.data) }
-                    }
-                    states[listing.id] = .working("Finishing…")
-                    try await waitUntilIdle(listing.id)
-                    states[listing.id] = .done
-                } catch {
-                    states[listing.id] = .failed(error.localizedDescription)
-                }
-            }
+            let tasks = listings.map { listing in Task { await rewrite(listing) } }
+            for task in tasks { await task.value }
         }
     }
 
-    /// Field fill can continue after the stream; the next listing waits for it.
+    @MainActor
+    private func rewrite(_ listing: ListingSummary) async {
+        if stopRequested { states[listing.id] = .skipped; return }
+        guard listing.coverPhotoID != nil, listing.settledAt == nil else {
+            states[listing.id] = .skipped
+            return
+        }
+        do {
+            states[listing.id] = .working("Clearing the generated listing…")
+            try await api.resetListing(listing.id, keepInputs: true)
+            states[listing.id] = .working("Generating…")
+            try await api.runAssistant(listing.id, action: .generate) { frame in
+                if frame.event == "status" { states[listing.id] = .working(frame.data) }
+            }
+            states[listing.id] = .working("Finishing…")
+            try await waitUntilIdle(listing.id)
+            states[listing.id] = .done
+        } catch {
+            states[listing.id] = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Each listing finishes independently after its marketplace fields settle.
     private func waitUntilIdle(_ id: String) async throws {
         for _ in 0..<600 {
             if try await !api.activity(id).busy { return }

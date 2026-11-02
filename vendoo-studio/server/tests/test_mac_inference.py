@@ -51,6 +51,97 @@ def test_offline_mac_is_refused_and_inflight_calls_are_not_replayed():
     asyncio.run(run())
 
 
+def test_more_than_sixteen_calls_can_overlap_without_crossing_accounts():
+    relay = MacInference()
+    relay.poll('mac', MODELS, timeout=0)
+
+    async def run():
+        calls = [asyncio.create_task(relay.invoke('quick_chat', [number], {})) for number in range(24)]
+        try:
+            await asyncio.sleep(0)
+            commands = [relay.poll('mac', MODELS, timeout=0) for _ in calls]
+            assert all(commands)
+            for command in reversed(commands):
+                assert relay.reply('mac', command['id'], command['args'][0], False)
+            assert await asyncio.gather(*calls) == list(range(24))
+        finally:
+            for call in calls:
+                call.cancel()
+            await asyncio.gather(*calls, return_exceptions=True)
+        assert not relay.pending
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('cancel_first', [False, True])
+def test_mac_worker_starts_a_second_call_while_the_first_model_is_waiting(monkeypatch, cancel_first):
+    import json
+    import httpx
+    from vendoo_studio.services.mac_ai_worker import MacAIWorker
+
+    async def run():
+        first, second, release, cancelled = (asyncio.Event() for _ in range(4))
+        replies = set()
+        commands = iter(['first', 'second'])
+
+        class Provider:
+            vision_model = listing_model = 'test'
+
+            async def quick_chat(self, messages):
+                if messages == 'first':
+                    first.set()
+                    try:
+                        await release.wait()
+                    except asyncio.CancelledError:
+                        cancelled.set()
+                        raise
+                yield messages
+
+        async def handle(request):
+            body = json.loads(request.content)
+            if body.get('available') is False:
+                active = not (cancel_first and body['active_call'] == 'first')
+                return httpx.Response(204, headers={'X-Anteroom-Call-Active': '1' if active else '0'})
+            if request.url.path.endswith('/reply'):
+                replies.add(body['identity'])
+                if body['identity'] == 'second':
+                    second.set()
+                return httpx.Response(200, json={'ok': True})
+            command = next(commands, None)
+            if command:
+                return httpx.Response(200, json={'id': command, 'operation': 'quick_chat',
+                                                 'args': [command], 'kwargs': {}})
+            await asyncio.sleep(.01)
+            return httpx.Response(204, headers={'X-Anteroom-Call-Active': '1'})
+
+        original = httpx.AsyncClient
+        monkeypatch.setattr('vendoo_studio.services.chatgpt_oauth.chatgpt_signed_in', lambda: True)
+        monkeypatch.setattr('vendoo_studio.providers.chatgpt_codex.ChatGPTCodexProvider', Provider)
+        monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
+        worker = MacAIWorker()
+        worker._token, worker._owner = 'session', 'alice'
+        task = asyncio.create_task(worker._run())
+        try:
+            await asyncio.wait_for(first.wait(), 2)
+            await asyncio.wait_for(second.wait(), 2)
+            assert replies == {'second'}
+            if cancel_first:
+                await asyncio.wait_for(cancelled.wait(), 5)
+                assert replies == {'second'}
+            else:
+                release.set()
+                for _ in range(100):
+                    if len(replies) == 2:
+                        break
+                    await asyncio.sleep(.01)
+                assert replies == {'first', 'second'}
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(run())
+
+
 def test_photo_paths_stay_in_a_temporary_mac_directory():
     paths = []
     class Reader:

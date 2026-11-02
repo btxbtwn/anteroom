@@ -38,26 +38,26 @@ export function BulkActionBar({
           type="button"
           variant="ghost"
           size="xs"
-          disabled={bulk.running || eligibleIds.length === 0}
+          disabled={eligibleIds.length === 0}
           onClick={toggleSelectAll}
         >
           {eligibleIds.length > 0 && eligibleIds.every((id) => selectedIds.has(id)) ? "None" : "All"}
         </Button>
-        {features.has("bulk_edit") && (<Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 300}
+        {features.has("bulk_edit") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 300}
           title="Review local field and label changes for up to 300 listings" onClick={() => setEditIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Edit fields</Button>)}
-        {features.has("bulk_copy") && (<Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 300}
+        {features.has("bulk_copy") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 300}
           title="Review separate draft copies of up to 300 selected items" onClick={() => setCopyIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Copy items</Button>)}
-        {features.has("marketplace_actions") && (<Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 100}
+        {features.has("marketplace_actions") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 100}
           title="Review List, Delist, Relist, Update or Mark as not listed on named marketplaces for up to 100 listings" onClick={() => setMarketIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Marketplaces</Button>)}
-        {features.has("marketplace_actions") && (<Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 100}
+        {features.has("marketplace_actions") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 100}
           title="Review sharing or offers to likers for up to 100 live listings" onClick={() => setPromoteIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Share / offers</Button>)}
-        {features.has("bulk_delete") && (<Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 300}
+        {features.has("bulk_delete") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 300}
           title="Review deleting up to 300 items from Anteroom. Nothing is delisted." onClick={() => setDeleteIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Delete</Button>)}
         {features.has("bulk_regenerate") && (<Button
           type="button"
           variant="destructive"
           size="xs"
-          disabled={bulk.running || selection.regenerateIds.length === 0}
+          disabled={selection.regenerateIds.length === 0}
           onClick={() => { void regenerateSelected(); }}
         >
           Regenerate
@@ -67,7 +67,7 @@ export function BulkActionBar({
           variant="outline"
           size="xs"
           title="Review a lower price for each selected listing. Saves in Anteroom only."
-          disabled={bulk.running || selectedIds.size === 0}
+          disabled={selectedIds.size === 0}
           onClick={() => setMarkdownIds(eligibleIds.filter((id) => selectedIds.has(id)))}
         >
           Mark down
