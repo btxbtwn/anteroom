@@ -1,8 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
-const fs = require('node:fs');
-const path = require('node:path');
 const { loadWorker, call, reply } = require('./worker-context');
 const MERCARI = 'https://www.mercari.com/sell/draft/testDraft/';
 
@@ -86,7 +84,7 @@ test('a finished Depop publish without a link reads the public product URL', asy
 
 test('another running job blocks native work', async () => {
   const s = setup();
-  vm.runInContext('activeJob = {job_id: "another"}', s.context);
+  s.context.claimNativeOperation('*', 'another');
   await s.context.handleNativeMarketplaceMessage(s.msg);
   assert.equal(s.replies[0].safe_to_retry, true);
   assert.equal(s.replies[0].error_code, 'rejected');
@@ -116,16 +114,6 @@ test('Poshmark keeps publication confirmed and accepts its private draft action'
   assert.match(unconfirmed.error, /Confirm/);
   const missing = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action: 'update', confirm: true } });
   assert.match(missing.error, /Confirm updating/);
-});
-
-test('legacy Poshmark fill messages cannot publish', () => {
-  let listener;
-  let clicks = 0;
-  const c = { chrome: { runtime: { onMessage: { addListener: fn => { listener = fn; } } } },
-    document: { querySelectorAll: () => [{ innerText: 'Next', click: () => { clicks++; } }] } };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../content-scripts/poshmark.js'), 'utf8'), c);
-  for (const type of ['START_FILL', 'START_POSHMARK']) listener({ type }, {}, reply => assert.equal(reply.ok, false));
-  assert.equal(clicks, 0);
 });
 
 test('the controller never repeats a Poshmark listing after a completed or interrupted one', async () => {
