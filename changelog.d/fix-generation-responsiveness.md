@@ -1,0 +1,2 @@
+- Keep the app responsive while preparing large marketplace category menus and repairing generated listing details.
+- Stop the hosted sandbox's private database when the sandbox closes, so repeated test runs keep working.

@@ -8,12 +8,16 @@ from __future__ import annotations
 import asyncio
 import os
 import secrets
+import signal
 import tempfile
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import jwt
+import uvicorn
 from jwt.algorithms import ECAlgorithm
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -25,6 +29,22 @@ from vendoo_studio.services.seller_sessions import InvalidSession, SessionVerifi
 ISSUER = 'https://sandbox.invalid/auth/v1'
 ACCOUNTS = {name + '@sandbox.test': str(uuid.uuid5(uuid.NAMESPACE_DNS, 'anteroom-sandbox-' + name))
             for name in ('alice', 'bob')}
+
+
+class HostedSandboxServer(uvicorn.Server):
+    """Keep termination graceful until the private database has been cleaned up."""
+
+    @contextmanager
+    def capture_signals(self):
+        if threading.current_thread() is not threading.main_thread():
+            yield
+            return
+        handlers = {sig: signal.signal(sig, self.handle_exit) for sig in (signal.SIGINT, signal.SIGTERM)}
+        try:
+            yield
+        finally:
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
 
 
 def auth_error(status: int, code: str, message: str):
@@ -151,70 +171,79 @@ class LocalSupabase:
 
 async def serve(port: int):
     from pgserver.postgres_server import get_server
-    import uvicorn
     from vendoo_studio import sandbox
 
-    # Ignore inherited production URLs: this command owns a new database and
-    # never migrates, seeds or connects to any operator-supplied database.
-    with tempfile.TemporaryDirectory(prefix='anteroom-hosted-sandbox-') as directory:
-        root = Path(directory)
-        postgres = get_server(root / 'postgres', cleanup_mode='delete')
-        os.environ.update(ANTEROOM_DATABASE_URL=postgres.get_uri(), VENDOO_STUDIO_DATA_DIR=str(root / 'data'),
-                          ANTEROOM_SANDBOX='1', ANTEROOM_BACKGROUND_WORKER='1',
-                          SUPABASE_URL=f'http://127.0.0.1:{port}/local', SUPABASE_PUBLISHABLE_KEY='sandbox-public')
-        try:
-            sandbox.install()
-            from vendoo_studio.database import engine, init_db
-            from vendoo_studio.services.category_tree_seed import import_seed
-            init_db()
-            import_seed(engine)
-            local = LocalSupabase()
-            os.environ["SUPABASE_SERVER_SECRET_KEY"] = local.server_key
-            from vendoo_studio.hosted import create_app
-            hosted = create_app('https://sandbox.invalid', session_verifier=local.verifier)
-            outer = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-            web_port = int(os.environ.get('VENDOO_STUDIO_WEB_PORT', '5175'))
-            outer.add_middleware(CORSMiddleware, allow_origins=[f'http://127.0.0.1:{web_port}'],
-                                 allow_methods=['GET', 'POST', 'PUT', 'DELETE'], allow_headers=['*'])
-            @outer.middleware('http')
-            async def refuse_live_actions(request: Request, call_next):
-                reason = sandbox.refusal(request.method, request.url.path)
-                if reason:
-                    return JSONResponse({'detail': reason}, status_code=403)
-                return await call_next(request)
+    outer = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    server = HostedSandboxServer(uvicorn.Config(outer, host='127.0.0.1', port=port))
+    # Keep handlers active while starting and cleaning up the private database.
+    with server.capture_signals():
+        # Ignore inherited production URLs: this command owns a new database and
+        # never migrates, seeds or connects to any operator-supplied database.
+        with tempfile.TemporaryDirectory(prefix='anteroom-hosted-sandbox-') as directory:
+            root = Path(directory)
+            postgres = get_server(root / 'postgres', cleanup_mode='delete')
+            database_engine = None
+            try:
+                if server.should_exit:
+                    return
+                os.environ.update(ANTEROOM_DATABASE_URL=postgres.get_uri(), VENDOO_STUDIO_DATA_DIR=str(root / 'data'),
+                                  ANTEROOM_SANDBOX='1', ANTEROOM_BACKGROUND_WORKER='1',
+                                  SUPABASE_URL=f'http://127.0.0.1:{port}/local', SUPABASE_PUBLISHABLE_KEY='sandbox-public')
+                sandbox.install()
+                from vendoo_studio.database import engine, init_db
+                database_engine = engine
+                from vendoo_studio.services.category_tree_seed import import_seed
+                init_db()
+                import_seed(engine)
+                local = LocalSupabase()
+                os.environ["SUPABASE_SERVER_SECRET_KEY"] = local.server_key
+                from vendoo_studio.hosted import create_app
+                hosted = create_app('https://sandbox.invalid', session_verifier=local.verifier)
+                web_port = int(os.environ.get('VENDOO_STUDIO_WEB_PORT', '5175'))
+                outer.add_middleware(CORSMiddleware, allow_origins=[f'http://127.0.0.1:{web_port}'],
+                                     allow_methods=['GET', 'POST', 'PUT', 'DELETE'], allow_headers=['*'])
+                @outer.middleware('http')
+                async def refuse_live_actions(request: Request, call_next):
+                    reason = sandbox.refusal(request.method, request.url.path)
+                    if reason:
+                        return JSONResponse({'detail': reason}, status_code=403)
+                    return await call_next(request)
 
-            @outer.get('/api/health')
-            def health():
-                from vendoo_studio.version import app_version
-                return {'status': 'ok', 'service': 'anteroom-hosted', 'version': app_version(), 'sandbox': True}
+                @outer.get('/api/health')
+                def health():
+                    from vendoo_studio.version import app_version
+                    return {'status': 'ok', 'service': 'anteroom-hosted', 'version': app_version(), 'sandbox': True}
 
-            outer.mount('/local', local.app)
-            outer.mount('/', hosted)
-            # Mounted applications do not receive lifespan events automatically.
-            async with hosted.router.lifespan_context(hosted):
-                server = uvicorn.Server(uvicorn.Config(outer, host='127.0.0.1', port=port))
+                outer.mount('/local', local.app)
+                outer.mount('/', hosted)
+                # Mounted applications do not receive lifespan events automatically.
+                async with hosted.router.lifespan_context(hosted):
 
-                async def seed_when_ready():
-                    from vendoo_studio.sandbox_seed import seed_hosted
-                    while not server.started:
-                        await asyncio.sleep(.05)
-                    await asyncio.to_thread(seed_hosted, f'http://127.0.0.1:{port}')
-                    print(f'Hosted sandbox ready: http://127.0.0.1:{port}', flush=True)
+                    async def seed_when_ready():
+                        from vendoo_studio.sandbox_seed import seed_hosted
+                        while not server.started:
+                            await asyncio.sleep(.05)
+                        await asyncio.to_thread(seed_hosted, f'http://127.0.0.1:{port}')
+                        print(f'Hosted sandbox ready: http://127.0.0.1:{port}', flush=True)
 
-                seed_task = asyncio.create_task(seed_when_ready())
-                serving = asyncio.create_task(server.serve())
+                    seed_task = asyncio.create_task(seed_when_ready())
+                    serving = asyncio.create_task(server.serve())
+                    try:
+                        done, _ = await asyncio.wait({serving, seed_task}, return_when=asyncio.FIRST_COMPLETED)
+                        if seed_task in done:
+                            seed_task.result()
+                        await serving
+                    finally:
+                        server.should_exit = True
+                        seed_task.cancel()
+                        await asyncio.gather(seed_task, return_exceptions=True)
+                        await serving
+            finally:
                 try:
-                    done, _ = await asyncio.wait({serving, seed_task}, return_when=asyncio.FIRST_COMPLETED)
-                    if seed_task in done:
-                        seed_task.result()
-                    await serving
+                    if database_engine is not None:
+                        database_engine.dispose()
                 finally:
-                    server.should_exit = True
-                    seed_task.cancel()
-                    await asyncio.gather(seed_task, return_exceptions=True)
-                    await serving
-        finally:
-            postgres.cleanup()
+                    postgres.cleanup()
 
 
 def main():
