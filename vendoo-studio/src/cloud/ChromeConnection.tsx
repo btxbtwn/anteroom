@@ -25,9 +25,9 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
     return () => { active = false; window.clearInterval(interval); };
   }, [bridge, connection?.state]);
   const connectedNow = connection?.ok === true && connection.state === "connected";
-  const capable = Boolean(connection?.supportedActions?.includes("marketplace.actions"));
-  // While this tab is connected, it carries the seller's approved marketplace commands to Chrome.
-  useEffect(() => connectedNow ? startChromeRelay(bridge, capable) : undefined, [bridge, connectedNow, capable]);
+  const capabilities = (connection?.supportedActions ?? []).join(",");
+  // While this tab is connected, it carries the seller's approved marketplace commands and reads to Chrome.
+  useEffect(() => connectedNow ? startChromeRelay(bridge, capabilities.split(",")) : undefined, [bridge, connectedNow, capabilities]);
   async function connect() {
     setBusy(true); setAttempted(true); setExpanded(true);
     try { setConnection(await bridge.connect()); } finally { setBusy(false); }

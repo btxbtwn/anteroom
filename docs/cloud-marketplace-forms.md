@@ -56,3 +56,13 @@ the title/description match General, categories and shipping choices appear,
 and changing General then reloading the preview changes its values. If the local
 app is running an automation job, the reader should report Chrome is busy.
 Loading the preview must not save or publish a Poshmark draft.
+
+## Vinted
+
+The Vinted tab is on the web with the same fields as the Mac. Its Category and
+Brand pickers read Vinted's own choices through the seller's connected Chrome
+(Bridge 0.2.42 or later; see `docs/cloud-extension.md`). When Chrome is not
+connected, or not signed in to Vinted, the picker says so and links to Vinted
+so the seller can sign in in Chrome. List, Update and Delist on
+Vinted run from the web the way Poshmark's do: each is the seller's own,
+confirmed action, carried to Chrome by the relay.
