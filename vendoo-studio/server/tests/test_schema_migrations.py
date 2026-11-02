@@ -143,6 +143,8 @@ def test_legacy_database_is_adopted_without_losing_rows(engine, snapshots):
     with sqlite3.connect(engine.url.database) as connection:
         rows = connection.execute("SELECT title FROM conversations").fetchall()
     assert rows == [("vintage coat",)]
+    indexes = {index["name"]: index["column_names"] for index in inspect(engine).get_indexes("jobs")}
+    assert indexes["ix_jobs_seller_created_at"] == ["user_id", "created_at"]
 
 
 def test_adopting_a_legacy_database_snapshots_first(engine, snapshots):
