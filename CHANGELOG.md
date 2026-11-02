@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.654 — 2026-11-02
+
+- Listings, photos and marketplace forms on the web no longer stall for 30 seconds and fail with "Request failed: 500" while background work runs
+
 ## 0.1.653 — 2026-11-02
 
 - On the web, Connect Chrome now says whether the Bridge is missing, wasn't approved, or is too old to list, and the note closes when you click away.
