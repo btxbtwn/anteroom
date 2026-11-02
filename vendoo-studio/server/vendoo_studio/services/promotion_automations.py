@@ -98,9 +98,10 @@ def _ids(value, label: str) -> list[str]:
 
 
 def _validate(body: dict) -> dict:
-    marketplace, action = body.get("marketplace"), body.get("action")
+    marketplace, action = body.get("marketplace") or "", body.get("action")
     if action not in promotions.SUPPORTED.get(marketplace, frozenset()):
         raise PromotionError(400, "Anteroom cannot do this on that marketplace.")
+    assert isinstance(marketplace, str)
     scope = body.get("scope") or "all"
     if scope not in ("all", "items"):
         raise PromotionError(400, "Cover all live listings or the items you choose.")
