@@ -524,30 +524,65 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
 
 
 async def vinted_categories(conv_id: str, db: Session) -> dict:
-    """Vinted's native categories, through Anteroom's private account window."""
-    import asyncio
+    """Vinted's native categories: the Mac reads them in its private account window,
+    the web in the seller's own Chrome."""
     from vendoo_studio.services import vinted_browser
 
     if not ConversationRepo(db).get(conv_id):
         raise NativeMarketplaceError(404, "Conversation not found")
-    try:
-        rows = await asyncio.to_thread(vinted_browser.category_rows)
-        options = vinted_browser.category_options(rows)
-        if not options:
-            raise vinted_browser.VintedConnectionError("Vinted returned no category choices.")
-        return {"options": options}
-    except vinted_browser.VintedConnectionError as exc:
-        raise NativeMarketplaceError(409, str(exc)) from exc
+    if seller := _web_seller():
+        options = await _chrome_read(seller, "Vinted","marketplace.vinted_categories", {})
+    else:
+        try:
+            options = vinted_browser.category_options(await asyncio.to_thread(vinted_browser.category_rows))
+        except vinted_browser.VintedConnectionError as exc:
+            raise NativeMarketplaceError(409, str(exc)) from exc
+    if not options:
+        raise NativeMarketplaceError(409, "Vinted returned no category choices.")
+    return {"options": options}
 
 
 async def vinted_brands(conv_id: str, query: str, category: str, db: Session) -> dict:
-    """Vinted brand choices, without Chrome or an extension message."""
-    import asyncio
+    """Vinted brand choices, read where its categories are."""
     from vendoo_studio.services import vinted_browser
 
     if not ConversationRepo(db).get(conv_id):
         raise NativeMarketplaceError(404, "Conversation not found")
+    if seller := _web_seller():
+        return {"options": await _chrome_read(seller, "Vinted","marketplace.vinted_brands", {"query": query, "category": category})}
     try:
         return {"options": await asyncio.to_thread(vinted_browser.brands, query, category)}
     except vinted_browser.VintedConnectionError as exc:
         raise NativeMarketplaceError(409, str(exc)) from exc
+
+
+def _web_seller() -> str | None:
+    """The signed-in seller on the web; None on the Mac."""
+    from vendoo_studio.services.service_context import current
+
+    context = current()
+    return context.seller_id if context is not None else None
+
+
+# What the seller can do when their Chrome could not read a marketplace's choices.
+_READ_ERRORS = {
+    "signed_out": "Sign in to {name} in Chrome, then reload {name}'s choices.",
+    "challenge": "Open {name} in Chrome and finish its check, then reload {name}'s choices.",
+    "rate_limited": "{name} asked Chrome to wait. Reload its choices in a few minutes.",
+    "schema_drift": "{name}'s choices changed. Anteroom needs an update to read them.",
+}
+
+
+async def _chrome_read(seller: str, name: str, command: str, payload: dict) -> list[str]:
+    """The choices one named read returns from the seller's Chrome, through their Anteroom tab."""
+    from vendoo_studio.services.hosted_browser_relay import ChromeReadError, relay_for
+
+    try:
+        reply = await relay_for(seller).read(command, payload, timeout=40)
+    except ChromeReadError as exc:
+        raise NativeMarketplaceError(409, str(exc)) from exc
+    options = reply.get("options")
+    if reply.get("ok") is not True or not isinstance(options, list):
+        message = _READ_ERRORS.get(str(reply.get("error_code")), "Chrome could not read {name}'s choices. Reload them to try again.")
+        raise NativeMarketplaceError(409, message.format(name=name))
+    return list(dict.fromkeys(item.strip() for item in options if isinstance(item, str) and item.strip()))
