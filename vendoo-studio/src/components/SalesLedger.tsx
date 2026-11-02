@@ -97,6 +97,7 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
 }
 
 function FinancialEditor({ row, onClose, onSaved, onReload }: { row: SalesLedgerRow; onClose: () => void; onSaved: () => void; onReload: (row: SalesLedgerRow) => void }) {
+  const [today] = useState(() => new Date().toISOString().slice(0, 10));
   const [soldOn, setSoldOn] = useState(row.sold_at?.slice(0, 10) || "");
   const [currency, setCurrency] = useState(row.financials?.currency || "");
   const [values, setValues] = useState<Record<FinancialField, string>>(() => Object.fromEntries(FINANCIAL_FIELDS.map((field) => [field, row.financials?.[field] || ""])) as Record<FinancialField, string>);
@@ -113,7 +114,7 @@ function FinancialEditor({ row, onClose, onSaved, onReload }: { row: SalesLedger
         <PageNote>Enter totals for this sale, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures in Anteroom; quantities and marketplace listings stay unchanged.</PageNote>
         {row.financials_source === "vendoo" ? <PageNote>These are imported historical sale details. Save corrections here in Anteroom.</PageNote> : null}
         {row.financials_stale ? <PageNote>This order changed. Review every amount before saving again.</PageNote> : null}
-        <label className="block space-y-1 text-xs">Sale date (UTC)<Input type="date" min="1970-01-01" max={new Date().toISOString().slice(0, 10)} value={soldOn} disabled={busy} onChange={event => setSoldOn(event.target.value)} /></label>
+        <label className="block space-y-1 text-xs">Sale date (UTC)<Input type="date" min="1970-01-01" max={today} value={soldOn} disabled={busy} onChange={event => setSoldOn(event.target.value)} /></label>
         <label className="block space-y-1 text-xs">Currency code<Input required pattern="[A-Z]{3}" maxLength={3} value={currency} placeholder="USD" disabled={busy} onChange={(event) => setCurrency(event.target.value.toUpperCase())} /></label>
         <div className="grid gap-3 sm:grid-cols-2">{FINANCIAL_FIELDS.map((field) => <label key={field} className="space-y-1 text-xs">{LABELS[field]}<Input inputMode="decimal" value={values[field]} placeholder="Unknown" disabled={busy} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}</div>
         {save.error ? <PageError message={save.error.message} /> : null}{reload.error ? <PageError message={reload.error.message} /> : null}
