@@ -2,11 +2,13 @@
  * Live updates for the hosted workspace. The API records which part of the
  * seller's data changed in `seller_changes` (topic names and times only);
  * Supabase Realtime tells every signed-in device, and each re-reads the
- * screens that topic covers. Without a live channel, polling carries on.
+ * screens that topic covers, so reads stay fresh longer while it is subscribed.
+ * Without a live channel, polling carries on.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { setLiveUpdates } from "../api/polling";
+import { setLiveFreshness } from "../api/queryClient";
 
 /**
  * The topics the server writes (`TOPIC_BY_TABLE` in
@@ -92,15 +94,20 @@ export function followSellerChanges(
       if (stopped) return;
       const live = status === "SUBSCRIBED";
       setLiveUpdates(live);
+      setLiveFreshness(queryClient, live);
       // Changes made while the channel was down were never announced.
       if (live && wasSubscribed) invalidateTopics(queryClient, Object.keys(TOPIC_QUERY_KEYS));
       wasSubscribed ||= live;
     });
-  }).catch(() => setLiveUpdates(false));
+  }).catch(() => {
+    setLiveUpdates(false);
+    setLiveFreshness(queryClient, false);
+  });
   return () => {
     stopped = true;
     if (timer) clearTimeout(timer);
     setLiveUpdates(false);
+    setLiveFreshness(queryClient, false);
     void supabase.removeChannel(channel);
   };
 }
