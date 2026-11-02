@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.663 — 2026-11-02
+
+- On the web, starting an eBay or Etsy sign-in, or loading their listing settings, no longer freezes Anteroom while the server is busy, and sign-in errors no longer blame the relay when the relay isn't the problem.
+
 ## 0.1.662 — 2026-11-02
 
 - Behind the scenes, retired panels and unused interface helpers have been removed, and the unused-code check now runs without exceptions.
