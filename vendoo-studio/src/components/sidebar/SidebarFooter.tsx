@@ -5,7 +5,6 @@ import {
   BoxIcon,
   CalendarClockIcon,
   ChartColumnIcon,
-  GaugeIcon,
   MessageCircleIcon,
   SettingsIcon,
   StoreIcon,
@@ -27,7 +26,7 @@ const SIDEBAR_BORDER_PX = 1;
 
 /**
  * The footer buttons in seller-workflow order: home first, then the day's work
- * (sourcing), marketplace tools, then insight (analytics, plan usage),
+ * (sourcing), marketplace tools, then insight (analytics),
  * then settings and the updater last, the way T3 Code ends its sidebar footer
  * with settings. The listings above are the inventory; Vendoo sync lives in
  * Settings → Data and on Analytics.
@@ -38,7 +37,6 @@ export const SIDEBAR_FOOTER_BUTTONS = [
   "analytics",
   "marketplaces",
   "automations",
-  "usage",
   "settings",
   "update",
 ] as const;
@@ -107,7 +105,6 @@ export function SidebarFooter({
   onOpenAutomations,
   onOpenAssistant,
   onOpenSettings,
-  onOpenUsage,
 }: {
   settingsMode: boolean;
   activeView: WorkspaceView;
@@ -118,7 +115,6 @@ export function SidebarFooter({
   onOpenAutomations: () => void;
   onOpenAssistant: () => void;
   onOpenSettings: () => void;
-  onOpenUsage: () => void;
 }) {
   const runtime = useWorkspaceRuntime();
   const buttons: Record<FooterButtonId, ReactNode> = {
@@ -131,7 +127,6 @@ export function SidebarFooter({
     ),
     marketplaces: <FooterButton page="marketplaces" label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} onClick={onOpenMarketplaces} />,
     automations: <FooterButton page="automations" label="Automations" icon={CalendarClockIcon} active={activeView === "automations"} onClick={onOpenAutomations} />,
-    usage: <FooterButton page="usage" label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
     settings: <FooterButton page="settings" label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
     update: runtime.hosted ? null : <UpdateButton />,
   };
