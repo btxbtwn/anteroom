@@ -1,1 +1,0 @@
-- Remove the website's five-connection cap so concurrent draft requests can use the connections available from Supabase.
