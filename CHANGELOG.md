@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.682 — 2026-11-02
+
+- Retry temporary sales-history failures, refresh Mercari's session for each check, and explain marketplace sign-in, browser-check and rate-limit failures while keeping saved sales.
+
+- Catch up recent eBay orders every five minutes while the workspace is open so missed sale notifications do not leave orders out of the ledger.
+
 ## 0.1.681 — 2026-11-02
 
 - Remove the website's five-connection cap so concurrent draft requests can use the connections available from Supabase.
