@@ -18,7 +18,7 @@ from vendoo_studio.models.conversation import Conversation, Message, Photo
 from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceListing
-from vendoo_studio.models.validation import etsy_eligible, validate_listing
+from vendoo_studio.services.validation import etsy_eligible, validate_listing
 from vendoo_studio.repositories import hosted_drafts
 from vendoo_studio.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from vendoo_studio.services import user_settings

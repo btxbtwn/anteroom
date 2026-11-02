@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
@@ -252,7 +253,7 @@ class FillLogServiceTest(unittest.TestCase):
         from vendoo_studio.repositories.queries import ListingRepo
 
         listing_repo = ListingRepo(self.db)
-        listing_repo.save_revision(self.conv.id, {
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
             "title": "Nike tee",
             "category_path": "Tops",
             "size": "S",
@@ -292,7 +293,7 @@ class FillLogServiceTest(unittest.TestCase):
         self.db.commit()
 
         listing_repo = ListingRepo(self.db)
-        listing_repo.save_revision(self.conv.id, {
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
             "title": "Nike tee",
             "category_path": category,
             "ebay_specifics": {},
@@ -485,7 +486,7 @@ class FillLogServiceTest(unittest.TestCase):
                 {"field": "Department", "status": "new", "reason": "Discovered on form after category select"},
             ],
         })[0]
-        ListingRepo(self.db).save_revision(self.conv.id, {
+        listing_persistence.save_revision(self.db, self.conv.id, {
             "title": "Spectra USA Apparel Company 8 Biker Graphic T-Shirt Black Regular",
             "ebay_specifics": {"department": ""},
         }, source="model")

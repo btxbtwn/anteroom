@@ -5,6 +5,7 @@ from alembic import command
 from sqlalchemy.orm import Session
 
 from test_seller_ownership import migration_config, migration_engine  # noqa: F401
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.native_category_match import native_rows
 
@@ -45,8 +46,8 @@ def test_upgrade_fills_the_current_revision(migration_engine):  # noqa: F811
     command.upgrade(config, backfill.down_revision)
     with Session(migration_engine) as db:
         conv = ConversationRepo(db).create(title="Tee")
-        old = ListingRepo(db).save_revision(conv.id, {"title": "Tee"}, "model")
-        current = ListingRepo(db).save_revision(conv.id, {"title": "Tee", **VENDOO}, "model", parent_revision_id=old.id)
+        old = listing_persistence.save_revision(db, conv.id, {"title": "Tee"}, "model")
+        current = listing_persistence.save_revision(db, conv.id, {"title": "Tee", **VENDOO}, "model", parent_revision_id=old.id)
         ids = (old.id, current.id)
     command.upgrade(config, "head")
     with Session(migration_engine) as db:

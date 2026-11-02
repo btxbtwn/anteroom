@@ -13,7 +13,7 @@ from vendoo_studio.models.conversation import Conversation, Photo, new_id as new
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.listing_copy import ListingCopyReceipt
 from vendoo_studio.models.schema import ListingSchema
-from vendoo_studio.models.validation import validate_listing
+from vendoo_studio.services.validation import validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import photos
 from vendoo_studio.services.photo_store import photo_store

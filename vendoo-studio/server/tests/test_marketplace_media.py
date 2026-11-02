@@ -13,10 +13,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.job import Job
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services.marketplace_media import PHOTO_LIMITS, keep_media, photos_for
 from vendoo_studio.services.photo_store import LocalPhotoStore
 
@@ -127,13 +128,13 @@ def test_changing_a_forms_photos_needs_a_new_review(env):
     from vendoo_studio.services.send_review import review_inputs
 
     _upload(env)
-    ListingRepo(env.db).save_revision(env.conv.id, {"title": "Denim jacket", "price": 30}, "user_form")
+    listing_persistence.save_revision(env.db, env.conv.id, {"title": "Denim jacket", "price": 30}, "user_form")
     first = review_inputs(env.db, env.conv.id)[1]
     _upload(env, "poshmark")
     second = review_inputs(env.db, env.conv.id)[1]
     assert second != first
     own = env.repo.get_all_photos(env.conv.id)[-1]
-    ListingRepo(env.db).save_revision(env.conv.id, {"title": "Denim jacket", "price": 30,
+    listing_persistence.save_revision(env.db, env.conv.id, {"title": "Denim jacket", "price": 30,
                                                     "marketplace_photos": {"poshmark": [own.id]}}, "user_form")
     assert review_inputs(env.db, env.conv.id)[1] != second
 
@@ -144,7 +145,7 @@ def test_an_approved_send_waits_for_a_new_review_after_a_form_photo_change(env):
 
     _upload(env)
     listing = {"title": "Denim jacket", "price": 30}
-    revision = ListingRepo(env.db).save_revision(env.conv.id, listing, "user_form")
+    revision = listing_persistence.save_revision(env.db, env.conv.id, listing, "user_form")
     job = Job(conversation_id=env.conv.id, approved_revision_id=revision.id, listing_snapshot=listing,
               status="dispatched", current_step="vendoo_api_create")
     env.db.add(job)
@@ -152,7 +153,7 @@ def test_an_approved_send_waits_for_a_new_review_after_a_form_photo_change(env):
     JobRepo(env.db).add_event(job.id, "vendoo_review", payload={
         "photo_versions": photo_versions(env.repo.get_all_photos(env.conv.id), listing)})
     [front] = env.repo.get_photos(env.conv.id)
-    ListingRepo(env.db).save_revision(env.conv.id, {**listing, "marketplace_photos": {"etsy": [front.id]}}, "user_form")
+    listing_persistence.save_revision(env.db, env.conv.id, {**listing, "marketplace_photos": {"etsy": [front.id]}}, "user_form")
     with patch("vendoo_studio.services.send_queue.SessionLocal", env.sessions), \
          patch("vendoo_studio.routes.vendoo_api._create_claimed_draft") as create, \
          patch("vendoo_studio.services.listing_provider.provider_is_configured", return_value=False), \

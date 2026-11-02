@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, load_models
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
@@ -50,7 +51,7 @@ class SuggestionsTest(unittest.TestCase):
         sold = self.convs.create(title="Sold tee")
         self.convs.update_status(sold.id, "sold")
         settled = self.convs.create(title="Settled draft")
-        self.convs.add_photo(settled.id, "a.jpg", "a.jpg", "image/jpeg", 12)
+        listing_persistence.add_photo(self.convs.db, settled.id, "a.jpg", "a.jpg", "image/jpeg", 12)
         self.convs.settle(settled.id)
         self.assertEqual(self._kinds(), [])
 
@@ -58,14 +59,14 @@ class SuggestionsTest(unittest.TestCase):
         failed = self.convs.create(title="Failed send")
         self.convs.update_status(failed.id, "failed")
         draft = self.convs.create(title="Needs generate")
-        self.convs.add_photo(draft.id, "a.jpg", "a.jpg", "image/jpeg", 12)
+        listing_persistence.add_photo(self.convs.db, draft.id, "a.jpg", "a.jpg", "image/jpeg", 12)
         kinds = self._kinds()
         self.assertEqual(kinds[0], "failed")
         self.assertIn("ready_to_generate", kinds)
 
     def test_photos_without_revision_are_ready_to_generate(self):
         conv = self.convs.create(title="New photos")
-        self.convs.add_photo(conv.id, "a.jpg", "a.jpg", "image/jpeg", 12)
+        listing_persistence.add_photo(self.convs.db, conv.id, "a.jpg", "a.jpg", "image/jpeg", 12)
         card = self._by_title("New photos")
         self.assertEqual(card["kind"], "ready_to_generate")
         self.assertIsNone(card["age_days"])
@@ -80,7 +81,7 @@ class SuggestionsTest(unittest.TestCase):
         })
         self.db.commit()
         self.convs.update_status(conv.id, "active")
-        self.listings.save_revision(conv.id, {"title": "Broken active", "price": 20}, "test")
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Broken active", "price": 20}, "test")
         listing = self.listings.get_current(conv.id)
         listing.validation_status = "error"
         self.db.commit()
@@ -88,35 +89,35 @@ class SuggestionsTest(unittest.TestCase):
 
     def test_later_revision_drops_stale_validation_flag(self):
         conv = self.convs.create(title="Fixed draft")
-        self.listings.save_revision(conv.id, {"title": "Fixed draft", "price": 18}, "user_form")
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Fixed draft", "price": 18}, "user_form")
         listing = self.listings.get_current(conv.id)
         listing.validation_status = "error"
         self.db.commit()
         with patch(
-            "vendoo_studio.models.validation.validate_listing",
+            "vendoo_studio.services.validation.validate_listing",
             return_value=ValidationResult(valid=True),
         ):
-            self.listings.save_revision(conv.id, {"title": "Fixed draft", "price": 19}, "chat")
+            listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Fixed draft", "price": 19}, "chat")
         self.assertEqual(self.listings.get_current(conv.id).validation_status, "valid")
         self.assertEqual(self._by_title("Fixed draft")["kind"], "ready_to_review")
 
     def test_adding_a_photo_rechecks_validation_flag(self):
         conv = self.convs.create(title="Needs photos")
-        self.listings.save_revision(conv.id, {"title": "Needs photos", "price": 18}, "user_form")
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Needs photos", "price": 18}, "user_form")
         listing = self.listings.get_current(conv.id)
         listing.validation_status = "error"
         self.db.commit()
         with patch(
-            "vendoo_studio.models.validation.validate_listing",
+            "vendoo_studio.services.validation.validate_listing",
             return_value=ValidationResult(valid=True),
         ) as validate:
-            self.convs.add_photo(conv.id, "a.jpg", "a.jpg", "image/jpeg", 12)
+            listing_persistence.add_photo(self.convs.db, conv.id, "a.jpg", "a.jpg", "image/jpeg", 12)
         self.assertEqual(validate.call_args.args[1], 1)
         self.assertEqual(self.listings.get_current(conv.id).validation_status, "valid")
 
     def test_listing_suggestions_never_writes(self):
         conv = self.convs.create(title="Flagged")
-        self.listings.save_revision(conv.id, {"title": "Flagged", "price": 18}, "user_form")
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Flagged", "price": 18}, "user_form")
         self.listings.get_current(conv.id).validation_status = "error"
         self.db.commit()
         with patch.object(self.db, "commit", side_effect=AssertionError("suggestions wrote")):
@@ -170,7 +171,7 @@ class SuggestionsTest(unittest.TestCase):
         self.db.commit()
         self.convs.update_status(conv.id, "active")
         if listing is not None:
-            self.listings.save_revision(conv.id, {"title": title, "price": 20, **listing}, "test")
+            listing_persistence.save_revision(self.listings.db, conv.id, {"title": title, "price": 20, **listing}, "test")
         return conv
 
     def _sold(self, title: str, sold: str, listing: dict):
@@ -178,7 +179,7 @@ class SuggestionsTest(unittest.TestCase):
         conv.notes = json.dumps({"vendooDates": {"listed": "2026-05-01T00:00:00Z", "sold": sold}})
         self.db.commit()
         self.convs.update_status(conv.id, "sold")
-        self.listings.save_revision(conv.id, {"title": title, "price": 20, **listing}, "test")
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": title, "price": 20, **listing}, "test")
 
     def _stale_titles(self) -> list[str]:
         return [card["title"] for card in list_suggestions(self.db, now=NOW) if card["kind"] == "stale_active"]
@@ -224,7 +225,7 @@ class SuggestionsTest(unittest.TestCase):
         for index in range(8):
             self._sold(f"Sold {index}", "2026-09-10T00:00:00Z", {"brand": "Madewell", "category_path": tops})
         broken = self.convs.create(title="Broken draft")
-        self.listings.save_revision(broken.id, {"title": "Broken draft", "price": 18}, "user_form")
+        listing_persistence.save_revision(self.listings.db, broken.id, {"title": "Broken draft", "price": 18}, "user_form")
         self.listings.get_current(broken.id).validation_status = "error"
         self.db.commit()
         self.assertEqual(self._kinds()[:2], ["fix_validation", "stale_active"])
@@ -232,7 +233,7 @@ class SuggestionsTest(unittest.TestCase):
 
     def test_draft_with_revision_is_ready_to_review(self):
         conv = self.convs.create(title="Ready draft")
-        self.listings.save_revision(conv.id, {"title": "Ready draft", "price": 18}, "generation")
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Ready draft", "price": 18}, "generation")
         card = self._by_title("Ready draft")
         self.assertEqual(card["kind"], "ready_to_review")
 

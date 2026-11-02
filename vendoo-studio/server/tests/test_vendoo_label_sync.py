@@ -7,10 +7,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services import vendoo_bulk_import, vendoo_label_sync
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
@@ -45,7 +46,7 @@ class LabelSyncTest(unittest.IsolatedAsyncioTestCase):
             "vendooStatus": "draft",
         })
         ConversationRepo(self.db).update_status(conv.id, "draft")
-        rev = ListingRepo(self.db).save_revision(conv.id, {"title": "Tee"}, source="user")
+        rev = listing_persistence.save_revision(self.db, conv.id, {"title": "Tee"}, source="user")
         JobRepo(self.db).create(conv.id, rev.id, {"title": "Tee"}, vendoo_item_id=item_id, status="completed")
         return conv
 

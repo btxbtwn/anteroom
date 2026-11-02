@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation
@@ -29,7 +30,7 @@ def inventory():
     original = {"title": "Wool coat M", "description": "Seller description", "brand": "Brand", "size": "M", "price": 50,
                 "sku": "OLD", "quantity": 3, "labels": ["Winter", "Storage A"], "ebay_specifics": {"Size": "M"}}
     for key in ("coat", "shirt"):
-        ListingRepo(db).save_revision(key, prepared_listing({}, original), "user_form")
+        listing_persistence.save_revision(db, key, prepared_listing({}, original), "user_form")
     app.dependency_overrides[get_db] = lambda: db
     client = TestClient(app)
     yield SimpleNamespace(db=db, client=client)
@@ -84,7 +85,7 @@ def test_label_actions(inventory, mode, labels, expected):
 def test_changed_rows_skip_independently_and_replay_cannot_overwrite(inventory):
     edits = {"values": {"cost": 4.25}}
     rows = preview(inventory, edits)
-    ListingRepo(inventory.db).save_revision("coat", {**current(inventory).listing_json, "description": "Newer edit"}, "user_form")
+    listing_persistence.save_revision(inventory.db, "coat", {**current(inventory).listing_json, "description": "Newer edit"}, "user_form")
     result = apply(inventory, edits, rows).json()
     assert [row["conversation_id"] for row in result["applied"]] == ["shirt"]
     assert result["skipped"][0]["conversation_id"] == "coat"
@@ -125,10 +126,10 @@ def test_invalid_requests_write_nothing(inventory, edits):
 
 def test_revision_cas_rolls_back_without_orphans(inventory):
     old = current(inventory)
-    ListingRepo(inventory.db).save_revision("coat", {**old.listing_json, "sku": "CURRENT"}, "user_form")
+    listing_persistence.save_revision(inventory.db, "coat", {**old.listing_json, "sku": "CURRENT"}, "user_form")
     before = inventory.db.query(ListingRevision).count()
     with pytest.raises(RevisionConflict):
-        ListingRepo(inventory.db).save_revision("coat", {**old.listing_json, "sku": "STALE"}, "bulk_edit", expected_revision_id=old.id)
+        listing_persistence.save_revision(inventory.db, "coat", {**old.listing_json, "sku": "STALE"}, "bulk_edit", expected_revision_id=old.id)
     assert inventory.db.query(ListingRevision).count() == before
     assert current(inventory).listing_json["sku"] == "CURRENT"
 
@@ -197,7 +198,7 @@ def test_categories_are_verified_and_written_where_each_marketplace_reads_them(i
     _leaf(inventory.db, "depop", "womenswear_coats", "Womenswear > Coats")
     stale = {**current(inventory).listing_json, "marketplace_category_objects": {"general": {"id": "old"}},
              "direct_category_ids": {"depop": "womenswear_jackets", "ebay": "1"}, "depop_specifics": {"nativeSizeId": "7"}}
-    ListingRepo(inventory.db).save_revision("coat", stale, "user_form")
+    listing_persistence.save_revision(inventory.db, "coat", stale, "user_form")
     edits = {"category": {"general": "g-1", "depop": "womenswear_coats", "ebay": {"id": "57988", "path": "Clothing › Coats"}}}
     rows = preview(inventory, edits)
     assert not rows[0]["skip_reason"], rows[0]

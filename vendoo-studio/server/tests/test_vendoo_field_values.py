@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from vendoo_studio.models.ebay_fields import ebay_size_for_type
+from vendoo_studio.services.ebay_fields import ebay_size_for_type
 from vendoo_studio.services.extension_connection import _build_registry_selectors
 from vendoo_studio.services.completion_gaps import deterministic_gap_patches
 from vendoo_studio.services.listing_generate import propagate_general_size

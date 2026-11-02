@@ -9,8 +9,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, load_models
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import chat_prompts, item_context, listing_generate, skill_formulas
 from vendoo_studio.services.catalog_index import relevant_skill_rules
 from vendoo_studio.services.generation_eval import evaluate_outputs
@@ -94,7 +95,7 @@ def test_chat_keeps_old_relevant_seller_evidence_and_saved_clears(db):
     old = repo.add_message(conv.id, "user", "The hem stain is permanent; keep that flaw.")
     for index in range(45):
         repo.add_message(conv.id, "system", f"Background status {index}")
-    ListingRepo(db).save_revision(conv.id, {**BASE, "depop_specifics": {"style": []},
+    listing_persistence.save_revision(db, conv.id, {**BASE, "depop_specifics": {"style": []},
                                           "seller_fields": ["depop_specifics.style", "price"]}, source="user_form")
     messages = asyncio.run(chat_prompts.build_chat_messages(conv.id, db, "Describe the hem stain"))
     assert any(message["content"] == old.text for message in messages)

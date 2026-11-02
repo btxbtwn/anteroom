@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import inventory_facets
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import get_db
 from vendoo_studio.repositories.queries import (
     BUSY_LISTING_STATUSES,
@@ -123,7 +125,7 @@ def list_conversations(db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
     repo.reconcile_job_statuses()
     covers = repo.cover_photos()
-    facets = repo.listing_facets()
+    facets = inventory_facets.listing_facets(repo.db)
     revisions = repo.current_revision_ids()
     conversations = repo.list_all()
     unsent = _unsent_edits(db, conversations, revisions)
@@ -487,7 +489,7 @@ def delete_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Photo not found")
 
     delete_photo_files(target)
-    repo.delete_photo(conv_id, photo_id)
+    listing_persistence.delete_photo(repo.db, conv_id, photo_id)
     return {"ok": True}
 
 
@@ -570,7 +572,7 @@ async def reset_conversation(
     conv.updated_at = utcnow()
     if binding:
         # Blank revision so Fields / ensure-draft can reattach to the same Vendoo item.
-        revision = ListingRepo(db).save_revision(conv_id, {}, source="reset")
+        revision = listing_persistence.save_revision(db, conv_id, {}, source="reset")
         if keep_inputs:
             # Regenerate remounts the editor with photos still present. Without a
             # job row it looks like a fresh Link and auto-imports the draft —
@@ -664,7 +666,7 @@ def _extras_for(db: Session, conv_id: str) -> dict:
 
     return _extras(
         _cover_photo_url(repo.cover_photo(conv_id)),
-        repo.listing_facet(conv_id),
+        inventory_facets.listing_facet(repo.db, conv_id),
         revision_id,
         conv_id in unsent,
         records.live_marketplaces(conv_id).get(conv_id, []),

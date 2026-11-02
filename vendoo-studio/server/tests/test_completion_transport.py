@@ -11,9 +11,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services.extension_connection import ExtensionManager
 import vendoo_studio.services.listing_completion as listing_completion
 
@@ -40,7 +41,7 @@ class CompletionTransportTest(unittest.TestCase):
         conv = ConversationRepo(db).create(title="Tee")
         ConversationRepo(db).add_message(conv.id, "user", "The tag says cotton.")
         listing = {"title": "Tee", "category_path": "Clothing > Tops", "platforms": ["ebay"]}
-        revision = ListingRepo(db).save_revision(conv.id, listing, source="user")
+        revision = listing_persistence.save_revision(db, conv.id, listing, source="user")
         job = JobRepo(db).create(conv_id=conv.id, approved_revision_id=revision.id,
             listing_snapshot=listing, vendoo_item_id="draft-123", status="queued")
         job_id = job.id

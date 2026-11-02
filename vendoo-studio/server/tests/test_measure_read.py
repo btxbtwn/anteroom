@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
@@ -164,7 +165,7 @@ class ReadSavedMeasurementsRouteTest(unittest.TestCase):
         self.conv = repo.create(title="Graphic tee")
         for name, body in (("tag.jpg", _plain_photo()), ("ruler.jpg", _ruler_photo())):
             (folder / name).write_bytes(body)
-            repo.add_photo(self.conv.id, name, name, "image/jpeg", len(body), checksum=name * 8, width=1, height=1)
+            listing_persistence.add_photo(repo.db, self.conv.id, name, name, "image/jpeg", len(body), checksum=name * 8, width=1, height=1)
 
         def override_get_db():
             yield self.db

@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
@@ -107,7 +108,7 @@ class AgentTestBase(unittest.TestCase):
         self.Session = sessionmaker(bind=engine)
         db = self.Session()
         conv = ConversationRepo(db).create(title="Tee")
-        revision = ListingRepo(db).save_revision(conv.id, {"title": "Vintage Tee", "ebay_specifics": {}}, source="user")
+        revision = listing_persistence.save_revision(db, conv.id, {"title": "Vintage Tee", "ebay_specifics": {}}, source="user")
         job = JobRepo(db).create(conv_id=conv.id, approved_revision_id=revision.id,
                                  listing_snapshot={"title": "Vintage Tee", "platforms": ["ebay"]},
                                  vendoo_item_id="draft-1", status="completed")
@@ -314,7 +315,7 @@ class FixAgentLoopTest(AgentTestBase):
         with tempfile.TemporaryDirectory() as tmp:
             Image.new("RGB", (40, 40), "red").save(Path(tmp) / "shirt.jpg")
             db = self.Session()
-            ConversationRepo(db).add_photo(self.conv_id, "shirt.jpg", "shirt.jpg", "image/jpeg", 100)
+            listing_persistence.add_photo(db, self.conv_id, "shirt.jpg", "shirt.jpg", "image/jpeg", 100)
             db.close()
             with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(tmp)):
                 events = self.run_agent(VisionProvider([]), "fill these")

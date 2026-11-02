@@ -7,7 +7,7 @@ from datetime import date
 from functools import lru_cache
 from typing import Any
 
-from vendoo_studio.models.ebay_fields import (
+from vendoo_studio.services.ebay_fields import (
     ebay_optional_blank,
     ebay_optional_raw,
     ebay_season_haystack,

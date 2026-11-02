@@ -17,7 +17,7 @@ from decimal import Decimal, InvalidOperation
 import httpx
 
 from vendoo_studio.services.photo_store import photo_store
-from vendoo_studio.models.etsy_fields import (
+from vendoo_studio.services.etsy_fields import (
     sanitize_etsy_tags, etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_raw, etsy_when_to_store, is_etsy_digital_listing,
 )
 from vendoo_studio.services import marketplace_accounts, marketplace_schemas

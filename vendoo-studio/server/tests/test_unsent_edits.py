@@ -17,6 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
@@ -42,7 +43,7 @@ class UnsentEditsTest(unittest.TestCase):
         app.dependency_overrides[get_db] = override
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title="Jeans")
-        self.revision = ListingRepo(self.db).save_revision(self.conv.id, LISTING, source="model")
+        self.revision = listing_persistence.save_revision(self.db, self.conv.id, LISTING, source="model")
 
     def tearDown(self):
         app.dependency_overrides.clear()
@@ -66,36 +67,36 @@ class UnsentEditsTest(unittest.TestCase):
 
     def test_an_edit_after_the_last_sync_is_unsent(self):
         self.mark_synced_on(self.revision.id)
-        ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "price": 42}, source="user_form")
         self.assertTrue(self.flag())
 
     def test_a_pull_from_vendoo_is_not_an_unsent_edit(self):
         """The revision came *from* Vendoo, so the two are level, not ahead."""
         self.mark_synced_on(self.revision.id)
-        pulled = ListingRepo(self.db).save_revision(
+        pulled = listing_persistence.save_revision(self.db,
             self.conv.id, {**LISTING, "title": "Vendoo's title"}, source="vendoo_pull",
         )
         self.mark_synced_on(pulled.id)
         self.assertFalse(self.flag())
 
     def test_an_unbound_listing_has_nothing_to_be_ahead_of(self):
-        ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "price": 42}, source="user_form")
         self.assertFalse(self.flag())
 
     def test_the_sidebar_list_carries_the_same_answer(self):
         self.mark_synced_on(self.revision.id)
-        ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "price": 42}, source="user_form")
         rows = self.client.get("/api/conversations").json()
         row = next(item for item in rows if item["id"] == self.conv.id)
         self.assertTrue(row["unsent_edits"])
 
     def test_a_revision_that_only_normalizes_is_not_an_unsent_edit(self):
         """Listings saved before pulls were normalized carry such a revision on top."""
-        pulled = ListingRepo(self.db).save_revision(
+        pulled = listing_persistence.save_revision(self.db,
             self.conv.id, {**LISTING, "size": "M", "brand": "Levi's"}, source="vendoo_sync",
         )
         self.mark_synced_on(pulled.id)
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.conv.id, {**LISTING, "size": "M", "brand": "Levi's", "title": "Levi's M 501"},
             source="dropdown_normalize",
         )
@@ -137,7 +138,7 @@ class UnsentEditsTest(unittest.TestCase):
         """Chrome may never have answered a sync; the import itself is the baseline."""
         conv_id = self.import_draft()
         listing = ListingRepo(self.db).get_revisions(conv_id)[0].listing_json
-        ListingRepo(self.db).save_revision(conv_id, {**listing, "price": 7}, source="user_form")
+        listing_persistence.save_revision(self.db, conv_id, {**listing, "price": 7}, source="user_form")
         self.assertTrue(self.flag(conv_id))
         rows = self.client.get("/api/conversations").json()
         self.assertTrue(next(item for item in rows if item["id"] == conv_id)["unsent_edits"])
@@ -154,7 +155,7 @@ class UnsentEditsTest(unittest.TestCase):
     def test_a_regenerated_listing_live_directly_is_not_unsent_against_vendoo(self):
         """Once it is listed directly, Vendoo's older copy no longer counts."""
         self.mark_synced_on(self.revision.id)
-        regenerated = ListingRepo(self.db).save_revision(
+        regenerated = listing_persistence.save_revision(self.db,
             self.conv.id, {**LISTING, "title": "Levi's 501 Regenerated"}, source="model",
         )
         self.assertTrue(self.flag())
@@ -164,13 +165,13 @@ class UnsentEditsTest(unittest.TestCase):
 
     def test_an_edit_after_a_direct_listing_is_unsent(self):
         self.list_directly(self.revision.id)
-        ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "price": 42}, source="user_form")
         self.assertTrue(self.flag())
         self.assertTrue(self.row_flag())
 
     def test_every_live_marketplace_must_have_the_edit(self):
         self.list_directly(self.revision.id, "ebay")
-        updated = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        updated = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "price": 42}, source="user_form")
         self.list_directly(updated.id, "etsy")
         self.assertTrue(self.flag())
         self.list_directly(updated.id, "ebay")
@@ -178,7 +179,7 @@ class UnsentEditsTest(unittest.TestCase):
 
     def test_a_direct_draft_leaves_vendoo_as_the_baseline(self):
         self.mark_synced_on(self.revision.id)
-        edited = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        edited = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "price": 42}, source="user_form")
         self.list_directly(edited.id, state="draft")
         self.assertTrue(self.flag())
 
@@ -188,7 +189,7 @@ class UnsentEditsTest(unittest.TestCase):
         from vendoo_studio.services import vendoo_watch
 
         self.mark_synced_on(self.revision.id)
-        ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "price": 42}, source="user_form")
         with mock.patch.object(vendoo_watch, "listings_match", wraps=vendoo_watch.listings_match) as match:
             for _ in range(3):
                 rows = self.client.get("/api/conversations").json()

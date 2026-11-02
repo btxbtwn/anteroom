@@ -10,8 +10,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from vendoo_studio.models.depop_fields import depop_size_for, ensure_depop_category_optionals
-from vendoo_studio.models.validation import normalize_listing_dropdowns
+from vendoo_studio.services.depop_fields import depop_size_for, ensure_depop_category_optionals
+from vendoo_studio.services.validation import normalize_listing_dropdowns
 from vendoo_studio.services.chat_listing import _field_commands
 from vendoo_studio.services.department_review import _recommendation, review_department
 from vendoo_studio.services.depop_measurements import depop_measurements_from_notes, sync_depop_measurements

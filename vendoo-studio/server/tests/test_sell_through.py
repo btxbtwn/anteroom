@@ -10,8 +10,9 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import sell_through
 from vendoo_studio.services.sell_through import (
     CohortStats,
@@ -199,7 +200,7 @@ class CollectOutcomesTest(unittest.TestCase):
         conv.status = status
         self.db.commit()
         for price in prices:
-            ListingRepo(self.db).save_revision(
+            listing_persistence.save_revision(self.db,
                 conv.id,
                 {"title": "Tee", "price": price, "category_path": "Women > Jeans", "brand": "Levi's"},
                 "generate",
@@ -306,7 +307,7 @@ class CollectOutcomesCostTest(unittest.TestCase):
         )
         conv.status = "sold"
         self.db.commit()
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             conv.id,
             {"title": "Tee", "price": price, "category_path": "Women > Jeans", "brand": "Levi's"},
             "generate",
@@ -346,7 +347,7 @@ class CollectOutcomesCostTest(unittest.TestCase):
     def test_a_new_revision_invalidates_it(self):
         conv = self._sold_conversation()
         self.assertEqual(collect_outcomes(self.db)[0].sold_price, 44)
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             conv.id,
             {"title": "Tee", "price": 30, "category_path": "Women > Jeans", "brand": "Levi's"},
             "price_drop",

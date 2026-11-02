@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.diagnostics import DiagnosticRun, FieldObservation  # noqa: F401
@@ -79,7 +80,7 @@ class ConversationActivityRouteTest(unittest.TestCase):
         return response.json()
 
     def add_job(self, status: str) -> Job:
-        revision = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Nike tee"}, "generate")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike tee"}, "generate")
         return JobRepo(self.db).create(self.conv.id, revision.id, revision.listing_json, status=status)
 
     def test_idle_listing_reports_done_and_the_latest_message(self):
@@ -92,14 +93,14 @@ class ConversationActivityRouteTest(unittest.TestCase):
 
     def test_scoped_agent_revision_preserves_other_fields_and_reports_its_lock(self):
         repo = ListingRepo(self.db)
-        repo.save_revision(self.conv.id, {"title": "New seller title", "price": 30,
+        listing_persistence.save_revision(repo.db, self.conv.id, {"title": "New seller title", "price": 30,
                            "ebay_specifics": {"Size": "34"}}, "generate")
         work = activity.begin(self.conv.id, "Editing size")
         work.fields = ("ebay_specifics.Size",)
         self.assertEqual(self.activity()["locked_fields"], ["ebay_specifics.Size"])
         token = activity.edit_fields.set(work.fields)
         try:
-            repo.save_revision(self.conv.id, {"title": "Old agent title", "price": 10,
+            listing_persistence.save_revision(repo.db, self.conv.id, {"title": "Old agent title", "price": 10,
                                "ebay_specifics": {"Size": "36"}}, "model_refinement")
         finally:
             activity.edit_fields.reset(token)
@@ -115,7 +116,7 @@ class ConversationActivityRouteTest(unittest.TestCase):
         from vendoo_studio.services.listing_editor import save_listing_edit
 
         repo = ListingRepo(self.db)
-        original = repo.save_revision(self.conv.id, {"title": "Tee", "ebay_specifics": {"Size": "34"}}, "generate")
+        original = listing_persistence.save_revision(repo.db, self.conv.id, {"title": "Tee", "ebay_specifics": {"Size": "34"}}, "generate")
         work = activity.begin(self.conv.id, "Editing size")
         work.fields = ("ebay_specifics.Size",)
         with self.assertRaises(HTTPException) as error:
@@ -124,14 +125,14 @@ class ConversationActivityRouteTest(unittest.TestCase):
         self.assertEqual(repo.get_current(self.conv.id).current_revision_id, original.id)
 
     def test_scoped_etsy_patch_survives_key_normalization_and_readback(self):
-        from vendoo_studio.models.etsy_fields import etsy_who_raw, etsy_when_raw
+        from vendoo_studio.services.etsy_fields import etsy_who_raw, etsy_when_raw
         from vendoo_studio.services.chat_listing import save_listing_revision
         from vendoo_studio.services.listing_patch import apply_json_patch
 
         repo = ListingRepo(self.db)
         before = {"title": "Vintage tee", "price": 30, "etsy_specifics": {},
                   "ebay_specifics": {"Size": "XL"}}
-        repo.save_revision(self.conv.id, before, "model")
+        listing_persistence.save_revision(repo.db, self.conv.id, before, "model")
         ops = [{"op": "add", "path": "/etsy_specifics/whoMade", "value": "Another company or person"},
                {"op": "add", "path": "/etsy_specifics/whenMade", "value": "2005"}]
         token = activity.edit_fields.set(("etsy_specifics.whoMade", "etsy_specifics.whenMade"))

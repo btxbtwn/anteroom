@@ -15,11 +15,11 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from ebay_workspace_fake import ITEM_ID, WorkspaceEbay, order
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.ebay_action import EbayAction
-from vendoo_studio.repositories.queries import ListingRepo
 from vendoo_studio.services import ebay_actions, ebay_client, ebay_workspace, keychain
 from vendoo_studio.services.vendoo_import import merge_notes
 
@@ -76,7 +76,7 @@ def workspace(tmp_path, monkeypatch):
         "vendooListingUrls": {"ebay": f"https://www.ebay.com/itm/{ITEM_ID}"},
     })))
     db.commit()
-    ListingRepo(db).save_revision("coat", {"title": "Test wool coat", "price": 50, "cost": 5}, "user")
+    listing_persistence.save_revision(db, "coat", {"title": "Test wool coat", "price": 50, "cost": 5}, "user")
 
     def test_db():
         with sessions() as session:
@@ -190,7 +190,7 @@ def test_finance_end_date_never_extends_into_the_future(monkeypatch):
 
 
 def test_missing_costs_remain_unknown(workspace):
-    ListingRepo(workspace.db).save_revision("coat", {"title": "Coat", "price": 50}, "user")
+    listing_persistence.save_revision(workspace.db, "coat", {"title": "Coat", "price": 50}, "user")
     row = workspace.client.get("/api/ebay/read/finances").json()["rows"][0]
     assert row["fields"]["Profit"] is None
 

@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.providers.xiaomi_mimo import StreamChunk, chunk_text, chunk_thinking
@@ -360,7 +361,7 @@ class PersistListingTest(unittest.TestCase):
         self.assertFalse(any("Answer the questions above" in note for note in notes))
 
     def test_generated_listing_preserves_categories_after_field_discovery(self):
-        ListingRepo(self.db).save_revision(self.conv.id, {
+        listing_persistence.save_revision(self.db, self.conv.id, {
             "category_path": "Clothing > Women's Tops",
             "marketplace_categories": {"ebay": "Fashion > Shirts"},
         }, source="fill_learned_fields")
@@ -871,7 +872,7 @@ class PersistListingTest(unittest.TestCase):
         self.assertEqual(spaced["ebay_specifics"]["inseam"], "34")
 
     def test_missing_condition_becomes_vendoo_general_value(self):
-        from vendoo_studio.models.validation import normalize_listing_dropdowns
+        from vendoo_studio.services.validation import normalize_listing_dropdowns
 
         blank = {"title": "Levi's 34 Jeans", "department": "Men"}
         self.assertTrue(normalize_listing_dropdowns(blank))
@@ -1061,7 +1062,7 @@ class PersistListingTest(unittest.TestCase):
             "categoryOverride": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
         })
         self.db.commit()
-        listing_repo.save_revision(self.conv.id, {
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
             "title": "Casa San Bord M Graphic T-Shirt",
             "department": "Women",
             "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
@@ -1092,7 +1093,7 @@ class PersistListingTest(unittest.TestCase):
     def test_apply_payload_keeps_sweatshirt_category(self):
         listing_repo = ListingRepo(self.db)
         sweatshirt_path = "Clothing, Shoes & Accessories > Men > Men's Clothing > Sweaters"
-        listing_repo.save_revision(self.conv.id, {
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
             "title": "Fruit of the Loom M Retro Graphic Sweatshirt Blue",
             "department": "Men",
             "category_path": MEN_TSHIRT_PATH,
@@ -1111,7 +1112,7 @@ class PersistListingTest(unittest.TestCase):
 
     def test_apply_payload_saves_missing_fields_into_listing_json(self):
         listing_repo = ListingRepo(self.db)
-        listing_repo.save_revision(self.conv.id, {
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
             "title": "Chaos Ink Graphic Tee",
             "etsy_specifics": {"Occasion": ""},
         }, source="model")
@@ -1141,13 +1142,13 @@ class PersistListingTest(unittest.TestCase):
         self.assertTrue(any("Saved to the listing JSON" in (m.text or "") for m in messages))
 
     def test_repeated_blank_repairs_preserve_required_values_and_unknown_price(self):
-        from vendoo_studio.models.validation import validate_listing
+        from vendoo_studio.services.validation import validate_listing
         from vendoo_studio.repositories.queries import RegistryRepo
 
         RegistryRepo(self.db).upsert_schema_fields("poshmark", None, [{"label": "Original Price", "selector": "#originalPrice"}])
 
         repo = ListingRepo(self.db)
-        repo.save_revision(self.conv.id, {
+        listing_persistence.save_revision(repo.db, self.conv.id, {
             "title": "XS Streetwear Graphic T-Shirt Black Slim Fit",
             "brand": "Unbranded", "size": "XS", "department": "Women",
             "description": "Graphic jersey tee.\nFlaws: Light lint.\nMeasurements: Pit to pit 14 inches; length 24.5 inches.",
@@ -1198,7 +1199,7 @@ class PersistListingTest(unittest.TestCase):
         asyncio.run(read_saved_listing())
 
     def test_poshmark_original_price_is_always_zero(self):
-        from vendoo_studio.models.validation import validate_listing
+        from vendoo_studio.services.validation import validate_listing
 
         for value in (None, "", "   ", "unknown", 40, "90"):
             data = {"poshmark_specifics": {"originalPrice": value}}
@@ -1208,7 +1209,7 @@ class PersistListingTest(unittest.TestCase):
 
     def test_apply_missing_fields_repairs_and_saves_when_ask_chat_format_breaks(self):
         listing_repo = ListingRepo(self.db)
-        listing_repo.save_revision(self.conv.id, {
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
             "title": "Chaos Ink Graphic Tee",
             "etsy_specifics": {},
         }, source="model")
@@ -1272,7 +1273,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         db = self.Session()
         repo = ConversationRepo(db)
         conv = repo.create(title="New Listing")
-        repo.add_photo(conv.id, "a.jpg", "a.jpg", "image/jpeg", 10)
+        listing_persistence.add_photo(repo.db, conv.id, "a.jpg", "a.jpg", "image/jpeg", 10)
         self.conv_id = conv.id
         db.close()
 
@@ -1561,7 +1562,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
             first = await client.post(f"/api/conversations/{self.conv_id}/generate")
             self.assertNotIn("Error:", first.text)
             db = self.Session()
-            ConversationRepo(db).add_photo(self.conv_id, "b.jpg", "b.jpg", "image/jpeg", 10)
+            listing_persistence.add_photo(db, self.conv_id, "b.jpg", "b.jpg", "image/jpeg", 10)
             db.close()
             second = await client.post(f"/api/conversations/{self.conv_id}/generate")
             self.assertNotIn("Error:", second.text)
@@ -1574,7 +1575,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         async def changing_reply(messages, stream=True):
             if "Generate a complete listing" in str(messages[-1].get("content") or ""):
                 db = self.Session()
-                ConversationRepo(db).add_photo(self.conv_id, "new.jpg", "new.jpg", "image/jpeg", 10)
+                listing_persistence.add_photo(db, self.conv_id, "new.jpg", "new.jpg", "image/jpeg", 10)
                 db.close()
             async for chunk in original_chat(messages, stream=stream):
                 yield chunk
@@ -1651,7 +1652,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         from datetime import UTC, datetime, timedelta
 
         with self.Session() as db:
-            ListingRepo(db).save_revision(self.conv_id, {
+            listing_persistence.save_revision(db, self.conv_id, {
                 "category_path": MEN_TSHIRT_PATH, "quantity": 1,
             }, source="category_analysis")
             now = datetime.now(UTC)
@@ -1666,7 +1667,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
                     },
                 })
                 db.commit()
-                ListingRepo(db).save_revision(prior.id, {
+                listing_persistence.save_revision(db, prior.id, {
                     "title": prior.title, "brand": "M&O Gold", "quantity": 1,
                     "category_path": MEN_TSHIRT_PATH, "price": 100,
                 }, source="vendoo_import")

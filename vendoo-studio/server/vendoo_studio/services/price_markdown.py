@@ -17,7 +17,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
+from vendoo_studio.services import listing_persistence
+from vendoo_studio.services.validation import normalize_listing_dropdowns, validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.price_drop import (
     PRICE_DROP_SOURCE,
@@ -111,7 +112,7 @@ def apply_price_drop(
 
     photo_count = len(ConversationRepo(db).get_photos(conv_id))
     validation = validate_listing(updated, photo_count, require_photos=True)
-    revision = listing_repo.save_revision(
+    revision = listing_persistence.save_revision(listing_repo.db,
         conv_id=conv_id,
         listing_json=updated,
         source=PRICE_DROP_SOURCE,

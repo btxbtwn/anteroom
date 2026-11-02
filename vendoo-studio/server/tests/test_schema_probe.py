@@ -11,13 +11,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.job import Job  # noqa: F401
 from vendoo_studio.models.listing import Listing, ListingRevision  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.repositories.queries import JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import JobRepo
 from vendoo_studio.services.category_catalog import remember_schema
 from vendoo_studio.services.schema_probe import (
     SCHEMA_PROBE_FLAG,
@@ -82,7 +83,7 @@ class SchemaProbeServiceTest(unittest.TestCase):
         self.conv = Conversation(title="Probe listing")
         self.db.add(self.conv)
         self.db.commit()
-        ListingRepo(self.db).save_revision(self.conv.id, {
+        listing_persistence.save_revision(self.db, self.conv.id, {
             "title": "Nike tee",
             "category_path": MEN_PATH,
             "ebay_specifics": {},

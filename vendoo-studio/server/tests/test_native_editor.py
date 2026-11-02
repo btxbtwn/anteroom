@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
@@ -28,7 +29,7 @@ class NativeEditorTest(unittest.TestCase):
         from vendoo_studio.services.chat_listing import apply_listing_payload
 
         snapshot = {**self.listing, "direct_category_ids": {"depop": "menswear_jeans"}}
-        ListingRepo(self.db).save_revision(self.conv.id, snapshot, "category_analysis")
+        listing_persistence.save_revision(self.db, self.conv.id, snapshot, "category_analysis")
         before = len(JobRepo(self.db).list_by_conversation(self.conv.id))
         with patch("vendoo_studio.services.chat_forms.get_selected_marketplaces", return_value=["poshmark", "depop"]), \
              patch("vendoo_studio.services.chat_forms.vinted_browser.category_rows", return_value=[{"title": "Jeans"}]):
@@ -57,7 +58,7 @@ class NativeEditorTest(unittest.TestCase):
             {"path": "mercari_specifics.condition", "label": "Condition", "options": []},
         ]}
         listing[native_contract.KEY] = native_contract.capture(listing, {"mercari": form}, ["mercari"])
-        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "native_schema")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "native_schema")
         answer = self.client.get(f"{self.url}/mercari/form?revision_id={revision.id}")
         self.assertEqual(answer.status_code, 200, answer.text)
         self.assertEqual(next(row for row in answer.json()["fields"]
@@ -87,7 +88,7 @@ class NativeEditorTest(unittest.TestCase):
         from vendoo_studio.services.native_field_fill import load_forms
 
         snapshot = {**self.listing, "direct_category_ids": {"depop": "menswear_jeans"}}
-        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "category_analysis")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "category_analysis")
         with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
             answer = self.client.get(f"{self.url}/depop/form")
             generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"depop"}))
@@ -117,7 +118,7 @@ class NativeEditorTest(unittest.TestCase):
                     {"path": "price", "label": "Price", "section": "Pricing", "input_type": "number"},
                 ]}
                 snapshot[native_contract.KEY] = native_contract.capture(snapshot, {market: form}, [market])
-                revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+                revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
                 before = copy.deepcopy(revision.listing_json)
                 with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
                     answer = self.client.get(f"{self.url}/{market}/form?revision_id={revision.id}")
@@ -149,7 +150,7 @@ class NativeEditorTest(unittest.TestCase):
                      "option_values": {"Nike": "Nike"}},
                 ]}
         snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"ebay": form}, ["ebay"])
-        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
         answer = self.client.get(f"{self.url}/ebay/form?revision_id={revision.id}")
         self.assertEqual(answer.status_code, 200, answer.text)
         self.assertEqual(answer.json()["marketplace"], "ebay")
@@ -168,7 +169,7 @@ class NativeEditorTest(unittest.TestCase):
                 ]}
         snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"ebay": form}, ["ebay"])
         snapshot["ebay_specifics"].pop("Condition")
-        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
         answer = self.client.get(f"{self.url}/ebay/form?revision_id={revision.id}")
         self.assertEqual(answer.status_code, 200, answer.text)
         self.assertEqual(answer.json()["marketplace"], "ebay")
@@ -184,7 +185,7 @@ class NativeEditorTest(unittest.TestCase):
             {"path": "mercari_specifics.nativeSizeId", "label": "Size", "options": ["L"]}]}
         snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"mercari": form}, ["mercari"])
         snapshot["direct_category_ids"]["mercari"] = "men/shoes"
-        ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
         answer = self.client.get(f"{self.url}/mercari/form")
         self.assertEqual(answer.status_code, 200)
         self.assertFalse(answer.json()["known"])
@@ -200,7 +201,7 @@ class NativeEditorTest(unittest.TestCase):
         self.conv = ConversationRepo(self.db).create(title="Private native form test")
         self.listing = {"title": "Nike L Tee", "description": "Details", "brand": "Nike", "size": "L", "price": 20,
                         "condition": "Pre-Owned - Good", "direct_category_ids": {"ebay": "15687", "poshmark": "men/shirts"}}
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, self.listing, "test")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, self.listing, "test")
         app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(app)
         self.url = f"/api/conversations/{self.conv.id}/native-marketplaces"
@@ -343,7 +344,7 @@ class NativeEditorTest(unittest.TestCase):
         form = native_editor.sellwild_form(self.listing, self.conv.id, self.db, coupons=[])
         snapshot = copy.deepcopy(self.listing)
         snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"sellwild": form}, ["sellwild"])
-        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
         self.sellwild.return_value = {"ship_from": "Seller address", "default_parcel": "USPS_SoftPack",
                                      "coupons": [{"id": 117, "name": "25OFF", "discountType": "percentage", "discountValue": 25}]}
         with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
@@ -448,7 +449,7 @@ class NativeEditorTest(unittest.TestCase):
 
     def test_clearing_existing_depop_age_and_source_persists(self):
         previous = {**self.listing, "depop_specifics": {"style": ["Casual", "Retro", "Minimalist"], "age": "Modern", "source": "Preloved"}}
-        ListingRepo(self.db).save_revision(self.conv.id, previous, "test")
+        listing_persistence.save_revision(self.db, self.conv.id, previous, "test")
         submitted = {**previous, "quantity": 3, "depop_specifics": {"style": ["casual", "retro"], "age": [], "source": []}}
         response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": submitted})
         self.assertEqual(response.status_code, 200, response.text)

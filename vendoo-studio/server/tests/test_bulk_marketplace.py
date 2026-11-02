@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
@@ -67,7 +68,7 @@ def _item(db, title="Coat", *, live_on_ebay=False, status="active"):
     conv = Conversation(title=title, status=status)
     db.add(conv)
     db.commit()
-    ListingRepo(db).save_revision(conv.id, {"title": title, "price": 40}, "test")
+    listing_persistence.save_revision(db, conv.id, {"title": title, "price": 40}, "test")
     if live_on_ebay:
         MarketplaceListingRepo(db).save(conv.id, "ebay", {"state": "published", "listing_id": "123456789012", "listing_url": EBAY_URL})
     return conv
@@ -133,7 +134,7 @@ def test_a_changed_item_needs_a_new_review(db, client, calls, change):
     conv = _item(db, live_on_ebay=True)
     row = _preview(client, [conv.id], "relist", ["ebay"])[0]
     if change == "revision":
-        ListingRepo(db).save_revision(conv.id, {"title": "New coat", "price": 30}, "user_form")
+        listing_persistence.save_revision(db, conv.id, {"title": "New coat", "price": 30}, "user_form")
     elif change == "photo":
         db.add(Photo(conversation_id=conv.id, stored_filename="n.png", original_filename="n.png", mime_type="image/png",
                      size_bytes=1, checksum="n"))
@@ -259,7 +260,7 @@ def test_update_writes_the_reviewed_revision_once_and_never_lists_or_delists(db,
 def test_update_after_an_edit_needs_a_new_review(db, client, updates):
     conv = _item(db, live_on_ebay=True)
     row = _preview(client, [conv.id], "update", ["ebay"])[0]
-    ListingRepo(db).save_revision(conv.id, {"title": "Edited", "price": 35}, "user_form")
+    listing_persistence.save_revision(db, conv.id, {"title": "Edited", "price": 35}, "user_form")
     assert _perform(client, _body(row)).status_code == 409
     assert updates == []
 

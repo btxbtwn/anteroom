@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
@@ -41,7 +42,7 @@ class PhotoThumbnailTest(unittest.TestCase):
         self.photos = []
         for name in ("back.jpg", "front.jpg"):
             (self.photos_dir / name).write_bytes(_jpeg(1200, 900))
-            photo = repo.add_photo(
+            photo = listing_persistence.add_photo(repo.db,
                 self.conv.id,
                 name,
                 name,

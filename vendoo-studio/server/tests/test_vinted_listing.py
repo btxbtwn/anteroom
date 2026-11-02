@@ -13,10 +13,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.services.photo_store import LocalPhotoStore
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import native_marketplaces as native
 from vendoo_studio.services.marketplace_delist import listing_id
 from vendoo_studio.services.vinted_listing import apply_vinted_listing, map_vinted_category_path
@@ -78,8 +79,8 @@ class VintedListRouteTest(unittest.TestCase):
             "primaryColor": "Black",
         }
         self.conv = ConversationRepo(self.db).create(title=listing["title"])
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
-        ConversationRepo(self.db).add_photo(self.conv.id, "test.jpg", "test.jpg", "image/jpeg", 1)
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
+        listing_persistence.add_photo(self.db, self.conv.id, "test.jpg", "test.jpg", "image/jpeg", 1)
         self.base = f"/api/conversations/{self.conv.id}/native-marketplaces"
         self.bridge = self.enterContext(patch("vendoo_studio.services.native_marketplaces.browser_bridge.request", new_callable=AsyncMock))
         self.draft_url = "https://www.vinted.com/items/42/edit"

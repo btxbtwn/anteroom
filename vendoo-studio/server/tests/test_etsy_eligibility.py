@@ -16,9 +16,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
-from vendoo_studio.models.etsy_fields import etsy_eligible
+from vendoo_studio.services.etsy_fields import etsy_eligible
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.etsy_audit import etsy_not_allowed_live
 from vendoo_studio.services.vendoo_item_build import build_vendoo_item, marketplaces_left_empty
@@ -198,7 +199,7 @@ class NotAllowedReportTest(unittest.TestCase):
 
     def add(self, title: str, etsy: dict, notes: dict) -> str:
         conv = self.convs.create(title=title, notes=json.dumps(notes))
-        self.listings.save_revision(conv.id, listing(etsy, title=title), "test")
+        listing_persistence.save_revision(self.listings.db, conv.id, listing(etsy, title=title), "test")
         return conv.id
 
     def seed(self) -> str:

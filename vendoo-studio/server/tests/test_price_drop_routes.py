@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
@@ -26,7 +27,7 @@ class PriceDropRouteTest(unittest.TestCase):
         self.db = SessionLocal()
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title="Price drop")
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.conv.id,
             {
                 "title": "Nike Tee",
@@ -173,7 +174,7 @@ class BatchMarkdownRouteTest(unittest.TestCase):
         listing = {"title": title, "description": "Soft.", "condition": "Pre-Owned - Good", "quantity": 1}
         if price is not None:
             listing["price"] = price
-        revision = self.listings.save_revision(conv.id, listing, source="generation")
+        revision = listing_persistence.save_revision(self.listings.db, conv.id, listing, source="generation")
         if synced:
             conv.notes = json.dumps({SYNCED_REVISION: revision.id})
             self.db.commit()
