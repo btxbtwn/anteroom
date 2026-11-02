@@ -14,7 +14,7 @@ export interface RelayedPhoto { id: string; mime_type: string; base64: string }
 // How long each command may take in Chrome, a little past the server's own wait.
 const COMMAND_TIMEOUT_MS: Record<string, number> = {
   "marketplace.execute": 200_000, "marketplace.result": 75_000, "marketplace.delete": 100_000, "job.cancel": 10_000,
-  "marketplace.vinted_categories": 45_000, "marketplace.vinted_brands": 45_000, "marketplace.sellwild_account": 45_000, "marketplace.sessions": 30_000, "marketplace.connect": 50_000,
+  "marketplace.vinted_categories": 45_000, "marketplace.vinted_brands": 45_000, "marketplace.sellwild_account": 45_000, "marketplace.sessions": 30_000, "marketplace.connect": 50_000, "marketplace.listing_state": 55_000,
 };
 const ERRORS: Record<string, string> = {
   not_connected: "Connect Chrome before loading the Poshmark form.",
@@ -45,7 +45,7 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
         }
         finish({ ok: data.ok === true, state: ["connected", "disconnected", "pending"].includes(data.state) ? data.state : "unavailable",
           extensionVersion: typeof data.extensionVersion === "string" ? data.extensionVersion.slice(0, 30) : "",
-          supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item: unknown) => item === "poshmark.form.read" || item === "marketplace.actions" || item === "vinted.choices" || item === "sellwild.account" || item === "marketplace.sessions") : [] });
+          supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item: unknown) => item === "poshmark.form.read" || item === "marketplace.actions" || item === "vinted.choices" || item === "sellwild.account" || item === "marketplace.sessions" || item === "facebook.listing") : [] });
       };
       const timeout = relay ? COMMAND_TIMEOUT_MS[relay.command.type] ?? 10_000 : action === "poshmark_form" ? 35000 : 2000;
       const timer = channel.setTimeout(() => finish({ ok: false, state: "unavailable", extensionVersion: "" }), timeout);
