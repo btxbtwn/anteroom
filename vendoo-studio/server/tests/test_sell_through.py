@@ -184,6 +184,9 @@ class HistorySuggestionTest(unittest.TestCase):
 
 class CollectOutcomesTest(unittest.TestCase):
     def setUp(self):
+        settings = {}
+        self.enterContext(patch("vendoo_studio.services.user_settings.read_settings", lambda: settings.copy()))
+        self.enterContext(patch("vendoo_studio.services.user_settings.update_settings", lambda mutate: mutate(settings)))
         engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
@@ -287,6 +290,9 @@ class CollectOutcomesCostTest(unittest.TestCase):
     """The dialog asks for this on every open; it must not rescan every time."""
 
     def setUp(self):
+        settings = {}
+        self.enterContext(patch("vendoo_studio.services.user_settings.read_settings", lambda: settings.copy()))
+        self.enterContext(patch("vendoo_studio.services.user_settings.update_settings", lambda mutate: mutate(settings)))
         self.engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
@@ -301,6 +307,9 @@ class CollectOutcomesCostTest(unittest.TestCase):
         self.db.close()
 
     def _sold_conversation(self, price=50):
+        from vendoo_studio.models.marketplace_sale import MarketplaceSale
+        from vendoo_studio.services.sales_ledger import order_basis
+
         conv = ConversationRepo(self.db).create(
             title="Tee",
             notes=json.dumps({"vendooStatus": "sold", "vendooSale": {"price": price - 6}}),
@@ -312,6 +321,11 @@ class CollectOutcomesCostTest(unittest.TestCase):
             {"title": "Tee", "price": price, "category_path": "Women > Jeans", "brand": "Levi's"},
             "generate",
         )
+        sale = MarketplaceSale(marketplace="ebay", order_id=conv.id, line_id="line", conversation_id=conv.id)
+        self.db.add(sale)
+        self.db.flush()
+        sale.financials = {"currency": "USD", "item_revenue": str(price - 6), "order_basis": order_basis(sale)}
+        self.db.commit()
         return conv
 
     def _count_selects(self, fn):
@@ -335,8 +349,8 @@ class CollectOutcomesCostTest(unittest.TestCase):
         self.assertGreater(queries, 2)
         again, cheap = self._count_selects(lambda: collect_outcomes(self.db))
         self.assertEqual(again, first)
-        # Only the two fingerprint aggregates — no conversation or revision scan.
-        self.assertEqual(cheap, 2)
+        # Only fingerprint aggregates; no item or revision scan.
+        self.assertEqual(cheap, 3)
 
     def test_a_new_sale_invalidates_it(self):
         self._sold_conversation()
@@ -356,6 +370,24 @@ class CollectOutcomesCostTest(unittest.TestCase):
         outcome = collect_outcomes(self.db)[0]
         self.assertEqual(outcome.first_price, 50)
         self.assertEqual(outcome.sold_price, 44)
+
+    def test_a_ledger_correction_invalidates_cached_pricing_evidence(self):
+        from vendoo_studio.models.marketplace_sale import MarketplaceSale
+
+        self._sold_conversation()
+        assert collect_outcomes(self.db)[0].sold_price == 44
+        sale = self.db.query(MarketplaceSale).one()
+        sale.financials = {**sale.financials, "item_revenue": "41"}
+        sale.financial_revision += 1
+        self.db.commit()
+        assert collect_outcomes(self.db)[0].sold_price == 41
+
+    def test_later_vendoo_notes_do_not_change_pricing_evidence(self):
+        conv = self._sold_conversation()
+        assert collect_outcomes(self.db)[0].sold_price == 44
+        conv.notes = json.dumps({"vendooStatus": "sold", "vendooSale": {"price": 999}})
+        self.db.commit()
+        assert collect_outcomes(self.db)[0].sold_price == 44
 
     def test_more_sold_items_than_one_id_batch(self):
         for index in range(5):

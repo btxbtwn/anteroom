@@ -1,6 +1,7 @@
 // Named commands other than marketplace actions: read-only choices for the seller's
 // editor and Connections, from their own marketplace sessions, and opening a sign-in page.
 const CLOUD_READS = {
+  'marketplace.sales_history': ({ marketplace, settled }) => readMarketplaceOrderHistory(marketplace, settled),
   'marketplace.vinted_categories': async () => ({ options: await vintedCategoryOptions() }),
   'marketplace.vinted_brands': async ({ query, category }) => ({ options: await vintedBrandOptions({ query, category }) }),
   'marketplace.sellwild_account': async () => sellwildAccountChoices(Date.now() + 25000),

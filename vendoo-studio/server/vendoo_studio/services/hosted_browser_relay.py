@@ -34,17 +34,20 @@ VINTED_CHOICES = "vinted.choices"
 SELLWILD_ACCOUNT = "sellwild.account"
 # Checking which marketplaces Chrome is signed in to, and opening one's sign-in page there.
 MARKETPLACE_SESSIONS = "marketplace.sessions"
+SALES_HISTORY = "marketplace.sales_history"
 # The Bridge version that first declares each capability, and what it lets the web do.
 NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
          SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices"),
-         MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in")}
+         MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in"),
+         SALES_HISTORY: ("0.2.47", "read marketplace orders")}
 
 # Each command, and the capability the Bridge must declare to receive it.
 COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
             "marketplace.delete": MARKETPLACE_ACTIONS, "job.cancel": MARKETPLACE_ACTIONS,
             "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES,
             "marketplace.sellwild_account": SELLWILD_ACCOUNT,
-            "marketplace.sessions": MARKETPLACE_SESSIONS, "marketplace.connect": MARKETPLACE_SESSIONS}
+            "marketplace.sessions": MARKETPLACE_SESSIONS, "marketplace.connect": MARKETPLACE_SESSIONS,
+            "marketplace.sales_history": SALES_HISTORY}
 # A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
 CONTRACT = ("type", "job_id", "message_id", "payload")
 # The page asks again as soon as it answers, and at least this often while idle.
@@ -61,6 +64,10 @@ class BrowserRelay(ReplyWaits):
 
     def _can(self, capability: str) -> bool:
         return capability in self._capabilities and time.monotonic() - self._seen_at < SEEN_FOR_S
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        return self._capabilities
 
     @property
     def connected(self) -> bool:

@@ -463,6 +463,11 @@ class SummarizeAnalyticsTest(unittest.TestCase):
 
 class LoadAnalyticsTest(unittest.TestCase):
     def setUp(self):
+        from vendoo_studio.services import user_settings
+        from vendoo_studio.services.vendoo_sales_archive import ARCHIVED_KEY
+
+        # Each test imports new fixtures before its first archive read.
+        user_settings.update_settings(lambda payload: payload.pop(ARCHIVED_KEY, None))
         self.db = SessionLocal()
         repo = ConversationRepo(self.db)
         self.sold = repo.create(title="Imported tee")
