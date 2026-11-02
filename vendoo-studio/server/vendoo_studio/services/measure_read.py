@@ -164,6 +164,7 @@ async def _read_once(provider, photos: list[dict], garment: str, measures: list[
         stick = next((s for s in (photo or {}).get("sticks", []) if s["stick"] == spot.get("stick")), None)
         if stick is None:
             continue
+        assert photo is not None
         picked = [n for n in spot.get("tiles") or [] if isinstance(n, int) and 1 <= n <= len(stick["tiles"])][:TILES_PER_MEASURE]
         if not picked:
             continue

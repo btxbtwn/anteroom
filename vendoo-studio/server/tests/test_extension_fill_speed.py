@@ -9,12 +9,13 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.catalog import CategorySchema  # noqa: F401
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.models.fill_log import FillLogEntry
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services.job_metrics import fill_success_stats, job_timing
 from extension_sources import background_source
 
@@ -31,7 +32,7 @@ class _DbTest(unittest.TestCase):
         Base.metadata.create_all(engine)
         self.db = sessionmaker(bind=engine)()
         self.conv = ConversationRepo(self.db).create(title="Tee")
-        revision = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Tee"}, source="model")
+        revision = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Tee"}, source="model")
         self.job = JobRepo(self.db).create(
             conv_id=self.conv.id, approved_revision_id=revision.id,
             listing_snapshot={"title": "Tee"}, status="completed", vendoo_item_id="item-1",

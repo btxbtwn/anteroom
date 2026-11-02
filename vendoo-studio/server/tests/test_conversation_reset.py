@@ -15,6 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
@@ -62,14 +63,14 @@ class ConversationResetTest(unittest.TestCase):
         ConversationRepo(self.db).add_message(self.conv.id, "user", "make it cheaper")
         stored = "front.jpg"
         (Path(self.photos_tmp.name) / stored).write_bytes(JPEG_BYTES)
-        ConversationRepo(self.db).add_photo(
+        listing_persistence.add_photo(self.db,
             self.conv.id,
             "front.jpg",
             stored,
             "image/jpeg",
             len(JPEG_BYTES),
         )
-        revision = ListingRepo(self.db).save_revision(
+        revision = listing_persistence.save_revision(self.db,
             self.conv.id,
             {"title": "Nike tee", "description": "Soft cotton", "price": 20},
             "generate",
@@ -337,7 +338,7 @@ class ConversationResetTest(unittest.TestCase):
 
     def test_reset_keep_inputs_carries_listing_facts_into_item_details(self):
         self.conv.notes = json.dumps({"condition": "Good"})
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.conv.id,
             {
                 "title": "Nike tee",
@@ -382,7 +383,7 @@ class ConversationResetTest(unittest.TestCase):
         self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id), [])
 
     def test_reset_without_keep_inputs_carries_nothing(self):
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.conv.id,
             {"title": "Nike tee", "description": "Flaws: small stain near the hem.", "cost": 1.5},
             "generate",
@@ -400,7 +401,7 @@ class ConversationResetTest(unittest.TestCase):
         self.assertEqual(renamed.status_code, 200, renamed.text)
         self.assertTrue(json.loads(renamed.json()["notes"])["titlePinned"])
 
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Nike Tee Mens M"}, "user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike Tee Mens M"}, "user_form")
         self.db.expire_all()
         self.assertEqual(ConversationRepo(self.db).get(self.conv.id).title, "SKU-0042")
 
@@ -411,7 +412,7 @@ class ConversationResetTest(unittest.TestCase):
         self.assertEqual(regenerated.status_code, 200, regenerated.text)
         self.assertEqual(regenerated.json()["title"], "SKU-0042")
 
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Nike Tee Mens M"}, "generate")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike Tee Mens M"}, "generate")
         self.db.expire_all()
         self.assertEqual(ConversationRepo(self.db).get(self.conv.id).title, "SKU-0042")
 
@@ -422,12 +423,12 @@ class ConversationResetTest(unittest.TestCase):
             cleared = self.client.post(f"/api/conversations/{self.conv.id}/reset")
         self.assertEqual(cleared.json()["title"], "New Listing")
 
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Nike Tee Mens M"}, "generate")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike Tee Mens M"}, "generate")
         self.db.expire_all()
         self.assertEqual(ConversationRepo(self.db).get(self.conv.id).title, "Nike Tee Mens M")
 
     def test_unrenamed_listing_follows_its_title(self):
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Nike Tee Mens M"}, "user_form")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike Tee Mens M"}, "user_form")
         self.db.expire_all()
         self.assertEqual(ConversationRepo(self.db).get(self.conv.id).title, "Nike Tee Mens M")
 

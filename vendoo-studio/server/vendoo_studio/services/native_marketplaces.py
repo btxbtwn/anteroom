@@ -370,7 +370,7 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
     if marketplace == "etsy":
-        from vendoo_studio.models.etsy_fields import etsy_eligible
+        from vendoo_studio.services.etsy_fields import etsy_eligible
 
         try:
             etsy_listings.connected_shop_id()
@@ -473,7 +473,8 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         except (OSError, ValueError) as exc:
             raise NativeMarketplaceError(409, "Could not preserve the approved photos. Review them and try again.") from exc
         if steps == ["publish"] and marketplace != "sellwild":
-            previous_job = repo.get(record.get("job_id")) if record.get("job_id") else None
+            previous_job_id = record.get("job_id")
+            previous_job = repo.get(previous_job_id) if previous_job_id else None
             previous_photos = (previous_job.listing_snapshot or {}).get(approved_photos.KEY, []) if previous_job else []
             previous_versions = [(row["id"], row["checksum"]) for row in previous_photos]
             current_versions = [(row["id"], row["checksum"]) for row in snapshot[approved_photos.KEY]]

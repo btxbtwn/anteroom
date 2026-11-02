@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 
-from vendoo_studio.models.validation import _description_follows_formula, _title_follows_formula, validate_listing
+from vendoo_studio.services.validation import _description_follows_formula, _title_follows_formula, validate_listing
 from vendoo_studio.services.seller_overrides import get_path
 
 

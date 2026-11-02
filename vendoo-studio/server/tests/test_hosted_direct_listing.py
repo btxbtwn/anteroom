@@ -9,6 +9,7 @@ from sqlalchemy import update
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services import approved_photos, hosted_job_watchdog
 from vendoo_studio.services.hosted_context import for_seller
 from vendoo_studio.services.photo_store import photo_store
@@ -122,9 +123,8 @@ def test_web_etsy_form_is_built_without_chrome(cloud, signing_keys, monkeypatch)
                'marketplace_category_ids': {'etsy': '1234'}, 'direct_category_ids': {'etsy': '1234'}}
     # Category IDs are written by category resolution, not the web's listing editor.
     from vendoo_studio.database import SessionLocal
-    from vendoo_studio.repositories.queries import ListingRepo
     with use(for_seller(USER_ID)), SessionLocal() as db:
-        ListingRepo(db).save_revision(identity, listing, 'test')
+        listing_persistence.save_revision(db, identity, listing, 'test')
 
     assert 'etsy' in client.get('/api/runtime', headers=alice).json()['marketplace_forms']
     forms = client.get(path + '/vendoo-api/fields', headers=alice)

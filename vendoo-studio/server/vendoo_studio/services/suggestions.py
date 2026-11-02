@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import json_value
 from vendoo_studio.models.conversation import Photo
-from vendoo_studio.models.ebay_fields import (
+from vendoo_studio.services.ebay_fields import (
     DEFAULT_EBAY_SEASONS,
     EBAY_SEASON_CUES,
     ebay_season_parts,

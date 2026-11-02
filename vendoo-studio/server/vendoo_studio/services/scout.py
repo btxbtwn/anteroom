@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.scout import ScoutCheck
@@ -159,7 +160,7 @@ def _start_listing(db: Session, check: ScoutCheck) -> Conversation:
         suffix = Path(name).suffix
         copy = f"{uuid.uuid4().hex}{suffix}"
         store.copy(name, copy)
-        repo.add_photo(
+        listing_persistence.add_photo(repo.db,
             conv_id=conv.id,
             original_filename=name,
             stored_filename=copy,

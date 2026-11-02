@@ -4,7 +4,7 @@ import threading
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
-from vendoo_studio.services import hosted_browser_relay
+from vendoo_studio.services import hosted_browser_relay, listing_persistence
 
 READS = 'marketplace.actions,vinted.choices'
 
@@ -81,11 +81,10 @@ def test_vinted_actions_are_offered_on_the_web(cloud, signing_keys):  # noqa: F8
     assert client.post(base + '/native-marketplaces/vinted/list', headers=alice,
                        json={'revision_id': 'r1'}).status_code == 400
     from vendoo_studio.database import SessionLocal
-    from vendoo_studio.repositories.queries import ListingRepo
     from vendoo_studio.services.hosted_context import for_seller
     from vendoo_studio.services.service_context import use
     with use(for_seller(USER_ID)), SessionLocal() as db:
-        revision = ListingRepo(db).save_revision(identity, {'title': 'Straight jeans', 'price': 20}, 'test').id
+        revision = listing_persistence.save_revision(db, identity, {'title': 'Straight jeans', 'price': 20}, 'test').id
     # A confirmed List with no Anteroom tab connecting Chrome is refused before anything starts.
     refused = client.post(base + '/native-marketplaces/vinted/list', headers=alice, json={'revision_id': revision, 'confirm': True})
     assert refused.status_code == 409 and 'connect Chrome first' in refused.json()['detail']

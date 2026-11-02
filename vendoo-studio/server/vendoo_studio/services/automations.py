@@ -30,6 +30,7 @@ from sqlalchemy import String, cast, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.automation import (
     Automation,
     AutomationApplication,
@@ -442,7 +443,7 @@ def apply_local(db: Session, conv_id: str, actions: list[dict], *, dry_run: bool
     changed = updated != listing
     if dry_run or not changed:
         return {"ok": True, "revision_id": revision.id if revision else None, "changed": changed, "notes": notes, "price": updated.get("price")}
-    saved = ListingRepo(db).save_revision(conv_id, updated, "automation", revision.id if revision else None)
+    saved = listing_persistence.save_revision(db, conv_id, updated, "automation", revision.id if revision else None)
     return {"ok": True, "revision_id": saved.id, "changed": True, "notes": notes, "price": updated.get("price")}
 
 
@@ -1041,6 +1042,14 @@ def _current(db: Session, conv_id: str) -> tuple[ListingRevision | None, dict | 
     return revision, revision.listing_json
 
 
+@overload
+def _original_price(db: Session, conv_id: str, current: float, *, persist: bool) -> float: ...
+
+
+@overload
+def _original_price(db: Session, conv_id: str, current: None, *, persist: bool) -> float | None: ...
+
+
 def _original_price(db: Session, conv_id: str, current: float | None, *, persist: bool) -> float | None:
     row = db.get(ItemPriceBaseline, conv_id)
     if row is not None:
@@ -1222,9 +1231,3 @@ def _naive(value: datetime | None) -> datetime | None:
 def _iso(value: datetime | None) -> str | None:
     stamp = as_utc(value)
     return stamp.isoformat() if stamp else None
-
-
-def jobs_for_run(db: Session, run_id: str) -> list[Job]:
-    """Jobs whose snapshot names this run. History reads the run summary; this is the check that the log exists."""
-    rows = db.query(Job).filter(Job.current_step == "automation").all()
-    return [row for row in rows if isinstance(row.listing_snapshot, dict) and row.listing_snapshot.get("run_id") == run_id]

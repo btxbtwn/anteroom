@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 from typing import Any
 
 from vendoo_studio.models.sizes import letter_size
@@ -351,20 +350,6 @@ def infer_ebay_season(listing: dict | None = None, *, ebay: dict | None = None) 
     return "Summer"
 
 
-def _append_ebay_seasons(kept: list[str], seasons: Iterable[str]) -> bool:
-    changed = False
-    for season in seasons:
-        canon = exact_ebay_season(str(season)) or (
-            str(season) if str(season) in VALID_EBAY_SEASONS else None
-        )
-        if not canon:
-            continue
-        if canon not in kept:
-            kept.append(canon)
-            changed = True
-    return changed
-
-
 def _pack_ebay_seasons(kept: list[str]) -> Any:
     if not kept:
         return "Summer"
@@ -686,7 +671,7 @@ def ensure_ebay_category_optionals(listing: dict) -> bool:
 
     # Vintage follows the item's era, never style words: a "Y2K" or "vintage-style"
     # tee made in the 2010s is not vintage. A modern Etsy When Made forces No.
-    from vendoo_studio.models.etsy_fields import etsy_when_is_modern, etsy_when_raw
+    from vendoo_studio.services.etsy_fields import etsy_when_is_modern, etsy_when_raw
 
     etsy = listing.get("etsy_specifics")
     when_made = etsy_when_raw(etsy if isinstance(etsy, dict) else {}, {**listing, "ebay_specifics": ebay})

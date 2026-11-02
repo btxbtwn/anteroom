@@ -6,8 +6,9 @@ import copy
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.etsy_fields import etsy_eligible
-from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
+from vendoo_studio.services import listing_persistence
+from vendoo_studio.services.etsy_fields import etsy_eligible
+from vendoo_studio.services.validation import normalize_listing_dropdowns, validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
 
 CORRUPT_SPECIFIC_KEYS = (
@@ -60,7 +61,8 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     from vendoo_studio.services.schema_probe import is_schema_probe_job
 
     conv_repo = ConversationRepo(db)
-    if not conv_repo.get(conv_id):
+    conv = conv_repo.get(conv_id)
+    if not conv:
         raise HTTPException(404, "Conversation not found")
 
     listing_repo = ListingRepo(db)
@@ -88,7 +90,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
             raise HTTPException(409, "The agent is editing: " + ", ".join(sorted(set(locked))))
     from vendoo_studio.services.vendoo_import import parse_notes
 
-    listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv_repo.get(conv_id).notes))
+    listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv.notes))
     from vendoo_studio.services.agent_categories import map_general_category
 
     map_general_category(db, previous_json, listing_data)
@@ -110,7 +112,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     previous_sku = str((revisions[0].listing_json if revisions else {}).get("sku") or "").strip()
     sku = str(listing_data.get("sku") or "").strip()
 
-    revision = listing_repo.save_revision(
+    revision = listing_persistence.save_revision(listing_repo.db,
         conv_id=conv_id,
         listing_json=listing_data,
         source=source,
@@ -132,7 +134,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     if note_updates:
         from vendoo_studio.services.vendoo_import import merge_notes
 
-        conv_repo.write_notes(conv_id, merge_notes(conv_repo.get(conv_id).notes, note_updates))
+        conv_repo.write_notes(conv_id, merge_notes(conv.notes, note_updates))
 
 
     record_correction(db, conv_id, revision.id, listing_data, changes, source="template" if source == "template" else "user_form")

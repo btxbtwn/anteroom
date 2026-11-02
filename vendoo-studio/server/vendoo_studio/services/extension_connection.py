@@ -636,6 +636,7 @@ async def dispatch_queued_jobs():
             from vendoo_studio.services.streaming import spawn
             spawn(run_send(job_id))
             return
+        assert message is not None
         sent = await extension_manager.send_message(message)
         if sent:
             await asyncio.to_thread(_set_job_status, job_id, "dispatched")
@@ -760,16 +761,6 @@ async def dispatch_open_listing(job) -> bool:
         log.info("extension did not open listing for job %s; opening Chrome directly", job.id)
         return False
     return bool(isinstance(result, dict) and result.get("ok"))
-
-
-async def dispatch_show_vendoo() -> bool:
-    if not extension_manager.connected:
-        return False
-    return await extension_manager.send_message(ProtocolMessage(
-        type="job.open_listing",
-        message_id=uuid.uuid4().hex[:12],
-        payload={"vendoo_url": "https://web.vendoo.co/app"},
-    ).model_dump(mode="json"))
 
 
 def _build_photo_list(conv_id: str, db) -> list[dict]:

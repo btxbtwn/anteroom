@@ -13,8 +13,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.routes import assistant as assistant_route
 from vendoo_studio.routes import attachments as attachments_route
 from vendoo_studio.routes import chat as chat_route
@@ -84,7 +85,7 @@ def listing_chat(store, monkeypatch):
     factory = sessionmaker(bind=engine)
     db = factory()
     conv = ConversationRepo(db).create(title="Tee")
-    ListingRepo(db).save_revision(conv.id, {"title": "Vintage Tee"}, source="user")
+    listing_persistence.save_revision(db, conv.id, {"title": "Vintage Tee"}, source="user")
     app = FastAPI()
     app.include_router(chat_route.router)
     app.include_router(conversations_route.router)

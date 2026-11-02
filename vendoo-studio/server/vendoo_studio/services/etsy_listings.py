@@ -17,7 +17,7 @@ from decimal import Decimal, InvalidOperation
 import httpx
 
 from vendoo_studio.services.photo_store import photo_store
-from vendoo_studio.models.etsy_fields import (
+from vendoo_studio.services.etsy_fields import (
     sanitize_etsy_tags, etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_raw, etsy_when_to_store, is_etsy_digital_listing,
 )
 from vendoo_studio.services import marketplace_accounts, marketplace_schemas
@@ -640,6 +640,7 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
     same = choice is not None and saved.get("checksum") == choice["checksum"]
     known = str(saved.get("video_id") or "") if same else ""
     if same and saved.get("pending") and not known and active:
+        assert choice is not None
         if len(active) > 1:
             raise ValueError("Etsy has more than one video on this listing and has not confirmed which Anteroom uploaded. "
                              "Check the listing in Etsy before trying again.")

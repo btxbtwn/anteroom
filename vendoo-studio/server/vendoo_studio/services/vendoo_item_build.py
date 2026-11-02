@@ -22,8 +22,8 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from vendoo_studio.models.ebay_fields import EBAY_CONDITION_DESCRIPTION
-from vendoo_studio.models.etsy_fields import etsy_eligible
+from vendoo_studio.services.ebay_fields import EBAY_CONDITION_DESCRIPTION
+from vendoo_studio.services.etsy_fields import etsy_eligible
 from vendoo_studio.services.vendoo_categories import (
     _category,
     _resolved_category,
@@ -228,7 +228,7 @@ def _force_numeric_fabric_weight(out: dict[str, Any], key: str) -> None:
     written as "": that clears whatever the form still shows, including a word
     left there by the listing this draft carried before Regenerate.
     """
-    from vendoo_studio.models.ebay_fields import normalize_ebay_fabric_weight
+    from vendoo_studio.services.ebay_fields import normalize_ebay_fabric_weight
 
     normalized, _ = normalize_ebay_fabric_weight(out.get(key))
     out[key] = normalized
@@ -439,7 +439,7 @@ def _listing_section(
     # A listing video is uploaded by Anteroom's direct List, never through Vendoo.
     specifics.pop("videoId", None)
     if marketplace == "ebay":
-        from vendoo_studio.models.ebay_fields import normalize_ebay_sizes
+        from vendoo_studio.services.ebay_fields import normalize_ebay_sizes
 
         sized = {**listing, "ebay_specifics": specifics}
         normalize_ebay_sizes(sized)

@@ -31,6 +31,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.repositories.queries import (
     ConversationRepo,
     JobRepo,
@@ -104,7 +105,7 @@ def listing_content_fingerprint(listing: dict[str, Any] | None) -> str:
 
 def listings_match(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
     """Compare content after normalizing sizes and dropdowns, as revision saves do."""
-    from vendoo_studio.models.validation import normalize_listing_dropdowns
+    from vendoo_studio.services.validation import normalize_listing_dropdowns
     from vendoo_studio.services.listing_generate import align_size_fields
 
     if not isinstance(a, dict) or not isinstance(b, dict):
@@ -281,7 +282,7 @@ def apply_pull(
     source: str = "vendoo_sync",
 ) -> str | None:
     """Merge Vendoo's version into a new revision and record that we are in step."""
-    from vendoo_studio.models.validation import normalize_listing_dropdowns
+    from vendoo_studio.services.validation import normalize_listing_dropdowns
     from vendoo_studio.services.listing_generate import align_size_fields
     from vendoo_studio.services.vendoo_import import listing_from_vendoo
 
@@ -294,7 +295,7 @@ def apply_pull(
     listing = merge_pulled_listing(current, listing_from_vendoo(item, None))
     align_size_fields(listing)
     normalize_listing_dropdowns(listing)
-    revision = listing_repo.save_revision(
+    revision = listing_persistence.save_revision(listing_repo.db,
         conv_id,
         listing,
         source=source,

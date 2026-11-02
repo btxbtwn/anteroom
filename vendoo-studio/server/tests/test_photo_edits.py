@@ -12,9 +12,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import photo_edits
 from vendoo_studio.services.photo_edits import CropBox, PhotoEdits
 from vendoo_studio.services.photo_store import LocalPhotoStore
@@ -47,7 +48,7 @@ def env(tmp_path, monkeypatch):
     conv = repo.create(title="Denim jacket")
     contents = _item_photo()
     (tmp_path / "front.jpg").write_bytes(contents)
-    photo = repo.add_photo(conv.id, "front.jpg", "front.jpg", "image/jpeg", len(contents),
+    photo = listing_persistence.add_photo(repo.db, conv.id, "front.jpg", "front.jpg", "image/jpeg", len(contents),
                            checksum="a" * 64, width=400, height=300)
     app.dependency_overrides[get_db] = lambda: db
     client = TestClient(app)
@@ -210,7 +211,7 @@ def test_a_copied_listing_keeps_the_original_under_the_edits(env):
 
     env.client.put(env.base + "/edits", json={"rotate": 90})
     env.db.refresh(env.photo)
-    ListingRepo(env.db).save_revision(env.conv.id, {"title": "Denim jacket", "price": 30}, "user")
+    listing_persistence.save_revision(env.db, env.conv.id, {"title": "Denim jacket", "price": 30}, "user")
     preview = listing_copy.preview(env.db, env.conv.id)
     response = env.client.post(f"/api/conversations/{env.conv.id}/copy", json={
         "request_id": "a" * 32, "expected_basis": preview["expected_basis"], "title": "Copy", "sku": "COPY-1",
@@ -228,7 +229,7 @@ def test_a_copied_listing_keeps_the_original_under_the_edits(env):
 def test_an_edit_invalidates_a_reviewed_vendoo_send(env):
     from vendoo_studio.services.send_review import review_inputs
 
-    ListingRepo(env.db).save_revision(env.conv.id, {"title": "Denim jacket", "price": 30}, "user")
+    listing_persistence.save_revision(env.db, env.conv.id, {"title": "Denim jacket", "price": 30}, "user")
     before = review_inputs(env.db, env.conv.id)[1]
     env.client.put(env.base + "/edits", json={"contrast": 20})
     assert review_inputs(env.db, env.conv.id)[1] != before

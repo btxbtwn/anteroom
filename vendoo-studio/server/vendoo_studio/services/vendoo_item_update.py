@@ -12,7 +12,7 @@ from collections.abc import Collection
 from copy import deepcopy
 from typing import Any
 
-from vendoo_studio.models.etsy_fields import sanitize_etsy_tags
+from vendoo_studio.services.etsy_fields import sanitize_etsy_tags
 from vendoo_studio.models.schema import DEPOP_OPTION_CODES
 from vendoo_studio.services.vendoo_encodings import (
     _condition_keys,
@@ -262,8 +262,9 @@ def apply_update_all(
                 _bucket(want_section, "marketplaceSpecifics")["smartSell"] = deepcopy(
                     poshmark_smart_sell(price)
                 )
+            have_overrides = have_section.get("overrides")
             if marketplace in _PRICE_OVERRIDE_MARKETPLACES or "price" in (
-                have_section.get("overrides") if isinstance(have_section.get("overrides"), dict) else {}
+                have_overrides if isinstance(have_overrides, dict) else {}
             ):
                 want_over["price"] = deepcopy(price)
     return desired

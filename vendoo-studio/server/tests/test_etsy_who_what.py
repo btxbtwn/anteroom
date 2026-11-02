@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
+from vendoo_studio.services.validation import normalize_listing_dropdowns, validate_listing
 
 
 def _etsy_issues(etsy: dict) -> list[str]:

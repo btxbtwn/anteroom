@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
@@ -47,7 +48,7 @@ def _item(db, title, *, status="draft", live=False):
     conv = Conversation(title=title, status=status)
     db.add(conv)
     db.commit()
-    ListingRepo(db).save_revision(conv.id, {"title": title, "price": 20}, "test")
+    listing_persistence.save_revision(db, conv.id, {"title": title, "price": 20}, "test")
     if live:
         MarketplaceListingRepo(db).save(conv.id, "ebay", {"state": "published", "listing_id": "123456789012", "listing_url": EBAY_URL})
     return conv
@@ -77,7 +78,7 @@ def test_delete_needs_confirmation_and_the_reviewed_item(db, client):
     draft, other = _item(db, "Draft"), _item(db, "Other")
     rows = _preview(client, [draft.id, other.id])
     assert _delete(client, [rows["Draft"]], confirm=False).status_code == 400
-    ListingRepo(db).save_revision(other.id, {"title": "Other", "price": 25}, "user_form")
+    listing_persistence.save_revision(db, other.id, {"title": "Other", "price": 25}, "user_form")
     result = _delete(client, [rows["Draft"], rows["Other"]]).json()
     assert result["deleted"] == [draft.id]
     assert "changed since the review" in result["skipped"][0]["reason"]

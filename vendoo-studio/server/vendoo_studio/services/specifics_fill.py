@@ -72,7 +72,7 @@ def specifics_gaps(
                 continue
             value = listing_value_for_field(listing, marketplace, label, include_not_applicable=True)
             if marketplace == "ebay" and spec.key == "Size":
-                from vendoo_studio.models.ebay_fields import ebay_size_for_type
+                from vendoo_studio.services.ebay_fields import ebay_size_for_type
 
                 value = ebay_size_for_type(value, listing_value_for_field(listing, "ebay", "Size Type"))
             if not spec.required and is_not_applicable(value):
@@ -112,7 +112,7 @@ async def _fill_marketplace(
     marketplace count: a model that answers fields it was not asked about does
     not get to write them.
     """
-    from vendoo_studio.models.ebay_fields import normalize_ebay_sizes
+    from vendoo_studio.services.ebay_fields import normalize_ebay_sizes
     from vendoo_studio.services.fill_log import MAX_PATCH_FIELDS
     from vendoo_studio.services.listing_field_gaps import (
         MAX_GAPS_PER_ROUND,
@@ -184,7 +184,7 @@ async def fill_listing_specifics(
     model cannot hold the send. What landed is merged once, in marketplace
     order, into the listing that came in.
     """
-    from vendoo_studio.models.ebay_fields import normalize_ebay_sizes
+    from vendoo_studio.services.ebay_fields import normalize_ebay_sizes
 
     current = dict(listing) if isinstance(listing, dict) else {}
     normalize_ebay_sizes(current)

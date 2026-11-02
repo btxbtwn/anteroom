@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import get_db
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.routes.conversations import _photo_response
@@ -61,7 +62,7 @@ async def upload_photos(
             continue
 
         try:
-            photo = repo.add_photo(
+            photo = listing_persistence.add_photo(repo.db,
                 conv_id=conv_id,
                 original_filename=meta["original_filename"],
                 stored_filename=meta["stored_filename"],

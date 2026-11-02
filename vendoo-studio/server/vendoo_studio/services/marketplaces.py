@@ -45,13 +45,6 @@ KNOWN_MARKETPLACES = tuple(item[0] for item in MARKETPLACE_CATALOG)
 DEFAULT_SELECTED = ["ebay", "etsy", "poshmark", "mercari", "depop"]
 
 
-def marketplace_label(marketplace_id: str) -> str:
-    for item_id, label, _fillable in MARKETPLACE_CATALOG:
-        if item_id == marketplace_id:
-            return label
-    return marketplace_id[:1].upper() + marketplace_id[1:] if marketplace_id else marketplace_id
-
-
 def catalog_payload() -> list[dict]:
     return [
         {"id": item_id, "label": label, "fillable": fillable}

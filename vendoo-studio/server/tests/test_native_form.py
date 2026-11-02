@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from vendoo_studio.models.ebay_fields import EBAY_CONDITION_DESCRIPTION
+from vendoo_studio.services.ebay_fields import EBAY_CONDITION_DESCRIPTION
 from vendoo_studio.services.native_form import vendoo_form
 
 LISTING = {
