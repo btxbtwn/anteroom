@@ -39,6 +39,17 @@ measure database latency there. Keep the existing healthy Machine until a
 replacement passes health checks. Changing `primary_region` alone does not
 move a running Machine.
 
+## Shutdown during deployments
+
+Fly sends SIGTERM with a 300-second grace period. Uvicorn allows active requests
+120 seconds to finish; the draft worker then stops claiming tasks and has up to
+120 seconds to save its current draft before the background loop is stopped.
+This also drains draft work whose browser has disconnected. Work that exceeds
+the grace period remains protected by its expiring lease and is never marked
+complete or replayed automatically. The seller must review the saved draft and
+retry interrupted work. A new web version offers a Reload app button instead
+of automatically reloading an open editor.
+
 ## Shared category trees
 
 The six category trees are shared reference data, not seller rows. The runtime

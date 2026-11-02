@@ -617,7 +617,7 @@ function KeyProviderEditor({
 
 export function ProvidersSettings() {
   const { hosted } = useWorkspaceRuntime();
-  const providerIds = hosted ? PROVIDER_IDS.filter((id) => isKeyProviderId(id) || id === "mimo") : PROVIDER_IDS;
+  const providerIds = hosted ? PROVIDER_IDS.filter((id) => isKeyProviderId(id) || id === "mimo" || id === "chatgpt") : PROVIDER_IDS;
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<ListingProviderId | null>(null);
   const [claudeTerminalOpen, setClaudeTerminalOpen] = useState(false);
@@ -628,6 +628,7 @@ export function ProvidersSettings() {
   const { data: provider } = useQuery({
     queryKey: ["settings-provider"],
     queryFn: api.settings.provider,
+    refetchInterval: hosted ? 10_000 : false,
   });
   const chatgptSignedIn = Boolean(provider?.chatgpt?.signed_in);
   const claudeSignedIn = Boolean(provider?.claude?.signed_in);
@@ -636,7 +637,7 @@ export function ProvidersSettings() {
   const { data: chatgptModels } = useQuery({
     queryKey: ["chatgpt-models"],
     queryFn: api.settings.chatgptModels,
-    enabled: chatgptSignedIn,
+    enabled: chatgptSignedIn && !hosted,
   });
   const { data: claudeModels } = useQuery({
     queryKey: ["claude-models"],
@@ -1233,7 +1234,7 @@ export function ProvidersSettings() {
                     <RoleBadges id={selected} primary={primary} fallback={fallback} photoProvider={photoProvider} />
                   </span>
                 </div>
-                {hosted && !providerIds.includes(selected) ? <SettingsNote>This sign-in requires a connected Mac worker. Choose an API-key provider below and select it as your primary listing AI to run in the web app.</SettingsNote> : editors[selected]}
+                {hosted && selected === "chatgpt" ? <SettingsNote>{chatgptSignedIn ? "ChatGPT on your Mac is connected. Select ChatGPT as your primary listing AI above. Models and reasoning are selected in your Mac's settings." : "Open Anteroom on your Mac, connect ChatGPT in its settings, then sign into this account in the Mac app. Keep the Mac awake and Anteroom open while generating."}</SettingsNote> : hosted && !providerIds.includes(selected) ? <SettingsNote>This sign-in requires a connected Mac worker. Choose an API-key provider below and select it as your primary listing AI to run in the web app.</SettingsNote> : editors[selected]}
               </div>
             </ScrollArea>
           </div>

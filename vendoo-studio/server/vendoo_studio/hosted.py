@@ -152,6 +152,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         from vendoo_studio.database import engine as database_engine
         loop_checkouts = LoopCheckoutWarning(database_engine)
         worker = offers = watchdog = None
+        stopping = threading.Event()
         background = None
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
@@ -165,7 +166,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             from vendoo_studio.routes.assistant import answer_task
             # Assistant answers share the draft worker; the route supplies how to answer one.
             background_worker.register(queue.ASSISTANT, answer_task)
-            worker = background.run(background_worker.serve(engine))
+            worker = background.run(background_worker.serve(engine, stopping))
             # Automations regenerate through the same draft queue, so both run together.
             background.run(hosted_automation_scheduler.serve(engine))
             offers = background.run(hosted_offer_scheduler.serve(engine))
@@ -179,7 +180,18 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         finally:
             loop_checkouts.close()
             if background is not None:
-                await asyncio.to_thread(background.stop)
+                stopping.set()
+                try:
+                    if worker is not None:
+                        # A disconnected browser does not mean its draft is done.
+                        # Let the current task save before cancelling the background loop.
+                        await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(worker)), timeout=120)
+                except TimeoutError:
+                    logging.getLogger(__name__).warning('Draft worker exceeded the shutdown grace period')
+                except Exception:
+                    logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
+                finally:
+                    await asyncio.to_thread(background.stop)
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,
@@ -226,6 +238,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(keys_router)
     from vendoo_studio.routes.hosted_tasks import router as task_router
     app.include_router(task_router)
+    from vendoo_studio.routes.mac_inference import router as mac_ai_router
+    app.include_router(mac_ai_router)
     from vendoo_studio.routes.hosted_attachments import router as attachment_router
     app.include_router(attachment_router)
     from vendoo_studio.routes import analytics, boxes, sale_calendar, sales_ledger

@@ -117,8 +117,8 @@ async def run_claimed(task_id, owner, token):
             await asyncio.gather(*pending, return_exceptions=True)
 
 
-async def serve(engine):
-    while True:
+async def serve(engine, stopping):
+    while not stopping.is_set():
         try:
             claimed = await asyncio.to_thread(queue.claim, engine)
         except SQLAlchemyError:
