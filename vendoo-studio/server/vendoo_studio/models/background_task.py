@@ -1,4 +1,4 @@
-"""Durable draft-only work. Marketplace mutations never enter this queue."""
+"""Durable draft and assistant work. Marketplace mutations never enter this queue."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,10 +31,20 @@ class BackgroundTask(SellerOwned, Base):
         ForeignKeyConstraint(['user_id', 'conversation_id'], ['conversations.user_id', 'conversations.id'],
                              name='fk_background_tasks_seller_conversation', deferrable=True, initially='DEFERRED'),
         Index('ix_background_tasks_pending', 'status', 'created_at'),
+        # A draft task belongs to a listing; an assistant answer to an assistant thread.
+        CheckConstraint(
+            "CASE WHEN kind = 'assistant' THEN conversation_id IS NULL AND assistant_thread_id IS NOT NULL "
+            "ELSE conversation_id IS NOT NULL AND assistant_thread_id IS NULL END",
+            name='ck_background_tasks_one_subject'),
+        # One answer at a time per seller, across tabs and Machines.
+        Index('uq_background_tasks_one_assistant_answer', 'user_id', unique=True,
+              sqlite_where=text("kind = 'assistant' AND status IN ('queued', 'running')"),
+              postgresql_where=text("kind = 'assistant' AND status IN ('queued', 'running')")),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
-    conversation_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    assistant_thread_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default='queued')
     payload: Mapped[Any] = mapped_column(JSON, nullable=False, default=dict)

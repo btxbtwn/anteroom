@@ -260,12 +260,14 @@ need marketplace sessions and stay hidden. Fly's trial stops the Machine after
 five minutes, so schedules only fire while it is running.
 
 On `feat/hosted-assistant`, the Assistant view mounts the canonical assistant
-routes. Answers stay in-process like desktop, but the run key and its thread
-are per seller, so one account never blocks or follows another's answer.
+routes. Hosted answers use the seller-owned durable task queue with leased workers
+and a persisted event journal, so tabs can reconnect without starting another answer.
 Images are stored under the seller's own assistant thread and readable only by
 its owner; deleting a thread releases them. Applying proposed changes takes the
 item's row lock first. The shop summary skips the Mac's local sourcing file,
-which the web app does not have yet. Answers do not survive an API restart.
+which the web app does not have yet. Expired answers are marked interrupted after an API restart and can be retried
+by the seller. Saving an answer and completing its task is one transaction;
+interrupted work is never replayed automatically.
 
 On `feat/hosted-marketplace-accounts`, Settings → Connections shows eBay and
 Etsy sign-in on the web. Each seller registers as their own relay device and

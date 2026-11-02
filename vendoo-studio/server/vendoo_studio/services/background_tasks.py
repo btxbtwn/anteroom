@@ -1,4 +1,4 @@
-"""Durable queue for draft generation and chat, with fenced worker leases."""
+"""Durable queue for draft generation, draft chat and assistant answers, with fenced worker leases."""
 from __future__ import annotations
 
 import uuid
@@ -11,6 +11,7 @@ from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.services.service_context import current
 
 DRAFT_KINDS = frozenset({'generate', 'chat'})
+ASSISTANT = 'assistant'
 ACTIVE = ('queued', 'running')
 
 
@@ -86,17 +87,17 @@ def renew(task_id, token):
 
 def finish(task_id, token, *, error=None):
     with _sessions()() as db:
-        conversation_id = db.execute(update(BackgroundTask).where(
+        finished = db.execute(update(BackgroundTask).where(
             BackgroundTask.id == task_id, BackgroundTask.status == 'running',
             BackgroundTask.lease_token == token, BackgroundTask.leased_until > func.now(),
         ).values(status='failed' if error else 'completed', error=error,
                  lease_token=None, leased_until=None, updated_at=func.now())
-            .returning(BackgroundTask.conversation_id)).scalar_one_or_none()
-        if conversation_id is not None:
-            db.execute(update(Conversation).where(Conversation.id == conversation_id, Conversation.status == 'in_progress')
+            .returning(BackgroundTask.id, BackgroundTask.conversation_id)).first()
+        if finished is not None and finished.conversation_id is not None:
+            db.execute(update(Conversation).where(Conversation.id == finished.conversation_id, Conversation.status == 'in_progress')
                        .values(status='draft'))
         db.commit()
-    if conversation_id is None:
+    if finished is None:
         raise TaskLeaseExpired()
 
 
@@ -140,3 +141,55 @@ def delete_history(db, conversation_id):
     task_ids = select(BackgroundTask.id).where(BackgroundTask.conversation_id == conversation_id)
     db.execute(delete(BackgroundTaskEvent).where(BackgroundTaskEvent.task_id.in_(task_ids)))
     db.execute(delete(BackgroundTask).where(BackgroundTask.conversation_id == conversation_id))
+
+
+def add_answer(db, thread_id, payload):
+    """Queue the seller's assistant answer in the caller's transaction.
+
+    A second active answer for the same seller fails that transaction's commit
+    (``uq_background_tasks_one_assistant_answer``).
+    """
+    task = BackgroundTask(kind=ASSISTANT, assistant_thread_id=thread_id, payload=payload)
+    db.add(task)
+    return task
+
+
+def active_answer(db, *, lock=False):
+    statement = select(BackgroundTask).where(BackgroundTask.kind == ASSISTANT, BackgroundTask.status.in_(ACTIVE))
+    return db.scalar(statement.with_for_update() if lock else statement)
+
+
+def latest_answer(db, thread_id):
+    return db.scalar(select(BackgroundTask).where(
+        BackgroundTask.kind == ASSISTANT, BackgroundTask.assistant_thread_id == thread_id,
+    ).order_by(BackgroundTask.created_at.desc(), BackgroundTask.id.desc()).limit(1))
+
+
+def complete_in(db, task_id, token, frames=()):
+    """Write the last events and complete the task in the caller's transaction.
+
+    The caller commits its own save with this, so a saved answer is never also
+    left running to be marked interrupted. The task row stays locked until
+    that commit, so a Stop cannot slip in between.
+    """
+    check_write_lease(db, task_id, token)
+    sequence = db.scalar(select(func.max(BackgroundTaskEvent.sequence))
+                         .where(BackgroundTaskEvent.task_id == task_id)) or 0
+    for offset, frame in enumerate(frames, 1):
+        db.add(BackgroundTaskEvent(task_id=task_id, sequence=sequence + offset, data=frame))
+    db.flush()
+    db.execute(update(BackgroundTask).where(BackgroundTask.id == task_id).values(
+        status='completed', lease_token=None, leased_until=None, updated_at=func.now()))
+    # Later flushes in this transaction belong to the completed task.
+    db.info.pop('background_lease', None)
+
+
+def journal(db, task_id):
+    return list(db.scalars(select(BackgroundTaskEvent.data).where(BackgroundTaskEvent.task_id == task_id)
+                           .order_by(BackgroundTaskEvent.sequence)))
+
+
+def delete_answers(db, thread_id):
+    task_ids = select(BackgroundTask.id).where(BackgroundTask.assistant_thread_id == thread_id)
+    db.execute(delete(BackgroundTaskEvent).where(BackgroundTaskEvent.task_id.in_(task_ids)))
+    db.execute(delete(BackgroundTask).where(BackgroundTask.assistant_thread_id == thread_id))
