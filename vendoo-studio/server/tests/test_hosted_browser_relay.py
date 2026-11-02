@@ -21,11 +21,11 @@ def test_relay_is_per_seller_and_refuses_other_commands():
             relay = current_extension()
             assert relay is not extension_manager
             # No tab has asked yet: Chrome is not connected, and nothing is queued.
-            assert not relay.connected and 'Open Anteroom in Chrome' in relay.marketplace_actions_refusal()
+            assert not relay.connected and 'Open Anteroom in Chrome' in relay.refusal()
             assert await relay.next_message(set(), 0.01) is None
-            assert relay.marketplace_actions_refusal().startswith('Update Anteroom Bridge')
+            assert relay.refusal().startswith('Update Anteroom Bridge')
             assert await relay.next_message({MARKETPLACE_ACTIONS}, 0.01) is None
-            assert relay.connected and relay.marketplace_actions_refusal() is None
+            assert relay.connected and relay.refusal() is None
             assert not await relay.send_message({'type': 'browser.open'})
             job = SimpleNamespace(id='job1')
             request = asyncio.create_task(browser_bridge.request(job, 'marketplace.execute', {'operation_id': 'op'}, timeout=5))
@@ -47,7 +47,7 @@ def test_page_relays_commands_and_replies_for_its_own_seller(cloud, signing_keys
     hosted_browser_relay._relays.clear()
     assert client.get('/api/browser-relay/next').status_code == 401
     relay = hosted_browser_relay.relay_for(USER_ID)
-    relay._seen_at, relay._capable = time.monotonic(), True
+    relay._seen_at, relay._capabilities = time.monotonic(), frozenset({MARKETPLACE_ACTIONS})
     loop = asyncio.new_event_loop()
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()

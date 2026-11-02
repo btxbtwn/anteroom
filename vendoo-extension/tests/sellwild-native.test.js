@@ -175,3 +175,20 @@ test('Sellwild Shipping From is the address its sell page shows, printed as its 
   // Direct List sends the same address's city and state.
   assert.equal(call(c, 'sellwildAddress', [address(1, 1, { locality: 'Peoria' }), address(2, 1)]).locationText, 'Springfield, IL');
 });
+
+// The web app reads the same account choices through the seller's connected Anteroom tab.
+test('a relayed Sellwild account read returns its choices with three GETs, or only a fixed error code', async () => {
+  const { c, requests } = worker({ routes: {
+    'GET /api/user/profile': [200, { profile: { defaultParcelTemplate: 'USPS_SoftPack' } }],
+    'GET /api/seller/coupons': [200, { coupons: [{ id: 117, code: '25OFF', discount_type: 'percentage', discount_value: 25 }, { name: 'no id' }] }],
+  } });
+  const id = 'c'.repeat(32);
+  const read = { type: 'marketplace.sellwild_account', job_id: null, message_id: id, payload: { request_id: id } };
+  assert.deepEqual(JSON.parse(JSON.stringify(await c.runCloudMarketplaceCommand(read, []))), {
+    ok: true, ship_from: '1 Private St\nNew Orleans, LA, 70125\nUnited States of America', default_parcel: 'USPS_SoftPack',
+    coupons: [{ id: 117, name: '25OFF', discountType: 'percentage', discountValue: 25 }] });
+  assert.deepEqual(requests.map(row => row.route).sort(), ['GET /api/addresses', 'GET /api/seller/coupons', 'GET /api/user/profile']);
+
+  const signedOut = worker({ routes: { 'GET /api/addresses': [401, { success: false, error: 'Unauthorized' }] } });
+  assert.deepEqual(JSON.parse(JSON.stringify(await signedOut.c.runCloudMarketplaceCommand(read, []))), { ok: false, error_code: 'signed_out' });
+});

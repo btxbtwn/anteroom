@@ -1384,7 +1384,7 @@ def marketplace_actions_refusal() -> str | None:
     if context is not None:
         from vendoo_studio.services.hosted_browser_relay import relay_for
 
-        return relay_for(context.seller_id).marketplace_actions_refusal()
+        return relay_for(context.seller_id).refusal()
     if not extension_manager.connected:
         return "Connect Chrome first."
     if MARKETPLACE_ACTIONS not in extension_manager.capabilities:
