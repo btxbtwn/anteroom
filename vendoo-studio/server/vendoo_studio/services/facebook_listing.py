@@ -29,8 +29,9 @@ def _reply(raw: object) -> dict:
     error = data.get("error")
     if not isinstance(error, str):
         error = ""
+    error = scrub(error)
     return {"ok": False, "error_code": code,
-            "error": scrub(error)[:300] if error else "Chrome could not read the Facebook listing.",
+            "error": error[:300] if error else "Chrome could not read the Facebook listing.",
             "marketplace_message": scrub(data.get("marketplace_message"))}
 
 
