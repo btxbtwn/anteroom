@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.678 — 2026-11-02
+
+- Opening listing panels together no longer blocks web draft generation while they load your settings.
+
 ## 0.1.677 — 2026-11-02
 
 - On the web, Sourcing now refreshes your buy list in the background every few hours, like the Mac app, without waiting for you to open the Sourcing page.
