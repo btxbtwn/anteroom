@@ -1390,6 +1390,7 @@ export const api = {
         version_mismatch?: boolean;
         load_path?: string | null;
         duplicate_bridge?: boolean;
+        runs_marketplace_actions?: boolean;
       }>("/extension/status"),
     pairingToken: () => request<{ token: string }>("/extension/pairing-token"),
     reload: () => request<{ ok: boolean; sent: boolean }>("/extension/reload", { method: "POST" }),

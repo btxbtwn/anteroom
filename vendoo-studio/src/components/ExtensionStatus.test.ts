@@ -30,10 +30,23 @@ describe("extensionConnection", () => {
     expect(view.detail).toContain("Connect Chrome");
   });
 
-  it("names the versions when Chrome is running an older extension", () => {
+  it("stays connected when an earlier extension can still list", () => {
     const view = extensionConnection({
       connected: true,
       up_to_date: false,
+      runs_marketplace_actions: true,
+      version: "0.2.39",
+    });
+    expect(view.label).toBe("Connected");
+    expect(view.tone).toBe("success");
+    expect(view.detail).toContain("0.2.39");
+  });
+
+  it("names the versions when Chrome's extension cannot list", () => {
+    const view = extensionConnection({
+      connected: true,
+      up_to_date: false,
+      runs_marketplace_actions: false,
       expected_version: "0.1.297",
       version: "0.1.292",
     });

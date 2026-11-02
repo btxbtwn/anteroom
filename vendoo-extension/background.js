@@ -3,6 +3,11 @@ var STUDIO_EXTENSION_BUILD = null;
 try { importScripts('studio-build.js'); } catch {}
 const STUDIO_URL = typeof STUDIO_API_ORIGIN === 'string' ? STUDIO_API_ORIGIN : 'http://127.0.0.1:4318';
 if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(STUDIO_URL)) throw new Error('Anteroom Bridge requires a loopback API address.');
+// What this Bridge can run, sent when it connects. Anteroom checks these rather
+// than the exact build, so an older copy keeps working until a change needs
+// something new. Add a name here when the Bridge gains a command an older copy
+// could not run, and require it in Anteroom.
+const BRIDGE_CAPABILITIES = ['marketplace.actions'];
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 8000;
 // A socket that stays up this long counts as a good connection, and only then
@@ -324,6 +329,7 @@ function identPayload(token, reloadGeneration) {
     token: token || '',
     version: chrome.runtime.getManifest().version,
     build: build || null,
+    capabilities: BRIDGE_CAPABILITIES,
     reload_generation: reloadGeneration || null,
   };
 }

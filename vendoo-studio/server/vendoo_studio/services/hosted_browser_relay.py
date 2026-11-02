@@ -21,13 +21,11 @@ import time
 import uuid
 from collections import deque
 
-from vendoo_studio.services.extension_connection import ReplyWaits
+from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, ReplyWaits
 
 COMMANDS = frozenset({"marketplace.execute", "marketplace.result", "marketplace.delete", "job.cancel"})
 # A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
 CONTRACT = ("type", "job_id", "message_id", "payload")
-# The Bridge's declared capability for running relayed marketplace commands.
-CAPABILITY = "marketplace.actions"
 # The page asks again as soon as it answers, and at least this often while idle.
 SEEN_FOR_S = 30.0
 
@@ -67,7 +65,7 @@ class BrowserRelay(ReplyWaits):
     async def next_message(self, capabilities: set[str], timeout: float) -> dict | None:
         """The next command for this seller's Chrome, waiting up to ``timeout`` seconds."""
         self._seen_at = time.monotonic()
-        self._capable = CAPABILITY in capabilities
+        self._capable = MARKETPLACE_ACTIONS in capabilities
         deadline = time.monotonic() + timeout
         while not self._outbox:
             remaining = deadline - time.monotonic()

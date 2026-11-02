@@ -13,6 +13,9 @@ export function installHostedApiSession(session: HostedApiSession): () => void {
 
 export function hasHostedApiSession() { return hostedSession !== null; }
 
+/** The signed-in session, so per-account caches can tell when it changes. */
+export function currentHostedSession(): HostedApiSession | null { return hostedSession; }
+
 export async function studioFetch(input: string, options: RequestInit = {}): Promise<Response> {
   const session = hostedSession;
   if (!session) return fetch(input, options);

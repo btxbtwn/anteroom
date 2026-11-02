@@ -82,20 +82,27 @@ form response for Poshmark previews. The original connection protocol remains
 unchanged; no cloud credential is added. See [form previews](cloud-marketplace-forms.md).
 
 
-## Restore the local app after loading a standalone web-test ZIP
+## Which Bridge may run marketplace actions
 
-Disable the downloaded Bridge in `chrome://extensions`. Choose **Connect Chrome**
-in the local Anteroom app. In Chrome's extensions page, enable Developer mode and
-load the managed folder `~/Library/Application Support/Anteroom/vendoo-extension`
-with **Load unpacked**, or re-enable/reload that managed copy if it is already
-listed. Keep only the managed copy enabled. Local Connect Chrome installs a
-worker with the exact build stamp expected by that app; a standalone ZIP has no
-such stamp. Repeatedly reloading the standalone folder cannot repair that mismatch.
+The Bridge reports what it can run when it connects, both to the Mac app
+(`capabilities` in `extension.ready`) and to the web page (`supportedActions`).
+List, Update, Save draft and Delist need `marketplace.actions`. Any copy that
+declares it may run them, whichever build it is: the app's managed copy, an
+older one, or a standalone ZIP. Chrome does not need to be updated every time
+Anteroom is.
 
-Do not copy a stamp from one build onto another or relax the marketplace build
-check. New cloud features become available to local-app users when the app's
-matching bundled Bridge includes them. A web-only test ZIP is not a substitute
-for an app-and-extension update.
+Connect Chrome still loads the app's newest copy, and Settings → Connections
+says when an earlier one is running. It warns only when that copy cannot run
+marketplace actions.
+
+When a change needs something an older Bridge cannot do (a new command, or a
+message it would misread), give it a new capability name. Add the name to
+`BRIDGE_CAPABILITIES` in `background.js` and require it in Anteroom, as
+`MARKETPLACE_ACTIONS` in `extension_connection.py` does. Never change what an
+existing name means.
+
+Keep only one copy enabled in `chrome://extensions`. Two copies take turns on
+the connection.
 
 ## Marketplace actions from the web (Bridge 0.2.40)
 
