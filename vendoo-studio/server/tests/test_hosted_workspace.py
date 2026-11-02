@@ -12,6 +12,38 @@ from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.services import hosted_photos
 
 
+def test_missing_sale_badge_matches_ledger_and_clears_after_correction(cloud, signing_keys):  # noqa: F811
+    from datetime import datetime
+
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+
+    client, engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Sold coat'}).json()['id']
+    with Session(engine) as db:
+        db.get(Conversation, identity).status = 'sold'
+        sale = MarketplaceSale(user_id=USER_ID, conversation_id=identity, marketplace='ebay',
+            order_id='badge-order', line_id='coat', sold_at=datetime.now(), quantity=1,
+            financials={'currency': 'USD', 'item_revenue': '40', 'shipping_credit': '0',
+                        'refunds': '0', 'shipping_cost': '4', 'item_cost': '5'})
+        db.add(sale)
+        db.commit()
+        sale_id = sale.id
+    summary = client.get('/api/conversations', headers=alice).json()[0]
+    assert summary['status'] == 'sold'
+    assert summary['missing_sale_data'] == ['fees']
+    assert client.get(f'/api/conversations/{identity}', headers=alice).json()['missing_sale_data'] == ['fees']
+    assert client.get('/api/conversations', headers=bob).json() == []
+    assert client.get(f'/api/conversations/{identity}', headers=bob).status_code == 404
+    with Session(engine) as db:
+        sale = db.get(MarketplaceSale, sale_id)
+        sale.financials = {**sale.financials, 'fees': '8'}
+        db.commit()
+    assert client.get('/api/conversations', headers=alice).json()[0]['missing_sale_data'] == []
+    assert client.get(f'/api/conversations/{identity}', headers=alice).json()['missing_sale_data'] == []
+
+
 def test_generated_category_provenance_does_not_block_editor_refresh(cloud, signing_keys):  # noqa: F811
     client, engine = cloud
     alice = headers(signing_keys)
