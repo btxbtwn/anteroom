@@ -48,6 +48,11 @@ DUPLICATE_BRIDGE = (
 )
 # How long a refusal keeps saying so, so a seller who opens Settings sees it.
 DUPLICATE_REPORT_SEC = 300.0
+# What a Bridge must declare before Anteroom sends it a List, Update, Save
+# draft or Delist. Any build that declares it may run them, so Chrome does not
+# need the exact copy this app ships. A change an older Bridge cannot handle
+# gets a new name here and in the Bridge's capabilities.
+MARKETPLACE_ACTIONS = "marketplace.actions"
 
 
 async def _warm_label_catalog() -> None:
@@ -131,6 +136,7 @@ class ExtensionManager(ReplyWaits):
         self.paired = False
         self.version: str | None = None
         self.build: str | None = None
+        self.capabilities: frozenset[str] = frozenset()
         self.reload_generation: str | None = None
         # The server's event loop, for the sourcing thread to reach Chrome through.
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -158,6 +164,7 @@ class ExtensionManager(ReplyWaits):
         self.paired = False
         self.version = None
         self.build = None
+        self.capabilities = frozenset()
         self.reload_generation = None
 
     def claims_connection(self, version: str | None, build: str | None) -> bool:
@@ -293,6 +300,13 @@ def _reported_build(payload: dict) -> str | None:
         return None
     text = str(reported).strip()
     return text or None
+
+
+def _reported_capabilities(payload: dict) -> frozenset[str]:
+    reported = payload.get("capabilities")
+    if not isinstance(reported, list):
+        return frozenset()
+    return frozenset(item for item in reported if isinstance(item, str) and 0 < len(item) <= 64)
 
 
 def _reported_version(payload: dict) -> str | None:
@@ -865,6 +879,7 @@ def extension_status():
         "connected": extension_manager.connected,
         "paired": extension_manager.paired,
         "duplicate_bridge": extension_manager.duplicate_bridge,
+        "runs_marketplace_actions": MARKETPLACE_ACTIONS in extension_manager.capabilities,
         **extension_build_status(
             extension_manager.version,
             extension_manager.reload_generation,
@@ -1012,6 +1027,7 @@ async def extension_websocket(ws: WebSocket):
                 extension_manager.loop = asyncio.get_running_loop()
                 extension_manager.version = version
                 extension_manager.build = build
+                extension_manager.capabilities = _reported_capabilities(payload)
                 extension_manager.reload_generation = _reported_reload_generation(payload)
                 extension_manager._duplicate_refused_at = None
                 if old is not None and old is not ws:
@@ -1370,10 +1386,8 @@ def marketplace_actions_refusal() -> str | None:
         from vendoo_studio.services.hosted_browser_relay import relay_for
 
         return relay_for(context.seller_id).marketplace_actions_refusal()
-    from vendoo_studio.services.chrome_bridge import expected_extension_build
-
     if not extension_manager.connected:
         return "Connect Chrome first."
-    if getattr(extension_manager, "build", None) != expected_extension_build():
-        return "Connect Chrome to load the current Anteroom Bridge before continuing."
+    if MARKETPLACE_ACTIONS not in extension_manager.capabilities:
+        return "Update Anteroom Bridge: press Connect Chrome to load Anteroom's copy, then try again."
     return None
