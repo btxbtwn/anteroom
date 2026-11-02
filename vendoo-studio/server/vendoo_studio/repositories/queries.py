@@ -1118,15 +1118,6 @@ class DiagnosticRepo:
 
         return run
 
-    def get_by_job(self, job_id: str) -> list[DiagnosticRun]:
-        return self.db.query(DiagnosticRun).filter(
-            DiagnosticRun.job_id == job_id
-        ).order_by(DiagnosticRun.created_at).all()
-
-    def get_fields(self, diagnostic_run_id: str) -> list[FieldObservation]:
-        return self.db.query(FieldObservation).filter(
-            FieldObservation.diagnostic_run_id == diagnostic_run_id
-        ).order_by(FieldObservation.created_at).all()
 
     def _upsert_registry(self, payload: dict):
         step = payload.get("step", "")
@@ -1411,27 +1402,6 @@ class RegistryRepo:
             FieldRegistry.normalized_label,
         ).all()
 
-    def get_registry_context(self, marketplace: str, category_path: str | None = None) -> str:
-        query = self.db.query(FieldRegistry).filter(
-            FieldRegistry.marketplace == marketplace
-        )
-        if category_path:
-            query = query.filter(
-                (FieldRegistry.category_path == category_path) |
-                (FieldRegistry.category_path.is_(None))
-            )
-        entries = query.order_by(FieldRegistry.normalized_label).all()
-
-        if not entries:
-            return ""
-
-        lines = []
-        for e in entries:
-            cat = f" [{e.category_path}]" if e.category_path else ""
-            opts = ", ".join(e.known_options[:30]) if e.known_options else ""
-            lines.append(f"- {e.normalized_label}{cat}: {opts}" if opts else f"- {e.normalized_label}{cat}")
-        return "\n".join(lines)
-
 
 class FillLogRepo:
     def __init__(self, db: Session):
@@ -1469,41 +1439,6 @@ class FillLogRepo:
             self.db.refresh(entry)
         return saved
 
-    def add_entries(
-        self,
-        job_id: str,
-        conversation_id: str,
-        step: str,
-        marketplace: str,
-        entries: list[dict],
-    ) -> list[FillLogEntry]:
-        saved: list[FillLogEntry] = []
-        for item in entries:
-            entry = FillLogEntry(
-                job_id=job_id,
-                conversation_id=conversation_id,
-                step=step,
-                marketplace=item.get("marketplace") or marketplace,
-                field=item["field"],
-                status=item["status"],
-                reason=item.get("reason") or "",
-                selector=item.get("selector") or "",
-                value_preview=item.get("value_preview") or "",
-            )
-            self.db.add(entry)
-            saved.append(entry)
-        self.db.commit()
-        for entry in saved:
-            self.db.refresh(entry)
-        return saved
-
-    def get_for_job_ids(self, job_id: str, ids: list[str]) -> list[FillLogEntry]:
-        if not ids:
-            return []
-        return self.db.query(FillLogEntry).filter(
-            FillLogEntry.job_id == job_id,
-            FillLogEntry.id.in_(ids),
-        ).all()
 
     def list_for_job(self, job_id: str) -> list[FillLogEntry]:
         return self.db.query(FillLogEntry).filter(
@@ -1518,17 +1453,3 @@ class FillLogRepo:
     def delete_for_job(self, job_id: str) -> None:
         self.db.query(FillLogEntry).filter(FillLogEntry.job_id == job_id).delete(synchronize_session=False)
         self.db.commit()
-
-    def delete_for_step(self, job_id: str, step: str) -> None:
-        if not step:
-            return
-        self.db.query(FillLogEntry).filter(
-            FillLogEntry.job_id == job_id,
-            FillLogEntry.step == step,
-        ).delete(synchronize_session=False)
-        self.db.commit()
-
-    def delete_for_jobs(self, job_ids: list[str]) -> None:
-        if not job_ids:
-            return
-        self.db.query(FillLogEntry).filter(FillLogEntry.job_id.in_(job_ids)).delete(synchronize_session=False)

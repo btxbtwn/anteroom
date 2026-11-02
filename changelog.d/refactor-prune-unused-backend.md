@@ -1,0 +1,1 @@
+- Behind the scenes, unused backend helpers and old protocol definitions have been removed, and new unused code is now caught without a baseline of exceptions.

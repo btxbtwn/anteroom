@@ -146,46 +146,6 @@ ROTATIONS = {
 SAVE_FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
 
 
-def rotate_file(stored_filename: str, mime_type: str, degrees: int) -> dict:
-    """Write a rotated copy of a stored photo under a new name; ``degrees`` is clockwise.
-
-    The pixels are rewritten rather than flagged with an EXIF orientation, so
-    every consumer — Vendoo uploads, model vision, thumbnails — sees the same
-    picture. The caller swaps the record over and deletes the old file.
-    """
-    if degrees not in ROTATIONS:
-        raise ValueError("Rotate by 90, -90 or 180 degrees")
-    fmt = SAVE_FORMATS.get(mime_type)
-    if not fmt:
-        raise ValueError("This photo format cannot be rotated")
-    store = photo_store()
-    source = store.local_path(stored_filename)
-
-    with Image.open(source) as img:
-        icc_profile = img.info.get("icc_profile")
-        rotated = ImageOps.exif_transpose(img).transpose(ROTATIONS[degrees])
-    options: dict = {"icc_profile": icc_profile} if icc_profile else {}
-    if fmt == "JPEG":
-        if rotated.mode not in ("RGB", "L"):
-            rotated = rotated.convert("RGB")
-        options.update(quality=95, subsampling=0)
-    elif fmt == "WEBP":
-        options.update(quality=95)
-
-    stored_name = store.edited_key(stored_filename)
-    buffer = BytesIO()
-    rotated.save(buffer, fmt, **options)
-    contents = buffer.getvalue()
-    store.put(stored_name, contents)
-    return {
-        "stored_filename": stored_name,
-        "size_bytes": len(contents),
-        "checksum": hashlib.sha256(contents).hexdigest(),
-        "width": rotated.width,
-        "height": rotated.height,
-    }
-
-
 def thumbnail_path(stored_filename: str, size: int) -> Path:
     stem = Path(stored_filename).stem
     return photo_store().cache_dir("thumbs") / f"{stem}_{size}.jpg"
@@ -229,9 +189,3 @@ def delete_photo_files(photo) -> None:
         photo_store().delete(name)
         delete_thumbnails(name)
     mask_path(photo.source_filename or photo.stored_filename).unlink(missing_ok=True)
-
-
-def delete_photo_file(stored_filename: str) -> None:
-    """Remove a stored photo and the thumbnails made from it."""
-    photo_store().delete(stored_filename)
-    delete_thumbnails(stored_filename)
