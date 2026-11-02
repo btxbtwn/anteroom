@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from vendoo_studio.services import sales_ledger
-from vendoo_studio.services.inventory_analytics import load_rows
+from vendoo_studio.services.inventory_analytics import AnalyticsItem, load_rows
 
 FIELD_LABELS = {"item_revenue": "sale price", "shipping_credit": "shipping collected", "refunds": "refunds",
                 "fees": "fees", "shipping_cost": "shipping cost", "item_cost": "item cost"}
@@ -42,13 +42,24 @@ def _amount(value) -> str | None:
     return format(amount, "f") if amount.is_finite() else None
 
 
-def records(db: Session, conversation_id: str | None = None) -> list[dict]:
+def incomplete_sales(db: Session, rows: list[AnalyticsItem] | None = None) -> list[dict]:
+    """Every sale record, across all time, that Sales records' Missing sale data filter shows."""
+    return sorted(
+        ({"id": row["id"], "conversation_id": row["conversation_id"],
+          "title": row["title"] or f"Order {row['order_id']}", "missing": row["missing_sale_data"]}
+         for row in records(db, analytics_rows=rows) if row["missing_sale_data"]),
+        key=lambda row: (row["title"].casefold(), row["id"]),
+    )
+
+
+def records(db: Session, conversation_id: str | None = None, analytics_rows: list[AnalyticsItem] | None = None) -> list[dict]:
     """Every line on the sales ledger. Vendoo's sales are read from the ledger too, where they were kept once."""
     from vendoo_studio.services.vendoo_sales_archive import ensure_archived
 
     ensure_archived(db)
     # Reuse Analytics' cost basis, including box allocations and order quantities.
-    costs = {row.sale_id: _amount(row.cost) for row in load_rows(db, conversation_id) if row.status == "sold" and row.sale_id}
+    analytics_rows = load_rows(db, conversation_id) if analytics_rows is None else analytics_rows
+    costs = {row.sale_id: _amount(row.cost) for row in analytics_rows if row.status == "sold" and row.sale_id}
     query = db.query(MarketplaceSale, Conversation.title).outerjoin(Conversation, Conversation.id == MarketplaceSale.conversation_id)
     if conversation_id:
         query = query.filter(MarketplaceSale.conversation_id == conversation_id)

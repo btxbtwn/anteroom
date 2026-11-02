@@ -114,12 +114,12 @@ struct InventoryAnalytics: Decodable, Sendable {
     }
 
     struct IncompleteSale: Decodable, Identifiable, Sendable {
-        let conversationID: String
+        let id: String
+        let conversationID: String?
         let title: String
         let missing: [String]
-        var id: String { conversationID }
         enum CodingKeys: String, CodingKey {
-            case title, missing
+            case id, title, missing
             case conversationID = "conversation_id"
         }
     }

@@ -768,7 +768,8 @@ export interface AnalyticsSale {
 
 export interface InventoryAnalytics {
   range: AnalyticsRange;
-  incomplete_sales: { conversation_id: string; title: string; missing: string[] }[];
+  incomplete_sales: { id: string; conversation_id: string | null; title: string; missing: string[] }[];
+
   undated_sales: number;
   periods_truncated: boolean;
   inventory: AnalyticsInventory;

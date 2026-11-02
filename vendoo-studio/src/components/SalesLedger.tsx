@@ -35,17 +35,19 @@ export function SalesLedgerSummary({ summary }: { summary: SalesLedgerPage["summ
   </>;
 }
 
-export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => void }) {
+export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenListing: (id: string) => void; missingOnly?: boolean }) {
+
   const queryClient = useQueryClient();
   const [today] = useState(() => new Date().toISOString().slice(0, 10));
-  const [start, setStart] = useState(() => new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
+  // Analytics' missing-data banner opens this across all time, filtered to what it lists.
+  const [start, setStart] = useState(() => missingOnly ? "1970-01-01" : new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
   const [end, setEnd] = useState(today);
   const [marketplace, setMarketplace] = useState("all");
   const [search, setSearch] = useState("");
   const q = useDeferredValue(search.trim());
-  const [attention, setAttention] = useState("all");
+  const [attention, setAttention] = useState(missingOnly ? "missing" : "all");
   const [sort, setSort] = useState("newest");
-  const [period, setPeriod] = useState("30");
+  const [period, setPeriod] = useState(missingOnly ? "all" : "30");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<SalesLedgerRow | null>(null);
   const [editor, setEditor] = useState(0);

@@ -499,7 +499,8 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
                 {key: bucket[key] for key in ("label", "count", "asking_value")} for bucket in everything["aging"]
             ],
             "sold_listings_missing_a_sale_date": everything["undated_sales"],
-            "sales_missing_details": len(everything["incomplete_sales"]),
+            "sales_missing_sale_data": len(everything["incomplete_sales"]),
+
         }),
         _sales_by_range(ranges),
         _sales_over_time(everything["periods"]),

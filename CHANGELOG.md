@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.679 — 2026-11-02
+
+- Analytics' missing sales data list now matches the Missing sale data filter in Sales records, including marketplace orders without amounts, and a sale drops off once you fill it in.
+- Open sales records from that list to see every sale with missing data across all time.
+
 ## 0.1.678 — 2026-11-02
 
 - Opening listing panels together no longer blocks web draft generation while they load your settings.
