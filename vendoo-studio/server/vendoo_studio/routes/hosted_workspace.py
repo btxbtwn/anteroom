@@ -23,7 +23,7 @@ from vendoo_studio.repositories import hosted_drafts
 from vendoo_studio.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from vendoo_studio.services import user_settings
 from vendoo_studio.services.hosted_database import get_seller_db
-from vendoo_studio.services.hosted_listing_contract import editable_listing
+from vendoo_studio.services.hosted_listing_contract import editable_listing, stored_listing_fields
 from vendoo_studio.version import app_version
 
 router = APIRouter(prefix='/api')
@@ -64,8 +64,7 @@ def conversation_response(row, listing=None, direct=None, *, include_notes=True)
 def listing_response(db, identity):
     revision = hosted_drafts.current_fields_revision(db, identity)
     raw = revision.listing_json if revision and isinstance(revision.listing_json, dict) else {}
-    from vendoo_studio.services.hosted_listing_contract import ROOTS
-    payload = editable_listing({key: value for key, value in raw.items() if key in ROOTS})
+    payload = stored_listing_fields(raw)
     if 'title' not in payload:
         payload['title'] = conversation(db, identity).title or ''
     count = db.scalar(select(func.count()).select_from(Photo).where(Photo.conversation_id == identity))
@@ -463,8 +462,7 @@ def owned_revision(db, identity, revision_id):
 @router.get('/conversations/{identity}/revisions/{revision_id}')
 def get_revision(identity: str, revision_id: str, db=Depends(get_seller_db)):
     row = owned_revision(db, identity, revision_id)
-    from vendoo_studio.services.hosted_listing_contract import ROOTS
-    return {'id': row.id, 'listing': {key: value for key, value in row.listing_json.items() if key in ROOTS}}
+    return {'id': row.id, 'listing': stored_listing_fields(row.listing_json)}
 
 
 class RestoreInput(BaseModel):

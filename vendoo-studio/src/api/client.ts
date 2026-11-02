@@ -1,5 +1,6 @@
 import { listingScreenRead } from "./listingScreen";
 import { studioFetch, hasHostedApiSession } from "./transport";
+import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
 import type { ListingVideo, ListingVideoLibrary, MarketplaceMediaRules } from "./listingVideos";
@@ -825,7 +826,7 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(orderedIds),
       }),
-    uploadPhotos: (convId: string, files: File[], marketplace?: string): Promise<PhotoUploadResult> => {
+    uploadPhotos: (convId: string, files: File[], marketplace?: string): Promise<PhotoUploadResult> => trackPhotoUpload(convId, async () => {
       if (hasHostedApiSession()) return (async () => {
         const ids: string[] = []; const errors: string[] = [];
         for (const file of files) {
@@ -850,7 +851,7 @@ export const api = {
           return data;
         }
       );
-    },
+    }),
   },
 
   imports: {

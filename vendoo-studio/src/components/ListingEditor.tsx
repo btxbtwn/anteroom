@@ -574,7 +574,7 @@ export function ListingEditor({
         railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}
         railStatus={<>
           {editState.saving && <span role="status" className="text-xs text-muted-foreground">Saving…</span>}
-          {!runtime.hosted && <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>}
+          <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>
         </>}
         onSelect={(id) => {
           setFieldTarget(null);

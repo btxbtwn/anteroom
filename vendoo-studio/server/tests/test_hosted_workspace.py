@@ -12,6 +12,34 @@ from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.services import hosted_photos
 
 
+def test_generated_category_provenance_does_not_block_editor_refresh(cloud, signing_keys):  # noqa: F811
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'New draft'}).json()['id']
+    with Session(engine) as db:
+        revision = ListingRevision(conversation_id=identity, user_id=USER_ID, source='agent', listing_json={
+            'title': 'Generated coat',
+            'direct_category_ids': {'ebay': '123', 'ebay_path': 'Clothing > Coats', 'query': 'coat search provenance'},
+        })
+        db.add(revision)
+        db.flush()
+        revision_id = revision.id
+        db.add(Listing(conversation_id=identity, user_id=USER_ID, current_revision_id=revision_id))
+        db.commit()
+    path = '/api/conversations/' + identity
+    for suffix in ['/listing', '/revisions/' + revision_id]:
+        response = client.get(path + suffix, headers=alice)
+        assert response.status_code == 200, response.text
+        fields = response.json()['listing']
+        assert fields['title'] == 'Generated coat'
+        assert fields['direct_category_ids'] == {'ebay': '123', 'ebay_path': 'Clothing > Coats'}
+    rejected = client.put(path + '/listing', headers=alice, json={
+        'listing': {'direct_category_ids': {'query': 'client-supplied provenance'}},
+        'expected_revision_id': revision_id,
+    })
+    assert rejected.status_code == 422
+
+
 def test_poshmark_category_choice_saves_and_reloads_its_native_form(cloud, signing_keys):  # noqa: F811
     client, _engine = cloud
     alice = headers(signing_keys)

@@ -39,7 +39,15 @@ and delisting cannot enter this queue. The hosted draft worker is enabled in the
 The branch now mounts the canonical provider-key/model settings, analytics,
 sales ledger/CSV exports, sale calendar, box records, and photo-edit handlers.
 Hosted API-key providers use Vault and sanitize request/stream errors. SDK
-sign-ins still require the registered-worker integration. Photo rotate,
+sign-ins other than ChatGPT still require worker integration. ChatGPT can use
+the outbound Mac inference worker: sign into the same account in an updated Mac
+app, connect ChatGPT in the Mac's settings, and select ChatGPT in web provider
+settings. ChatGPT credentials stay on the Mac; the worker receives only that
+account's inference calls and private photos. Keep the Mac awake with Anteroom
+open. Models and reasoning follow the Mac's settings. Offline Macs produce an
+explicit error, and inference calls are cancelled rather than replayed when
+their draft stops. This requires coordinated Mac and hosted releases; it is
+implemented locally and is not yet deployed. Photo rotate,
 adjustment previews, saved edits and reset use private Storage and retain the
 original. Mac Vision background removal still needs the worker.
 
