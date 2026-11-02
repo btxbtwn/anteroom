@@ -1,3 +1,4 @@
+import { listingScreenRead } from "./listingScreen";
 import { studioFetch, hasHostedApiSession } from "./transport";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
@@ -118,6 +119,11 @@ export function errorMessage(body: ErrorBody, fallback: string): string {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  if (!options) return listingScreenRead<T>(path, rawRequest);
+  return rawRequest<T>(path, options);
+}
+
+async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await studioFetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
