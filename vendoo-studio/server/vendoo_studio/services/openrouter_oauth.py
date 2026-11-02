@@ -8,6 +8,7 @@ callback must use ``localhost``: that is what OpenRouter accepts on any port.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import secrets
@@ -73,4 +74,5 @@ async def finish_sign_in(code: str, state: str) -> None:
     key = resp.json().get("key")
     if not isinstance(key, str) or not key:
         raise RuntimeError("OpenRouter did not return a key.")
-    set_ai_key("openrouter", key)
+    # Saving opens a database session on the web; keep it off the event loop.
+    await asyncio.to_thread(set_ai_key, "openrouter", key)

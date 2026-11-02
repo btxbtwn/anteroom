@@ -8,10 +8,12 @@ here runs on a timer or a retry. Chrome actions go through the seller's
 signed-in Anteroom tab (``services/hosted_browser_relay.py``). Sellwild and
 Vinted follow once their forms are on the web.
 """
+import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from vendoo_studio.database import get_db
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
@@ -86,13 +88,16 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
     from vendoo_studio.models.listing_values import marketplace_dropdown_forms
     from vendoo_studio.services.category_fields import listing_category_ids, load_fields
 
-    if not ConversationRepo(db).get(conv_id):
-        raise HTTPException(404, 'Conversation not found')
-    revisions = ListingRepo(db).get_revisions(conv_id)
-    listing = revisions[0].listing_json if revisions else {}
-    db.commit()
-    category_id = listing_category_ids(listing).get('etsy')
-    if not category_id:
-        return {'ok': True, 'forms': []}
-    static = marketplace_dropdown_forms().get('etsy') or {}
-    return {'ok': True, 'forms': [await leaf_form(listing, 'etsy', category_id, load_fields('etsy', category_id) or {}, static)]}
+    def load():
+        # Database reads and Etsy's token lookup block; keep them off the request loop.
+        if not ConversationRepo(db).get(conv_id):
+            raise HTTPException(404, 'Conversation not found')
+        revisions = ListingRepo(db).get_revisions(conv_id)
+        listing = revisions[0].listing_json if revisions else {}
+        db.commit()
+        category_id = listing_category_ids(listing).get('etsy')
+        if not category_id:
+            return {'ok': True, 'forms': []}
+        static = marketplace_dropdown_forms().get('etsy') or {}
+        return {'ok': True, 'forms': [asyncio.run(leaf_form(listing, 'etsy', category_id, load_fields('etsy', category_id) or {}, static))]}
+    return await run_in_threadpool(load)
