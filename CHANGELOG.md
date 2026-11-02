@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.648 — 2026-11-02
+
+- Prevent a new release on main from incorrectly blocking another pull request's changelog check.
+
 ## 0.1.647 — 2026-11-02
 
 - Listing, updating, saving drafts and delisting on Poshmark, Mercari and Depop from your account now reach Chrome, instead of waiting until they time out.
