@@ -1,6 +1,8 @@
 """Slow storage and settings reads must not require an extra pooled connection."""
 from unittest.mock import MagicMock
 import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +19,50 @@ from vendoo_studio.services import hosted_photos
 from vendoo_studio.services.hosted_context import HostedSettingsStore
 from vendoo_studio.services.service_context import ServiceContext, use
 from vendoo_studio.services.suggestions import list_suggestions
+
+
+def test_concurrent_listing_reads_do_not_wait_for_nested_settings_connections(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from vendoo_studio.routes import hosted_workspace
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Tee'}).json()['id']
+    readers = engine.pool.size()
+    ready = threading.Barrier(readers, timeout=10)
+    validate = hosted_workspace.validate_listing
+    monkeypatch.setattr(engine.pool, '_timeout', 2)
+
+    def together(*args, **kwargs):
+        ready.wait()
+        return validate(*args, **kwargs)
+
+    monkeypatch.setattr(hosted_workspace, 'validate_listing', together)
+    with ThreadPoolExecutor(max_workers=readers) as executor:
+        responses = list(executor.map(
+            lambda _: client.get(f'/api/conversations/{identity}/listing', headers=alice),
+            range(readers),
+        ))
+    assert [response.status_code for response in responses] == [200] * readers
+    assert all(response.json()['listing']['title'] == 'Tee' for response in responses)
+
+
+def test_settings_snapshot_failure_returns_a_private_retriable_response(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from sqlalchemy.exc import SQLAlchemyError
+
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Tee'}).json()['id']
+
+    class UnavailableSettings:
+        def read(self):
+            raise SQLAlchemyError('private-diagnostic')
+
+    context = ServiceContext(USER_ID, MagicMock(), UnavailableSettings(), MagicMock(), MagicMock())
+    monkeypatch.setattr('vendoo_studio.services.hosted_context.for_seller', lambda *_args: context)
+    response = client.get(f'/api/conversations/{identity}/listing', headers=alice)
+    assert response.status_code == 503
+    assert response.headers['retry-after'] == '5'
+    assert 'private-diagnostic' not in response.text
 
 
 @pytest.fixture

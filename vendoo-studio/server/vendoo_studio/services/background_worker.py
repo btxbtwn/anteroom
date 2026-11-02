@@ -28,6 +28,10 @@ async def _execute(task_id, token):
     from vendoo_studio.routes.chat import ChatMessage, generate_listing, run_message
     from vendoo_studio.services.listing_generate import photo_fingerprint
 
+    context = current()
+    if context is None:
+        raise RuntimeError("Hosted draft work requires a seller context")
+    await asyncio.to_thread(context.settings.read)
     with SessionLocal() as db:
         task = db.get(BackgroundTask, task_id)
         queue.check_write_lease(db, task_id, token)
@@ -71,9 +75,6 @@ async def _execute(task_id, token):
             await asyncio.to_thread(queue.append_events, task_id, token, frames)
             frames, flushed_at = [], time.monotonic()
     await asyncio.to_thread(queue.append_events, task_id, token, frames)
-    context = current()
-    if context is None:
-        raise RuntimeError("Hosted draft work requires a seller context")
     while context.spawned_tasks:
         await asyncio.gather(*list(context.spawned_tasks), return_exceptions=False)
         await asyncio.sleep(0)

@@ -43,12 +43,20 @@ def get_seller_db(request: Request):
 
     if engine.dialect.name != "postgresql":
         raise HTTPException(status_code=503, detail="The cloud database is not configured")
-    with SellerDatabaseSession(user_id=identity.user_id, bind=engine) as db:
-        try:
+    from vendoo_studio.services.service_context import current
+
+    try:
+        # Preferences are an execution snapshot. Load it before any inventory
+        # query: concurrent validators must not each hold one pooled connection
+        # while waiting for a second connection to read settings.
+        context = current()
+        if context is not None:
+            context.settings.read()
+        with SellerDatabaseSession(user_id=identity.user_id, bind=engine) as db:
             yield db
-        except SQLAlchemyError:
-            db.rollback()
-            raise HTTPException(status_code=503, detail="Cloud data is temporarily unavailable") from None
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Cloud data is temporarily unavailable",
+                            headers={"Retry-After": "5"}) from None
 
 
 @event.listens_for(SellerDatabaseSession, "after_begin")
