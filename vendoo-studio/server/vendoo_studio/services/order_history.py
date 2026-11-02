@@ -338,7 +338,7 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
             "schema_drift": "The marketplace returned sales Anteroom can't read. Saved records were kept.",
             "rejected": "The marketplace refused the sales read. Saved records were kept.",
         }
-        code = raw.get("error")
+        code = raw.get("error_code") or raw.get("error")
         return {"ok": False, "error": messages.get(code, "Couldn't read sales.") if isinstance(code, str) else "Couldn't read sales."}
     try:
         orders = parse_orders(marketplace, raw)

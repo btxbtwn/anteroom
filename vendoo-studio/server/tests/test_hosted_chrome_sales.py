@@ -56,6 +56,10 @@ def test_history_read_uses_the_hosted_contract_and_stays_private(cloud, signing_
     for seller, count in ((USER_ID, 1), (BOB, 0)):
         with use(for_seller(seller)), SessionLocal() as db:
             assert db.query(MarketplaceSale).count() == count
+    thread, refused = _in_background(check)
+    _answer(client, alice, {'ok': False, 'error_code': 'signed_out'}, CAPABLE)
+    thread.join(10)
+    assert 'Sign in' in refused['response']['error']
     with use(for_seller(BOB)):
         assert asyncio.run(order_history.sync('poshmark'))['ok'] is False
     assert client.get('/api/browser-relay/next?capabilities=' + CAPABLE, headers=bob).status_code == 204
