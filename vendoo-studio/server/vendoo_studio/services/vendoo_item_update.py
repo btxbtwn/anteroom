@@ -262,8 +262,9 @@ def apply_update_all(
                 _bucket(want_section, "marketplaceSpecifics")["smartSell"] = deepcopy(
                     poshmark_smart_sell(price)
                 )
+            have_overrides = have_section.get("overrides")
             if marketplace in _PRICE_OVERRIDE_MARKETPLACES or "price" in (
-                have_section.get("overrides") if isinstance(have_section.get("overrides"), dict) else {}
+                have_overrides if isinstance(have_overrides, dict) else {}
             ):
                 want_over["price"] = deepcopy(price)
     return desired

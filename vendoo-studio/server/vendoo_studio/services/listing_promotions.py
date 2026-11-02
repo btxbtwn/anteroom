@@ -200,6 +200,7 @@ async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_p
     row.listing_id = listing_id or ""
     if reason:
         raise PromotionError(409, reason)
+    assert listing_id is not None
     name = NAMES.get(row.marketplace, row.marketplace)
     if row.action == "offer":
         if floor_price not in (None, ""):
@@ -236,6 +237,7 @@ async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_p
     ]
     if row.like_count <= 0:
         raise PromotionError(409, "Nobody has liked this listing yet.")
+    assert row.floor_cents is not None
     if row.offer_price_cents < row.floor_cents:
         raise PromotionError(409, f"{row.discount_percent}% off is ${dollars(row.offer_price_cents)}, below your floor "
                                   f"of ${dollars(row.floor_cents)}. Lower the discount or skip this item.")
@@ -315,6 +317,7 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
     listing_id, reason = live_listing(db, conv, row.marketplace) if conv else (None, "This item was deleted.")
     if reason or listing_id != row.listing_id:
         raise PromotionError(409, reason or "This item's listing changed. Review it again.")
+    assert conv is not None
     if blocked := blocking(db, row.marketplace, row.listing_id, row.action, new_like_at=new_like_at):
         raise PromotionError(409, blocked)
     if row.action == "offer":
@@ -394,6 +397,8 @@ def _settle(row: ListingPromotion, result: dict | None) -> None:
         row.state, row.note = "unknown", UNKNOWN_NOTE
     elif result.get("ok") is True and result.get("state") == "done":
         row.state = "done"
+        if row.action != "share":
+            assert row.offer_price_cents is not None
         row.note = "Shared to your followers." if row.action == "share" else (
             f"Offer of ${dollars(row.offer_price_cents)} sent to likers.")
     elif result.get("safe_to_retry") is True:
