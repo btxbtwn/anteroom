@@ -671,7 +671,7 @@ def ensure_ebay_category_optionals(listing: dict) -> bool:
 
     # Vintage follows the item's era, never style words: a "Y2K" or "vintage-style"
     # tee made in the 2010s is not vintage. A modern Etsy When Made forces No.
-    from vendoo_studio.models.etsy_fields import etsy_when_is_modern, etsy_when_raw
+    from vendoo_studio.services.etsy_fields import etsy_when_is_modern, etsy_when_raw
 
     etsy = listing.get("etsy_specifics")
     when_made = etsy_when_raw(etsy if isinstance(etsy, dict) else {}, {**listing, "ebay_specifics": ebay})

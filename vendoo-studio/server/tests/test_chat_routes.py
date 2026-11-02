@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.listing_generate import photo_analysis_usable
 
 
@@ -56,14 +57,14 @@ class SendMessageStreamTest(unittest.TestCase):
         from sqlalchemy.pool import StaticPool
 
         from vendoo_studio.database import Base
-        from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+        from vendoo_studio.repositories.queries import ConversationRepo
 
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         Base.metadata.create_all(engine)
         self.Session = sessionmaker(bind=engine)
         db = self.Session()
         conv = ConversationRepo(db).create(title="Tee")
-        ListingRepo(db).save_revision(conv.id, {"title": "Vintage Tee"}, source="user")
+        listing_persistence.save_revision(db, conv.id, {"title": "Vintage Tee"}, source="user")
         self.conv_id = conv.id
         db.close()
 

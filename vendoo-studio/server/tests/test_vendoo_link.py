@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
@@ -50,7 +51,7 @@ class LinkVendooDraftTest(unittest.TestCase):
         self.Session = sessionmaker(bind=engine)
         self.db = self.Session()
         self.conv = ConversationRepo(self.db).create(title="Nike tee")
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Nike tee"}, source="user")
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike tee"}, source="user")
 
         def override_get_db():
             yield self.db

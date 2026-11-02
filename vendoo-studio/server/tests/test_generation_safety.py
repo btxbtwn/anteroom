@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, load_models
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
 from vendoo_studio.services import listing_field_gaps, listing_generate
@@ -28,16 +29,16 @@ def draft():
 def test_changed_photos_do_not_reuse_old_analysis(draft, change):
     db, conv_id = draft
     repo = ConversationRepo(db)
-    first = repo.add_photo(conv_id, "a.jpg", "a.jpg", "image/jpeg", 10, checksum="a")
-    second = repo.add_photo(conv_id, "b.jpg", "b.jpg", "image/jpeg", 10, checksum="b")
+    first = listing_persistence.add_photo(repo.db, conv_id, "a.jpg", "a.jpg", "image/jpeg", 10, checksum="a")
+    second = listing_persistence.add_photo(repo.db, conv_id, "b.jpg", "b.jpg", "image/jpeg", 10, checksum="b")
     text = "Photo analysis:\n- brand: Original"
     repo.add_message(conv_id, "system", text,
                      photo_fingerprint=listing_generate.photo_fingerprint(repo.get_photos(conv_id)))
     assert listing_generate.current_photo_analysis(repo, conv_id) == text
     if change == "upload":
-        repo.add_photo(conv_id, "c.jpg", "c.jpg", "image/jpeg", 10)
+        listing_persistence.add_photo(repo.db, conv_id, "c.jpg", "c.jpg", "image/jpeg", 10)
     elif change == "delete":
-        repo.delete_photo(conv_id, first.id)
+        listing_persistence.delete_photo(repo.db, conv_id, first.id)
     elif change == "edit":
         first.checksum = "edited"
         db.commit()
@@ -49,11 +50,11 @@ def test_changed_photos_do_not_reuse_old_analysis(draft, change):
 def test_marketplace_only_photos_do_not_invalidate_item_reading(draft):
     db, conv_id = draft
     repo = ConversationRepo(db)
-    repo.add_photo(conv_id, "a.jpg", "a.jpg", "image/jpeg", 10)
+    listing_persistence.add_photo(repo.db, conv_id, "a.jpg", "a.jpg", "image/jpeg", 10)
     text = "Photo analysis:\n- brand: Original"
     repo.add_message(conv_id, "system", text,
                      photo_fingerprint=listing_generate.photo_fingerprint(repo.get_photos(conv_id)))
-    repo.add_photo(conv_id, "b.jpg", "b.jpg", "image/jpeg", 10, marketplace="ebay")
+    listing_persistence.add_photo(repo.db, conv_id, "b.jpg", "b.jpg", "image/jpeg", 10, marketplace="ebay")
     assert listing_generate.current_photo_analysis(repo, conv_id) == text
 
 
@@ -61,11 +62,11 @@ def test_gap_fill_cannot_overwrite_an_edit_made_during_model_call(draft, monkeyp
     db, conv_id = draft
     listings = ListingRepo(db)
     original = {"title": "Original", "price": 20}
-    listings.save_revision(conv_id, original, source="model")
+    listing_persistence.save_revision(listings.db, conv_id, original, source="model")
     seller = {"title": "Seller edit", "price": 99}
 
     async def reply(*args, **kwargs):
-        listings.save_revision(conv_id, seller, source="user_form")
+        listing_persistence.save_revision(listings.db, conv_id, seller, source="user_form")
         return [{"marketplace": "etsy", "field": "Pattern", "value": "Solid"}]
 
     monkeypatch.setattr(listing_field_gaps.RegistryService, "merge_learned_fields", lambda *args: None)
@@ -85,7 +86,7 @@ def test_validation_repair_cannot_overwrite_a_newer_seller_edit(draft, monkeypat
     seller = {"title": "Seller edit", "price": 99}
 
     async def repair(*args, **kwargs):
-        listings.save_revision(conv_id, seller, source="user_form")
+        listing_persistence.save_revision(listings.db, conv_id, seller, source="user_form")
         return {"title": "Repaired", "price": 20}
 
     monkeypatch.setattr(listing_generate, "_validation_blockers", lambda *args: [{"field": "price"}])
@@ -100,7 +101,7 @@ def test_first_listing_cannot_overwrite_a_seller_draft_created_while_generating(
     db, conv_id = draft
     listings = ListingRepo(db)
     seller = {"title": "Seller draft", "price": 99}
-    listings.save_revision(conv_id, seller, source="user_form")
+    listing_persistence.save_revision(listings.db, conv_id, seller, source="user_form")
     with pytest.raises(RevisionConflict):
         listing_generate.persist_generated_listing(
             db, conv_id, '{"title":"Generated","price":20}', expected_revision_id="")
@@ -112,13 +113,13 @@ def test_native_fill_discards_evidence_if_photos_change_while_loading_forms(draf
 
     db, conv_id = draft
     repo = ConversationRepo(db)
-    repo.add_photo(conv_id, "a.jpg", "a.jpg", "image/jpeg", 10)
+    listing_persistence.add_photo(repo.db, conv_id, "a.jpg", "a.jpg", "image/jpeg", 10)
     listings = ListingRepo(db)
     original = {"title": "Original", "ebay_specifics": {}}
-    listings.save_revision(conv_id, original, source="model")
+    listing_persistence.save_revision(listings.db, conv_id, original, source="model")
 
     async def load_forms(*args, **kwargs):
-        repo.add_photo(conv_id, "new.jpg", "new.jpg", "image/jpeg", 10)
+        listing_persistence.add_photo(repo.db, conv_id, "new.jpg", "new.jpg", "image/jpeg", 10)
         return {"ebay": {"category_id": "1", "fields": [{
             "path": "ebay_specifics.Closure", "label": "Closure", "options": ["Zip"],
             "input_type": "select", "category_specific": True,
@@ -139,11 +140,11 @@ def test_category_selection_cannot_overwrite_a_newer_seller_edit(draft, monkeypa
 
     db, conv_id = draft
     listings = ListingRepo(db)
-    listings.save_revision(conv_id, {"title": "Original", "price": 20}, source="model")
+    listing_persistence.save_revision(listings.db, conv_id, {"title": "Original", "price": 20}, source="model")
     seller = {"title": "Seller edit", "price": 99}
 
     async def choose(*args, **kwargs):
-        listings.save_revision(conv_id, seller, source="user_form")
+        listing_persistence.save_revision(listings.db, conv_id, seller, source="user_form")
         return {"general": "Clothing > Tops"}
 
     monkeypatch.setattr("vendoo_studio.services.category_selection.select_categories", choose)
@@ -196,7 +197,7 @@ def test_regeneration_restores_seller_clears_and_owned_root_values(draft):
     db, conv_id = draft
     previous = {"title": "Seller chosen title", "price": 29, "depop_specifics": {"style": []},
                 "seller_fields": ["title", "price", "depop_specifics.style"]}
-    ListingRepo(db).save_revision(conv_id, previous, source="user_form")
+    listing_persistence.save_revision(db, conv_id, previous, source="user_form")
     generated = {"title": "Model replacement title", "price": 12, "depop_specifics": {"style": ["Vintage"]}}
     saved = listing_generate.persist_generated_listing(db, conv_id, "", parsed=generated)
     assert saved["title"] == previous["title"]
@@ -213,7 +214,7 @@ def test_general_normalization_keeps_native_form_spelling(draft):
          "input_type": "select", "selection_only": True, "options": ["Solid", "Floral"]}]}
     seed = {"brand": "Fixture", "size": "M"}
     seed["_native_forms"] = capture(seed, {"ebay": form}, ["ebay"])
-    ListingRepo(db).save_revision(conv_id, seed, source="native_schema")
+    listing_persistence.save_revision(db, conv_id, seed, source="native_schema")
     result = listing_generate.persist_generated_listing(db, conv_id, "", parsed={
         "title": "Fixture M Casual Tee Blue Regular", "brand": "Fixture", "size": "M",
         "price": 20, "ebay_specifics": {"Pattern": "Floral"}})

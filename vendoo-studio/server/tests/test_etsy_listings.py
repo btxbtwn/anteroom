@@ -16,11 +16,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services import etsy_listings, native_marketplaces, relay_client
 
 LISTING = {"title": "Private api check - do not publish", "description": "Private draft check.", "price": 12,
@@ -39,13 +40,13 @@ class EtsyListingsTest(unittest.TestCase):
         app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title=LISTING["title"])
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, copy.deepcopy(LISTING), "model")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, copy.deepcopy(LISTING), "model")
         self.temp = self.enterContext(tempfile.TemporaryDirectory())
         self.enterContext(patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(self.temp)))
         for index in range(2):
             name = f"test-{index}.jpg"
             Path(self.temp, name).write_bytes(b"image")
-            ConversationRepo(self.db).add_photo(self.conv.id, name, name, "image/jpeg", 5)
+            listing_persistence.add_photo(self.db, self.conv.id, name, name, "image/jpeg", 5)
         self.enterContext(patch.object(etsy_listings, "get_marketplace_accounts", return_value={"etsy": {"accountId": "123", "accessToken": "never-expose"}}))
         self.enterContext(patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)))
         self.enterContext(patch("vendoo_studio.services.extension_connection.schedule_advance_job_queue"))
@@ -231,7 +232,7 @@ class EtsyListingsTest(unittest.TestCase):
     def test_when_made_follows_etsys_ranges_for_the_year(self):
         from datetime import date
 
-        from vendoo_studio.models import etsy_fields
+        from vendoo_studio.services import etsy_fields
 
         self.assertEqual(etsy_fields.etsy_when_made_codes(date(2026, 10, 25)), (
             "made_to_order", "2020_2026", "2010_2019", "2007_2009", "before_2007", "2000_2006", "1990s", "1980s",
@@ -288,7 +289,7 @@ class EtsyListingsTest(unittest.TestCase):
 
     def test_an_ineligible_item_is_refused_before_any_job_or_write(self):
         modern = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "2020 - 2026"}}
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, modern, "user")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, modern, "user")
         response = self.client.post(self.base + "/list", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(response.status_code, 409)
         self.assertIn("Etsy only allows vintage (20+ years), handmade or craft supplies", response.text)
@@ -318,7 +319,7 @@ class EtsyListingsTest(unittest.TestCase):
         self.execute("save_draft", binding)
         photos = ConversationRepo(self.db).get_photos(self.conv.id)
         Path(self.temp, "test-2.jpg").write_bytes(b"new image")
-        added = ConversationRepo(self.db).add_photo(self.conv.id, "test-2.jpg", "test-2.jpg", "image/jpeg", 9)
+        added = listing_persistence.add_photo(self.db, self.conv.id, "test-2.jpg", "test-2.jpg", "image/jpeg", 9)
         kept = [photos[1], added]
         self.calls.clear()
         result = self.execute("save_draft", binding, photos=kept)
@@ -355,7 +356,7 @@ class EtsyListingsTest(unittest.TestCase):
     def test_update_changes_the_live_listing_and_does_not_create_another(self):
         self.assertEqual(self.list()["state"], "published")
         self.calls.clear()
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "title": "Updated tee", "price": 13}, "user")
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "title": "Updated tee", "price": 13}, "user")
         response = self.client.post(self.base + "/update", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(response.status_code, 200, response.text)
         while self.launched:

@@ -7,9 +7,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, load_models
 from vendoo_studio.models.listing_evidence import SaleSnapshot
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services.listing_evidence import sale_key
 from vendoo_studio.services.sourcing_seasonality import historical_windows, seasonal_sales_context, selling_window
 
@@ -35,7 +36,7 @@ def record(db, *, sold="2025-11-10", price=20, quantity=1, category="Clothing > 
     conv.notes = json.dumps(notes)
     listing = {"title": "Wool coat", "quantity": quantity, "category_path": category,
                "ebay_specifics": {"type": "Coat"}, "price": 999, "internal_notes": "PRIVATE-LISTING", "sku": "PRIVATE-SKU"}
-    ListingRepo(db).save_revision(conv.id, listing, source="vendoo_import")
+    listing_persistence.save_revision(db, conv.id, listing, source="vendoo_import")
     db.commit()
     return conv, listing, sale, dates
 
@@ -105,7 +106,7 @@ def test_frozen_sale_facets_survive_later_listing_edits_and_snapshots_are_not_ex
         conv, listing, sale, dates = record(db)
         db.add(SaleSnapshot(conversation_id=conv.id, sale_key=sale_key(sale, dates), listing=listing,
                             source="vendoo_first_observed_sold"))
-        ListingRepo(db).save_revision(conv.id, {**listing, "category_path": "Other > Pants", "title": "Edited pants"}, source="user_form")
+        listing_persistence.save_revision(db, conv.id, {**listing, "category_path": "Other > Pants", "title": "Edited pants"}, source="user_form")
     db.commit()
     result = context(db)
     assert result["matching_window_sales"] == 5
@@ -120,7 +121,7 @@ def test_sale_dates_are_compared_in_utc_and_exact_types_have_separate_sample_flo
     for _index in range(4):
         record(db)
     conv, listing, *_ = record(db)
-    ListingRepo(db).save_revision(conv.id, {**listing, "ebay_specifics": {"type": "Jacket"}}, source="user_form")
+    listing_persistence.save_revision(db, conv.id, {**listing, "ebay_specifics": {"type": "Jacket"}}, source="user_form")
     db.commit()
     result = context(db)
     assert result["matching_window_sales"] == 5
