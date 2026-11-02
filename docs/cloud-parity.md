@@ -69,7 +69,7 @@ the export is loading.
   need that desktop. Work must remain bound to the authenticated seller and
   explicitly registered worker.
 - Port real sourcing, analytics, sales ledger/calendar, marketplace connections,
-  offers, automations, usage, settings, logs, diagnostics and export workflows.
+  offers, automations, settings, logs, diagnostics and export workflows.
   Replace filesystem dependencies with account storage or browser equivalents.
 - Make ongoing work durable across API restarts. Restrict retries to safe draft
   and read operations; ambiguous publish/delist outcomes need seller review.
@@ -239,7 +239,7 @@ it while search uses the verified lexical fallback. The Machine has 2 GB for tha
 build. The index is still per seller; a shared category index is needed before
 many sellers use the web app.
 
-On `feat/hosted-usage`, the Usage view uses the canonical usage-limits handler.
+On `feat/hosted-usage`, usage limits use the canonical usage-limits handler.
 Its cache is keyed by seller, and on the web the Claude row reports that
 sign-in usage is shown in the Mac app instead of probing a CLI login on the
 server.

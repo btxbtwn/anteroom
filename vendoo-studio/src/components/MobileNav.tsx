@@ -4,7 +4,6 @@ import {
   BoxIcon,
   CalendarClockIcon,
   ChartColumnIcon,
-  GaugeIcon,
   MenuIcon,
   MessageCircleIcon,
   Rows3Icon,
@@ -16,7 +15,7 @@ import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
 import type { WorkspaceView } from "./workspaceCrumbs";
 import { pageLoaders } from "../app/pageLoaders";
 
-export type MobileNavTarget = "assistant" | "listings" | "sourcing" | "analytics" | "usage" | "settings" | "marketplaces" | "automations";
+export type MobileNavTarget = "assistant" | "listings" | "sourcing" | "analytics" | "settings" | "marketplaces" | "automations";
 
 /** Same order as the desktop sidebar footer: home and inventory, the day's work, insight, settings. */
 const ITEMS: { id: MobileNavTarget; label: string; icon: ComponentType<{ className?: string }> }[] = [
@@ -26,7 +25,6 @@ const ITEMS: { id: MobileNavTarget; label: string; icon: ComponentType<{ classNa
   { id: "analytics", label: "Analytics", icon: ChartColumnIcon },
   { id: "marketplaces", label: "Marketplaces", icon: StoreIcon },
   { id: "automations", label: "Automations", icon: CalendarClockIcon },
-  { id: "usage", label: "Usage", icon: GaugeIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
