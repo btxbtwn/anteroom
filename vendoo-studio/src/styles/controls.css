@@ -24,7 +24,7 @@
 }
 
 /* Whole-element opacity washes a filled button's label into its own fill: at
-   0.35 white-on-green "Send to Vendoo" is unreadable. Filled variants drop to
+   0.35 a white label on a green button is unreadable. Filled variants drop to
    the neutral surface the rest of the app already uses instead. Inset shadow
    rather than a border so the box doesn't resize on disable. */
 .btn-primary:disabled,

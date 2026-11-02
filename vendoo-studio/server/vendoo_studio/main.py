@@ -12,8 +12,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from vendoo_studio.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
 from vendoo_studio.database import init_db, SessionLocal
 from vendoo_studio.static_files import FrontendFiles
-from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, imports, listing_commands
-from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, browser, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
+from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, listing_commands
+from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
 from vendoo_studio.services.local_requests import LocalRequestMiddleware
 from vendoo_studio.routes import marketplace_listings, marketplace_schemas, native_marketplaces
@@ -187,7 +187,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Anteroom",
     version=app_version(),
-    description="Local web app for generating and automating Vendoo marketplace listings",
+    description="Local web app for generating and listing marketplace items",
     lifespan=lifespan,
 )
 
@@ -211,31 +211,7 @@ class _SandboxMiddleware:
         await self.app(scope, receive, send)
 
 
-class _VendooOffMiddleware:
-    """Answer Vendoo routes with 409 while the seller has Vendoo turned off.
-
-    Added before CORS so a browser still receives the CORS headers on that 409.
-    """
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            from vendoo_studio.services.user_settings import vendoo_enabled
-            from vendoo_studio.services.vendoo_gate import VENDOO_OFF_DETAIL, vendoo_request_blocked
-
-            path = scope.get("path") or ""
-            method = scope.get("method") or "GET"
-            if vendoo_request_blocked(method, path) and not vendoo_enabled():
-                response = JSONResponse({"detail": VENDOO_OFF_DETAIL}, status_code=409)
-                await response(scope, receive, send)
-                return
-        await self.app(scope, receive, send)
-
-
 app.add_middleware(_SandboxMiddleware)
-app.add_middleware(_VendooOffMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -265,7 +241,6 @@ app.include_router(listing_videos.router)
 app.include_router(measurements.router)
 app.include_router(listings.router)
 app.include_router(jobs.router)
-app.include_router(imports.router)
 app.include_router(ai_keys.router)
 app.include_router(settings.router)
 app.include_router(extension.router)
@@ -291,7 +266,6 @@ app.include_router(automations_route.router)
 app.include_router(errors_route.router)
 app.include_router(attachments.router)
 app.include_router(scout.router)
-app.include_router(browser.router)
 app.include_router(vendoo_api.router)
 app.include_router(backups.router)
 app.include_router(updates.router)

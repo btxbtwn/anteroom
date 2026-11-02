@@ -13,7 +13,6 @@ from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, Listin
 from vendoo_studio.services import live_trace
 from vendoo_studio.services.comp_research import CompsEvent
 from vendoo_studio.services.price_drop import PRICE_DROP_SOURCE
-from vendoo_studio.services.vendoo_watch import SYNCED_REVISION
 
 
 class PriceDropRouteTest(unittest.TestCase):
@@ -176,7 +175,7 @@ class BatchMarkdownRouteTest(unittest.TestCase):
             listing["price"] = price
         revision = listing_persistence.save_revision(self.listings.db, conv.id, listing, source="generation")
         if synced:
-            conv.notes = json.dumps({SYNCED_REVISION: revision.id})
+            conv.notes = json.dumps({"vendooSyncedRevision": revision.id})
             self.db.commit()
         return conv
 
@@ -231,8 +230,8 @@ class BatchMarkdownRouteTest(unittest.TestCase):
             self.assertEqual(JobRepo(self.db).list_by_conversation(conv.id), [])
 
         listed = {row["id"]: row for row in self.client.get("/api/conversations").json()}
-        self.assertTrue(listed[self.tee.id]["unsent_edits"])
-        self.assertTrue(listed[self.coat.id]["unsent_edits"])
+        self.assertEqual(listed[self.tee.id]["price"], 40)
+        self.assertEqual(listed[self.coat.id]["price"], 100)
 
     def test_apply_skips_what_cannot_drop_and_saves_the_rest(self):
         rows = self._preview(self.tee.id, self.coat.id)

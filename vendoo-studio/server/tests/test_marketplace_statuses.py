@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
-from vendoo_studio.models.job import Job  # noqa: F401
+from vendoo_studio.models.job import VendooDraftCache
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 
@@ -28,19 +28,13 @@ class MarketplaceStatusesRouteTest(unittest.TestCase):
         repo = JobRepo(self.db)
         self.cached = repo.create(conv_id=conv.id, approved_revision_id="rev1", listing_snapshot={"title": "Nike tee"})
         self.uncached = repo.create(conv_id=conv.id, approved_revision_id="rev2", listing_snapshot={"title": "Nike tee"})
-        repo.save_vendoo_draft(
-            self.cached.id,
-            item={
-                "title": "Nike tee",
-                "description": "long text the sidebar never needs",
-                "listings": {
-                    "ebay": {"status": {"listed": True}, "price": 20},
-                    "facebook": {"status": {"notListed": True}},
-                },
-            },
-            form={"statuses": {"general": "DRAFT"}, "fields": {"title": "Nike tee"}},
-            statuses={"ebay": "LISTED"},
-        )
+        # Seed the status-only history written by older releases.
+        self.db.add(VendooDraftCache(job_id=self.cached.id, payload={
+            "item": {"listings": {"ebay": {"status": {"listed": True}},
+                                   "facebook": {"status": {"notListed": True}}}},
+            "form": {"statuses": {"general": "DRAFT"}}, "statuses": {"ebay": "LISTED"},
+        }))
+        self.db.commit()
 
         def override_get_db():
             yield self.db

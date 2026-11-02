@@ -48,7 +48,7 @@ def depop_leaf(category_id: str = "", path: str = "") -> dict[str, Any] | None:
 
     from vendoo_studio.database import SessionLocal
     from vendoo_studio.models.catalog import CategoryTreeNode
-    from vendoo_studio.services.vendoo_create import tree_leaf
+    from vendoo_studio.services.leaf_schemas import tree_leaf
 
     wanted = " > ".join(path_parts(path))
     if category_id:

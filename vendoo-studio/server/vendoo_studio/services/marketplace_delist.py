@@ -327,7 +327,7 @@ def _failure_text(marketplace: str, exc: Exception) -> str:
 
 async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
     """Delete the named listings. Runs as a job holding the automation slot, so no Send starts into Chrome meanwhile."""
-    from vendoo_studio.services.extension_connection import current_extension, schedule_advance_job_queue
+    from vendoo_studio.services.extension_connection import current_extension
 
     names = list(dict.fromkeys(str(m).strip().lower() for m in marketplaces if str(m or "").strip()))
     if confirm is not True:
@@ -385,5 +385,4 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         raise
     finally:
         release_api_job(job.id)
-        schedule_advance_job_queue()
     return listings(db, conv_id)

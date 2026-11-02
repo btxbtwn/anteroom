@@ -12,9 +12,7 @@ import { toForm, type DraftField, type DraftForm } from "./formModel";
 type HiddenField = { marketplace: string; field: string; label: string };
 type HiddenFieldsState = { always: HiddenField[]; listing: HiddenField[] };
 
-export function emptyHiddenFields(): HiddenFieldsState {
-  return { always: [], listing: [] };
-}
+
 
 export function hiddenFieldKey(marketplace: string, field: string): string {
   return `${marketplace}:${field}`;

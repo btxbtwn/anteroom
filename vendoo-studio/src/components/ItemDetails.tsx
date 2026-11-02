@@ -3,7 +3,6 @@ import { labelColor, labelDotClass } from "../labelColors";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { addLabel, removeLabel, splitLabels } from "./itemLabels";
-import { historyRows } from "./vendooHistory";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, type Garment, type Measurements } from "./garmentMeasurements";
 import { XIcon } from "lucide-react";
@@ -159,7 +158,6 @@ export function ItemDetails({ convId }: Props) {
     queryKey: ["settings-ui"],
     queryFn: api.settings.ui,
   });
-  const vendooOn = uiPrefs?.vendoo_enabled !== false;
 
   const { data: packageDimensionSettings } = useQuery({
     queryKey: ["settings-package-dimensions"],
@@ -320,8 +318,6 @@ export function ItemDetails({ convId }: Props) {
     }
   };
 
-  // Vendoo's own dates for the item: when it went live, sold, and was touched.
-  const history = useMemo(() => historyRows(conv || {}), [conv]);
   const currentLabels = splitLabels(details.vendooLabels);
   const selectedKeys = new Set(currentLabels.map((label) => label.toLowerCase()));
   const token = labelDraft.trim().toLowerCase();
@@ -622,21 +618,6 @@ export function ItemDetails({ convId }: Props) {
         </div>
       </InspectorSection>
 
-      {vendooOn && history.length > 0 && (
-        <InspectorSection title="Vendoo History" titleId={`item-section-history-${convId}`}>
-          <dl className="flex flex-col gap-0.5">
-            {history.map((row) => (
-              <div className="flex items-baseline justify-between gap-2 py-0.5 text-xs" key={row.key}>
-                <dt className={cn("text-muted-foreground", row.nested && "ps-2.5 opacity-80")}>{row.label}</dt>
-                <dd className="flex min-w-0 items-baseline gap-1.5" title={row.iso}>
-                  <span className="whitespace-nowrap text-foreground tabular-nums">{row.age}</span>
-                  <span className="whitespace-nowrap text-2xs text-muted-foreground">{row.when}</span>
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </InspectorSection>
-      )}
       {saving && (
         <span className="absolute right-0 bottom-0 flex items-center gap-1 text-2xs text-muted-foreground" role="status">
           <Spinner aria-hidden="true" role={undefined} className="size-3" />

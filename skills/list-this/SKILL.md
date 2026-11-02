@@ -11,7 +11,7 @@ triggers:
 # List This - Product Listing Workflow
 
 ## Purpose
-Generate accurate, formula-compliant marketplace listings from product photos. Extract visual details, apply strict formatting rules, output Vendoo-compatible JSON for standard listings, output copy-pasteable text for Etsy digital downloads, and persist the final result beside the source photos whenever the user provides a local path.
+Generate accurate, formula-compliant marketplace listings from product photos. Extract visual details, apply strict formatting rules, output Anteroom's listing JSON for standard listings, output copy-pasteable text for Etsy digital downloads, and persist the final result beside the source photos whenever the user provides a local path.
 
 ## Parameters
 
@@ -40,7 +40,7 @@ Generate accurate, formula-compliant marketplace listings from product photos. E
 ## Returns
 
 Returns one of the following:
-- Standard and physical listings: a Vendoo-compatible JSON object containing `title`, `description`, `price`, and marketplace-specific fields
+- Standard and physical listings: a listing JSON object containing `title`, `description`, `price`, and marketplace-specific fields
 - Etsy digital download listings: a copy-pasteable plain-text or markdown block containing the final `title`, `description`, `price`, `materials`, `tags`, and Etsy-specific fields
 - `listing.json` written to the resolved local photo folder for standard listings when the user provides a local path
 - `listing.md` written to the resolved local photo folder for Etsy digital download listings when the user provides a local path
@@ -48,7 +48,7 @@ Returns one of the following:
 ### Sample Output Structure
 
 **For the COMPLETE JSON template with all 100+ fields, see:**
-`references/vendoo_listing_template.md` → Section "2. Extension JSON Structure"
+`references/vendoo_listing_template.md` → Section "2. Listing JSON Structure"
 
 **Etsy digital download output:**
 ```markdown
@@ -68,7 +68,7 @@ What is it: {what_is}
 When made: {when_made}
 ```
 
-**Note:** The extension can fill 100+ fields across all platforms. Always reference the complete template in `references/vendoo_listing_template.md` for the full field list and allowed values.
+**Note:** The listing JSON carries 100+ fields across all marketplaces. Always reference the complete template in `references/vendoo_listing_template.md` for the full field list and allowed values.
 
 **Etsy digital download exception:** Do not return JSON for Etsy digital products. Return a copy-pasteable text block using the Etsy Digital Download Output Format.
 
@@ -158,14 +158,14 @@ Apply pricing formula from MEMORY.md.
 
 **Men's Bottoms Sizing (MANDATORY):**
 - Men's pants, jeans, shorts, and other bottoms use the waist alone — `34`, never `34x34` or `34x32`.
-- Vendoo and marketplace size dropdowns are waist or letter sizes. A waist x inseam value does not match, so the size field stays blank.
+- Marketplace size dropdowns are waist or letter sizes. A waist x inseam value does not match, so the size field stays blank.
 - Put that waist in `size`, in every marketplace size field, and in the title.
 - When a real inseam is known and it is not a copy of the waist, put it on the eBay Inseam field and in Measurements. Never invent an inseam by repeating the waist.
 - Women's bottoms keep their own sizing (`8`, `M`, `30`).
 
 **Petite Size Normalization (MANDATORY):**
 - Keep the raw verified tag size in the listing copy when it is a petite code such as `PS`, `PM`, `PL`, or `PXL`.
-- For Vendoo/general size mapping, prefer the actual petite code used by the platform dropdown, such as `PS` for petite small, instead of improvising `SP` or free-typing a custom alias.
+- For general size mapping, prefer the actual petite code used by the platform dropdown, such as `PS` for petite small, instead of improvising `SP` or free-typing a custom alias.
 - For marketplaces that split the size into a base size plus a grouping, map petite sizes as base size plus petite grouping. Example: tag `PS` maps to Depop `Size = S` and `Size grouping = Petite`. On eBay, keep `Size Type = Petites` and select the category's matching petite size (`PS`, `PM`, `PL`, `PXL`, or numeric sizes such as `12P`). A petite large must not become plain `L`; verify that the petite code is offered by the category. Keep platform-specific size mappings when syncing the general size.
 - When the exact petite mapping is unclear from the live platform options, stop and verify the options instead of flattening the size to plain `S`/`Small`.
 
@@ -197,7 +197,7 @@ Apply pricing formula from MEMORY.md.
 
 **eBay Fields — ALWAYS include ALL of these in `ebay_specifics`. Do not skip any.**
 
-Every eBay listing MUST populate these fields. Leaving them blank causes downgraded search visibility and incomplete Vendoo drafts.
+Every eBay listing MUST populate these fields. Leaving them blank causes downgraded search visibility and incomplete eBay drafts.
 
 | Field | Value guidance |
 |-------|---------------|
@@ -229,7 +229,7 @@ Every eBay listing MUST populate these fields. Leaving them blank causes downgra
 | **Inseam** | If provided in measurements |
 | **Waist** | If provided in measurements |
 
-**Pitfall: Skipping any of these fields causes the Vendoo eBay form to show them blank. After "Show Optional Fields", fill every applicable row — non-negotiable unless the attribute literally does not apply (then leave the row out — allowed only for MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced on the tag or seller notes — never the word Lightweight (eBay rejects non-numeric values; do not invent a number). Never leave Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, or Unit Type blank. Season must be Spring/Summer/Fall/Winter. Verify they are present in `ebay_specifics` before outputting.**
+**Pitfall: Skipping any of these fields causes the eBay form to show them blank. After "Show Optional Fields", fill every applicable row — non-negotiable unless the attribute literally does not apply (then leave the row out — allowed only for MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced on the tag or seller notes — never the word Lightweight (eBay rejects non-numeric values; do not invent a number). Never leave Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, or Unit Type blank. Season must be Spring/Summer/Fall/Winter. Verify they are present in `ebay_specifics` before outputting.**
 
 **Pitfall: Etsy Show Optional Fields are also non-negotiable.** Fill Clothing style, Sleeve length, Neckline, Closure, and Fabric pattern with exact Etsy dropdown values. Leave out Graphic, Collar style, Holiday, Occasion, and Sustainability only when they literally do not apply.
 
@@ -239,7 +239,7 @@ Every eBay listing MUST populate these fields. Leaving them blank causes downgra
 
 **Pitfall: eBay Season has no "All Seasons" option.** Choose exactly one of Spring, Summer, Fall, or Winter from the garment (fabric, sleeve, type, title cues). For year-round items, put `"All Seasons"` under **Features** and still set Season to the primary wear season.
 
-**Pitfall: JSON key names must exactly match the extension's `fieldNameMap` keys** (e.g., `unitQuantity` not `unit_quantity` or `qty`). See `references/vendoo-extension-architecture.md` for the full mapping and extension architecture.
+**Pitfall: JSON key names must exactly match the listing contract's keys** (e.g., `unitQuantity` not `unit_quantity` or `qty`). See the JSON Field Reference in `references/vendoo_listing_template.md`.
 
 ## Formula Reference (NON-NEGOTIABLE)
 
@@ -362,7 +362,7 @@ Before outputting ANY listing, verify:
 - [ ] **Comps checked:** web_search used or baseline estimated
 - [ ] **Title formula:** `{BRAND} {SIZE} {VIBE} {ITEM} {COLOR} {FIT}` followed EXACTLY
 - [ ] **Title size matches the size field:** the same value, character for character (men's bottoms: `34`, not `34x34`)
-- [ ] **Condition is a Vendoo general value and is not blank** (`Pre-Owned - Good`, `New With Tags/Box`, and the other values in `references/vendoo-dropdown-options.md`)
+- [ ] **Condition is a general value and is not blank** (`Pre-Owned - Good`, `New With Tags/Box`, and the other values in `references/vendoo-dropdown-options.md`)
 - [ ] **Title length:** 80 characters or less
 - [ ] **Physical-item description lines:** if the item is physical, use the standard description formula and preserve its required line structure
 - [ ] **Etsy digital description override:** if the item is a digital Etsy product, use the Etsy Digital Download Description Formula instead of the physical-item template
@@ -375,12 +375,12 @@ Before outputting ANY listing, verify:
 - [ ] **No uncertainties in description:** no hedges, estimates, or unverified-detail notes in buyer-facing copy; open questions go in the reply to the seller only
 - [ ] **Local save completed:** If a local path was provided, `listing.json` was written for standard listings or `listing.md` was written for Etsy digital download listings and verified
 - [ ] **Main fields populated:** title, description, price, brand, condition, size, primaryColor, secondaryColor (if visible), quantity, weight_lb, weight_oz, package_dimensions_in
-- [ ] **Vendoo category is terminal:** use Vendoo General taxonomy (`Women > Women's Clothing > Tops` for women's shirts/T-shirts; `Men > Men's Clothing > Shirts > T-Shirts` for men's T-shirts), not marketplace-only aliases such as `Shirts & Blouses`
+- [ ] **General category is terminal:** use the general category tree (`Women > Women's Clothing > Tops` for women's shirts/T-shirts; `Men > Men's Clothing > Shirts > T-Shirts` for men's T-shirts), not marketplace-only aliases such as `Shirts & Blouses`
 - [ ] **Category chosen on every enabled marketplace form:** choose and save the most specific category from each marketplace's own catalog before filling its dependent fields. A General category alone does not complete the marketplace forms. Never leave category selection to the seller. If a catalog cannot be read or a category cannot be verified, keep the draft incomplete and report the blocker; never list without a category. Etsy applies only when the item is eligible.
-- [ ] **Native form is authoritative:** when Anteroom supplies a native marketplace form, generate only its provided paths and exact choices, respecting its types and limits. Its live fields replace generic marketplace templates and Vendoo aliases for that marketplace. Re-read dependent choices after a controlling selection changes. An available option is not evidence: support item facts with the photos or seller notes, omit unsupported optional facts, and keep unsupported required facts as blockers. Never fill a field just because its name appears in a generic template.
+- [ ] **Native form is authoritative:** when Anteroom supplies a native marketplace form, generate only its provided paths and exact choices, respecting its types and limits. Its live fields replace generic marketplace templates and general aliases for that marketplace. Re-read dependent choices after a controlling selection changes. An available option is not evidence: support item facts with the photos or seller notes, omit unsupported optional facts, and keep unsupported required facts as blockers. Never fill a field just because its name appears in a generic template.
 - [ ] **eBay specifics populated (ALL required):** type, department, sizeType, size, brand, fit, material, pattern, style, accents, features, neckline, closure, countryOfOrigin, fabricType, garmentCare, handmade, personalize, vintage, occasion, season, theme, unitQuantity, unitType
 - [ ] **eBay jackets/coats:** Outer Shell Material populated separately from material/fabricType, with the best estimate when unverified; shell uncertainty documented in the description
-- [ ] **eBay specifics key names match extension fieldNameMap:** JSON keys like `features`, `neckline`, `season`, `unitQuantity`, `unitType` must use exactly these names (not aliases like `feature` or `qty`) so the Vendoo extension can find and fill the corresponding form fields
+- [ ] **eBay specifics key names match the listing contract:** JSON keys like `features`, `neckline`, `season`, `unitQuantity`, `unitType` must use exactly these names (not aliases like `feature` or `qty`) so Anteroom can map them to the corresponding eBay item specifics
 - [ ] **Petite size normalized:** petite codes such as `PS` are mapped using exact platform-supported values instead of being flattened to plain small
 - [ ] **Depop specifics populated:** source, age, style, type, fit, material, occasion, and size_grouping when supportable
 - [ ] **Etsy specifics populated:** who_made, what_is, when_made, materials, tags
@@ -420,7 +420,7 @@ Before outputting ANY listing, verify:
 - NO title field (uses description)
 - Exactly 3 Style tags required
 - Source and Age are required
-- Brand must be a Depop list brand (not a free-text Vendoo brand)
+- Brand must be a Depop list brand (not a free-text brand)
 - Maximum 5 tags
 - Parcel size must be an exact current Depop dropdown value: Extra extra small, Extra small, Small, Medium, Large, Extra large
 - Parcel size must match the packaged weight you estimated: under 4oz Extra extra small, under 8oz Extra small, under 12oz Small, under 1lb Medium, under 2lb Large, otherwise Extra large
@@ -429,14 +429,13 @@ Before outputting ANY listing, verify:
 - Condition is required and uses Mercari labels (see `vendoo-dropdown-options.md`)
 - shippingLabel must be `USPS Ground Advantage`
 
-**Grailed / Sellwild:**
-- No category of their own to choose: Vendoo maps the general category to each one
-- Fields come from that mapped category's live schema; put answers in `grailed_specifics` or `sellwild_specifics`
-- Grailed's Designer is the listing brand; it must be the real maker, never a store or reseller name
+**Sellwild:**
+- Fields come from the marketplace form Anteroom supplies; put answers in `sellwild_specifics`
+
 - Condition follows the general condition; do not set it per marketplace
 
 **Vinted (direct listing):**
-- Put Vinted's own catalog breadcrumb in `vinted_specifics.category`, such as `Women > Clothing > Jeans > Straight jeans`. Do not copy that breadcrumb into `marketplace_categories.vinted`. That field is Vendoo's category, and Send fills it on Vendoo's form.
+- Put Vinted's own catalog breadcrumb in `vinted_specifics.category`, such as `Women > Clothing > Jeans > Straight jeans`. Do not copy that breadcrumb into `marketplace_categories.vinted`.
 - Condition, brand, size, color, package size, and material go in `vinted_specifics` when the photos or seller notes support them
 - Listing on Vinted saves a draft, then publishes only after the seller confirms List. Do not publish or delist
 
@@ -453,7 +452,7 @@ Before outputting ANY listing, verify:
 5. Pricing: $22 × 1.35 = $29.70 → $30 listing, $28 auto, $26 min
 6. Synthesis generates JSON with exact formulas
 
-**Output:** Vendoo-compatible JSON ready to copy/paste
+**Output:** Listing JSON ready to copy/paste
 
 ### Example 2: Unclear brand
 **User sends:** Photos but tag is blurry

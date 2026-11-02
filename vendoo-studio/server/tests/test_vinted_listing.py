@@ -90,7 +90,6 @@ class VintedListRouteTest(unittest.TestCase):
         ]
         self.manager = SimpleNamespace(connected=True, capabilities=frozenset({"marketplace.actions"}), send_message=AsyncMock(return_value=True))
         self.enterContext(patch("vendoo_studio.services.extension_connection.extension_manager", self.manager))
-        self.enterContext(patch("vendoo_studio.services.extension_connection.schedule_advance_job_queue"))
         self.enterContext(patch("vendoo_studio.database.SessionLocal", self.sessions))
         self.launched = []
         self.enterContext(patch.object(native, "_launch", self.launched.append))

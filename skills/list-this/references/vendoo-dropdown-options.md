@@ -1,6 +1,6 @@
-# Vendoo marketplace dropdown options
+# Marketplace dropdown options
 
-Scraped live from `https://web.vendoo.co` on **2026-09-08**.
+Scraped from the cross-listing form the seller used before Anteroom listed directly, on **2026-09-08**. The **General** values below are Anteroom's general listing values; each marketplace's own form stays authoritative for that marketplace.
 
 Machine-readable copy: `vendoo-dropdown-options.json`.
 
@@ -10,26 +10,26 @@ Brand, tags, Character, Country of Origin, Model, and similar open-ended fields 
 
 ## Condition (fill-critical)
 
-Each marketplace has its own vocabulary. Filling Vendoo general `condition` into marketplace overrides will miss unless the filler maps these strings.
+Each marketplace has its own vocabulary. Filling the general `condition` into marketplace fields will miss unless the filler maps these strings.
 
 | Marketplace | Options |
 |---|---|
-| **Vendoo general** | New With Tags/Box · New Without Tags/Box · New With Imperfections · Pre-Owned - Excellent · Pre-Owned - Good · Pre-Owned - Fair · Poor (Major flaws) |
+| **General** | New With Tags/Box · New Without Tags/Box · New With Imperfections · Pre-Owned - Excellent · Pre-Owned - Good · Pre-Owned - Fair · Poor (Major flaws) |
 | **eBay** | New with tags · New without tags · New with imperfections · Pre-owned - Excellent · Pre-owned - Good · Pre-owned - Fair |
 | **Poshmark** | New With Tags (NWT) · Like New · Good · Fair |
 | **Mercari** | New (New with tags) · Like new (New without tags) · Good (Gently used) · Fair (Used) · Poor (Major flaws) |
 | **Depop** | Brand new · Like new · Used - Excellent · Used - Good · Used - Fair |
-| Etsy / Facebook / Shopify / Vinted / Whatnot | No condition dropdown on the Vendoo form |
+| Etsy / Facebook / Shopify / Vinted / Whatnot | No condition dropdown in this scrape |
 
 Poshmark help text: NWT = tags/packaging; Like New = new without tags; Good = gently used; Fair = visible wear.
 
 Depop help text: Brand new = unused with tags; Like new = mint pre-owned or new without tags; Used - Excellent/Good/Fair = increasing wear.
 
-eBay has no Poor option. Casing differs from Vendoo (`Pre-owned` vs `Pre-Owned`).
+eBay has no Poor option. Casing differs from the general values (`Pre-owned` vs `Pre-Owned`).
 
-The Anteroom extension maps Vendoo general condition → marketplace labels before filling:
+Anteroom maps the general condition to each marketplace's label:
 
-| Vendoo general | eBay | Poshmark | Mercari | Depop |
+| General | eBay | Poshmark | Mercari | Depop |
 |---|---|---|---|---|
 | New With Tags/Box | New with tags | New With Tags (NWT) | New (New with tags) | Brand new |
 | New Without Tags/Box | New without tags | Like New | Like new (New without tags) | Like new |
@@ -43,16 +43,16 @@ The Anteroom extension maps Vendoo general condition → marketplace labels befo
 
 | Marketplace | Options |
 |---|---|
-| **Vendoo / eBay** | Beige, Black, Blue, Brown, Cream, Gold, Gray, Green, Orange, Multicolor, Pink, Purple, Red, Silver, Yellow, Tan, White |
+| **General / eBay** | Beige, Black, Blue, Brown, Cream, Gold, Gray, Green, Orange, Multicolor, Pink, Purple, Red, Silver, Yellow, Tan, White |
 | **Etsy** | Same list **without** Multicolor |
 | **Poshmark** | Same list **without** Beige and Multicolor |
 | **Depop** | Black, Grey, White, Brown, Tan, Cream, Yellow, Red, Burgundy, Orange, Pink, Purple, Blue, Navy, Green, Khaki, Multi, Silver, Gold |
 
 Depop uses **Grey** (not Gray) and **Multi** (not Multicolor), plus Burgundy, Navy, Khaki.
 
-The Anteroom extension maps Vendoo general colors before filling. When Multicolor has no marketplace option, secondary is promoted to primary so the required field is not left blank:
+Anteroom maps the general colors to each marketplace's list. When Multicolor has no marketplace option, secondary is promoted to primary so the required field is not left blank:
 
-| Incoming / Vendoo | eBay | Etsy | Poshmark | Depop |
+| General | eBay | Etsy | Poshmark | Depop |
 |---|---|---|---|---|
 | Gray / Grey | Gray | Gray | Gray | Grey |
 | Multicolor / Multi | Multicolor | *skipped* → use secondary | *skipped* → use secondary | Multi |
@@ -61,7 +61,7 @@ The Anteroom extension maps Vendoo general colors before filling. When Multicolo
 | Burgundy | Red | Red | Red | Burgundy |
 | Khaki | Beige | Beige | Tan | Khaki |
 
-## Vendoo general
+## General
 
 - **US Size** (after T-Shirt category): 2XS–8XL, combos (S/M, M/L, L/XL, XS/S), numeric 28–62, Big 1X–6X, ST–6XLT, One Size, IT/EU/FR 42–60.
 - Size Type (`#generalDetails.size.scale.value`) is **gone**. Size is labeled US Size.
@@ -132,5 +132,5 @@ Material, occasion, and body fit appear after **Show Optional Fields**.
 |---|---|
 | **Facebook** | Delivery method: Shipping only. Shipping option: Use a prepaid shipping label |
 | **Shopify** | No condition dropdown. Location and Collections are account-specific |
-| **Vinted** | BETA on the Vendoo form: Title, Description, Quantity, Category, Price only. Direct listing uses `vinted_specifics.category` (Vinted's breadcrumb), not this Vendoo category |
+| **Vinted** | Direct listing uses `vinted_specifics.category` (Vinted's breadcrumb), not the general category |
 | **Whatnot** | Hazmat: No Hazardous Materials, Contains Hazardous Materials, Contains Lithium Batteries. Sales format: Buy It Now, Anytime Auction |

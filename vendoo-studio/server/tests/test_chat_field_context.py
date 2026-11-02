@@ -30,7 +30,7 @@ def context_db():
         ))
         db.commit()
         job = JobRepo(db).create(conv.id, revision.id, revision.listing_json,
-                                 vendoo_item_id="draft-1", status="completed")
+                                  status="completed")
         yield db, conv.id, job
     engine.dispose()
 
@@ -46,42 +46,12 @@ def test_empty_required_fields_have_options_without_a_draft_readback(context_db)
     assert material["required"] is True
     assert material["options"] == ["Cotton", "Silk"]
     assert material["action"] == "generate_value"
-    assert "Saved-draft readback available: no" in prompt
 
 
-def test_completed_job_readback_uses_current_values_and_exact_options(context_db):
-    db, conv_id, job = context_db
-    JobRepo(db).add_event(job.id, "completion_review", payload={"schema": {"ebay": {"fields": [
-        {"label": "Pattern", "value": "", "options": [{"label": "Solid"}, {"label": "Floral"}]},
-        {"label": "Material", "value": "", "required": True, "options": ["Cotton", "Silk"]},
-    ]}}})
-    fields = {row["field"]: row for row in rows(chat_field_context(db, conv_id))}
-    assert fields["Pattern"]["action"] == "fill_on_vendoo"
-    assert fields["Pattern"]["listing_value"] == "Solid"
-    assert fields["Pattern"]["observed"] == ""
-    assert fields["Pattern"]["options"] == ["Solid", "Floral"]
-    assert fields["Material"]["action"] == "generate_value"
 
 
-def test_creation_gaps_are_available_before_browser_verification(context_db):
-    db, conv_id, job = context_db
-    JobRepo(db).add_event(job.id, "vendoo_api_created", payload={
-        "unfilled": [{"marketplace": "ebay", "field": "Sleeve Length", "required": True}],
-        "unresolved": [{"field": "ebay:Pattern", "value": "Solid"}],
-    })
-    fields = {row["field"]: row for row in rows(chat_field_context(db, conv_id))}
-    assert fields["Sleeve Length"]["source"] == "draft_creation"
-    assert fields["Pattern"]["action"] == "repair_value"
 
 
-def test_saved_answer_is_preserved_when_listing_json_is_empty(context_db):
-    db, conv_id, job = context_db
-    JobRepo(db).add_event(job.id, "completion_review", payload={"schema": {
-        "ebay": {"fields": [{"label": "Material", "value": "Cotton"}]},
-    }})
-    material = next(row for row in rows(chat_field_context(db, conv_id)) if row["field"] == "Material")
-    assert material["action"] == "adopt_saved_value"
-    assert material["observed"] == "Cotton"
 
 
 def test_hidden_and_unselected_fields_are_excluded(context_db):
@@ -127,16 +97,6 @@ def test_not_applicable_optional_field_is_excluded_from_readback(context_db):
     assert all(row["field"] != "Holiday" for row in rows(chat_field_context(db, conv_id)))
 
 
-def test_not_applicable_does_not_hide_required_fields_or_failed_clears():
-    from vendoo_studio.services.completion_gaps import review_fields
-
-    listing = {"ebay_specifics": {"holiday": "Does Not Apply"}}
-    optional = {"schema": {"ebay": {"fields": [{"label": "Holiday", "value": ""}]}}}
-    assert review_fields(optional, listing) == []
-    optional["schema"]["ebay"]["fields"][0]["required"] = True
-    assert len(review_fields(optional, listing)) == 1
-    optional["schema"]["ebay"]["fields"][0].update(required=False, error="Clear failed")
-    assert len(review_fields(optional, listing)) == 1
 
 
 def test_chat_clear_without_status_is_remembered(context_db):
@@ -183,14 +143,6 @@ def test_chat_clear_is_recorded_when_saving_without_a_write_on_read(context_db):
     assert len(ListingRepo(db).get_revisions(conv_id)) == count
 
 
-def test_reviewed_blank_does_not_hide_required_fields():
-    from vendoo_studio.services.completion_gaps import review_fields
-
-    listing = {"reviewed_empty_fields": [{"marketplace": "ebay", "field": "Holiday"}]}
-    schema = {"schema": {"ebay": {"fields": [{"label": "Holiday", "value": ""}]}}}
-    assert review_fields(schema, listing) == []
-    schema["schema"]["ebay"]["fields"][0]["required"] = True
-    assert len(review_fields(schema, listing)) == 1
 
 
 def test_saved_chat_clear_recovery_does_not_override_a_later_seller_value(context_db):

@@ -3,11 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { ChevronRightIcon, Trash2Icon } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Spinner } from "../ui/spinner";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
-import { useVendooEnabled } from "../../vendooMode";
 
 // Phones get one scroll for the page and each log row as a card: time, level and
 // source on a line, the message (the tap target) under them.
@@ -42,80 +39,6 @@ function formatLogTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function prettyLogBody(body: string): string {
-  try {
-    return JSON.stringify(JSON.parse(body), null, 2);
-  } catch {
-    return body;
-  }
-}
-
-function LogHeaders({ title, headers }: { title: string; headers: Record<string, string> }) {
-  const names = Object.keys(headers);
-  return (
-    <section className="space-y-1.5">
-      <h4 className="text-3xs font-medium uppercase tracking-wider text-muted-foreground">{title}</h4>
-      {names.length ? (
-        <dl className="grid grid-cols-[minmax(8rem,max-content)_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-2xs">
-          {names.map((name) => (
-            <div key={name} className="contents">
-              <dt className="text-muted-foreground">{name}</dt>
-              <dd className="text-foreground [overflow-wrap:anywhere]">{headers[name]}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : (
-        <p className="text-xs text-muted-foreground">None</p>
-      )}
-    </section>
-  );
-}
-
-function LogBody({ title, body }: { title: string; body: string | null }) {
-  return (
-    <section className="space-y-1.5">
-      <h4 className="text-3xs font-medium uppercase tracking-wider text-muted-foreground">{title}</h4>
-      {body ? <pre className={LOG_PRE}>{prettyLogBody(body)}</pre> : <p className="text-xs text-muted-foreground">None</p>}
-    </section>
-  );
-}
-
-function LogDetail({ id }: { id: number }) {
-  const { data, error, isPending } = useQuery({
-    queryKey: ["vendoo-api-log", id],
-    queryFn: () => api.settings.vendooApiLog(id),
-    staleTime: Infinity,
-  });
-  if (isPending) {
-    return (
-      <p className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground">
-        <Spinner size="xs" tone="muted" />
-        Loading
-      </p>
-    );
-  }
-  if (error) return <SettingsNote tone="error">{error.message}</SettingsNote>;
-  return (
-    <div className="grid gap-4 py-2">
-      <LogHeaders
-        title="General"
-        headers={{
-          URL: data.url,
-          Method: data.method,
-          Status: String(data.status ?? "No response"),
-          Time: new Date(data.at).toLocaleString(),
-          Duration: `${data.duration_ms} ms`,
-          ...(data.error ? { Error: data.error } : {}),
-        }}
-      />
-      <LogHeaders title="Request headers" headers={data.request_headers} />
-      <LogBody title="Request body" body={data.request_body} />
-      <LogHeaders title="Response headers" headers={data.response_headers} />
-      <LogBody title="Response body" body={data.response_body} />
-    </div>
-  );
 }
 
 function ErrorLogSection() {
@@ -207,104 +130,6 @@ function ErrorLogSection() {
   );
 }
 
-function VendooApiLogSection() {
-  const queryClient = useQueryClient();
-  const { data, error } = useQuery({
-    queryKey: ["vendoo-api-logs"],
-    queryFn: api.settings.vendooApiLogs,
-    refetchInterval: () => (document.hidden ? false : 1000),
-  });
-  const clear = useMutation({
-    mutationFn: api.settings.clearVendooApiLogs,
-    onSuccess: () => queryClient.setQueryData(["vendoo-api-logs"], { entries: [] }),
-  });
-  const [openId, setOpenId] = useState<number | null>(null);
-  const entries = data?.entries ?? [];
-  return (
-    <SettingsSection id="logs" title="Vendoo API">
-      <SettingsRow
-        id="vendoo-api-logs"
-        title={
-          <span className="flex items-center gap-2">
-            Live requests
-            <Badge variant="outline" size="sm">Troubleshooting</Badge>
-          </span>
-        }
-        description="For troubleshooting. Calls the extension makes to Vendoo while Anteroom is open. Click a request to see its full URL, headers, and bodies. Tokens, API keys, and cookies are masked. The list clears when Anteroom restarts."
-        status={entries.length ? `${entries.length} ${entries.length === 1 ? "call" : "calls"}` : undefined}
-        control={
-          <Button
-            size="xs"
-            variant="ghost-muted"
-            disabled={!entries.length || clear.isPending}
-            onClick={() => {
-              setOpenId(null);
-              clear.mutate();
-            }}
-          >
-            <Trash2Icon />
-            Clear
-          </Button>
-        }
-      >
-        {error ? <SettingsNote tone="error">{error.message}</SettingsNote> : null}
-        {entries.length === 0 ? (
-          <SettingsNote>No Vendoo calls yet. Create, update, or open a listing and requests will show up here.</SettingsNote>
-        ) : (
-          <div className={LOG_SCROLL}>
-            <table className={LOG_TABLE} aria-label="Vendoo API calls">
-              <thead className={LOG_HEAD}>
-                <tr>
-                  <th scope="col">Time</th>
-                  <th scope="col">Method</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Duration</th>
-                  <th scope="col">Request</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry) => {
-                  const open = openId === entry.id;
-                  return (
-                    <Fragment key={entry.id}>
-                      <tr className={cn(LOG_ROW, open && "bg-muted/30")}>
-                        <td className="whitespace-nowrap">{formatLogTime(entry.at)}</td>
-                        <td className="font-mono">{entry.method}</td>
-                        <td className={entry.ok ? "text-success-foreground" : "text-destructive-foreground"}>
-                          {entry.status ?? entry.error ?? ""}
-                        </td>
-                        <td className="whitespace-nowrap">{entry.duration_ms} ms</td>
-                        <td className="w-full font-mono">
-                          <LogToggle open={open} onClick={() => setOpenId(open ? null : entry.id)}>
-                            {entry.url}
-                          </LogToggle>
-                        </td>
-                      </tr>
-                      {open ? (
-                        <tr className="border-b border-border/40 bg-muted/30 last:border-b-0">
-                          <td colSpan={5}>
-                            <LogDetail id={entry.id} />
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SettingsRow>
-    </SettingsSection>
-  );
-}
-
 export function LogsSettings() {
-  const vendooOn = useVendooEnabled();
-  return (
-    <>
-      <ErrorLogSection />
-      {vendooOn ? <VendooApiLogSection /> : null}
-    </>
-  );
+  return <ErrorLogSection />;
 }

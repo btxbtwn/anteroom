@@ -1,12 +1,11 @@
-import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BadgeDollarSignIcon, ExternalLinkIcon } from "lucide-react";
+import { BadgeDollarSignIcon } from "lucide-react";
 import { api } from "../api/client";
 import { useListingSessionActive } from "./listingSession";
 import type { MarketplaceSale } from "../api/directConnections";
 import { marketplaceName } from "./marketplaceNames";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
-import { Button, buttonVariants } from "./ui/button";
+import { Button } from "./ui/button";
 
 const SALES_POLL_MS = 15_000;
 
@@ -22,7 +21,7 @@ function listJoin(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-export function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; openInVendoo?: ReactNode }) {
+export function SaleNotice({ sale }: { sale: MarketplaceSale }) {
   const queryClient = useQueryClient();
   const soldOn = marketplaceName(sale.marketplace);
   const reversed = sale.orderStatus === "cancelled" || sale.orderStatus === "refunded" || sale.orderStatus === "cancellation_pending";
@@ -59,15 +58,6 @@ export function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; open
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
-          {exhausted && sale.listedElsewhere.length
-            ? openInVendoo ??
-              (sale.vendooUrl ? (
-                <a className={buttonVariants({ size: "xs", variant: "outline" })} href={sale.vendooUrl} target="_blank" rel="noreferrer">
-                  <ExternalLinkIcon />
-                  Open in Vendoo
-                </a>
-              ) : null)
-            : null}
           <Button size="xs" variant="ghost" disabled={done.isPending} onClick={() => done.mutate()}>
             Done
           </Button>
@@ -78,7 +68,7 @@ export function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; open
 }
 
 /** Sales eBay or Etsy reported for this listing, until the seller marks them done. */
-export function SoldElsewhereNotice({ convId, openInVendoo }: { convId: string; openInVendoo?: ReactNode }) {
+export function SoldElsewhereNotice({ convId }: { convId: string }) {
   const sessionActive = useListingSessionActive();
   const { data } = useQuery({
     queryKey: ["marketplace-sales", convId],
@@ -90,7 +80,7 @@ export function SoldElsewhereNotice({ convId, openInVendoo }: { convId: string; 
   return (
     <>
       {sales.map((sale) => (
-        <SaleNotice key={sale.id} sale={sale} openInVendoo={openInVendoo} />
+        <SaleNotice key={sale.id} sale={sale} />
       ))}
     </>
   );

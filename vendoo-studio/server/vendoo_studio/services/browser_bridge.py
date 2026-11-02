@@ -1,21 +1,18 @@
-"""Request/response calls to the interactive Vendoo browser in Chrome.
+"""Request/response calls to the Anteroom Bridge in Chrome.
 
-Studio shows a Vendoo draft tab as a live frame. These helpers send
-``browser.*`` messages over the extension WebSocket and wait for the matching
-``browser.result``. Pointer, touch, and keyboard input is fire-and-forget.
+``request`` sends one message over the extension WebSocket and waits for the
+matching ``browser.result``. Direct marketplace actions, reads and checks all
+go through it.
 """
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from typing import Any
 
 from vendoo_studio.models.protocol import ProtocolMessage
 
-OPEN_TIMEOUT_SEC = 60.0
 READ_TIMEOUT_SEC = 20.0
-ACT_TIMEOUT_SEC = 30.0
 
 
 class BrowserBridgeError(RuntimeError):
@@ -28,17 +25,10 @@ def _manager():
     return current_extension()
 
 
-def _require_draft(job) -> None:
-    from vendoo_studio.services.extension_connection import durable_vendoo_item_id
-
-    if not durable_vendoo_item_id(job.vendoo_item_id) and not job.vendoo_url:
-        raise BrowserBridgeError("Send the listing to Vendoo first so there is a draft to open.")
-
-
 async def request(job, message_type: str, payload: dict[str, Any] | None = None, *, timeout: float = READ_TIMEOUT_SEC) -> dict:
     manager = _manager()
     if not manager.connected:
-        raise BrowserBridgeError("Connect Chrome to use the Vendoo browser.")
+        raise BrowserBridgeError("Connect Chrome first.")
     request_id = uuid.uuid4().hex
     waiter = manager.register_wait(request_id, getattr(job, "id", None))
     sent = await manager.send_message(ProtocolMessage(
@@ -54,77 +44,8 @@ async def request(job, message_type: str, payload: dict[str, Any] | None = None,
         result = await asyncio.wait_for(waiter, timeout)
     except asyncio.CancelledError as exc:
         manager.cancel_wait(request_id)
-        raise BrowserBridgeError("Send was cancelled.") from exc
+        raise BrowserBridgeError("The request was cancelled.") from exc
     except TimeoutError as exc:
         manager.cancel_wait(request_id)
         raise BrowserBridgeError("Chrome did not answer in time.") from exc
     return result if isinstance(result, dict) else {"ok": False, "error": "Malformed browser reply"}
-
-
-async def open_session(job, marketplace: str | None = None) -> dict:
-    from vendoo_studio.services.extension_connection import durable_vendoo_item_id
-
-    _require_draft(job)
-    return await request(job, "browser.open", {
-        "vendoo_item_id": durable_vendoo_item_id(job.vendoo_item_id),
-        "vendoo_url": job.vendoo_url,
-        "marketplace": marketplace or "",
-    }, timeout=OPEN_TIMEOUT_SEC)
-
-
-async def close_session(job) -> dict:
-    return await request(job, "browser.close", timeout=READ_TIMEOUT_SEC)
-
-
-_TAKEOVER_MOUSE = frozenset({"mousePressed", "mouseWheel", "touchStart"})
-_last_human_input: dict[str, float] = {}
-
-
-def _is_takeover(event: dict) -> bool:
-    # Hovering over the pane is not taking control; pressing, touching, scrolling, or typing is.
-    return event.get("kind") in {"key", "text"} or event.get("type") in _TAKEOVER_MOUSE
-
-
-def human_input_since(job_id: str, since: float) -> bool:
-    return _last_human_input.get(job_id, 0.0) > since
-
-
-async def send_input(job, events: list[dict]) -> bool:
-    if any(_is_takeover(event) for event in events):
-        _last_human_input[job.id] = time.monotonic()
-    manager = _manager()
-    if not manager.connected:
-        return False
-    return await manager.send_message(ProtocolMessage(
-        type="browser.input",
-        job_id=job.id,
-        payload={"job_id": job.id, "events": events},
-    ).model_dump(mode="json"))
-
-
-async def send_viewport(job, viewport: dict) -> bool:
-    manager = _manager()
-    if not manager.connected:
-        return False
-    return await manager.send_message(ProtocolMessage(
-        type="browser.viewport",
-        job_id=job.id,
-        payload={**viewport, "job_id": job.id},
-    ).model_dump(mode="json"))
-
-
-async def pick(job, x_ratio: float, y_ratio: float) -> dict:
-    return await request(job, "browser.pick", {"x_ratio": x_ratio, "y_ratio": y_ratio})
-
-
-async def snapshot(job) -> dict:
-    return await request(job, "browser.snapshot")
-
-
-async def act(job, action: dict) -> dict:
-    return await request(job, "browser.act", action, timeout=ACT_TIMEOUT_SEC)
-
-
-async def navigate(job, direction: str) -> dict:
-    _last_human_input[job.id] = time.monotonic()
-    return await request(job, "browser.navigate", {"direction": direction}, timeout=ACT_TIMEOUT_SEC)

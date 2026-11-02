@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useWorkspaceRuntime } from "../../app/runtime";
-import { useVendooEnabled } from "../../vendooMode";
-import { searchSettings, settingsSearchItemsForMode, type SettingsSearchItem } from "../settingsNav";
+import { searchSettings, SETTINGS_SEARCH_ITEMS, type SettingsSearchItem } from "../settingsNav";
 
 export type SettingsSearch = ReturnType<typeof useSettingsSearch>;
 
@@ -18,10 +17,9 @@ export function useSettingsSearch(
   const [activeResultIndex, setActiveResultIndex] = useState(0);
   const settingsSearchRef = useRef<HTMLInputElement>(null);
   const { hosted } = useWorkspaceRuntime();
-  const vendooOn = useVendooEnabled();
   const settingsResults = useMemo(
-    () => searchSettings(settingsQuery, settingsSearchItemsForMode(vendooOn).filter((item) => !hosted || (item.section === "general" && item.id !== "setup-guide") || (item.section === "listings" && item.id !== "vendoo") || (item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)) || (item.section === "connections" && ["accounts", "direct-ebay", "ebay-inventory-location", "direct-etsy"].includes(item.id)))),
-    [settingsQuery, vendooOn, hosted],
+    () => searchSettings(settingsQuery, SETTINGS_SEARCH_ITEMS.filter((item) => !hosted || (item.section === "general" && item.id !== "setup-guide") || item.section === "listings" || (item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)) || (item.section === "connections" && ["accounts", "direct-ebay", "ebay-inventory-location", "direct-etsy"].includes(item.id)))),
+    [settingsQuery, hosted],
   );
   const isSettingsSearching = settingsQuery.trim().length > 0;
 

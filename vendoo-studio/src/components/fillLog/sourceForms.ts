@@ -180,7 +180,7 @@ function formsFromListing(listing?: Record<string, unknown>): DraftForm[] {
   if (!listing || typeof listing !== "object") return [];
   const general = LISTING_GENERAL_FIELDS.map((field) => listingField(listing, field.key, field.label));
   const forms: DraftForm[] = [toForm("general", organizeFields("general", general))];
-  for (const id of ["ebay", "etsy", "poshmark", "mercari", "depop", "grailed", "vinted", "facebook", "sellwild"]) {
+  for (const id of ["ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "facebook", "sellwild"]) {
     const extras: DraftField[] = [];
     if (id === "poshmark") extras.push(listingField(listing, "poshmark_specifics.originalPrice", "Original Price"));
     if (id === "mercari") extras.push(listingField(listing, "mercari_specifics.shippingLabel", "Shipping Label"));

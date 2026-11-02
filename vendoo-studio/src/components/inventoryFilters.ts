@@ -1,6 +1,5 @@
-/** Vendoo Inventory's filters and sorts, over Studio's own listing rows. */
+/** Inventory filters and sorts over Studio's own listing rows. */
 
-import { needsRelist } from "./relistStatus";
 import { inventoryStatus, liveMarketplaces } from "./sidebar/listingStatus";
 
 export type ListingSortId =
@@ -41,7 +40,7 @@ export const STALE_DAY_OPTIONS = [30, 60, 90] as const;
 
 const DAY_MS = 86_400_000;
 
-/** Vendoo's Inventory tabs, plus the one state Vendoo has no name for. */
+/** The inventory's lifecycle tabs. */
 export const LISTING_STATUS_TABS = ["draft", "active", "sold", "failed"] as const;
 
 export type ListingStatusFilter = "all" | (typeof LISTING_STATUS_TABS)[number];
@@ -63,8 +62,6 @@ export type FilterableListing = {
   vendoo_sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
   vendoo_sold_dates?: Record<string, string>;
-  vendoo_form_updated_at?: string | null;
-  vendoo_relist_pending?: string[];
   unsent_edits?: boolean;
 };
 
@@ -77,9 +74,7 @@ export interface ListingFilters {
    * them, or, with none picked, the listings no marketplace carries.
    */
   notListed: boolean;
-  /** Keep only listings whose live marketplaces are behind the last Vendoo write. */
-  needsRelist: boolean;
-  /** Keep only listings edited here since Vendoo last had them. */
+  /** Keep only listings edited here since they were last sent to a marketplace. */
   unsent: boolean;
   /** Keep only listings that went live at least this many days ago; 0 is off. */
   staleDays: number;
@@ -91,7 +86,6 @@ export const DEFAULT_LISTING_FILTERS: ListingFilters = {
   marketplaces: [],
   labels: [],
   notListed: false,
-  needsRelist: false,
   unsent: false,
   staleDays: 0,
   sort: "recent",
@@ -121,7 +115,7 @@ function listedOn(listing: FilterableListing): string[] {
   return liveMarketplaces(listing);
 }
 
-/** Vendoo searches Title and SKU; Studio also searches the labels a listing wears. */
+/** Search covers title, SKU and the labels a listing wears. */
 export function matchesSearch(listing: FilterableListing, needle: string): boolean {
   if (!needle) return true;
   return (
@@ -183,7 +177,6 @@ export function matchesFilters(
     const own = new Set((listing.vendoo_labels || []).map(lower));
     if (!filters.labels.some((label) => own.has(lower(label)))) return false;
   }
-  if (filters.needsRelist && !needsRelist(listing)) return false;
   if (filters.unsent && !listing.unsent_edits) return false;
   if (!isStale(listing, filters.staleDays, now)) return false;
   return true;
@@ -289,7 +282,7 @@ export function statusCounts(
   return counts;
 }
 
-/** Every Vendoo label in the inventory, deduped case-insensitively. */
+/** Every label in the inventory, deduped case-insensitively. */
 export function labelOptions(listings: FilterableListing[]): string[] {
   const seen = new Map<string, string>();
   for (const listing of listings) {
@@ -327,7 +320,6 @@ export function activeFilterCount(filters: ListingFilters): number {
     // "Not listed on eBay" is one narrowing, not two.
     Math.max(filters.marketplaces.length, filters.notListed ? 1 : 0) +
     filters.labels.length +
-    (filters.needsRelist ? 1 : 0) +
     (filters.unsent ? 1 : 0) +
     (filters.staleDays ? 1 : 0)
   );
@@ -364,7 +356,7 @@ export function notListedOnCounts(listings: FilterableListing[], marketplaces: s
   return Object.fromEntries(marketplaces.map((id) => [id, listings.length - (carried[id] || 0)]));
 }
 
-/** The same for Vendoo labels, keyed the way `labelOptions` names them. */
+/** The same for labels, keyed the way `labelOptions` names them. */
 export function labelCounts(listings: FilterableListing[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const listing of listings) {
@@ -389,17 +381,12 @@ export function staleCounts(
   return counts;
 }
 
-/** Listings whose live marketplaces still carry the copy from before the last write. */
-export function needsRelistCount(listings: FilterableListing[]): number {
-  return listings.filter((listing) => needsRelist(listing)).length;
-}
-
-/** Listings whose Vendoo form is behind the copy sitting in Studio. */
+/** Listings edited since they were last sent to a marketplace. */
 export function unsentCount(listings: FilterableListing[]): number {
   return listings.filter((listing) => Boolean(listing.unsent_edits)).length;
 }
 
-/** Listings no marketplace carries — what Vendoo's "View Not Listed" asks for. */
+/** Listings no marketplace carries. */
 export function notListedCount(listings: FilterableListing[]): number {
   return listings.filter((listing) => listedOn(listing).length === 0).length;
 }

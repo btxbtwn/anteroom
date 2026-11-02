@@ -39,16 +39,4 @@ describe("chatMessageQueue", () => {
       "third",
     ]);
   });
-
-  it("snapshots browser fields onto the queued message", () => {
-    const message = newQueuedChatMessage("fix material", {
-      browserJobId: "job-1",
-      browserFields: [{ marketplace: "depop", label: "Material", value: "Cotton" }],
-    });
-    expect(message.browserJobId).toBe("job-1");
-    expect(message.browserFields).toEqual([
-      { marketplace: "depop", label: "Material", value: "Cotton" },
-    ]);
-    expect(newQueuedChatMessage("plain").browserFields).toBeUndefined();
-  });
 });

@@ -1,11 +1,10 @@
 import { studioFetch } from "../../api/transport";
 import { photosUploading } from "../../photoUploads";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import type { BrowserField } from "../../api/client";
 import type { ConversationActivity, Job } from "../../api/types";
-import { type QueuedChatMessage } from "../chatMessageQueue";
 import { isStreamError } from "./assistantDisplay";
 import {
   consumeResponseSse,
@@ -22,8 +21,6 @@ import type { ChatAttachmentUpload, Message } from "../../api/types";
 
 interface Options {
   convId: string;
-  browser: { jobId: string; fields: BrowserField[] } | null | undefined;
-  onBrowserFieldsChange: ((fields: BrowserField[]) => void) | undefined;
   setInput: React.Dispatch<React.SetStateAction<string>>;
   pinChatToBottom: () => void;
   activeProbe: Job | undefined;
@@ -35,8 +32,6 @@ interface Options {
 /** Generate, send, stop and retry for one listing's chat, all writing to the live store. */
 export function useChatStream({
   convId,
-  browser,
-  onBrowserFieldsChange,
   setInput,
   pinChatToBottom,
   activeProbe,
@@ -44,8 +39,6 @@ export function useChatStream({
   lastSendText,
   streamText,
 }: Options) {
-  const browserRef = useRef(browser);
-  browserRef.current = browser;
   const [stopping, setStopping] = useState(false);
   const queryClient = useQueryClient();
   // The turn's own messages are whatever arrives after these; its fold row sits above them.
@@ -244,21 +237,14 @@ export function useChatStream({
 
   const sendMessage = useCallback(async (
     text: string,
-    opts?: {
-      browserJobId?: string;
-      browserFields?: QueuedChatMessage["browserFields"];
-      attachments?: ChatAttachmentUpload[];
-    },
+    opts?: { attachments?: ChatAttachmentUpload[] },
   ) => {
-    const browserContext = browserRef.current;
-    const pointedAt = opts?.browserFields ?? browserContext?.fields ?? [];
-    const jobId = opts?.browserJobId ?? browserContext?.jobId;
     const running = getLive(convId).streaming
       || getLive(convId).generating
       || getLive(convId).resetting
       || Boolean(queryClient.getQueryData<ConversationActivity>(["activity", convId])?.busy);
     const attachments = opts?.attachments ?? [];
-    if ((!text && !pointedAt.length && !attachments.length) || running) return false;
+    if ((!text && !attachments.length) || running) return false;
     pinChatToBottom();
     const liveState = getLive(convId);
     liveState.controller?.abort();
@@ -290,18 +276,6 @@ export function useChatStream({
         body: JSON.stringify({
           text,
           ...(attachments.length ? { attachments } : {}),
-          ...(pointedAt.length && jobId
-            ? {
-                browser: {
-                  job_id: jobId,
-                  fields: pointedAt.map((field) => ({
-                    marketplace: field.marketplace,
-                    label: field.label,
-                    value: field.value,
-                  })),
-                },
-              }
-            : {}),
         }),
         cache: "no-store",
         signal: controller.signal,
@@ -321,9 +295,6 @@ export function useChatStream({
         return true;
       }
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      // Only clear live browser chips when this send used the current selection,
-      // not a snapshot from a queued follow-up.
-      if (!opts?.browserFields && pointedAt.length) onBrowserFieldsChange?.([]);
       const { parts } = await consumeResponseSse(res, (event, nextParts) => applySseToLive(convId, event, nextParts));
       const assembled = parts.content;
       if (stillMine() && isStreamError(assembled)) patchLive(convId, { failedAction: "send" });
@@ -377,7 +348,7 @@ export function useChatStream({
       }
       return true;
     }
-  }, [convId, queryClient, pinChatToBottom, onBrowserFieldsChange, setInput, messageIds]);
+  }, [convId, queryClient, pinChatToBottom, setInput, messageIds]);
 
   const handleCancel = useCallback(async () => {
     const liveState = getLive(convId);

@@ -1,7 +1,3 @@
-import { ChevronDownIcon, CircleAlertIcon, MessageSquareIcon, WrenchIcon } from "lucide-react";
-import { cn } from "../lib/utils";
-import { useVendooEnabled } from "../vendooMode";
-import { Button } from "./ui/button";
 import { OPTIONS_RULE, optionsForField, type DropdownForms } from "../dropdownOptions";
 
 type Blocker = { field?: string; message?: string };
@@ -113,7 +109,7 @@ function replyShape(fields: BlockerField[]): string {
 {"missing_fields":[${missingFieldsJsonExamples(fields)}]}
 \`\`\`
 
-Use marketplace ids and field names exactly as listed. ${OPTIONS_RULE} Anteroom saves the listing JSON from this reply; filling the live Vendoo draft is a separate step. Do not publish.
+Use marketplace ids and field names exactly as listed. ${OPTIONS_RULE} Anteroom saves the listing JSON from this reply; saving a marketplace draft is a separate action. Do not publish.
 `;
 }
 
@@ -143,7 +139,7 @@ export function validationErrorsPrompt(
     .slice(0, 3)
     .map((target) => `{"marketplace":"${target.marketplace}","field":"${target.field}","value":"..."}`);
 
-  return `Fix these Anteroom validation errors so Send to Vendoo can proceed for "${title}".
+  return `Fix these Anteroom validation errors before direct marketplace listing for "${title}".
 
 Update EVERY field listed below so the errors clear. Use photo analysis and seller notes. Do not invent unsupported facts.
 For eBay Season intelligently choose exactly one of Spring, Summer, Fall, or Winter from the item (title, fabric, type, photos). Never leave it blank.
@@ -160,7 +156,7 @@ ${fields.length ? `Fields to fill:\n${fieldLines(fields)}\n\n` : ""}Reply with J
 {"missing_fields":[${examples.join(",") || '{"marketplace":"ebay","field":"Season","value":"..."}'}]}
 \`\`\`
 
-Use marketplace ids and field names that match the errors. Anteroom saves the listing JSON from this reply; filling the live Vendoo draft is a separate step.
+Use marketplace ids and field names that match the errors. Anteroom saves the listing JSON from this reply; saving a marketplace draft is a separate action.
 `;
 }
 
@@ -212,88 +208,4 @@ export function emptyFieldsButtonLabel(count: number): string {
   const n = Math.max(0, Math.floor(Number(count) || 0));
   if (n <= 0) return "Fill empty fields";
   return `Fill ${n} empty field${n === 1 ? "" : "s"}`;
-}
-
-export function CopyableLlmError({
-  text,
-  prompt,
-  onAskChat,
-  emptyFieldsCount = 0,
-  emptyFieldsPrompt,
-  hideDetails = false,
-  issueCount = 0,
-  className,
-}: {
-  text: string;
-  prompt: string;
-  onAskChat?: (text: string) => void;
-  emptyFieldsCount?: number;
-  emptyFieldsPrompt?: string;
-  /** The caller already lists these issues, so the raw dump would repeat them. */
-  hideDetails?: boolean;
-  /** Blocking issues, when known, so Fix says how many. */
-  issueCount?: number;
-  className?: string;
-}) {
-  const vendooOn = useVendooEnabled();
-  const body = String(text || "").trim();
-  const emptyCount = Math.max(0, Math.floor(Number(emptyFieldsCount) || 0));
-  const canFillEmpty = Boolean(onAskChat && emptyFieldsPrompt && emptyCount > 0);
-  // No error and nothing left to fill — nothing to show. With fields still
-  // empty the card stays so its fill button survives the error clearing.
-  if (!body && !canFillEmpty) return null;
-
-  const fixLabel = issueCount > 0
-    ? `Fix ${issueCount} in chat`
-    : "Fix in chat";
-
-  return (
-    <div className={cn("flex min-w-0 flex-col gap-2", className)}>
-      {onAskChat && (body || canFillEmpty) && (
-        <div className="flex flex-wrap gap-1.5 max-[900px]:[&>*]:w-full">
-          {body && (
-            <Button
-              variant="outline"
-              size="xs"
-              title={vendooOn
-                ? "Send the blocking issues to chat. Chat updates this listing. It does not send to Vendoo."
-                : "Send the blocking issues to chat. Chat updates this listing."}
-              onClick={() => onAskChat(prompt)}
-            >
-              <WrenchIcon />
-              {fixLabel}
-            </Button>
-          )}
-          {canFillEmpty && (
-            <Button
-              variant="outline"
-              size="xs"
-              title={vendooOn
-                ? "Send empty listing fields to chat. Does not change Vendoo yet."
-                : "Send empty listing fields to chat."}
-              onClick={() => {
-                if (!emptyFieldsPrompt) return;
-                onAskChat(emptyFieldsPrompt);
-              }}
-            >
-              <MessageSquareIcon />
-              {emptyFieldsButtonLabel(emptyCount)}
-            </Button>
-          )}
-        </div>
-      )}
-      {body && !hideDetails && (
-        <details className="group rounded-lg border border-error/32 bg-error-surface">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-error-foreground text-xs [&::-webkit-details-marker]:hidden">
-            <CircleAlertIcon className="size-3.5 shrink-0 text-error" aria-hidden="true" />
-            Errors need attention
-            <ChevronDownIcon className="ms-auto size-3.5 shrink-0 opacity-70 transition-transform group-open:rotate-180" aria-hidden="true" />
-          </summary>
-          <div className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words border-error/20 border-t px-2.5 py-2 text-error-foreground/90 text-xs max-[900px]:max-h-22">
-            {body}
-          </div>
-        </details>
-      )}
-    </div>
-  );
 }

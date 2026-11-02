@@ -56,10 +56,10 @@ struct InventoryFilters: Equatable, Sendable {
 
 enum Marketplaces {
     static let order = ["ebay", "etsy", "poshmark", "mercari", "depop", "facebook", "shopify",
-                        "vinted", "whatnot", "grailed", "vestiaire", "sellwild"]
-    static let names = ["general": "Vendoo", "ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark",
+                        "vinted", "whatnot", "vestiaire", "sellwild"]
+    static let names = ["ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark",
                         "mercari": "Mercari", "depop": "Depop", "facebook": "Facebook", "shopify": "Shopify",
-                        "vinted": "Vinted", "whatnot": "Whatnot", "sellwild": "Sellwild", "grailed": "Grailed",
+                        "vinted": "Vinted", "whatnot": "Whatnot", "sellwild": "Sellwild",
                         "vestiaire": "Vestiaire Collective", "other": "Other / in person"]
 
     static func name(_ id: String) -> String {

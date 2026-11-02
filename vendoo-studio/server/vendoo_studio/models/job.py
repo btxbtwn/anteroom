@@ -21,26 +21,12 @@ from vendoo_studio.models.conversation import new_id, utcnow
 from vendoo_studio.models.ownership import SellerOwned
 
 ACTIVE_JOB_STATUSES = ("queued", "awaiting_extension", "dispatched")
-DISPATCHABLE_JOB_STATUSES = ("queued", "awaiting_extension")
 RUNNING_JOB_STATUSES = ("dispatched",)
 TERMINAL_JOB_STATUSES = ("completed", "cancelled", "failed", "imported", "dry_run")
 
 
-# A send that was interrupted rather than refused. It resumes once on its own;
-# the resumed run picks up its checkpointed draft instead of making a second.
-ABANDONED_SEND = "Send to Vendoo stopped before it finished. Click Send to Vendoo again."
-RECONNECTED_SEND = "Chrome reconnected during Send to Vendoo. Click Send to Vendoo again."
-INTERRUPTED_SEND_ERRORS = frozenset({ABANDONED_SEND, RECONNECTED_SEND})
-AUTO_RETRY_EVENT = "vendoo_api_auto_retry"
-
-
 def is_terminal_job_status(status: str | None) -> bool:
     return str(status or "") in TERMINAL_JOB_STATUSES
-
-
-def is_vendoo_api_step(step: str | None) -> bool:
-    """True for API create/save work — never hand these to the form-filler."""
-    return str(step or "").startswith("vendoo_api")
 
 
 class Job(SellerOwned, Base):
@@ -59,6 +45,7 @@ class Job(SellerOwned, Base):
     listing_snapshot: Mapped[Any] = mapped_column(JSON, nullable=False)
     status: Mapped[str | None] = mapped_column(String, default="queued", nullable=True)
     current_step: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Set only on jobs from the removed Send to Vendoo; kept as history.
     vendoo_item_id: Mapped[str | None] = mapped_column(String, nullable=True)
     vendoo_url: Mapped[str | None] = mapped_column(String, nullable=True)
     attempt_count: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
@@ -84,7 +71,7 @@ class JobEvent(SellerOwned, Base):
 
 
 class VendooDraftCache(SellerOwned, Base):
-    """The last Vendoo status Studio saw for a job — one row, status only.
+    """The last Vendoo status Studio saw for a job — one row, status only. History: nothing writes it now.
 
     This used to be an appended ``job_events`` row carrying the whole Vendoo
     item. Sync writes one on every pull, an item is tens of kilobytes, and the

@@ -23,8 +23,6 @@ SKIP_PARTS = {
     ".playwright-mcp",
     ".pytest_cache",
     "README.md",
-    "TROUBLESHOOTING.md",
-    "diagnostic-tool.js",
     "__pycache__",
     "node_modules",
     "sample-listing.json",

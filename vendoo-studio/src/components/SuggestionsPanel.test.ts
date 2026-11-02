@@ -13,7 +13,7 @@ describe("suggestionKindLabel", () => {
     expect(suggestionKindLabel("ready_to_generate")).toBe("Generate listing");
     expect(suggestionKindLabel("fix_validation")).toBe("Fix listing fields");
     expect(suggestionKindLabel("stale_active")).toBe("Refresh or consider price drop");
-    expect(suggestionKindLabel("ready_to_review")).toBe("Review and send");
+    expect(suggestionKindLabel("ready_to_review")).toBe("Review listing");
   });
 
   it("covers every kind the API can return", () => {

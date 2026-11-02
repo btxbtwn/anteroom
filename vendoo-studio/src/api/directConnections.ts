@@ -49,6 +49,4 @@ export interface MarketplaceSale {
   title: string | null;
   /** Other marketplace listings still present, from direct records and saved links. */
   listedElsewhere: string[];
-  /** Optional link back to an item originally imported from Vendoo. */
-  vendooUrl: string | null;
 }

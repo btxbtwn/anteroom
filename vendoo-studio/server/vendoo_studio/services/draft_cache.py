@@ -1,53 +1,10 @@
-"""What Studio keeps from a Vendoo draft: where each marketplace stands.
+"""The last marketplace statuses Vendoo reported for an imported item.
 
-The sidebar chips and the hover popup read one thing out of a draft — whether
-the item is listed, not listed, sold or failed on each marketplace. Everything
-else in a Vendoo item (description, photos, per-marketplace specifics) is read
-live when a panel needs it, so keeping a copy only cost disk.
+Nothing writes this cache any more; the sidebar chips and hover popup still
+read it for items imported from Vendoo.
 """
 
 from __future__ import annotations
-
-EMPTY_STATUS = (None, "", {}, [])
-
-
-def _listing_statuses(group: object) -> dict:
-    if not isinstance(group, dict):
-        return {}
-    return {
-        marketplace: {"status": listing["status"]}
-        for marketplace, listing in group.items()
-        if isinstance(listing, dict) and listing.get("status") not in EMPTY_STATUS
-    }
-
-
-def slim_vendoo_draft_payload(
-    *,
-    item: dict | None = None,
-    form: dict | None = None,
-    statuses: dict | None = None,
-) -> dict:
-    """The status slices of a draft, in the shape the UI already reads.
-
-    ``externalListings`` is a listing the seller already had on the marketplace.
-    It can be live while the Vendoo nav still says not listed, so the sidebar
-    keeps that status too.
-    """
-    payload: dict = {}
-    listings = _listing_statuses(item.get("listings") if isinstance(item, dict) else None)
-    external = _listing_statuses(item.get("externalListings") if isinstance(item, dict) else None)
-    if listings or external:
-        payload["item"] = {}
-        if listings:
-            payload["item"]["listings"] = listings
-        if external:
-            payload["item"]["externalListings"] = external
-    form_statuses = form.get("statuses") if isinstance(form, dict) else None
-    if isinstance(form_statuses, dict) and form_statuses:
-        payload["form"] = {"statuses": form_statuses}
-    if isinstance(statuses, dict) and statuses:
-        payload["statuses"] = statuses
-    return payload
 
 
 def draft_has_status_signal(payload: object) -> bool:

@@ -7,7 +7,6 @@ import json
 import re
 
 from sqlalchemy.orm import Session
-from types import SimpleNamespace
 
 from vendoo_studio.config import skills_dir
 from vendoo_studio.repositories.queries import ListingRepo
@@ -110,13 +109,11 @@ async def _category_fields(listing: dict, market: str) -> list[dict]:
     from vendoo_studio.models.listing_values import marketplace_dropdown_forms
     from vendoo_studio.services.category_fields import listing_category_ids
     from vendoo_studio.services.form_schema import field_applies, labels_for_spec
-    from vendoo_studio.services.vendoo_create import LOOKUP_TIMEOUT_SEC, fetch_leaf_specifics
+    from vendoo_studio.services.leaf_schemas import leaf_specifics
 
     static = marketplace_dropdown_forms().get(market) or {}
     category = listing_category_ids(listing).get(market)
-    objects = listing.get("marketplace_category_objects") or {}
-    specs = await fetch_leaf_specifics(SimpleNamespace(id=None), market, category, objects.get(market),
-                                      timeout=LOOKUP_TIMEOUT_SEC) if category else {}
+    specs = await leaf_specifics(market, category) if category else {}
     fields = []
     for spec in (specs or {}).values():
         if field_applies(spec.display, listing):

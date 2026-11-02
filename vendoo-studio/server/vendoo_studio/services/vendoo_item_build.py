@@ -1,19 +1,6 @@
-"""Build Vendoo items in the exact shape Vendoo's own form produces.
+"""Stored field shapes and encodings retained by the native marketplace form builder.
 
-Vendoo's create-item form never fills anything: it builds an item object,
-uploads photos through the inventory microservice, mints a Firestore id and
-calls the ``items`` Cloud Function with ``{type: "createItem"}``. Studio does the
-same (``vendoo_create``), so a generated listing is stored as data with every
-marketplace section exactly as computed.
-
-See ``docs/vendoo-listing-architecture.md``. This module is the inverse of
-``vendoo_import.listing_from_vendoo`` and mirrors Vendoo's ``getInit*Form``
-defaults, which is what makes the result indistinguishable from a form save.
-
-Vendoo's coded vocabularies (condition codes, colour codes) are not guessed.
-``observe_item_schema`` learns them from the user's own existing items, and
-``build_vendoo_item`` reports any field it could not encode confidently rather
-than storing a value that looks right and is wrong.
+These helpers shape listing data; they do not contact Vendoo or publish listings.
 """
 
 from __future__ import annotations
@@ -23,7 +10,6 @@ from copy import deepcopy
 from typing import Any
 
 from vendoo_studio.services.ebay_fields import EBAY_CONDITION_DESCRIPTION
-from vendoo_studio.services.etsy_fields import etsy_eligible
 from vendoo_studio.services.vendoo_categories import (
     _category,
     _resolved_category,
@@ -37,11 +23,6 @@ from vendoo_studio.services.vendoo_encodings import (
 )
 from vendoo_studio.services.vendoo_item_shape import (
     _CAMEL_BOUNDARY,
-    ALL_MARKETPLACES,
-    CURRENT_ITEM_VERSION,
-    DEFAULT_ORIGIN,
-    GENERAL_KEY,
-    LISTINGS_KEY,
     SPECIFICS_SOURCES,
     _clean,
     _norm,
@@ -587,98 +568,3 @@ def _listing_section(
 
     _apply_marketplace_brand(section, marketplace, listing)
     return section
-
-
-def _firestore_now() -> dict[str, int]:
-    """A Firestore timestamp, the shape saved items carry."""
-    import time
-
-    now = time.time()
-    return {"_seconds": int(now), "_nanoseconds": int((now % 1) * 1_000_000_000)}
-
-
-def _mark_saved(item: dict[str, Any], *, incomplete: bool = False) -> None:
-    """Record the item as saved, the way Vendoo's own save does.
-
-    A new item starts ``{"notSaved": True}`` — literally "Not Saved" in
-    Vendoo's UI — and its save replaces that with ``complete`` or
-    ``inProgress`` depending on whether anything required is still missing,
-    stamping every marketplace form it wrote. Creating an item without doing
-    the same leaves every form looking untouched.
-    """
-    # Complete, not inProgress: a draft Studio created is finished work as far
-    # as Studio is concerned. Vendoo recomputes this on its own next save, so
-    # a required field still missing will show there rather than here.
-    item["status"] = {"complete": True}
-    stamp = _firestore_now()
-    for section in (item.get(LISTINGS_KEY) or {}).values():
-        if not isinstance(section, dict):
-            continue
-        # Only forms that were actually filled out.
-        if not (section.get("categorySpecifics") or (section.get("overrides") or {}).get("categoryV2")):
-            continue
-        section["dateCreated"] = stamp
-        section["dateLastModified"] = stamp
-
-
-def marketplaces_left_empty(listing: dict[str, Any]) -> frozenset[str]:
-    """Marketplace forms Studio must not fill for this listing.
-
-    Etsy removes modern resale items, and a filled Etsy form shows as ready to
-    list in Vendoo. Left empty, Etsy cannot be picked for the item by mistake;
-    an Update leaves an existing Etsy form as it is (``apply_update_all``).
-    """
-    return frozenset() if etsy_eligible(listing) else frozenset({"etsy"})
-
-
-def build_vendoo_item(
-    listing: dict[str, Any],
-    schema: dict[str, Any] | None = None,
-    *,
-    images: list[Any] | None = None,
-    user_id: str = "",
-    item_id: str = "",
-    origin: str = DEFAULT_ORIGIN,
-    specifics: dict[str, dict[str, FieldSpec]] | None = None,
-) -> tuple[dict[str, Any], list[dict[str, str]]]:
-    """A complete Vendoo item, shaped exactly like a form save.
-
-    ``images`` are the ``{version: 3, id, originalMaxDimension}`` objects the
-    inventory upload returns. ``specifics`` maps a marketplace to Vendoo's own
-    field schema for the leaf chosen there; where it is present the item fields
-    are encoded exactly as that marketplace's form would store them.
-
-    Returns ``(item, unresolved)``; ``unresolved`` names every field sent as
-    plain text because nothing covered it, every value a coded field had no
-    option for, and every required field left empty — show those to the seller
-    rather than assuming they landed.
-
-    Forms named by ``marketplaces_left_empty`` stay as Vendoo seeds them.
-    """
-    unresolved: list[dict[str, str]] = []
-    by_marketplace = specifics or {}
-    general = _general_details(listing, schema, images or [], unresolved)
-    left_out = marketplaces_left_empty(listing)
-    listings = {
-        mp: _listing_section(mp, listing, general, schema, unresolved, by_marketplace.get(mp))
-        if mp not in left_out else default_listing_section(mp)
-        for mp in ALL_MARKETPLACES
-    }
-    item = {
-        "origin": origin,
-        "version": CURRENT_ITEM_VERSION,
-        "status": {"notSaved": True},  # replaced by _mark_saved below
-        "type": "item",
-        "userID": user_id,
-        "itemID": item_id,
-        "labels": _string_list(listing.get("labels")),
-        GENERAL_KEY: general,
-        LISTINGS_KEY: listings,
-    }
-    _mark_saved(item)
-    return item, unresolved
-
-
-def create_item_payload(item: dict[str, Any], subscription_version: str | None) -> dict[str, Any]:
-    """Body for the ``items`` Cloud Function (callable envelope added by the extension)."""
-    return {"type": "createItem", "payload": {"item": item, "subscriptionVersion": subscription_version}}

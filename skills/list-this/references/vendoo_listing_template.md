@@ -1,6 +1,6 @@
-# VENDOO CROSS-LISTING TEMPLATE
+# LISTING TEMPLATE
 
-Purpose: produce copy/insert-ready field values for Vendoo + eBay + Etsy + Poshmark + Depop from attached photos and any notes.
+Purpose: produce copy/insert-ready field values for eBay + Etsy + Poshmark + Mercari + Depop from attached photos and any notes.
 
 # **GLOBAL OUTPUT RULES (Hard Constraints)**
 
@@ -141,7 +141,7 @@ Depop: No title field → use Universal Description only
 
 ***Return TWO things:***
 1. **Human Readable Template**: A clean summary for the user to read.
-2. **Extension JSON**: The strict JSON block for the Vendoo extension.
+2. **Listing JSON**: The strict JSON block Anteroom saves and fills each marketplace from.
 
 ## **1. Human Readable Template**
 
@@ -157,7 +157,7 @@ Depop: No title field → use Universal Description only
 **Weight:** {Weight} oz
 **Tags:** {Tags}
 
-## **2. Extension JSON Structure**
+## **2. Listing JSON Structure**
 
 ```json
 {
@@ -261,16 +261,16 @@ Depop: No title field → use Universal Description only
 
 ### **JSON Field Reference**
 
-**Main Vendoo Fields:**
+**General Fields:**
 - `title` (required): Listing title, max 80 chars
 - `description` (required): Multi-line description with line breaks
 - `price` (required): Listing price
 - `cost`: Cost of goods
 - `quantity`: Available quantity (default: 1)
 - `brand`: Brand name
-- `condition`: Vendoo general form values only. See `references/vendoo-dropdown-options.md` — each marketplace uses a different condition vocabulary.
-- `primaryColor`: Main color (MUST be an exact Vendoo General dropdown value: Beige, Black, Blue, Brown, Cream, Gold, Gray, Green, Orange, Multicolor, Pink, Purple, Red, Silver, Yellow, Tan, White)
-- `secondaryColor`: Accent color (MUST be an exact Vendoo General dropdown value: Beige, Black, Blue, Brown, Cream, Gold, Gray, Green, Orange, Multicolor, Pink, Purple, Red, Silver, Yellow, Tan, White)
+- `condition`: General condition values only. See `references/vendoo-dropdown-options.md` — each marketplace uses a different condition vocabulary.
+- `primaryColor`: Main color (MUST be an exact general color value: Beige, Black, Blue, Brown, Cream, Gold, Gray, Green, Orange, Multicolor, Pink, Purple, Red, Silver, Yellow, Tan, White)
+- `secondaryColor`: Accent color (MUST be an exact general color value: Beige, Black, Blue, Brown, Cream, Gold, Gray, Green, Orange, Multicolor, Pink, Purple, Red, Silver, Yellow, Tan, White)
 - `department`: Men, Women, Unisex, Kids
 
 **Color Standardization Rules:**
@@ -289,16 +289,16 @@ Depop: No title field → use Universal Description only
   - Indigo, Cobalt, Royal → **Blue**
   - Navy → **Blue** (Navy is a Depop-only dropdown value)
   - Fuchsia, Magenta, Hot Pink → **Pink**
-  - For multicolor items: primaryColor = most prominent basic color; secondaryColor = second visible basic color. Do **not** use Multicolor/Multi as primary when cross-listing — Etsy and Poshmark have no Multicolor option and leave primary blank. Prefer Multicolor only on Vendoo/eBay when a second concrete color is also set for fallback markets.
+  - For multicolor items: primaryColor = most prominent basic color; secondaryColor = second visible basic color. Do **not** use Multicolor/Multi as primary when cross-listing — Etsy and Poshmark have no Multicolor option and leave primary blank. Prefer Multicolor only on eBay when a second concrete color is also set for fallback markets.
 - `sizeType`: Regular, Petite, Tall, Plus, Maternity
 - `size`: Size value (S, M, L, XL, numeric)
 - `size_us`: US size for consistency
 - `tags`: Array of keywords. When Etsy is selected, each tag may only use letters, numbers, spaces, hyphens, and apostrophes (max 20 chars, max 13 tags). No `#`, `/`, `&`, or other special characters.
-- `labels`: Array of Vendoo labels
+- `labels`: Array of the seller's labels
 - `weight_lb`, `weight_oz`: Packaged shipping weight. Estimate from item type/size when the seller did not provide a scale weight (do not ask). Example: a women's M graphic tee is often `0` lb / `8`–`12` oz packaged.
 - `package_dimensions_in`: Format "LxWxH". Use a reasonable poly-mailer / packaging estimate for the item unless the seller provided dimensions.
 - `category_path`: Full category path
-- `category_path` must end at a selectable Vendoo General leaf. Use `Clothing, Shoes & Accessories > Women > Women's Clothing > Tops` for women's shirts and T-shirts; `Shirts & Blouses` is not a valid Vendoo General segment. For men's T-shirts, use `Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts`.
+- `category_path` must end at a selectable general category leaf. Use `Clothing, Shoes & Accessories > Women > Women's Clothing > Tops` for women's shirts and T-shirts; `Shirts & Blouses` is not a valid general category segment. For men's T-shirts, use `Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts`.
 - `zipCode`: Ship from ZIP code
 
 **eBay Specifics:**

@@ -35,8 +35,7 @@ account. Slow catalog reads run outside the connection-state queue, so signing
 out is immediate and a late result is discarded. No read retries are initiated
 by the web transport; the existing catalog reader retains its read-only behavior.
 
-Form reads claim the existing exclusive `nativeOperations` scope. Vendoo,
-patches, marketplace actions, delists, promotions and page inspections cannot
+Form reads claim the existing exclusive `nativeOperations` scope. Patches, marketplace actions, delists, promotions and page inspections cannot
 start alongside the hosted read. Page inspections now reserve that same scope
 through completion, instead of only checking whether it was free at startup.
 Claims are released after every catalog request has settled, including failures.

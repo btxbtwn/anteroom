@@ -1,16 +1,15 @@
-import { liveStatusForMarketplace, mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
+import { statusIsListed } from "../fillLog/marketplaces";
 import { marketplaceName } from "../marketplaceNames";
 
 ;
 
-// Vendoo's Inventory labels, plus the states that are Studio's own doing.
 const STATUS_HINTS: Record<string, string> = {
   draft: "Not listed on any marketplace",
   active: "Listed on a marketplace",
   sold: "Sold",
-  failed: "The last send to Vendoo failed",
+  failed: "The last send failed",
   in_progress: "Anteroom is working on this listing",
-  listing: "Anteroom is sending this listing to Vendoo",
+  listing: "Anteroom is sending this listing",
 };
 const MARKETPLACE_STATUS_ORDER = [
   "general",
@@ -23,25 +22,18 @@ const MARKETPLACE_STATUS_ORDER = [
   "shopify",
   "vinted",
   "whatnot",
-  "grailed",
   "vestiaire",
   "sellwild",
 ];
 // Vendoo keys Vestiaire's API integration separately; Settings treats it as one marketplace.
 const MARKETPLACE_ID_ALIASES: Record<string, string> = { vestiaireApi: "vestiaire" };
 
-const STATUS_HINTS_DIRECT: Record<string, string> = {
-  ...STATUS_HINTS,
-  failed: "The last send failed",
-  listing: "Anteroom is sending this listing",
-};
-
-/** Why a listing reads the way it does. Anteroom's own listings and sales outrank Vendoo's label. */
-export function statusHint(status: string, vendooOn = true): string {
-  const hint = (vendooOn ? STATUS_HINTS : STATUS_HINTS_DIRECT)[status];
+/** Why a listing reads the way it does. */
+export function statusHint(status: string): string {
+  const hint = STATUS_HINTS[status];
   if (hint) return hint;
   const plain = status.replace(/_/g, " ");
-  return vendooOn ? `${plain} · follows Vendoo` : plain;
+  return plain;
 }
 
 function marketplaceLabel(id: string): string {
@@ -114,56 +106,7 @@ export function withDirectListings(
   return [...byId.values()].sort((left, right) => statusOrderIndex(left.id) - statusOrderIndex(right.id));
 }
 
-/** Listing status per marketplace, limited to `visible` (Settings → Listings → Where you list) when given. */
-export function marketplaceStatusesFromDraft(
-  draft: unknown,
-  visible?: Set<string>,
-): {
-  id: string;
-  label: string;
-  status: string;
-}[] {
-  const merged = mergeStatusDrafts(draft);
-  if (!merged) return [];
-  const scraped = merged.statuses || {};
-  const listings = merged.listings || {};
-  const externalListings = merged.externalListings || {};
-  const extraIds = [
-    ...Object.keys(listings),
-    ...Object.keys(externalListings),
-  ].filter((id) => id !== "validate" && !MARKETPLACE_STATUS_ORDER.includes(id) && !(id in scraped));
-  const ids = [
-    ...MARKETPLACE_STATUS_ORDER,
-    ...Object.keys(scraped).filter((id) => !MARKETPLACE_STATUS_ORDER.includes(id)),
-    ...extraIds,
-  ];
-
-  const item = {
-    statuses: scraped,
-    listings,
-    externalListings,
-  };
-  const rows: { id: string; label: string; status: string }[] = [];
-  const seen = new Set<string>();
-  for (const rawId of ids) {
-    const id = MARKETPLACE_ID_ALIASES[rawId] || rawId;
-    if (seen.has(id)) continue;
-    if (visible && id !== "general" && !visible.has(id)) continue;
-    const status = liveStatusForMarketplace(id, item);
-    if (!status) continue;
-    seen.add(id);
-    rows.push({ id, label: marketplaceLabel(id), status });
-  }
-  return rows;
-}
-
-/** Where the import says the listing is live, for rows whose cached draft holds
- *  no per-marketplace status.
- *
- * `vendoo_marketplaces` is written from the same Vendoo payload the draft comes
- * from (`vendoo_listed_marketplaces`), counting sold as live, so an imported
- * listing can badge without anyone hovering it or pulling it again.
- */
+/** Where the import recorded the listing as live, counting sold as live. */
 export function listedFromImport(
   listing: {
     vendoo_marketplaces?: string[];

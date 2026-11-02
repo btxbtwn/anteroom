@@ -1,6 +1,6 @@
 """What a direct List to Poshmark, Mercari, or Depop needs before anything is written.
 
-Send to Vendoo still uses ``marketplace_category_ids`` and Vendoo's field names.
+Imported ``marketplace_category_ids`` remain historical values.
 These checks read the same snapshot and only decide whether direct List can start.
 A color Poshmark does not list, a price it will round, and a quantity above one
 are said beside List. A missing category, an overlong description, a missing
@@ -85,7 +85,7 @@ def poshmark_requirements(snapshot: dict, context: Context) -> list[dict]:
 
 
 def _category_id(snapshot: dict, marketplace: str) -> str:
-    """The marketplace tab's own category. Vendoo's category ids are Send to Vendoo's alone."""
+    """The marketplace tab's own category. Historical imported category ids are not native taxonomy ids."""
     direct = snapshot.get("direct_category_ids")
     if not isinstance(direct, dict):
         direct = {}

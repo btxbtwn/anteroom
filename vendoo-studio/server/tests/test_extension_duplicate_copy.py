@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -63,7 +63,6 @@ class DuplicateCopyTest(unittest.TestCase):
             patch.object(self.manager, "verify_token", return_value=True),
             patch("vendoo_studio.services.extension_connection._websocket_allowed", return_value=True),
             patch("vendoo_studio.services.extension_connection.handshake_extension", side_effect=handshake),
-            patch("vendoo_studio.services.extension_connection.dispatch_queued_jobs", AsyncMock()),
             patch("vendoo_studio.services.extension_connection.extension_in_lockstep", side_effect=lockstep),
         ]
         for patch_object in patches:

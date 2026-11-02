@@ -6,7 +6,6 @@ import { DownloadLink } from "./DownloadLink";
 import { FINANCIAL_FIELDS, type FinancialEntry, type FinancialField, type SalesLedgerPage, type SalesLedgerRow } from "../api/salesLedger";
 import { pollMs } from "../api/polling";
 import { marketplaceName } from "./marketplaceNames";
-import { useVendooEnabled } from "../vendooMode";
 import { EmptyRow, PageError, PageHeader, PageNote, PageSection, PageSkeleton, Panel } from "./WorkspacePage";
 import { Button, buttonVariants } from "./ui/button";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "./ui/dialog";
@@ -37,7 +36,7 @@ export function SalesLedgerSummary({ summary }: { summary: SalesLedgerPage["summ
 }
 
 export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenListing: (id: string) => void; missingOnly?: boolean }) {
-  const vendooOn = useVendooEnabled();
+
   const queryClient = useQueryClient();
   const [today] = useState(() => new Date().toISOString().slice(0, 10));
   // Analytics' missing-data banner opens this across all time, filtered to what it lists.
@@ -58,9 +57,7 @@ export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenList
     enabled: valid, retry: false, refetchInterval: () => pollMs(15000) });
   const data = valid ? query.data : undefined;
   return <>
-    <PageHeader title="Analytics" description={vendooOn
-      ? "Review imported Vendoo sales and recorded marketplace orders, fees and profit."
-      : "Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales from here."} actions={<div className="flex flex-wrap gap-2">
+    <PageHeader title="Analytics" description="Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales from here." actions={<div className="flex flex-wrap gap-2">
       <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.inventoryCsv()} filename="anteroom-inventory.csv">Export inventory CSV</DownloadLink>
       {valid ? <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.salesCsv(filters)} filename="anteroom-sales.csv">Export sales CSV</DownloadLink> : <Button size="sm" variant="outline" disabled>Export sales CSV</Button>}
     </div>}>
