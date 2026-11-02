@@ -1,2 +1,0 @@
-- Remove Send to Vendoo and Grailed from Anteroom so listings use direct marketplace connections.
-- The Chrome Bridge no longer runs on Vendoo or requests access to Vendoo and Grailed.

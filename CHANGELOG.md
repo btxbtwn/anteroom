@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.680 — 2026-11-02
+
+- Remove Send to Vendoo and Grailed from Anteroom so listings use direct marketplace connections.
+- The Chrome Bridge no longer runs on Vendoo or requests access to Vendoo and Grailed.
+
 ## 0.1.679 — 2026-11-02
 
 - Analytics' missing sales data list now matches the Missing sale data filter in Sales records, including marketplace orders without amounts, and a sale drops off once you fill it in.
