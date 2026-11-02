@@ -1,13 +1,12 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code), MIT License,
 // (c) 2026 T3 Tools Inc. Copied verbatim apart from import paths.
 import { mergeProps } from "@base-ui/react/merge-props";
-import { Select as SelectPrimitive } from "@base-ui/react/select";
+
 import { useRender } from "@base-ui/react/use-render";
-import type { ComponentProps, ComponentType, SVGProps } from "react";
+import type { ComponentType, SVGProps } from "react";
 import { ChevronDownIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
-import { Separator } from "../ui/separator";
 
 export type ComposerControlSize = "sm" | "xs";
 
@@ -86,40 +85,5 @@ export function ComposerControlChevron({
       data-composer-control-chevron
       strokeWidth={2.25}
     />
-  );
-}
-
-export function ComposerControlSeparator({
-  className,
-  size = "sm",
-  ...props
-}: Omit<ComponentProps<typeof Separator>, "orientation"> & {
-  size?: ComposerControlSize;
-}) {
-  return (
-    <Separator
-      orientation="vertical"
-      className={cn("mx-0.5 hidden sm:block", size === "xs" ? "h-3.5!" : "h-4", className)}
-      {...props}
-    />
-  );
-}
-
-export function ComposerSelectControl({
-  className,
-  children,
-  size = "sm",
-  ...props
-}: Omit<SelectPrimitive.Trigger.Props, "className"> & {
-  className?: string | undefined;
-  size?: ComposerControlSize;
-}) {
-  return (
-    <SelectPrimitive.Trigger className={composerControlClassName(size, className)} {...props}>
-      {children}
-      <SelectPrimitive.Icon>
-        <ComposerControlChevron size={size} />
-      </SelectPrimitive.Icon>
-    </SelectPrimitive.Trigger>
   );
 }

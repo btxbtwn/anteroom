@@ -5,8 +5,6 @@ import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 
 import { cn } from "../../lib/utils";
 
-const PopoverCreateHandle = PopoverPrimitive.createHandle;
-
 const Popover = PopoverPrimitive.Root;
 
 function PopoverTrigger({ className, children, ...props }: PopoverPrimitive.Trigger.Props) {
@@ -127,26 +125,10 @@ function PopoverPopup({
   );
 }
 
-function PopoverClose({ ...props }: PopoverPrimitive.Close.Props) {
-  return <PopoverPrimitive.Close data-slot="popover-close" {...props} />;
-}
-
-function PopoverTitle({ className, ...props }: PopoverPrimitive.Title.Props) {
-  return (
-    <PopoverPrimitive.Title
-      className={cn("font-semibold text-sm leading-none", className)}
-      data-slot="popover-title"
-      {...props}
-    />
-  );
-}
-
 export {
-  PopoverCreateHandle,
+
   Popover,
   PopoverTrigger,
   PopoverPopup,
-  PopoverPopup as PopoverContent,
-  PopoverTitle,
-  PopoverClose,
+
 };

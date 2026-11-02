@@ -11,7 +11,6 @@ import { toForm, type DraftField, type DraftForm } from "./formModel";
 
 type HiddenField = { marketplace: string; field: string; label: string };
 type HiddenFieldsState = { always: HiddenField[]; listing: HiddenField[] };
-export type OpenMenu = { kind: "hidden" } | { kind: "field"; key: string } | null;
 
 export function emptyHiddenFields(): HiddenFieldsState {
   return { always: [], listing: [] };

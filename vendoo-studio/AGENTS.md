@@ -55,25 +55,24 @@ in the sandbox.
 
 ## Code health checks
 
-Five checks guard refactors and the design. Where pre-existing problems are
-recorded, those records may only shrink: when
-you fix a recorded problem, remove it from the record in the same PR, and never
-add to a record to make a check pass. The backend unused-code check has no
-baseline: every unused declaration fails it.
+Five checks guard refactors and the design. Type, layer and design checks retain
+records of existing problems. Those records may only shrink: when you fix a
+problem, remove it from the record in the same PR. Never add an entry to make a
+check pass. The frontend and backend unused-code checks have no baselines.
 
 | Check | Command | Record of existing problems |
 |---|---|---|
 | Types (basedpyright, standard mode) | `basedpyright` | `.basedpyright/baseline.json`; after fixing errors, `basedpyright --writebaseline` and check the diff only removes entries |
 | Layers: routes, then services, then repositories, then models; a lower one never imports a higher one | `lint-imports` | `ignore_imports` in `pyproject.toml` |
 | Unused backend functions, methods, classes and properties (vulture) | `python scripts/check-dead-code.py` | None: all unused declarations fail; tests and maintenance scripts count as callers |
-| Unused frontend files, exports and dependencies | `npm run knip` | `ignoreIssues` in `knip.json` |
+| Unused frontend files, exports and dependencies | `npm run knip` | None: no per-file exceptions |
 | Design rules from `DESIGN.md`: hard-coded colors, uppercase labels, weights above 600, gradients, native selects and checkboxes, arbitrary text sizes | `python scripts/check-design.py` | `design_baseline.json`; `--write-baseline` after fixing a recorded case |
 
 - Code that something calls only by name (a handler method a library calls, a
   callback) goes in `server/dead_code_allowlist.py`, with a comment naming the
   caller.
-- knip's record works file by file. A file listed there is not checked for that
-  issue type at all. Shrink the list rather than adding to it.
+- Knip has no per-file exceptions. Remove unused code and declare directly
+  imported dependencies instead of suppressing findings.
 - ORM fields use `Mapped[...] = mapped_column(...)`. Keep database nullability
   explicit: a Python type refactor must not silently change existing tables.
   Type checking blocks CI on new errors; its baseline may only shrink.

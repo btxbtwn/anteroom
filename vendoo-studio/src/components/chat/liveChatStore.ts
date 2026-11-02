@@ -125,12 +125,6 @@ export function isChatResetting(convId: string): boolean {
   return getLive(convId).resetting;
 }
 
-/** True while this listing's chat is wiping, streaming, or waiting to generate. */
-export function chatIsBusy(convId: string): boolean {
-  const live = getLive(convId);
-  return live.streaming || live.generating || live.resetting;
-}
-
 /** The open chat is attached to this run, so bulk regenerate must leave it alone. */
 export function chatOwnsGeneration(convId: string): boolean {
   const live = getLive(convId);
