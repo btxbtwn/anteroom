@@ -57,7 +57,8 @@ def stream_state() -> dict[str, Any]:
 
 
 async def ensure_device() -> dict:
-    device = get_relay_device()
+    # On the web the device lives in the seller's Vault: a database read, kept off the request loop.
+    device = await asyncio.to_thread(get_relay_device)
     if device:
         return device
     async with httpx.AsyncClient(timeout=20) as client:
@@ -68,7 +69,7 @@ async def ensure_device() -> dict:
         raise RelayError(f"Could not register this Mac with Anteroom's relay ({resp.status_code}).", resp.status_code)
     body = resp.json()
     device = {"deviceId": body["deviceId"], "token": body["token"]}
-    set_relay_device(device)
+    await asyncio.to_thread(set_relay_device, device)
     return device
 
 

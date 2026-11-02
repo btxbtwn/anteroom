@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import Literal, cast
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -48,7 +49,7 @@ async def connect(marketplace: str, body: ConnectionRequest | None = None):
         raise
     except RelayError as exc:
         raise HTTPException(503 if exc.status in (None, 429, 503) else 502, str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 - offline and the like
+    except (httpx.HTTPError, OSError) as exc:  # offline and the like
         raise HTTPException(503, "Can't reach Anteroom's relay. Check your internet connection.") from exc
 
 
