@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.681 — 2026-11-02
+
+- Remove the website's five-connection cap so concurrent draft requests can use the connections available from Supabase.
+
 ## 0.1.680 — 2026-11-02
 
 - Remove Send to Vendoo and Grailed from Anteroom so listings use direct marketplace connections.
