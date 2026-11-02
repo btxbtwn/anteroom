@@ -16,7 +16,7 @@ struct AutomationsView: View {
     @State private var error: String?
 
     var body: some View {
-        NavigationStack {
+        Group {
             List {
                 Section {
                     Text("Manage automatic offers, sharing, draft preparation and price edits. Listing, delisting and relisting wait for your review of each item and named marketplace.")

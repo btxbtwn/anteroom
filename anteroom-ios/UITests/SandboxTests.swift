@@ -159,8 +159,11 @@ final class AppearanceSandboxTests: XCTestCase {
     }
 
     private func openSettings(_ app: XCUIApplication) {
-        let settings = app.tabBars.buttons["Settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 30))
+        let more = app.tabBars.buttons["More"]
+        XCTAssertTrue(more.waitForExistence(timeout: 30))
+        more.tap()
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
         settings.tap()
         XCTAssertTrue(app.buttons["appearance-picker"].waitForExistence(timeout: 10))
     }
@@ -211,13 +214,26 @@ final class DestinationSandboxTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Inventory today"].waitForExistence(timeout: 30))
         keep(app, "Inventory analytics")
 
-        app.tabBars.buttons["Settings"].tap()
+        app.tabBars.buttons["Marketplaces"].tap()
+        let connect = app.buttons["Connect eBay"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 30), "Marketplaces offers to connect eBay")
+        keep(app, "Marketplaces eBay")
+        connect.tap()
+        XCTAssertTrue(app.switches.matching(NSPredicate(format: "label BEGINSWITH 'Buyer messages'")).firstMatch.waitForExistence(timeout: 10),
+                      "The connection sheet lists the tools to authorize")
+        keep(app, "eBay connection")
+        app.buttons["Close"].tap()
+
+        app.tabBars.buttons["More"].tap()
         let usage = app.buttons["Usage"].firstMatch
         XCTAssertTrue(usage.waitForExistence(timeout: 10))
         usage.tap()
         XCTAssertTrue(app.staticTexts["ChatGPT"].waitForExistence(timeout: 30))
         keep(app, "Usage")
         app.navigationBars.buttons.firstMatch.tap()
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
 
         let listings = app.buttons["Listings"].firstMatch
         XCTAssertTrue(listings.waitForExistence(timeout: 10))

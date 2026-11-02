@@ -708,6 +708,60 @@ final class AnteroomAPI: Sendable {
         return failure
     }
 
+    // MARK: Marketplaces
+
+    func marketplaceAccounts() async throws -> DirectConnections {
+        try await decode(request("GET", "api/marketplace-accounts"))
+    }
+
+    /// Start eBay sign-in for the chosen tool groups; returns the page the seller opens.
+    func connectEbay(features: [String]) async throws -> URL {
+        struct Answer: Decodable { let authorizeUrl: String }
+        let answer: Answer = try await decode(request("POST", "api/marketplace-accounts/ebay/connect", json: ["features": features]))
+        guard let url = URL(string: answer.authorizeUrl), url.scheme == "https" else {
+            throw APIError(status: 0, message: "eBay sign-in didn't return a page to open.")
+        }
+        return url
+    }
+
+    /// One page of an eBay section, read with the seller's own eBay account.
+    func ebayRead(_ section: String, params: [String: String] = [:], offset: Int = 0) async throws -> EbayPage {
+        var query = params.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        query.append(URLQueryItem(name: "offset", value: String(offset)))
+        return try EbayPage.decode(await send(request("GET", "api/ebay/read/\(section)", query: query)))
+    }
+
+    /// Active eBay listings that look like a photo (JPEG or PNG).
+    func ebayImageSearch(_ image: Data, mime: String) async throws -> EbayPage {
+        try EbayPage.decode(await send(request("POST", "api/ebay/research/image",
+                                               json: ["data": image.base64EncodedString(), "mime": mime])))
+    }
+
+    /// What an eBay account change would do. Nothing is changed until `confirmEbay`.
+    func previewEbay(kind: String, payload: [String: JSONValue]) async throws -> EbayReview {
+        struct Body: Encodable { let kind: String; let payload: [String: JSONValue] }
+        return try await decode(request("POST", "api/ebay/actions/preview", json: Body(kind: kind, payload: payload)))
+    }
+
+    /// Make the change the seller reviewed. `confirm` is the seller's explicit approval.
+    func confirmEbay(reviewID: String, kind: String, payload: [String: JSONValue]) async throws -> EbayResult {
+        struct Body: Encodable { let id: String; let kind: String; let payload: [String: JSONValue]; let confirm = true }
+        return try await decode(request("POST", "api/ebay/actions/confirm", json: Body(id: reviewID, kind: kind, payload: payload)))
+    }
+
+    /// The seller checked in eBay that an action whose outcome was unknown went through. Nothing is repeated.
+    func markEbayActionChecked(_ id: String) async throws {
+        _ = try await send(request("POST", "api/ebay/actions/\(id)/checked", json: ["confirm": true]))
+    }
+
+    func ebayLiveListing(_ id: String) async throws -> EbayLiveListing {
+        try await decode(request("GET", "api/ebay/listing/\(id)"))
+    }
+
+    func ebayOfferListings() async throws -> EbayOfferListings {
+        try await decode(request("GET", "api/ebay-offers"))
+    }
+
     // MARK: Shared listing history
 
     func revisions(_ id: String) async throws -> [ListingRevision] {
