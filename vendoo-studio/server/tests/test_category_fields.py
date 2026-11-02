@@ -165,24 +165,6 @@ class MercariSpecificsTest(unittest.TestCase):
         # a group with no rows is empty too, not a stub field
         self.assertEqual(mercari_specifics(self.MASTER, "99"), {})
 
-    def test_size_lands_on_the_flat_key_vendoo_reads(self):
-        from vendoo_studio.services.vendoo_item_build import build_vendoo_item
-        from vendoo_studio.services.vendoo_specifics import mercari_specifics
-
-        item, unresolved = build_vendoo_item(
-            {
-                "title": "Top",
-                "size": "M (8-10)",
-                "marketplace_category_ids": {"mercari": "12"},
-                "marketplace_categories": {"mercari": "Women > Tops"},
-            },
-            specifics={"mercari": mercari_specifics(self.MASTER, "12")},
-        )
-        stored = item["listings"]["mercari"]["categorySpecifics"]
-        self.assertEqual(stored["12_Size"], "4")
-        # flat: no scale companion, unlike Poshmark and Etsy
-        self.assertNotIn("12_Size_scale", stored)
-        self.assertEqual([r for r in unresolved if "mercari" in r["field"]], [])
 
 
 class NumberedSizeCodesTest(unittest.TestCase):

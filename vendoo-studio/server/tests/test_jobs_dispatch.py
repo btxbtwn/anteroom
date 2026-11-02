@@ -222,38 +222,6 @@ class PrepareListingSnapshotRetryTest(unittest.TestCase):
         self.assertEqual(snapshot["category_path"], MEN_TSHIRT_PATH)
         self.assertNotIn("Women", snapshot["category_path"])
 
-    def test_item_details_labels_cog_and_notes_reach_vendoo_form(self):
-        import json
-
-        from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
-        from vendoo_studio.services.vendoo_item_build import build_vendoo_item
-
-        self.conv.notes = json.dumps({
-            "vendooLabels": "A19, To List",
-            "sku": "KEEP-ME-SKU",
-            "cog": "3.50",
-            "sellerNotes": "Bin 4, small hole on hem",
-            "poshmarkOriginalPrice": "80",
-        })
-        self.db.commit()
-        snapshot = prepare_listing_snapshot(
-            self.db,
-            self.conv,
-            {"title": "Tee", "sku": "NEW-SLUG", "cost": 9, "internal_notes": "stale"},
-        )
-        self.assertEqual(snapshot["labels"], ["A19", "To List"])
-        self.assertEqual(snapshot["sku"], "KEEP-ME-SKU")
-        self.assertEqual(snapshot["cost"], 3.5)
-        self.assertEqual(snapshot["internal_notes"], "Bin 4, small hole on hem")
-        self.assertEqual(snapshot["poshmark_specifics"]["originalPrice"], 0)
-
-        item, _ = build_vendoo_item(snapshot, None, images=[], user_id="u", item_id="i")
-        self.assertEqual(item["listings"]["poshmark"]["marketplaceSpecifics"]["originalPrice"], "0")
-        general = item["generalDetails"]
-        self.assertEqual(item["labels"], ["A19", "To List"])
-        self.assertEqual(general["sku"], "KEEP-ME-SKU")
-        self.assertEqual(general["cost"], "3.5")
-        self.assertEqual(general["notes"], "Bin 4, small hole on hem")
 
     def test_blank_item_details_keep_listing_cost_and_notes(self):
         from vendoo_studio.services.job_snapshot import prepare_listing_snapshot

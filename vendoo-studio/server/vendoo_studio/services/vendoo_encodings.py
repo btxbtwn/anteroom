@@ -358,46 +358,10 @@ def marketplace_condition(schema: dict[str, Any] | None, marketplace: str, gener
     return None
 
 
-def _is_general_condition_value(value: Any) -> bool:
-    """True when ``value`` belongs on generalDetails, not a marketplace form.
-
-    Marketplace overrides store short codes (Poshmark ``ug``/``nwt``, Mercari
-    ``3``/``4``, eBay category ids). A Vendoo ``v_preowned`` object or label
-    left there is what Poshmark rejects on Relist as
-    ``Invalid condition v_preowned``. The invented code ``good`` is also
-    invalid on Poshmark — see ``_learned_condition_is_usable``.
-    """
-    if isinstance(value, dict):
-        return True
-    text = str(value or "").strip()
-    if not text:
-        return False
-    lower = text.lower()
-    if lower.startswith("v_") or lower.startswith("v "):
-        return True
-    key = _norm(text)
-    return (
-        key.startswith("pre owned")
-        or key.startswith("new with")
-        or key.startswith("new without")
-        or key.startswith("poor ")
-        or "imperfection" in key
-    )
 
 
-def _is_condition_path(path: str) -> bool:
-    """Firestore paths that hold a marketplace condition value."""
-    lower = path.lower()
-    return lower.endswith(".condition") or lower.endswith("_condition")
 
 
-def _condition_keys(bucket: dict[str, Any] | None) -> list[str]:
-    if not isinstance(bucket, dict):
-        return []
-    return [
-        key for key in bucket
-        if str(key).lower() == "condition" or str(key).lower().endswith("_condition")
-    ]
 
 
 def _set_learned_condition(

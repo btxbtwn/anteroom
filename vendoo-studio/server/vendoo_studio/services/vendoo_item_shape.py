@@ -14,24 +14,6 @@ from vendoo_studio.models.mercari_shipping import (
     ground_advantage,
 )
 
-API_BASE = "https://api.web.vendoo.co"
-MSVC_BASE = "https://us.vendoo.co"
-FUNCTIONS_BASE = "https://us-central1-vendoo-prod-7948f.cloudfunctions.net"
-FIREBASE_PROJECT = "vendoo-prod-7948f"
-
-GET_ITEM = "/api/item/{item_id}"
-CATEGORY_SEARCH = "/api/category/search"
-IMAGE_UPLOAD_URL = "/inventory/v1/images/url"
-ITEMS_FUNCTION = "/items"
-# Bulk importer path; takes items that came *from* a marketplace. Kept for
-# reference — the form path above is what a net-new item uses.
-IMPORT_NORMALIZED = "/api/rest/v1/import/items_normalized"
-
-# Deliberately not wired up: these publish to marketplaces, and AGENTS.md says
-# automation stops at saved drafts.
-_LIST_ITEM = "/api/item/{item_id}/list"
-_DELIST_ITEM = "/api/item/{item_id}/delist"
-
 GENERAL_KEY = "generalDetails"
 LISTINGS_KEY = "listings"
 DEFAULT_ORIGIN = "vendoo"
