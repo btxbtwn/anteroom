@@ -28,6 +28,17 @@ const HISTORY_STATUSES = new Set(['paid', 'partially_refunded', 'refunded', 'can
 const MERCARI_USER_ITEMS = '88c1f24f1ee3617c5e4b04f33d4f9aec7357e55cb94fea8affc78571df6368f3';
 const MERCARI_ORDER_STATUS = '1e2de463bdf2fb33c7c328ad2659d4ef20ace0e4ff0c526b64d6502b26c23f6a';
 
+async function historyJson(marketplace, url, options = {}) {
+  try {
+    const { data } = await marketplaceFetch(url, { ...options, marketplace, step: 'sales_history',
+      headers: { Accept: 'application/json', ...options.headers }, deadline: Date.now() + 60000 });
+    return data;
+  } catch (error) {
+    if (error?.status === 404) return null;
+    throw error;
+  }
+}
+
 // "8.23", 8.23, "28.0" → "8.23". Anything else → null.
 function historyMoney(value) {
   if (typeof value !== 'number' && typeof value !== 'string') return null;
@@ -98,7 +109,7 @@ function depopHistoryOrder(receipt) {
 async function depopOrderHistory(settled) {
   await ensureMarketplaceRequestContext();
   const auth = await depopBearer();
-  const read = path => saleJson(`https://webapi.depop.com/presentation/api/v1/receipts/${path}`,
+  const read = path => historyJson('depop', `https://webapi.depop.com/presentation/api/v1/receipts/${path}`,
     { credentials: 'omit', headers: { Authorization: auth } });
   const orders = [];
   let after = null;
@@ -261,7 +272,7 @@ function mercariHistoryOrder(item, contents) {
 
 async function mercariOrderHistory(settled) {
   const deadline = Date.now() + 15 * 60 * 1000;
-  const session = await mercariCurrentSession(deadline);
+  const session = await mercariCurrentSession(deadline, true);
   const seller = Number(session?.user?.userId);
   if (!Number.isInteger(seller)) throw new Error('Seller not found');
   // Both are reads; the label ending in "Query" tells mercariRequest so.
@@ -330,7 +341,7 @@ async function sellwildOrderHistory(settled) {
   let unreadable = 0;
   for (let page = 1; page <= HISTORY_MAX_PAGES; page += 1) {
     if (page > 1) await salePause(true);
-    const body = await saleJson(`https://sellwild.com/api/transactions/seller?page=${page}&limit=200`, { credentials: 'include' });
+    const body = await historyJson('sellwild', `https://sellwild.com/api/transactions/seller?page=${page}&limit=200`, { credentials: 'include' });
     if (body?.success !== true || !Array.isArray(body.transactions)) throw new Error('Sellwild sales missing');
     body.transactions.filter(row => !settled.has(String(row?.id ?? ''))).forEach(row => {
       const order = sellwildHistoryOrder(row);
@@ -348,7 +359,7 @@ async function sellwildOrderHistory(settled) {
 async function vintedOrderHistory() {
   await ensureMarketplaceRequestContext();
   await vintedKeepSignedIn(Date.now() + 20000);
-  const body = await saleJson('https://www.vinted.com/api/v2/my_orders?type=sold&status=all&page=1&per_page=20', { credentials: 'include' });
+  const body = await historyJson('vinted', 'https://www.vinted.com/api/v2/my_orders?type=sold&status=all&page=1&per_page=20', { credentials: 'include' });
   if (!Array.isArray(body?.my_orders)) throw new Error('Vinted orders missing');
   // No Vinted sale has been read yet, so its order format is unconfirmed.
   // Report the orders as unreadable instead of guessing at their amounts.
@@ -367,8 +378,10 @@ async function readMarketplaceOrderHistory(marketplace, settledIds) {
     const { orders, more = false, unreadable = 0 } = await read(settled);
     return { ok: true, orders, more, unreadable };
   } catch (error) {
-    const signedOut = error?.code === 'signed_out';
-    return { ok: false, error: signedOut ? 'signed_out' : 'Could not read sales.' };
+    const code = ['signed_out', 'challenge', 'rate_limited', 'network', 'schema_drift', 'rejected'].includes(error?.code)
+      ? error.code : 'schema_drift';
+    marketplaceLog(marketplace, 'sales_history', { error_code: code, status: error?.status });
+    return { ok: false, error: code };
   }
 }
 

@@ -321,8 +321,16 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
     if not isinstance(raw, dict) or raw.get("skipped") is True:
         return {"ok": False, "skipped": True}
     if raw.get("ok") is not True:
-        signed_out = raw.get("error") == "signed_out"
-        return {"ok": False, "error": "Sign in to this marketplace in Chrome." if signed_out else "Couldn't read sales."}
+        messages = {
+            "signed_out": "Sign in to this marketplace in Chrome.",
+            "challenge": "Open this marketplace in Chrome and finish its browser check, then try again.",
+            "rate_limited": "The marketplace is limiting sales reads. Wait a few minutes, then try again.",
+            "network": "The marketplace did not answer the sales read. Try again shortly.",
+            "schema_drift": "The marketplace returned sales Anteroom can't read. Saved records were kept.",
+            "rejected": "The marketplace refused the sales read. Saved records were kept.",
+        }
+        code = raw.get("error")
+        return {"ok": False, "error": messages.get(code, "Couldn't read sales.") if isinstance(code, str) else "Couldn't read sales."}
     try:
         orders = parse_orders(marketplace, raw)
     except HistoryError:
