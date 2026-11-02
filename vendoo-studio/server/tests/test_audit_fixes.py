@@ -1615,10 +1615,9 @@ console.log(JSON.stringify({ blouse, tee }));
         fill_log = sorted(p for p in (components / "fillLog").glob("*.ts") if not p.name.endswith(".test.ts"))
         panel = "\n".join(
             path.read_text(encoding="utf-8")
-            for path in [components / "FillLogPanel.tsx", *fill_log,
+            for path in [*fill_log,
                          components / "ListingEditor.tsx", components / "CopyableLlmError.tsx"]
         )
-        self.assertIn("function leftoverFieldPrompt", panel)
         self.assertIn("function askChatGapsPrompt", panel)
         self.assertIn("function askChatTargetCount", panel)
         self.assertIn("Listing:", panel)
@@ -1640,20 +1639,17 @@ console.log(JSON.stringify({ blouse, tee }));
         self.assertNotIn("Ask chat for fields generation could not resolve", panel)
         self.assertIn("emptyFieldsButtonLabel", panel)
 
-    def test_completion_blocker_ask_chat_prompts(self):
+    def test_send_blocker_ask_chat_uses_validation_prompt(self):
         source = (
             Path(__file__).resolve().parents[2] / "src" / "components" / "CopyableLlmError.tsx"
         ).read_text(encoding="utf-8")
-        self.assertIn("export function completionBlockerPrompt", source)
-        self.assertIn("Estimate packaged shipping", source)
-        self.assertIn("Fix marketplace category alignment", source)
-        self.assertIn("Fill marketplace optional fields", source)
-        self.assertIn("Resolve these remaining listing fields", source)
+        self.assertIn("export function validationErrorsPrompt", source)
+        self.assertIn("Fix these Anteroom validation errors", source)
+        self.assertIn("Update EVERY field listed below", source)
         editor = (
             Path(__file__).resolve().parents[2] / "src" / "components" / "ListingEditor.tsx"
         ).read_text(encoding="utf-8")
-        # Send blockers use the shared validation prompt; completionBlockerPrompt
-        # remains for non-Send surfaces (shipping / category / optionals).
+        # Send blockers use the shared validation prompt in the active editor.
         self.assertIn("validationErrorsPrompt", editor)
         self.assertNotIn("completionBlockerPrompt", editor)
         self.assertIn("onAskChat={onAskChat}", editor)

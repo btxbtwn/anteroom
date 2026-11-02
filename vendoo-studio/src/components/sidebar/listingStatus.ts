@@ -1,7 +1,7 @@
-import { liveStatusClass, liveStatusForMarketplace, mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
+import { liveStatusForMarketplace, mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
 import { marketplaceName } from "../marketplaceNames";
 
-export { liveStatusClass };
+;
 
 // Vendoo's Inventory labels, plus the states that are Studio's own doing.
 const STATUS_HINTS: Record<string, string> = {

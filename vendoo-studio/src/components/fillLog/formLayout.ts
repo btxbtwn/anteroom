@@ -360,14 +360,3 @@ export function organizeFields(marketplace: string, fields: DraftField[], leftov
     return true;
   });
 }
-
-export function groupFields(fields: DraftField[]): { label: string; fields: DraftField[] }[] {
-  const groups: { label: string; fields: DraftField[] }[] = [];
-  for (const field of fields) {
-    const label = field.section || "";
-    const last = groups[groups.length - 1];
-    if (last && last.label === label) last.fields.push(field);
-    else groups.push({ label, fields: [field] });
-  }
-  return groups;
-}

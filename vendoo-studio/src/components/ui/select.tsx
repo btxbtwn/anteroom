@@ -1,9 +1,8 @@
 // Ported from T3 Code (https://github.com/pingdotgg/t3code), MIT License,
 // (c) 2026 T3 Tools Inc. Adapted only where it imported T3-specific modules.
 
-import { mergeProps } from "@base-ui/react/merge-props";
 import { Select as SelectPrimitive } from "@base-ui/react/select";
-import { useRender } from "@base-ui/react/use-render";
+
 import { cva, type VariantProps } from "class-variance-authority";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import type * as React from "react";
@@ -59,33 +58,6 @@ function SelectTrigger({
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
-}
-
-function SelectButton({
-  className,
-  size = "default",
-  children,
-  render,
-  ...props
-}: useRender.ComponentProps<"button"> & Pick<VariantProps<typeof selectTriggerVariants>, "size">) {
-  const defaultProps = {
-    className: cn(selectTriggerVariants({ size }), className),
-    "data-slot": "select-trigger",
-    type: render ? undefined : ("button" as const),
-  };
-  return useRender({
-    defaultTagName: "button",
-    props: {
-      ...mergeProps<"button">(defaultProps, props),
-      children: (
-        <>
-          <span className="min-w-0 flex-1 truncate text-left">{children}</span>
-          <ChevronDownIcon aria-hidden className="-me-1 size-3 shrink-0 opacity-50" />
-        </>
-      ),
-    },
-    render,
-  });
 }
 
 function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
@@ -193,28 +165,13 @@ function SelectItem({
   );
 }
 
-function SelectGroup(props: SelectPrimitive.Group.Props) {
-  return <SelectPrimitive.Group data-slot="select-group" {...props} />;
-}
-
-function SelectGroupLabel(props: SelectPrimitive.GroupLabel.Props) {
-  return (
-    <SelectPrimitive.GroupLabel
-      className="px-2 py-1.5 font-medium text-muted-foreground text-xs"
-      data-slot="select-group-label"
-      {...props}
-    />
-  );
-}
-
 export {
   Select,
   SelectTrigger,
-  SelectButton,
+
   SelectValue,
   SelectPopup,
-  SelectPopup as SelectContent,
+
   SelectItem,
-  SelectGroup,
-  SelectGroupLabel,
+
 };

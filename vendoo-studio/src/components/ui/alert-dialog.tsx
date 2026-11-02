@@ -141,9 +141,9 @@ export {
   AlertDialog,
   AlertDialogPortal,
   AlertDialogBackdrop,
-  AlertDialogBackdrop as AlertDialogOverlay,
+
   AlertDialogPopup,
-  AlertDialogPopup as AlertDialogContent,
+
   AlertDialogHeader,
   AlertDialogFooter,
   AlertDialogTitle,

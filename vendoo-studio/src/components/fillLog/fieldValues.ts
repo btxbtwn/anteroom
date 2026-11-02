@@ -2,7 +2,6 @@ import { normalizeLookupKey } from "./fieldKeys";
 import type { DraftField } from "./formModel";
 
 export const EMPTY_CELL = "— empty —";
-export const UNREAD_CELL = "— not read —";
 
 const DOES_NOT_APPLY_RE = /^(d|n\/?a|n\.a\.?|does not apply|none|unknown|-+)$/i;
 
