@@ -492,6 +492,9 @@ async def select_categories(
         db, marketplaces, query, selected, path_prefix,
         analysis=analysis, notes=notes, override=override,
     )
+    # Candidates are fully loaded values; model latency must not occupy a
+    # connection from the hosted pool. The session can reopen for a retry.
+    db.close()
 
     if not choices:
         return selected
@@ -509,6 +512,7 @@ async def select_categories(
             db, marketplaces, retry_hint, confirmed, path_prefix,
             analysis=analysis, notes=notes, override=override,
         )
+        db.close()
         response = await _ask_model(provider, analysis, notes, retry_choices)
         pending.update(retry_choices)
         nodes_by_marketplace.update(retry_nodes)
