@@ -1,0 +1,1 @@
+- Sellwild is in your account on the web: its form, with your Sellwild address, discounts and package read through Chrome, and List, Update and Delist, each still asking you to confirm. Update Anteroom Bridge to 0.2.43 to load your Sellwild choices.

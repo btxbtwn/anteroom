@@ -69,6 +69,21 @@ function sellwildShipFromText(addresses) {
     'United States of America'].map(line => String(line || '').trim()).filter(Boolean).join('\n');
 }
 
+// The account's own choices on the sell page: the Shipping From card, the seller's
+// coupons, and the profile's package when one is set. Three GETs, nothing written.
+async function sellwildAccountChoices(deadline) {
+  const [addresses, profile, coupons] = await Promise.all([
+    sellwildFetch('/api/addresses', { deadline, step: 'addresses' }),
+    sellwildFetch('/api/user/profile', { deadline, step: 'profile' }).catch(() => null),
+    sellwildFetch('/api/seller/coupons?limit=50', { deadline, step: 'coupons' }).catch(() => null),
+  ]);
+  const rows = Array.isArray(coupons?.coupons) ? coupons.coupons : Array.isArray(coupons?.data) ? coupons.data : Array.isArray(coupons) ? coupons : [];
+  return { ship_from: addresses?.success ? sellwildShipFromText(addresses.addresses) : '',
+    default_parcel: String(profile?.profile?.defaultParcelTemplate || profile?.defaultParcelTemplate || ''),
+    coupons: rows.filter(row => row?.id != null).map(row => ({ id: row.id, name: String(row.name || row.code || ''),
+      discountType: row.discountType || row.discount_type || '', discountValue: row.discountValue ?? row.discount_value })) };
+}
+
 function sellwildAddress(addresses) {
   const address = sellwildShipFrom(addresses);
   if (!address?.line1 || !address.locality || !address.region || !address.zipCode) return null;
