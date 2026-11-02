@@ -243,3 +243,37 @@ def test_delete_only_removes_the_sellers_unsent_draft(cloud, signing_keys):  # n
     assert client.get(path, headers=alice).status_code == 200
     assert client.delete(path, headers=alice).json() == {'ok': True, 'deleted_jobs': 0, 'deleted_photos': 0}
     assert client.get(path, headers=alice).status_code == 404
+
+
+def test_cover_thumbnails_are_made_once(cloud, signing_keys, monkeypatch):  # noqa: F811
+    # Scrolling the inventory asks for the same covers again and again. Each
+    # ask must not download and resize the full photo from Storage again.
+    client, _engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    stored, reads = {}, []
+
+    def storage(method, key, _token, data=None):
+        if method == 'POST':
+            stored[key] = data
+        if method == 'GET':
+            reads.append(key)
+        return stored.get(key, b'')
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    image = io.BytesIO()
+    Image.new('RGB', (2400, 1200), 'red').save(image, 'JPEG')
+    photo = client.post('/api/drafts/' + identity + '/photos', headers=alice, content=image.getvalue()).json()['id']
+    cover_url = client.get('/api/conversations', headers=alice).json()[0]['cover_photo_url']
+
+    first = client.get(cover_url, headers=alice)
+    again = client.get(cover_url, headers=alice)
+
+    assert first.status_code == again.status_code == 200
+    assert first.content == again.content
+    with Image.open(io.BytesIO(first.content)) as result:
+        assert result.size == (96, 48)
+    assert len(reads) == 1
+    # The cache never answers for a seller who does not own the photo.
+    assert client.get(cover_url, headers=bob).status_code == 404
+    assert client.get('/api/photos/' + photo + '/thumb?size=192', headers=alice).status_code == 200
+    assert len(reads) == 2

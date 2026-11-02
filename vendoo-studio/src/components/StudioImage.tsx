@@ -1,5 +1,5 @@
 import { useEffect, useState, type ImgHTMLAttributes } from "react";
-import { studioFetch } from "../api/transport";
+import { cachedPrivateImage, loadPrivateImage } from "../api/privateImages";
 import { useWorkspaceRuntime } from "../app/runtime";
 
 /** Private API images use the same seller session as every other cloud read. */
@@ -7,16 +7,16 @@ export function StudioImage({ src, alt, ...props }: ImgHTMLAttributes<HTMLImageE
   const runtime = useWorkspaceRuntime();
   const privateImage = runtime.hosted && typeof src === "string" && src.startsWith("/api/");
   const [image, setImage] = useState<{ source?: string; url?: string }>({});
+  const kept = privateImage && image.source !== src ? cachedPrivateImage(src) : undefined;
   useEffect(() => {
-    if (!privateImage || !src) return;
-    const controller = new AbortController(); let objectUrl: string | undefined;
-    void studioFetch(src, { signal: controller.signal }).then(async response => {
-      if (!response.ok) throw new Error("Photo unavailable");
-      const blob = await response.blob();
-      if (controller.signal.aborted) return;
-      objectUrl = URL.createObjectURL(blob); setImage({ source: src, url: objectUrl });
-    }).catch(() => { if (!controller.signal.aborted) setImage({ source: src }); });
-    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    if (!privateImage || !src || cachedPrivateImage(src)) return;
+    const controller = new AbortController();
+    loadPrivateImage(src, controller.signal).then(
+      url => { if (!controller.signal.aborted) setImage({ source: src, url }); },
+      () => { if (!controller.signal.aborted) setImage({ source: src }); },
+    );
+    return () => controller.abort();
   }, [privateImage, src]);
-  return <img {...props} alt={alt} src={privateImage ? image.source === src ? image.url : undefined : src}/>;
+  const shown = privateImage ? (kept ?? (image.source === src ? image.url : undefined)) : src;
+  return <img {...props} alt={alt} src={shown}/>;
 }
