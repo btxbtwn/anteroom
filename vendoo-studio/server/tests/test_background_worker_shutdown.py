@@ -13,6 +13,8 @@ def test_shutdown_finishes_claimed_work_before_leaving(monkeypatch):
     claims, finished = [], []
 
     def claim(engine):
+        if claims:
+            return None
         claims.append(engine)
         return ('draft-task', 'seller', 'lease')
 
@@ -76,7 +78,8 @@ def test_hosted_shutdown_drains_a_draft_after_its_browser_disconnects(monkeypatc
         await asyncio.Event().wait()
 
     monkeypatch.setattr(background_worker, 'serve', tracked_worker)
-    monkeypatch.setattr(background_worker.queue, 'claim', lambda _engine: ('draft', 'seller', 'lease'))
+    jobs = iter([('draft', 'seller', 'lease')])
+    monkeypatch.setattr(background_worker.queue, 'claim', lambda _engine: next(jobs, None))
     monkeypatch.setattr(background_worker, 'run_claimed', execute)
     for name in ('hosted_automation_scheduler', 'hosted_offer_scheduler', 'hosted_job_watchdog'):
         monkeypatch.setattr(f'vendoo_studio.services.{name}.serve', scheduler)

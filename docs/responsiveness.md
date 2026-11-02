@@ -1,0 +1,64 @@
+# Responsiveness and concurrent work
+
+The web, Mac and iPhone apps share the responsiveness requirements in
+[AGENTS.md](../AGENTS.md#responsiveness-and-concurrent-work). Independent drafts
+and accounts must overlap; long work must leave navigation, input and unrelated
+drafts usable. This is a product requirement, not a promise of infinite hardware
+capacity or zero model/network latency.
+
+## References
+
+- [McMaster-Carr](https://www.mcmaster.com/): use its persistent workspace,
+  direct search, fast category/filter changes and lack of unnecessary waiting
+  screens as the interaction reference. On 2026-11-02, browsing Screws & Bolts,
+  Socket, Stainless Steel and searching for washers updated the existing
+  document rather than doing a full-page navigation. One initial navigation
+  recorded DOM readiness at 603 ms and load completion at 1,224 ms. This single
+  browser session is an observation, not a service-level guarantee.
+- [NextMaster](https://github.com/stratolark/NextMaster), inspected at commit
+  `6db286afbe57c19b7d0be2cb97e929b3f99d58b8`: its README describes precomputed
+  page shells with streamed dynamic data; category pages and search links use
+  prefetching. Apply the patterns through Anteroom's existing React, query
+  cache, native SwiftUI and API boundaries. Do not copy framework choices or
+  its disabled type/lint build checks.
+
+## Targets and verification
+
+Target input acknowledgement within 100 ms and cached navigation within 200 ms
+on supported devices. Keep already loaded screens available during background
+refresh. Do not block a screen on unrelated requests or hold database
+transactions during model or remote-storage waits. Record the tested load,
+device/build, p50/p95 latency, errors and any missed target. Separate queue wait,
+model work and interface response time.
+
+The regression in `vendoo-studio/e2e/concurrentGeneration.e2e.ts` holds two
+independent generation responses open, starts a second batch, selects another
+draft and types into its editor. It attaches event timing samples and a
+screenshot on desktop and phone; CI retains the browser report on success as
+well as failure. Event timings below 16 ms are not reported by this observer,
+so the attached percentiles describe the recorded samples, not every input.
+
+The local Chromium run on 2026-11-02 recorded 241 samples on desktop (p50 40 ms,
+p95 72 ms) and 208 on the phone layout (p50 32 ms, p95 104 ms). The phone p95
+missed the 100 ms target. These are sandbox interaction measurements with held
+responses, not native-device measurements or real model throughput results.
+
+Backend tests separately verify overlapping jobs across two sellers, cancellation
+of one draft while others finish, correct ownership of saved results, graceful
+shutdown and Mac inference overlap beyond the former 16-call cap. Native iPhone
+bulk changes require an app build and native runtime testing; a phone browser
+test alone does not verify SwiftUI behavior.
+
+## Remaining latency work
+
+After transaction pooling was deployed in web release 0.1.683, three sequential
+populated-draft reads took 1,043, 1,126 and 1,816 ms in the shared browser. A
+20-request browser burst hit a 12-second client deadline. Neither observation
+meets the intended responsiveness standard. Removing admission caps must not be
+reported as proof that every workload is fast: profile request setup, query
+round trips and contention, and retest with simultaneous real generations.
+
+Physical database, device and upstream provider capacity still exists. Handle
+backpressure and failures visibly, preserve drafts, allow cancellation and keep
+other work usable. Do not replace a removed limit with an undocumented global
+serialization gate or hide provider throttling behind a successful status.
