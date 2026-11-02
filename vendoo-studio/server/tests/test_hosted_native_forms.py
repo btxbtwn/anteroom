@@ -60,7 +60,7 @@ def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(c
         # A List needs the approved revision; nothing starts without one.
         assert client.post(path + '/native-marketplaces/' + market + '/list', headers=alice,
                            json={'confirm': True}).status_code == 422
-    assert client.get(path + '/native-marketplaces/sellwild/form', headers=alice).status_code == 422
+    assert client.get(path + '/native-marketplaces/grailed/form', headers=alice).status_code == 422
     bob_id = client.post('/api/conversations', headers=bob, json={'title': 'Bob coat'}).json()['id']
     bob_path = '/api/conversations/' + bob_id
     assert client.put(bob_path + '/listing', headers=bob, json={
