@@ -1,0 +1,1 @@
+- Keep the app responsive while preparing large marketplace category menus and repairing generated listing details.
