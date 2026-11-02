@@ -135,20 +135,20 @@ async function facebookSales(ids) {
   return sales;
 }
 
-async function handleMarketplaceListingState(msg) {
+async function handleMarketplaceListingState(msg, reply = result => sendBrowserResult(msg, result)) {
   const payload = msg.payload || {};
   const id = String(payload.listing_id || '');
   if (payload.marketplace !== 'facebook' || !FACEBOOK_LISTING_ID.test(id)) {
-    sendBrowserResult(msg, marketplaceFailure(marketplaceError('Name a Facebook listing to check.'), true));
+    reply(marketplaceFailure(marketplaceError('Name a Facebook listing to check.'), true));
     return;
   }
   if (nativeOperationsRunning() || activeJob || activePatch) {
-    sendBrowserResult(msg, marketplaceFailure(marketplaceError('Another automation job is running.'), true));
+    reply(marketplaceFailure(marketplaceError('Another automation job is running.'), true));
     return;
   }
   try {
-    sendBrowserResult(msg, await readFacebookListing(id, Date.now() + FACEBOOK_READ_DEADLINE_MS));
+    reply(await readFacebookListing(id, Date.now() + FACEBOOK_READ_DEADLINE_MS));
   } catch (error) {
-    sendBrowserResult(msg, marketplaceFailure(error, true));
+    reply(marketplaceFailure(error, true));
   }
 }

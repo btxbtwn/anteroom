@@ -190,11 +190,11 @@ async function readMarketplaceSignIn(marketplace) {
   return {};
 }
 
-async function handleMarketplaceConnect(msg) {
+async function handleMarketplaceConnect(msg, reply = result => sendBrowserResult(msg, result)) {
   const marketplace = msg.payload?.marketplace;
   const url = MARKETPLACE_SIGN_IN[marketplace];
   if (!url || nativeOperationsRunning() || activeJob || activePatch) {
-    sendBrowserResult(msg, { ok: false, error: url ? 'Wait for the current listing action to finish.' : 'Unsupported marketplace.' });
+    reply({ ok: false, error: url ? 'Wait for the current listing action to finish.' : 'Unsupported marketplace.' });
     return;
   }
   try {
@@ -210,8 +210,8 @@ async function handleMarketplaceConnect(msg) {
     if (marketplace === 'depop' && (result.page_read_status === 401 || result.page_read_status === 403) && summary.state === 'signed_in') {
       summary = { ...summary, state: 'expired', expiring: false };
     }
-    sendBrowserResult(msg, { ok: true, signed_in: summary.state === 'signed_in', ...summary });
-  } catch { sendBrowserResult(msg, { ok: false, error: 'Finish signing in in Chrome, then reconnect. Listing actions will not open tabs.' }); }
+    reply({ ok: true, signed_in: summary.state === 'signed_in', ...summary });
+  } catch { reply({ ok: false, error: 'Finish signing in in Chrome, then reconnect. Listing actions will not open tabs.' }); }
 }
 
 // One-time recording while the seller saves a throwaway draft by hand, so a

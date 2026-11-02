@@ -66,3 +66,14 @@ connected, or not signed in to Vinted, the picker says so and links to Vinted
 so the seller can sign in in Chrome. List, Update and Delist on
 Vinted run from the web the way Poshmark's do: each is the seller's own,
 confirmed action, carried to Chrome by the relay.
+
+## Sellwild
+
+The Sellwild tab is on the web with the same native form as the Mac, built by
+the same `sellwild_form`. Its account choices (the Shipping From card, the
+seller's discounts and the profile's default package) come from the seller's
+connected Chrome (Bridge 0.2.43 or later) instead of the Mac's private Sellwild
+window. The API reads them before building the form, so the product fields load
+even when Chrome is not connected or not signed in to Sellwild; the form then
+says why, and links to Sellwild so the seller can sign in in Chrome and reload
+the choices. List, Update and Delist on Sellwild run from the web like Vinted's.
