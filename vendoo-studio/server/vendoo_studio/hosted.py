@@ -207,8 +207,10 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        # pywebview builds its native API methods with Function(). WebKit
+        # applies this policy to that bootstrap as well as to page scripts.
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
             "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         )
