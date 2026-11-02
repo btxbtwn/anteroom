@@ -1,1 +1,0 @@
-- Assistant answers on the web keep their progress across a disconnected tab. If a server restart interrupts an answer, you can retry the saved question.
