@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.686 — 2026-11-02
+
+- Generate independent drafts concurrently across accounts and devices, including overlapping batches, without locking unrelated inventory work.
+- Let the Mac ChatGPT worker handle concurrent model calls and make iPhone bulk regeneration concurrent.
+- Set McMaster-Carr and NextMaster as ongoing responsiveness references for the web, Mac and iPhone apps, with explicit performance targets and load verification.
+
 ## 0.1.685 — 2026-11-02
 
 - Your account now lives behind a profile button, with Connect Anteroom Extension and Sign out inside.
