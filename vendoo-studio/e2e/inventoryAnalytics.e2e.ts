@@ -1,9 +1,9 @@
 import { expect, test } from "./fixtures";
 
-test("inventory analytics periods and breakdown search remain clear on every screen", async ({ page, request, phone }, info) => {
-  const created = await request.post("/api/conversations", { data: { title: "Analytics sample sale", notes: JSON.stringify({
+test("inventory analytics periods and breakdown search remain clear on every screen", async ({ page, request, phone, createConversation }, info) => {
+  const created = await createConversation({ title: "Analytics sample sale", notes: JSON.stringify({
     vendooStatus: "sold", vendooSale: { marketplace: "ebay", price: 40, cost: 5, fees: 8, shippingCost: 4, soldAt: new Date().toISOString() },
-  }) } });
+  }) });
   expect(created.ok()).toBe(true);
   const { id } = await created.json();
   const saved = await request.put(`/api/conversations/${id}/listing`, { data: { listing: { title: "Analytics sample sale", brand: "Acme", price: 40, quantity: 1 }, expected_revision_id: "" } });
