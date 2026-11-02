@@ -33,6 +33,7 @@ for path, handler, methods in (
     ('/marketplace-listings', marketplace_listings.listings, ['GET']),
     ('/marketplace-listings/{marketplace}/mark', marketplace_listings.mark, ['POST']),
     ('/marketplace-listings/sold', marketplace_listings.record_sale, ['POST']),
+    ('/marketplace-listings/check-sales', marketplace_listings.check_sales, ['POST']),
     ('/native-marketplaces/vinted/categories', native_marketplaces.vinted_categories, ['GET']),
     ('/native-marketplaces/vinted/brands', native_marketplaces.vinted_brands, ['GET']),
     ('/native-marketplaces/sellwild/options', native_marketplaces.sellwild_options, ['GET']),

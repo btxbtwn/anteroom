@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import unittest
+from datetime import UTC, datetime
 from unittest import mock
 
 from fastapi.testclient import TestClient
@@ -14,9 +15,17 @@ from sqlalchemy.pool import StaticPool
 from vendoo_studio.database import Base
 from vendoo_studio.main import app
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
-from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import chrome_sales, user_settings
+
+
+def _history(marketplace, listing_ids, sold_at=None):
+    valid = [listing_id for listing_id in listing_ids if chrome_sales._LISTING_ID[marketplace].fullmatch(listing_id)]
+    return {"ok": True, "orders": [{
+        "order_id": f"receipt-{index}", "status": "paid", "currency": "USD",
+        "sold_at": sold_at or datetime.now(UTC).isoformat(), "totals": {},
+        "lines": [{"line_id": "receipt-line", "listing_id": listing_id}],
+    } for index, listing_id in enumerate(valid)]}
 
 
 def _engine():
@@ -34,102 +43,20 @@ def _listing(Session, notes: dict) -> str:
 
 
 class ChromeSaleParsingTest(unittest.TestCase):
-    def test_only_known_listing_ids_are_kept(self):
-        found = chrome_sales.normalize_sales("depop", {"ok": True, "sales": [
-            {"listing_id": "shop-classic-tee-136d", "buyer": "Pat", "price": "20.00"},
-            {"listing_id": "Not A Slug"},
-            {"listing_id": "shop-classic-tee-136d"},
-        ]})
-        self.assertEqual(found, ["shop-classic-tee-136d"])
-        self.assertEqual(chrome_sales.normalize_sales("poshmark", {"ok": False, "sales": []}), [])
 
-    def test_listings_without_a_recorded_sale_are_checked(self):
-        Session = sessionmaker(bind=_engine())
-        url = "https://www.depop.com/products/shop-{}-136d/"
-        _listing(Session, {"vendooListingUrls": {"depop": url.format("live")}})
-        # A sale only the imported notes claim is still read, so the marketplace
-        # itself confirms it rather than Anteroom believing the notes.
-        _listing(Session, {"vendooListingUrls": {"depop": url.format("vendor-sold")},
-                           "vendooDates": {"soldByMarketplace": {"depop": "2026-09-01T00:00:00Z"}}})
-        _listing(Session, {"vendooListingUrls": {"depop": url.format("taken-down")},
-                           "marketplaceMarks": {"depop": {"state": "not_listed", "listing_id": "shop-taken-down-136d"}}})
-        _listing(Session, {"nativeMarketplaceDrafts": {"depop": {"listing_url": "https://www.depop.com/sellinghub/drafts/edit/123456/"}}})
-        reported = _listing(Session, {"vendooListingUrls": {"depop": url.format("reported")}})
-        with Session() as db:
-            db.add(MarketplaceSale(marketplace="depop", order_id="x", line_id="x", conversation_id=reported))
-            db.commit()
-        self.assertEqual(list(chrome_sales.live_listing_ids("depop", session_factory=Session)),
-                         ["shop-live-136d", "shop-vendor-sold-136d"])
-
-    def test_direct_listings_are_checked_and_their_sales_matched(self):
-        Session = sessionmaker(bind=_engine())
-        slug = "shop-direct-136d"
-        conv_id = _listing(Session, {})
-        with Session() as db:
-            MarketplaceListingRepo(db).save(conv_id, "depop", {"state": "published",
-                                                               "listing_url": f"https://www.depop.com/products/{slug}/"})
-        self.assertEqual(list(chrome_sales.live_listing_ids("depop", session_factory=Session)), [slug])
-        self.assertEqual(len(chrome_sales.record_reported_sales("depop", [slug], session_factory=Session)), 1)
-        with Session() as db:
-            self.assertEqual(db.query(MarketplaceSale).one().conversation_id, conv_id)
-        self.assertEqual(chrome_sales.live_listing_ids("depop", session_factory=Session), {})
-
-    def test_a_reported_sale_matches_the_listing_once_and_stops_its_checks(self):
-        Session = sessionmaker(bind=_engine())
-        slug = "shop-classic-tee-136d"
-        conv_id = _listing(Session, {"vendooListingUrls": {"depop": f"https://www.depop.com/products/{slug}/"}})
-        self.assertEqual(len(chrome_sales.record_reported_sales("depop", [slug], session_factory=Session)), 1)
-        self.assertEqual(chrome_sales.record_reported_sales("depop", [slug], session_factory=Session), [])
-        with Session() as db:
-            sale = db.query(MarketplaceSale).one()
-            self.assertEqual((sale.conversation_id, sale.marketplace, sale.listing_id), (conv_id, "depop", slug))
-        self.assertEqual(chrome_sales.live_listing_ids("depop", session_factory=Session), {})
-
-    def test_only_sold_items_still_live_in_anteroom_are_recorded(self):
-        recorded = []
-
-        async def request(_job, _message_type, payload=None, timeout=40):
-            return {"ok": True, "sales": [{"listing_id": "shop-live-136d"}, {"listing_id": "shop-sold-long-ago-136d"}]}
-
-        def record(market, ids, **kwargs):
-            recorded.append((ids, kwargs.get("conversation_ids")))
-            return []
-
-        with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
-                mock.patch.object(chrome_sales, "live_listing_ids", lambda market: {"shop-live-136d": "c1", "shop-other-136d": "c2"}), \
-                mock.patch.object(chrome_sales, "record_reported_sales", record):
-            asyncio.run(chrome_sales.check_marketplace("depop"))
-        # The item travels with each ID, so the sale protects the listing it was found on.
-        self.assertEqual(recorded, [(["shop-live-136d"], {"shop-live-136d": "c1", "shop-other-136d": "c2"})])
-
-    def test_every_live_listing_is_sent_in_one_check(self):
-        ids = [f"shop-item-{index}-136d" for index in range(20)]
-        seen = {}
-
-        async def request(_job, _message_type, payload=None, timeout=40):
-            seen["ids"] = list(payload["listing_ids"])
-            seen["timeout"] = timeout
-            return {"ok": True, "sales": []}
-
-        with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
-                mock.patch.object(chrome_sales, "live_listing_ids", lambda market: {i: "c" for i in ids}), \
-                mock.patch.object(chrome_sales, "record_reported_sales", lambda market, found: []):
-            asyncio.run(chrome_sales.check_marketplace("depop"))
-        self.assertEqual(seen["ids"], ids)
-        self.assertGreaterEqual(seen["timeout"], 90)
 
     def test_shops_take_turns_on_an_uneven_gap(self):
         chrome_sales._next.clear()
         chrome_sales._errors.clear()
         calls = []
 
-        async def request(_job, _message_type, payload=None, timeout=40):
-            calls.append(payload["marketplace"])
-            return {"ok": True, "sales": []}
+        async def request(marketplace, **kwargs):
+            calls.append(marketplace)
+            return {"ok": True}
 
         try:
-            with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
-                    mock.patch.object(chrome_sales, "live_listing_ids", lambda market: {"x": "c"}):
+            with mock.patch("vendoo_studio.services.order_history.sync", request), \
+                mock.patch.object(chrome_sales, "sale_detection_enabled", return_value=True):
                 asyncio.run(chrome_sales.check_due())
                 self.assertEqual(calls, ["poshmark"])
                 gap = chrome_sales._next["poshmark"] - time.time()
@@ -148,15 +75,15 @@ class ChromeSaleParsingTest(unittest.TestCase):
         chrome_sales._errors.clear()
         calls = []
 
-        async def request(_job, _message_type, payload=None, timeout=40):
-            calls.append(payload["marketplace"])
-            if payload["marketplace"] == "poshmark":
-                return {"ok": False, "error": "Could not check sales."}
-            return {"ok": True, "sales": []}
+        async def request(marketplace, **kwargs):
+            calls.append(marketplace)
+            if marketplace == "poshmark":
+                return {"ok": False, "error": "Couldn't check sales."}
+            return {"ok": True}
 
         try:
-            with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
-                    mock.patch.object(chrome_sales, "live_listing_ids", lambda market: {} if market == "mercari" else {"x": "c"}):
+            with mock.patch("vendoo_studio.services.order_history.sync", request), \
+                mock.patch.object(chrome_sales, "sale_detection_enabled", side_effect=lambda market: market != "depop"):
                 asyncio.run(chrome_sales.check_due())
             self.assertNotIn("depop", calls)
             self.assertIn("poshmark", calls)
@@ -169,6 +96,11 @@ class ChromeSaleParsingTest(unittest.TestCase):
 
 
 class SaleDetectionRouteTest(unittest.TestCase):
+    def test_history_marketplace_reads_orders_instead_of_listing_status(self):
+        with mock.patch.object(chrome_sales, "_read_history", new_callable=mock.AsyncMock, return_value=True) as history:
+            self.assertTrue(asyncio.run(chrome_sales.check_marketplace("depop")))
+        history.assert_awaited_once_with("depop")
+
     def tearDown(self):
         user_settings.set_sale_detection("sellwild", True)
         user_settings.set_autodelist(False)
@@ -205,7 +137,7 @@ class ItemSaleCheckTest(unittest.TestCase):
         chrome_sales._item_read.clear()
 
     def check(self, Session, conv_id, request):
-        manager = mock.Mock(connected=True)
+        manager = mock.Mock(connected=True, capabilities={"marketplace.sales_history"})
         announced = mock.AsyncMock()
         with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
                 mock.patch("vendoo_studio.services.extension_connection.extension_manager", manager), \
@@ -221,12 +153,12 @@ class ItemSaleCheckTest(unittest.TestCase):
 
         async def request(_job, _message_type, payload=None, timeout=40):
             calls.append(dict(payload))
-            return {"ok": True, "sales": [{"listing_id": "shop-tee-136d"}]}
+            return _history("depop", ["shop-tee-136d"])
 
         result, announced = self.check(Session, conv_id, request)
         self.assertEqual(result["checked"], ["depop"])
         self.assertEqual(len(result["recorded"]), 1)
-        self.assertEqual(calls, [{"marketplace": "depop", "listing_ids": ["shop-tee-136d"]}])
+        self.assertEqual(calls, [{"marketplace": "depop", "settled": []}])
         with Session() as db:
             sale = db.query(MarketplaceSale).one()
             self.assertEqual((sale.conversation_id, sale.marketplace, sale.listing_id), (conv_id, "depop", "shop-tee-136d"))
@@ -245,7 +177,7 @@ class ItemSaleCheckTest(unittest.TestCase):
 
         async def request(_job, _message_type, payload=None, timeout=40):
             calls.append(payload["marketplace"])
-            return {"ok": True, "sales": []}
+            return _history("depop", [])
 
         first, _ = self.check(Session, conv_id, request)
         second, _ = self.check(Session, conv_id, request)
@@ -312,18 +244,18 @@ class ItemSaleCheckRouteTest(unittest.TestCase):
         app.dependency_overrides[get_db] = session
 
         async def request(_job, _message_type, payload=None, timeout=40):
-            self.assertEqual(payload, {"marketplace": "depop", "listing_ids": ["shop-tee-136d"]})
-            return {"ok": True, "sales": [{"listing_id": "shop-tee-136d"}]}
+            self.assertEqual(payload, {"marketplace": "depop", "settled": []})
+            return _history("depop", ["shop-tee-136d"])
 
         with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
-                mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True)), \
-                mock.patch.object(chrome_sales, "record_reported_sales", return_value=["sale-1"]) as record, \
+                mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True, capabilities={"marketplace.sales_history"})), \
+                mock.patch("vendoo_studio.database.SessionLocal", Session), \
                 mock.patch("vendoo_studio.services.marketplace_accounts.announce_sales", mock.AsyncMock()):
             body = TestClient(app).post(f"/api/conversations/{conv_id}/marketplace-listings/check-sales").json()
-        self.assertEqual((body["ok"], body["checked"], body["recorded"]), (True, ["depop"], ["sale-1"]))
+        self.assertEqual((body["ok"], body["checked"], len(body["recorded"])), (True, ["depop"], 1))
         self.assertEqual(body["listings"]["depop"]["listing_id"], "shop-tee-136d")
-        record.assert_called_once_with("depop", ["shop-tee-136d"], session_factory=None,
-                                       conversation_ids={"shop-tee-136d": conv_id})
+        with Session() as db:
+            self.assertEqual(db.query(MarketplaceSale).one().order_id, "receipt-0")
 
 
 class NotesClaimedSaleCheckTest(unittest.TestCase):
@@ -345,11 +277,11 @@ class NotesClaimedSaleCheckTest(unittest.TestCase):
         })
 
         async def request(_job, _message_type, payload=None, timeout=40):
-            return {"ok": True, "sales": [{"listing_id": "shop-tee-136d"}]}
+            return _history("depop", ["shop-tee-136d"])
 
         announced = mock.AsyncMock()
         with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
-                mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True)), \
+                mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True, capabilities={"marketplace.sales_history"})), \
                 mock.patch("vendoo_studio.services.marketplace_accounts.announce_sales", announced):
             with Session() as db:
                 result = asyncio.run(chrome_sales.check_item(db, conv_id, session_factory=Session))
@@ -391,10 +323,10 @@ class DetectedSaleProtectionTest(unittest.TestCase):
 
     def check(self, Session, conv_id, reported):
         async def request(_job, _message_type, payload=None, timeout=40):
-            return {"ok": True, "sales": [{"listing_id": sold} for sold in reported]}
+            return _history(payload["marketplace"], reported)
 
         with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
-                mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True)), \
+                mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True, capabilities={"marketplace.sales_history"})), \
                 mock.patch("vendoo_studio.services.marketplace_accounts.announce_sales", mock.AsyncMock()):
             with Session() as db:
                 return asyncio.run(chrome_sales.check_item(db, conv_id, session_factory=Session))
@@ -419,7 +351,7 @@ class DetectedSaleProtectionTest(unittest.TestCase):
             self.assertNotIn("depop", live + fresh)
             self.assertIn("poshmark", live + fresh)
 
-    def test_a_sale_belongs_to_the_item_the_check_read_even_with_a_shared_link(self):
+    def test_a_sale_with_ambiguous_ownership_stays_unmatched(self):
         from vendoo_studio.services import marketplace_delist
 
         Session = sessionmaker(bind=_engine())
@@ -428,8 +360,8 @@ class DetectedSaleProtectionTest(unittest.TestCase):
         self.check(Session, first, ["shop-tee-136d"])
         with Session() as db:
             sale = db.query(MarketplaceSale).one()
-            self.assertEqual(sale.conversation_id, first)
-            self.assertTrue(marketplace_delist.listings(db, first)["depop"]["sold_here"])
+            self.assertIsNone(sale.conversation_id)
+            self.assertFalse(marketplace_delist.listings(db, first)["depop"]["sold_here"])
             self.assertFalse(marketplace_delist.listings(db, second)["depop"]["sold_here"])
 
     def test_a_sale_that_arrived_before_its_item_was_known_is_attached_now(self):
@@ -438,11 +370,11 @@ class DetectedSaleProtectionTest(unittest.TestCase):
         Session = sessionmaker(bind=_engine())
         conv_id = _listing(Session, {"vendooListingUrls": {"depop": "https://www.depop.com/products/shop-tee-136d/"}})
         with Session() as db:
-            db.add(MarketplaceSale(marketplace="depop", order_id="shop-tee-136d", line_id="shop-tee-136d",
+            db.add(MarketplaceSale(marketplace="depop", order_id="receipt-0", line_id="receipt-line",
                                    listing_id="shop-tee-136d", conversation_id=None))
             db.commit()
         result = self.check(Session, conv_id, ["shop-tee-136d"])
-        self.assertEqual(result["recorded"], [])
+        self.assertEqual(len(result["recorded"]), 1)
         with Session() as db:
             sale = db.query(MarketplaceSale).one()
             self.assertEqual(sale.conversation_id, conv_id)
@@ -473,12 +405,12 @@ class MarkedSoldElsewhereTest(unittest.TestCase):
     def tearDown(self):
         chrome_sales._item_read.clear()
 
-    def check(self, Session, conv_id, reported):
+    def check(self, Session, conv_id, reported, sold_at=None):
         async def request(_job, _message_type, payload=None, timeout=40):
-            return {"ok": True, "sales": [{"listing_id": sold} for sold in reported]}
+            return _history(payload["marketplace"], reported, sold_at)
 
         with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
-                mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True)), \
+                mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True, capabilities={"marketplace.sales_history"})), \
                 mock.patch("vendoo_studio.services.marketplace_accounts.announce_sales", mock.AsyncMock()):
             with Session() as db:
                 return asyncio.run(chrome_sales.check_item(db, conv_id, session_factory=Session))
@@ -490,7 +422,8 @@ class MarkedSoldElsewhereTest(unittest.TestCase):
             db.add(MarketplaceSale(marketplace="ebay", order_id="o1", line_id="l1", listing_id="123456789012",
                                    conversation_id=conv_id))
             db.commit()
-        result = self.check(Session, conv_id, ["shop-tee-136d"])
+        # The listing reads sold, but this shop has no receipt for it.
+        result = self.check(Session, conv_id, [])
         self.assertEqual(result["recorded"], [])
         with Session() as db:
             self.assertEqual([line.marketplace for line in db.query(MarketplaceSale).all()], ["ebay"])
@@ -503,7 +436,7 @@ class MarkedSoldElsewhereTest(unittest.TestCase):
             "vendooListingUrls": {"depop": "https://www.depop.com/products/shop-tee-136d/"},
             "vendooDates": {"soldByMarketplace": {"depop": "2026-09-02T15:00:00Z"}},
         })
-        result = self.check(Session, conv_id, ["shop-tee-136d"])
+        result = self.check(Session, conv_id, ["shop-tee-136d"], "2026-09-02T15:00:00Z")
         self.assertEqual(len(result["recorded"]), 1)
         with Session() as db:
             sale = db.query(MarketplaceSale).one()
@@ -518,7 +451,8 @@ class MarkedSoldElsewhereTest(unittest.TestCase):
         first = self.check(Session, conv_id, ["shop-tee-136d"])
         self.assertEqual(len(first["recorded"]), 1)
         chrome_sales._item_read.clear()
-        second = self.check(Session, conv_id, ["65a1b2c3d4e5f6a7b8c9d0e1"])
+        # Clearing Poshmark's listing creates no Poshmark receipt.
+        second = self.check(Session, conv_id, [])
         self.assertEqual(second["recorded"], [])
         with Session() as db:
             self.assertEqual([line.marketplace for line in db.query(MarketplaceSale).all()], ["depop"])

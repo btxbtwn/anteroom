@@ -2,7 +2,6 @@
 from __future__ import annotations
 from typing import cast as type_cast
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.exc import IntegrityError
 
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
@@ -112,13 +111,9 @@ def sale_out(sale: MarketplaceSale, title: str | None) -> dict:
 
 def get_sale(db: Session, sale_id: str) -> dict:
     from vendoo_studio.services.sales_records import records
+    from vendoo_studio.services.vendoo_sales_archive import ensure_archived
 
-    if sale_id.startswith("vendoo-"):
-        rows = records(db, sale_id.removeprefix("vendoo-"))
-        for row in rows:
-            if row["id"] == sale_id:
-                return row
-        raise LedgerError("Sale record not found.", 404)
+    ensure_archived(db)
     row = db.query(MarketplaceSale, Conversation.title).outerjoin(Conversation, Conversation.id == MarketplaceSale.conversation_id).filter(MarketplaceSale.id == sale_id).first()
     if row is None:
         raise LedgerError("Sale record not found.", 404)
@@ -129,26 +124,10 @@ def save_financials(db: Session, sale_id: str, body: FinancialSave) -> dict:
     if body.sold_on is not None and not date(1970, 1, 1) <= body.sold_on <= datetime.now(UTC).date():
         raise LedgerError("Choose a sale date from 1970 through today.")
     with start_gate():
-        sale = db.get(MarketplaceSale, sale_id, populate_existing=True)
-        if sale is None and sale_id.startswith("vendoo-"):
-            from vendoo_studio.services.sell_through import _parse_moment
+        from vendoo_studio.services.vendoo_sales_archive import ensure_archived
 
-            imported = get_sale(db, sale_id)
-            if body.expected_revision != 0 or body.expected_order_basis != imported["order_basis"]:
-                raise LedgerError("The imported sale changed. Reload the record before saving.", 409)
-            moment = _parse_moment(imported["sold_at"] or "")
-            sale = MarketplaceSale(id=sale_id, marketplace=imported["marketplace"], order_id=sale_id, line_id="1",
-                                   conversation_id=imported["conversation_id"], quantity=imported["quantity"],
-                                   order_status="paid", source="seller", state="dismissed", financial_revision=0,
-                                   sold_at=moment.replace(tzinfo=None) if moment else None,
-                                   received_at=_parse_moment(imported["received_at"]))
-            db.add(sale)
-            try:
-                db.flush()
-            except IntegrityError as exc:
-                db.rollback()
-                raise LedgerError("The sale changed. Reload the record before saving.", 409) from exc
-            body = body.model_copy(update={"expected_order_basis": order_basis(sale)})
+        ensure_archived(db)
+        sale = db.get(MarketplaceSale, sale_id, populate_existing=True)
         if sale is None:
             raise LedgerError("Sale record not found.", 404)
         if order_basis(sale) != body.expected_order_basis:

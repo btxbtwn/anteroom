@@ -12,6 +12,16 @@ const execute = (extra = {}) => ({ type: 'marketplace.execute', job_id: 'job-1',
   payload: { marketplace: 'poshmark', action: 'list', confirm: true, operation_id: 'job-1', job_id: 'job-1', request_id: MESSAGE, ...extra } });
 const photo = { id: '0f1e2d3c4b5a', mime_type: 'image/jpeg', base64: 'AAAA' };
 
+test('sales history accepts bounded order ids and rejects arbitrary payloads', () => {
+  const command = { type: 'marketplace.sales_history', job_id: null, message_id: MESSAGE,
+    payload: { request_id: MESSAGE, marketplace: 'depop', settled: ['receipt-1'] } };
+  assert.ok(CloudMarketplaceProtocol.command(command));
+  for (const changes of [{ settled: ['https://example.com'] }, { settled: Array(2001).fill('id') },
+    { marketplace: 'ebay' }, { url: 'https://example.com' }]) {
+    assert.equal(CloudMarketplaceProtocol.command({ ...command, payload: { ...command.payload, ...changes } }), null);
+  }
+});
+
 function setup() {
   let data = {};
   const runs = [];
@@ -37,7 +47,7 @@ function setup() {
 test('an approved page relays the seller command with its photos and gets the Bridge reply', async () => {
   const s = setup();
   await s.connect();
-  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions']);
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions', 'marketplace.sales_history']);
   const result = await s.page('marketplace_command', ALICE, { command: execute(), photos: [photo] });
   assert.deepEqual(result, { ok: true, reply: { ok: true, state: 'published' } });
   assert.equal(s.runs.length, 1);
@@ -96,5 +106,5 @@ test('reads take only their own inputs and no job', async () => {
   ]) assert.equal(CloudMarketplaceProtocol.command(command), null, JSON.stringify(command));
   const s = setup();
   await s.connect();
-  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions']);
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions', 'marketplace.sales_history']);
 });
