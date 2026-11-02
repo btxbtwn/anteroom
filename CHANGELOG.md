@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.674 — 2026-11-02
+
+- Keep imported Vendoo sales in Sales records without rereading Vendoo's sale notes after the first archive.
+- Read orders and available amounts from Depop, Poshmark, Mercari and Sellwild, preserving seller corrections and reporting orders whose amounts cannot be read.
+
 ## 0.1.673 — 2026-11-02
 
 - Keep draft generation available while the photo catalog rebuilds, and release database connections between generation steps.

@@ -1,2 +1,0 @@
-- Keep imported Vendoo sales in Sales records without rereading Vendoo's sale notes after the first archive.
-- Read orders and available amounts from Depop, Poshmark, Mercari and Sellwild, preserving seller corrections and reporting orders whose amounts cannot be read.
