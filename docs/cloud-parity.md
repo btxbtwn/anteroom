@@ -371,3 +371,12 @@ sold records the sale, as on the Mac. Facebook's sale detection pass stays on
 the Mac. Grailed is not on the web: on the Mac its tab only feeds the old
 cross-lister flow, which the web does not offer, and Anteroom has no direct
 Grailed listing, sign-in or check.
+
+On `feat/hosted-chrome-imports`, the Chrome inventory import reads Poshmark,
+Mercari, Depop, Sellwild and Vinted listings in the seller's own Chrome through
+their Anteroom tab, with two named reads under the Bridge capability
+`marketplace.import` (Bridge 0.2.46). The hosted API mounts the desktop
+`chrome-import` routes in the seller's row-secured context; imported photos go
+to their private Storage through the same safe public download as eBay and
+Etsy. The import stays behind `marketplace_sessions`, which the web runtime
+turns on once sale detection and the sharing and offers panels work too.

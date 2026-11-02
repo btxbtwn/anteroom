@@ -14,7 +14,8 @@ the Mac does outside its listing actions: reads that fill the seller's editor
 with their account's own choices (Vinted's categories and brands, Sellwild's
 address, discounts and package, which the Mac reads in its private account
 windows), the sign-in status and Sign in of Settings → Connections, and Check
-on Facebook. Each is a fixed command with fixed inputs; none takes a URL or a
+on Facebook, and the Chrome inventory import's reads of the seller's own active
+listings. Each is a fixed command with fixed inputs; none takes a URL or a
 script. A command waits in the relay only while the tab is answering; when no
 tab has asked recently, Chrome counts as disconnected and the action is refused
 before it starts.
@@ -37,11 +38,14 @@ SELLWILD_ACCOUNT = "sellwild.account"
 MARKETPLACE_SESSIONS = "marketplace.sessions"
 # Reading one linked Facebook listing's page, when the seller chooses Check on Facebook.
 FACEBOOK_LISTING = "facebook.listing"
+# Reading the seller's own active Poshmark, Mercari, Depop, Sellwild and Vinted listings to import them.
+MARKETPLACE_IMPORT = "marketplace.import"
 # The Bridge version that first declares each capability, and what it lets the web do.
 NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
          SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices"),
          MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in"),
-         FACEBOOK_LISTING: ("0.2.45", "check Facebook listings")}
+         FACEBOOK_LISTING: ("0.2.45", "check Facebook listings"),
+         MARKETPLACE_IMPORT: ("0.2.46", "import your listings")}
 
 # Each command, and the capability the Bridge must declare to receive it.
 COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
@@ -49,7 +53,8 @@ COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MA
             "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES,
             "marketplace.sellwild_account": SELLWILD_ACCOUNT,
             "marketplace.sessions": MARKETPLACE_SESSIONS, "marketplace.connect": MARKETPLACE_SESSIONS,
-            "marketplace.listing_state": FACEBOOK_LISTING}
+            "marketplace.listing_state": FACEBOOK_LISTING,
+            "marketplace.import.page": MARKETPLACE_IMPORT, "marketplace.import.listing": MARKETPLACE_IMPORT}
 # A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
 CONTRACT = ("type", "job_id", "message_id", "payload")
 # The page asks again as soon as it answers, and at least this often while idle.

@@ -11,7 +11,16 @@ const CLOUD_READS = {
   // Check on Facebook: one linked listing's own page, read as the Mac reads it. Nothing on Facebook changes.
   'marketplace.listing_state': ({ marketplace, listing_id }) =>
     new Promise(resolve => handleMarketplaceListingState({ payload: { marketplace, listing_id } }, resolve)),
+  // Inventory import: the same reads the Mac's import makes, each listing checked against the signed-in account.
+  // Their errors are the Bridge's own words, as the Mac shows them; nothing the marketplace said.
+  'marketplace.import.page': async ({ marketplace, cursor }) => importReply(await readMarketplaceImportPage(marketplace, cursor ?? null)),
+  'marketplace.import.listing': async ({ marketplace, listing_id }) => importReply(await readMarketplaceImportListing(marketplace, listing_id)),
 };
+
+function importReply(result) {
+  return result.ok ? result : { ok: false, error: String(result.error || '').slice(0, 300), error_code: String(result.error_code || 'rejected').slice(0, 30) };
+}
+
 const CLOUD_READ_ERRORS = new Set(['signed_out', 'challenge', 'rate_limited', 'schema_drift', 'network']);
 
 // Only fixed error codes go back: the marketplace's own words and headers stay in Chrome.

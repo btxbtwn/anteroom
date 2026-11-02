@@ -37,7 +37,7 @@ function setup() {
 test('an approved page relays the seller command with its photos and gets the Bridge reply', async () => {
   const s = setup();
   await s.connect();
-  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions', 'facebook.listing']);
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions', 'facebook.listing', 'marketplace.import']);
   const result = await s.page('marketplace_command', ALICE, { command: execute(), photos: [photo] });
   assert.deepEqual(result, { ok: true, reply: { ok: true, state: 'published' } });
   assert.equal(s.runs.length, 1);
@@ -90,6 +90,17 @@ test('reads take only their own inputs and no job', async () => {
     { marketplace: 'facebook', listing_id: '1234567890/../x' }]) {
     assert.equal(CloudMarketplaceProtocol.command(read('marketplace.listing_state', payload)), null, JSON.stringify(payload));
   }
+  assert.ok(CloudMarketplaceProtocol.command(read('marketplace.import.page', { marketplace: 'depop' })));
+  assert.ok(CloudMarketplaceProtocol.command(read('marketplace.import.page', { marketplace: 'mercari', cursor: 'next-1' })));
+  assert.ok(CloudMarketplaceProtocol.command(read('marketplace.import.listing', { marketplace: 'poshmark', listing_id: 'b'.repeat(24) })));
+  for (const [type, payload] of [
+    ['marketplace.import.page', { marketplace: 'facebook' }],
+    ['marketplace.import.page', { marketplace: 'ebay' }],
+    ['marketplace.import.page', { marketplace: 'depop', cursor: 'x'.repeat(301) }],
+    ['marketplace.import.page', { marketplace: 'depop', url: 'https://evil.example' }],
+    ['marketplace.import.listing', { marketplace: 'vinted', listing_id: '../api/v2/users' }],
+    ['marketplace.import.listing', { marketplace: 'vinted', listing_id: 'https://evil.example' }],
+  ]) assert.equal(CloudMarketplaceProtocol.command(read(type, payload)), null, JSON.stringify(payload));
   for (const command of [
     read('marketplace.vinted_categories', { url: 'https://evil.example' }),
     read('marketplace.vinted_brands', { query: 'x'.repeat(101) }),
@@ -100,5 +111,5 @@ test('reads take only their own inputs and no job', async () => {
   ]) assert.equal(CloudMarketplaceProtocol.command(command), null, JSON.stringify(command));
   const s = setup();
   await s.connect();
-  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions', 'facebook.listing']);
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions', 'facebook.listing', 'marketplace.import']);
 });

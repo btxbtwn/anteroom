@@ -159,3 +159,12 @@ Bridge 0.2.45 adds `marketplace.listing_state` under `facebook.listing`, for
 Check on Facebook on the web. It takes `marketplace: "facebook"` and one numeric
 listing id, reads that listing's page as the Mac's check does, and returns its
 state and whether it is on the signed-in account. Nothing on Facebook changes.
+
+Bridge 0.2.46 adds `marketplace.import.page` and `marketplace.import.listing`
+under `marketplace.import`, for the Chrome inventory import on a marketplace's
+page on the web. They are the reads the Mac's import makes: a page of the
+seller's own active listings, or one listing checked against the signed-in
+account. Each takes one of Poshmark, Mercari, Depop, Sellwild or Vinted, and
+only a cursor or a listing id. A refusal carries the Bridge's own sentence and
+code, as the Mac shows it, never the marketplace's response. Nothing on the
+marketplace changes.
