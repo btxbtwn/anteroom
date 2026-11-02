@@ -3,10 +3,15 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from vendoo_studio.routes import jobs
+from vendoo_studio.services import extension_connection
 from vendoo_studio.services.hosted_browser_relay import relay_for
 from vendoo_studio.services.service_context import current
 
 router = APIRouter(prefix='/api/browser-relay')
+# Settings → Connections: which marketplaces the seller's Chrome is signed in to, as on the Mac.
+sessions_router = APIRouter()
+sessions_router.add_api_route('/api/marketplaces/sessions', extension_connection.marketplace_sessions, methods=['GET'])
+sessions_router.add_api_route('/api/marketplaces/{marketplace}/connect', extension_connection.connect_marketplace, methods=['POST'])
 WAIT_S = 20.0
 
 

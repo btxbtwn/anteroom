@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anteroom Bridge",
-  "version": "0.2.43",
+  "version": "0.2.44",
   "minimum_chrome_version": "116",
   "description": "Connect Anteroom to automate marketplace listing drafts",
   "permissions": [

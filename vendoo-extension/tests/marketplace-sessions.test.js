@@ -152,3 +152,26 @@ test('Sellwild is unknown when the check cannot reach the site', async () => {
   const { c } = worker({ fetch: async () => { throw new Error('offline'); } });
   assert.deepEqual(JSON.parse(JSON.stringify(await c.readExtensionSession('sellwild'))), { state: 'unknown', expires_at: null, label: null, expiring: false });
 });
+
+// Settings → Connections on the web asks through the seller's connected Anteroom tab.
+test('relayed sign-in checks report every marketplace without cookie values, and a sign-in opens only its page', async () => {
+  const secret = 'depop-access-token-secret';
+  const later = Math.floor(Date.now() / 1000) + 60 * 60 * 72;
+  const { c } = worker({
+    cookies: { 'https://www.depop.com/ access_token': { value: encodeURIComponent(secret), expirationDate: later } },
+    fetch: async () => { throw new Error('offline'); },
+  });
+  const id = 'd'.repeat(32);
+  const result = await c.runCloudMarketplaceCommand({ type: 'marketplace.sessions', job_id: null, message_id: id, payload: { request_id: id } }, []);
+  assert.equal(result.ok, true);
+  assert.deepEqual(Object.keys(result.sessions).sort(), ['depop', 'facebook', 'mercari', 'poshmark', 'sellwild', 'vinted']);
+  assert.equal(result.sessions.depop.state, 'signed_in');
+  assert.equal(JSON.stringify(result).includes(secret), false);
+
+  // A listing action is running: the sign-in page waits, and nothing opens.
+  c.nativeOperationsRunning = () => true;
+  c.chrome.tabs = { query: () => { throw new Error('read tabs'); }, create: () => { throw new Error('opened a tab'); } };
+  const busy = await c.runCloudMarketplaceCommand({ type: 'marketplace.connect', job_id: null, message_id: id,
+    payload: { request_id: id, marketplace: 'vinted' } }, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(busy)), { ok: false, error: 'Wait for the current listing action to finish.' });
+});

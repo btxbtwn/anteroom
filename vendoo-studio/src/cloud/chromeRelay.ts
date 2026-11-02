@@ -22,7 +22,7 @@ function approvedPhotos(command: RelayedCommand): { id: string; mime_type: strin
 }
 
 /** What a Bridge may declare it runs for the hosted API: marketplace actions, and each named read. */
-export const RELAY_CAPABILITIES = ["marketplace.actions", "vinted.choices", "sellwild.account"] as const;
+export const RELAY_CAPABILITIES = ["marketplace.actions", "vinted.choices", "sellwild.account", "marketplace.sessions"] as const;
 
 /** One relay turn: wait for the next command, run it in Chrome, post the reply. False when nothing came. */
 export async function relayOnce(bridge: RelayBridge, capabilities: readonly string[]): Promise<boolean> {

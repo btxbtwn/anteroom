@@ -393,7 +393,7 @@ function EbayListingDefaults({ reconnecting, onReconnect }: { reconnecting: bool
 const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
   depop: "Lists on Depop with the account signed in to Chrome.",
   poshmark: "Lists on Poshmark with the account signed in to Chrome.",
-  mercari: "Saves the Mercari sign-in on this Mac so listing keeps working after Chrome restarts.",
+  mercari: "Saves the Mercari sign-in in Anteroom Bridge so listing keeps working after Chrome restarts.",
   sellwild: "Lists on Sellwild with the account signed in to Chrome.",
   vinted: "Lists on Vinted with the account signed in to Chrome. List saves a draft, then publishes it only after you confirm.",
   facebook: "Watches your linked Facebook Marketplace listings with the account signed in to Chrome. Anteroom can't list or delete on Facebook yet.",
@@ -465,9 +465,33 @@ function ChromeSessionRow({
   );
 }
 
+/** On the web, Chrome's marketplace sign-ins are read through this seller's connected Anteroom tab. */
+function HostedChromeSessions() {
+  const sessions = useQuery({
+    queryKey: ["marketplace-sessions"],
+    queryFn: api.marketplaceSessions.status,
+    retry: false,
+    refetchInterval: (query) => (query.state.status === "error" ? 15_000 : 60_000),
+  });
+  const chromeReady = sessions.isSuccess;
+  return (
+    <>
+      {CHROME_MARKET_ORDER.map((marketplace) => (
+        <ChromeSessionRow key={marketplace} marketplace={marketplace} chromeReady={chromeReady} />
+      ))}
+      <SettingsRow
+        title="Where the sign-in lives"
+        description="Depop, Poshmark, Mercari, Sellwild, Vinted, and Facebook stay signed in through the Chrome where Anteroom Bridge runs. Anteroom reads only whether each is signed in, never the cookies or tokens. Sale detection runs in the Mac app."
+      >
+        {sessions.isError ? <SettingsNote>{sessions.error.message}</SettingsNote> : null}
+      </SettingsRow>
+    </>
+  );
+}
+
 function MarketplaceSection() {
   const queryClient = useQueryClient();
-  // The web app has no Chrome extension or sale detection yet: only eBay and Etsy sign-in.
+  // The web app has eBay and Etsy sign-in, and reads Chrome's sign-ins through the seller's tab. Sale detection stays on the Mac.
   const { hosted } = useWorkspaceRuntime();
   const extension = useQuery({
     queryKey: ["extension-status"],
@@ -519,6 +543,7 @@ function MarketplaceSection() {
         {DIRECT_MARKETPLACES.map((marketplace) => (
           <DirectConnectionRow key={marketplace.id} marketplace={marketplace} account={accounts?.[marketplace.id]} />
         ))}
+        <HostedChromeSessions />
       </SettingsSection>
     );
   }
