@@ -1,8 +1,0 @@
-- Keep draft generation available while the photo catalog rebuilds, and release database connections between generation steps.
-- Wait for all selected photos to finish uploading before enabling Generate listing.
-- Stop requesting the desktop setup-guide endpoint when signed in on the web.
-- Offer a reload when a web update arrives, so it does not reload an open draft automatically.
-- Make Clear listing available from the web editor's More listing actions menu.
-- Give running draft work time to finish during a web deployment before stopping the worker.
-- Refresh generated listing fields in the web editor without rejecting internal category-search metadata.
-- Use ChatGPT on a connected, signed-in Mac for web generation, with ChatGPT credentials kept on the Mac.
