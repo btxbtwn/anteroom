@@ -93,14 +93,14 @@ describe("InventoryAnalyticsView", () => {
 
   it("reminds the seller to complete missing sales details across all time", () => {
     const html = render({ ...data, incomplete_sales: [
-      { conversation_id: "undated", title: "Undated jacket", missing: ["sale date", "sale price", "fees"] },
-      { conversation_id: "old", title: "Old boots", missing: ["cost"] },
+      { id: "s1", conversation_id: "undated", title: "Undated jacket", missing: ["sale date", "sale price", "fees"] },
+      { id: "s2", conversation_id: null, title: "Old boots", missing: ["item cost"] },
     ] });
     expect(html).toContain("2 sales need sales data");
     expect(html).toContain("Across all time");
     expect(html).toContain("Add missing amounts in Sales records");
     expect(render({ ...data, incomplete_sales: [
-      { conversation_id: "undated", title: "Undated jacket", missing: ["sale date"] },
+      { id: "s1", conversation_id: "undated", title: "Undated jacket", missing: ["sale date"] },
     ] }, { running: false }, false, false)).toContain("Add missing amounts in Sales records");
     expect(render(data, { running: false }, false, false)).not.toContain("Resync Vendoo data");
     expect(render(data, { running: false }, false, false)).toContain("Track sales performance and find inventory that needs attention.");
@@ -110,7 +110,7 @@ describe("InventoryAnalyticsView", () => {
     expect(html).not.toContain("undefined");
     expect(render(data)).not.toContain('aria-label="Missing sales data"');
     expect(render({ ...data, incomplete_sales: [
-      { conversation_id: "one", title: "Single sale", missing: ["marketplace"] },
+      { id: "s3", conversation_id: "one", title: "Single sale", missing: ["fees"] },
     ] })).toContain("1 sale needs sales data");
   });
 

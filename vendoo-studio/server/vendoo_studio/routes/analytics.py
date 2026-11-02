@@ -102,7 +102,8 @@ class AnalyticsOldListing(BaseModel):
 
 
 class AnalyticsIncompleteSale(BaseModel):
-    conversation_id: str
+    id: str
+    conversation_id: str | None
     title: str
     missing: list[str]
 

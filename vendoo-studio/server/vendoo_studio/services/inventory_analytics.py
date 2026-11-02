@@ -73,7 +73,6 @@ class AnalyticsItem:
     shipping_cost: float = 0.0
     shipping_credit: float = 0.0
     box_id: str | None = None
-    missing_sale_details: tuple[str, ...] = ()
     refunds: float = 0.0
     # The sales-ledger line this sale row came from, if any.
     sale_id: str | None = None
@@ -125,18 +124,18 @@ def inventory_analytics(
         raise ValueError(range_id)
     from vendoo_studio.services.ad_spend import list_entries, summarize_ads
     from vendoo_studio.services.sale_events import windows
+    from vendoo_studio.services.sales_records import incomplete_sales
     from vendoo_studio.services.user_settings import vendoo_inventory_synced_at
 
     clock = now or datetime.now(UTC)
     if clock.tzinfo is None:
         clock = clock.replace(tzinfo=UTC)
-    payload = summarize(
-        load_rows(db) if rows is None else rows, range_id=range_id, now=clock, events=windows(db),
-        start=start, end=end,
-    )
+    rows = load_rows(db) if rows is None else rows
+    payload = summarize(rows, range_id=range_id, now=clock, events=windows(db), start=start, end=end)
     window_start, window_end = _window(range_id, clock, start, end)
     return {
         **payload,
+        "incomplete_sales": incomplete_sales(db, rows),
         "ads": summarize_ads(
             list_entries(db),
             start=window_start,
@@ -353,7 +352,6 @@ def summarize(
     return {
         "range": range_id,
         "undated_sales": sum(1 for item in items if item.status == "sold" and item.sold_at is None),
-        "incomplete_sales": _incomplete_sales(items),
         "periods_truncated": truncated,
         "inventory": inventory,
         # Snapshot-based rate: period sales plus inventory still available today.
@@ -375,24 +373,6 @@ def summarize(
         "recent": _recent(sales, events or []),
         "oldest": _oldest(items, now),
     }
-
-
-def _incomplete_sales(items: list[AnalyticsItem]) -> list[dict[str, Any]]:
-    """What Vendoo's Missing Sale Details filter lists, across all time.
-
-    The seller fixes these in Vendoo, so Studio holds a sale to Vendoo's rule
-    rather than its own: a gap Vendoo does not flag is one the seller cannot clear.
-    """
-    rows = [
-        {
-            "conversation_id": item.conversation_id,
-            "title": item.title,
-            "missing": list(item.missing_sale_details),
-        }
-        for item in items
-        if item.missing_sale_details
-    ]
-    return sorted(rows, key=lambda row: (row["title"].casefold(), row["conversation_id"]))
 
 
 def price_tier(price: float) -> str:

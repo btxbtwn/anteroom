@@ -1,0 +1,2 @@
+- Analytics' missing sales data list now matches the Missing sale data filter in Sales records, including marketplace orders without amounts, and a sale drops off once you fill it in.
+- Open sales records from that list to see every sale with missing data across all time.
