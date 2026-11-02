@@ -53,7 +53,12 @@ class FacebookRemovedTest(unittest.TestCase):
         self.assertNotIn("facebook.listing", hosted_browser_relay.NEEDS)
 
     def test_there_is_no_facebook_check(self):
-        self.assertEqual(self.client.post(f"{self.base}/facebook/check").status_code, 404)
+        self.assertNotIn(
+            "/api/conversations/{conversation_id}/marketplace-listings/facebook/check",
+            app.openapi()["paths"],
+        )
+        # A built frontend mounts StaticFiles at /, which rejects POST with 405.
+        self.assertIn(self.client.post(f"{self.base}/facebook/check").status_code, (404, 405))
 
     def test_an_old_facebook_link_no_longer_shows_but_the_others_do(self):
         response = self.client.get(self.base)
