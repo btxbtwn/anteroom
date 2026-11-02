@@ -73,3 +73,40 @@ async def _send(relay):
     assert await relay.send_message({'type': 'marketplace.delete', 'message_id': request_id,
                                      'payload': {'marketplace': 'poshmark', 'listing_id': 'x', 'confirm': True}})
     return waiter
+
+
+def _bridge_accepts(command: dict) -> bool:
+    """Whether Anteroom Bridge's own contract check takes this command as the page relays it."""
+    import json
+    import subprocess
+    from pathlib import Path
+
+    protocol = Path(__file__).resolve().parents[3] / 'vendoo-extension' / 'cloud-marketplace-protocol.js'
+    script = f"console.log(JSON.stringify(require({json.dumps(str(protocol))}).command({json.dumps(command)}) !== null))"
+    return json.loads(subprocess.run(['node', '-e', script], check=True, capture_output=True, text=True).stdout)
+
+
+def test_relayed_commands_are_ones_the_bridge_accepts():
+    from vendoo_studio.services import native_marketplaces
+
+    hosted_browser_relay._relays.clear()
+
+    async def scenario():
+        with use(for_seller(USER_ID)):
+            relay = current_extension()
+            await relay.next_message({MARKETPLACE_ACTIONS}, 0.01)
+            request = asyncio.create_task(browser_bridge.request(SimpleNamespace(id='job-1'), 'marketplace.execute',
+                                                                 {'marketplace': 'poshmark', 'action': 'list', 'confirm': True}, timeout=5))
+            execute = await relay.next_message({MARKETPLACE_ACTIONS}, 1)
+            relay.resolve_wait(execute['message_id'], {'ok': True})
+            await request
+            await native_marketplaces._send_cancel('op-1')
+            cancel = await relay.next_message({MARKETPLACE_ACTIONS}, 1)
+        return execute, cancel
+
+    execute, cancel = asyncio.run(scenario())
+    # The server's own envelope fields (version, sent_at) are not part of the page's contract.
+    assert set(execute) == {'type', 'job_id', 'message_id', 'payload'}
+    assert _bridge_accepts(execute)
+    assert cancel['type'] == 'job.cancel' and cancel['payload']['job_id'] == 'op-1'
+    assert _bridge_accepts(cancel)

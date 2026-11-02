@@ -18,11 +18,14 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+import uuid
 from collections import deque
 
 from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, ReplyWaits
 
 COMMANDS = frozenset({"marketplace.execute", "marketplace.result", "marketplace.delete", "job.cancel"})
+# A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
+CONTRACT = ("type", "job_id", "message_id", "payload")
 # The page asks again as soon as it answers, and at least this often while idle.
 SEEN_FOR_S = 30.0
 
@@ -49,7 +52,13 @@ class BrowserRelay(ReplyWaits):
     async def send_message(self, message: dict) -> bool:
         if message.get("type") not in COMMANDS or not self.connected:
             return False
-        self._outbox.append(message)
+        # The page and Bridge take exactly these fields; the socket envelope's others stay here.
+        command = {key: message.get(key) for key in CONTRACT}
+        if command["type"] == "job.cancel":
+            # Nothing waits for a cancel's reply, but the page still needs an id to carry it by.
+            request_id = uuid.uuid4().hex
+            command.update(message_id=request_id, payload={**(command["payload"] or {}), "request_id": request_id})
+        self._outbox.append(command)
         self._ready.set()
         return True
 
