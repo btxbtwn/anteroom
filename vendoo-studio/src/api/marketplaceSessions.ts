@@ -50,8 +50,13 @@ export function chromeSessionPresentation(
   session: ExtensionSession | undefined,
   chromeReady: boolean,
   now = Date.now(),
+  unavailable?: string | null,
 ): { tone: "success" | "warning" | "error" | "muted"; label: string } {
-  if (!chromeReady) return { tone: "muted", label: "Connect Chrome first" };
+  if (!chromeReady) {
+    // A connected but older Bridge can list yet cannot read sign-ins; say so instead of asking to connect.
+    if (unavailable?.startsWith("Update Anteroom Bridge")) return { tone: "warning", label: "Update Anteroom Bridge" };
+    return { tone: "muted", label: "Connect Chrome first" };
+  }
   if (!session || session.state === "unknown") return { tone: "muted", label: "Could not check" };
   if (session.state === "expired") return { tone: "error", label: "Sign in again" };
   if (session.state === "signed_out") return { tone: "muted", label: "Not signed in" };
