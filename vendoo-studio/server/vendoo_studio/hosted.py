@@ -156,11 +156,15 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
             from vendoo_studio.services import background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler
+            from vendoo_studio.services import background_tasks as queue
             # Background work opens blocking database sessions. It gets its own
             # thread and event loop: waiting for a pooled connection on the
             # request loop froze every request, including the ones that would
             # have returned their connections, until the pool timed out.
             background = BackgroundLoop()
+            from vendoo_studio.routes.assistant import answer_task
+            # Assistant answers share the draft worker; the route supplies how to answer one.
+            background_worker.register(queue.ASSISTANT, answer_task)
             worker = background.run(background_worker.serve(engine))
             # Automations regenerate through the same draft queue, so both run together.
             background.run(hosted_automation_scheduler.serve(engine))
