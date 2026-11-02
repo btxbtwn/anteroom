@@ -47,19 +47,20 @@ def test_chrome_import_reads_the_sellers_own_listings_through_their_tab(cloud, s
     _answer(client, alice, {'ok': False, 'error': 'This listing does not belong to the signed-in Poshmark account.',
                             'error_code': 'rejected'}, CAPABLE)
     thread.join(10)
-    assert result['response'].status_code == 502
+    assert result['response'].status_code == 409
     assert result['response'].json()['detail'] == 'This listing does not belong to the signed-in Poshmark account.'
 
     thread, result = _in_background(lambda: client.post('/api/chrome-import/poshmark', headers=alice,
                                                         json={'listing': f'https://poshmark.com/listing/Denim-{POST}'}))
     command = _answer(client, alice, {'ok': True, 'listing': {
-        'id': POST, 'title': 'Denim jacket', 'description': 'Classic fit.', 'price': 45, 'quantity': 1,
+        'id': POST, 'title': 'Denim jacket', 'description': 'Classic fit.', 'price': 45, 'currency': 'USD', 'quantity': 1,
         'brand': "Levi's", 'condition': 'not_nwt', 'photos': []}}, CAPABLE)
     thread.join(10)
     assert command['type'] == 'marketplace.import.listing'
     assert command['payload'] == {'marketplace': 'poshmark', 'listing_id': POST, 'request_id': command['message_id']}
     imported = result['response'].json()
-    assert result['response'].status_code == 200 and imported['reused'] is False and imported['listing_id'] == POST
+    assert result['response'].status_code == 200, imported
+    assert imported['reused'] is False and imported['listing_id'] == POST
 
     # The item is Alice's alone, and importing again reopens it without asking Chrome.
     assert client.get(f"/api/conversations/{imported['conversation_id']}", headers=alice).status_code == 200
