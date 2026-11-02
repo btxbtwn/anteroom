@@ -11,6 +11,7 @@ test("a seller signs in with an email and password", async ({ page }) => {
   await signIn(page, "alice@sandbox.test", "wrong password");
   await expect(page.getByRole("alert")).toContainText("don’t match");
   await signIn(page, "alice@sandbox.test", "sandbox");
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
 });
 
@@ -39,6 +40,7 @@ test("a seller who forgot their password sets a new one from the reset link", as
   await expect(page.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
   await page.getByLabel("New password").fill("a new password");
   await page.getByRole("button", { name: "Save password" }).click();
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
 });
 
@@ -56,8 +58,9 @@ test("in the Mac app, password resets open in the browser", async ({ page }) => 
   await expect(reset).toHaveAttribute("href", /\/\?forgot-password$/);
   await expect(page.getByText("Account › This Mac’s Listings")).toBeVisible();
   await signIn(page, "alice@sandbox.test", "sandbox");
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Connect Chrome" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Connect Anteroom Extension" })).toHaveCount(0);
 });
 
 test("the browser opens straight to the reset form from the Mac app", async ({ page }) => {
