@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
@@ -19,7 +20,6 @@ from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.listing import Listing, ListingRevision  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.repositories.queries import ConversationRepo
 from extension_sources import background_source
 
 EXTENSION_DIR = Path(__file__).resolve().parents[3] / "vendoo-extension"
@@ -146,7 +146,7 @@ class JobPhotoRouteTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         stored = "front.jpg"
         (Path(self.tmp.name) / stored).write_bytes(JPEG_BYTES)
-        self.photo = ConversationRepo(self.db).add_photo(
+        self.photo = listing_persistence.add_photo(self.db,
             self.conv.id,
             "front.jpg",
             stored,

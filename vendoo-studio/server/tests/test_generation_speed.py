@@ -7,13 +7,13 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.catalog import CategorySchema
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.job import Job  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.repositories.queries import ListingRepo
 from vendoo_studio.services import chat_prompts
 from vendoo_studio.services.listing_generate import collect_provider_text, repair_listing_json
 
@@ -35,7 +35,7 @@ class ListingPromptOrderTest(unittest.TestCase):
             ],
         ))
         self.db.commit()
-        ListingRepo(self.db).save_revision(
+        listing_persistence.save_revision(self.db,
             self.conv.id,
             {"category_path": "Clothing > Tops", "etsy_specifics": {"pattern": "Solid"}},
             source="category_analysis",
@@ -66,7 +66,7 @@ class ListingPromptOrderTest(unittest.TestCase):
         self.assertIn("Navy → **Blue**", rules)
 
     def test_first_generation_receives_required_flags_and_exact_allowed_options(self):
-        ListingRepo(self.db).save_revision(self.conv.id, {"category_path": "Clothing > Tops"}, source="category_analysis")
+        listing_persistence.save_revision(self.db, self.conv.id, {"category_path": "Clothing > Tops"}, source="category_analysis")
         content = chat_prompts.listing_generation_messages("R", "", "", self.db, self.conv.id)[0]["content"]
         section = content[content.index("--- Discovered fields still empty ---"):]
         self.assertIn('etsy: Pattern (required) — allowed options: ["Solid", "Floral"]', section)

@@ -7,9 +7,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 
 
 class JobsListConversationTest(unittest.TestCase):
@@ -34,8 +35,8 @@ class JobsListConversationTest(unittest.TestCase):
 
         self.keep = ConversationRepo(self.db).create(title="Keep")
         self.other = ConversationRepo(self.db).create(title="Other")
-        keep_rev = ListingRepo(self.db).save_revision(self.keep.id, {"title": "Keep"}, source="user")
-        other_rev = ListingRepo(self.db).save_revision(self.other.id, {"title": "Other"}, source="user")
+        keep_rev = listing_persistence.save_revision(self.db, self.keep.id, {"title": "Keep"}, source="user")
+        other_rev = listing_persistence.save_revision(self.db, self.other.id, {"title": "Other"}, source="user")
         self.keep_job = JobRepo(self.db).create(
             conv_id=self.keep.id,
             approved_revision_id=keep_rev.id,

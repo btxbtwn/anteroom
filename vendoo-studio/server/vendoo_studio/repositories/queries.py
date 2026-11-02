@@ -2,8 +2,6 @@ from __future__ import annotations
 from typing import cast as type_cast
 from sqlalchemy.engine import CursorResult
 
-import copy
-import json
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select, update
@@ -75,26 +73,6 @@ def _sync_settlement(conv: Conversation, status: str, *, backfill: bool = False)
     if status == "sold":
         return _settle(conv, now, backfill=backfill, force=not backfill)
     return False
-
-
-def _facet(sku: Any, price: Any, etsy: Any = None, year: Any = None) -> dict[str, Any]:
-    from vendoo_studio.models.etsy_fields import etsy_eligible
-
-    text = str(sku or "").strip()
-    try:
-        amount = float(price) if price is not None and str(price) != "" else None
-    except (TypeError, ValueError):
-        amount = None
-    # json_value hands back a dict; JSON text is still accepted.
-    try:
-        specifics = json.loads(etsy) if isinstance(etsy, str) else etsy
-    except json.JSONDecodeError:
-        specifics = None
-    listing = {
-        "etsy_specifics": specifics if isinstance(specifics, dict) else {},
-        "ebay_specifics": {"yearManufactured": year} if year else {},
-    }
-    return {"sku": text or None, "price": amount, "etsy_eligible": etsy_eligible(listing)}
 
 
 # What ``_facet`` reads from a revision, extracted inside the database.
@@ -181,11 +159,10 @@ class ConversationRepo:
     def list_all(self) -> list[Conversation]:
         return self.db.query(Conversation).order_by(Conversation.updated_at.desc()).all()
 
-    def listing_facets(self) -> dict[str, dict[str, Any]]:
-        """SKU, price and Etsy eligibility for every listing, read inside SQLite.
+    def listing_facet_rows(self) -> list:
+        """SKU, price and Etsy inputs extracted inside the database.
 
-        The sidebar filters and sorts on both. Loading whole revisions to reach
-        two fields would mean hauling the entire inventory's listing JSON into
+        Loading whole revisions to reach these inputs would haul the inventory's listing JSON into
         Python on every sidebar read, so SQLite extracts them instead.
         """
         rows = (
@@ -193,7 +170,8 @@ class ConversationRepo:
             .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
             .all()
         )
-        return {conv_id: _facet(*values) for conv_id, *values in rows}
+        return rows
+
 
     def current_revision_ids(self) -> dict[str, str]:
         """Each listing's current revision, for the sidebar in one query.
@@ -213,14 +191,15 @@ class ConversationRepo:
         )
         return row[0] if row else None
 
-    def listing_facet(self, conv_id: str) -> dict[str, Any]:
+    def listing_facet_row(self, conv_id: str):
         row = (
             self.db.query(*_facet_columns())
             .join(Listing, ListingRevision.id == Listing.current_revision_id)
             .filter(Listing.conversation_id == conv_id)
             .first()
         )
-        return _facet(*row) if row else {"sku": None, "price": None, "etsy_eligible": True}
+        return row
+
 
     def cover_photos(self) -> dict[str, tuple[str, str | None]]:
         """Map each conversation to its first photo's id and checksum, for sidebar thumbnails."""
@@ -442,7 +421,7 @@ class ConversationRepo:
     def get_messages(self, conv_id: str) -> list[Message]:
         return self.db.query(Message).filter(Message.conversation_id == conv_id).order_by(Message.created_at).all()
 
-    def add_photo(self, conv_id: str, original_filename: str, stored_filename: str, mime_type: str, size_bytes: int, checksum: str | None = None, width: int | None = None, height: int | None = None, marketplace: str | None = None) -> Photo:
+    def insert_photo(self, conv_id: str, original_filename: str, stored_filename: str, mime_type: str, size_bytes: int, checksum: str | None = None, width: int | None = None, height: int | None = None, marketplace: str | None = None) -> Photo:
         max_order = self.db.query(Photo).filter(Photo.conversation_id == conv_id).count()
         photo = Photo(
             conversation_id=conv_id,
@@ -457,10 +436,8 @@ class ConversationRepo:
             marketplace=marketplace,
         )
         self.db.add(photo)
-        _recheck_error_flag(self.db, conv_id)
-        self.db.commit()
-        self.db.refresh(photo)
         return photo
+
 
     def get_photos(self, conv_id: str) -> list[Photo]:
         """The item's photos, in item order. Photos added on one marketplace's form are not among them."""
@@ -472,14 +449,13 @@ class ConversationRepo:
         return (self.db.query(Photo).filter(Photo.conversation_id == conv_id)
                 .order_by(Photo.marketplace.is_not(None), Photo.display_order).all())
 
-    def delete_photo(self, conv_id: str, photo_id: str) -> bool:
+    def remove_photo(self, conv_id: str, photo_id: str) -> bool:
         photo = self.db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id).first()
         if not photo:
             return False
         self.db.delete(photo)
-        _recheck_error_flag(self.db, conv_id)
-        self.db.commit()
         return True
+
 
     def replace_photo_file(self, photo: Photo, meta: dict, *, source_filename: str | None, edits: dict | None) -> Photo:
         """Point a photo at a rendered edit of its source, or back at the source."""
@@ -504,75 +480,6 @@ class ConversationRepo:
         return self.get_photos(conv_id)
 
 
-def _recheck_error_flag(db: Session, conv_id: str) -> None:
-    """Re-check a listing a form save flagged, now that its inputs changed.
-
-    Chat, repair, regeneration and Vendoo sync write revisions without
-    touching the flag, and photos change its photo rule, so a listing fixed any
-    other way would otherwise stay flagged forever.
-    """
-    import copy
-
-    from vendoo_studio.models.validation import validate_listing
-
-    listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
-    if not listing or listing.validation_status != "error":
-        return
-    revision = db.get(ListingRevision, listing.current_revision_id) if listing.current_revision_id else None
-    data = copy.deepcopy(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
-    photo_count = db.query(Photo).filter(Photo.conversation_id == conv_id, Photo.marketplace.is_(None)).count()
-    validation = validate_listing(data, photo_count, require_photos=True)
-    listing.validation_status = "valid" if validation.valid else "error"
-    listing.validation_errors = validation.errors + validation.warnings
-
-
-def _field_value(listing: dict, marketplace: str, field: str):
-    """What a marketplace reads for ``field``: a dotted path, or its own copy of a top-level field."""
-    if "." not in field:
-        block = listing.get(f"{marketplace}_specifics")
-        return block[field] if isinstance(block, dict) and field in block else listing.get(field)
-    value = listing
-    for part in field.split("."):
-        value = value.get(part) if isinstance(value, dict) else None
-    return value
-
-
-def _field_unchanged(item, marketplace: str, before: dict, after: dict) -> bool:
-    field = str(item.get("field") or "") if isinstance(item, dict) else ""
-    # Settings live outside the listing; only a new List can tell they are fixed.
-    if not field or field.startswith("settings."):
-        return True
-    return _field_value(before, marketplace, field) == _field_value(after, marketplace, field)
-
-
-def _drop_fixed_marketplace_errors(db: Session, conv_id: str, before: dict, after: dict) -> None:
-    """Clear a marketplace's "needs these fields" error once a save changes those fields.
-
-    A List that stopped for missing fields keeps its error until the next List,
-    so a category fixed in the editor or by chat would still show as missing.
-    Each field this save changed leaves the error; the next List checks it again.
-    """
-    from vendoo_studio.models.marketplace_listing import (
-        UNSETTLED_STATES,
-        MarketplaceListing,
-    )
-
-    rows = db.query(MarketplaceListing).filter(
-        MarketplaceListing.conversation_id == conv_id, MarketplaceListing.error_code == "missing_fields",
-    ).all()
-    for row in rows:
-        if row.state in UNSETTLED_STATES or not isinstance(row.error_fields, list):
-            continue
-        left = [item for item in row.error_fields if _field_unchanged(item, row.marketplace, before, after)]
-        if len(left) == len(row.error_fields):
-            continue
-        if left:
-            row.error_fields = left
-            row.error = " ".join(f"{str(item.get('message') or '').rstrip('.')}." for item in left if isinstance(item, dict))
-        else:
-            row.error = row.error_code = row.error_fields = row.marketplace_message = None
-
-
 class RevisionConflict(ValueError):
     pass
 
@@ -584,36 +491,7 @@ class ListingRepo:
     def get_current(self, conv_id: str) -> Listing | None:
         return self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
 
-    def save_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None) -> ListingRevision:
-        """Save atomically; an empty expected id means no listing may exist yet."""
-        from vendoo_studio.services.native_field_fill import (
-            FILL_ON_SOURCES,
-            category_saved,
-        )
-
-        before: dict = {}
-        current = self.get_current(conv_id)
-        previous = self.get_revision(current.current_revision_id) if current and current.current_revision_id else None
-        before = previous.listing_json if previous is not None and isinstance(previous.listing_json, dict) else {}
-        from vendoo_studio.services import activity
-
-        scope = activity.edit_fields.get()
-        if scope is not None and source in FILL_ON_SOURCES:
-            listing_json = activity.scoped_listing(before, listing_json, scope)
-        from vendoo_studio.services import native_contract
-
-        if source != "native_schema" and native_contract.KEY in before:
-            listing_json = copy.deepcopy(listing_json)
-            if source in FILL_ON_SOURCES:
-                listing_json[native_contract.KEY] = copy.deepcopy(before[native_contract.KEY])
-                listing_json[native_contract.EVIDENCE_KEY] = copy.deepcopy(before.get(native_contract.EVIDENCE_KEY) or {})
-                native_contract.invalidate_dependents(before, listing_json)
-                if source != "user_form":
-                    native_contract.constrain_generated(listing_json, before, freeze_categories=False)
-            else:
-                native_contract.constrain_generated(listing_json, before, freeze_categories=source not in {
-                    "native_fields", "native_categories", "vendoo_prepare", "category_analysis", "category_schema_cache"},
-                    keep_evidence=source == "native_fields")
+    def insert_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None) -> ListingRevision:
         revision = ListingRevision(
             conversation_id=conv_id,
             listing_json=listing_json,
@@ -622,20 +500,16 @@ class ListingRepo:
         )
         self.db.add(revision)
         self.db.flush()
+        return revision
 
-        if source == "model_refinement":
-            from vendoo_studio.services.chat_listing import recover_saved_chat_clears
-
-            revision.listing_json = recover_saved_chat_clears(self.db, conv_id, revision)
-            listing_json = revision.listing_json
-
+    def set_current_revision(self, conv_id: str, revision_id: str, *, expected_revision_id: str | None = None) -> None:
         listing = self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
         if expected_revision_id == "":
             if listing is not None and listing.current_revision_id is not None:
                 self.db.rollback()
                 raise RevisionConflict("This listing changed since you reviewed it")
             if listing is None:
-                listing = Listing(conversation_id=conv_id, current_revision_id=revision.id)
+                listing = Listing(conversation_id=conv_id, current_revision_id=revision_id)
                 self.db.add(listing)
                 try:
                     self.db.flush()
@@ -645,39 +519,23 @@ class ListingRepo:
             else:
                 result = self.db.execute(update(Listing).where(
                     Listing.conversation_id == conv_id, Listing.current_revision_id.is_(None),
-                ).values(current_revision_id=revision.id))
+                ).values(current_revision_id=revision_id))
                 if type_cast(CursorResult, result).rowcount != 1:
                     self.db.rollback()
                     raise RevisionConflict("This listing changed since you reviewed it")
         elif expected_revision_id is not None:
             result = self.db.execute(update(Listing).where(
                 Listing.conversation_id == conv_id, Listing.current_revision_id == expected_revision_id,
-            ).values(current_revision_id=revision.id))
+            ).values(current_revision_id=revision_id))
             if type_cast(CursorResult, result).rowcount != 1:
                 self.db.rollback()
                 raise RevisionConflict("This listing changed since you reviewed it")
         elif listing:
-            listing.current_revision_id = revision.id
+            listing.current_revision_id = revision_id
         else:
-            listing = Listing(conversation_id=conv_id, current_revision_id=revision.id)
+            listing = Listing(conversation_id=conv_id, current_revision_id=revision_id)
             self.db.add(listing)
-        _recheck_error_flag(self.db, conv_id)
-        _drop_fixed_marketplace_errors(self.db, conv_id, before, listing_json)
 
-        title = (listing_json.get("title") or "").strip()
-        if title:
-            from vendoo_studio.services.vendoo_import import parse_notes
-
-            conv = self.db.query(Conversation).filter(Conversation.id == conv_id).first()
-            if conv and not parse_notes(conv.notes).get("titlePinned"):
-                conv.title = title
-
-        self.db.commit()
-        self.db.refresh(revision)
-        if source in FILL_ON_SOURCES:
-            # A newly chosen marketplace category has new fields for the listing agent to fill.
-            category_saved(conv_id, before, listing_json, source)
-        return revision
 
     def revision_bodies(self, revision_ids: set[str]) -> dict[str, dict]:
         """Listing JSON for several revisions in one query."""

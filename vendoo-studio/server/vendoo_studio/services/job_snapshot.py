@@ -6,6 +6,7 @@ import copy
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.mercari_shipping import DEFAULT_SHIPPING_LABEL
 from vendoo_studio.repositories.queries import JobRepo
 
@@ -157,7 +158,7 @@ def ensure_listing_defaults(listing_snapshot: dict) -> None:
     mercari["shippingLabel"] = label or DEFAULT_SHIPPING_LABEL
     listing_snapshot["mercari_specifics"] = mercari
 
-    from vendoo_studio.models.validation import normalize_listing_dropdowns
+    from vendoo_studio.services.validation import normalize_listing_dropdowns
     from vendoo_studio.services.listing_generate import align_size_fields
 
     from vendoo_studio.services.seller_overrides import preserving_locks
@@ -186,7 +187,7 @@ def save_prepared_revision(db: Session, conv_id: str, prepared: dict, revision_i
     previous = repo.get_revision(revision_id)
     if previous and previous.listing_json == prepared:
         return revision_id
-    return repo.save_revision(
+    return listing_persistence.save_revision(repo.db,
         conv_id, prepared, source="vendoo_prepare", parent_revision_id=revision_id,
     ).id
 
