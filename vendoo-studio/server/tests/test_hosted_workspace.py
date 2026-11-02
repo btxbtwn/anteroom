@@ -277,3 +277,37 @@ def test_cover_thumbnails_are_made_once(cloud, signing_keys, monkeypatch):  # no
     assert client.get(cover_url, headers=bob).status_code == 404
     assert client.get('/api/photos/' + photo + '/thumb?size=192', headers=alice).status_code == 200
     assert len(reads) == 2
+
+
+def test_job_list_skips_the_listing_snapshot(cloud, signing_keys):  # noqa: F811
+    # Each job keeps a full listing copy (tens of kilobytes). The list shows
+    # status only, so it should not read those copies on every request.
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    from vendoo_studio.models.job import Job
+
+    client, engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    with Session(engine) as db:
+        db.add(Job(id='job-1', conversation_id=identity, approved_revision_id='rev', user_id=USER_ID,
+            listing_snapshot={'title': 'Coat', 'description': 'x' * 50000}, status='completed'))
+        db.commit()
+    statements = []
+    def record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+    event.listen(Engine, 'before_cursor_execute', record)
+    try:
+        listed = client.get('/api/jobs', headers=alice)
+        scoped = client.get('/api/jobs', headers=alice, params={'conversation_id': identity})
+    finally:
+        event.remove(Engine, 'before_cursor_execute', record)
+    assert listed.status_code == 200, listed.text
+    assert [row['id'] for row in listed.json()] == ['job-1']
+    assert scoped.json() == listed.json()
+    assert 'listing_snapshot' not in listed.json()[0]
+    job_reads = [statement for statement in statements if 'FROM jobs' in statement]
+    assert job_reads
+    assert not any('listing_snapshot' in statement for statement in job_reads), job_reads
+    assert client.get('/api/jobs', headers=bob).json() == []
