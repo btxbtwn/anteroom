@@ -370,7 +370,7 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
     if marketplace == "etsy":
-        from vendoo_studio.models.etsy_fields import etsy_eligible
+        from vendoo_studio.services.etsy_fields import etsy_eligible
 
         try:
             etsy_listings.connected_shop_id()

@@ -11,9 +11,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy import update
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, make_engine
 from vendoo_studio.models.job import ABANDONED_SEND, AUTO_RETRY_EVENT, Job, JobEvent
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services.extension_connection import ExtensionManager, dispatch_queued_jobs
 from vendoo_studio.services import job_watchdog
 from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
@@ -53,7 +54,7 @@ class FailStalledJobsTest(unittest.TestCase):
     def job(self, *, status="dispatched", step="vendoo_api_fields", live=False):
         repo = ConversationRepo(self.db)
         conv = repo.create(title="Tee")
-        rev = ListingRepo(self.db).save_revision(conv.id, {"title": "Tee"}, source="model")
+        rev = listing_persistence.save_revision(self.db, conv.id, {"title": "Tee"}, source="model")
         job = JobRepo(self.db).create(conv.id, rev.id, {"title": "Tee"}, status=status, current_step=step)
         if live:
             claim_api_job(job.id)
@@ -158,7 +159,7 @@ class SweepTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(db.close)
         manager = _ConnectedManager()
         conv = ConversationRepo(db).create(title="Tee")
-        rev = ListingRepo(db).save_revision(conv.id, {"title": "Tee"}, source="model")
+        rev = listing_persistence.save_revision(db, conv.id, {"title": "Tee"}, source="model")
         job = JobRepo(db).create(conv.id, rev.id, {}, status="dispatched", current_step="vendoo_api_photos")
         claim_api_job(job.id)
         self.addCleanup(release_api_job, job.id)
@@ -227,8 +228,8 @@ class QueueAfterStallTest(unittest.IsolatedAsyncioTestCase):
 
         repo = ConversationRepo(self.db)
         conv = repo.create(title=title)
-        ListingRepo(self.db).save_revision(conv.id, {"title": title, "price": 30}, source="model")
-        repo.add_photo(conv.id, "a.jpg", "a.jpg", "image/jpeg", 10)
+        listing_persistence.save_revision(self.db, conv.id, {"title": title, "price": 30}, source="model")
+        listing_persistence.add_photo(repo.db, conv.id, "a.jpg", "a.jpg", "image/jpeg", 10)
         inputs, fingerprint = review_inputs(self.db, conv.id)
         review_id = remember_review(inputs, fingerprint, {
             "snapshot": inputs["snapshot"], "specifics": {}, "schema": None,

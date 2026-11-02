@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.services.browser_bridge import BrowserBridgeError
@@ -362,7 +363,7 @@ class BulkImportRunTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_busy_listing_is_kept_even_when_vendoo_lost_the_item(self):
         await self._run([[vendoo_item("a", title="Tee A")]])
         conv = ConversationRepo(self.db).list_all()[0]
-        revision = ListingRepo(self.db).save_revision(conv.id, {}, source="test")
+        revision = listing_persistence.save_revision(self.db, conv.id, {}, source="test")
         JobRepo(self.db).create(
             conv_id=conv.id,
             approved_revision_id=revision.id,

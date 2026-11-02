@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.config import FILL_LOGS_DIR
 from vendoo_studio.models.fill_log import FillLogEntry
 from vendoo_studio.models.job import Job
@@ -823,15 +824,6 @@ class FillLogService:
         if path.exists():
             path.unlink()
 
-    def clear_step(self, job_id: str, step: str) -> None:
-        if not step:
-            return
-        self._repo.delete_for_step(job_id, step)
-        # Markdown is rewritten lazily on the next save; remove only when empty.
-        if not self._repo.list_for_job(job_id):
-            path = self.log_path(job_id)
-            if path.exists():
-                path.unlink()
 
     def report_for_job(self, job: Job) -> dict:
         entries = self._repo.list_for_job(job.id)
@@ -924,7 +916,7 @@ class FillLogService:
         if not added:
             return
 
-        listing_repo.save_revision(
+        listing_persistence.save_revision(listing_repo.db,
             job.conversation_id,
             listing,
             source="fill_learned_fields",

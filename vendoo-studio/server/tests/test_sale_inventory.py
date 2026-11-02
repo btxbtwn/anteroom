@@ -3,6 +3,7 @@ from datetime import timedelta
 import pytest
 import test_marketplace_inventory as inventory_tests
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
@@ -112,5 +113,5 @@ def test_observation_contains_only_public_inventory_fields(etsy_imported):
 
 def test_local_quantity_edit_does_not_erase_multiunit_publication_evidence(etsy_imported):
     conv_id, _ = prepare(etsy_imported)
-    ListingRepo(etsy_imported.db).save_revision(conv_id, {"title": "Coat", "quantity": 1}, "user")
+    listing_persistence.save_revision(etsy_imported.db, conv_id, {"title": "Coat", "quantity": 1}, "user")
     assert stock(etsy_imported, conv_id)["status"] == "unknown"

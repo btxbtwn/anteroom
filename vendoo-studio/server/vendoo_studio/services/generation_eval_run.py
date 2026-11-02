@@ -9,7 +9,8 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.services import listing_persistence
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import model_usage
 from vendoo_studio.services.chat_prompts import listing_generation_messages, load_skill_rules
 from vendoo_studio.services.generation_eval import evaluate_outputs
@@ -42,7 +43,7 @@ async def run_cases(provider, cases: list[dict], output_dir: Path) -> dict:
                 contracts = capture(seed, forms, forms) if forms else {}
                 if contracts:
                     seed["_native_forms"] = contracts
-                seed_revision = ListingRepo(db).save_revision(conv.id, seed, source="evaluation_seed")
+                seed_revision = listing_persistence.save_revision(db, conv.id, seed, source="evaluation_seed")
                 evidence = str(case["evidence"])
                 if not evidence.startswith("Photo analysis:"):
                     evidence = "Photo analysis:\n" + evidence

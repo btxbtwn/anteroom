@@ -137,8 +137,8 @@ mix it with a fix or a feature.
 - The code-health checks in `./check.sh` and CI catch what a refactor commonly
   breaks: type errors (basedpyright), imports that go the wrong way between
   layers (import-linter), and code left unused (knip for the frontend,
-  `scripts/check-dead-code.py` for the backend). Each one records the problems
-  that existed when it was added and fails only on new ones. See
+  `scripts/check-dead-code.py` for the backend). Some checks record the problems
+  that existed when they were added and fail only on new ones. See
   `vendoo-studio/AGENTS.md`, **Code health checks**. A refactor that fixes
   recorded problems removes them from the record in the same PR.
 

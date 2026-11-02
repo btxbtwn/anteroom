@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from test_listing_copy import source as source
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.conversation import Conversation, Message, Photo
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.listing import ListingRevision
@@ -23,7 +24,7 @@ def capture(source, fields=None, **changes):
 def target(source):
     source.db.add(Conversation(id="target", title="Target", notes='{"cog":"99","vendooLabels":"Keep","private":"keep"}'))
     source.db.commit()
-    ListingRepo(source.db).save_revision("target", {"title": "Existing coat", "description": "Original text", "price": 20, "quantity": 3, "cost": 99, "labels": ["Keep"]}, "user_form")
+    listing_persistence.save_revision(source.db, "target", {"title": "Existing coat", "description": "Original text", "price": 20, "quantity": 3, "cost": 99, "labels": ["Keep"]}, "user_form")
 
 
 def application(source, template, mode="replace"):
@@ -137,7 +138,7 @@ def test_changed_item_template_or_mode_rejects_an_old_application(source, monkey
 
 def test_category_selections_keep_catalog_ids_but_strip_operational_identity(source):
     listing = ListingRepo(source.db).get_revisions("source")[0].listing_json
-    ListingRepo(source.db).save_revision("source", {**listing, "marketplace_category_objects": {"ebay": {"id":"123", "path":["Clothing", "Coats"], "listing_id":"old-listing", "access_token":"do-not-copy"}}}, "user_form")
+    listing_persistence.save_revision(source.db, "source", {**listing, "marketplace_category_objects": {"ebay": {"id":"123", "path":["Clothing", "Coats"], "listing_id":"old-listing", "access_token":"do-not-copy"}}}, "user_form")
     response = capture(source, ["marketplace_category_objects"])
     assert response.status_code == 200, response.text
     assert response.json()["fields"]["marketplace_category_objects"]["ebay"] == {"id":"123", "path":["Clothing", "Coats"]}
@@ -145,7 +146,7 @@ def test_category_selections_keep_catalog_ids_but_strip_operational_identity(sou
 
 def test_marketplace_forms_cannot_reuse_private_notes_variant_skus_or_video_identity(source):
     original = ListingRepo(source.db).get_revisions("source")[0].listing_json
-    ListingRepo(source.db).save_revision("source", {**original, "poshmark_specifics": {
+    listing_persistence.save_revision(source.db, "source", {**original, "poshmark_specifics": {
         "poshmarkSku": "SOURCE-SKU", "sellerNotes": "Private source notes", "video_id": "source-video",
         "originalPrice": 60, "inventoryRows": [{"sizeId": "M", "sizeSetId": "regular", "quantity": 2, "sku": "SOURCE-M"}],
     }}, "user_form")

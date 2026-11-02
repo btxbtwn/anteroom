@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation, Message, Photo
@@ -44,7 +45,7 @@ def source(tmp_path, monkeypatch):
             "poshmark_specifics": {"videoId": "source-video", "originalPrice": 60}, "direct_category_ids": {"ebay": "123"},
             "marketplace_categories": {"ebay": "Clothing > Coats"}, "listing_id": "old", "form": {"status": "SOLD"},
             "job_id": "old-job", "photos": ["old-photo"], "access_token": "do-not-copy"}
-    ListingRepo(db).save_revision("source", data, "user_form")
+    listing_persistence.save_revision(db, "source", data, "user_form")
     db.add(Message(conversation_id="source", role="user", text="old chat"))
     db.add(MarketplaceSale(marketplace="ebay", order_id="old-order", line_id="old-line", conversation_id="source", quantity=1))
     db.commit()
@@ -53,7 +54,7 @@ def source(tmp_path, monkeypatch):
         image = BytesIO()
         Image.new("RGB", (24, 36), color).save(image, "PNG")
         meta = photos.process_bytes(image.getvalue(), f"{color}.png", "image/png", collection_id="source")
-        ConversationRepo(db).add_photo("source", **meta)
+        listing_persistence.add_photo(db, "source", **meta)
     app.dependency_overrides[get_db] = lambda: db
     client = TestClient(app)
     yield SimpleNamespace(db=db, client=client, directory=tmp_path, data=data)
@@ -129,7 +130,7 @@ def test_cost_and_photos_are_explicit_options_and_sku_defaults_to_empty(source):
 def test_source_changes_reject_old_review_without_creating_anything(source, change):
     before = preview(source)
     if change == "revision":
-        ListingRepo(source.db).save_revision("source", {**source.data, "description": "New"}, "user_form")
+        listing_persistence.save_revision(source.db, "source", {**source.data, "description": "New"}, "user_form")
     elif change == "notes":
         source.db.get(Conversation, "source").notes = '{"sellerNotes":"New"}'
     else:

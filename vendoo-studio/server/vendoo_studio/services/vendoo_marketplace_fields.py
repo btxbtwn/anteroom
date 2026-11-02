@@ -12,7 +12,7 @@ import math
 import re
 from typing import Any
 
-from vendoo_studio.models.etsy_fields import sanitize_etsy_tags
+from vendoo_studio.services.etsy_fields import sanitize_etsy_tags
 from vendoo_studio.models.facebook_shipping import package_weight_label
 from vendoo_studio.models.mercari_shipping import (
     DEFAULT_PACKAGE_OUNCES,
@@ -293,7 +293,7 @@ def _etsy_when_code(raw: Any) -> str:
     Made To Order is not selected. An already-made item gets a year range.
     Anything unreadable falls to the recent bucket.
     """
-    from vendoo_studio.models.etsy_fields import etsy_when_options, etsy_when_to_store
+    from vendoo_studio.services.etsy_fields import etsy_when_options, etsy_when_to_store
 
     text = _clean(raw) or ""
     if not text:

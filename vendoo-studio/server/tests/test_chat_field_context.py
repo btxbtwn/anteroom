@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
 from vendoo_studio.models.catalog import CategorySchema
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
@@ -19,7 +20,7 @@ def context_db():
     Base.metadata.create_all(engine)
     with sessionmaker(bind=engine)() as db:
         conv = ConversationRepo(db).create(notes=json.dumps({"vendooItemId": "draft-1"}))
-        revision = ListingRepo(db).save_revision(conv.id, {
+        revision = listing_persistence.save_revision(db, conv.id, {
             "title": "Shirt", "category_path": "Clothing > Tops",
             "ebay_specifics": {"pattern": "Solid"},
         }, source="user_form")
@@ -116,7 +117,7 @@ def test_every_chat_turn_gets_field_context_even_without_skill_rules(context_db)
 
 def test_not_applicable_optional_field_is_excluded_from_readback(context_db):
     db, conv_id, job = context_db
-    ListingRepo(db).save_revision(conv_id, {
+    listing_persistence.save_revision(db, conv_id, {
         "title": "Shirt", "category_path": "Clothing > Tops",
         "ebay_specifics": {"holiday": "Does Not Apply"},
     }, source="model")
@@ -168,7 +169,7 @@ def test_chat_clear_is_recorded_when_saving_without_a_write_on_read(context_db):
     ConversationRepo(db).add_message(conv_id, "assistant",
         'I left Secondary Color blank because there is no verified second color.\n'
         '{"missing_fields":[{"marketplace":"general","field":"Secondary Color","value":""}]}')
-    ListingRepo(db).save_revision(conv_id, parent.listing_json, source="model_refinement",
+    listing_persistence.save_revision(db, conv_id, parent.listing_json, source="model_refinement",
                                   parent_revision_id=parent.id)
     assert ListingRepo(db).latest_revision(conv_id).listing_json["reviewed_empty_fields"] == [
         {"marketplace": "general", "field": "Secondary Color"},
@@ -199,9 +200,9 @@ def test_saved_chat_clear_recovery_does_not_override_a_later_seller_value(contex
     parent = ListingRepo(db).get_revisions(conv_id)[0]
     ConversationRepo(db).add_message(conv_id, "assistant",
         '{"missing_fields":[{"marketplace":"general","field":"Secondary Color","value":""}]}')
-    cleared = ListingRepo(db).save_revision(conv_id, parent.listing_json,
+    cleared = listing_persistence.save_revision(db, conv_id, parent.listing_json,
         source="model_refinement", parent_revision_id=parent.id)
-    ListingRepo(db).save_revision(conv_id, {**parent.listing_json, "secondaryColor": "White"},
+    listing_persistence.save_revision(db, conv_id, {**parent.listing_json, "secondaryColor": "White"},
         source="user_form", parent_revision_id=cleared.id)
     response = get_listing(conv_id, db)
     assert response.listing["secondaryColor"] == "White"
