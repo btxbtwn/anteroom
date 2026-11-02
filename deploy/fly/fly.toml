@@ -4,8 +4,8 @@
 #
 
 app = 'peaceful-meadowstone-6944'
-# Beside the Supabase database (AWS us-west-2, Oregon). See README, Region.
-primary_region = 'sea'
+# Seattle no longer accepts new Machines; use the supported West Coast region.
+primary_region = 'sjc'
 
 [build]
   dockerfile = 'Dockerfile'
