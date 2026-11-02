@@ -31,6 +31,7 @@ export interface ConversationSummary {
   removed_marketplaces?: string[];
   /** Units sold on Anteroom's sales ledger, and the most the item was offered with. */
   units_sold?: number;
+  missing_sale_data?: string[];
   quantity?: number | null;
   /** Each marketplace listing's own page, where Vendoo recorded one. */
   vendoo_listing_urls?: Record<string, string>;

@@ -15,6 +15,7 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
     var quantity: Int?
     var directMarketplaces: [String]?
     var coverPhotoURL: String?
+    var missingSaleData: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, sku, price, quantity
@@ -24,6 +25,7 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
         case updatedAt = "updated_at"
         case directMarketplaces = "direct_marketplaces"
         case coverPhotoURL = "cover_photo_url"
+        case missingSaleData = "missing_sale_data"
     }
 
     var displayTitle: String {

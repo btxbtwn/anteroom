@@ -28,8 +28,8 @@ def records(response: Response, start: date, end: date, marketplace: str | None 
 @router.get("/export/sales.csv")
 def export_sales(start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None,
                  db: Session = Depends(get_db, scope="request")):
-    query = _run(lambda: sales_ledger.sale_query(db, start, end, marketplace, conversation_id))
-    return _download(ledger_exports.sales_csv(query), "sales")
+    records = _run(lambda: sales_ledger.sale_records(db, start, end, marketplace, conversation_id))
+    return _download(ledger_exports.sales_csv(records), "sales")
 
 
 @router.get("/export/inventory.csv")

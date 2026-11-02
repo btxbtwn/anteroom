@@ -51,18 +51,17 @@ def _csv(headers, rows):
             buffer.truncate(0)
 
 
-def sales_csv(query):
+def sales_csv(records):
     headers = ["sale_id", "marketplace", "order_id", "line_id", "listing_id", "quantity", "order_status", "alert_state",
                "conversation_id", "title", "sold_at_utc", "received_at_utc", "currency", *sales_ledger.AMOUNTS,
                "net_revenue", "profit", "financials_need_review", "financials_revision", "financials_updated_at_utc"]
 
     def rows():
-        for sale, title in query.yield_per(500):
-            record = sales_ledger.sale_out(sale, title)
+        for record in records:
             data = record["financials"] or {}
             yield [text(record["id"]), text(record["marketplace"]), text(record["order_id"]), text(record["line_id"]),
                    text(record["listing_id"]), number(record["quantity"]), text(record["order_status"]), text(record["alert_state"]),
-                   text(record["conversation_id"]), text(title), text(record["sold_at"]), text(record["received_at"]), text(data.get("currency")),
+                   text(record["conversation_id"]), text(record["title"]), text(record["sold_at"]), text(record["received_at"]), text(data.get("currency")),
                    *[number(data.get(field)) for field in sales_ledger.AMOUNTS], number(record["net_revenue"]), number(record["profit"]),
                    str(record["financials_stale"]).lower(), number(record["financial_revision"]), text(record["financials_updated_at"])]
     return _csv(headers, rows())
