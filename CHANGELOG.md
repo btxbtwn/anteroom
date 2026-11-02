@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.665 — 2026-11-02
+
+- Make sale amounts, fees, profit and dates easier to scan, with search, date presets, sorting and filters for missing data, reviews and losses.
+- Keep sales totals and CSV exports in sync with the selected filters across every page.
+- Simplify Inventory analytics periods, search and rank breakdowns together, and jump straight to inventory that needs attention.
+
 ## 0.1.664 — 2026-11-02
 
 - On the web, Settings → Connections now asks you to update Anteroom Bridge when it is too old to check marketplace sign-in, instead of saying Chrome is not connected.

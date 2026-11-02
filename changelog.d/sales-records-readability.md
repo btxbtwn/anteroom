@@ -1,3 +1,0 @@
-- Make sale amounts, fees, profit and dates easier to scan, with search, date presets, sorting and filters for missing data, reviews and losses.
-- Keep sales totals and CSV exports in sync with the selected filters across every page.
-- Simplify Inventory analytics periods, search and rank breakdowns together, and jump straight to inventory that needs attention.
