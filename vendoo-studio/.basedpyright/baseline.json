@@ -198,16 +198,6 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/facebook_listing.py": [
-            {
-                "code": "reportOptionalSubscript",
-                "range": {
-                    "startColumn": 21,
-                    "endColumn": 33,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/inventory_analytics.py": [
             {
                 "code": "reportOperatorIssue",
