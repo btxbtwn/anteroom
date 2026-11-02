@@ -1,0 +1,1 @@
+- Facebook is in your account on the web, as in the Mac app: link an item that is already on Facebook, and check it on Facebook through Chrome. Update Anteroom Bridge to 0.2.45 to check Facebook listings.

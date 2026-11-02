@@ -8,6 +8,9 @@ const CLOUD_READS = {
   'marketplace.sessions': async () => ({ sessions: await readExtensionSessions() }),
   // The seller asked to sign in: open that marketplace's sign-in page in this Chrome, as the Mac does.
   'marketplace.connect': ({ marketplace }) => new Promise(resolve => handleMarketplaceConnect({ payload: { marketplace } }, resolve)),
+  // Check on Facebook: one linked listing's own page, read as the Mac reads it. Nothing on Facebook changes.
+  'marketplace.listing_state': ({ marketplace, listing_id }) =>
+    new Promise(resolve => handleMarketplaceListingState({ payload: { marketplace, listing_id } }, resolve)),
 };
 const CLOUD_READ_ERRORS = new Set(['signed_out', 'challenge', 'rate_limited', 'schema_drift', 'network']);
 
