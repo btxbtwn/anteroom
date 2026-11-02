@@ -19,7 +19,7 @@ from vendoo_studio.models.marketplace_sale import OTHER_MARKETPLACE, Marketplace
 from vendoo_studio.services.api_job_lock import start_gate
 
 AMOUNTS = ("item_revenue", "shipping_credit", "refunds", "fees", "shipping_cost", "item_cost")
-MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "facebook")
+MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
 # Where a sale can be recorded: the marketplaces, plus anywhere else (in person, Instagram).
 SALE_MARKETPLACES = (*MARKETPLACES, OTHER_MARKETPLACE)
 PAGE_SIZE = 50
@@ -297,7 +297,7 @@ def record_seller_sale(db: Session, conv_id: str, body: SellerSale) -> dict:
     offer = [] if status.status != "sold" else [
         name for name, entry in listings.items()
         if name != body.marketplace and entry.get("listing_id") and not entry.get("sold_here")
-        and entry.get("state") not in {"deleted", "deleting"} and entry.get("can_delist") is not False
+        and entry.get("state") not in {"deleted", "deleting"}
     ]
     return {"sale": get_sale(db, sale_id), "status": status.status, "units_sold": status.units_sold,
             "quantity": status.quantity, "listings": listings, "delist_offer": offer}

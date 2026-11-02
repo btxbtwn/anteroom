@@ -45,8 +45,7 @@
     'marketplace.vinted_brands': { query: 100, category: 1000 },
     'marketplace.sellwild_account': {},
     'marketplace.sessions': {},
-    'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted', 'facebook']) },
-    'marketplace.listing_state': { marketplace: new Set(['facebook']), listing_id: /^\d{6,20}$/ },
+    'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted']) },
   };
   const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
   const MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
