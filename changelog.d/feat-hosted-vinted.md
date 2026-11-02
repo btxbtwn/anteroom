@@ -1,1 +1,0 @@
-- Vinted is in your account on the web: its tab, its own categories and brands read through Chrome, and List, Update and Delist, each still asking you to confirm. Update Anteroom Bridge to 0.2.42 to load Vinted's choices.

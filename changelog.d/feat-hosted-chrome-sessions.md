@@ -1,1 +1,0 @@
-- Settings → Connections in your account now shows whether Chrome is signed in to Poshmark, Mercari, Depop, Sellwild, Vinted and Facebook, with Sign in for each, as the Mac app does. Update Anteroom Bridge to 0.2.44 to see them.
