@@ -242,13 +242,6 @@ def match_command(catalog: dict[str, Any], method: str, path: str) -> dict[str, 
     return None
 
 
-def find_command(catalog: dict[str, Any], group: str, action: str) -> dict[str, Any] | None:
-    for command in catalog.get("commands") or []:
-        if command["group"] == group and command["action"] == action:
-            return command
-    return None
-
-
 def _from_http(route: Any, method: str, operation: dict[str, Any], root: dict[str, Any], path: str) -> dict[str, Any]:
     summary, description = _text(route, operation)
     parameters = _parameters(operation, root)

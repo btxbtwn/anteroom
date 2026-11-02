@@ -943,11 +943,6 @@ def _sale_amount(entry: dict, key: str) -> float | None:
     return amount
 
 
-def vendoo_listed_at(item: dict | None, form: dict | None = None) -> str:
-    """When the item last went live -- what says how stale a listing has gone."""
-    return str(vendoo_dates(item, form).get("listed") or "")
-
-
 def vendoo_updated_at(item: dict | None, form: dict | None = None) -> str:
     """The item's last Vendoo write, as a comparable string.
 

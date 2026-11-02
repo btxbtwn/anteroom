@@ -123,10 +123,6 @@ def apply(labels: list[Any], names: dict[str, str] | None = None) -> list[str]:
     return [catalog.get(label, label) for label in cleaned]
 
 
-def has_opaque_ids(labels: list[Any]) -> bool:
-    return any(looks_like_label_id(str(label).strip()) for label in (labels or []) if str(label).strip())
-
-
 def convert_stored_labels(db, names: dict[str, str] | None = None, *, dry_run: bool = False) -> dict[str, Any]:
     """Rewrite every stored Vendoo label id as its name, so labels are Anteroom's own.
 

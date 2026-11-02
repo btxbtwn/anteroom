@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 from typing import Any
 
 from vendoo_studio.models.sizes import letter_size
@@ -349,20 +348,6 @@ def infer_ebay_season(listing: dict | None = None, *, ebay: dict | None = None) 
     if re.search(r"\b(?:coat|parka|puffer|sweater|hoodie|fleece|wool|boot)\b", hay):
         return "Winter"
     return "Summer"
-
-
-def _append_ebay_seasons(kept: list[str], seasons: Iterable[str]) -> bool:
-    changed = False
-    for season in seasons:
-        canon = exact_ebay_season(str(season)) or (
-            str(season) if str(season) in VALID_EBAY_SEASONS else None
-        )
-        if not canon:
-            continue
-        if canon not in kept:
-            kept.append(canon)
-            changed = True
-    return changed
 
 
 def _pack_ebay_seasons(kept: list[str]) -> Any:

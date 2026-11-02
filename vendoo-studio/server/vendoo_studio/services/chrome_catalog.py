@@ -107,13 +107,6 @@ def apply_preview(found: list[dict], preview: dict | None, marketplace: str) -> 
     return found
 
 
-def preview_categories(preview: dict | None) -> dict[str, str]:
-    raw = preview.get("categories") if (isinstance(preview, dict)) else {}
-    if not isinstance(raw, dict):
-        raw = {}
-    return {key: str(raw.get(key)).strip() for key in CHROME_MARKETS if str(raw.get(key) or "").strip()}
-
-
 async def live_preview(listing: dict) -> dict | None:
     """Ask the connected extension. A stand-in connection answers nothing."""
     from vendoo_studio.services.extension_connection import extension_manager

@@ -20,3 +20,6 @@ delete_password
 # PyJWT calls the local sandbox key provider through its virtual fetch_data method.
 from jwt import PyJWKClient
 PyJWKClient.fetch_data
+
+# direct_preflight.requirement("vinted") registers this callback for preflight checks.
+vinted_requirements
