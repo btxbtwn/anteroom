@@ -6,6 +6,42 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.655 — 2026-11-02
+
+- After a restart, a finished one-time task is marked completed or paused without crashing the scheduler or repeating its actions.
+
+## 0.1.654 — 2026-11-02
+
+- Listings, photos and marketplace forms on the web no longer stall for 30 seconds and fail with "Request failed: 500" while background work runs
+
+## 0.1.653 — 2026-11-02
+
+- On the web, Connect Chrome now says whether the Bridge is missing, wasn't approved, or is too old to list, and the note closes when you click away.
+
+## 0.1.652 — 2026-11-02
+
+- Facebook is in your account on the web, as in the Mac app: link an item that is already on Facebook, and check it on Facebook through Chrome. Update Anteroom Bridge to 0.2.45 to check Facebook listings.
+
+## 0.1.651 — 2026-11-02
+
+- Settings → Connections in your account now shows whether Chrome is signed in to Poshmark, Mercari, Depop, Sellwild, Vinted and Facebook, with Sign in for each, as the Mac app does. Update Anteroom Bridge to 0.2.44 to see them.
+
+## 0.1.650 — 2026-11-02
+
+- Sellwild is in your account on the web: its form, with your Sellwild address, discounts and package read through Chrome, and List, Update and Delist, each still asking you to confirm. Update Anteroom Bridge to 0.2.43 to load your Sellwild choices.
+
+## 0.1.649 — 2026-11-02
+
+- Vinted is in your account on the web: its tab, its own categories and brands read through Chrome, and List, Update and Delist, each still asking you to confirm. Update Anteroom Bridge to 0.2.42 to load Vinted's choices.
+
+## 0.1.648 — 2026-11-02
+
+- Prevent a new release on main from incorrectly blocking another pull request's changelog check.
+
+## 0.1.647 — 2026-11-02
+
+- Listing, updating, saving drafts and delisting on Poshmark, Mercari and Depop from your account now reach Chrome, instead of waiting until they time out.
+
 ## 0.1.646 — 2026-11-02
 
 - An earlier Anteroom Bridge in Chrome keeps listing, updating and delisting until a change actually needs the newer one, so you no longer have to update Chrome after every Anteroom update.
