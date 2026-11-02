@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.653 — 2026-11-02
+
+- On the web, Connect Chrome now says whether the Bridge is missing, wasn't approved, or is too old to list, and the note closes when you click away.
+
 ## 0.1.652 — 2026-11-02
 
 - Facebook is in your account on the web, as in the Mac app: link an item that is already on Facebook, and check it on Facebook through Chrome. Update Anteroom Bridge to 0.2.45 to check Facebook listings.
