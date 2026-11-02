@@ -125,6 +125,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [folds, setFolds] = useState<FoldedTurn[]>(() => (threadId ? foldsFor(threadId) : []));
   const [error, setError] = useState("");
+  /** True while this page follows an answer, including a reattach that has not heard anything yet. */
+  const [following, setFollowing] = useState(false);
   const [queued, setQueued] = useState<QueuedQuestion[]>([]);
   const controller = useRef<AbortController | null>(null);
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
@@ -146,7 +148,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   };
 
   /**
-   * Follow an answer to its end: a new one when there is a question, otherwise
+   * Follow an answer to its end: a new one when there is a question, a new
+   * answer to the thread's unanswered question when retrying, otherwise
    * whichever is already being written. Studio keeps writing when this
    * connection drops, so a drop is retried, not reported.
    */
@@ -155,6 +158,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     uploads: ChatAttachmentUpload[] = [],
     shownImages: ChatAttachment[] = [],
     inThread: string | null = threadIdRef.current,
+    retry = false,
   ) => {
     if (controller.current) return;
     let id = inThread;
@@ -178,6 +182,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     const abort = new AbortController();
     controller.current = abort;
     let asking = question !== null;
+    let retrying = retry;
+    setFollowing(true);
     const asked = turnsRef.current.length;
     const baseIds = turnsRef.current.map((turn) => turn.id);
     const startedAtMs = Date.now();
@@ -186,10 +192,10 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     let stopped = false;
     const show = () =>
       setLive({ question, questionImages: shownImages, asked, startedAtMs, parts: { ...parts } });
-    if (question !== null) {
+    if (question !== null || retry) {
       scroll.pinChatToBottom();
       setError("");
-      setInput("");
+      if (question !== null) setInput("");
       parts.status = "Reading your shop…";
       show();
     }
@@ -208,7 +214,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         try {
           const result = asking && question !== null
             ? await api.assistant.ask(question, handlers, abort.signal, uploads, id)
-            : await api.assistant.resume(handlers, abort.signal, id);
+            : retrying
+              ? await api.assistant.retry(handlers, abort.signal, id)
+              : await api.assistant.resume(handlers, abort.signal, id);
           paint.flush();
           if (result.error) setError(result.error);
           break;
@@ -224,6 +232,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
             break;
           }
           asking = false;
+          retrying = false;
           dropped = true;
           if (tries >= RECONNECT_TRIES) {
             setError(LOST_CONNECTION);
@@ -270,6 +279,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       if (controller.current === abort) {
         controller.current = null;
         setLive(null);
+        setFollowing(false);
       }
     }
   };
@@ -303,6 +313,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         controller.current?.abort();
         controller.current = null;
         followThread.current = null;
+        setFollowing(false);
       }
     };
   }, [threadId]);
@@ -378,6 +389,12 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const visible = live && drawn.answer ? stableStreamingText(live.parts.content) : "";
   const empty = !live && !turns.length && !messages.isLoading && !messages.isError;
   const needsProvider = /sign in with chatgpt/i.test(error);
+  // An answer that failed, or that a restart cut off, left the last question unanswered.
+  const unanswered = !live && !following && !messages.isFetching && turns[turns.length - 1]?.role === "user";
+  const retry = () => {
+    setError("");
+    void follow(null, [], [], threadIdRef.current, true);
+  };
   const foldPositions = placeTurnFolds(turns, folds);
   const foldsAt = (index: number) => folds.filter((_, k) => foldPositions[k] === index);
   const liveTail = live && drawn.answer && !live.parts.trace.some((entry) => entry.kind === "phase")
@@ -496,14 +513,20 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
             queue={queued}
             onRemove={(id) => setQueued((current) => current.filter((message) => message.id !== id))}
           />
-          {error ? (
+          {error || unanswered ? (
             <Alert variant="error" className="my-2">
               <CircleAlertIcon />
-              <AlertTitle className="whitespace-pre-wrap">{error}</AlertTitle>
+              <AlertTitle className="whitespace-pre-wrap">{error || "This question was not answered."}</AlertTitle>
               {needsProvider ? (
                 <AlertAction>
                   <Button type="button" size="xs" variant="outline" onClick={onOpenProviders}>
                     Open provider settings
+                  </Button>
+                </AlertAction>
+              ) : unanswered ? (
+                <AlertAction>
+                  <Button type="button" size="xs" variant="outline" onClick={retry}>
+                    Retry
                   </Button>
                 </AlertAction>
               ) : null}

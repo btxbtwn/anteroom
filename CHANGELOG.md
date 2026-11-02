@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.671 — 2026-11-02
+
+- Assistant answers on the web keep their progress across a disconnected tab. If a server restart interrupts an answer, you can retry the saved question.
+
 ## 0.1.670 — 2026-11-02
 
 - Open web listings with fewer separate requests for the form, photos and conversation.

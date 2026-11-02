@@ -415,6 +415,14 @@ export const api = {
         handlers,
         signal,
       ),
+    /** Answer the thread's last question again, when nothing answered it (an interrupted or failed answer). */
+    retry: (handlers: AssistantStreamHandlers, signal: AbortSignal | undefined, threadId: string) =>
+      followAssistant(
+        `/assistant/messages/retry?thread_id=${encodeURIComponent(threadId)}`,
+        undefined,
+        handlers,
+        signal,
+      ),
     /** Stop the answer in progress; what it had written is kept. */
     stop: () => request<{ ok: boolean }>("/assistant/messages/stop", { method: "POST" }),
     /** Write the changes an answer proposed. Resolves with the answer and what became of each listing. */

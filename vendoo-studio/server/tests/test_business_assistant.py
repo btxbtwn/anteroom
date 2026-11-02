@@ -401,6 +401,24 @@ def test_a_failed_answer_reports_the_error_and_keeps_what_arrived(workspace, mon
     assert [row["text"] for row in client.get("/api/assistant/messages").json()] == ["Anything stale?", "Half an"]
 
 
+def test_an_unanswered_question_is_retried_once_without_asking_it_again(workspace, monkeypatch):
+    _db, client = workspace
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: Provider(("",), fail=True))
+    thread = client.post("/api/assistant/threads").json()["id"]
+    client.post("/api/assistant/messages", json={"text": "What sold?", "thread_id": thread})
+    assert [row["role"] for row in client.get(f"/api/assistant/messages?thread_id={thread}").json()] == ["user"]
+
+    provider = Provider(("You sold ", "one item."))
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: provider)
+    answer = client.post(f"/api/assistant/messages/retry?thread_id={thread}")
+    assert answer.status_code == 200 and "one item." in answer.text
+    assert provider.seen[-1] == {"role": "user", "content": "What sold?"}
+    turns = client.get(f"/api/assistant/messages?thread_id={thread}").json()
+    assert [(row["role"], row["text"]) for row in turns] == [("user", "What sold?"), ("assistant", "You sold one item.")]
+    assert client.post(f"/api/assistant/messages/retry?thread_id={thread}").status_code == 409
+    assert client.post("/api/assistant/messages/retry?thread_id=missing").status_code == 404
+
+
 def test_no_provider_or_no_question_saves_nothing(workspace, monkeypatch):
     _db, client = workspace
     monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: None)
@@ -472,7 +490,7 @@ def test_stop_keeps_what_was_written_and_a_second_question_waits_its_turn(worksp
 
         run = await start_answer(db, SlowProvider())
         try:
-            await assistant_route.ask(assistant_route.AssistantQuestion(text="And yesterday?"), db=db)
+            await assistant_route.ask(assistant_route.AssistantQuestion(text="And yesterday?"), request=None, db=db)
         except HTTPException as refused:
             status = refused.status_code
         await assistant_route.stop()
