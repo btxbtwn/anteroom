@@ -43,6 +43,14 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
 
+/** Sections the web app has; the others need the Mac. */
+export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "listings", "providers", "connections"];
+
+/** The section to show: on the web, one only the Mac has opens Providers instead. */
+export function settingsSectionFor(section: SettingsSectionId, hosted: boolean): SettingsSectionId {
+  return hosted && !HOSTED_SETTINGS_SECTIONS.includes(section) ? "providers" : section;
+}
+
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {id:"listing-templates",title:"Saved templates",section:"listings",targetId:"listing-templates",searchTerms:["template","preset","reusable fields","saved defaults"]},
   {
