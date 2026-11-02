@@ -1,0 +1,1 @@
+- Opening listing panels together no longer blocks web draft generation while they load your settings.
