@@ -9,14 +9,15 @@ started it.
 Only the marketplace commands a seller starts go through here: an approved
 List, Update or Save draft (``marketplace.execute``), reading what one did
 (``marketplace.result``), a confirmed Delist (``marketplace.delete``), and
-cancelling one (``job.cancel``). Besides those, a few named reads fill the
-seller's editor with their marketplace account's own choices, the ones the Mac
-reads in its private account windows (Vinted's categories and brands, and
-Sellwild's address, discounts and package). Each is
-a fixed command with fixed inputs; none takes a URL or a script. A command
-waits in the relay only while the tab is answering; when no tab has asked
-recently, Chrome counts as disconnected and the action is refused before it
-starts.
+cancelling one (``job.cancel``). Besides those, a few named commands do what
+the Mac does outside its listing actions: reads that fill the seller's editor
+with their account's own choices (Vinted's categories and brands, Sellwild's
+address, discounts and package, which the Mac reads in its private account
+windows), the sign-in status and Sign in of Settings → Connections, and Check
+on Facebook. Each is a fixed command with fixed inputs; none takes a URL or a
+script. A command waits in the relay only while the tab is answering; when no
+tab has asked recently, Chrome counts as disconnected and the action is refused
+before it starts.
 """
 from __future__ import annotations
 
@@ -32,15 +33,23 @@ from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, Rep
 # what an existing name promises (docs/cloud-extension.md).
 VINTED_CHOICES = "vinted.choices"
 SELLWILD_ACCOUNT = "sellwild.account"
+# Checking which marketplaces Chrome is signed in to, and opening one's sign-in page there.
+MARKETPLACE_SESSIONS = "marketplace.sessions"
+# Reading one linked Facebook listing's page, when the seller chooses Check on Facebook.
+FACEBOOK_LISTING = "facebook.listing"
 # The Bridge version that first declares each capability, and what it lets the web do.
 NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
-         SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices")}
+         SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices"),
+         MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in"),
+         FACEBOOK_LISTING: ("0.2.45", "check Facebook listings")}
 
 # Each command, and the capability the Bridge must declare to receive it.
 COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
             "marketplace.delete": MARKETPLACE_ACTIONS, "job.cancel": MARKETPLACE_ACTIONS,
             "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES,
-            "marketplace.sellwild_account": SELLWILD_ACCOUNT}
+            "marketplace.sellwild_account": SELLWILD_ACCOUNT,
+            "marketplace.sessions": MARKETPLACE_SESSIONS, "marketplace.connect": MARKETPLACE_SESSIONS,
+            "marketplace.listing_state": FACEBOOK_LISTING}
 # A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
 CONTRACT = ("type", "job_id", "message_id", "payload")
 # The page asks again as soon as it answers, and at least this often while idle.
@@ -104,8 +113,9 @@ class BrowserRelay(ReplyWaits):
         return self._outbox.popleft()
 
     async def read(self, command: str, payload: dict, timeout: float) -> dict:
-        """One named read in the seller's Chrome, and the Bridge's reply. Raises
-        ``ChromeReadError`` when Chrome cannot take it or does not answer in time."""
+        """One named command other than a marketplace action, run in the seller's Chrome,
+        and the Bridge's reply. Raises ``ChromeReadError`` when Chrome cannot take it or
+        does not answer in time."""
         capability = COMMANDS.get(command)
         if capability is None or capability == MARKETPLACE_ACTIONS:
             raise ValueError(f"{command} is not a relayed read.")

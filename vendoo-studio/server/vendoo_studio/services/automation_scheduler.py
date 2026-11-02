@@ -187,7 +187,8 @@ def _skip_claimed_slot(db: Session, row: Automation, now: datetime) -> None:
     )
     if existing is None or existing.status not in {"completed", "failed"}:
         return
-    row.next_run_at = _naive(advance_after_run(row.schedule, row.timezone, existing.scheduled_for, now))
+    next_run = advance_after_run(row.schedule, row.timezone, existing.scheduled_for, now)
+    row.next_run_at = _naive(next_run) if next_run is not None else None
     if row.schedule.get("kind") == "once":
         row.status = "completed" if existing.status == "completed" else "paused"
     db.commit()
