@@ -1,12 +1,13 @@
 """List, update and delist from the web: eBay and Etsy through their APIs, and
-Poshmark, Mercari and Depop through the seller's own Chrome.
+Poshmark, Mercari, Depop, Vinted and Sellwild through the seller's own Chrome.
 
 These are the desktop handlers, run in the signed-in seller's context with
 their own tokens. Every action is one the seller starts: List and Update carry
 ``confirm``, Delist names its marketplaces and carries ``confirm``, and nothing
 here runs on a timer or a retry. Chrome actions go through the seller's
-signed-in Anteroom tab (``services/hosted_browser_relay.py``). Sellwild and
-Vinted follow once their forms are on the web.
+signed-in Anteroom tab (``services/hosted_browser_relay.py``), and so do the
+reads of Vinted's own categories and brands, of the seller's Sellwild account
+choices, and of a linked Facebook listing's page.
 """
 from typing import Literal
 
@@ -17,10 +18,12 @@ from vendoo_studio.database import get_db
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.routes import marketplace_listings, native_marketplaces
 from vendoo_studio.routes.vendoo_api import leaf_form
-from vendoo_studio.services.native_marketplaces import NAMES, CheckRequest, ListRequest
+from vendoo_studio.services.native_marketplaces import CheckRequest, ListRequest
 
-ACTION_MARKETPLACES = ('ebay', 'etsy', 'poshmark', 'mercari', 'depop')
-Direct = Literal['ebay', 'etsy', 'poshmark', 'mercari', 'depop']
+# The rail's actions, as on the Mac. Facebook has no List: the seller links an item already on
+# Facebook, checks it in Chrome, and deletes it on Facebook themselves.
+ACTION_MARKETPLACES = ('ebay', 'etsy', 'poshmark', 'mercari', 'depop', 'vinted', 'sellwild', 'facebook')
+Direct = Literal['ebay', 'etsy', 'poshmark', 'mercari', 'depop', 'vinted', 'sellwild']
 PREFIX = '/api/conversations/{conv_id}'
 
 router = APIRouter()
@@ -29,6 +32,10 @@ for path, handler, methods in (
     ('/marketplace-listings', marketplace_listings.listings, ['GET']),
     ('/marketplace-listings/{marketplace}/mark', marketplace_listings.mark, ['POST']),
     ('/marketplace-listings/sold', marketplace_listings.record_sale, ['POST']),
+    ('/marketplace-listings/facebook/check', marketplace_listings.check_facebook, ['POST']),
+    ('/native-marketplaces/vinted/categories', native_marketplaces.vinted_categories, ['GET']),
+    ('/native-marketplaces/vinted/brands', native_marketplaces.vinted_brands, ['GET']),
+    ('/native-marketplaces/sellwild/options', native_marketplaces.sellwild_options, ['GET']),
 ):
     router.add_api_route(PREFIX + path, handler, methods=methods)
 
@@ -69,13 +76,7 @@ def reset(conv_id: str, marketplace: Direct, body: native_marketplaces.ResetRequ
     return native_marketplaces.reset(conv_id, marketplace, body, db)
 
 
-@router.post(PREFIX + '/marketplace-listings/delist')
-async def delist(conv_id: str, body: marketplace_listings.DelistRequest, db: Session = Depends(get_db)):
-    browser_only = [name for name in body.marketplaces if name not in ACTION_MARKETPLACES]
-    if browser_only:
-        names = ', '.join(NAMES.get(name, name) for name in browser_only)
-        raise HTTPException(409, f'Delist from {names} in the Mac app for now. The web app delists from eBay, Etsy, Poshmark, Mercari and Depop.')
-    return await marketplace_listings.delist(conv_id, body, db)
+router.add_api_route(PREFIX + '/marketplace-listings/delist', marketplace_listings.delist, methods=['POST'])
 
 
 @router.get(PREFIX + '/vendoo-api/fields')

@@ -37,7 +37,7 @@ function setup() {
 test('an approved page relays the seller command with its photos and gets the Bridge reply', async () => {
   const s = setup();
   await s.connect();
-  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions']);
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions', 'facebook.listing']);
   const result = await s.page('marketplace_command', ALICE, { command: execute(), photos: [photo] });
   assert.deepEqual(result, { ok: true, reply: { ok: true, state: 'published' } });
   assert.equal(s.runs.length, 1);
@@ -72,4 +72,33 @@ test('cancel needs only the operation it stops', () => {
   assert.equal(CloudMarketplaceProtocol.command({ ...cancel, payload: { job_id: 'op/../1', request_id: MESSAGE } }), null);
   assert.equal(CloudMarketplaceProtocol.reply('text'), null);
   assert.deepEqual(CloudMarketplaceProtocol.reply({ ok: false, error: 'x' }), { ok: false, error: 'x' });
+});
+
+test('reads take only their own inputs and no job', async () => {
+  const read = (type, payload) => ({ type, job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE, ...payload } });
+  assert.ok(CloudMarketplaceProtocol.command(read('marketplace.vinted_categories', {})));
+  assert.ok(CloudMarketplaceProtocol.command(read('marketplace.vinted_brands', { query: 'Nike', category: 'Women > Jeans' })));
+  assert.ok(CloudMarketplaceProtocol.command(read('marketplace.sellwild_account', {})));
+  assert.equal(CloudMarketplaceProtocol.command(read('marketplace.sellwild_account', { path: '/api/user/profile' })), null);
+  assert.ok(CloudMarketplaceProtocol.command(read('marketplace.sessions', {})));
+  assert.ok(CloudMarketplaceProtocol.command(read('marketplace.connect', { marketplace: 'poshmark' })));
+  for (const marketplace of ['ebay', 'https://evil.example', '']) {
+    assert.equal(CloudMarketplaceProtocol.command(read('marketplace.connect', { marketplace })), null, marketplace);
+  }
+  assert.ok(CloudMarketplaceProtocol.command(read('marketplace.listing_state', { marketplace: 'facebook', listing_id: '1234567890' })));
+  for (const payload of [{ marketplace: 'poshmark', listing_id: '1234567890' }, { marketplace: 'facebook', listing_id: '12ab' },
+    { marketplace: 'facebook', listing_id: '1234567890/../x' }]) {
+    assert.equal(CloudMarketplaceProtocol.command(read('marketplace.listing_state', payload)), null, JSON.stringify(payload));
+  }
+  for (const command of [
+    read('marketplace.vinted_categories', { url: 'https://evil.example' }),
+    read('marketplace.vinted_brands', { query: 'x'.repeat(101) }),
+    read('marketplace.vinted_brands', { query: 5 }),
+    { ...read('marketplace.vinted_categories', {}), job_id: 'job-1' },
+    { ...read('marketplace.vinted_categories', {}), version: 1 },
+    read('marketplace.fetch', {}),
+  ]) assert.equal(CloudMarketplaceProtocol.command(command), null, JSON.stringify(command));
+  const s = setup();
+  await s.connect();
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions', 'facebook.listing']);
 });
