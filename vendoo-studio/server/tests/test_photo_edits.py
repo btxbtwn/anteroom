@@ -226,13 +226,6 @@ def test_a_copied_listing_keeps_the_original_under_the_edits(env):
     assert (reset["width"], reset["height"]) == (400, 300)
 
 
-def test_an_edit_invalidates_a_reviewed_vendoo_send(env):
-    from vendoo_studio.services.send_review import review_inputs
-
-    listing_persistence.save_revision(env.db, env.conv.id, {"title": "Denim jacket", "price": 30}, "user")
-    before = review_inputs(env.db, env.conv.id)[1]
-    env.client.put(env.base + "/edits", json={"contrast": 20})
-    assert review_inputs(env.db, env.conv.id)[1] != before
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Apple Vision runs on macOS")

@@ -11,7 +11,6 @@ from vendoo_studio.models.catalog import (
     CategoryTree,
     CategoryTreeNode,
 )
-from vendoo_studio.services.category_tree import MARKETPLACES, start_sync, syncing
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
@@ -53,34 +52,6 @@ def search(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"query": query, "kind": kind, "marketplace": marketplace, "results": hits}
-
-
-@router.get("/sync")
-def sync_status(db: Session = Depends(get_db)):
-    result = {}
-    for marketplace in MARKETPLACES:
-        tree = db.get(CategoryTree, marketplace)
-        query = db.query(CategoryTreeNode).filter_by(marketplace=marketplace)
-        status = tree.status if tree else "pending"
-        if status == "running" and not syncing():
-            status = "paused"
-        result[marketplace] = {"status": status,
-            "nodes": query.count(), "pending_branches": query.filter_by(children_loaded=False).count(),
-            "error": tree.error if tree else None}
-    return {"running": syncing(), "complete": all(row["status"] == "complete" for row in result.values()),
-            "marketplaces": result}
-
-
-@router.post("/sync")
-async def sync_categories(db: Session = Depends(get_db)):
-    from vendoo_studio.repositories.queries import JobRepo
-    from vendoo_studio.services.extension_connection import extension_manager
-    if JobRepo(db).get_active():
-        raise HTTPException(409, "Wait for the current listing job before extracting categories")
-    if not extension_manager.connected:
-        raise HTTPException(409, "Connect Chrome before extracting categories")
-    start_sync()
-    return {"started": True}
 
 
 @router.get("/dropdown-options")

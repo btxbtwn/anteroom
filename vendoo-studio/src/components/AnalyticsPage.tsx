@@ -13,8 +13,6 @@ import { marketplaceName } from "./marketplaceNames";
 import { Stat, StatGrid } from "./AnalyticsStat";
 import { DiscountSuggestions } from "./DiscountSuggestions";
 import { EtsyNotAllowed } from "./EtsyNotAllowed";
-import { useVendooEnabled } from "../vendooMode";
-import { VendooImportButton } from "./VendooImportButton";
 import { Input } from "./ui/input";
 import { Button, buttonVariants } from "./ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
@@ -55,7 +53,6 @@ export function AnalyticsPage({ onOpenListing }: Props) {
 }
 
 export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Props) {
-  const vendooOn = useVendooEnabled();
   const [range, setRange] = useState<AnalyticsRange>("12m");
   const [breakdownSearch, setBreakdownSearch] = useState("");
   const [rankMetric, setRankMetric] = useState<RankMetric>("revenue");
@@ -79,19 +76,9 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
       <PageHeader
         title="Analytics"
         description="Track sales performance and find inventory that needs attention."
-        actions={vendooOn ? <VendooImportButton variant="analytics" /> : undefined}
       >
         {data ? (
           <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            <p>
-              {data.last_updated_at ? <>
-                {"Last updated on "}
-                <time dateTime={data.last_updated_at}>{new Date(data.last_updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time>
-                {vendooOn ? " from the historical import." : "."}
-              </> : vendooOn
-                ? "Last updated on: not recorded yet. Sales entered in Anteroom are included automatically."
-                : "Last updated on: not recorded yet."}
-            </p>
             <InventoryStrip inventory={data.inventory} />
           </div>
         ) : null}

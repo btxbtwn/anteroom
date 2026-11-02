@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 
 from vendoo_studio.services.fill_log import FULL_OPTION_LIMIT, canonical_option, prompt_options
 from vendoo_studio.services.listing_field_gaps import build_missing_fields_request
 from vendoo_studio.services.listing_generate import format_photo_analysis
 
-VENDOO_JS = Path(__file__).resolve().parents[3] / "vendoo-extension" / "content-scripts" / "vendoo.js"
 
 
 class PromptOptionsTest(unittest.TestCase):
@@ -48,12 +46,3 @@ class TagTextTest(unittest.TestCase):
         })
         self.assertIn('- tag text: brand label "ZARA WOMAN"; size tag "EUR M"; care tag "100% cotton"', text)
         self.assertNotIn("RN", text)
-
-
-class ExtensionRegistryScopeTest(unittest.TestCase):
-    def test_registry_selectors_are_scoped_to_current_marketplace(self):
-        source = VENDOO_JS.read_text()
-        start = source.index("  function resolveWithRegistry")
-        body = source[start:source.index("\n  }\n", start)]
-        self.assertIn("currentFillMarketplace", body)
-        self.assertIn("key === scoped", body)

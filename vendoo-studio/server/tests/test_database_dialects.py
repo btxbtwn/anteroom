@@ -16,8 +16,6 @@ from alembic.migration import MigrationContext
 from vendoo_studio.database import Base, SessionLocal, database_url, engine, json_text, json_value, load_models
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.listing import Listing, ListingRevision
-from vendoo_studio.models.listing_evidence import SaleSnapshot
-from vendoo_studio.services.listing_evidence import capture_sale_snapshot
 
 
 def test_postgres_bursts_wait_for_a_connection_instead_of_exceeding_session_limit():
@@ -77,21 +75,4 @@ def test_json_values_come_back_typed_and_comparable():
             ListingRevision.id == revision.id,
         ).scalar()
         assert matched == revision.id
-        db.rollback()
-
-
-def test_a_sale_is_snapshotted_once_even_when_recorded_twice(monkeypatch):
-    from vendoo_studio.services import vendoo_import
-
-    monkeypatch.setattr(vendoo_import, "vendoo_item_sold", lambda item, form: True)
-    monkeypatch.setattr(vendoo_import, "vendoo_sale", lambda item, form: {"marketplace": "ebay"})
-    monkeypatch.setattr(vendoo_import, "vendoo_dates", lambda item, form: {"sold": "2026-10-01T12:00:00Z"})
-    monkeypatch.setattr(vendoo_import, "listing_from_vendoo", lambda item, form: {"title": "Tee"})
-    with SessionLocal() as db:
-        conv = Conversation(title="snapshot check")
-        db.add(conv)
-        db.flush()
-        capture_sale_snapshot(db, conv.id, {"id": "x"})
-        capture_sale_snapshot(db, conv.id, {"id": "x"})
-        assert db.query(SaleSnapshot).filter_by(conversation_id=conv.id).count() == 1
         db.rollback()

@@ -74,13 +74,6 @@ class Base(DeclarativeBase):
     pass
 
 
-def dialect_insert(db):
-    """``insert`` for the session's database, so ``on_conflict_do_nothing`` works on both."""
-    if db.get_bind().dialect.name == "postgresql":
-        from sqlalchemy.dialects.postgresql import insert
-    else:
-        from sqlalchemy.dialects.sqlite import insert
-    return insert
 
 
 def json_value(column, path: str):

@@ -19,6 +19,49 @@ branch_labels = None
 depends_on = None
 
 
+# The status-only slice this revision keeps, held here so it runs on its own.
+EMPTY_STATUS = (None, "", {}, [])
+
+
+def _listing_statuses(group: object) -> dict:
+    if not isinstance(group, dict):
+        return {}
+    return {
+        marketplace: {"status": listing["status"]}
+        for marketplace, listing in group.items()
+        if isinstance(listing, dict) and listing.get("status") not in EMPTY_STATUS
+    }
+
+
+def slim_vendoo_draft_payload(
+    *,
+    item: dict | None = None,
+    form: dict | None = None,
+    statuses: dict | None = None,
+) -> dict:
+    """The status slices of a draft, in the shape the UI already reads.
+
+    ``externalListings`` is a listing the seller already had on the marketplace.
+    It can be live while the Vendoo nav still says not listed, so the sidebar
+    keeps that status too.
+    """
+    payload: dict = {}
+    listings = _listing_statuses(item.get("listings") if isinstance(item, dict) else None)
+    external = _listing_statuses(item.get("externalListings") if isinstance(item, dict) else None)
+    if listings or external:
+        payload["item"] = {}
+        if listings:
+            payload["item"]["listings"] = listings
+        if external:
+            payload["item"]["externalListings"] = external
+    form_statuses = form.get("statuses") if isinstance(form, dict) else None
+    if isinstance(form_statuses, dict) and form_statuses:
+        payload["form"] = {"statuses": form_statuses}
+    if isinstance(statuses, dict) and statuses:
+        payload["statuses"] = statuses
+    return payload
+
+
 def upgrade() -> None:
     """Keep one status-only row per job and drop the appended draft events.
 
@@ -27,8 +70,6 @@ def upgrade() -> None:
     failing with ``database or disk is full``. Only the marketplace statuses
     are ever read back, so only those are carried over.
     """
-    from vendoo_studio.services.draft_cache import slim_vendoo_draft_payload
-
     op.create_table(
         'vendoo_draft_cache',
         sa.Column('job_id', sa.String(), nullable=False),

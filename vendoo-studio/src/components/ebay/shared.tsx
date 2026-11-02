@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useVendooEnabled } from "../../vendooMode";
 import { useQuery } from "@tanstack/react-query";
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, InboxIcon, RefreshCwIcon, UploadCloudIcon } from "lucide-react";
 import { api } from "../../api/client";
@@ -58,7 +57,6 @@ export function RemoteList({ section, params = {}, onSelect, selected }: { secti
 }
 
 export function ListingPicker({ selected, onChange }: { selected: string[]; onChange: (ids: string[]) => void }) {
-  const vendooOn = useVendooEnabled();
   const [search, setSearch] = useState("");
   const listings = useQuery({ queryKey: ["ebay", "local-listings"], queryFn: api.ebayOffers.status });
   const visible = listings.data?.listings.filter((item) => item.title.toLowerCase().includes(search.toLowerCase())) || [];
@@ -70,7 +68,7 @@ export function ListingPicker({ selected, onChange }: { selected: string[]; onCh
       {visible.map((item) => <label key={item.listingId}>
         <Checkbox className="mt-0.5" checked={selected.includes(item.listingId)} onCheckedChange={(next) => onChange(next === true ? [...selected, item.listingId] : selected.filter((id) => id !== item.listingId))} />{item.title}
       </label>)}
-      {listings.data && !visible.length ? <p className="text-sm text-muted-foreground py-4">{search ? "No listings match your search." : vendooOn ? "Import listings from Vendoo to select them here." : "Import listings from eBay to select them here."}</p> : null}
+      {listings.data && !visible.length ? <p className="text-sm text-muted-foreground py-4">{search ? "No listings match your search." : "Import listings from eBay to select them here."}</p> : null}
     </div>
   </fieldset>;
 }

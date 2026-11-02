@@ -25,12 +25,10 @@ from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.services.validation import validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.safe_fetch import UnsafeURLError, validate_fetch_url
-from vendoo_studio.services.vendoo_import import listing_from_vendoo, merge_notes
-from extension_sources import background_source
+from vendoo_studio.services.vendoo_import import merge_notes
 
 
 REPO = Path(__file__).resolve().parents[3]
-EXTENSION_DIR = REPO / "vendoo-extension"
 JPEG_BYTES = bytes([
     0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
     0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,
@@ -981,110 +979,6 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertEqual(listing["etsy_specifics"]["when_made"], "2010 - 2019 (Recently)")
 
 
-class ExtensionSafetySourceTest(unittest.TestCase):
-    def test_existing_item_safety_check_runs_before_photo_upload(self):
-        source = background_source()
-        safety = source.index("checking_draft_safety")
-        upload = source.index("uploading_photos", safety)
-        self.assertLess(safety, upload)
-        self.assertIn("payload.options?.publish !== false", source)
-
-        refill_start = source.index("async function runFillFields")
-        refill_end = source.index("function groupFillFieldBatches", refill_start)
-        refill = source[refill_start:refill_end]
-        self.assertIn("CHECK_DRAFT_SAFETY", refill)
-        self.assertLess(
-            refill.index("CHECK_DRAFT_SAFETY"),
-            refill.index("groupFillFieldMarketplaces"),
-        )
-
-    def test_etsy_live_state_needs_explicit_draft_nav_status(self):
-        source = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text()
-        self.assertIn("const navConfirmsDraft =", source)
-        self.assertIn("if (navConfirmsDraft)", source)
-        self.assertIn("Refusing to update a published Vendoo item", source)
-
-    def test_existing_item_preflight_fails_closed_for_live_or_missing_status(self):
-        source = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text()
-        start = source.index("  function marketplaceStatusIsPublished")
-        end = source.index("  function marketplaceNameToId", start)
-        script = source[start:end] + """
-let testStatuses = {};
-function scrapeMarketplaceStatusesFromDom() { return testStatuses; }
-const waitForPostSaveForm = async () => true;
-const waitForMarketplaceNavControls = async () => true;
-const sleep = async () => {};
-const log = () => {};
-const CONFIG = {SLEEP_LONG: 0};
-const results = [];
-(async () => {
-testStatuses = { etsy: 'LIVE' };
-results.push(await checkDraftSafety(['etsy']));
-testStatuses = {};
-results.push(await checkDraftSafety(['etsy']));
-testStatuses = { etsy: 'NOT LISTED' };
-results.push(await checkDraftSafety(['etsy']));
-testStatuses = { general: 'COMPLETE' };
-results.push(await checkDraftSafety([]));
-testStatuses = { etsy: 'PENDING' };
-results.push(await checkDraftSafety(['etsy']));
-testStatuses = { etsy: 'DRAFT LISTING' };
-results.push(await checkDraftSafety(['etsy']));
-console.log(JSON.stringify(results));
-})();
-"""
-        result = subprocess.run(
-            ["node", "-e", script],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        live, missing, draft, general_only, pending, draft_listing = json.loads(result.stdout)
-        self.assertFalse(live["ok"])
-        self.assertIn("published Vendoo item", live["error"])
-        self.assertFalse(missing["ok"])
-        self.assertIn("verify draft status", missing["error"])
-        self.assertTrue(draft["ok"])
-        self.assertFalse(general_only["ok"])
-        self.assertFalse(pending["ok"])
-        self.assertTrue(draft_listing["ok"])
-
-    def test_draft_safety_waits_for_marketplace_statuses_to_paint(self):
-        source = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text()
-        start = source.index("  async function checkDraftSafety")
-        end = source.index("  function marketplaceNameToId", start)
-        script = source[start:end] + """
-let tick = 0;
-function scrapeMarketplaceStatusesFromDom() {
-  tick += 1;
-  return tick >= 3 ? { ebay: 'NOT LISTED', etsy: 'NOT LISTED', poshmark: 'NOT LISTED',
-    mercari: 'NOT LISTED', depop: 'NOT LISTED' } : {};
-}
-const publishedMarketplaceStatuses = (statuses) => Object.entries(statuses || {})
-  .filter(([, status]) => /\\b(LISTED|LIVE|ACTIVE|SOLD|PUBLISHED)\\b/i.test(status)
-    && !/NOT LISTED/i.test(status));
-const marketplaceStatusConfirmsDraft = (status) => ['NOT LISTED', 'DRAFT', 'DRAFT LISTING', 'INCOMPLETE', 'COMPLETE']
-  .includes(String(status || '').toUpperCase());
-const waitForPostSaveForm = async () => true;
-const waitForMarketplaceNavControls = async () => true;
-const sleep = async () => {};
-const log = () => {};
-const CONFIG = {SLEEP_LONG: 0};
-(async () => console.log(JSON.stringify(await checkDraftSafety(['ebay','etsy','poshmark','mercari','depop']))))();
-"""
-        result = json.loads(subprocess.run(
-            ["node", "-e", script], check=True, capture_output=True, text=True,
-        ).stdout)
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["statuses"]["ebay"], "NOT LISTED")
-
-    def test_invalid_dropdown_has_a_distinct_fill_status(self):
-        source = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text()
-        self.assertIn("status: 'invalid'", source)
-        frontend = (REPO / "vendoo-studio" / "src" / "components" / "fillLog" / "chatPrompts.ts").read_text()
-        self.assertIn('if (entry.status === "invalid") return "invalid-dropdown";', frontend)
-
-
 class ListingIntegrityRouteTest(unittest.TestCase):
     def setUp(self):
         engine = create_engine(
@@ -1206,7 +1100,7 @@ class JobSafetyRouteTest(unittest.TestCase):
         app.dependency_overrides.clear()
         self.db.close()
 
-    def test_user_form_refresh_sanitizes_size_and_job_snapshot(self):
+    def test_seller_edit_keeps_historical_send_snapshot(self):
         job = Job(
             conversation_id=self.conv.id,
             approved_revision_id="rev1",
@@ -1227,9 +1121,9 @@ class JobSafetyRouteTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.db.refresh(job)
-        self.assertEqual(job.listing_snapshot.get("size"), "10")
-        # The save set eBay's size itself, so that value stays.
-        self.assertEqual(job.listing_snapshot.get("ebay_specifics", {}).get("size"), "M")
+        self.assertEqual(job.listing_snapshot.get("size"), "XL")
+        # Historical jobs keep the values they originally sent.
+        self.assertEqual(job.listing_snapshot.get("ebay_specifics", {}), VALID_LISTING["ebay_specifics"])
         self.assertEqual(job.listing_snapshot.get("platforms"), ["ebay"])
         latest = ListingRepo(self.db).get_revisions(self.conv.id)[0]
         self.assertEqual(latest.source, "user_form")
@@ -1264,7 +1158,7 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.assertEqual(updated.status, "cancelled")
         self.assertIsNone(updated.last_error)
 
-    def test_job_response_includes_blocker_fields(self):
+    def test_historical_job_response_keeps_failure_details(self):
         job = Job(
             conversation_id=self.conv.id,
             approved_revision_id="rev1",
@@ -1291,13 +1185,7 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["current_step"], "completion_blocked")
-        self.assertEqual(
-            body["blocker_fields"],
-            [
-                {"marketplace": "ebay", "field": "Package weight", "expected": "8 oz"},
-                {"marketplace": "ebay", "field": "Package dimensions"},
-            ],
-        )
+        self.assertEqual(body["last_error"], job.last_error)
 
     def test_merge_notes_keeps_vendoo_binding(self):
         existing = json.dumps({"vendooItemId": "abc123", "vendooUrl": "https://web.vendoo.co/app/item/abc123", "condition": "Good"})
@@ -1306,26 +1194,6 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.assertEqual(merged["condition"], "Fair")
 
 
-class ImportIntegrityTest(unittest.TestCase):
-    def test_resolves_root_label_ids_to_names(self):
-        item = {
-            "itemID": "abc123",
-            "labels": ["UOYZA8oYMxY5fwBzyP2Q"],
-            "labelDetails": [{"id": "UOYZA8oYMxY5fwBzyP2Q", "name": "To List"}],
-            "generalDetails": {
-                "title": "Imported blouse",
-                "description": "Size: XL\nCondition: Good\nMeasurements: 22.5",
-                "price": 14,
-                "primaryColor": "Multi",
-                "labels": ["A19"],
-            },
-        }
-        listing = listing_from_vendoo(item, None)
-        # Opaque Firestore ids become display names when labelDetails is present.
-        self.assertNotIn("UOYZA8oYMxY5fwBzyP2Q", listing["labels"])
-        self.assertIn("To List", listing["labels"])
-        self.assertIn("A19", listing["labels"])
-        self.assertEqual(listing["primaryColor"], "Multi")
 
 
 class PhotoMimeTest(unittest.TestCase):
@@ -1377,103 +1245,6 @@ class PhotoMimeTest(unittest.TestCase):
         with Image.open(BytesIO(data)) as img:
             self.assertEqual(img.format, "JPEG")
 
-class ExtensionRouteSafetyTest(unittest.TestCase):
-    def test_rejects_item_id_new_and_requires_verification(self):
-        content = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text(encoding="utf-8")
-        background = background_source()
-        self.assertIn("nonDurable.has(id.toLowerCase())", content)
-        self.assertIn("VERIFY_SAVED_DRAFT", content)
-        self.assertIn("Draft Listing", content)
-        self.assertIn("Women > Tops & Blouses > Blouse", content)
-        self.assertIn("waitForPostSaveForm", content)
-        self.assertIn("nearestMarketplaceCategoryClickable", content)
-        self.assertIn("findCategoryControlNearHeading", content)
-        self.assertNotIn("btn.getAttribute('role') === 'category-input') continue", content)
-        self.assertNotIn("token || 'direct'", background)
-        self.assertNotIn("identPayload('direct'", background)
-        self.assertNotIn("Draft ${job.vendoo_item_id} already exists, skipping photo upload", background)
-        self.assertIn("type: 'VERIFY_SAVED_DRAFT'", background)
-        self.assertIn("importScripts('diagnostic-collector.js')", background)
-        self.assertIn("PROHIBITED_TERMS", content)
-        self.assertIn("LISTED|LIVE|ACTIVE|SOLD|PUBLISHED", content)
-        self.assertIn("Another automation job is already running", background)
-        self.assertIn("Another leftover field fill is already running", background)
-
-    def test_extract_item_id_from_url_drops_route_ids(self):
-        text = background_source()
-        start = text.index("const NON_DURABLE_ITEM_IDS")
-        end = text.index("async function findTabByDraft")
-        script = text[start:end] + """
-const result = {
-  saved: extractItemIdFromUrl('https://web.vendoo.co/app/item/abc123'),
-  created: extractItemIdFromUrl('https://web.vendoo.co/app/item/new'),
-  edited: extractItemIdFromUrl('https://web.vendoo.co/app/item/edit'),
-  createRoute: extractItemIdFromUrl('https://web.vendoo.co/app/item/create'),
-};
-console.log(JSON.stringify(result));
-"""
-        proc = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
-        result = json.loads(proc.stdout)
-        self.assertEqual(result["saved"], "abc123")
-        self.assertEqual(result["created"], "")
-        self.assertEqual(result["edited"], "")
-        self.assertEqual(result["createRoute"], "")
-
-    def test_marketplace_nav_matches_status_suffix(self):
-        text = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text(encoding="utf-8")
-        start = text.index("function marketplaceNavBareLabel")
-        end = text.index("function marketplaceSectionButtonMatches")
-        script = """
-function normalizeText(text) {
-  return (text || '')
-    .toString()
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-""" + text[start:end] + """
-const cases = [
-  ['eBay', 'ebay', true],
-  ['eBay NOT LISTED', 'ebay', true],
-  ['eBay\\nNOT LISTED', 'ebay', true],
-  ['Depop BETA', 'depop', true],
-  ['List on eBay', 'ebay', false],
-  ['Copy eBay title', 'ebay', false],
-];
-const result = cases.map(([label, platform, expected]) => ({
-  label, platform, expected, actual: marketplaceNavLabelMatches(label, platform),
-}));
-console.log(JSON.stringify(result));
-"""
-        proc = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
-        result = json.loads(proc.stdout)
-        for row in result:
-            self.assertEqual(row["actual"], row["expected"], row)
-
-    def test_complete_general_status_is_not_published(self):
-        text = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text(encoding="utf-8")
-        start = text.index("function marketplaceStatusIsPublished")
-        end = text.index("function publishedMarketplaceStatuses")
-        script = text[start:end] + """
-const cases = [
-  ['COMPLETE', false],
-  ['NOT LISTED', false],
-  ['DRAFT', false],
-  ['LISTED', true],
-  ['LIVE', true],
-];
-const result = cases.map(([status, expected]) => ({
-  status, expected, actual: marketplaceStatusIsPublished(status),
-}));
-console.log(JSON.stringify(result));
-"""
-        proc = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
-        result = json.loads(proc.stdout)
-        for row in result:
-            self.assertEqual(row["actual"], row["expected"], row)
-
 
 class MercariCategoryAndDepopAuditTest(unittest.TestCase):
     def test_previous_category_input_skip_misses_mercari_picker(self):
@@ -1515,102 +1286,6 @@ console.log(JSON.stringify(result));
         self.assertFalse(result["previous"])
         self.assertTrue(result["current"])
 
-    def test_prefix_id_query_finds_mercari_category_label(self):
-        content = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text(encoding="utf-8")
-        self.assertIn("V2-formGroupLabel", content)
-        self.assertIn("nearestMarketplaceCategoryClickable", content)
-
-    def test_blouse_leaf_outranks_tshirts_under_tops_and_blouses(self):
-        text = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text(encoding="utf-8")
-        start = text.index("function escapeRegExp(value)")
-        end = text.index("async function clickCategoryOption(option)")
-        helpers = text[start:end]
-        display_start = text.index("function categoryDisplayMatches(shown, path)")
-        display_end = text.index("function queryDeepAll(selector, root)")
-        script = """
-function normalizeText(text) {
-  return (text || '')
-    .toString()
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-""" + helpers + text[display_start:display_end] + """
-const options = [
-  { el: {}, text: 'Women ‣ Tops & Blouses ‣ T-Shirts', lower: normalizeText('Women ‣ Tops & Blouses ‣ T-Shirts') },
-  { el: {}, text: 'Blouse', lower: normalizeText('Blouse') },
-  { el: {}, text: 'Women ‣ Tops & Blouses ‣ Blouses', lower: normalizeText('Women ‣ Tops & Blouses ‣ Blouses') },
-  { el: {}, text: 'Women ‣ Tops & Blouses', lower: normalizeText('Women ‣ Tops & Blouses') },
-];
-const ranked = rankCategorySearchResults(options, ['Women', 'Tops & Blouses', 'Blouse']);
-const displayOk = categoryDisplayMatches('Women ‣ Tops & Blouses ‣ T-Shirts', 'Women > Tops & Blouses > Blouse');
-const parentOk = categoryDisplayMatches('Women ‣ Tops & Blouses', 'Women > Tops & Blouses > Blouse');
-const blouseOk = categoryDisplayMatches('Women ‣ Tops & Blouses ‣ Blouse', 'Women > Tops & Blouses > Blouse');
-const mercariBreadcrumbOk = categoryDisplayMatches('Tops & Blouses ‣ Blouse', 'Women > Tops & Blouses > Blouse');
-console.log(JSON.stringify({
-  winner: ranked[0] && ranked[0].text,
-  displayOk,
-  parentOk,
-  blouseOk,
-  mercariBreadcrumbOk,
-}));
-"""
-        proc = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
-        result = json.loads(proc.stdout)
-        self.assertIn("Blouse", result["winner"])
-        self.assertNotIn("T-Shirt", result["winner"])
-        self.assertFalse(result["displayOk"])
-        self.assertFalse(result["parentOk"])
-        self.assertTrue(result["blouseOk"])
-        self.assertTrue(result["mercariBreadcrumbOk"])
-
-    def test_button_up_shirt_maps_to_mercari_blouses(self):
-        text = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text(encoding="utf-8")
-        start = text.index("function categoryHaystack(data, categoryPath)")
-        end = text.index("function explicitPoshmarkCategoryPath(data)")
-        hay = text[start:end]
-        mercari_start = text.index("function normalizeMercariCategoryPath(data)")
-        mercari_end = text.index("async function fillMarketplaceCategory(marketplace, data)")
-        script = """
-function normalizeText(text) {
-  return (text || '')
-    .toString()
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-""" + hay + text[mercari_start:mercari_end] + """
-const blouse = normalizeMercariCategoryPath({
-  title: 'Notations XL Retro Short Sleeve Button-Up Shirt Black White Gray Relaxed',
-  department: 'Women',
-  category_path: "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
-  ebay_specifics: { type: 'Blouse', department: 'Women' },
-});
-const tee = normalizeMercariCategoryPath({
-  title: 'Graphic Tee',
-  department: 'Women',
-  category_path: "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
-});
-console.log(JSON.stringify({ blouse, tee }));
-"""
-        proc = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
-        result = json.loads(proc.stdout)
-        self.assertEqual(result["blouse"], "Women > Tops & Blouses > Blouse")
-        self.assertEqual(result["tee"], "Women > Tops & Blouses > T-shirts")
-
-    def test_etsy_listing_state_live_ok_when_not_listed(self):
-        content = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text(encoding="utf-8")
-        self.assertIn("Unfilled Etsy sections often keep Listing State", content)
-        self.assertIn("key === 'listingState' && mp === 'etsy'", content)
-        self.assertIn("resolveEtsyListingState", content)
-        self.assertIn("return 'Live Listing'", content)
-        self.assertIn('[aria-label^="Remove "]', content)
-        self.assertIn("normalizeComparableText(lab) === normalizeComparableText(want)", content)
-
     def test_ask_chat_prompt_includes_field_context(self):
         components = Path(__file__).resolve().parents[2] / "src" / "components"
         fill_log = sorted(p for p in (components / "fillLog").glob("*.ts") if not p.name.endswith(".test.ts"))
@@ -1630,30 +1305,13 @@ console.log(JSON.stringify({ blouse, tee }));
         self.assertNotIn("Set Vendoo category", panel)
         self.assertIn("function leftoverGeneratedValue", panel)
         self.assertIn("isAlreadySetEntry", panel)
-        self.assertIn(
-            'const FILL_FAILURE_STATUSES = new Set(["invalid", "failed", "not_found", "uncertain"]);',
-            panel,
-        )
+
         self.assertNotIn("Ask chat to retry", panel)
         # One bulk Ask-chat button under Update Vendoo (full draft schema), not a
         # second listing-JSON-only copy in the Fields panel.
         self.assertNotIn("Ask chat for fields generation could not resolve", panel)
         self.assertIn("emptyFieldsButtonLabel", panel)
 
-    def test_send_blocker_ask_chat_uses_validation_prompt(self):
-        source = (
-            Path(__file__).resolve().parents[2] / "src" / "components" / "CopyableLlmError.tsx"
-        ).read_text(encoding="utf-8")
-        self.assertIn("export function validationErrorsPrompt", source)
-        self.assertIn("Fix these Anteroom validation errors", source)
-        self.assertIn("Update EVERY field listed below", source)
-        editor = (
-            Path(__file__).resolve().parents[2] / "src" / "components" / "ListingEditor.tsx"
-        ).read_text(encoding="utf-8")
-        # Send blockers use the shared validation prompt in the active editor.
-        self.assertIn("validationErrorsPrompt", editor)
-        self.assertNotIn("completionBlockerPrompt", editor)
-        self.assertIn("onAskChat={onAskChat}", editor)
 
 
 if __name__ == "__main__":

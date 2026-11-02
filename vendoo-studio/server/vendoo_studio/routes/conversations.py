@@ -47,46 +47,39 @@ class ConversationSummary(BaseModel):
     created_at: str
     updated_at: str
     cover_photo_url: str | None = None
-    # Vendoo's own label for a bound item, and its image as a thumbnail fallback.
+    # Imported from Vendoo: the item's status label there, and its image as a
+    # thumbnail fallback.
     vendoo_status: str | None = None
     vendoo_cover_url: str | None = None
-    # What the sidebar filters on: the listing's own SKU and price, the Vendoo
-    # labels it wears, and the marketplaces it is live on.
+    # What the sidebar filters on: the listing's own SKU and price, the labels
+    # it wears, and the marketplaces it was imported as live on.
     sku: str | None = None
     price: float | None = None
     vendoo_labels: list[str] = []
     vendoo_marketplaces: list[str] = []
-    # Marketplaces Anteroom published directly. Vendoo may still call the item a draft.
+    # Marketplaces Anteroom published directly.
     direct_marketplaces: list[str] = []
-    # Marketplaces Anteroom delisted directly. Vendoo may still call the item listed there.
+    # Marketplaces Anteroom delisted directly, though imported history says listed.
     removed_marketplaces: list[str] = []
     # Units sold on Anteroom's sales ledger, and the most the item was offered
     # with. An Active row with some sold reads "1 of 3 sold".
     units_sold: int = 0
     quantity: int | None = None
-    # Each marketplace listing's own page, where Vendoo recorded one.
+    # Each marketplace listing's own page, where the imported history recorded one.
     vendoo_listing_urls: dict[str, str] = {}
-    # Vendoo's own time tracking for the item: when it was created, last
-    # modified, last went live (a relist moves this) and sold, plus the listing
-    # date per marketplace. "listed" drives the staleness filter and sort.
+    # Imported Vendoo time tracking for the item: when it was created, last
+    # modified, last went live and sold, plus the listing date per marketplace.
+    # "listed" drives the staleness filter and sort.
     vendoo_created_at: str | None = None
     vendoo_modified_at: str | None = None
     vendoo_listed_at: str | None = None
     vendoo_sold_at: str | None = None
     vendoo_listed_dates: dict[str, str] = {}
     vendoo_sold_dates: dict[str, str] = {}
-    # When Studio last wrote this listing onto its Vendoo item. A marketplace
-    # whose listing date is older than this is still showing the copy from
-    # before that write, and only a delist + relist in Vendoo replaces it.
-    vendoo_form_updated_at: str | None = None
-    # Edited here since Studio and Vendoo were last level: the Vendoo form does
-    # not have this version yet, so Update Vendoo is the step that is owed.
+    # Edited here since the item's live direct listings were written: Update
+    # is the step that is owed.
     unsent_edits: bool = False
-    # The marketplaces that write left on old copy. Kept rather than re-derived
-    # so the reminder survives the delist, when the item is live nowhere.
-    vendoo_relist_pending: list[str] = []
-    # False for modern resale: Etsy removes those, so Send leaves its form
-    # empty and no reminder asks for an Etsy relist.
+    # False for modern resale: Etsy removes those.
     etsy_eligible: bool = True
     missing_sale_data: list[str] = []
 
@@ -150,22 +143,6 @@ def list_conversations(db: Session = Depends(get_db)):
     ]
 
 
-class DuplicateVendooListing(BaseModel):
-    id: str
-    title: str
-
-
-class DuplicateVendooLink(BaseModel):
-    vendoo_item_id: str
-    vendoo_url: str
-    listings: list[DuplicateVendooListing]
-
-
-@router.get("/vendoo-link-duplicates", response_model=list[DuplicateVendooLink])
-def duplicate_vendoo_links(db: Session = Depends(get_db)):
-    return ConversationRepo(db).duplicate_vendoo_links()
-
-
 @router.get("/{conv_id}", response_model=ConversationResponse)
 def get_conversation(conv_id: str, db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
@@ -210,7 +187,7 @@ def copy_result(conv_id: str, request_id: str, response: Response, db: Session =
 
 
 class ConversationUpdate(BaseModel):
-    """Title, notes and box only: a listing's status is Vendoo's to report."""
+    """Title, notes and box only: a listing's status follows its marketplaces."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -244,65 +221,6 @@ def unsettle_conversation(conv_id: str, db: Session = Depends(get_db)):
     if not conv:
         raise HTTPException(404, "Conversation not found")
     return _conv_response(repo.unsettle(conv_id), _extras_for(db, conv_id))
-
-
-class VendooLinkRequest(BaseModel):
-    url_or_id: str
-
-
-class VendooLinkResponse(BaseModel):
-    conversation: ConversationResponse
-    vendoo_item_id: str
-    vendoo_url: str
-
-
-@router.post("/{conv_id}/vendoo-link", response_model=VendooLinkResponse)
-def link_vendoo_draft(conv_id: str, body: VendooLinkRequest, db: Session = Depends(get_db)):
-    """Bind this Studio listing to an existing Vendoo draft via URL or item ID."""
-    from vendoo_studio.models.job import Job
-    from vendoo_studio.services.vendoo_import import merge_notes, parse_vendoo_draft_ref, vendoo_binding
-
-    repo = ConversationRepo(db)
-    conv = repo.get(conv_id)
-    if not conv:
-        raise HTTPException(404, "Conversation not found")
-
-    try:
-        binding = parse_vendoo_draft_ref(body.url_or_id)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-    item_id = binding["vendooItemId"]
-    item_url = binding["vendooUrl"]
-    other = repo.find_by_vendoo_item_id(item_id, exclude_conv_id=conv_id)
-    if other:
-        title = other.title or "Untitled"
-        raise HTTPException(
-            409,
-            f"That Vendoo draft is already linked to another listing ({title}).",
-        )
-
-    conv.notes = merge_notes(conv.notes, binding)
-    conv.updated_at = utcnow()
-
-    # Keep any existing jobs pointed at the same draft so Fields can refresh.
-    jobs = (
-        db.query(Job)
-        .filter(Job.conversation_id == conv_id, Job.status != "cancelled")
-        .all()
-    )
-    for job in jobs:
-        job.vendoo_item_id = item_id
-        job.vendoo_url = item_url
-
-    db.commit()
-    db.refresh(conv)
-    linked = vendoo_binding(conv.notes)
-    return VendooLinkResponse(
-        conversation=_conv_response(conv, _extras_for(db, conv_id)),
-        vendoo_item_id=linked.get("vendooItemId") or item_id,
-        vendoo_url=linked.get("vendooUrl") or item_url,
-    )
 
 
 @router.patch("/{conv_id}")
@@ -369,18 +287,12 @@ class ActivityResponse(BaseModel):
 
 
 def _job_activity_label(job) -> str:
-    from vendoo_studio.services.schema_probe import is_schema_probe_job
-
-    if is_schema_probe_job(job):
-        return "Discovering fields in Chrome…"
     if str(job.current_step or "").startswith("native_"):
         from vendoo_studio.services.native_marketplaces import NAMES, STEP_LABEL
 
         _, marketplace, step = str(job.current_step).split("_", 2)
         return f"{NAMES.get(marketplace, marketplace)}: {STEP_LABEL.get(step, 'Working')}…"
-    if job.status in ("queued", "awaiting_extension"):
-        return "Vendoo draft waiting for Chrome…"
-    return "Working on the Vendoo draft…"
+    return "Working in Chrome…"
 
 
 @router.get("/{conv_id}/activity", response_model=ActivityResponse)
@@ -389,7 +301,6 @@ def get_activity(conv_id: str, db: Session = Depends(get_db)):
     from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
     from vendoo_studio.models.conversation import Message
     from vendoo_studio.services import activity
-    from vendoo_studio.services.listing_completion import completion_running
     from vendoo_studio.services.streaming import active_generation
 
     items: list[str] = []
@@ -401,7 +312,7 @@ def get_activity(conv_id: str, db: Session = Depends(get_db)):
     # and load a job (and its listing snapshot) only when it is still running.
     jobs = db.query(Job.id, Job.status).filter(Job.conversation_id == conv_id).all()
     for job_id, status in jobs:
-        if status in ACTIVE_JOB_STATUSES or completion_running(job_id):
+        if status in ACTIVE_JOB_STATUSES:
             job = db.get(Job, job_id)
             if job is not None:
                 items.append(_job_activity_label(job))
@@ -438,22 +349,12 @@ def get_generation_timings(conv_id: str, limit: int = 20, db: Session = Depends(
 
 
 async def cancel_conversation_jobs(db: Session, conv_id: str) -> int:
-    """Cancel this listing's running Chrome/Vendoo jobs and their field repair."""
+    """Cancel this listing's running direct marketplace jobs."""
     from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
-    from vendoo_studio.models.protocol import ProtocolMessage
     from vendoo_studio.repositories.queries import JobRepo
-    from vendoo_studio.services.extension_connection import dispatch_queued_jobs, extension_manager
-    from vendoo_studio.services.listing_completion import cancel_completion, completion_running
 
-    jobs = [
-        job
-        for job in db.query(Job).filter(Job.conversation_id == conv_id).all()
-        if job.status in ACTIVE_JOB_STATUSES or completion_running(job.id)
-    ]
+    jobs = db.query(Job).filter(Job.conversation_id == conv_id, Job.status.in_(ACTIVE_JOB_STATUSES)).all()
     for job in jobs:
-        cancel_completion(job.id)
-        if job.status not in ACTIVE_JOB_STATUSES:
-            continue
         if str(job.current_step or "").startswith("native_"):
             from vendoo_studio.services import native_marketplaces
 
@@ -464,14 +365,6 @@ async def cancel_conversation_jobs(db: Session, conv_id: str) -> int:
         job.current_step = None
         db.commit()
         JobRepo(db).add_event(job.id, "cancelled")
-        extension_manager.cancel_waits_for_job(job.id)
-        await extension_manager.send_message(ProtocolMessage(
-            type="job.cancel",
-            job_id=job.id,
-            payload={"job_id": job.id},
-        ).model_dump(mode="json"))
-    if jobs:
-        await dispatch_queued_jobs()
     return len(jobs)
 
 
@@ -519,15 +412,11 @@ async def reset_conversation(
         # The marketplace record outlives Clear; the action writing it has to finish first.
         raise HTTPException(409, f"Wait for the {busy} listing to finish, or cancel it, before clearing.")
 
-    from vendoo_studio.repositories.queries import JobRepo, ListingRepo
+    from vendoo_studio.repositories.queries import ListingRepo
     from vendoo_studio.services.streaming import stop_generation
     from vendoo_studio.services.hidden_fields import clear_listing_hidden_fields
     from vendoo_studio.services.listing_carryover import carryover_updates
-    from vendoo_studio.services.vendoo_import import (
-        merge_notes,
-        parse_notes,
-        vendoo_binding,
-    )
+    from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
     from vendoo_studio.services import activity
 
@@ -535,8 +424,6 @@ async def reset_conversation(
     # Post-generate field fills would otherwise write into the cleared chat.
     activity.cancel(conv_id)
 
-    # Keep the Vendoo draft link across Clear; wipe only Studio form contents.
-    binding = vendoo_binding(conv.notes)
     notes = conv.notes
 
     if keep_inputs:
@@ -549,7 +436,7 @@ async def reset_conversation(
         if carried:
             notes = merge_notes(notes, carried)
 
-    # Stop Chrome fill/repair before the wipe deletes the job rows.
+    # Stop running marketplace jobs before the wipe.
     await cancel_conversation_jobs(db, conv_id)
 
     # Marketplace records survive Clear and Regenerate, with the jobs they name.
@@ -564,7 +451,7 @@ async def reset_conversation(
     if keep_inputs:
         conv.notes = notes
     else:
-        conv.notes = merge_notes(None, binding) if binding else None
+        conv.notes = None
         # Clear removes this item's facts as well as its visible form. Otherwise
         # generation and chat reuse corrections from the listing just erased.
         from vendoo_studio.models.listing_evidence import ListingCorrection
@@ -574,28 +461,6 @@ async def reset_conversation(
     conv.settled_at = None
     conv.unsettled_at = None
     conv.updated_at = utcnow()
-    if binding:
-        # Blank revision so Fields / ensure-draft can reattach to the same Vendoo item.
-        revision = listing_persistence.save_revision(db, conv_id, {}, source="reset")
-        if keep_inputs:
-            # Regenerate remounts the editor with photos still present. Without a
-            # job row it looks like a fresh Link and auto-imports the draft —
-            # that opens Chrome and walks every marketplace tab. Reattach Fields
-            # here so remount never starts that scrape.
-            item_id = str(binding.get("vendooItemId") or "").strip()
-            item_url = str(binding.get("vendooUrl") or "").strip()
-            if item_id and item_id.lower() not in {"new", "edit", "create"}:
-                if not item_url:
-                    item_url = f"https://web.vendoo.co/app/item/{item_id}"
-                JobRepo(db).create(
-                    conv_id=conv_id,
-                    approved_revision_id=revision.id,
-                    listing_snapshot={},
-                    vendoo_item_id=item_id,
-                    vendoo_url=item_url,
-                    status="completed",
-                    current_step="fields_applied",
-                )
     db.commit()
     db.refresh(conv)
     clear_listing_hidden_fields(conv_id)
@@ -693,31 +558,22 @@ _REVISIONS_MATCH_MAX = 20_000
 
 
 def _unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -> set[str]:
-    """Conversations whose listing moved on after it was last sent.
+    """Conversations whose listing moved on after it was last listed.
 
-    A listing live on a marketplace through Anteroom is measured against what
-    those listings were written from, and Vendoo's copy no longer counts:
-    Direct List and Update are where its edits go. Any other listing is
-    measured against the sync machinery's marker for Vendoo, not against
-    revision timestamps: a pull writes a revision too, and dating the
-    comparison would call Vendoo's own copy an unsent edit the moment it
-    arrived. A differing revision only counts when its content differs too,
-    so a revision that just normalized Vendoo's copy is not an edit. A listing
-    sent nowhere has nothing to be ahead of.
+    A listing live on a marketplace through Anteroom is measured against the
+    revisions those listings were written from; Update is where its edits go.
+    A differing revision only counts when its content differs too, so a
+    revision that only normalized the same listing is not an edit. A listing
+    live nowhere has nothing to be ahead of.
     """
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
-    from vendoo_studio.services.vendoo_import import parse_notes
-    from vendoo_studio.services.vendoo_watch import SYNCED_REVISION, listings_match
 
     ids = [conv.id for conv in conversations]
     direct = MarketplaceListingRepo(db).live_revisions(ids[0] if len(ids) == 1 else None)
     pairs: dict[str, set[tuple[str, str]]] = {}
     for conv in conversations:
         current = revisions.get(conv.id)
-        if conv.id in direct:
-            sent = direct[conv.id]
-        else:
-            sent = {str(parse_notes(conv.notes).get(SYNCED_REVISION) or "")} - {""}
+        sent = direct.get(conv.id, set())
         differing = {(current, rev) for rev in sent if current and rev != current}
         if differing:
             pairs[conv.id] = differing
@@ -729,16 +585,29 @@ def _unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -
     if unknown:
         bodies = ListingRepo(db).revision_bodies({rev for pair in unknown for rev in pair})
         for current, sent in unknown:
-            _REVISIONS_MATCH[(current, sent)] = listings_match(bodies.get(current), bodies.get(sent))
+            _REVISIONS_MATCH[(current, sent)] = _listings_match(bodies.get(current), bodies.get(sent))
     return {conv_id for conv_id, group in pairs.items() if not all(_REVISIONS_MATCH[pair] for pair in group)}
 
 
-def _relist_pending(notes: dict) -> list[str]:
-    """Marketplaces still owed a relist after Studio's last write to Vendoo."""
-    raw = notes.get("vendooRelistPending")
-    if not isinstance(raw, list):
-        return []
-    return [str(market).strip() for market in raw if str(market).strip()]
+def _listings_match(a: dict | None, b: dict | None) -> bool:
+    """Compare content after normalizing sizes and dropdowns, as revision saves do."""
+    import copy
+    import hashlib
+    import json
+
+    from vendoo_studio.services.listing_generate import align_size_fields
+    from vendoo_studio.services.validation import normalize_listing_dropdowns
+
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    shaped = []
+    for listing in (a, b):
+        listing = copy.deepcopy(listing)
+        align_size_fields(listing)
+        normalize_listing_dropdowns(listing)
+        raw = json.dumps(listing, sort_keys=True, default=str, separators=(",", ":"))
+        shaped.append(hashlib.sha256(raw.encode()).hexdigest())
+    return shaped[0] == shaped[1]
 
 
 def _listing_urls(notes: dict) -> dict[str, str]:
@@ -764,8 +633,6 @@ def _vendoo_dates(notes: dict) -> dict:
         return {str(market): str(stamp) for market, stamp in raw.items() if stamp}
 
     return {
-        "vendoo_form_updated_at": str(notes.get("vendooFormUpdatedAt") or "") or None,
-        "vendoo_relist_pending": _relist_pending(notes),
         "vendoo_created_at": text("created"),
         "vendoo_modified_at": text("modified"),
         "vendoo_listed_at": text("listed"),

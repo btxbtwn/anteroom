@@ -1,5 +1,5 @@
 // A direct List checked against Poshmark's and Depop's own catalogs before anything is written.
-// The category is the id Anteroom stored for each site; Send to Vendoo's
+// The category is the id Anteroom stored for each site; the old Vendoo
 // marketplace_category_ids are never read here. A stored id the live catalog
 // no longer lists is reported so the seller picks again.
 

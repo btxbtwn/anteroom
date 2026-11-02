@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import tempfile
-import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -172,126 +170,8 @@ class ConversationResetTest(unittest.TestCase):
         self.assertEqual(len(hidden["always"]), 1)
         self.assertEqual(hidden["listing"], [])
 
-    def test_reset_keeps_vendoo_binding(self):
-        from vendoo_studio.services.vendoo_import import vendoo_binding
 
-        self.conv.notes = json.dumps({
-            "vendooItemId": "QVzIZuKs",
-            "vendooUrl": "https://web.vendoo.co/app/item/QVzIZuKs",
-            "condition": "Good",
-            "categoryOverride": "Men > Tops",
-        })
-        self.db.commit()
 
-        with photos_dir(self.photos_tmp.name):
-            response = self.client.post(f"/api/conversations/{self.conv.id}/reset")
-
-        self.assertEqual(response.status_code, 200, response.text)
-        body = response.json()
-        self.assertEqual(body["title"], "New Listing")
-        self.assertEqual(body["status"], "draft")
-        binding = vendoo_binding(body["notes"])
-        self.assertEqual(binding["vendooItemId"], "QVzIZuKs")
-        self.assertEqual(binding["vendooUrl"], "https://web.vendoo.co/app/item/QVzIZuKs")
-        notes = json.loads(body["notes"])
-        self.assertNotIn("condition", notes)
-        self.assertNotIn("categoryOverride", notes)
-
-        self.db.expire_all()
-        self.assertEqual(ConversationRepo(self.db).get_photos(self.conv.id), [])
-        self.assertEqual(ConversationRepo(self.db).get_messages(self.conv.id), [])
-        self.assertEqual(self.db.query(Job).filter(Job.conversation_id == self.conv.id).count(), 0)
-        revisions = ListingRepo(self.db).get_revisions(self.conv.id)
-        self.assertEqual(len(revisions), 1)
-        self.assertEqual(revisions[0].listing_json, {})
-        self.assertEqual(revisions[0].source, "reset")
-
-        ensure = self.client.post("/api/jobs/ensure-draft", json={"conversation_id": self.conv.id})
-        self.assertEqual(ensure.status_code, 200, ensure.text)
-        self.assertEqual(ensure.json()["vendoo_item_id"], "QVzIZuKs")
-
-    def test_reset_keep_inputs_reattaches_fields_job_without_chrome_import(self):
-        """Regenerate must not leave the editor looking like a fresh Link."""
-        self.conv.notes = json.dumps({
-            "vendooItemId": "QVzIZuKs",
-            "vendooUrl": "https://web.vendoo.co/app/item/QVzIZuKs",
-        })
-        self.db.commit()
-
-        with photos_dir(self.photos_tmp.name), \
-             patch(
-                 "vendoo_studio.services.vendoo_create.resolve_label_display_names",
-                 new=AsyncMock(side_effect=lambda _job, labels: list(labels)),
-             ):
-            response = self.client.post(
-                f"/api/conversations/{self.conv.id}/reset",
-                json={"keep_inputs": True},
-            )
-
-        self.assertEqual(response.status_code, 200, response.text)
-        self.db.expire_all()
-        jobs = JobRepo(self.db).list_by_conversation(self.conv.id)
-        self.assertEqual(len(jobs), 1)
-        job = jobs[0]
-        self.assertEqual(job.status, "completed")
-        self.assertEqual(job.current_step, "fields_applied")
-        self.assertEqual(job.vendoo_item_id, "QVzIZuKs")
-        self.assertEqual(job.vendoo_url, "https://web.vendoo.co/app/item/QVzIZuKs")
-        # ensure-draft should reuse this row instead of creating another.
-        ensure = self.client.post("/api/jobs/ensure-draft", json={"conversation_id": self.conv.id})
-        self.assertEqual(ensure.status_code, 200, ensure.text)
-        self.assertEqual(ensure.json()["id"], job.id)
-
-    def test_reset_does_not_wait_out_a_silent_chrome_for_label_names(self):
-        """A Chrome that never answers list_labels must not stall Regenerate.
-
-        The label catalog only prettifies carried-over labels, so reset reads
-        the cached catalog and never asks Chrome.
-        """
-        from vendoo_studio.services import vendoo_label_catalog
-
-        vendoo_label_catalog.clear_for_tests()
-        self.conv.notes = json.dumps({
-            "vendooItemId": "QVzIZuKs",
-            "vendooLabels": "0GbMUqtBqPkGDcEyNqYQ",
-        })
-        self.db.commit()
-
-        class SilentChrome:
-            """Connected, accepts the message, never sends a result back."""
-
-            connected = True
-
-            def register_wait(self, request_id: str, job_id: str | None = None):
-                return asyncio.get_running_loop().create_future()
-
-            async def send_message(self, _message) -> bool:
-                return True
-
-            def cancel_wait(self, _request_id: str) -> None:
-                return None
-
-        with photos_dir(self.photos_tmp.name), \
-             patch(
-                 "vendoo_studio.services.browser_bridge._manager",
-                 return_value=SilentChrome(),
-             ), \
-             patch("vendoo_studio.services.vendoo_create.LOOKUP_TIMEOUT_SEC", 0.2):
-            started = time.monotonic()
-            response = self.client.post(
-                f"/api/conversations/{self.conv.id}/reset",
-                json={"keep_inputs": True},
-            )
-            elapsed = time.monotonic() - started
-
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertLess(elapsed, 10.0, "reset waited out the label catalog read")
-        self.assertEqual(response.json()["title"], "New Listing")
-        # The label id survives unresolved rather than blocking the reset.
-        self.assertEqual(
-            json.loads(response.json()["notes"])["vendooLabels"],
-            "0GbMUqtBqPkGDcEyNqYQ",
-        )
 
     def test_reset_keep_inputs_keeps_photos_and_notes(self):
         notes = json.dumps({
@@ -302,11 +182,7 @@ class ConversationResetTest(unittest.TestCase):
         self.conv.notes = notes
         self.db.commit()
 
-        with photos_dir(self.photos_tmp.name), \
-             patch(
-                 "vendoo_studio.services.vendoo_create.resolve_label_display_names",
-                 new=AsyncMock(side_effect=lambda _job, labels: list(labels)),
-             ):
+        with photos_dir(self.photos_tmp.name):
             response = self.client.post(
                 f"/api/conversations/{self.conv.id}/reset",
                 json={"keep_inputs": True},
@@ -326,15 +202,10 @@ class ConversationResetTest(unittest.TestCase):
         self.assertEqual(len(ConversationRepo(self.db).get_photos(self.conv.id)), 1)
         self.assertTrue((Path(self.photos_tmp.name) / "front.jpg").exists())
         self.assertEqual(ConversationRepo(self.db).get_messages(self.conv.id), [])
-        # Regenerate keeps the Vendoo link and reattaches Fields so remount does
-        # not look like a fresh Link (which would open Chrome and re-import).
-        jobs = self.db.query(Job).filter(Job.conversation_id == self.conv.id).all()
-        self.assertEqual(len(jobs), 1)
-        self.assertEqual(jobs[0].status, "completed")
-        self.assertEqual(jobs[0].current_step, "fields_applied")
-        self.assertEqual(jobs[0].vendoo_item_id, "QVzIZuKs")
+        # Regeneration does not create any automation job.
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
         revisions = ListingRepo(self.db).get_revisions(self.conv.id)
-        self.assertEqual([r.listing_json for r in revisions], [{}])
+        self.assertEqual(revisions, [])
 
     def test_reset_keep_inputs_carries_listing_facts_into_item_details(self):
         self.conv.notes = json.dumps({"condition": "Good"})
@@ -358,11 +229,7 @@ class ConversationResetTest(unittest.TestCase):
         )
         self.db.commit()
 
-        with photos_dir(self.photos_tmp.name), \
-             patch(
-                 "vendoo_studio.services.vendoo_create.resolve_label_display_names",
-                 new=AsyncMock(side_effect=lambda _job, labels: list(labels)),
-             ):
+        with photos_dir(self.photos_tmp.name):
             response = self.client.post(
                 f"/api/conversations/{self.conv.id}/reset",
                 json={"keep_inputs": True},

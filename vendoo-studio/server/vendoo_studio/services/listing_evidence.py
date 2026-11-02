@@ -7,8 +7,7 @@ from datetime import UTC
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import dialect_insert
-from vendoo_studio.models.listing_evidence import ListingCorrection, SaleSnapshot
+from vendoo_studio.models.listing_evidence import ListingCorrection
 from vendoo_studio.services.sell_through import _parse_moment
 
 
@@ -17,28 +16,6 @@ def sale_key(sale: dict, dates: dict) -> str:
     if not sold_at:
         return ""
     return f"{str(sale.get('marketplace') or '').lower()}:{sold_at.astimezone(UTC).isoformat()}"
-
-
-def capture_sale_snapshot(db: Session, conv_id: str, item: dict | None, form: dict | None = None) -> None:
-    """Freeze the remote listing at the first observation of each dated sale.
-
-    Observation can happen after the actual sale. Never call it verified
-    at-sale text, or substitute a local unsent draft for the remote listing.
-    """
-    from vendoo_studio.services.vendoo_import import (
-        listing_from_vendoo, vendoo_dates, vendoo_item_sold, vendoo_sale,
-    )
-
-    if not vendoo_item_sold(item, form):
-        return
-    key = sale_key(vendoo_sale(item, form), vendoo_dates(item, form))
-    if not key or db.query(SaleSnapshot.id).filter_by(conversation_id=conv_id, sale_key=key).first():
-        return
-    db.execute(dialect_insert(db)(SaleSnapshot).values(
-        conversation_id=conv_id, sale_key=key,
-        listing=copy.deepcopy(listing_from_vendoo(item, form)),
-        source="vendoo_first_observed_sold",
-    ).on_conflict_do_nothing(index_elements=["conversation_id", "sale_key"]))
 
 
 def explicit_changes(previous: dict, submitted: dict) -> dict:

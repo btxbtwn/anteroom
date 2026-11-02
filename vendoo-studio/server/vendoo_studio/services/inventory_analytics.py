@@ -125,7 +125,7 @@ def inventory_analytics(
     from vendoo_studio.services.ad_spend import list_entries, summarize_ads
     from vendoo_studio.services.sale_events import windows
     from vendoo_studio.services.sales_records import incomplete_sales
-    from vendoo_studio.services.user_settings import vendoo_inventory_synced_at
+
 
     clock = now or datetime.now(UTC)
     if clock.tzinfo is None:
@@ -144,7 +144,6 @@ def inventory_analytics(
             marketplace_profit={row["id"]: row["profit"] for row in payload["marketplaces"]},
             profit=payload["sales"]["profit"],
         ),
-        "last_updated_at": vendoo_inventory_synced_at(),
     }
 
 

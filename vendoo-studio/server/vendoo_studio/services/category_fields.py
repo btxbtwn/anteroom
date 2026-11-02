@@ -110,7 +110,7 @@ def listing_category_ids(listing: dict[str, Any]) -> dict[str, str]:
                 out[str(marketplace).strip().lower()] = text
     paths = listing.get("marketplace_categories")
     if isinstance(paths, dict):
-        from vendoo_studio.services.vendoo_create import tree_leaf
+        from vendoo_studio.services.leaf_schemas import tree_leaf
 
         for marketplace, path in paths.items():
             key = str(marketplace).strip().lower()

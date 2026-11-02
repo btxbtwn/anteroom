@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from vendoo_studio.services.vendoo_categories import category_from_hit, path_parts
-from vendoo_studio.services.vendoo_create import load_schema
+from vendoo_studio.services.leaf_schemas import load_schema
 from vendoo_studio.services.vendoo_item_build import _general_details, _listing_section
 
 log = logging.getLogger("vendoo_studio.native_form")
@@ -39,7 +39,7 @@ def resolve_category(listing: dict[str, Any], marketplace: str) -> None:
             and path_parts(stored.get("displayPath")) == path:
         ids[marketplace] = str(stored["id"])
         return
-    from vendoo_studio.services.vendoo_create import tree_leaf
+    from vendoo_studio.services.leaf_schemas import tree_leaf
 
     leaf = category_from_hit(tree_leaf(marketplace, " > ".join(path)), " > ".join(path))
     specifics = listing.get(f"{marketplace}_specifics")

@@ -17,6 +17,11 @@ branch_labels = None
 depends_on = None
 
 
+# Notes keys the Vendoo sync used to write; this revision is kept self-contained.
+SYNCED_AT = "vendooSyncedAt"
+SYNCED_REVISION = "vendooSyncedRevision"
+
+
 def _epoch_ms(created_at) -> str:
     if isinstance(created_at, str):
         created_at = datetime.fromisoformat(created_at)
@@ -35,7 +40,6 @@ def upgrade() -> None:
     old listing and anything filled in since is ahead of it.
     """
     from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
-    from vendoo_studio.services.vendoo_watch import SYNCED_AT, SYNCED_REVISION
 
     bind = op.get_bind()
     conversations = bind.execute(sa.text(

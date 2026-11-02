@@ -15,14 +15,12 @@ import type {
   PromotionHistory, PromotionMarketplace, PromotionPreview, PromotionPreviewRequest, PromotionResult,
 } from "./promotions";
 import type {
-  SendPreview,
   BackupSnapshot,
   BackupsStatus,
   Conversation,
   ConversationSummary,
   DatabaseReport,
   DeleteConversationResult,
-  FillLogReport,
   Job,
   ListingData,
   ListingNames,
@@ -52,17 +50,11 @@ import type {
   ProviderStatus,
   ProviderTestResult,
   StudioErrorLogEntry,
-  VendooApiLogDetail,
-  VendooApiLogEntry,
   ChatGPTPendingLogin,
   RevisionRestoreResult,
   ValidationResult,
-  VendooBulkImport,
-  VendooLabelSync,
-  VendooLabelConversion,
   SimilarItems,
   SimilarMerge,
-  VendooItemResult,
   MarketplaceForm,
   SuggestionsResponse,
   EtsyNotAllowedResponse,
@@ -180,58 +172,6 @@ export type VersionPlan = {
   | { action: "restore"; snapshot: { name: string; taken_at: string; reason: string; size_bytes: number } }
 );
 
-export interface VendooSyncStatus {
-  checked_at: string | null;
-  conflict: boolean;
-  revision_id: string | null;
-}
-
-export interface BrowserRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface BrowserViewport {
-  width: number;
-  height: number;
-  scroll_x?: number;
-  scroll_y?: number;
-}
-
-export interface BrowserField {
-  marketplace: string;
-  label: string;
-  key: string;
-  selector: string;
-  value: string;
-  filled: boolean;
-  required: boolean;
-  disabled: boolean;
-  is_dropdown: boolean;
-  account_managed: boolean;
-  error: string;
-  options: string[];
-  rect: BrowserRect;
-}
-
-export interface BrowserInputEvent {
-  kind: "mouse" | "touch" | "key" | "text";
-  type?: string;
-  x_ratio?: number;
-  y_ratio?: number;
-  button?: "none" | "left" | "middle" | "right";
-  buttons?: number;
-  click_count?: number;
-  delta_x?: number;
-  delta_y?: number;
-  modifiers?: number;
-  key?: string;
-  code?: string;
-  text?: string;
-}
-
 async function followAssistant(
   path: string,
   body: string | undefined,
@@ -284,9 +224,6 @@ export const api = {
       }),
   },
   catalog: {
-    status: () => request<{running: boolean; complete: boolean; marketplaces: Record<string,
-      {status: string; nodes: number; pending_branches: number; error: string | null}>}>("/catalog/sync"),
-    sync: () => request<{started: boolean}>("/catalog/sync", {method: "POST"}),
     dropdownOptions: () =>
       request<{ forms: Record<string, Record<string, string[]>> }>("/catalog/dropdown-options"),
     searchCategories: (q: string, marketplace: string) =>
@@ -696,48 +633,6 @@ export const api = {
     },
     dismiss: (saleId: string) => request<OkResponse>(`/marketplace-sales/${saleId}/dismiss`, { method: "POST" }),
   },
-  vendooApi: {
-    listingFields: (convId: string) =>
-      request<{ ok: boolean; forms: MarketplaceForm[] }>(
-        `/conversations/${convId}/vendoo-api/fields`,
-      ),
-    create: (convId: string) =>
-      request<{
-        ok: boolean;
-        job_id: string;
-        item_id: string;
-        url: string;
-        unresolved: { marketplace?: string; field?: string; reason?: string }[];
-        unfilled: { marketplace?: string; field?: string; reason?: string }[];
-        diff: unknown[];
-      }>(`/conversations/${convId}/vendoo-api/create`, { method: "POST" }),
-    save: (convId: string) =>
-      request<{ ok: boolean; item_id: string; updated: string[]; relist_needed: string[] }>(
-        `/conversations/${convId}/vendoo-api/save`, { method: "POST" },
-      ),
-    relistDone: (convId: string) =>
-      request<{ ok: boolean }>(
-        `/conversations/${convId}/vendoo-api/relist-done`, { method: "POST" },
-      ),
-    sync: (convId: string, signal?: AbortSignal) =>
-      request<{
-        ok: boolean;
-        action: "pull" | "conflict" | "label" | "none" | "unavailable";
-        reason: string;
-        item_id?: string;
-        revision_id?: string;
-        vendoo_status?: string;
-      }>(
-        `/conversations/${convId}/vendoo-api/sync`, { method: "POST", signal },
-      ),
-    syncStatus: (convId: string) =>
-      request<VendooSyncStatus>(`/conversations/${convId}/vendoo-api/sync`),
-    pull: (convId: string) =>
-      request<{ ok: boolean; item_id: string; revision_id: string }>(
-        `/conversations/${convId}/vendoo-api/pull`, { method: "POST" },
-      ),
-  },
-
   health: () => request<{ status: string; version: string }>("/health"),
 
   status: () =>
@@ -758,31 +653,16 @@ export const api = {
     copyResult: (id: string, requestId: string) => request<Conversation>(`/conversations/${id}/copy-result/${requestId}`),
     copyPreview: (id: string) => request<CopyPreview>(`/conversations/${id}/copy-preview`),
     copy: (id: string, body: CopyListingRequest) => request<Conversation>(`/conversations/${id}/copy`, { method: "POST", body: JSON.stringify(body) }),
-    duplicateVendooLinks: () => request<{
-      vendoo_item_id: string;
-      vendoo_url: string;
-      listings: { id: string; title: string }[];
-    }[]>("/conversations/vendoo-link-duplicates"),
     list: () => request<ConversationSummary[]>("/conversations"),
     get: (id: string) => request<Conversation>(`/conversations/${id}`),
     create: (body?: { title?: string; notes?: string; box_id?: string | null }) =>
       request<Conversation>("/conversations", { method: "POST", body: JSON.stringify(body || {}) }),
-    // Status is not here on purpose: it follows the bound Vendoo item.
     update: (id: string, body: { title?: string; notes?: string; box_id?: string | null }) =>
       request<Conversation>(`/conversations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     settle: (id: string) =>
       request<Conversation>(`/conversations/${id}/settle`, { method: "POST" }),
     unsettle: (id: string) =>
       request<Conversation>(`/conversations/${id}/unsettle`, { method: "POST" }),
-    linkVendoo: (id: string, urlOrId: string) =>
-      request<{
-        conversation: Conversation;
-        vendoo_item_id: string;
-        vendoo_url: string;
-      }>(`/conversations/${id}/vendoo-link`, {
-        method: "POST",
-        body: JSON.stringify({ url_or_id: urlOrId }),
-      }),
     stop: (id: string) =>
       request<{ ok: boolean }>(`/conversations/${id}/stop`, { method: "POST" }),
     activity: (id: string) => request<ConversationActivity>(`/conversations/${id}/activity`),
@@ -860,17 +740,6 @@ export const api = {
     }),
   },
 
-  imports: {
-    bulkStatus: () => request<VendooBulkImport>("/imports/vendoo/bulk"),
-    startBulk: () => request<VendooBulkImport>("/imports/vendoo/bulk", { method: "POST" }),
-    cancelBulk: () =>
-      request<VendooBulkImport>("/imports/vendoo/bulk/cancel", { method: "POST" }),
-    syncLabels: () => request<VendooLabelSync>("/imports/vendoo/labels", { method: "POST" }),
-    labelSyncStatus: () => request<VendooLabelSync>("/imports/vendoo/labels"),
-    labelNames: () => request<VendooLabelConversion>("/imports/vendoo/label-names"),
-    convertLabelNames: () => request<VendooLabelConversion>("/imports/vendoo/label-names", { method: "POST" }),
-  },
-
   similarItems: {
     list: () => request<SimilarItems>("/similar-items"),
     dismiss: (firstId: string, secondId: string) =>
@@ -881,6 +750,9 @@ export const api = {
 
   listings: {
     get: (convId: string) => request<ListingResponse>(`/conversations/${convId}/listing`),
+    /** The marketplace forms for this listing's category (the eBay and Etsy editors read these). */
+    fields: (convId: string) =>
+      request<{ ok: boolean; forms: MarketplaceForm[] }>(`/conversations/${convId}/vendoo-api/fields`),
     update: (convId: string, listing: ListingData, expectedRevisionId: string) =>
       request<ListingUpdateResult>(`/conversations/${convId}/listing`, {
         method: "PUT",
@@ -940,7 +812,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ conversation_ids: conversationIds }),
       }),
-    /** Save confirmed prices as Studio revisions. Never sends to Vendoo. */
+    /** Save confirmed prices as Studio revisions. */
     applyMarkdowns: (drops: MarkdownDropRequest[]) =>
       requestWithTimeout<MarkdownApplyResult>("/price-drop/batch", {
         method: "POST",
@@ -949,15 +821,6 @@ export const api = {
   },
 
   jobs: {
-    send: async (conversationId: string) => {
-      // The button click approves the send. Freeze its preparation before queueing.
-      const prepared = await request<SendPreview>("/jobs/send-preview", {
-        method: "POST", body: JSON.stringify({ conversation_id: conversationId }),
-      });
-      return request<Job>("/jobs/send", {
-        method: "POST", body: JSON.stringify({ conversation_id: conversationId, review_id: prepared.review_id }),
-      });
-    },
     queue: () => request<{
       work: { conversation_id: string; title: string; detail: string }[];
       jobs: Job[];
@@ -965,76 +828,6 @@ export const api = {
     list: (conversationId?: string) => {
       const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : "";
       return request<Job[]>(`/jobs${query}`);
-    },
-    ensureDraft: (conversationId: string) =>
-      request<Job>("/jobs/ensure-draft", {
-        method: "POST",
-        body: JSON.stringify({ conversation_id: conversationId }),
-      }),
-    get: (id: string) => request<Job>(`/jobs/${id}`),
-    importDraft: (id: string) =>
-      request<{ ok: boolean; listing_title: string; photo_count: number; photo_warnings: string[] }>(
-        `/jobs/${id}/import-draft`,
-        { method: "POST" },
-      ),
-    fillLog: (id: string) => request<FillLogReport>(`/jobs/${id}/fill-log`),
-    marketplaceStatuses: (ids: string[]) =>
-      request<Record<string, Record<string, unknown>>>(
-        `/jobs/marketplace-statuses?job_ids=${encodeURIComponent(ids.join(","))}`,
-      ),
-    vendooItem: (
-      id: string,
-      opts?: { refresh?: boolean; cacheOnly?: boolean; resolvePhotos?: boolean; signal?: AbortSignal },
-    ) => {
-      const params = new URLSearchParams();
-      if (opts?.refresh) params.set("refresh", "true");
-      if (opts?.cacheOnly) params.set("cache_only", "true");
-      if (opts?.resolvePhotos) params.set("resolve_photos", "true");
-      const query = params.toString();
-      return request<VendooItemResult>(`/jobs/${id}/vendoo-item${query ? `?${query}` : ""}`, { method: "POST", signal: opts?.signal });
-    },
-    resolveCategory: (id: string, query?: string) =>
-      request<{ ok: boolean; query?: string; path?: string; matches?: { text?: string; path?: string; score?: number }[]; error?: string }>(
-        `/jobs/${id}/resolve-category`,
-        {
-          method: "POST",
-          body: JSON.stringify({ query: query || null }),
-        },
-      ),
-    open: (id: string) =>
-      requestWithTimeout<{ ok: boolean; url: string; via: "extension" | "chrome" }>(
-        `/jobs/${id}/open`, { method: "POST" },
-        "Opening the listing took too long. Try Open listing again; you do not need to restart Anteroom.",
-        25000,
-      ),
-    browser: {
-      open: (id: string) =>
-        request<{ ok: boolean; controller: string; input?: boolean; warning?: string }>(`/jobs/${id}/browser/open`, {
-          method: "POST",
-          body: JSON.stringify({}),
-        }),
-      close: (id: string) => request<{ ok: boolean }>(`/jobs/${id}/browser/close`, { method: "POST" }),
-      input: (id: string, events: BrowserInputEvent[]) =>
-        request<{ sent: boolean }>(`/jobs/${id}/browser/input`, {
-          method: "POST",
-          body: JSON.stringify({ events }),
-        }),
-      viewport: (id: string, viewport: { width: number; height: number; scale: number }) =>
-        request<{ sent: boolean }>(`/jobs/${id}/browser/viewport`, {
-          method: "POST",
-          body: JSON.stringify(viewport),
-        }),
-      navigate: (id: string, direction: "back" | "forward") =>
-        request<{ ok: boolean }>(`/jobs/${id}/browser/navigate`, {
-          method: "POST", body: JSON.stringify({ direction }),
-        }),
-      pick: (id: string, xRatio: number, yRatio: number) =>
-        request<{ ok: boolean; viewport: BrowserViewport; field: BrowserField | null; element: { text: string; danger: boolean } | null }>(
-          `/jobs/${id}/browser/pick`,
-          { method: "POST", body: JSON.stringify({ x_ratio: xRatio, y_ratio: yRatio }) },
-        ),
-      snapshot: (id: string) =>
-        request<{ ok: boolean; url: string; viewport: BrowserViewport; fields: BrowserField[] }>(`/jobs/${id}/browser/snapshot`),
     },
     cancel: (id: string) => request<Job>(`/jobs/${id}/cancel`, { method: "POST" }),
   },
@@ -1295,7 +1088,6 @@ export const api = {
         theme: "dark" | "light" | "system";
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
-        vendoo_enabled: boolean;
         stale_listing_days: number;
         label_colors: Record<string, LabelColor>;
       }>("/settings/ui"),
@@ -1308,7 +1100,6 @@ export const api = {
       restore_labels?: string[];
       forget_label?: string;
       model_favorites?: ModelFavorite[];
-      vendoo_enabled?: boolean;
       stale_listing_days?: number;
       label_colors?: Record<string, LabelColor>;
     }) =>
@@ -1320,7 +1111,6 @@ export const api = {
         theme: "dark" | "light" | "system";
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
-        vendoo_enabled: boolean;
         stale_listing_days: number;
         label_colors: Record<string, LabelColor>;
       }>("/settings/ui", { method: "PUT", body: JSON.stringify(body) }),
@@ -1381,9 +1171,6 @@ export const api = {
         error: string | null;
         funnel: boolean;
       }>("/settings/tailscale/disable", { method: "POST" }),
-    vendooApiLogs: () => request<{ entries: VendooApiLogEntry[] }>("/settings/vendoo-api-logs"),
-    vendooApiLog: (id: number) => request<VendooApiLogDetail>(`/settings/vendoo-api-logs/${id}`),
-    clearVendooApiLogs: () => request<{ ok: boolean }>("/settings/vendoo-api-logs", { method: "DELETE" }),
     errorLogs: () => request<{ entries: StudioErrorLogEntry[] }>("/settings/error-logs"),
     clearErrorLogs: () => request<{ ok: boolean }>("/settings/error-logs", { method: "DELETE" }),
   },

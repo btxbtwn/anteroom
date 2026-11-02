@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The General dropdown lists the desktop editor offers (Vendoo's reference
+/// The General dropdown lists the desktop editor offers (the skill's reference
 /// lists from `/api/catalog/dropdown-options`), keyed by listing field.
 struct GeneralOptions: Equatable, Sendable {
     var condition: [String] = []
@@ -8,7 +8,7 @@ struct GeneralOptions: Equatable, Sendable {
     var secondaryColor: [String] = []
     var size: [String] = []
 
-    /// `forms.vendoo` names size `usSize`; the listing calls it `size`.
+    /// The API's `forms.vendoo` (General) list names size `usSize`; the listing calls it `size`.
     init(vendoo: [String: [String]]) {
         condition = vendoo["condition"] ?? []
         primaryColor = vendoo["primaryColor"] ?? []

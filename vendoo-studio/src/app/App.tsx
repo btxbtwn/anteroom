@@ -2,8 +2,7 @@ import { useWorkspaceRuntime } from "./runtime";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useReducer, type CSSProperties, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, jobsPollMs, pollMs } from "../api/polling";
-import type { BrowserField } from "../api/client";
+import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, pollMs } from "../api/polling";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
 import { isChatToggleShortcut, ListingChatPopup, type ListingChatStatus } from "../components/ListingChatPopup";
 import { ListingSession } from "../components/listingSession";
@@ -29,7 +28,6 @@ import { workspaceCrumbs, type WorkspaceView } from "../components/workspaceCrum
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
-import { useVendooEnabled } from "../vendooMode";
 import { toastManager } from "../components/ui/toast";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
@@ -56,9 +54,6 @@ import { loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode } fro
 import { prefetchListingReads } from "../api/navigationQueries";
 
 const ChatPanel = lazy(loadChatPanel);
-const BrowserPreview = lazy(() =>
-  import("../components/BrowserPreview").then((module) => ({ default: module.BrowserPreview })),
-);
 const ListingEditor = lazy(loadListingEditor);
 const SettingsPage = lazy(pageLoaders.settings);
 const AnalyticsPage = lazy(pageLoaders.analytics);
@@ -101,7 +96,6 @@ function useMobileLayout() {
 export function App() {
   const runtime = useWorkspaceRuntime();
   const queryClient = useQueryClient();
-  const vendooOn = useVendooEnabled();
   const isMobile = useMobileLayout();
   const [openListingState, dispatchOpenListing] = useReducer(
     openListingReducer,
@@ -120,18 +114,14 @@ export function App() {
   const [pickedThreadId, setPickedThreadId] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(runtime.hosted ? "providers" : DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
-  const [mobilePane, setMobilePane] = useState<"workspace" | "editor" | "browser">(runtime.hosted ? "editor" : "workspace");
+  const [mobilePane, setMobilePane] = useState<"workspace" | "editor">(runtime.hosted ? "editor" : "workspace");
   // On mobile the listings start open only when a listing link opened the app; home is the assistant.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => listingFromUrl && window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
   const [mobileThreadsOpen, setMobileThreadsOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [listingQuery, setListingQuery] = useState("");
   const [setupGuideOpen, setSetupGuideOpen] = useState(setupGuideAutoOpen === true);
-  const [browserJobId, setBrowserJobId] = useState<string | null>(null);
-  const [browserFields, setBrowserFields] = useState<BrowserField[]>([]);
-  const [browserExpanded, setBrowserExpanded] = useState(false);
   const [pendingBulkGroups, setPendingBulkGroups] = useState<PhotoFolderGroup[] | null>(null);
-  const wasBrowserOpen = useRef(false);
   const mainPanelRef = useRef<HTMLElement>(null);
   const [sidebarWidth, setSidebarWidth] = usePanelWidth("sidebar");
   const [threadsWidth, setThreadsWidth] = usePanelWidth("threads");
@@ -155,8 +145,7 @@ export function App() {
   });
   useReloadStaleFrontend(status?.version);
   // Re-reading the whole inventory is the heaviest request Studio makes, so it
-  // only runs fast while a Vendoo send is moving rows. Studio's own edits
-  // invalidate it; the slow pass picks up Vendoo's background syncs.
+  // only runs fast while a job is moving rows. Studio's own edits invalidate it.
   const { data: conversations } = useQuery({
     queryKey: ["conversations"],
     queryFn: api.conversations.list,
@@ -166,11 +155,6 @@ export function App() {
           ? BUSY_POLL_MS
           : IDLE_POLL_MS,
       ),
-  });
-  const { data: jobs } = useQuery({
-    queryKey: selectedConvId ? ["jobs", selectedConvId] : ["jobs"],
-    queryFn: () => api.jobs.list(selectedConvId || undefined),
-    refetchInterval: (query) => jobsPollMs(query.state.data),
   });
   const assistantThreads = useQuery({
     queryKey: ["assistant", "threads"],
@@ -226,52 +210,24 @@ export function App() {
     if (!previous) return;
     for (const job of queue.data.jobs) {
       if (!ACTIVE_JOB_STATUSES.has(previous.get(job.id) || "") || ACTIVE_JOB_STATUSES.has(job.status)) continue;
-      for (const key of ["jobs", "conversations", "conversation", "listing", "listing-fields", "fill-log", "vendoo-item"]) {
+      for (const key of ["jobs", "conversations", "conversation", "listing", "listing-fields", "fill-log"]) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
       if (job.status === "completed" || job.status === "failed") {
         toastManager.add({
           type: job.status === "failed" ? "error" : "success",
           title: job.status === "failed"
-            ? (vendooOn ? "Vendoo send failed" : "Send failed")
-            : (vendooOn ? "Vendoo draft saved" : "Listing saved"),
+            ? "Send failed"
+            : "Listing saved",
           description: job.last_error || job.listing_title,
         });
       }
     }
-  }, [queue.data, queryClient, vendooOn]);
-
-  // Bound listings can change tab in Vendoo while the sidebar is open. A quiet
-  // inventory pass refreshes draft/active/sold without importing photos — on
-  // focus and whenever Chrome reconnects. Server debounce stops focus spam.
-  const extensionConnected = Boolean(status?.extension_connected);
-  useEffect(() => {
-    if (!extensionConnected || !vendooOn) return undefined;
-    const kick = () => {
-      void api.imports.syncLabels().catch(() => {
-        /* Chrome may still be pairing; next focus retries. */
-      });
-    };
-    kick();
-    const onFocus = () => kick();
-    const onVisible = () => {
-      if (document.visibilityState === "visible") kick();
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [extensionConnected, vendooOn]);
+  }, [queue.data, queryClient]);
 
   const providerConfigured = Boolean(status?.provider_configured);
   const needsSetup = !runtime.hosted && (!status || !status.provider_configured || !status.extension_connected);
   const createListingTitle = "New listing";
-  const listingJob = jobs?.find((job) => job.conversation_id === selectedConvId && job.status !== "cancelled");
-  const automationRunning = ACTIVE_JOB_STATUSES.has(String(listingJob?.status));
-  // Sends run in the background; the seller opens the browser explicitly.
-  const browserOpen = vendooOn && Boolean(browserJobId && listingJob?.id === browserJobId);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -413,64 +369,6 @@ export function App() {
     setSettingsTargetId(item.targetId || item.id);
     closeMobileSidebar();
   };
-
-  useEffect(() => {
-    if (wasBrowserOpen.current && !browserOpen && mobilePane === "browser") {
-      setMobilePane(runtime.hosted ? "editor" : "workspace");
-    }
-    wasBrowserOpen.current = browserOpen;
-  }, [browserOpen, mobilePane, runtime.hosted]);
-
-  const openBrowser = useMutation({
-    mutationFn: (jobId: string) => api.jobs.browser.open(jobId),
-    onMutate: (jobId: string) => {
-      setBrowserJobId(jobId);
-      setMobilePane("browser");
-    },
-    onSuccess: (result) => {
-      if (result.warning) {
-        toastManager.add({ type: "error", title: "Browser is view-only", description: result.warning });
-      }
-    },
-    onError: (err: Error, jobId: string) => {
-      setBrowserJobId((current) => (current === jobId ? null : current));
-      toastManager.add({
-        type: "error",
-        title: vendooOn ? "Could not open the Vendoo draft" : "Could not open the draft",
-        description: err.message,
-      });
-    },
-  });
-
-  const closeBrowser = () => {
-    const jobId = browserJobId;
-    setBrowserJobId(null);
-    setBrowserFields([]);
-    setBrowserExpanded(false);
-    if (jobId) void api.jobs.browser.close(jobId).catch(() => {});
-  };
-
-  useEffect(() => {
-    // A new Send replaces the listing job. Release the old draft tab.
-    if (browserJobId && listingJob?.id && listingJob.id !== browserJobId) {
-      setBrowserJobId(null);
-      setBrowserFields([]);
-      void api.jobs.browser.close(browserJobId).catch(() => {});
-    }
-  }, [browserJobId, listingJob?.id]);
-
-  const browserJobRef = useRef<string | null>(null);
-  browserJobRef.current = browserJobId;
-  useEffect(() => () => {
-    // Leaving a listing hands its Chrome tab back to the background window.
-    const jobId = browserJobRef.current;
-    if (jobId) {
-      setBrowserJobId(null);
-      setBrowserFields([]);
-      void api.jobs.browser.close(jobId).catch(() => {});
-    }
-    setBrowserExpanded(false);
-  }, [selectedConvId]);
 
   useEffect(() => {
     if (!isMobile) setMobileSidebarOpen(false);
@@ -662,14 +560,6 @@ export function App() {
     },
   });
 
-  const cancelJob = useMutation({
-    mutationFn: (jobId: string) => api.jobs.cancel(jobId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  });
-
   const { mutate: deleteConversation } = useMutation({
     mutationFn: (convId: string) => api.conversations.delete(convId),
     onSuccess: (_data, convId) => {
@@ -691,8 +581,6 @@ export function App() {
         convId={listing.id}
         queuedMessage={listing.queuedMessage}
         onQueuedMessageConsumed={() => dispatchOpenListing({ type: "message", id: listing.id, value: null })}
-        browser={browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
-        onBrowserFieldsChange={setBrowserFields}
         onStatusChange={setChatStatus}
       />
     </Suspense>
@@ -703,8 +591,6 @@ export function App() {
         convId={listing.id}
         reviewTab={listing.reviewTab}
         onReviewTabChange={(value) => dispatchOpenListing({ type: "review", id: listing.id, value })}
-        onOpenBrowser={(jobId) => openBrowser.mutate(jobId)}
-        browserOpen={browserOpen}
         onAskChat={(text) => {
           dispatchOpenListing({ type: "message", id: listing.id, value: text });
           setMobilePane(runtime.hosted ? "editor" : "workspace");
@@ -839,17 +725,6 @@ export function App() {
                 >
                   Listing
                 </button>
-                {browserOpen ? (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={mobilePane === "browser"}
-                    className={mobilePane === "browser" ? "selected" : ""}
-                    onClick={() => setMobilePane("browser")}
-                  >
-                    Browser
-                  </button>
-                ) : null}
               </div>
             ) : null}
           </header>
@@ -926,29 +801,7 @@ export function App() {
                 </Empty>
               )}
               {selectedConvId && (
-                <div hidden={activeView !== "listings"} className={`listing-workspace${browserOpen && browserExpanded ? " is-browser-expanded" : ""}`}>
-                  {browserOpen && (
-                    <Suspense fallback={pageLoading}>
-                      <BrowserPreview
-                        jobId={listingJob?.id ?? null}
-                        step={listingJob?.current_step}
-                        status={listingJob?.status}
-                        vendooItemId={listingJob?.vendoo_item_id}
-                        vendooUrl={listingJob?.vendoo_url}
-                        cancelling={cancelJob.isPending}
-                        onCancel={listingJob?.id ? () => cancelJob.mutate(listingJob.id) : undefined}
-                        interactive={browserOpen}
-                        mobile={isMobile}
-                        automationRunning={automationRunning}
-                        onClose={closeBrowser}
-                        expanded={browserExpanded}
-                        onToggleExpanded={isMobile ? undefined : () => setBrowserExpanded((value) => !value)}
-                        selected={browserFields}
-                        onSelectedChange={setBrowserFields}
-                        onGoToChat={isMobile ? () => setMobilePane("workspace") : undefined}
-                      />
-                    </Suspense>
-                  )}
+                <div hidden={activeView !== "listings"} className="listing-workspace">
                   {openListingState && (
                     <div className="listing-workspace-main listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>
                       <ListingSession active={activeView === "listings"}>

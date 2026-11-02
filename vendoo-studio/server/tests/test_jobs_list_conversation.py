@@ -42,7 +42,7 @@ class JobsListConversationTest(unittest.TestCase):
             conv_id=self.keep.id,
             approved_revision_id=keep_rev.id,
             listing_snapshot={"title": "Keep"},
-            vendoo_item_id="keep-draft",
+
             status="completed",
             current_step="fields_applied",
         )
@@ -70,7 +70,6 @@ class JobsListConversationTest(unittest.TestCase):
         payload = response.json()
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["id"], self.keep_job.id)
-        self.assertEqual(payload[0]["vendoo_item_id"], "keep-draft")
 
     def test_conversation_filter_unknown_conversation_404(self):
         response = self.client.get("/api/jobs?conversation_id=missing")
@@ -108,6 +107,3 @@ class JobsListConversationTest(unittest.TestCase):
         self.assertEqual(detail.status_code, 200, detail.text)
         self.assertEqual(summary.status_code, 200, summary.text)
         self.assertEqual(summary.json()[0], detail.json())
-        self.assertEqual(summary.json()[0]["send_progress"], {"stage": "new"})
-        self.assertEqual(summary.json()[0]["mode"], "schema_probe")
-        self.assertEqual(summary.json()[0]["blocker_fields"][0]["field"], "Size")

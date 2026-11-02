@@ -43,32 +43,12 @@ describe("Listing action deadlines", () => {
     vi.useRealTimers();
   });
 
-  it("aborts a stalled request and allows the next attempt to succeed", async () => {
-    vi.useFakeTimers();
-    let signal: AbortSignal | undefined;
-    const fetch = vi.fn().mockImplementationOnce((_url: string, options: RequestInit) => {
-      signal = options.signal as AbortSignal;
-      return new Promise((_resolve, reject) => {
-        signal!.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
-      });
-    }).mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, url: "https://web.vendoo.co/app/item/item1", via: "chrome" })));
-    vi.stubGlobal("fetch", fetch);
-
-    const first = expect(api.jobs.open("job1")).rejects.toThrow("you do not need to restart Anteroom");
-    await vi.advanceTimersByTimeAsync(25000);
-    await first;
-    expect(signal?.aborted).toBe(true);
-    await expect(api.jobs.open("job1")).resolves.toMatchObject({ ok: true, via: "chrome" });
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
   it("preserves server errors and clears the deadline", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ detail: "No Vendoo draft is available yet." }), { status: 400 },
+      JSON.stringify({ detail: "This listing is busy." }), { status: 409 },
     )));
-    await expect(api.jobs.open("job1")).rejects.toThrow("No Vendoo draft is available yet.");
+    await expect(api.conversations.reset("listing1", { keepInputs: true })).rejects.toThrow("This listing is busy.");
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -88,44 +68,6 @@ describe("Listing action deadlines", () => {
     await failure;
     expect(fetch).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
-  });
-});
-
-describe("Send to Vendoo", () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("prepares and queues the clicked send without another approval", async () => {
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ review_id: "prepared-1" })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "job-1", status: "queued" })));
-    vi.stubGlobal("fetch", fetch);
-
-    await expect(api.jobs.send("listing-1")).resolves.toMatchObject({ id: "job-1", status: "queued" });
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(fetch.mock.calls[0][0]).toContain("/jobs/send-preview");
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ conversation_id: "listing-1" });
-    expect(fetch.mock.calls[1][0]).toContain("/jobs/send");
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ conversation_id: "listing-1", review_id: "prepared-1" });
-  });
-
-  it("does not enqueue when preparing the draft fails", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ detail: "Chrome disconnected" }), { status: 502 },
-    ));
-    vi.stubGlobal("fetch", fetch);
-
-    await expect(api.jobs.send("listing-1")).rejects.toThrow("Chrome disconnected");
-    expect(fetch).toHaveBeenCalledOnce();
-  });
-
-  it("surfaces a changed listing without retrying or starting another send", async () => {
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ review_id: "prepared-1" })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "This listing changed" }), { status: 409 }));
-    vi.stubGlobal("fetch", fetch);
-
-    await expect(api.jobs.send("listing-1")).rejects.toThrow("This listing changed");
-    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -79,7 +79,6 @@ describe("mergeDraftItem", () => {
 describe("labels", () => {
   it("names known and unknown marketplaces", () => {
     expect(marketplaceLabel("ebay")).toBe("eBay");
-    expect(marketplaceLabel("grailed")).toBe("Grailed");
     expect(marketplaceLabel("vinted")).toBe("Vinted");
   });
 

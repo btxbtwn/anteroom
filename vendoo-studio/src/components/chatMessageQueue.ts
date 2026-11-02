@@ -2,33 +2,13 @@
 export type QueuedChatMessage = {
   id: string;
   text: string;
-  /** Vendoo browser job the snapped fields belong to. */
-  browserJobId?: string;
-  /** Snapshot of browser fields pointed at when the user queued. */
-  browserFields?: Array<{
-    marketplace: string;
-    label: string;
-    value: string;
-    key?: string;
-    filled?: boolean;
-    account_managed?: boolean;
-  }>;
   createdAt: string;
 };
 
-export function newQueuedChatMessage(
-  text: string,
-  opts?: {
-    browserJobId?: string;
-    browserFields?: QueuedChatMessage["browserFields"];
-  },
-): QueuedChatMessage {
-  const browserFields = opts?.browserFields;
+export function newQueuedChatMessage(text: string): QueuedChatMessage {
   return {
     id: crypto.randomUUID(),
     text,
-    ...(opts?.browserJobId ? { browserJobId: opts.browserJobId } : {}),
-    ...(browserFields?.length ? { browserFields } : {}),
     createdAt: new Date().toISOString(),
   };
 }

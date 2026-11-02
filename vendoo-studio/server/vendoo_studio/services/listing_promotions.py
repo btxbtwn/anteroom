@@ -38,7 +38,7 @@ SUPPORTED: dict[str, frozenset[str]] = {
     "depop": frozenset({"offer"}),
 }
 # Built against fakes; the signed-in web client's request has not been captured
-# yet (docs/vendoo-feature-parity.md, gap 4). Nothing is sent while listed here.
+# yet (docs/direct-form-parity.md, "Mercari and Depop offer requests"). Nothing is sent while listed here.
 AWAITING_CAPTURE: dict[str, frozenset[str]] = {}
 # Marketplaces whose offers carry a seller shipping discount the seller picks.
 SHIPPING_DISCOUNTS = frozenset({"poshmark"})
@@ -304,7 +304,6 @@ def _choose_shipping(row: ListingPromotion, shipping_discount_id: str | None) ->
 async def perform(db: Session, promotion_id: str, shipping_discount_id: str | None = None, *, gap_ms: int | None = None,
                   new_like_at: datetime | None = None) -> dict:
     """Send one reviewed row, once. The caller has the seller's explicit confirmation or enabled automation."""
-    from vendoo_studio.services.extension_connection import schedule_advance_job_queue
 
     row = _get(db, promotion_id)
     if row.state != "preview":
@@ -387,7 +386,6 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
         raise
     finally:
         release_api_job(job.id)
-        schedule_advance_job_queue()
     return {**out(row), "error_code": error_code, "stop": error_code in STOP_CODES}
 
 

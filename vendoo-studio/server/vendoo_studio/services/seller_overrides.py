@@ -16,7 +16,8 @@ from typing import Any
 SELLER_FIELDS = "seller_fields"
 
 MARKETPLACES = ("ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild")
-FORM_MARKETPLACES = (*MARKETPLACES, "grailed")
+FORM_MARKETPLACES = MARKETPLACES
+
 
 # Shared General fields a marketplace form shows until that form edits them.
 # Size is handled beside these: equality is the size propagation would write

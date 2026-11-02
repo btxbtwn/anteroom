@@ -141,13 +141,14 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
             "options_source": "marketplace", "on_form": True,
         })
 
-    def test_the_generation_prompt_names_live_fields_and_keeps_vendoo_names(self):
+    def test_the_generation_prompt_names_only_direct_marketplace_fields(self):
         listing = {"direct_category_ids": {"ebay": "15687", "ebay_path": "Clothing > T-Shirts"}}
         rows = [{"name": "Sleeve Length", "required": True, "values": [{"label": "Short"}]}]
         with patch("vendoo_studio.services.category_fields.load_rows", return_value=rows):
             text = live_fields_prompt(listing)
         self.assertIn("Sleeve Length (required)", text)
-        self.assertIn("Send to Vendoo reads those", text)
+        self.assertIn("Use each marketplace's exact field names and dropdown choices", text)
+        self.assertNotIn("Vendoo", text)
         self.assertIn("Fill these under ebay_specifics using", text)
 
     async def test_only_the_tabs_own_ebay_category_reads_its_live_fields(self):

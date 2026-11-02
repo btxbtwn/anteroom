@@ -4,7 +4,6 @@ import json
 import subprocess
 import unittest
 from datetime import timedelta
-from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -17,9 +16,7 @@ from vendoo_studio.models.fill_log import FillLogEntry
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services.job_metrics import fill_success_stats, job_timing
-from extension_sources import background_source
 
-EXTENSION = Path(__file__).resolve().parents[3] / "vendoo-extension"
 
 
 def _node(script: str) -> dict:
@@ -35,7 +32,7 @@ class _DbTest(unittest.TestCase):
         revision = listing_persistence.save_revision(self.db, self.conv.id, {"title": "Tee"}, source="model")
         self.job = JobRepo(self.db).create(
             conv_id=self.conv.id, approved_revision_id=revision.id,
-            listing_snapshot={"title": "Tee"}, status="completed", vendoo_item_id="item-1",
+            listing_snapshot={"title": "Tee"}, status="completed",
         )
 
 
@@ -71,78 +68,3 @@ class JobMetricsTest(_DbTest):
         self.assertEqual(stats["fields"][0]["field"], "Sleeve length")
         self.assertEqual(stats["fields"][0]["success_rate"], 0.5)
         self.assertEqual(stats["by_marketplace"]["ebay"]["success_rate"], 1.0)
-
-
-class ExtensionWaitTest(unittest.TestCase):
-    def test_wait_until_returns_early_and_honors_ceiling(self):
-        source = (EXTENSION / "content-scripts" / "vendoo.js").read_text()
-        helpers = source[source.index("  const POLL_MS"):source.index("  function previewValue")]
-        script = """
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-let options = [];
-const listOpenDropdownOptions = () => options;
-""" + helpers + """
-(async () => {
-  let ready = false;
-  setTimeout(() => { ready = true; }, 40);
-  let start = Date.now();
-  const early = await waitUntil(() => ready, 1000);
-  const earlyMs = Date.now() - start;
-  start = Date.now();
-  const timeout = await waitUntil(() => false, 80);
-  const timeoutMs = Date.now() - start;
-  setTimeout(() => { options = [{text: 'Small'}, {text: 'Medium'}]; }, 30);
-  start = Date.now();
-  const settled = await waitForMenuSettled(() => null, 2000);
-  const settledMs = Date.now() - start;
-  console.log(JSON.stringify({early, earlyMs, timeout, timeoutMs, settled, settledMs}));
-})();
-"""
-        result = _node(script)
-        self.assertTrue(result["early"])
-        self.assertLess(result["earlyMs"], 400)
-        self.assertIsNone(result["timeout"])
-        self.assertGreaterEqual(result["timeoutMs"], 75)
-        self.assertTrue(result["settled"])
-        self.assertLess(result["settledMs"], 1000)
-
-
-class ExtensionSkipTest(unittest.TestCase):
-    def test_send_steps_skip_matching_marketplaces_and_unchanged_saves(self):
-        source = background_source()
-        build = source[source.index("function buildJobSteps"):source.index("function sleep(ms)")]
-        fill = source[source.index("// True when a fill log shows any control was written"):source.index("async function auditMarketplace")]
-        script = """
-const log = () => {};
-const durableItemId = (id) => id;
-const openVendooListing = 1, waitForContentScript = 1, checkDraftSafety = 1, uploadPhotos = 1;
-const clearGeneral = 1, fillGeneral = 1, saveGeneral = 1, auditGeneral = 1, discoverSchema = 1;
-const clearMarketplace = 1, auditMarketplace = 1, auditAllMarketplaces = 1, selectGeneralCategoryOnly = 1;
-const sent = [];
-const sendToVendoo = async (job, command) => {
-  sent.push(command.type);
-  if (command.type === 'FILL_MARKETPLACE') {
-    return {ok: true, fill_log: {entries: command.platform === 'etsy'
-      ? [{status: 'filled', reason: 'Already set'}, {status: 'skipped'}]
-      : [{status: 'filled', reason: ''}]}};
-  }
-  return {ok: true};
-};
-""" + build + fill + """
-(async () => {
-  const job = {vendoo_item_id: 'item-1', options: {platforms: ['ebay', 'etsy', 'depop'], skipPlatforms: ['ebay'],
-    reuseExistingItem: true, skipDiscoverSchema: true}};
-  const steps = buildJobSteps(job).map((step) => step.step);
-  await fillMarketplace(job, 'etsy');
-  await fillMarketplace(job, 'depop');
-  const etsySave = await saveMarketplace(job, 'etsy');
-  const depopSave = await saveMarketplace(job, 'depop');
-  console.log(JSON.stringify({steps, etsySave, depopSave, sent}));
-})();
-"""
-        result = _node(script)
-        self.assertNotIn("filling_ebay", result["steps"])
-        self.assertIn("filling_etsy", result["steps"])
-        self.assertTrue(result["etsySave"]["skipped"])
-        self.assertNotIn("skipped", result["depopSave"])
-        self.assertEqual(result["sent"].count("SAVE_MARKETPLACE"), 1)

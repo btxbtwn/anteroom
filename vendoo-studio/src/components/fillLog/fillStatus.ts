@@ -4,8 +4,6 @@ import { isAccountManagedField } from "./fieldKeys";
 const STATUS_ORDER = ["invalid", "failed", "not_found", "uncertain", "new", "skipped", "not_applicable", "filled"];
 export const FILLABLE_STATUSES = new Set(["invalid", "failed", "not_found", "uncertain", "new", "skipped"]);
 
-/** Real Apply/Send failures only — not skipped-empty or already-correct controls. */
-export const FILL_FAILURE_STATUSES = new Set(["invalid", "failed", "not_found", "uncertain"]);
 
 function isAlreadySetEntry(entry: { status?: string; reason?: string }): boolean {
   return /^already set$/i.test(String(entry.reason || "").trim());
@@ -27,8 +25,4 @@ export function leftoverEntries(report: FillLogReport): FillLogEntry[] {
     if (statusDelta !== 0) return statusDelta;
     return `${left.marketplace} ${left.field}`.localeCompare(`${right.marketplace} ${right.field}`);
   });
-}
-
-export function fillFailureEntries(report: FillLogReport): FillLogEntry[] {
-  return leftoverEntries(report).filter((entry) => FILL_FAILURE_STATUSES.has(entry.status));
 }

@@ -91,7 +91,7 @@ function summarizeJsonPatch(ops: { op?: string; path?: string; value?: unknown }
 }
 
 const MARKETPLACE_DISPLAY: Record<string, string> = {
-  general: "Vendoo",
+  general: "General",
   ebay: "eBay",
   etsy: "Etsy",
   poshmark: "Poshmark",
@@ -103,22 +103,18 @@ const MARKETPLACE_DISPLAY: Record<string, string> = {
 
 function summarizeMissingFields(
   rows: { marketplace?: string; field?: string; value?: unknown }[],
-  vendooOn: boolean,
 ): string {
-  const labels = vendooOn ? MARKETPLACE_DISPLAY : { ...MARKETPLACE_DISPLAY, general: "General" };
   const lines = rows.flatMap((row) => {
     const field = String(row.field || "").trim();
     const value = displayValue(row.value).trim();
     if (!field || !value) return [];
     const market = String(row.marketplace || "general").trim().toLowerCase() || "general";
-    const label = labels[market] || humanKey(market);
+    const label = MARKETPLACE_DISPLAY[market] || humanKey(market);
     return [`${label} / ${field}: ${value}`];
   });
   if (!lines.length) return "Saved field values to the listing JSON.";
   if (lines.length === 1) {
-    return vendooOn
-      ? `Saved to the listing JSON — ${lines[0]}. Fill on Vendoo when ready.`
-      : `Saved to the listing JSON — ${lines[0]}.`;
+    return `Saved to the listing JSON — ${lines[0]}.`;
   }
   return `Saved to the listing JSON:\n${lines.map((line) => `- ${line}`).join("\n")}`;
 }
@@ -135,7 +131,7 @@ function looksLikeJsonStream(text: string): boolean {
   return trimmed.startsWith("[") || trimmed.startsWith("{") || /```json/i.test(text);
 }
 
-export function assistantDisplayText(text: string, vendooOn = true): string {
+export function assistantDisplayText(text: string): string {
   const prose = stripJsonPayloads(text);
   if (prose) return prose;
 
@@ -145,7 +141,7 @@ export function assistantDisplayText(text: string, vendooOn = true): string {
     const parsed = JSON.parse(json);
     if (Array.isArray(parsed) && parsed[0]?.op) return summarizeJsonPatch(parsed);
     if (parsed && typeof parsed === "object" && Array.isArray(parsed.missing_fields)) {
-      return summarizeMissingFields(parsed.missing_fields, vendooOn);
+      return summarizeMissingFields(parsed.missing_fields);
     }
     if (parsed && typeof parsed === "object" && typeof parsed.message === "string" && parsed.message.trim()) {
       return parsed.message.trim();

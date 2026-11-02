@@ -7,7 +7,6 @@ import { ClaudeLoginTerminal } from "./ClaudeLoginTerminal";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import { ExtensionLoadPath } from "./ExtensionLoadPath";
 import { KEY_PROVIDER_IDS, KEY_PROVIDER_LABELS, isKeyProviderId, isListingProviderId } from "./keyProviders";
-import { useVendooEnabled } from "../vendooMode";
 import type { KeyProviderId, ListingProviderId } from "../api/types";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 
@@ -17,7 +16,6 @@ export const SETUP_GUIDE_STEPS = [
   { id: "brave", label: "Brave Search" },
   { id: "chrome", label: "Connect Chrome" },
   { id: "tour", label: "How Anteroom works" },
-  { id: "updates", label: "Updating live listings" },
   { id: "ready", label: "Create a listing" },
 ] as const;
 
@@ -41,7 +39,6 @@ export function FirstRunGuide({
   onClose,
   onCreateListing,
 }: FirstRunGuideProps) {
-  const vendooOn = useVendooEnabled();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<StepId>("welcome");
   const [listingChoice, setListingChoice] = useState<ListingChoice | null>(null);
@@ -186,10 +183,8 @@ export function FirstRunGuide({
     onError: (err: Error) => setBraveMessage(err.message),
   });
 
-  const steps: readonly { id: StepId; label: string }[] = vendooOn
-    ? SETUP_GUIDE_STEPS
-    : SETUP_GUIDE_STEPS.filter((item) => item.id !== "updates");
-  const activeStep: StepId = !vendooOn && step === "updates" ? "tour" : step;
+  const steps: readonly { id: StepId; label: string }[] = SETUP_GUIDE_STEPS;
+  const activeStep: StepId = step;
   const stepIndex = steps.findIndex((item) => item.id === activeStep);
   const isLast = activeStep === "ready";
   const listingReady =
@@ -263,7 +258,6 @@ export function FirstRunGuide({
     if (id === "brave") return braveConfigured || stepIndex > steps.findIndex((item) => item.id === "brave");
     if (id === "chrome") return chromeReady;
     if (id === "tour") return stepIndex > steps.findIndex((item) => item.id === "tour");
-    if (id === "updates") return stepIndex > steps.findIndex((item) => item.id === "updates");
     return false;
   };
 
@@ -302,11 +296,9 @@ export function FirstRunGuide({
           <div className="setup-guide-body">
             {activeStep === "welcome" ? (
               <>
-                <h2 id="setup-guide-title" className="setup-guide-title">{vendooOn ? "Turn photos into Vendoo drafts" : "Turn photos into listings"}</h2>
+                <h2 id="setup-guide-title" className="setup-guide-title">{"Turn photos into listings"}</h2>
                 <p className="setup-guide-copy">
-                  {vendooOn
-                    ? "Anteroom stays on this Mac. You add product photos, chat writes the listing, then Anteroom fills a Vendoo draft. It never publishes. You review and send live yourself."
-                    : "Anteroom stays on this Mac. You add product photos, chat writes the listing, then you list it on the marketplace. Anteroom never publishes until you confirm."}
+                  {"Anteroom stays on this Mac. You add product photos, chat writes the listing, then you list it on the marketplace. Anteroom never publishes until you confirm."}
                 </p>
                 <ul className="setup-guide-points">
                   <li>Choose ChatGPT, a Xiaomi MiMo key, or a Cursor API key so chat can read photos.</li>
@@ -622,9 +614,7 @@ export function FirstRunGuide({
               <>
                 <h2 id="setup-guide-title" className="setup-guide-title">Connect Chrome</h2>
                 <p className="setup-guide-copy">
-                  {vendooOn
-                    ? "Anteroom uses Chrome for a signed-in Vendoo session. Load the listing extension from the folder below once, then sign in to Vendoo. After that, Send to Vendoo creates or updates a draft over the API. It never publishes."
-                    : "Anteroom uses Chrome to open each marketplace. Load the listing extension from the folder below once. Listing on a marketplace opens that marketplace in this Chrome. Anteroom never publishes until you confirm."}
+                  {"Anteroom uses Chrome to open each marketplace. Load the listing extension from the folder below once. Listing on a marketplace opens that marketplace in this Chrome. Anteroom never publishes until you confirm."}
                 </p>
                 {!chromeAvailable ? (
                   <p className="setup-guide-copy">
@@ -662,44 +652,13 @@ export function FirstRunGuide({
                     <strong>Chat</strong> — ask it to write the listing from the photos. Edit in conversation instead of starting over.
                   </li>
                   <li>
-                    <strong>Listing panel</strong> — {vendooOn
-                      ? "the draft fields for Vendoo, eBay, Poshmark, Mercari, Depop, and Etsy. Review here before send."
-                      : "the draft fields for eBay, Poshmark, Mercari, Depop, and Etsy. Review here before you list."}
+                    <strong>Listing panel</strong> — {"the draft fields for eBay, Poshmark, Mercari, Depop, and Etsy. Review here before you list."}
                   </li>
                   <li>
-                    {vendooOn ? (
-                      <><strong>Send to Vendoo</strong> — creates or updates the Vendoo form over Vendoo's API. Listing and relisting stay human clicks in Vendoo.</>
-                    ) : (
-                      <><strong>Marketplaces</strong> — list on eBay, Poshmark, and the others from here when you confirm. Anteroom never publishes on its own.</>
-                    )}
+                    <strong>Marketplaces</strong> — list on eBay, Poshmark, and the others from here when you confirm. Anteroom never publishes on its own.
                   </li>
                   <li>
                     <strong>Footer</strong> — extension and listing-AI status. If either is off, fix it in Settings before generating.
-                  </li>
-                </ul>
-              </>
-            ) : null}
-
-            {activeStep === "updates" ? (
-              <>
-                <h2 id="setup-guide-title" className="setup-guide-title">Editing something already listed</h2>
-                <p className="setup-guide-copy">
-                  Anteroom writes the Vendoo <em>form</em>. Vendoo only carries a form change onto a
-                  live marketplace listing when you delist and list it again — so a regenerated
-                  listing is live on its old copy until you do that, in Vendoo.
-                </p>
-                <ul className="setup-guide-points">
-                  <li>
-                    <strong>1. Regenerate here.</strong> Find your edits in <strong>Filters → Unsent edits</strong> until you press <strong>Update Vendoo</strong> — until then even the Vendoo form is on the old copy.
-                  </li>
-                  <li>
-                    <strong>2. Update Vendoo, then open the item there.</strong> The Vendoo form now matches Anteroom; the live listings still do not. The ⋮ menu beside Vendoo Form → Delist Item takes it off every marketplace at once.
-                  </li>
-                  <li>
-                    <strong>3. List it again from Vendoo.</strong> The new listing carries the updated copy, and its listing date resets.
-                  </li>
-                  <li>
-                    <strong>Anteroom tracks every step for you.</strong> <strong>Filters → Unsent edits</strong> collects edits waiting to reach Vendoo, then an amber <em>relist</em> chip marks the listing until it is back up — and Filters collects that set too. The relist chip stays through the middle, where the item reads as a draft because it really is live nowhere, and clears itself once Vendoo reports the new listing date.
                   </li>
                 </ul>
               </>
