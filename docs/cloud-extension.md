@@ -117,7 +117,10 @@ session, and posts the command with those photo bytes to the content script.
 The content script and worker accept only that contract
 (`CloudMarketplaceProtocol.command` and `.photos`): a fixed command type, a
 32-hex request id echoed in the payload, a Chrome marketplace, no video, and at
-most 30 JPEG/PNG/WebP photos. They check the approved connection, document and
+most 30 JPEG/PNG/WebP photos. The relay sends only the contract's fields
+(`type`, `job_id`, `message_id`, `payload`), never the socket envelope's
+`version` or `sent_at`, and gives each cancel its own request id; a test runs
+the Bridge's own check on what the relay sends. They check the approved connection, document and
 account exactly as for form reads, then run the same handlers the Mac's socket
 uses, which still require `confirm` and claim the shared operation lock. The
 Bridge's reply goes back to the hosted API, which records what the marketplace
