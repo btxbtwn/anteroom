@@ -411,17 +411,16 @@ def media_rules():
 
 @router.get('/photos/{photo_id}/thumb')
 def photo_thumbnail(photo_id: str, request: Request, size: int = Query(192, ge=32, le=512), db=Depends(get_seller_db)):
+    from vendoo_studio.services.hosted_photos import thumbnail
     row = db.scalar(select(Photo).where(Photo.id == photo_id))
     if row is None:
         raise HTTPException(404, 'Photo not found')
-    response = photo_bytes(row.conversation_id, photo_id, request, db)
-    from io import BytesIO
-    from PIL import Image
-    with Image.open(BytesIO(response.body)) as image:
-        image.thumbnail((size, size))
-        output = BytesIO()
-        image.save(output, 'JPEG', quality=82)
-    return Response(output.getvalue(), media_type='image/jpeg')
+    row = owned_photo(db, row.conversation_id, photo_id)
+    key, version = row.stored_filename, row.checksum
+    # Release the read transaction before Storage I/O, as photo_bytes does.
+    db.rollback()
+    data = thumbnail(key, version, size, request.headers['authorization'].partition(' ')[2])
+    return Response(data, media_type='image/jpeg')
 
 
 @router.get('/conversations/{identity}/revisions')

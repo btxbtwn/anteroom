@@ -4,7 +4,7 @@
 #
 
 app = 'peaceful-meadowstone-6944'
-primary_region = 'iad'
+primary_region = 'sjc'
 
 [build]
   dockerfile = 'Dockerfile'

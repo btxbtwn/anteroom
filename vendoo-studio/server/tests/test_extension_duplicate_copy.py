@@ -79,6 +79,7 @@ class DuplicateCopyTest(unittest.TestCase):
                 "connection": self.manager.connection,
                 "version": self.manager.version,
                 "build": self.manager.build,
+                "capabilities": self.manager.capabilities,
                 "paired": self.manager.paired,
                 "duplicate_bridge": self.manager.duplicate_bridge,
             }
@@ -99,10 +100,13 @@ class DuplicateCopyTest(unittest.TestCase):
     def test_the_copy_that_runs_this_build_takes_the_socket_from_a_stale_one(self):
         self.manager.version = "0.2.30"
         self.manager.build = None
-        seen = self._connect({"token": "test", "version": "0.2.37", "build": "this-build"},
+        seen = self._connect({"token": "test", "version": "0.2.37", "build": "this-build",
+                              "capabilities": ["marketplace.actions", 7, "x" * 200]},
                             lambda build, version=None: build == "this-build", expect_reply=False)
         self.assertTrue(self.incumbent.closed)
         self.assertIsNot(seen["connection"], self.incumbent)
         self.assertEqual((seen["version"], seen["build"]), ("0.2.37", "this-build"))
+        # Only short names count as declared abilities.
+        self.assertEqual(seen["capabilities"], frozenset({"marketplace.actions"}))
         self.assertTrue(seen["paired"])
         self.assertFalse(seen["duplicate_bridge"])

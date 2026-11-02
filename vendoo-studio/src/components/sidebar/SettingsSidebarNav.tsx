@@ -2,7 +2,7 @@ import { useWorkspaceRuntime } from "../../app/runtime";
 import type { ComponentType } from "react";
 import { BotIcon, CircleHelpIcon, DatabaseIcon, Link2Icon, MessageSquareTextIcon, ScrollTextIcon, Settings2Icon, TagIcon, TerminalIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { SETTINGS_NAV_ITEMS, SETTINGS_SECTION_LABELS, type SettingsSectionId } from "../settingsNav";
+import { HOSTED_SETTINGS_SECTIONS, SETTINGS_NAV_ITEMS, SETTINGS_SECTION_LABELS, type SettingsSectionId } from "../settingsNav";
 import { SIDEBAR_ROW } from "./sidebarStyles";
 import type { SettingsSearch } from "./useSettingsSearch";
 
@@ -77,7 +77,7 @@ export function SettingsSidebarNav({
         </div>
       ) : (
         <nav aria-label="Settings sections" className="flex flex-col gap-1">
-          {SETTINGS_NAV_ITEMS.filter((item) => !hosted || ["general", "providers", "listings", "connections"].includes(item.id)).map((item) => {
+          {SETTINGS_NAV_ITEMS.filter((item) => !hosted || HOSTED_SETTINGS_SECTIONS.includes(item.id)).map((item) => {
             const Icon = SECTION_ICONS[item.id];
             return (
               <button

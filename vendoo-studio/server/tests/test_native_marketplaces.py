@@ -60,9 +60,8 @@ class NativeMarketplacesTest(unittest.TestCase):
         listing_persistence.add_photo(self.db, self.conv.id, "test.jpg", "test.jpg", "image/jpeg", 1)
         self.base = f"/api/conversations/{self.conv.id}/native-marketplaces"
         self.bridge = self.enterContext(patch("vendoo_studio.services.native_marketplaces.browser_bridge.request", new_callable=AsyncMock))
-        self.manager = SimpleNamespace(connected=True, build="test-build", send_message=AsyncMock(return_value=True))
+        self.manager = SimpleNamespace(connected=True, capabilities=frozenset({"marketplace.actions"}), send_message=AsyncMock(return_value=True))
         self.enterContext(patch("vendoo_studio.services.extension_connection.extension_manager", self.manager))
-        self.enterContext(patch("vendoo_studio.services.chrome_bridge.expected_extension_build", return_value="test-build"))
         self.enterContext(patch("vendoo_studio.services.extension_connection.schedule_advance_job_queue"))
         self.enterContext(patch("vendoo_studio.database.SessionLocal", self.sessions))
         self.enterContext(patch.object(native, "SETTLE_POLL_S", 0))
@@ -984,27 +983,20 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertFalse(JobRepo(self.db).get_running())
         self.assertEqual(self.client.post(f"{self.base}/unknown/inspect", json={}).status_code, 422)
 
-    def test_standalone_bridge_without_app_stamp_is_rejected_until_managed_copy_is_restored(self):
-        # A web-only extension ZIP can pair, but it is not the app's installed
-        # worker. Never disguise it as that worker or send a marketplace action.
-        self.manager.build = None
+    def test_a_bridge_from_another_build_runs_actions_it_declares(self):
+        # Chrome may run an older or separately loaded copy of the Bridge. What
+        # decides is whether it declares the ability, not which build it is.
+        self.manager.build = "older-build"
+        self.manager.capabilities = frozenset()
         result = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(result.status_code, 409)
-        self.assertIn("current Anteroom Bridge", result.json()["detail"])
+        self.assertIn("Update Anteroom Bridge", result.json()["detail"])
         self.assertFalse(JobRepo(self.db).list_all())
         self.bridge.assert_not_called()
-        # Connect Chrome installs/stamps the bundled worker. Once it reconnects
-        # with the expected build, the same approved request can start.
-        self.manager.build = "test-build"
+        self.manager.capabilities = frozenset({"marketplace.actions"})
         restored = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(restored.status_code, 200, restored.text)
         self.assertTrue(restored.json()["running"])
-
-    def test_old_bridge_is_rejected_before_making_a_job(self):
-        with patch("vendoo_studio.services.chrome_bridge.expected_extension_build", return_value="new-build"):
-            result = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
-        self.assertEqual(result.status_code, 409)
-        self.assertFalse(JobRepo(self.db).list_all())
 
     def test_other_jobs_block_native_actions(self):
         JobRepo(self.db).create(self.conv.id, self.rev.id, LISTING)
