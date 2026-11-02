@@ -23,18 +23,30 @@ ONE_SUBJECT = (
 
 def upgrade() -> None:
     bind = op.get_bind()
-    # An assistant answer belongs to an assistant thread, not to a listing.
-    with op.batch_alter_table('background_tasks', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('assistant_thread_id', sa.String(), nullable=True))
-        batch_op.alter_column('conversation_id', existing_type=sa.String(), nullable=True)
-        batch_op.create_index('ix_background_tasks_assistant_thread_id', ['assistant_thread_id'], unique=False)
-        batch_op.create_check_constraint('ck_background_tasks_one_subject', ONE_SUBJECT)
+    inspector = sa.inspect(bind)
+    columns = {column['name']: column for column in inspector.get_columns('background_tasks')}
+    indexes = {index['name'] for index in inspector.get_indexes('background_tasks')}
+    checks = {check['name'] for check in inspector.get_check_constraints('background_tasks')}
+    # A database adopted from before migrations may already have the current shape.
+    if 'assistant_thread_id' not in columns or columns['conversation_id']['nullable'] is False \
+            or 'ck_background_tasks_one_subject' not in checks:
+        # An assistant answer belongs to an assistant thread, not to a listing.
+        with op.batch_alter_table('background_tasks', schema=None) as batch_op:
+            if 'assistant_thread_id' not in columns:
+                batch_op.add_column(sa.Column('assistant_thread_id', sa.String(), nullable=True))
+            if columns['conversation_id']['nullable'] is False:
+                batch_op.alter_column('conversation_id', existing_type=sa.String(), nullable=True)
+            if 'ck_background_tasks_one_subject' not in checks:
+                batch_op.create_check_constraint('ck_background_tasks_one_subject', ONE_SUBJECT)
+    if 'ix_background_tasks_assistant_thread_id' not in indexes:
+        op.create_index('ix_background_tasks_assistant_thread_id', 'background_tasks', ['assistant_thread_id'])
     # One answer at a time per seller, across tabs and Machines.
-    op.create_index(
-        'uq_background_tasks_one_assistant_answer', 'background_tasks', ['user_id'], unique=True,
-        sqlite_where=sa.text("kind = 'assistant' AND status IN ('queued', 'running')"),
-        postgresql_where=sa.text("kind = 'assistant' AND status IN ('queued', 'running')"),
-    )
+    if 'uq_background_tasks_one_assistant_answer' not in indexes:
+        op.create_index(
+            'uq_background_tasks_one_assistant_answer', 'background_tasks', ['user_id'], unique=True,
+            sqlite_where=sa.text("kind = 'assistant' AND status IN ('queued', 'running')"),
+            postgresql_where=sa.text("kind = 'assistant' AND status IN ('queued', 'running')"),
+        )
     if bind.dialect.name != 'postgresql':
         return
     # Same claim as 56b5ee7250ec, now also for assistant answers. An expired
