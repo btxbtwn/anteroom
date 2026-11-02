@@ -1,1 +1,0 @@
-- Show a clear failed-read message instead of crashing when Chrome returns a blank Facebook listing error.
