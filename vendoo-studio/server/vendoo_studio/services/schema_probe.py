@@ -221,62 +221,6 @@ def bind_probe_draft(db: Session, job: Job) -> None:
     db.commit()
 
 
-async def kickoff_schema_probe(conv_id: str, listing: dict | None, *, reason: str = "generate") -> dict[str, Any]:
-    """Create a probe job (if eligible) and ask the extension dispatcher to run it."""
-    from vendoo_studio.database import SessionLocal
-    from vendoo_studio.services.extension_connection import dispatch_queued_jobs
-
-    db = SessionLocal()
-    try:
-        result = maybe_start_schema_probe(db, conv_id, listing=listing, reason=reason)
-        if result.get("started"):
-            await dispatch_queued_jobs()
-        elif result.get("reason") == "busy":
-            log.info("schema probe skipped for %s: another job is active", conv_id)
-        return result
-    except Exception:
-        log.exception("schema probe kickoff failed for %s", conv_id)
-        return {"started": False, "reason": "error"}
-    finally:
-        db.close()
-
-
-def _schema_from_probe_job(db: Session, job_id: str) -> dict | None:
-    events = JobRepo(db).get_events(job_id)
-    return next(
-        (
-            (event.payload or {}).get("schema")
-            for event in reversed(events)
-            if event.step == "discovering_schema" and (event.payload or {}).get("schema")
-        ),
-        None,
-    )
-
-
-def _validate_schema_paths(schema: dict, paths: dict, platforms: list[str]) -> None:
-    required = ["general", *platforms]
-    missing = [
-        mp for mp in required
-        if not schema.get(mp, {}).get("fields") or schema[mp].get("error")
-    ]
-    if missing:
-        details = []
-        for mp in missing:
-            section = schema.get(mp) or {}
-            err = section.get("error")
-            details.append(f"{mp}: {err}" if err else f"{mp}: no fields")
-        raise RuntimeError(
-            "Category discovery did not return all selected marketplace fields "
-            f"({', '.join(details)}). Retry discovery."
-        )
-    for marketplace, expected in paths.items():
-        observed = str((schema.get(marketplace, {}).get("category") or {}).get("path") or "").strip()
-        if observed and expected and observed.casefold() != expected.casefold():
-            raise RuntimeError(
-                f"{marketplace} category was not verified: expected {expected}, observed {observed or 'empty'}"
-            )
-
-
 async def prepare_generation_schema(
     db: Session,
     conv_id: str,

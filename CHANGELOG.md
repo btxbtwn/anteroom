@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.656 — 2026-11-02
+
+- Behind the scenes, unused backend helpers and old protocol definitions have been removed, and new unused code is now caught without a baseline of exceptions.
+
+## 0.1.655 — 2026-11-02
+
+- After a restart, a finished one-time task is marked completed or paused without crashing the scheduler or repeating its actions.
+
 ## 0.1.654 — 2026-11-02
 
 - Listings, photos and marketplace forms on the web no longer stall for 30 seconds and fail with "Request failed: 500" while background work runs

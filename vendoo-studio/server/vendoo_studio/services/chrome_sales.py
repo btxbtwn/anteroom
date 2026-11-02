@@ -297,12 +297,6 @@ async def check_marketplace(marketplace: str) -> bool:
     return True
 
 
-async def check_now(marketplace: str) -> bool:
-    """Check one shop when the seller asks. Its next timed check moves a full gap out."""
-    arm_next(marketplace, time.time())
-    return await check_marketplace(marketplace)
-
-
 def live_item_listings(db: Session, conv_id: str) -> dict[str, str]:
     """Listing IDs this item has on marketplaces Chrome reads, and whose sale Anteroom has not seen itself.
 

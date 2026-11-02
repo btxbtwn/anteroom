@@ -104,16 +104,6 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/automation_scheduler.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 29,
-                    "endColumn": 103,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/automations.py": [
             {
                 "code": "reportArgumentType",
