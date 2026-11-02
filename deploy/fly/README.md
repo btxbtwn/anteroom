@@ -17,11 +17,13 @@ The Dockerfile path is relative to the configuration directory; the build
 context is the repository root. The allowlist in `.dockerignore` excludes
 local data, photos, databases, credentials, tests and the extension.
 
-The configuration uses one shared CPU, 2 GB memory, HTTPS, a health check,
-automatic start and stop, and zero minimum running Machines. Supabase's project
-URL is public configuration. No database password, service-role key, provider
-key or seller data is needed for this first deployment. Later hosted data
-routes require the remaining cloud work in `docs/cloud-architecture.md`.
+The configuration uses one shared CPU, 2 GB memory, HTTPS, a health check, and
+a paid plan with one Machine kept running (`auto_stop_machines = 'off'`,
+`min_machines_running = 1`), so the draft worker and the scheduled automations,
+offer checks and Sourcing refreshes keep running. Supabase's project URL is
+public configuration. No database password, service-role key, provider key or
+seller data is needed for this first deployment. Later hosted data routes
+require the remaining cloud work in `docs/cloud-architecture.md`.
 
 The root URL and built `/assets/` files serve the public sign-in UI. All data
 routes require bearer authentication. Open `/api/health` to check the service.
