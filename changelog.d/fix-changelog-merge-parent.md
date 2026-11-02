@@ -1,0 +1,1 @@
+- Prevent a new release on main from incorrectly blocking another pull request's changelog check.
