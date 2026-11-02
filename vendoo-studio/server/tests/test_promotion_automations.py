@@ -48,7 +48,6 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.bridge = self.enterContext(patch("vendoo_studio.services.listing_promotions.browser_bridge.request", new_callable=AsyncMock))
         self.bridge.side_effect = self.answer
         self.enterContext(patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=True)))
-        self.enterContext(patch("vendoo_studio.services.extension_connection.schedule_advance_job_queue", lambda: None))
         self.likes = {post: 3 for _conv, post in self.items}
         self.sent = {}
         self.on_check = None

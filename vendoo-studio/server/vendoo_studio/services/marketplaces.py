@@ -2,40 +2,19 @@ from __future__ import annotations
 
 from vendoo_studio.services.user_settings import read_settings, update_settings
 
-# Order used when filling Vendoo marketplace forms.
-#
-# The goal is to sell everywhere Vendoo reaches, so treat this list as the
-# current reach rather than the intended one. Adding a marketplace needs two
-# things, and they are independent:
-#
-#   * a field schema. Vendoo answers
-#     GET /api/category/specifics/{marketplace}/category/{id} for ebay, etsy,
-#     whatnot, sellwild, vestiaireApi, shopify, mercari, grailed, poshmark,
-#     facebook, depop, vestiaire, vinted and vendoo — so whatnot and kidizen
-#     could be filled with no new discovery work. Tradesy is gone: Vendoo
-#     dropped it from that list and the company itself closed in 2022.
-#   * somewhere for the values to go, which is what this list drives.
-#
-# Grailed and Sellwild have no seeded category tree: their leaves come
-# from Vendoo mapping the general category, never from a local tree search.
-# Vinted is not filled through Vendoo. List on Vinted publishes on vinted.com.
-FILLABLE_MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "grailed", "sellwild")
+# Direct marketplace forms that use the shared category-field generation pass.
+FILLABLE_MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild")
 
-# Every marketplace Vendoo lists to (its LISTABLE_MARKETPLACES, with
-# vestiaire/vestiaireApi folded together). Any of them can be selected in
-# Settings; `fillable` ones also have Send-to-Vendoo form fillers, the rest are
-# crossposted from Vendoo itself.
+
+# Marketplaces with direct listing connections.
 MARKETPLACE_CATALOG: tuple[tuple[str, str, bool], ...] = (
     ("ebay", "eBay", True),
     ("poshmark", "Poshmark", True),
     ("mercari", "Mercari", True),
     ("depop", "Depop", True),
     ("etsy", "Etsy", True),
-    ("grailed", "Grailed", True),
+
     ("vinted", "Vinted", False),
-    ("whatnot", "Whatnot", False),
-    ("shopify", "Shopify", False),
-    ("vestiaire", "Vestiaire Collective", False),
     ("sellwild", "Sellwild", True),
 )
 
@@ -54,9 +33,7 @@ def catalog_payload() -> list[dict]:
 def normalize_selected(raw: object) -> list[str]:
     """Normalize a marketplace selection into catalog order.
 
-    Any Vendoo marketplace may be selected. Send only fills the fillable
-    subset (see `selected_fillable_platforms`), so non-fillable choices never
-    reach a job snapshot.
+    Only marketplaces with a direct listing connection can be selected.
     """
     if not isinstance(raw, list):
         return list(DEFAULT_SELECTED)

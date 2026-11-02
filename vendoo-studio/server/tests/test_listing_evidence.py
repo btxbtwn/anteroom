@@ -18,12 +18,11 @@ from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.generation_history import seller_history_context
 from vendoo_studio.services.listing_delete import delete_listing, wipe_contents
 from vendoo_studio.services.listing_evidence import (
-    capture_sale_snapshot, corrections_context, explicit_changes, generation_evidence_prompt,
+    corrections_context, explicit_changes, generation_evidence_prompt,
     record_correction,
 )
 from vendoo_studio.services.registry import MEN_TSHIRT_PATH
-from vendoo_studio.services.vendoo_import import merge_notes, vendoo_dates, vendoo_sale
-from vendoo_studio.services.vendoo_watch import refresh_inventory_label
+from vendoo_studio.services.vendoo_import import merge_notes
 
 
 @pytest.fixture
@@ -44,12 +43,13 @@ def workspace():
     engine.dispose()
 
 
-def sold_item(title="Nike L Original Tee"):
-    return {"sold": True, "generalDetails": {
-        "title": title, "brand": "Nike", "size": "L", "quantity": 1,
-        "category": MEN_TSHIRT_PATH, "condition": "Good", "notes": "PRIVATE-REMOTE-NOTE",
-    }, "saleRecord": {"date_sold": "2026-10-01T12:00:00Z", "marketplace": "ebay", "price_sold": 24},
-        "listings": {"ebay": {"status": {"sold": True}, "dateListed": "2026-09-01T12:00:00Z"}}}
+def stored_sale(db, conv_id):
+    """Historical observations remain readable after the Vendoo connection is removed."""
+    listing = {"title": "Nike L Original Tee", "brand": "Nike", "size": "L",
+               "quantity": 1, "category_path": MEN_TSHIRT_PATH, "condition": "Good"}
+    db.add(SaleSnapshot(conversation_id=conv_id, sale_key="ebay:2026-10-01T12:00:00+00:00",
+                        listing=listing, source="vendoo_first_observed_sold"))
+    db.commit()
 
 
 def test_form_records_only_raw_changes_before_automatic_normalization(workspace):
@@ -115,48 +115,18 @@ def test_related_edits_are_copy_examples_only_and_latest_current_clear_wins(work
     assert '"r2"' not in prompt
 
 
-def test_sale_snapshot_is_remote_immutable_and_idempotent(workspace):
-    db, conv, revision, _client = workspace
-    item = sold_item()
-    capture_sale_snapshot(db, conv.id, item)
-    db.commit()
-    snapshot = db.query(SaleSnapshot).one()
-    assert snapshot.listing["title"] == "Nike L Original Tee"
-    assert snapshot.source == "vendoo_first_observed_sold"
-    observed = snapshot.observed_at
-    capture_sale_snapshot(db, conv.id, sold_item("Later changed remote title"))
-    db.commit()
-    assert db.query(SaleSnapshot).count() == 1
-    db.refresh(snapshot)
-    assert snapshot.listing["title"] == "Nike L Original Tee"
-    assert snapshot.observed_at == observed
-    assert revision.listing_json["title"] != snapshot.listing["title"]
 
 
-def test_missing_dates_and_unsold_items_do_not_fabricate_snapshots(workspace):
-    db, conv, _, _client = workspace
-    item = sold_item()
-    item["saleRecord"].pop("date_sold")
-    capture_sale_snapshot(db, conv.id, item)
-    capture_sale_snapshot(db, conv.id, {"generalDetails": {"title": "Draft"}})
-    assert db.query(SaleSnapshot).count() == 0
 
 
-def test_sync_captures_sales_amount_and_first_observed_snapshot(workspace):
-    db, conv, _, _client = workspace
-    refresh_inventory_label(db, conv.id, sold_item())
-    notes = json.loads(conv.notes)
-    assert notes["vendooSale"]["price"] == 24
-    assert db.query(SaleSnapshot).one().listing["title"] == "Nike L Original Tee"
 
 
 def test_history_matches_snapshot_instead_of_later_edited_brand_and_title(workspace):
     db, conv, revision, _client = workspace
     other = ConversationRepo(db).create(title="Sold")
-    item = sold_item()
-    other.notes = merge_notes(None, {"vendooStatus": "sold", "vendooSale": vendoo_sale(item), "vendooDates": vendoo_dates(item)})
+    other.notes = merge_notes(None, {"vendooStatus": "sold", "vendooSale": {"marketplace": "ebay", "price": 24}, "vendooDates": {"sold": "2026-10-01T12:00:00Z", "listed": "2026-09-01T12:00:00Z"}})
     db.commit()
-    capture_sale_snapshot(db, other.id, item)
+    stored_sale(db, other.id)
     listing_persistence.save_revision(db, other.id, {**revision.listing_json, "brand": "Adidas", "title": "Edited after sale"}, source="user_form")
     context = seller_history_context(db, conv.id, "- brand: Nike\n- condition: Good", now=datetime(2026, 10, 7, tzinfo=UTC))
     assert context["sales"]["count"] == 1
@@ -170,7 +140,7 @@ def test_history_matches_snapshot_instead_of_later_edited_brand_and_title(worksp
 def test_evidence_survives_regeneration_and_is_deleted_with_listing(workspace):
     db, conv, revision, _client = workspace
     record_correction(db, conv.id, revision.id, revision.listing_json, {"size": {"before": "L", "after": "M"}})
-    capture_sale_snapshot(db, conv.id, sold_item())
+    stored_sale(db, conv.id)
     wipe_contents(db, conv.id, keep_photos=True)
     db.commit()
     assert db.query(ListingCorrection).count() == 1

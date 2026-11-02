@@ -137,7 +137,7 @@ async function offerPoshmark(payload, deadline) {
 // pages; their requests from captures of the seller's signed-in browser
 // (both sites refuse a plain fetch). A marketplace not yet captured keeps
 // null entries, and its checks and offers refuse before any request is made
-// (docs/vendoo-feature-parity.md, gap 4).
+// (docs/direct-form-parity.md, "Mercari and Depop offer requests").
 // Mercari (help article 347): at least 10% below the item's lowest price so
 // far, whole dollars, at least $1, to up to 50 recent likers, for 24 hours.
 // Its offer screen (recorded 2026-10-27) asks offerToLikerable whether the

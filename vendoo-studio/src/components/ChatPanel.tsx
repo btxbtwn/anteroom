@@ -7,7 +7,6 @@ import { ChatCitationRevealContext } from "./chatCitationContext";
 import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { currentPhaseIndex } from "./liveTrace";
 import { assistantDisplayText, extractJson, isListingJson, isStreamError } from "./chat/assistantDisplay";
-import { BrowserFieldChips } from "./chat/BrowserFieldChips";
 import { useComposerImages } from "./chat/ComposerAttachments";
 import { ChatComposer } from "./chat/ChatComposer";
 import { StreamErrorPanel, UnfinishedGenerationPanel } from "./chat/ChatErrors";
@@ -26,18 +25,13 @@ import { placeTurnFolds } from "./chat/workLogModel";
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { Spinner } from "./ui/spinner";
-import type { BrowserField } from "../api/client";
 import type { Message } from "../api/types";
-import { useVendooEnabled } from "../vendooMode";
 import type { ListingChatStatus } from "./ListingChatPopup";
 
 interface Props {
   convId: string;
   queuedMessage?: string | null;
   onQueuedMessageConsumed?: () => void;
-  /** Draft open in Studio's browser. Messages then go to the fix agent with the picked fields. */
-  browser?: { jobId: string; fields: BrowserField[] } | null;
-  onBrowserFieldsChange?: (fields: BrowserField[]) => void;
   /** What the chat is doing, for a minimized chat's pill. Reported once messages load. */
   onStatusChange?: (status: ListingChatStatus) => void;
 }
@@ -47,9 +41,9 @@ function messageRowPadding(m: Message): string {
   return m.role === "user" || m.role === "assistant" || m.role === "model" ? "pb-4" : "pb-2";
 }
 
-export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, browser, onBrowserFieldsChange, onStatusChange }: Props) {
+export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onStatusChange }: Props) {
   const uploadingPhotos = usePhotosUploading(convId);
-  const vendooOn = useVendooEnabled();
+
   const [input, setInput] = useState("");
   // Quotes live inline in the composer itself, T3 Code style: `input` is the
   // markdown prompt, and a quote inside it is its citation link.
@@ -90,8 +84,6 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
     handleRetry,
   } = useChatStream({
     convId,
-    browser,
-    onBrowserFieldsChange,
     setInput,
     pinChatToBottom,
     activeProbe,
@@ -115,32 +107,15 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
 
   const handleSend = useCallback(() => {
     const text = input.trim();
-    const liveFields = browser?.fields || [];
     const attached = images.images;
-    if (!text && !liveFields.length && !attached.length) return;
+    if (!text && !attached.length) return;
     if (busy) {
       if (attached.length) {
         images.setError("Images go with the next message once the current run finishes.");
         return;
       }
-      // Queue plain follow-ups; browser chips ride along as a snapshot so a
-      // later field pick doesn't rewrite what the user queued.
-      const message = newQueuedChatMessage(text, liveFields.length
-        ? {
-            browserJobId: browser?.jobId,
-            browserFields: liveFields.map((field) => ({
-              marketplace: field.marketplace,
-              label: field.label,
-              value: field.value,
-              key: field.key,
-              filled: field.filled,
-              account_managed: field.account_managed,
-            })),
-          }
-        : undefined);
-      enqueue(message);
+      enqueue(newQueuedChatMessage(text));
       setInput("");
-      if (liveFields.length) onBrowserFieldsChange?.([]);
       pinChatToBottom();
       return;
     }
@@ -150,7 +125,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
       images.clear();
       void sendMessage(text, uploads.length ? { attachments: uploads } : undefined);
     })();
-  }, [busy, input, browser, sendMessage, onBrowserFieldsChange, pinChatToBottom, enqueue, images]);
+  }, [busy, input, sendMessage, pinChatToBottom, enqueue, images]);
 
   const hasPhotos = Boolean(photos && photos.length > 0);
   const hasMessages = Boolean(messages && messages.length > 0);
@@ -159,14 +134,14 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
     return Boolean(json && isListingJson(json));
   }) || (listing?.listing && isListingJson(JSON.stringify(listing.listing))));
   const streamFailed = isStreamError(streamText);
-  const streamVisible = streamFailed ? "" : assistantDisplayText(streamText, vendooOn);
+  const streamVisible = streamFailed ? "" : assistantDisplayText(streamText);
   // Persist finishes (and messages refetch) before the SSE stream is cleared —
   // hide the live reply once the same assistant prose is already on screen.
   const streamAlreadyPersisted = Boolean(
     streamVisible
       && messages?.some((m) => {
         if (m.role !== "assistant" && m.role !== "model") return false;
-        return assistantDisplayText(m.text, vendooOn) === streamVisible;
+        return assistantDisplayText(m.text) === streamVisible;
       }),
   );
   const showStreamBubble = Boolean(streamText && !streamFailed && !streamAlreadyPersisted);
@@ -207,8 +182,6 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
     : "";
   const composerPlaceholder = busy
     ? "Queue a follow-up…"
-    : browser
-    ? (vendooOn ? "Tell Anteroom what to fix in the Vendoo draft..." : "Tell Anteroom what to fix in this listing...")
     : !hasPhotos
     ? "Upload photos to begin"
     : awaitingSellerAnswers
@@ -328,8 +301,6 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
         onInputChange={setInput}
         placeholder={composerPlaceholder}
         images={images}
-        header={<BrowserFieldChips fields={browser?.fields} onChange={onBrowserFieldsChange} />}
-        hasOtherContent={Boolean(browser?.fields?.length)}
         busy={busy}
         stopping={stopping}
         onSend={handleSend}

@@ -56,9 +56,6 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
 
 
 def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None):
-    from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
-    from vendoo_studio.repositories.queries import JobRepo
-    from vendoo_studio.services.schema_probe import is_schema_probe_job
 
     conv_repo = ConversationRepo(db)
     conv = conv_repo.get(conv_id)
@@ -142,21 +139,6 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     if current:
         current.validation_status = "valid" if validation.valid else "error"
         current.validation_errors = validation.errors + validation.warnings
-
-    # Keep unreviewed Vendoo preparation on the edited form. A direct action
-    # owns the revision already sent, including after a lost reply or failure.
-    refresh_statuses = set(ACTIVE_JOB_STATUSES) | {"failed"}
-    for job in JobRepo(db).list_by_conversation(conv_id):
-        if (job.status not in refresh_statuses or is_schema_probe_job(job)
-                or str(job.current_step or "").startswith("native_")):
-            continue
-        if JobRepo(db).latest_event(job.id, "vendoo_review"):
-            continue  # A reviewed Send owns its approved snapshot, even after edits.
-        platforms = (job.listing_snapshot or {}).get("platforms") if isinstance(job.listing_snapshot, dict) else None
-        snapshot = dict(listing_data)
-        if isinstance(platforms, list):
-            snapshot["platforms"] = platforms
-        job.listing_snapshot = snapshot
 
     db.commit()
 

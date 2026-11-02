@@ -15,9 +15,6 @@
     "system.display"
   ],
   "host_permissions": [
-    "https://app.vendoo.co/*",
-    "https://web.vendoo.co/*",
-    "https://api.web.vendoo.co/*",
     "https://www.ebay.com/*",
     "https://poshmark.com/*",
     "https://www.mercari.com/*",
@@ -32,71 +29,12 @@
     "https://vinted.com/*",
     "https://api.www.vinted.com/*",
     "http://127.0.0.1:4318/*",
-    "ws://127.0.0.1:4318/*",
-    "https://us.vendoo.co/*",
-    "https://us-central1-vendoo-prod-7948f.cloudfunctions.net/*",
-    "https://securetoken.googleapis.com/*",
-    "https://firestore.googleapis.com/*",
-    "https://storage.googleapis.com/*",
-    "https://firebasestorage.googleapis.com/*"
+    "ws://127.0.0.1:4318/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
-    {
-      "matches": [
-        "https://app.vendoo.co/*",
-        "https://web.vendoo.co/*"
-      ],
-      "js": [
-        "content-script-version.js",
-        "content-scripts/update-all-buttons.js",
-        "content-scripts/marketplace-colors.js",
-        "content-scripts/vendoo.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.ebay.com/*"
-      ],
-      "js": [
-        "content-scripts/ebay.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://poshmark.com/*"
-      ],
-      "js": [
-        "content-scripts/poshmark.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.mercari.com/*"
-      ],
-      "js": [
-        "content-scripts/mercari.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.depop.com/*"
-      ],
-      "js": [
-        "content-scripts/depop.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.vinted.com/*",
-        "https://vinted.com/*"
-      ],
-      "js": [
-        "content-scripts/vinted.js"
-      ]
-    },
     {
       "matches": [
         "https://myanteroom.com/*"

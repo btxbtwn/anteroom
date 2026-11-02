@@ -28,11 +28,11 @@ test('inspection cannot fetch unobserved, private or foreign scripts', async () 
   assert.equal(fetched, false);
 });
 
-test('an active automation job blocks page inspection', async () => {
+test('a running delist or promotion blocks page inspection', async () => {
   const c = loadWorker();
   let reply;
   c.sendBrowserResult = (_msg, result) => { reply = result; };
-  require('node:vm').runInContext('activeJob = {job_id: "busy"}', c);
+  c.claimNativeOperation('*', 'busy');
   await c.handleMarketplaceInspection({ payload: { marketplace: 'depop' } });
   assert.equal(reply.ok, false);
   assert.match(reply.error, /running/);

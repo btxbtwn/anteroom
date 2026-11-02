@@ -13,10 +13,7 @@ import { getLive } from "./liveChatStore";
 interface Options {
   convId: string;
   busy: boolean;
-  sendMessage: (
-    text: string,
-    opts?: { browserJobId?: string; browserFields?: QueuedChatMessage["browserFields"] },
-  ) => Promise<boolean>;
+  sendMessage: (text: string) => Promise<boolean>;
   queuedMessage: string | null | undefined;
   onQueuedMessageConsumed: (() => void) | undefined;
   pinChatToBottom: () => void;
@@ -66,10 +63,7 @@ export function useChatQueue({
     if (!next) return;
     drainLockRef.current = true;
     setPendingQueue(rest);
-    void sendMessage(next.text, {
-      browserJobId: next.browserJobId,
-      browserFields: next.browserFields,
-    }).then((started) => {
+    void sendMessage(next.text).then((started) => {
       if (!started) {
         setPendingQueue((queue) => [next, ...queue]);
       }

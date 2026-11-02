@@ -75,7 +75,7 @@ class MercariFormTest(unittest.TestCase):
         self.db.close()
 
     def test_a_mercari_parent_is_never_the_leaf_the_tree_answers(self):
-        from vendoo_studio.services.vendoo_create import tree_leaf
+        from vendoo_studio.services.leaf_schemas import tree_leaf
 
         self.assertIsNone(tree_leaf("mercari", "Kids > Boys coats & jackets"))
         self.assertEqual(tree_leaf("mercari", "Kids > Boys coats & jackets > Boys (4+)")["id"], "1931")
@@ -87,9 +87,7 @@ class MercariFormTest(unittest.TestCase):
 
         listing = {**LISTING, "size": "XL (18/20)", "direct_category_ids": {"mercari": "1931"},
                    "marketplace_category_ids": {"mercari": "1881"}}
-        with mock.patch.object(native_form, "vendoo_form") as vendoo, \
-                mock.patch("vendoo_studio.services.user_settings.get_ships_from_zip", return_value=""):
+        with mock.patch("vendoo_studio.services.user_settings.get_ships_from_zip", return_value=""):
             snapshot = native_form.attach_form(listing, "mercari")
-        vendoo.assert_not_called()
         self.assertNotIn("sizes", snapshot["form"])
         self.assertEqual(snapshot["direct_category_ids"]["mercari"], "1931")

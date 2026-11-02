@@ -178,8 +178,7 @@ The Listings settings page is connected on `feat/hosted-listings-settings`. It
 uses the shared template/default/formula controls and label-management handlers.
 The similar-item finder reads private account photos, stores owner-scoped hashes
 and reviews, and merges only explicitly chosen owned items. Active draft tasks
-block merges under the submission row locks. Vendoo controls remain unavailable
-in hosted mode until their approved browser actions are connected.
+block merges under the submission row locks.
 
 Release 0.1.581 passed public health/version and unsigned private-route checks.
 Its release image also passed private startup, assets and synthetic-owner
@@ -375,7 +374,4 @@ the Bridge capability `marketplace.sessions` (Bridge 0.2.44). The status holds
 only each sign-in's state, expiry and account label, never cookies or tokens.
 Sale detection switches stay on the Mac.
 
-Anteroom has no Facebook Marketplace support on the Mac or the web. Grailed is
-not on the web: on the Mac its tab only feeds the old
-cross-lister flow, which the web does not offer, and Anteroom has no direct
-Grailed listing, sign-in or check.
+Anteroom has no Facebook Marketplace or Grailed support on the Mac or the web.

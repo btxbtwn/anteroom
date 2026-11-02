@@ -6,33 +6,30 @@ Create a purpose-built local web application that lets the user:
 
 1. Add product photos and optional notes.
 2. Chat with Xiaomi MiMo about the item.
-3. Generate a complete Vendoo-compatible listing.
+3. Generate a complete listing (see `docs/json-contract.md`).
 4. Review and revise the listing conversationally.
 5. Edit individual fields or raw JSON directly.
-6. Validate the approved listing.
-7. Click **Send to Vendoo**.
-8. Send the approved listing to Vendoo as one call to Vendoo's own item API — photos to the inventory service, then `createItem` with every marketplace section already resolved. No marketplace form is opened or filled.
-9. Watch progress in the web app, and pull back anything edited in Vendoo.
+6. Validate the listing.
+7. Click **List** on a marketplace and confirm.
+8. List directly: eBay and Etsy through their APIs; Poshmark, Mercari, Depop, Sellwild and Vinted through the extension, which writes through each marketplace's own signed-in web client.
+9. Watch progress in the web app; Anteroom reads every write back from the marketplace.
 
-Clicking **Send to Vendoo** or **Update Vendoo** approves the action directly,
-without a change-preview dialog. Anteroom prepares the fields, category schemas,
-listing revision, item details and photo order before queueing; later edits do
-not rewrite that approval. An update checks the Vendoo draft version before
-writing and stops if it changed. Updates retain Vendoo's existing photos.
-Progress reports the active stage, elapsed time and confirmed photo-upload
-counts, without estimated percentages. Validation issues link to their fields.
-History compares revisions and restores listing fields into a new revision;
-photos stay as they are, and restoration never sends to Vendoo.
+**List** and **Update** each name one marketplace and carry `confirm`. Save
+draft writes the marketplace's own draft and never publishes. Progress reports
+the active stage and elapsed time, without estimated percentages. Validation
+issues link to their fields. History compares revisions and restores listing
+fields into a new revision; photos stay as they are, and restoration never
+lists or updates anything.
 
-The system is local-only, intended for one user, runs one Chrome automation job at a time (additional approved Sends wait in a FIFO queue), and must always stop before publication.
+The system is local-only, intended for one user, and never publishes without
+the seller's confirmation. Direct actions run side by side, one per
+marketplace, never alongside another automation job such as a delist or a page
+inspection.
 
 Generation prepares category ids and marketplace fields in the saved Anteroom
-listing using read-only category/schema requests. Send and Update reuse this
-preparation; price and description edits do not repeat an unchanged field-fill
-pass. Category edits, newly empty fields and changed schemas require a fresh
-pass. Generation does not create labels, upload photos or write a Vendoo draft.
-After Send approval, photos upload three at a time in seller order; a failed
-upload stops creation, and the saved draft is still read back for verification.
+listing using read-only category/schema requests. List and Update reuse this
+preparation. Generation does not create labels, upload photos or write to any
+marketplace.
 
 ## 2. Product Decisions
 
@@ -46,11 +43,11 @@ upload stops creation, and the saved draft is still read back for verification.
 - `mimo-v2.5` for multimodal photo analysis.
 - `mimo-v2.5-pro` for listing synthesis, chat, and revisions.
 - macOS Keychain for API-key storage.
-- Chrome extension controls Vendoo.
+- eBay and Etsy are listed through their APIs; Poshmark, Mercari, Depop, Sellwild and Vinted through the Chrome extension in the seller's signed-in Chrome.
 - Draft saving only; never publish automatically.
-- Human approval required before sending to Vendoo.
-- The extension runs without its own interface. Anteroom owns review, approved Sends, progress, and diagnostics.
-- One automation job runs at a time. Additional Send to Vendoo approvals enqueue and start when the current job finishes, fails, or is cancelled.
+- Publishing, updating and delisting happen only when the seller confirms that action: `POST /api/conversations/{id}/native-marketplaces/{marketplace}/list` or `.../update` (one marketplace, named in the path, body `confirm`), `POST /api/conversations/{id}/marketplace-listings/delist` (marketplaces named, body `confirm`), and eBay `POST /api/ebay/actions/confirm` (`confirm: true`). Nothing publishes everywhere by default, on a queue, on a retry, or as a side effect.
+- The extension runs without its own interface. Anteroom owns review, confirmed actions, progress, and diagnostics.
+- Direct List, Update and Save draft run side by side, one per marketplace, but never alongside another automation job such as a delist or a page inspection.
 
 ### Marketplace workspace
 
@@ -95,12 +92,11 @@ Anteroom (http://127.0.0.1:4318)
 │   ├── Keychain service
 │   ├── Job orchestrator
 │   └── Authenticated WebSocket server
-└── Chrome extension
+└── Chrome extension (Bridge)
     ├── Reconnecting WebSocket client
     ├── Durable active-job state
-    ├── Vendoo tab creation
-    ├── Sequential step runner
-    └── Vendoo content-script fill, save, and audit operations
+    ├── Marketplace workers (Poshmark, Mercari, Depop, Sellwild, Vinted)
+    └── Field results and read-back
 ```
 
 The frontend communicates with FastAPI through HTTP and Server-Sent Events. The extension connects to FastAPI through an authenticated loopback WebSocket. API keys never leave the backend process.
@@ -201,7 +197,7 @@ Desktop uses three resizable columns:
 │ Job status    │ Chat composer            │ JSON and validation  │
 │ + New listing │                          │                      │
 ├───────────────┴──────────────────────────┴──────────────────────┤
-│ Extension connected · Valid listing        [Send to Vendoo]    │
+│ Extension connected · Valid listing        [List on …]         │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -209,16 +205,16 @@ Mobile and narrow screens use Photos, Chat, Listing, and Automation tabs.
 
 ### Visual Direction
 
-- Purpose-built local listing workbench for one operator. Photos in, marketplace draft out, human approval before Send to Vendoo.
+- Purpose-built local listing workbench for one operator. Photos in, marketplace listing out, seller confirmation before anything is published.
 - Dense enough for daily operational use.
 - T3 Code-inspired information hierarchy, not an IDE clone.
 - T3 Code stock dark shell from `pingdotgg/t3code` `themePalette.ts`: `#000000` sidebar, `#0a0a0a` workspace, `#111111` surfaces, `#191919` borders, and `#346bf1` accent. Settings → Appearance also offers a neutral light shell (inverted surfaces, same cobalt accent) and System (follow the OS). Preference is stored in `settings.json` under `ui.theme` (`dark` | `light` | `system`, default `dark`).
 - The main workspace is inset by 8px inside a 12px rounded frame; navigation remains 244px wide.
 - Sidebar, workspace, and inspector share the same 8px inset and aligned top/bottom frame.
-- Column footers stay independent: sidebar keeps Settings and updates; inspector keeps Send to Vendoo; only the chat column gets a T3-style composer.
+- Column footers stay independent: sidebar keeps Settings and updates; inspector keeps the marketplace actions; only the chat column gets a T3-style composer.
 - Chat chrome follows T3 Code: user right, assistant left, no bubble cards. Assistant and user text render as T3-style markdown (GFM tables, headings, lists, inline code). The composer is always visible as a rounded `#111111` pill on `#0a0a0a` with a circular `#346bf1` send control. Empty state keeps Generate Listing when photos exist.
-- Browser preview is a bottom pane in the center column only when the seller opens **Browse draft**. **Send to Vendoo** and **Update Vendoo** run in the background with progress in the editor; they do not open the preview or switch the mobile pane. Collapse the preview when the seller closes it. Do not keep a permanent ~42% split.
-- Browse draft makes the preview interactive, following T3 Code's in-app browser. **Use** forwards pointer, wheel, keyboard, and paste to the Vendoo tab. **Pick**, **Box**, and **Pen** point Anteroom at fields, and **Missed fields** outlines empty listing fields. Picked fields show as chips in the chat composer. While the draft is open, chat messages go to the fix agent with those fields: it reads the live form, takes one action at a time (Anteroom's filler first, then clicks and typing), re-reads the form to verify, saves, and replies with the changed values and its steps. It changes only what the seller asked for, skips account settings, pauses when the seller presses, scrolls, or types in the pane, and stops after 24 steps. Input waits while Anteroom is filling. In the phone layout the pane sends its size and Chrome lays the draft out at that size with touch emulation, a finger on the pane is forwarded as touch (tap, drag to scroll), and **Keyboard** focuses a hidden text box so the phone's keyboard opens and its edits replay on the draft. Fills always run on the desktop layout; the phone layout returns when they finish.
+- Browser preview is a bottom pane in the center column only when the seller opens **Browse draft**. **List** and **Update** run in the background with progress in the editor; they do not open the preview or switch the mobile pane. Collapse the preview when the seller closes it. Do not keep a permanent ~42% split.
+- Browse draft makes the preview interactive, following T3 Code's in-app browser. **Use** forwards pointer, wheel, keyboard, and paste to the draft tab. **Pick**, **Box**, and **Pen** point Anteroom at fields, and **Missed fields** outlines empty listing fields. Picked fields show as chips in the chat composer. While the draft is open, chat messages go to the fix agent with those fields: it reads the live form, takes one action at a time (Anteroom's filler first, then clicks and typing), re-reads the form to verify, saves, and replies with the changed values and its steps. It changes only what the seller asked for, skips account settings, pauses when the seller presses, scrolls, or types in the pane, and stops after 24 steps. Input waits while Anteroom is filling. In the phone layout the pane sends its size and Chrome lays the draft out at that size with touch emulation, a finger on the pane is forwarded as touch (tap, drag to scroll), and **Keyboard** focuses a hidden text box so the phone's keyboard opens and its edits replay on the draft. Fills always run on the desktop layout; the phone layout returns when they finish.
 - T3 Code blue marks primary actions, selection, and focus; marketplace colors remain sparing.
 - System UI sans handles navigation, controls, and content while the T3 Code mono stack handles measurements, JSON, and technical status.
 - Avoid generic dashboard cards and excessive rounded containers.
@@ -240,12 +236,11 @@ Mobile and narrow screens use Photos, Chat, Listing, and Automation tabs.
 - Create a new listing.
 - Search by title, brand, SKU, or job ID.
 - Filter by draft, active, sold, and failed status.
-- Listings wear Vendoo's own Inventory labels — `Draft`, `Active`, `Sold` — taken from the bound item, plus `Failed` for a send that broke. `In progress` shows during MiMo generation or refinement and `Listing` during queued/running Vendoo automation.
-- The label is read-only: Anteroom reports what Vendoo says and offers no way to set it, so a listing can never claim a state Vendoo does not agree with.
+- Listings show `Draft`, `Active` or `Sold` from Anteroom's own marketplace listings and sales (`services/item_status.py`), on top of any imported Vendoo history, plus `Failed` for an action that broke. `In progress` shows during MiMo generation or refinement and `Listing` while a direct action runs.
+- The label is read-only: it reports what the marketplaces say and offers no way to set it.
 - A live listing with unsent edits keeps its `Active` label and wears an `unsent` tag; `Filters → Unsent edits` collects them. `Draft` holds only listings that are live nowhere.
 - Sold listings settle onto the collapsed shelf, so the working list holds what is still sellable.
-- Import the whole Vendoo inventory in one run (sidebar footer), photos included. Items already imported are refreshed only when Vendoo's copy changed, so the run doubles as a sync. A run that reaches the last page also deletes the listings whose Vendoo item is gone, so deleting in Vendoo deletes here; listings never bound to a Vendoo item are left alone, and an inventory that reads as empty deletes nothing.
-- Show last-updated time and completed Vendoo draft link.
+- Show last-updated time and each marketplace's listing link.
 
 ### Workspace
 
@@ -267,7 +262,7 @@ Mobile and narrow screens use Photos, Chat, Listing, and Automation tabs.
 - Display model changes as a field diff.
 - Allow accepting, undoing, and restoring revisions.
 - Infer brand, size, category, and other product facts from photos and the seller's initial notes. Flag remaining uncertainties in the description; never ask clarifying questions.
-- Normalize generated categories to selectable Vendoo General leaf paths before automation. Women's shirts and T-shirts use `Clothing, Shoes & Accessories > Women > Women's Clothing > Tops`; men's T-shirts use `Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts`. Treat `Shirts & Blouses` as a marketplace alias, not a Vendoo General category.
+- Normalize generated categories to selectable General leaf paths before marketplace categories are chosen. Women's shirts and T-shirts use `Clothing, Shoes & Accessories > Women > Women's Clothing > Tops`; men's T-shirts use `Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts`. Treat `Shirts & Blouses` as a marketplace alias, not a General category.
 
 ### Listing Editor
 
@@ -279,6 +274,8 @@ Tabs:
 - Mercari
 - Depop
 - Etsy
+- Sellwild
+- Vinted
 - Raw JSON
 
 Requirements:
@@ -291,33 +288,24 @@ Requirements:
 - Invalid JSON cannot overwrite the last valid listing.
 - Revision history and restore action.
 
-### Send Controls
+### List Controls
 
-**Send to Vendoo** is enabled only when:
+Each marketplace's **List** is enabled only when:
 
-- The extension is connected.
-- The listing passes validation.
+- The marketplace is connected (the extension for Poshmark, Mercari, Depop, Sellwild and Vinted; the API sign-in for eBay and Etsy).
+- The listing passes validation and the marketplace's pre-flight.
 - Required photos are present.
-- No critical uncertainty remains unresolved.
-- No automation job is active.
-- The user confirms an immutable listing snapshot.
+- No other action on that marketplace, delist or page inspection is running.
+- The seller confirms that one marketplace and the saved revision.
 
-The confirmation shows the title, photo count, selected marketplaces, draft-only behavior, and the no-publish guarantee.
+List and Update carry `confirm`; Save draft never publishes.
 
 ### Automation Progress
 
-```text
-✓ Vendoo opened
-✓ Photos uploaded and verified: 7
-✓ General form saved and audited
-✓ eBay saved and audited
-● Poshmark filling
-○ Mercari
-○ Depop
-○ Etsy
-```
-
-Failures show the failed field or section, evidence, last error, retry action, cancel action, and any available Vendoo draft link.
+Each running action shows its marketplace, its current step (Saving the listing,
+Publishing, Updating the live listing, Waiting for Chrome to confirm, Checking
+the result) and elapsed time. Failures show the failed field, evidence, last
+error, Check and Cancel, and the marketplace link when one exists.
 
 ## 6. Backend Specification
 
@@ -389,13 +377,17 @@ POST   /api/conversations/{conversation_id}/listing/validate
 GET    /api/conversations/{conversation_id}/revisions
 POST   /api/conversations/{conversation_id}/revisions/{revision_id}/restore
 
-POST   /api/conversations/{conversation_id}/vendoo-api/create
-POST   /api/conversations/{conversation_id}/vendoo-api/save
-POST   /api/conversations/{conversation_id}/vendoo-api/pull
-POST   /api/conversations/{conversation_id}/vendoo-api/sync
-GET    /api/conversations/{conversation_id}/vendoo-api/sync
-POST   /api/conversations/{conversation_id}/vendoo-api/list
-POST   /api/conversations/{conversation_id}/vendoo-api/delist
+GET    /api/conversations/{conversation_id}/vendoo-api/fields
+
+GET    /api/conversations/{conversation_id}/native-marketplaces
+POST   /api/conversations/{conversation_id}/native-marketplaces/{marketplace}/draft
+POST   /api/conversations/{conversation_id}/native-marketplaces/{marketplace}/list
+POST   /api/conversations/{conversation_id}/native-marketplaces/{marketplace}/update
+POST   /api/conversations/{conversation_id}/native-marketplaces/{marketplace}/check
+POST   /api/conversations/{conversation_id}/native-marketplaces/{marketplace}/reset
+POST   /api/conversations/{conversation_id}/native-marketplaces/{marketplace}/cancel
+POST   /api/conversations/{conversation_id}/marketplace-listings/delist
+POST   /api/ebay/actions/confirm
 
 POST   /api/jobs/ensure-draft
 GET    /api/jobs
@@ -463,7 +455,7 @@ Use `mimo-v2.5-pro` with:
 - Structured photo evidence.
 - User notes.
 - Current listing rules.
-- Vendoo JSON schema.
+- Listing JSON schema (`docs/json-contract.md`).
 - Marketplace value constraints.
 - Conversation instructions.
 
@@ -485,12 +477,12 @@ never transfer another item's facts or replace canonical/customized formulas.
 These records survive regeneration and are removed when the listing is deleted.
 Old revisions are not backfilled as deliberate edits.
 
-A dated Vendoo sale freezes its remote listing at first observation. Both full
-imports and status-only syncs capture it; repeated syncs never overwrite it.
-The record is explicitly first-observed-sold text, not verified text at the sale
-instant. Generation matches historical facets against that snapshot, so later
-listing edits cannot rewrite historical examples. Legacy listings without a
-snapshot remain labeled as current text with unknown at-sale provenance.
+A dated imported Vendoo sale froze its remote listing at first observation,
+and that snapshot is kept. The record is explicitly first-observed-sold text,
+not verified text at the sale instant. Generation matches historical facets
+against that snapshot, so later listing edits cannot rewrite historical
+examples. Legacy listings without a snapshot remain labeled as current text with
+unknown at-sale provenance.
 
 The output contains a user-facing response, complete proposed listing, uncertainties, and validation warnings.
 
@@ -553,7 +545,7 @@ Define the complete schema in `vendoo-studio/server/vendoo_studio/models/listing
 
 Validation levels:
 
-- **Error:** blocks Send to Vendoo.
+- **Error:** blocks List and Update.
 - **Warning:** requires acknowledgement.
 - **Information:** quality recommendation.
 
@@ -585,7 +577,7 @@ SQLite tables:
 
 ### `jobs`
 
-- ID, conversation ID, approved revision ID, immutable listing snapshot, status, current step, Vendoo item ID/URL, attempts, last error, and timestamps.
+- ID, conversation ID, approved revision ID, immutable listing snapshot, status, current step, attempts, last error, and timestamps.
 
 ### `job_events`
 
@@ -659,39 +651,24 @@ Extension-to-server messages:
 - Retry resumes at an explicit step.
 - Approved listing snapshots cannot change during execution.
 
-## 11. Automation State Machine
+## 11. Direct Action States
+
+A direct action runs as one job whose step names the marketplace and the
+action: `native_<marketplace>_<step>`, where the step is `save_draft`,
+`publish`, `list`, `update` or `check`. Its record in `marketplace_listings`
+moves through:
 
 ```text
-queued
-awaiting_extension
-dispatched
-opening_vendoo
-waiting_for_vendoo
-uploading_photos
-filling_general
-saving_general
-auditing_general
-filling_ebay
-saving_ebay
-auditing_ebay
-filling_poshmark
-saving_poshmark
-auditing_poshmark
-filling_mercari
-saving_mercari
-auditing_mercari
-filling_depop
-saving_depop
-auditing_depop
-filling_etsy
-saving_etsy
-auditing_etsy
-completed
-failed
-cancelled
+not_saved
+draft
+saving
+publishing
+updating
+published / pending_review   (live)
+unknown                      (no answer came back; Check decides)
 ```
 
-Field states follow the existing direct-flow contract:
+Field states:
 
 ```text
 not_started
@@ -702,103 +679,57 @@ audited_complete
 blocked_with_evidence
 ```
 
-No section is complete when values were merely typed. Completion requires visible committed values after save.
+No field is complete when values were merely sent. Completion requires the
+value to read back from the marketplace.
 
-## 12. Existing Extension Changes
+## 12. Extension
 
 ### `vendoo-extension/manifest.json`
 
-- Add the minimum tab permission needed for deterministic tab creation and querying.
-- Add loopback host access for `http://127.0.0.1:4318/*` and the local WebSocket.
-- Keep existing Vendoo and marketplace permissions.
-- Update name, version, and description for Anteroom integration.
+- Loopback host access for `http://127.0.0.1:4318/*` and the local WebSocket.
+- Host permissions for the marketplaces it lists on: Poshmark, Mercari, Depop, Sellwild, Vinted, and eBay pages it reads.
 - Do not add `<all_urls>`.
 
 ### `vendoo-extension/background.js`
 
-Add:
-
 - WebSocket lifecycle and pairing.
 - Active-job persistence and idempotency.
-- Vendoo tab creation or controlled reuse.
-- Vendoo readiness polling.
-- Sequential step execution.
-- Timeouts, retries, progress forwarding, and restart recovery.
+- Loads the marketplace worker modules in `background/` and routes messages to them and to the content scripts.
+- Timeouts, progress forwarding, and restart recovery.
 
-Suggested functions:
+### Marketplace workers and content scripts
 
-```text
-connectToStudio()
-handleStudioMessage()
-acceptJob()
-openVendooListing()
-waitForContentScript()
-runJob()
-runStep()
-sendProgress()
-restoreActiveJob()
-```
-
-The current `startVendooFill()` assumption that a listing tab already exists must not apply to Anteroom jobs.
-
-### `vendoo-extension/content-scripts/vendoo.js`
-
-Replace the single broad fill command with explicit operations:
-
-```text
-UPLOAD_PHOTOS
-FILL_GENERAL
-SAVE_GENERAL
-AUDIT_GENERAL
-DISCOVER_SCHEMA
-FILL_MARKETPLACE
-SAVE_MARKETPLACE
-AUDIT_MARKETPLACE
-GET_PAGE_STATE
-```
-
-Required changes:
-
-- Upload through `#imageInput`.
-- Fetch authorized job photos from the backend.
-- Preserve photo ordering and verify visible upload count.
-- Fill category path.
-- Extract the full General, eBay, Poshmark, Mercari, Depop, and Etsy category trees through Vendoo's own authenticated picker client. Authentication remains in Vendoo; only category metadata crosses the extension bridge. Store IDs, parents, breadcrumbs, leaf flags, and visited branches in `category_tree_nodes`, with per-marketplace status in `category_trees`. Completion requires every branch to be visited. Errors preserve checkpoints and never report complete. Settings exposes extraction progress and resume through `/api/catalog/sync`.
-- After photo analysis, choose a real terminal category independently in each selected marketplace tree via local semantic catalog search (Semble) over verified `category_tree_nodes` leaves, inferring the best-supported leaf from photos and notes when evidence is thin. Preserve `category_path` and `marketplace_categories` through generation. Await a schema probe and verify every form's category breadcrumb before generating the full listing. Infer supportable unknown fields from photos and initial notes; leave unsupported facts empty and flag them — never ask the seller clarifying questions.
-- Cache reusable field definitions in `category_schemas`, without item values or item-specific selectors. `/api/catalog/categories` reports actual per-marketplace tree completeness; `/api/catalog/schema` exposes observed category fields; `/api/catalog/search` semantically searches local category leaves, observed schemas, skill dropdown options, listing-rule chunks, and extension fill helpers. Generation retrieves relevant skill chunks; field repair enriches gaps with catalog options; fill-log reports attach related fill helpers for failed fields. A complete category tree does not imply all category-specific or conditional fields have been discovered. Searchable dropdown options remain partial unless exhaustiveness is established.
-- Failed extension jobs release their persisted active-job state before reporting failure, so Retry can start another attempt. Failure events retain per-marketplace schemas and errors.
-- After General category is committed during Send to Vendoo, align each marketplace category, scrape the live field schema, and register discovered fields before marketplace fill.
+- Poshmark, Mercari, Depop, Sellwild and Vinted listings are written through each marketplace's own signed-in web client, in the seller's Chrome. Authentication stays in Chrome; only listing data and results cross the bridge.
+- Fetch authorized job photos from the backend and preserve their order.
 - Fill SKU only when explicitly supplied.
-- Return structured field results.
-- Separate filling, saving, and auditing.
-- After each full fill or targeted repair, reload the saved draft and read General plus every selected marketplace, including newly exposed optional fields. Only this readback may mark the listing complete.
-- Feed missing, rejected and mismatched fields back to the listing assistant. Repair only gaps, preserve correct values, and require photo/seller evidence for new facts. Infer from photos and initial notes; never pause to ask clarifying questions. Pause in `completion_blocked` when evidence cannot resolve gaps so the seller can edit the draft or Fill Log and retry; stop unchanged retries and pause after five repair rounds. `POST /api/jobs/{id}/complete` starts a fresh verification/repair attempt on an already approved draft. Schema probes never authorize filling.
-- Required fields cannot be marked not applicable. Optional exemptions require evidence and are recorded in job events. A failed, empty or partial readback must leave the listing incomplete. Completion never publishes.
-- Detect validation blockers and pending search text.
-- Verify committed chips, tokens, and selected options.
-- Capture Vendoo item ID and URL after general save.
-- Remove unconditional success when a fill function merely returns.
-- Stop calling `clickSave()` from marketplace fill functions.
+- Return structured field results and read the saved listing back.
+- Never publish, delist or delete outside a seller-confirmed action.
+
+### Categories and schemas
+
+- After photo analysis, choose a real terminal category independently in each selected marketplace tree via local semantic catalog search (Semble) over verified `category_tree_nodes` leaves, inferring the best-supported leaf from photos and notes when evidence is thin. Preserve `category_path` and `marketplace_categories` through generation. Infer supportable unknown fields from photos and initial notes; leave unsupported facts empty and flag them — never ask the seller clarifying questions.
+- `/api/catalog/categories` reports per-marketplace tree completeness; `/api/catalog/schema` exposes observed category fields; `/api/catalog/search` semantically searches local category leaves, observed schemas, skill dropdown options, listing-rule chunks, and extension fill helpers. Generation retrieves relevant skill chunks; field repair enriches gaps with catalog options; fill-log reports attach related fill helpers for failed fields. Searchable dropdown options remain partial unless exhaustiveness is established.
+- Direct forms come from each marketplace's own catalog (`marketplace_schemas.py`, `chrome_catalog.py`); the eBay and Etsy editor forms come from `GET /api/conversations/{id}/vendoo-api/fields`.
 
 Structured result example:
 
 ```json
 {
   "ok": false,
-  "step": "audit_ebay",
+  "step": "native_mercari_save_draft",
   "fields": {
     "brand": {
       "state": "audited_complete",
       "expected": "Levi's",
       "observed": "Levi's"
     },
-    "features": {
+    "size": {
       "state": "attempted_unverified",
-      "expected": ["Comfortable", "Lightweight"],
-      "observed": ["Comfortable"]
+      "expected": "M",
+      "observed": null
     }
   },
-  "error": "One eBay feature did not persist after save"
+  "error": "Mercari's draft read back without a size"
 }
 ```
 
@@ -806,38 +737,24 @@ Structured result example:
 
 - No toolbar popup, on-page debug panel, field highlighting, or manual JSON controls.
 - Pair automatically with the local Anteroom server and reconnect in the background.
-- Keep content-script connection wakeups and seller-save notifications.
 - Show connection status, active jobs, fill results, and errors in Anteroom.
-- Remove permissions used only by the deleted manual controls (`activeTab` and `downloads`).
 
 ### Documentation
 
-Update:
+Keep current:
 
 - `vendoo-extension/README.md`
-- `vendoo-extension/TROUBLESHOOTING.md`
 - Root `README.md`
 
-Direct marketplace scripts are not part of the primary Anteroom flow and should remain unchanged unless testing proves a concrete dependency.
+## 13. Read-back Requirements
 
-## 13. Save and Audit Requirements
+A write succeeds only when the marketplace's own copy is read back and matches.
+Clicking a button or getting a reply does not prove persistence.
 
-The existing `clickSave()` behavior is insufficient because clicking a likely button does not prove persistence.
-
-A save succeeds only when:
-
-1. Save begins.
-2. Loading completes.
-3. No validation error is visible.
-4. Vendoo confirms success or reaches stable persisted state.
-5. The form is re-read after save.
-6. Expected fields remain visibly committed.
-7. Token fields show committed pills.
-8. Dropdown fields show closed committed values.
-9. No transient search text remains.
-10. General save produces a stable Vendoo item ID.
-
-If audit fails, report mismatched fields, return the section to `attempted_unverified`, retry with a stricter interaction, save again, audit again, and fail with evidence after bounded retries.
+- Each List, Update and Save draft reads the listing or draft back from the marketplace.
+- A reply that never came leaves the record `unknown`. Check reads the marketplace (never writes) and runs by itself after a lost reply, on startup and when Chrome reconnects.
+- Nothing retries a write on its own. Reset is the seller saying they looked on the marketplace themselves, and requires `confirm`.
+- A failed, empty or partial read-back leaves the record unconfirmed.
 
 ## 14. Photo Handling
 
@@ -860,10 +777,8 @@ If audit fails, report mismatched fields, return the section to `attempted_unver
 ### Extension Transfer
 
 - Create job-scoped signed photo URLs.
-- Extension downloads bytes over loopback HTTP.
-- Content script creates native `File` objects and assigns them through `#imageInput`.
-- Wait for all Vendoo thumbnails to finish uploading.
-- Audit count and order before continuing.
+- Extension downloads bytes over loopback HTTP and uploads them to the marketplace in seller order.
+- Read the photo count and order back before continuing.
 
 Use a Native Messaging host only if browser-based file assignment is tested and proven incompatible.
 
@@ -891,7 +806,7 @@ Use a Native Messaging host only if browser-based file assignment is tested and 
 
 Backend logs may include request ID, conversation ID, job ID, step, duration, provider/model, token usage, and redacted errors.
 
-Extension logs may include connection state, job ID, step transitions, retries, audit failures, and sanitized Vendoo URLs.
+Extension logs may include connection state, job ID, step transitions, retries, read-back failures, and sanitized marketplace URLs.
 
 Do not log API keys, pairing tokens, authorization URLs, image bytes, base64 payloads, or full listing content by default.
 
@@ -939,14 +854,12 @@ Mocked flow:
 - Fake extension WebSocket client.
 - Generate, approve, dispatch, report progress, and complete.
 
-Live Vendoo smoke test:
+Direct listing smoke test (a private draft on a disposable item):
 
-1. Use a disposable item.
-2. Upload known photos.
-3. Save and audit general fields.
-4. Confirm stable Vendoo item ID.
-5. Fill, save, and audit selected marketplaces.
-6. Confirm no publish action occurred.
+1. Save draft on one marketplace.
+2. Confirm the marketplace's draft reads back with the expected photos and fields.
+3. Check the record without writing.
+4. Confirm no publish action occurred.
 
 ## 18. Implementation Milestones
 
@@ -971,35 +884,27 @@ Live Vendoo smoke test:
 - Add pairing, authenticated WebSocket, heartbeat, reconnect, durable jobs, and acknowledgements.
 - Verify online status, duplicate prevention, and restart recovery.
 
-### Milestone 5: Vendoo General Form
+### Milestone 5: Direct Listing
 
-- Add automatic tab creation, readiness detection, photo upload, general fill/save/audit, and draft URL return.
-- Verify a new persisted draft with the correct photo count and fields.
+- Add List, Update and Save draft per marketplace: eBay and Etsy through their APIs; Poshmark, Mercari, Depop, Sellwild and Vinted through the extension.
+- Verify each action reads the listing back and records its state, and a lost reply leaves the record `unknown` until Check reads it.
 
-### Milestone 6: Marketplace Pipeline
+### Milestone 6: Recovery and Polish
 
-- Implement sequential fill/save/audit/retry for eBay, Poshmark, Mercari, Depop, and Etsy.
-- Verify each marketplace reaches `audited_complete` or `blocked_with_evidence`.
-
-### Milestone 7: Recovery and Polish
-
-- Add retry, cancellation, event history, draft links, diagnostics, documentation, and live smoke testing.
-- Verify a failed step resumes without creating another Vendoo item.
+- Add Check, Reset, cancellation, event history, listing links, diagnostics and documentation.
+- Verify a failed or lost action never creates a second listing.
 
 ## 19. Relevant Existing Files
 
 - `docs/json-contract.md`: the listing JSON shared by skills, Anteroom and the extension.
+- `docs/direct-form-parity.md`: each marketplace's form, sharing and offer support, with sources.
 - `skills/list-this/SKILL.md`: canonical listing-generation policy.
 - `skills/list-this/references/vendoo_listing_template.md`: JSON and marketplace guidance.
-
-- `skills/list-this/references/vendoo-extension-architecture.md`: current extension architecture.
+- `vendoo-studio/server/vendoo_studio/services/native_marketplaces.py`: direct List, Update, Save draft, Check and Reset.
 - `vendoo-extension/manifest.json`: permissions and extension metadata.
 - `vendoo-extension/background.js`: Anteroom connection and job orchestration.
-- `vendoo-extension/content-scripts/vendoo.js`: photo upload and fill/save/audit operations.
 - `vendoo-extension/sample-listing.json`: shared validation and automation fixture.
-- `vendoo-extension/diagnostic-collector.js`: structured failure evidence where applicable.
 - `vendoo-extension/README.md`: setup and workflow documentation.
-- `vendoo-extension/TROUBLESHOOTING.md`: connection and automation troubleshooting.
 
 ## 20. Non-Goals for Version 1
 
@@ -1007,11 +912,8 @@ Live Vendoo smoke test:
 - Multi-user accounts.
 - Cloud hosting.
 - Native mobile application.
-- Inventory management or sales analytics.
 - Distributed workers.
-- Multiple simultaneous automation jobs.
 - LibreChat or T3 Code integration.
-- Direct automation of native marketplace sites.
 - Native Messaging unless browser-based photo upload fails.
 - A generalized provider framework beyond the small MiMo boundary.
 
@@ -1027,14 +929,12 @@ Version 1 is complete when the user can:
 6. Edit structured fields or raw JSON.
 7. Pass validation.
 8. See that the extension is connected.
-9. Click **Send to Vendoo**.
-10. Have a new Vendoo draft created automatically.
-11. Have photos and general fields saved and audited.
-12. Have each selected marketplace saved and audited.
-13. See live progress and actionable failures.
-14. Retry a failed step without creating a duplicate item.
-15. Open the completed Vendoo draft.
-16. Confirm that no listing was published automatically.
+9. Confirm **List** on one marketplace.
+10. Have the listing written and read back on that marketplace.
+11. See live progress and actionable failures.
+12. Check a lost or failed action without creating a duplicate listing.
+13. Open the listing on the marketplace.
+14. Confirm that nothing was published without the seller's confirmation.
 
 
 ## Sale calendar in Marketing
@@ -1046,8 +946,8 @@ and seller-paid shipping start from that marketplace's sales over the last year.
 The suggested discount is the deepest 5% step, up to 30%, at which every listing
 with a cost still clears the seller's minimum profit; the plan lists the
 listings that fall below it and those with no cost.
-Saving, editing, recording, or cancelling an event never writes to a marketplace
-or to Vendoo. The seller runs the sale separately and marks it as run.
+Saving, editing, recording, or cancelling an event never writes to a
+marketplace. The seller runs the sale separately and marks it as run.
 
 Weekday suggestions scan every run of one to six consecutive weekdays over up
 to 52 complete weeks of imported sales (Kulldorff's scan statistic), so the
@@ -1063,7 +963,7 @@ to 14 days after it. Overlapping recorded promotions
 or insufficient history suppress that comparison. Missing prices, costs, and
 fees are disclosed. Recent sales get event labels only from events marked as
 run, in the event time zone and selected item scope. Marketplace-wide historical
-records have no item scope. Resyncing Vendoo refreshes the calendar results.
+records have no item scope. A new sale refreshes the calendar results.
 
 Earlier multi-marketplace event records migrate to one record per marketplace;
 events that covered all marketplaces keep that scope. Their dates are retained,
@@ -1156,15 +1056,16 @@ rest apply. A proposal is settled once, and later questions tell the model
 whether it was applied or dismissed.
 
 Applied changes are saved in Anteroom only. The Assistant never sends, lists,
-delists or publishes, and never calls Vendoo or a marketplace: a listing already
-on Vendoo keeps its old values there until the seller sends it again. Asking a
+delists or publishes, and never calls a marketplace: a listing already live
+keeps its old values there until the seller updates it.
 question still writes nothing but the conversation and the seller's note.
 Photos and secrets are in neither the brief nor the copy.
 
 ## Direct marketplace transition scope
 
-Anteroom owns inventory and connects directly to marketplaces. Vendoo is a
-temporary migration source, not a dependency for new marketplace workflows.
+Anteroom owns inventory and connects directly to marketplaces. Inventory
+imported from Vendoo earlier keeps its history (statuses, labels, sale dates)
+as read-only data; nothing new depends on Vendoo.
 Extend the direct connections, listing records and sales reconciliation already
 implemented here; do not introduce parallel identity or connection systems.
 

@@ -1,26 +1,18 @@
-"""Fail automation jobs that died or went quiet, so the next one can start.
+"""Fail direct marketplace jobs that died or went quiet, so the next one can start.
 
-One Chrome job runs at a time and approved Sends wait behind it in a FIFO
-queue. A job left ``dispatched`` holds that slot, keeps its listing on the busy
-``listing`` label, and keeps the editor's card on "Updating…". Each stall used
-to get its own fix in whichever request noticed it. This sweep is the one place
-that frees the slot, on startup and every ``SWEEP_INTERVAL_SEC``:
+A job left ``dispatched`` holds its marketplace's slot and keeps the editor's
+card on "Updating…". This sweep frees the slot, on startup and every
+``SWEEP_INTERVAL_SEC``:
 
-- **dead** — a Vendoo API send this process is not running (Studio quit or
-  restarted mid-send). Failed once it is ``ORPHAN_GRACE`` old, which covers a
-  job committed a moment before its worker claims it.
+- **interrupted** — a direct marketplace job this process is not running
+  (Studio quit or restarted mid-action). Failed once it is ``ORPHAN_GRACE``
+  old, which covers a job committed a moment before its worker claims it.
 - **silent** — any dispatched job that has not been heard from for
-  ``STALL_AFTER``. Every step writes the job or one of its events as it moves
-  (each Chrome op records a timing, the extension reports progress), and the
-  longest single wait inside a send is Chrome's 240s op timeout or a model's
-  5-minute idle limit, so ten minutes of silence is a stuck job.
+  ``STALL_AFTER``. Every step writes the job or one of its events as it moves,
+  so ten minutes of silence is a stuck job.
 
 The watchdog only marks a job failed and stops what is still waiting on it. It
-never sends, publishes or delists. The one thing it starts again is a dead send:
-that send is queued once more (``JobRepo.requeue_interrupted_send``), and the
-resumed run picks up its checkpointed draft instead of creating a second one. The listing's label follows from
-the failed job in ``ConversationRepo.reconcile_job_statuses``; the next queued
-Send starts because a failed job frees the slot, as the queue already does.
+never sends, publishes or delists, and it starts nothing again.
 """
 
 from __future__ import annotations
@@ -32,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.job import ABANDONED_SEND, JobEvent, is_vendoo_api_step
+from vendoo_studio.models.job import JobEvent
 from vendoo_studio.repositories.queries import JobRepo
 from vendoo_studio.services.api_job_lock import api_job_is_live
 
@@ -44,7 +36,7 @@ SWEEP_INTERVAL_SEC = 15.0
 
 STALLED_JOB = (
     "Anteroom heard nothing from this job for 10 minutes and stopped it. "
-    "Check the draft in Vendoo, then try again."
+    "Check the marketplace, then try again."
 )
 
 _task: asyncio.Task | None = None
@@ -79,10 +71,8 @@ def _stop_waiting_on(job_id: str) -> None:
     Cancels loop futures and tasks, so it runs on the event loop.
     """
     from vendoo_studio.services.extension_connection import current_extension
-    from vendoo_studio.services.listing_completion import cancel_completion
 
     current_extension().cancel_waits_for_job(job_id)
-    cancel_completion(job_id)
 
 
 def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
@@ -109,8 +99,6 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
             continue
         if native and quiet >= ORPHAN_GRACE:
             error, reason = "Marketplace action interrupted. Check its result before trying again.", "native_interrupted"
-        elif is_vendoo_api_step(job.current_step) and not api_job_is_live(job.id) and quiet >= ORPHAN_GRACE:
-            error, reason = ABANDONED_SEND, "dead"
         elif quiet >= STALL_AFTER:
             error, reason = STALLED_JOB, "silent"
         else:
@@ -127,20 +115,17 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
             from vendoo_studio.services.listing_promotions import mark_interrupted as promotions_interrupted
 
             promotions_interrupted(db, job.id)
-        if reason == "dead":
-            # Nothing in this process runs it, so resuming cannot double up.
-            repo.requeue_interrupted_send(job.id)
         failed.append(job.id)
         log.warning("Failed %s job %s at %s after %ds", reason, job.id, step, int(quiet.total_seconds()))
     return failed
 
 
 async def sweep() -> list[str]:
-    """One pass: fail what is stuck, tell the extension, start the next queued Send."""
+    """One pass: fail what is stuck and tell the extension."""
     from vendoo_studio.database import SessionLocal
     from vendoo_studio.models.protocol import ProtocolMessage
     from vendoo_studio.services.extension_connection import extension_manager
-    from vendoo_studio.services.native_marketplaces import reconcile_then_dispatch
+    from vendoo_studio.services.native_marketplaces import reconcile_after_reconnect
 
     def fail_in_session() -> list[str]:
         with SessionLocal() as db:
@@ -154,8 +139,8 @@ async def sweep() -> list[str]:
         ).model_dump(mode="json"))
     if failed:
         # A stalled List or Update left its result unconfirmed: read it now
-        # (read-only), then start the next queued job.
-        await reconcile_then_dispatch()
+        # (read-only).
+        await reconcile_after_reconnect()
     return failed
 
 

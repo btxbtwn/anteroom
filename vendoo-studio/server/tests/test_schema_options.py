@@ -6,12 +6,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.job import Job  # noqa: F401
 from vendoo_studio.models.listing import Listing, ListingRevision  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.repositories.queries import JobRepo, RegistryRepo
+from vendoo_studio.repositories.queries import RegistryRepo
 from vendoo_studio.services.registry import RegistryService
 
 
@@ -148,64 +147,6 @@ class SchemaOptionIngestTest(unittest.TestCase):
         self.assertEqual(value, "2020 - 2026 (Recently)")
 
 
-class SchemaPayloadRoundTripTest(unittest.TestCase):
-    """The probe payload used to dead-end at an event holding field counts."""
-
-    def setUp(self):
-        engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(engine)
-        self.db = sessionmaker(bind=engine)()
-        self.conv = Conversation(title="Tee")
-        self.db.add(self.conv)
-        self.db.commit()
-        self.job = JobRepo(self.db).create(
-            conv_id=self.conv.id,
-            approved_revision_id="schema-probe",
-            listing_snapshot={"category_path": ETSY_PATH, "_schema_probe": True},
-        )
-
-    def tearDown(self):
-        self.db.close()
-
-    def test_probe_options_reach_the_extension_payload(self):
-        from vendoo_studio.services.extension_connection import (
-            _build_registry_options,
-            _learn_schema_options,
-        )
-
-        schema = {
-            "etsy": {"fields": [
-                _field("When Made", ["2020 - 2026 (Recently)", "Before 2004 (Vintage)"]),
-                _field("Holiday", [], source="unavailable"),
-            ]},
-            "depop": {"fields": [
-                _field("Parcel Size", ["Small", "Medium", "Large"]),
-            ]},
-        }
-
-        learned = _learn_schema_options(self.db, self.job, schema)
-        self.assertEqual(learned, {"etsy": 1, "depop": 1})
-
-        payload = _build_registry_options(self.db, ["etsy", "depop"], ETSY_PATH)
-        self.assertEqual(
-            payload["etsy"]["when made"],
-            ["2020 - 2026 (Recently)", "Before 2004 (Vintage)"],
-        )
-        self.assertEqual(payload["depop"]["parcel size"], ["Large", "Medium", "Small"])
-        self.assertNotIn("holiday", payload["etsy"])
-
-    def test_options_are_scoped_to_the_probed_category(self):
-        from vendoo_studio.services.extension_connection import (
-            _build_registry_options,
-            _learn_schema_options,
-        )
-
-        _learn_schema_options(self.db, self.job, {
-            "etsy": {"fields": [_field("When Made", ["2020 - 2026 (Recently)"])]},
-        })
-
-        other = _build_registry_options(self.db, ["etsy"], "Home & Garden > Kitchen")
-        self.assertEqual(other, {})
 
 
 if __name__ == "__main__":

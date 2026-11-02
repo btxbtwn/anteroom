@@ -1,10 +1,10 @@
 """Seller-confirmed direct listings on eBay, Etsy, Poshmark, Mercari, Depop, Sellwild and Vinted.
 
 List is one seller-confirmed step. It runs as one background job that holds
-the single automation slot from the first write to the last answer: saving the
+its marketplace's slot from the first write to the last answer: saving the
 marketplace's own draft (Mercari, Depop, Etsy, Vinted) and publishing it are steps of
-the same job, so no queued Send can start between them, and a job whose Chrome
-reply is late keeps the slot until Chrome reports what it did.
+the same job, so no other action on that marketplace can start between them,
+and a job whose Chrome reply is late keeps the slot until Chrome reports what it did.
 
 What Anteroom knows lives in ``marketplace_listings`` (one row per item and
 marketplace). Nothing here retries a write on its own. A reply that never came
@@ -135,9 +135,9 @@ def blocking_job(repo: JobRepo, marketplace: str | None):
     """The active job that stops a new action on ``marketplace``, if any.
 
     Listing actions on different marketplaces run side by side; one
-    marketplace runs one action at a time. Vendoo sends, delists and page
-    inspections still have Chrome to themselves. With no marketplace, only
-    those exclusive jobs count.
+    marketplace runs one action at a time. Delists and page inspections still
+    have Chrome to themselves. With no marketplace, only those exclusive jobs
+    count.
     """
     for job in repo.get_active():
         step = str(job.current_step or "")
@@ -150,7 +150,7 @@ def blocking_job(repo: JobRepo, marketplace: str | None):
 def _busy_message(job, marketplace: str) -> str:
     if str(job.current_step or "").startswith(f"native_{marketplace}_"):
         return f"Another {NAMES[marketplace]} action is running. Wait for it to finish."
-    return "Another automation job is queued or running. Wait for it to finish."
+    return "Another automation job is running. Wait for it to finish."
 
 
 def running_marketplace(db: Session, conv_id: str) -> str | None:
@@ -708,7 +708,6 @@ def _finish_job(db: Session, job_id: str, conv_id: str, marketplace: str) -> Non
 async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str], options: dict) -> None:
     """Run a List or Update job's steps in order, holding the automation slot until the last answer."""
     from vendoo_studio.database import SessionLocal
-    from vendoo_studio.services.extension_connection import schedule_advance_job_queue
 
     db = SessionLocal()
     try:
@@ -758,7 +757,6 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
             release_api_job(job_id)
             _cancel_requested.discard(job_id)
             db.close()
-            schedule_advance_job_queue()
 
 
 async def cancel(conv_id: str, marketplace: Marketplace, db: Session) -> dict:
@@ -821,7 +819,7 @@ async def _read_result(db: Session, conv_id: str, marketplace: str, record: dict
 
 async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body: CheckRequest | None = None) -> dict:
     """Read-only: ask the marketplace what the last action did, and record it."""
-    from vendoo_studio.services.extension_connection import current_extension, schedule_advance_job_queue
+    from vendoo_studio.services.extension_connection import current_extension
 
     _conversation(db, conv_id)
     record = _record(db, conv_id, marketplace)
@@ -864,7 +862,6 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
         raise
     finally:
         release_api_job(check_job.id)
-        schedule_advance_job_queue()
 
 
 def reset(conv_id: str, marketplace: Marketplace, db: Session) -> dict:
@@ -921,20 +918,16 @@ async def reconcile(*, chrome: bool) -> int:
     return checked
 
 
-async def reconcile_then_dispatch() -> None:
-    """On Chrome reconnect: settle what Chrome may have finished, then start the queue."""
-    from vendoo_studio.services.extension_connection import dispatch_queued_jobs
-
+async def reconcile_after_reconnect() -> None:
+    """On Chrome reconnect or a stalled job: settle what Chrome may have finished. Read-only."""
     try:
         await reconcile(chrome=True)
-    except Exception:  # noqa: BLE001 - the queue must still start
+    except Exception:  # noqa: BLE001 - logged; the next reconnect tries again
         log.exception("Reconnect reconcile failed")
-    await dispatch_queued_jobs()
 
 
 async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: InspectRequest, db: Session):
-    """Read a marketplace page's form. Holds the automation slot so a Send cannot start into a busy Chrome."""
-    from vendoo_studio.services.extension_connection import schedule_advance_job_queue
+    """Read a marketplace page's form. Holds the automation slot so no action starts into a busy Chrome."""
 
     _conversation(db, conv_id)
     repo = JobRepo(db)
@@ -954,7 +947,6 @@ async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: I
         raise NativeMarketplaceError(502, "Chrome could not inspect the marketplace page.") from exc
     finally:
         release_api_job(job.id)
-        schedule_advance_job_queue()
 
 
 def listing_package(snapshot: dict) -> dict | None:

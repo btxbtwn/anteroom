@@ -1,7 +1,7 @@
 /** How each marketplace is named in the app's own copy, badges and labels. */
 
 export const MARKETPLACE_NAMES: Record<string, string> = {
-  general: "Vendoo",
+  general: "General",
   ebay: "eBay",
   etsy: "Etsy",
   poshmark: "Poshmark",
@@ -12,7 +12,6 @@ export const MARKETPLACE_NAMES: Record<string, string> = {
   vinted: "Vinted",
   whatnot: "Whatnot",
   sellwild: "Sellwild",
-  grailed: "Grailed",
   vestiaire: "Vestiaire Collective",
   other: "Other / in person",
 };

@@ -1,1 +1,0 @@
-var CONTENT_SCRIPT_VERSION = '0.3.41';

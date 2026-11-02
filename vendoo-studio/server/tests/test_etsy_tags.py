@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 from vendoo_studio.services.etsy_fields import sanitize_etsy_tag, sanitize_etsy_tags
-from vendoo_studio.services.vendoo_item_build import build_vendoo_item
 
 
 class EtsyTagSanitizeTests(unittest.TestCase):
@@ -39,23 +38,6 @@ class EtsyTagSanitizeTests(unittest.TestCase):
         self.assertNotIn("a tag far longer than twenty", tags)
         self.assertEqual(len(tags), 13)
         self.assertEqual(len({t.casefold() for t in tags}), 13)
-
-    def test_build_vendoo_item_sanitizes_etsy_tags(self):
-        item, _ = build_vendoo_item({
-            "title": "Tee",
-            "tags": ["#y2k", "pop/art", "women's tee", "graphic_tee!!!"],
-            "etsy_specifics": {"when_made": "1990s (Vintage)"},
-        }, None)
-        etsy = item["listings"]["etsy"]["marketplaceSpecifics"]
-        self.assertEqual(
-            etsy["tags"],
-            ["y2k", "pop art", "women's tee", "graphic tee"],
-        )
-        # General tags stay as authored — only the Etsy copy is scrubbed.
-        self.assertEqual(
-            item["generalDetails"]["tags"],
-            ["#y2k", "pop/art", "women's tee", "graphic_tee!!!"],
-        )
 
 
 if __name__ == "__main__":

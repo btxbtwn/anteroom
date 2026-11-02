@@ -17,7 +17,7 @@ from collections import deque
 from datetime import UTC, datetime
 from typing import Any
 
-from vendoo_studio.services.vendoo_api_log import redact
+from vendoo_studio.services.redaction import redact
 
 MAX_ENTRIES = 200
 MAX_MESSAGE_CHARS = 4000

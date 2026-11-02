@@ -25,7 +25,6 @@ describe("local sales records", () => {
     expect(html).not.toContain("Resync Vendoo data");
     const keys = useQuery.mock.calls.map((call) => call[0].queryKey[0]);
     expect(keys).toContain("sales-ledger");
-    expect(keys).toContain("settings-ui");
     expect(keys).not.toContain("analytics");
   });
   it("shows changed orders, quantity and unknown profit with local export links", () => {

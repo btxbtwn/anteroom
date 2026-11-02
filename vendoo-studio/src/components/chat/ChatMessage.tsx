@@ -2,13 +2,11 @@ import { InfoIcon } from "lucide-react";
 import type { Message } from "../../api/types";
 import { EvidenceCard } from "../EvidenceCard";
 import { SoldCompsCard } from "../SoldCompsCard";
-import { useVendooEnabled } from "../../vendooMode";
 import { assistantDisplayText, isCompResearch, isPhotoAnalysis } from "./assistantDisplay";
 import { AssistantMessageRow, UserMessageRow } from "./TimelineRows";
 import { WorkLogRow } from "./WorkLog";
 
 export function ChatMessage({ message: m }: { message: Message }) {
-  const vendooOn = useVendooEnabled();
   if (m.role === "user") {
     return <UserMessageRow text={m.text} createdAt={m.created_at} attachments={m.attachments} />;
   }
@@ -31,7 +29,7 @@ export function ChatMessage({ message: m }: { message: Message }) {
     );
   }
 
-  const visible = assistantDisplayText(m.text, vendooOn);
+  const visible = assistantDisplayText(m.text);
   if (!visible) return null;
   return <AssistantMessageRow text={visible} createdAt={m.created_at} messageId={m.id} />;
 }
