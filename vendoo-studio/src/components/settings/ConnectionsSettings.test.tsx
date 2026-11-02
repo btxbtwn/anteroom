@@ -104,4 +104,20 @@ describe("Connections settings", () => {
     expect(html).toContain("Open Anteroom in Chrome on your computer and connect Chrome first.");
     expect(html).toContain("Connect Chrome first");
   });
+
+  it("on the web, asks to update an older Bridge instead of to connect Chrome", () => {
+    const base = useQuery.getMockImplementation()!;
+    useQuery.mockImplementation((options: { queryKey: string[] }) => {
+      if (options.queryKey[0] === "marketplace-sessions") {
+        return { isError: true, error: new Error("Update Anteroom Bridge in Chrome to 0.2.44 or later to check marketplace sign-in from the web.") };
+      }
+      return base(options);
+    });
+    const html = renderToStaticMarkup(
+      <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
+    );
+    expect(html).toContain("Update Anteroom Bridge in Chrome to 0.2.44 or later");
+    expect(html).toContain("Update Anteroom Bridge<");
+    expect(html).not.toContain("Connect Chrome first");
+  });
 });

@@ -64,7 +64,6 @@ const SettingsPage = lazy(pageLoaders.settings);
 const AnalyticsPage = lazy(pageLoaders.analytics);
 const AssistantPage = lazy(pageLoaders.assistant);
 const MarketplacesPage = lazy(pageLoaders.marketplaces);
-const UsagePage = lazy(pageLoaders.usage);
 const AutomationsPage = lazy(pageLoaders.automations);
 const SourcingPage = lazy(pageLoaders.sourcing);
 // A page's code is fetched the first time it is opened. Fetching it once the
@@ -308,8 +307,6 @@ export function App() {
       ? "Analytics"
       : activeView === "marketplaces"
         ? marketplaceName(marketplace)
-      : activeView === "usage"
-        ? "Usage"
       : activeView === "automations"
         ? "Automations"
       : activeView === "assistant"
@@ -362,8 +359,8 @@ export function App() {
     closeMobileSidebar();
   };
 
-  // Analytics, Marketplaces, Usage and Sourcing toggle back to whichever of home or inventory was open.
-  const togglePage = (view: "analytics" | "marketplaces" | "usage" | "sourcing" | "automations") => {
+  // Analytics, Marketplaces, Automations and Sourcing toggle back to whichever of home or inventory was open.
+  const togglePage = (view: "analytics" | "marketplaces" | "sourcing" | "automations") => {
     if (!runtime.views.has(view)) return;
     setMobilePane(runtime.hosted ? "editor" : "workspace");
     if (activeView === view) {
@@ -393,7 +390,6 @@ export function App() {
     setMobilePane(runtime.hosted ? "editor" : "workspace");
     closeMobileSidebar();
   };
-  const openUsage = () => togglePage("usage");
   const openAutomations = () => togglePage("automations");
   const openSourcing = () => togglePage("sourcing");
 
@@ -769,7 +765,6 @@ export function App() {
             onCreate={createListing}
             creating={createConv.isPending}
             onOpenSettings={openSettings}
-            onOpenUsage={openUsage}
             onOpenAnalytics={openAnalytics}
             onOpenMarketplaces={openMarketplaces}
             onOpenAutomations={openAutomations}
@@ -877,10 +872,6 @@ export function App() {
               ) : activeView === "marketplaces" ? (
                 <Suspense fallback={pageLoading}>
                   <MarketplacesPage marketplace={marketplace} onMarketplaceChange={setMarketplace} onOpenListing={openListing} />
-                </Suspense>
-              ) : activeView === "usage" ? (
-                <Suspense fallback={pageLoading}>
-                  <UsagePage />
                 </Suspense>
               ) : activeView === "automations" ? (
                 <Suspense fallback={pageLoading}>

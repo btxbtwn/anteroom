@@ -24,7 +24,7 @@ export interface SalesLedgerRow {
   net_revenue: string | null;
   profit: string | null;
 }
-export interface SalesLedgerFilters { start: string; end: string; marketplace?: string; conversation_id?: string }
+export interface SalesLedgerFilters { start: string; end: string; marketplace?: string; conversation_id?: string; q?: string; attention?: string; sort?: string }
 export interface FinancialSave extends FinancialEntry { expected_revision: number; expected_order_basis: string; sold_on?: string | null }
 export interface SalesLedgerPage {
   rows: SalesLedgerRow[];
@@ -42,6 +42,7 @@ export function salesLedgerParams(filters: SalesLedgerFilters, page?: number): s
   const params = new URLSearchParams({ start: filters.start, end: filters.end });
   if (filters.marketplace) params.set("marketplace", filters.marketplace);
   if (filters.conversation_id) params.set("conversation_id", filters.conversation_id);
+  for (const key of ["q", "attention", "sort"] as const) if (filters[key]) params.set(key, filters[key]);
   if (page != null) params.set("page", String(page));
   return params.toString();
 }
