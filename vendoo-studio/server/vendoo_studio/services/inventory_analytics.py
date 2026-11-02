@@ -73,7 +73,6 @@ class AnalyticsItem:
     shipping_cost: float = 0.0
     shipping_credit: float = 0.0
     box_id: str | None = None
-    missing_sale_details: tuple[str, ...] = ()
     refunds: float = 0.0
     # The sales-ledger line this sale row came from, if any.
     sale_id: str | None = None
@@ -125,18 +124,18 @@ def inventory_analytics(
         raise ValueError(range_id)
     from vendoo_studio.services.ad_spend import list_entries, summarize_ads
     from vendoo_studio.services.sale_events import windows
+    from vendoo_studio.services.sales_records import incomplete_sales
     from vendoo_studio.services.user_settings import vendoo_inventory_synced_at
 
     clock = now or datetime.now(UTC)
     if clock.tzinfo is None:
         clock = clock.replace(tzinfo=UTC)
-    payload = summarize(
-        load_rows(db) if rows is None else rows, range_id=range_id, now=clock, events=windows(db),
-        start=start, end=end,
-    )
+    rows = load_rows(db) if rows is None else rows
+    payload = summarize(rows, range_id=range_id, now=clock, events=windows(db), start=start, end=end)
     window_start, window_end = _window(range_id, clock, start, end)
     return {
         **payload,
+        "incomplete_sales": incomplete_sales(db, rows),
         "ads": summarize_ads(
             list_entries(db),
             start=window_start,
@@ -239,7 +238,6 @@ def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
                 fees=_amount(sale.get("fees")),
                 shipping_cost=_amount(sale.get("shippingCost")) or 0.0,
                 shipping_credit=_amount(sale.get("shippingCredit")) or 0.0,
-                missing_sale_details=tuple(str(gap) for gap in sale.get("missing") or ()),
             )
         # A send in flight keeps its one row, as before; its sales count once it settles.
         sales = [] if effective in _BUSY else _item_sales(base, vendoo, lines.get(conv_id, []), listed_text)
@@ -311,7 +309,6 @@ def _item_sales(base: AnalyticsItem, vendoo: AnalyticsItem | None, lines: list, 
         cost=ledger.cost if ledger.cost is not None else vendoo.cost,
         sold_at=ledger.sold_at if local_date else vendoo.sold_at or ledger.sold_at,
         days_listed=ledger.days_listed if local_date else vendoo.days_listed if vendoo.days_listed is not None else ledger.days_listed,
-        missing_sale_details=() if recorded else vendoo.missing_sale_details,
     )
     return rows
 
@@ -396,7 +393,6 @@ def summarize(
     return {
         "range": range_id,
         "undated_sales": sum(1 for item in items if item.status == "sold" and item.sold_at is None),
-        "incomplete_sales": _incomplete_sales(items),
         "periods_truncated": truncated,
         "inventory": inventory,
         # Snapshot-based rate: period sales plus inventory still available today.
@@ -418,24 +414,6 @@ def summarize(
         "recent": _recent(sales, events or []),
         "oldest": _oldest(items, now),
     }
-
-
-def _incomplete_sales(items: list[AnalyticsItem]) -> list[dict[str, Any]]:
-    """What Vendoo's Missing Sale Details filter lists, across all time.
-
-    The seller fixes these in Vendoo, so Studio holds a sale to Vendoo's rule
-    rather than its own: a gap Vendoo does not flag is one the seller cannot clear.
-    """
-    rows = [
-        {
-            "conversation_id": item.conversation_id,
-            "title": item.title,
-            "missing": list(item.missing_sale_details),
-        }
-        for item in items
-        if item.missing_sale_details
-    ]
-    return sorted(rows, key=lambda row: (row["title"].casefold(), row["conversation_id"]))
 
 
 def price_tier(price: float) -> str:

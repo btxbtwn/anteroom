@@ -116,6 +116,14 @@ test("historical imported sales can be corrected entirely in Anteroom", async ({
   } else {
     await page.getByRole("button", { name: "Analytics", exact: true }).click();
   }
+  await page.getByRole("tab", { name: "Inventory analytics", exact: true }).click();
+  await page.getByText("Review sales with missing data", { exact: true }).click();
+  const analytics = page.getByRole("tabpanel", { name: "Inventory analytics", exact: true });
+  await expect(analytics.getByText(title, { exact: true })).toBeVisible();
+  await page.screenshot({ path: info.outputPath("analytics-missing-sales.png"), fullPage: true });
+  await page.getByRole("button", { name: "Open sales records", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Sales period" })).toContainText("All time");
+  await expect(page.getByRole("combobox", { name: "Sales completeness" })).toContainText("Missing sale data");
   const row = page.getByRole("listitem").filter({ has: page.getByText(title, { exact: true }) });
   await expect(row.getByText("Profit: USD 23", { exact: true })).toBeVisible();
   await row.getByRole("button", { name: "Record amounts", exact: true }).click();
@@ -125,8 +133,13 @@ test("historical imported sales can be corrected entirely in Anteroom", async ({
   await page.getByLabel("Sale date (UTC)", { exact: true }).fill(new Date().toISOString().slice(0, 10));
   await page.screenshot({ path: info.outputPath("imported-vendoo-details.png") });
   await page.getByRole("button", { name: "Save amounts", exact: true }).click();
+  await page.getByRole("combobox", { name: "Sales completeness" }).click();
+  await page.getByRole("option", { name: "All records", exact: true }).click();
   await expect(row.getByText("Profit: USD 22", { exact: true })).toBeVisible();
   await expect(row.getByText("Missing:", { exact: false })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Inventory analytics", exact: true }).click();
+  await expect(page.getByText("Track sales performance and find inventory that needs attention.")).toBeVisible();
+  await expect(analytics.getByText(title, { exact: true })).toHaveCount(0);
   await page.reload();
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();

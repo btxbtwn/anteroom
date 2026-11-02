@@ -101,7 +101,14 @@ struct InventoryAnalyticsView: View {
                              note: "Across all time. Add the missing details on the listing to update your analytics. Missing prices, costs, or fees leave revenue and profit incomplete.") {
                 DisclosureGroup("Review sales with missing data") {
                     ForEach(data.incompleteSales) { sale in
-                        ListingLink(id: sale.conversationID, title: sale.title, meta: "Missing \(sale.missing.joined(separator: ", "))")
+                        if let listingID = sale.conversationID {
+                            ListingLink(id: listingID, title: sale.title, meta: "Missing \(sale.missing.joined(separator: ", "))")
+                        } else {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(sale.title).font(.subheadline)
+                                Text("Missing \(sale.missing.joined(separator: ", "))").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
                 .font(.footnote)

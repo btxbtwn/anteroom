@@ -268,16 +268,32 @@ def test_analytics_counts_ledger_sales_with_their_recorded_amounts(env):
     assert payload["inventory"]["sold"] == 1 and payload["inventory"]["active"] == 0
 
 
+def test_analytics_missing_sales_data_lists_what_sales_records_flags(env):
+    from datetime import date
+
+    from vendoo_studio.services.sales_ledger import sale_records
+
+    item(env.db, "coat")
+    line(env.db, "coat", when=datetime(2024, 3, 1))
+    item(env.db, "boots")
+    line(env.db, "boots", order="o2", financials={"item_revenue": "40", "fees": "5", "shipping_cost": "3",
+                                                  "shipping_credit": "2", "refunds": "0", "item_cost": "5"})
+    flagged = sale_records(env.db, date(1970, 1, 1), datetime.now(UTC).date(), attention="missing")
+    listed = inventory_analytics(env.db, range_id="30d")["incomplete_sales"]
+    assert [row["id"] for row in listed] == [row["id"] for row in flagged]
+    assert listed == [{"id": flagged[0]["id"], "conversation_id": "coat", "title": "Coat",
+                       "missing": ["sale price", "shipping collected", "refunds", "fees", "shipping cost", "item cost"]}]
+
+
 def test_the_same_order_in_vendoo_and_the_ledger_counts_once(env):
     when = datetime.now(UTC) - timedelta(days=2)
     item(env.db, "coat", notes={"vendooStatus": "sold", "vendooSale": {"price": 38, "marketplace": "ebay", "fees": 4,
-                                                                         "soldAt": when.isoformat(), "missing": ["shipping cost"]},
+                                                                         "soldAt": when.isoformat()},
                                 "vendooDates": {"sold": when.isoformat()}})
     # The ledger has no amounts yet: Vendoo's fill in.
     line(env.db, "coat", when=(when + timedelta(minutes=5)).replace(tzinfo=None))
     sold = [row for row in load_rows(env.db) if row.status == "sold"]
     assert len(sold) == 1 and sold[0].sold_price == 38 and sold[0].fees == 4
-    assert sold[0].missing_sale_details == ("shipping cost",)
     assert inventory_analytics(env.db, range_id="30d")["sales"]["count"] == 1
 
 
