@@ -43,7 +43,10 @@ def make_engine(url: str):
         return sqlite_engine
     # Supabase manages the hosted connection pool. Do not add a second, capped
     # queue in this process or reserve idle client connections between requests.
-    return create_engine(url, poolclass=NullPool, echo=False, hide_parameters=True)
+    # Transaction pooling can move consecutive transactions between backends;
+    # named prepared statements belong to a backend session, not this client.
+    return create_engine(url, poolclass=NullPool, connect_args={"prepare_threshold": None},
+                         echo=False, hide_parameters=True)
 
 
 def enable_wal(dbapi_connection, _connection_record):
