@@ -6,6 +6,7 @@ import html
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from vendoo_studio.services.ai_key_catalog import KEY_PROVIDERS, key_provider
@@ -101,7 +102,8 @@ def delete_ai_key(provider_id: str):
 
 @key_router.post("/{provider_id}/test")
 async def test_ai_key(provider_id: str):
-    provider = _instance(provider_id)
+    # Reading the key opens a database session on the web; keep it off the event loop.
+    provider = await run_in_threadpool(_instance, provider_id)
     try:
         await provider.test_connection()
     except Exception as exc:
@@ -114,7 +116,7 @@ async def ai_key_models(provider_id: str):
     from vendoo_studio.services.user_settings import get_key_provider_reasoning
 
     spec = _spec(provider_id)
-    provider = _instance(provider_id)
+    provider = await run_in_threadpool(_instance, provider_id)
     entries: list = []
     try:
         list_entries = getattr(provider, "list_model_entries", None)
@@ -134,7 +136,7 @@ async def ai_key_models(provider_id: str):
         entry = next((item for item in entries if item.slug == provider.listing_model), None)
         if entry is not None and entry.reasoning_efforts:
             efforts = entry.reasoning_efforts
-            saved = get_key_provider_reasoning(provider_id)
+            saved = await run_in_threadpool(get_key_provider_reasoning, provider_id)
             value = "default"
             if (
                 saved

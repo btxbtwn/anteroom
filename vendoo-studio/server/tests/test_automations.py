@@ -358,6 +358,35 @@ def test_a_run_drops_from_the_stored_original_and_a_second_pass_does_not(db):
     assert db.query(Job).filter(Job.current_step == "automation").count() == 2
 
 
+@pytest.mark.parametrize("finished_status", ["completed", "failed"])
+def test_once_schedule_recovers_a_finished_slot_without_replaying_it(db, finished_status):
+    conv = _item(db, title="Nike Men's Tee", price=40, department="Men", category="T-Shirts", marketplace="ebay", days=80)
+    created = automations.create_automation(db, {
+        "timezone": "UTC",
+        "schedule": {"kind": "once", "at": "2026-10-26T09:00"},
+        "filters": {"conversation_ids": [conv.id]},
+        "actions": [{"type": "delist"}],
+        "marketplaces": ["ebay"],
+        "activate": True,
+    }, now=NOW)
+    row = automations.get_automation(db, created["id"])
+    # A restart after the run was committed but before its schedule advanced.
+    db.add(AutomationRun(automation_id=row.id, scheduled_for=row.next_run_at, status=finished_status))
+    db.commit()
+
+    async def executor(*_args, **_kwargs):
+        pytest.fail("A finished slot must never execute again")
+
+    assert asyncio.run(tick(db, now=NOW, executor=executor)) == 0
+    db.refresh(row)
+    assert row.next_run_at is None
+    assert row.status == ("completed" if finished_status == "completed" else "paused")
+    assert db.query(AutomationRun).count() == 1
+    assert db.query(Job).count() == 0
+    assert automations.list_pending_approvals(db) == []
+    assert asyncio.run(tick(db, now=NOW + timedelta(days=1), executor=executor)) == 0
+
+
 def test_ticking_twice_does_not_run_the_same_slot_twice(db):
     conv = _item(db, title="Nike Men's Tee", price=40, department="Men", category="T-Shirts", marketplace="ebay", days=80)
     calls = []
