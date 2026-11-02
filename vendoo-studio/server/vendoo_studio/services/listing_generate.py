@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
@@ -396,8 +397,12 @@ async def collect_provider_text(provider, messages: list[dict], *, quick: bool =
     """Collect visible reply text. quick=True uses the provider's no-reasoning path when it has one."""
     from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
 
-    quick_chat = getattr(provider, "quick_chat", None) if quick else None
-    structured_chat = getattr(provider, "structured_chat", None)
+    quick_chat: Callable[[list[dict]], AsyncIterator[object]] | None = (
+        getattr(provider, "quick_chat", None) if quick else None
+    )
+    structured_chat: Callable[[list[dict], dict], AsyncIterator[object]] | None = (
+        getattr(provider, "structured_chat", None)
+    )
     if option_catalog is not None:
         from vendoo_studio.services.option_lookup import chat_with_options
 

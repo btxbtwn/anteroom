@@ -114,16 +114,6 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/category_selection.py": [
-            {
-                "code": "reportGeneralTypeIssues",
-                "range": {
-                    "startColumn": 31,
-                    "endColumn": 68,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/category_tree.py": [
             {
                 "code": "reportOptionalMemberAccess",
@@ -168,16 +158,6 @@
                 "range": {
                     "startColumn": 40,
                     "endColumn": 45,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./server/vendoo_studio/services/listing_generate.py": [
-            {
-                "code": "reportGeneralTypeIssues",
-                "range": {
-                    "startColumn": 22,
-                    "endColumn": 28,
                     "lineCount": 1
                 }
             }
