@@ -39,7 +39,15 @@ and delisting cannot enter this queue. The hosted draft worker is enabled in the
 The branch now mounts the canonical provider-key/model settings, analytics,
 sales ledger/CSV exports, sale calendar, box records, and photo-edit handlers.
 Hosted API-key providers use Vault and sanitize request/stream errors. SDK
-sign-ins still require the registered-worker integration. Photo rotate,
+sign-ins other than ChatGPT still require worker integration. ChatGPT can use
+the outbound Mac inference worker: sign into the same account in an updated Mac
+app, connect ChatGPT in the Mac's settings, and select ChatGPT in web provider
+settings. ChatGPT credentials stay on the Mac; the worker receives only that
+account's inference calls and private photos. Keep the Mac awake with Anteroom
+open. Models and reasoning follow the Mac's settings. Offline Macs produce an
+explicit error, and inference calls are cancelled rather than replayed when
+their draft stops. This requires coordinated Mac and hosted releases; it is
+implemented locally and is not yet deployed. Photo rotate,
 adjustment previews, saved edits and reset use private Storage and retain the
 original. Mac Vision background removal still needs the worker.
 
@@ -258,12 +266,14 @@ one is refused until web marketplace actions exist. Offers and sharing panels
 need marketplace sessions and stay hidden.
 
 On `feat/hosted-assistant`, the Assistant view mounts the canonical assistant
-routes. Answers stay in-process like desktop, but the run key and its thread
-are per seller, so one account never blocks or follows another's answer.
+routes. Hosted answers use the seller-owned durable task queue with leased workers
+and a persisted event journal, so tabs can reconnect without starting another answer.
 Images are stored under the seller's own assistant thread and readable only by
 its owner; deleting a thread releases them. Applying proposed changes takes the
 item's row lock first. The shop summary skips the Mac's local sourcing file,
-which the web app does not have yet. Answers do not survive an API restart.
+which the web app does not have yet. Expired answers are marked interrupted after an API restart and can be retried
+by the seller. Saving an answer and completing its task is one transaction;
+interrupted work is never replayed automatically.
 
 On `feat/hosted-marketplace-accounts`, Settings → Connections shows eBay and
 Etsy sign-in on the web. Each seller registers as their own relay device and
@@ -357,7 +367,7 @@ Chrome through one named read, `marketplace.sellwild_account`, under its own
 Bridge capability, `sellwild.account` (Bridge 0.2.43).
 
 On `feat/hosted-chrome-sessions`, Settings → Connections on the web lists
-Poshmark, Mercari, Depop, Sellwild, Vinted and Facebook under eBay and Etsy, each
+Poshmark, Mercari, Depop, Sellwild and Vinted under eBay and Etsy, each
 signed in, not signed in, or "Connect Chrome first", as on the Mac. The web reads
 them with `marketplace.sessions` and opens a marketplace's sign-in page in the
 seller's Chrome with `marketplace.connect` when they choose Sign in, both under
@@ -365,13 +375,7 @@ the Bridge capability `marketplace.sessions` (Bridge 0.2.44). The status holds
 only each sign-in's state, expiry and account label, never cookies or tokens.
 Sale detection switches stay on the Mac.
 
-On `feat/hosted-facebook`, Facebook is on the web as it is on the Mac. Anteroom
-does not list on Facebook: the seller links an item already on Facebook with
-Mark as listed, checks it with Check on Facebook, which reads that listing's
-page in their Chrome (`marketplace.listing_state`, Bridge capability
-`facebook.listing`, Bridge 0.2.45), and deletes it on Facebook themselves; a
-Delist names Facebook and gets the Mac's own answer. A check that finds the item
-sold records the sale, as on the Mac. Facebook's sale detection pass stays on
-the Mac. Grailed is not on the web: on the Mac its tab only feeds the old
+Anteroom has no Facebook Marketplace support on the Mac or the web. Grailed is
+not on the web: on the Mac its tab only feeds the old
 cross-lister flow, which the web does not offer, and Anteroom has no direct
 Grailed listing, sign-in or check.

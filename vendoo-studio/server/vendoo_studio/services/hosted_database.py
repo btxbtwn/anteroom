@@ -22,6 +22,11 @@ class SellerDatabaseSession(Session):
             raise ValueError("Hosted sessions require an account owner")
         if bind.dialect.name != "postgresql":
             raise ValueError("Hosted seller isolation requires PostgreSQL")
+        # Reading an attribute expired by a commit silently checks a pooled
+        # connection out again, and it stays out until the next commit. In
+        # generation that spans minutes of provider calls, and a handful of
+        # them drain the small Supabase pool. Keep committed values loaded.
+        kwargs.setdefault("expire_on_commit", False)
         super().__init__(bind=bind, **kwargs)
 
     @property

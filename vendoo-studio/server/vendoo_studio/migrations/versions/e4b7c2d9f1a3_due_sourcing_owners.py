@@ -1,7 +1,7 @@
 """Let the trusted web process find sellers whose Sourcing refresh is due
 
 Revision ID: e4b7c2d9f1a3
-Revises: d574efabc39a
+Revises: 5e7a2c9b4d18
 Create Date: 2026-11-02 12:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = 'e4b7c2d9f1a3'
-down_revision = 'd574efabc39a'
+down_revision = '5e7a2c9b4d18'
 branch_labels = None
 depends_on = None
 

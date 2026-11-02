@@ -302,26 +302,29 @@ def _evidence_fingerprint(db) -> tuple:
 
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.listing import ListingRevision
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
 
     convs = db.query(func.count(Conversation.id), func.max(Conversation.updated_at)).one()
     revs = db.query(func.count(ListingRevision.id), func.max(ListingRevision.created_at)).one()
-    return (convs[0], str(convs[1]), revs[0], str(revs[1]))
+    sales = db.query(func.count(MarketplaceSale.id), func.sum(MarketplaceSale.financial_revision),
+                     func.max(MarketplaceSale.order_observed_at)).one()
+    return (convs[0], str(convs[1]), revs[0], str(revs[1]), sales[0], sales[1], str(sales[2]))
 
 
 def collect_outcomes(db, *, use_cache: bool = True) -> list[SoldOutcome]:
     """Every closed sale in the workspace, as pricing evidence.
 
-    Vendoo records what an item sold for; Studio only keeps that once the item
-    has been imported since the sale price was captured, so an item without one
-    falls back to the price its listing carried when it sold.
+    Sales come from the local ledger, including the frozen Vendoo history.
+    An item without a closing price uses its last saved asking price.
 
     Only the columns this reads are loaded: a workspace of a thousand items
     holds far more listing JSON than a price suggestion needs to look at.
     """
-    from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.listing import ListingRevision
-    from vendoo_studio.services.vendoo_import import parse_notes
+    from vendoo_studio.services.inventory_analytics import load_rows
+    from vendoo_studio.services.vendoo_sales_archive import ensure_archived
 
+    ensure_archived(db)
     engine = db.get_bind() if use_cache else None
     fingerprint = _evidence_fingerprint(db) if use_cache else None
     if engine is not None:
@@ -329,15 +332,10 @@ def collect_outcomes(db, *, use_cache: bool = True) -> list[SoldOutcome]:
         if cached and cached[0] == fingerprint:
             return list(cached[1])
 
-    sold = [
-        row
-        for row in db.query(Conversation.id, Conversation.status, Conversation.notes).all()
-        if str(row.status or "") == "sold"
-        or str(parse_notes(row.notes).get("vendooStatus") or "") == "sold"
-    ]
+    sold = [row for row in load_rows(db) if row.status == "sold"]
     if not sold:
         return _remember(engine, fingerprint, [])
-    ids = [row.id for row in sold]
+    ids = list({row.conversation_id for row in sold})
     revisions: dict[str, list[Any]] = {}
     for start in range(0, len(ids), _ID_BATCH):
         batch = ids[start : start + _ID_BATCH]
@@ -355,33 +353,23 @@ def collect_outcomes(db, *, use_cache: bool = True) -> list[SoldOutcome]:
             revisions.setdefault(row.conversation_id, []).append(row)
 
     outcomes: list[SoldOutcome] = []
-    for conv in sold:
-        history = revisions.get(conv.id) or []
+    for sale in sold:
+        history = revisions.get(sale.conversation_id) or []
         prices = [(_price_of(row.listing_json), row.listing_json, row.created_at) for row in history]
         priced = [(amount, listing, seen) for amount, listing, seen in prices if amount > 0]
         if not priced:
             continue
         first_price, _first, first_seen = priced[0]
         last_price, last, _last_seen = priced[-1]
-        notes = parse_notes(conv.notes)
-        sale = notes.get("vendooSale")
-        if not isinstance(sale, dict):
-            sale = {}
-        try:
-            sold_price = float(sale.get("price") or 0)
-        except (TypeError, ValueError):
-            sold_price = 0.0
-        dates = notes.get("vendooDates")
-        if not isinstance(dates, dict):
-            dates = {}
-        sold_at = str(dates.get("sold") or "")
+        sold_price = sale.sold_price or 0.0
+        sold_at = sale.sold_at.isoformat() if sale.sold_at else ""
         outcomes.append(
             SoldOutcome(
                 category=category_leaf(last.get("category_path") if isinstance(last, dict) else ""),
                 brand=str((last or {}).get("brand") or "").strip().lower(),
                 first_price=first_price,
                 sold_price=sold_price or last_price,
-                days_listed=_days_between(str(dates.get("listed") or ""), sold_at),
+                days_listed=sale.days_listed,
                 discount_known=_discount_is_evidence(
                     first_price=first_price,
                     sold_price=sold_price or last_price,

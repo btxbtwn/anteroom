@@ -1,4 +1,5 @@
 import { studioFetch } from "../../api/transport";
+import { photosUploading } from "../../photoUploads";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
@@ -230,6 +231,7 @@ export function useChatStream({
   }, [convId, queryClient, setInput, messageIds]);
 
   const handleGenerate = useCallback(async () => {
+    if (photosUploading(convId)) return;
     pinChatToBottom();
     patchLive(convId, {
       generating: true,

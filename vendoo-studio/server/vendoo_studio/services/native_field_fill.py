@@ -90,7 +90,11 @@ def category_rows(form: dict, listing: dict) -> list[dict]:
         if path not in CATEGORY_PATHS or row.get("locked") or is_locked(listing, path):
             continue
         options = row.get("options") or []
-        leaves = [label for label in options if not any(other.startswith(label + " > ") for other in options)]
+        parents = set()
+        for label in options:
+            parts = label.split(" > ")
+            parents.update(" > ".join(parts[:end]) for end in range(1, len(parts)))
+        leaves = [label for label in options if label not in parents]
         values = row.get("option_values") or {}
         current = str(row.get("value") or "").strip()
         if not leaves or current and any(current in (label, str(values.get(label, label))) for label in leaves):

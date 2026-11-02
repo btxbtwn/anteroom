@@ -12,6 +12,34 @@ from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.services import hosted_photos
 
 
+def test_generated_category_provenance_does_not_block_editor_refresh(cloud, signing_keys):  # noqa: F811
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'New draft'}).json()['id']
+    with Session(engine) as db:
+        revision = ListingRevision(conversation_id=identity, user_id=USER_ID, source='agent', listing_json={
+            'title': 'Generated coat',
+            'direct_category_ids': {'ebay': '123', 'ebay_path': 'Clothing > Coats', 'query': 'coat search provenance'},
+        })
+        db.add(revision)
+        db.flush()
+        revision_id = revision.id
+        db.add(Listing(conversation_id=identity, user_id=USER_ID, current_revision_id=revision_id))
+        db.commit()
+    path = '/api/conversations/' + identity
+    for suffix in ['/listing', '/revisions/' + revision_id]:
+        response = client.get(path + suffix, headers=alice)
+        assert response.status_code == 200, response.text
+        fields = response.json()['listing']
+        assert fields['title'] == 'Generated coat'
+        assert fields['direct_category_ids'] == {'ebay': '123', 'ebay_path': 'Clothing > Coats'}
+    rejected = client.put(path + '/listing', headers=alice, json={
+        'listing': {'direct_category_ids': {'query': 'client-supplied provenance'}},
+        'expected_revision_id': revision_id,
+    })
+    assert rejected.status_code == 422
+
+
 def test_poshmark_category_choice_saves_and_reloads_its_native_form(cloud, signing_keys):  # noqa: F811
     client, _engine = cloud
     alice = headers(signing_keys)
@@ -311,3 +339,31 @@ def test_job_list_skips_the_listing_snapshot(cloud, signing_keys):  # noqa: F811
     assert job_reads
     assert not any('listing_snapshot' in statement for statement in job_reads), job_reads
     assert client.get('/api/jobs', headers=bob).json() == []
+
+
+def test_screen_matches_core_reads_and_refuses_other_sellers(cloud, signing_keys):  # noqa: F811
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    path = '/api/conversations/' + identity
+    from sqlalchemy import event
+    statements = []
+
+    def record(_connection, _cursor, statement, *_args):
+        statements.append(statement)
+
+    event.listen(_engine, 'before_cursor_execute', record)
+    try:
+        response = client.get(path + '/screen', headers=alice)
+    finally:
+        event.remove(_engine, 'before_cursor_execute', record)
+    # One ownership read; activity reuses the messages already loaded for chat.
+    assert sum('FROM conversations' in sql for sql in statements) == 1
+    assert sum('FROM messages' in sql for sql in statements) == 1
+    assert response.status_code == 200, response.text
+    for key, suffix in [('conversation', ''), ('listing', '/listing'), ('photos', '/photos'),
+                        ('messages', '/messages'), ('activity', '/activity')]:
+        assert response.json()[key] == client.get(path + suffix, headers=alice).json()
+    assert response.json()['jobs'] == client.get('/api/jobs', params={'conversation_id': identity}, headers=alice).json()
+    assert client.get(path + '/screen', headers=headers(signing_keys, BOB)).status_code == 404
+    assert client.get(path + '/screen').status_code == 401

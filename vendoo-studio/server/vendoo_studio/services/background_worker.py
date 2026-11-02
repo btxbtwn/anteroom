@@ -1,4 +1,4 @@
-"""Run claimed draft tasks using the canonical generation/chat services."""
+"""Run claimed draft tasks and assistant answers using the canonical services."""
 from __future__ import annotations
 
 import asyncio
@@ -12,8 +12,18 @@ from vendoo_studio.services import background_tasks as queue
 from vendoo_studio.services.hosted_context import for_seller
 from vendoo_studio.services.service_context import current, use
 
+# Handlers for queued work that is not a draft task, by kind. The assistant's
+# route registers its answer here, so this service never imports a route.
+_handlers = {}
+
+
+def register(kind, handler):
+    """``handler(task_id, token, task)`` runs one claimed task and completes or fails it itself."""
+    _handlers[kind] = handler
+
 
 async def _execute(task_id, token):
+    """Run one claimed task. Returns True when the handler already completed it."""
     from vendoo_studio.database import SessionLocal
     from vendoo_studio.routes.chat import ChatMessage, generate_listing, run_message
     from vendoo_studio.services.listing_generate import photo_fingerprint
@@ -23,7 +33,12 @@ async def _execute(task_id, token):
         queue.check_write_lease(db, task_id, token)
         if task is None:
             raise queue.TaskLeaseExpired()
+        if (handler := _handlers.get(task.kind)) is not None:
+            db.rollback()
+            return await handler(task_id, token, task)
         conversation_id, kind, payload = task.conversation_id, task.kind, task.payload
+        if conversation_id is None:
+            raise ValueError('A draft task needs its listing')
         repo = ConversationRepo(db)
         conversation = repo.get(conversation_id)
         if (conversation is None
@@ -64,6 +79,7 @@ async def _execute(task_id, token):
         await asyncio.sleep(0)
     if failed:
         raise RuntimeError('The draft task failed. Review the conversation before retrying.')
+    return False
 
 
 async def run_claimed(task_id, owner, token):
@@ -81,8 +97,8 @@ async def run_claimed(task_id, owner, token):
             done, _pending = await asyncio.wait({work, pulse}, return_when=asyncio.FIRST_COMPLETED)
             if pulse in done:
                 pulse.result()
-            await work
-            await asyncio.to_thread(queue.finish, task_id, token)
+            if not await work:
+                await asyncio.to_thread(queue.finish, task_id, token)
         except asyncio.CancelledError:
             # On shutdown the durable lease expires; never mark an incomplete
             # draft complete or silently replay it after a process restart.
@@ -101,8 +117,8 @@ async def run_claimed(task_id, owner, token):
             await asyncio.gather(*pending, return_exceptions=True)
 
 
-async def serve(engine):
-    while True:
+async def serve(engine, stopping):
+    while not stopping.is_set():
         try:
             claimed = await asyncio.to_thread(queue.claim, engine)
         except SQLAlchemyError:

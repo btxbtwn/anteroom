@@ -90,12 +90,17 @@ def test_catalog_state_files_and_rebuild_threads_keep_their_execution_owner(monk
     monkeypatch.setattr(catalog, 'user_data_root', lambda: tmp_path)
     finished, rebuilt = Event(), []
 
-    def rebuild(session):
+    def snapshot(session):
         rebuilt.append((session, service_context.current().seller_id, catalog.catalog_docs_dir()))
+        return 'alice-snapshot'
+
+    def build(snap):
+        assert snap == 'alice-snapshot'
         catalog._state().index = 'alice-observed-schema'
         finished.set()
 
-    monkeypatch.setattr(catalog, 'rebuild_catalog_index', rebuild)
+    monkeypatch.setattr(catalog, 'catalog_snapshot', snapshot)
+    monkeypatch.setattr(catalog, 'build_catalog_index', build)
     with service_context.use(replace(alice, session_factory=lambda: nullcontext('alice-session'))):
         alice_path = catalog.catalog_docs_dir()
         catalog._kick_rebuild()
@@ -106,3 +111,35 @@ def test_catalog_state_files_and_rebuild_threads_keep_their_execution_owner(monk
         assert catalog.catalog_docs_dir() != alice_path
         assert bob.seller_id in str(catalog.catalog_docs_dir())
     assert rebuilt == [('alice-session', alice.seller_id, alice_path)]
+
+
+def test_catalog_rebuild_returns_its_connection_before_the_slow_build(monkeypatch, tmp_path):
+    # Writing and tokenizing the catalog takes minutes on the web; holding a
+    # pooled connection through it left the five-slot pool short for requests.
+    from contextlib import contextmanager
+    from dataclasses import replace
+    from threading import Event
+    from vendoo_studio.services import catalog_index as catalog
+
+    seller = runtime('c7a5ee16-9850-49ba-b5bd-83b8be54df46')
+    monkeypatch.setattr(catalog, 'user_data_root', lambda: tmp_path)
+    session_open, built = [], Event()
+
+    @contextmanager
+    def session():
+        session_open.append(True)
+        try:
+            yield 'session'
+        finally:
+            session_open.pop()
+
+    def build(snapshot):
+        assert snapshot == 'snapshot'
+        assert not session_open, 'built while holding a database session'
+        built.set()
+
+    monkeypatch.setattr(catalog, 'catalog_snapshot', lambda db: 'snapshot')
+    monkeypatch.setattr(catalog, 'build_catalog_index', build)
+    with service_context.use(replace(seller, session_factory=session)):
+        catalog._kick_rebuild()
+        assert built.wait(2)
