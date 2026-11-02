@@ -196,7 +196,7 @@ def save_prepared_revision(db: Session, conv_id: str, prepared: dict, revision_i
     ).id
 
 
-def blocker_fields_for_job(job) -> list[dict] | None:
+def blocker_fields_for_job(job, *, events: dict | None = None) -> list[dict] | None:
     """Compact marketplace/field targets from the latest completion pause event."""
     step = str(getattr(job, "current_step", None) or "").strip()
     if step not in {"completion_blocked", "awaiting_answers"}:
@@ -205,10 +205,13 @@ def blocker_fields_for_job(job) -> list[dict] | None:
         return None
     from sqlalchemy.orm import object_session
 
-    session = object_session(job)
-    if session is None:
-        return None
-    event = JobRepo(session).latest_event(job.id, step)
+    if events is not None:
+        event = events.get((job.id, step))
+    else:
+        session = object_session(job)
+        if session is None:
+            return None
+        event = JobRepo(session).latest_event(job.id, step)
     raw = (event.payload or {}).get("fields") if event and isinstance(event.payload, dict) else None
     if not isinstance(raw, list) or not raw:
         return None

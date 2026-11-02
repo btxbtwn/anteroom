@@ -190,8 +190,9 @@ def list_jobs(conversation_id: str | None = None, db: Session = Depends(get_db))
         conv = ConversationRepo(db).get(conversation_id)
         if not conv:
             raise HTTPException(404, "Conversation not found")
-        return [_job_response(j) for j in repo.list_by_conversation(conversation_id)]
-    return [_job_response(j) for j in repo.list_all()]
+    jobs = repo.list_summaries(conversation_id)
+    events = repo.latest_summary_events([job.id for job in jobs])
+    return [_job_response(job, events=events) for job in jobs]
 
 
 @router.get("/fill-stats")
@@ -802,14 +803,18 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db)):
     return _job_response(job)
 
 
-def _job_response(job) -> JobResponse:
+def _job_response(job, *, events: dict | None = None) -> JobResponse:
     from vendoo_studio.services.schema_probe import is_schema_probe_job
 
     from vendoo_studio.services.vendoo_send import job_repo
 
-    repo = job_repo(job)
-    progress = repo.latest_event(job.id, "vendoo_api_progress") if repo else None
-    started = repo.latest_event(job.id, "vendoo_api_started") if repo else None
+    if events is not None:
+        progress = events.get((job.id, "vendoo_api_progress"))
+        started = events.get((job.id, "vendoo_api_started"))
+    else:
+        repo = job_repo(job)
+        progress = repo.latest_event(job.id, "vendoo_api_progress") if repo else None
+        started = repo.latest_event(job.id, "vendoo_api_started") if repo else None
     title = job.listing_snapshot.get("title", "") if job.listing_snapshot else ""
     return JobResponse(
         id=job.id,
@@ -822,7 +827,7 @@ def _job_response(job) -> JobResponse:
         last_error=job.last_error,
         listing_title=title,
         mode="native_marketplace" if str(job.current_step or "").startswith("native_") else "schema_probe" if is_schema_probe_job(job) else None,
-        blocker_fields=blocker_fields_for_job(job),
+        blocker_fields=blocker_fields_for_job(job, events=events),
         send_progress=progress.payload if progress else None,
         started_at=started.created_at.isoformat() if started and started.created_at else None,
         created_at=job.created_at.isoformat() if job.created_at else "",

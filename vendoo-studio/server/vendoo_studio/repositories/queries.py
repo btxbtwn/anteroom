@@ -4,6 +4,7 @@ from sqlalchemy.engine import CursorResult
 
 import copy
 import json
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select, update
@@ -842,6 +843,41 @@ class JobRepo:
 
     def list_all(self) -> list[Job]:
         return self.db.query(Job).order_by(Job.created_at.desc()).limit(50).all()
+
+    def list_summaries(self, conv_id: str | None = None) -> list[SimpleNamespace]:
+        columns = [column for column in Job.__table__.columns if column.name != "listing_snapshot"]
+        query = self.db.query(
+            *columns,
+            json_value(Job.listing_snapshot, "title").label("listing_title"),
+            json_value(Job.listing_snapshot, "_schema_probe").label("schema_probe"),
+        ).order_by(Job.created_at.desc())
+        if conv_id:
+            query = query.filter(Job.conversation_id == conv_id)
+        else:
+            query = query.limit(50)
+        summaries = []
+        for row in query.all():
+            values = dict(row._mapping)
+            values["listing_snapshot"] = {
+                "title": values.pop("listing_title") or "",
+                "_schema_probe": values.pop("schema_probe"),
+            }
+            summaries.append(SimpleNamespace(**values))
+        return summaries
+
+    def latest_summary_events(self, job_ids: list[str]) -> dict:
+        if not job_ids:
+            return {}
+        types = ("vendoo_api_progress", "vendoo_api_started", "completion_blocked", "awaiting_answers")
+        ranked = self.db.query(
+            JobEvent.id,
+            func.row_number().over(
+                partition_by=(JobEvent.job_id, JobEvent.event_type),
+                order_by=JobEvent.sequence.desc(),
+            ).label("rank"),
+        ).filter(JobEvent.job_id.in_(job_ids), JobEvent.event_type.in_(types)).subquery()
+        events = self.db.query(JobEvent).join(ranked, ranked.c.id == JobEvent.id).filter(ranked.c.rank == 1).all()
+        return {(event.job_id, event.event_type): event for event in events}
 
     def list_by_conversation(self, conv_id: str) -> list[Job]:
         return self.db.query(Job).filter(Job.conversation_id == conv_id).order_by(Job.created_at.desc()).all()
