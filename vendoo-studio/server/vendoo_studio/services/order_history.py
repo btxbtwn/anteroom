@@ -301,6 +301,7 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
     """Read this marketplace's orders through Chrome and store them. Nothing on the marketplace changes."""
     from vendoo_studio.services import browser_bridge
     from vendoo_studio.services.api_job_lock import start_gate
+    from vendoo_studio.services.hosted_browser_relay import ChromeReadError
     from vendoo_studio.services.relay_sales import reconcile_unmatched
 
     if session_factory is None:
@@ -314,9 +315,17 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
     with session_factory() as db:
         settled = settled_orders(db, marketplace)
     try:
-        raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.sales_history",
-                                           {"marketplace": marketplace, "settled": settled}, timeout=READ_TIMEOUT_S)
-    except browser_bridge.BrowserBridgeError as exc:
+        from vendoo_studio.services.service_context import current
+        from vendoo_studio.services.hosted_browser_relay import relay_for
+
+        context = current()
+        payload = {"marketplace": marketplace, "settled": settled}
+        if context is not None:
+            raw = await relay_for(context.seller_id).read("marketplace.sales_history", payload, READ_TIMEOUT_S)
+        else:
+            raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.sales_history",
+                                               payload, timeout=READ_TIMEOUT_S)
+    except (browser_bridge.BrowserBridgeError, ChromeReadError) as exc:
         return {"ok": False, "error": str(exc)}
     if not isinstance(raw, dict) or raw.get("skipped") is True:
         return {"ok": False, "skipped": True}
@@ -329,7 +338,7 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
             "schema_drift": "The marketplace returned sales Anteroom can't read. Saved records were kept.",
             "rejected": "The marketplace refused the sales read. Saved records were kept.",
         }
-        code = raw.get("error")
+        code = raw.get("error_code") or raw.get("error")
         return {"ok": False, "error": messages.get(code, "Couldn't read sales.") if isinstance(code, str) else "Couldn't read sales."}
     try:
         orders = parse_orders(marketplace, raw)

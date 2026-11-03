@@ -1,0 +1,1 @@
+- Run your approved sharing and offer rules from connected Chrome on the web, with the same minimums, limits and protection against sending twice.
