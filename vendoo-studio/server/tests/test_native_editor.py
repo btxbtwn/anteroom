@@ -224,6 +224,18 @@ class NativeEditorTest(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
+    def test_forms_open_for_a_draft_with_no_listing_yet(self):
+        conv = ConversationRepo(self.db).create(title="Filled in by hand")
+        url = f"/api/conversations/{conv.id}/native-marketplaces"
+        for marketplace in ("poshmark", "depop", "mercari", "sellwild", "ebay"):
+            with self.subTest(marketplace=marketplace):
+                answer = self.client.get(f"{url}/{marketplace}/form")
+                self.assertEqual(answer.status_code, 200, answer.text)
+                self.assertTrue(answer.json()["fields"])
+        self.assertIsNone(ListingRepo(self.db).get_current(conv.id))
+        self.assertEqual(JobRepo(self.db).list_by_conversation(conv.id), [])
+        self.bridge.assert_not_called()
+
     def test_form_read_uses_posting_snapshot_and_does_not_save_or_launch(self):
         self.conv.notes = merge_notes(self.conv.notes, {"cog": "3.65", "packageDimensions": "13x10x3", "sku": "SKU1"})
         self.db.commit()
