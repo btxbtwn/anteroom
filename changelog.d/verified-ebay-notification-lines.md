@@ -1,0 +1,2 @@
+- Look up eBay notification orders through the same verified order reader as catch-up, preventing duplicate sales from differing notification IDs and preserving recorded amounts.
+- Keep a connected Chrome tab present during long marketplace reads with a separate heartbeat, instead of reporting it disconnected while it is busy.

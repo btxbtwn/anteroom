@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.marketplace_sale import MarketplaceSale
+from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from vendoo_studio.services.api_job_lock import start_gate
 from vendoo_studio.services.ebay_client import EbayClient, NS, assert_identity, digest, trading_xml
 from vendoo_studio.services.etsy_workspace import EtsyClient
@@ -184,6 +184,41 @@ async def _read(marketplace: str, start: datetime, end: datetime, page: int, exp
             raise result
         verified_orders.append(result)
     return verified_orders, more == "true", lambda: assert_identity(client.seller), connection
+
+
+async def recover_ebay_notification(order_id: str, *, session_factory) -> list[str]:
+    """Treat a notification as an order hint; use the same verified keys as catch-up.
+
+    Notification and Trading order-line IDs are different namespaces. Never
+    construct a key from a notification's flattened, position-dependent IDs.
+    """
+    order_id = _id(order_id)
+    client = await EbayClient.connect()
+    root = ET.Element("GetOrdersRequest", xmlns=NS["e"])
+    ET.SubElement(root, "OrderRole").text = "Seller"
+    ET.SubElement(root, "OrderStatus").text = "All"
+    ET.SubElement(root, "DetailLevel").text = "ReturnAll"
+    ET.SubElement(ET.SubElement(root, "OrderIDArray"), "OrderID").text = order_id
+    response = (await client.request("POST", "/ws/api.dll", xml=trading_xml(root), call="GetOrders"))["xml"]
+    rows = response.findall("e:OrderArray/e:Order", NS)
+    if len(rows) != 1 or rows[0].findtext("e:OrderID", namespaces=NS) != order_id:
+        raise RecoveryError("eBay did not verify the notified order. This event will be retried.")
+    lines = await _ebay_payment(client, _ebay_lines(rows[0]))
+    observed = datetime.now(UTC).replace(tzinfo=None)
+
+    def store():
+        with session_factory() as db:
+            with start_gate():
+                assert_identity(client.seller)
+                before = {row.id for row in db.query(MarketplaceSale).filter_by(marketplace="ebay", order_id=order_id).all()}
+                result = _save(db, "ebay", lines, observed)
+                if result["conflicts"]:
+                    raise RecoveryError("The notified order conflicts with a saved line. This event will be retried.")
+            reconcile_unmatched(db, marketplace="ebay")
+            return [row.id for row in db.query(MarketplaceSale).filter_by(marketplace="ebay", order_id=order_id).all()
+                    if row.id not in before and row.order_status in PAID_STATUSES]
+
+    return await asyncio.to_thread(store)
 
 
 def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datetime) -> dict:
