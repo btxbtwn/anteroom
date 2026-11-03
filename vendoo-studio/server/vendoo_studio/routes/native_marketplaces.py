@@ -40,46 +40,46 @@ def _sync(call, *args):
 
 
 @router.get("")
-def status(conv_id: str, db: Session = Depends(get_db)):
+def status(conv_id: str, db: Session = Depends(get_db, scope="function")):
     return _sync(native.status, conv_id, db)
 
 
 @router.get("/preflight")
 def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
-              sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db)):
+              sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db, scope="function")):
     """What each marketplace still needs before List. A plain function, so FastAPI runs
     its database work in the threadpool instead of on the event loop."""
     return _sync(native.preflight, conv_id, db, sellwild_category_id, sellwild_condition_id)
 
 
 @router.post("/{marketplace}/inspect")
-async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: InspectRequest, db: Session = Depends(get_db)):
+async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: InspectRequest, db: Session = Depends(get_db, scope="function")):
     return await _reply(native.inspect_page(conv_id, marketplace, body, db))
 
 
 @router.post("/{marketplace}/list")
-async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session = Depends(get_db)):
+async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session = Depends(get_db, scope="function")):
     return await _reply(native.list_now(conv_id, marketplace, body, db))
 
 
 @router.post("/{marketplace}/update")
-async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session = Depends(get_db)):
+async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session = Depends(get_db, scope="function")):
     return await _reply(native.update_live(conv_id, marketplace, body, db))
 
 
 @router.post("/{marketplace}/draft")
-async def save_draft(conv_id: str, marketplace: Marketplace, body: SaveDraftRequest, db: Session = Depends(get_db)):
+async def save_draft(conv_id: str, marketplace: Marketplace, body: SaveDraftRequest, db: Session = Depends(get_db, scope="function")):
     return await _reply(native.save_draft(conv_id, marketplace, body.revision_id, db))
 
 
 @router.post("/{marketplace}/cancel")
-async def cancel(conv_id: str, marketplace: Marketplace, db: Session = Depends(get_db)):
+async def cancel(conv_id: str, marketplace: Marketplace, db: Session = Depends(get_db, scope="function")):
     return await _reply(native.cancel(conv_id, marketplace, db))
 
 
 @router.get("/{marketplace}/form")
 async def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "sellwild"],
-                      revision_id: str | None = None, db: Session = Depends(get_db)):
+                      revision_id: str | None = None, db: Session = Depends(get_db, scope="function")):
     import asyncio
 
     from starlette.concurrency import run_in_threadpool
@@ -98,24 +98,24 @@ async def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "me
 
 
 @router.get("/sellwild/options")
-def sellwild_options(conv_id: str, db: Session = Depends(get_db)):
+def sellwild_options(conv_id: str, db: Session = Depends(get_db, scope="function")):
     return _sync(native.sellwild_options, conv_id, db)
 
 
 @router.post("/{marketplace}/check")
-async def check_result(conv_id: str, marketplace: Marketplace, body: CheckRequest | None = None, db: Session = Depends(get_db)):
+async def check_result(conv_id: str, marketplace: Marketplace, body: CheckRequest | None = None, db: Session = Depends(get_db, scope="function")):
     return await _reply(native.check_result(conv_id, marketplace, db, body))
 
 
 @router.post("/{marketplace}/reset")
-def reset(conv_id: str, marketplace: Marketplace, body: ResetRequest, db: Session = Depends(get_db)):
+def reset(conv_id: str, marketplace: Marketplace, body: ResetRequest, db: Session = Depends(get_db, scope="function")):
     if body.confirm is not True:
         raise HTTPException(400, "Confirm that you checked the marketplace yourself.")
     return _sync(native.reset, conv_id, marketplace, db)
 
 
 @router.post("/{marketplace}/connect")
-async def connect_account(conv_id: str, marketplace: Literal["vinted", "sellwild"], db: Session = Depends(get_db)):
+async def connect_account(conv_id: str, marketplace: Literal["vinted", "sellwild"], db: Session = Depends(get_db, scope="function")):
     import asyncio
     from vendoo_studio.repositories.queries import ConversationRepo
     from vendoo_studio.services import sellwild_browser, vinted_browser
@@ -131,7 +131,7 @@ async def connect_account(conv_id: str, marketplace: Literal["vinted", "sellwild
 
 
 @router.get("/vinted/categories")
-async def vinted_categories(conv_id: str, db: Session = Depends(get_db)):
+async def vinted_categories(conv_id: str, db: Session = Depends(get_db, scope="function")):
     from vendoo_studio.services.native_editor import vinted_categories as read
 
     return await _reply(read(conv_id, db))
@@ -139,7 +139,7 @@ async def vinted_categories(conv_id: str, db: Session = Depends(get_db)):
 
 @router.get("/vinted/brands")
 async def vinted_brands(conv_id: str, q: str = Query(default="", max_length=100),
-                        category: str = Query(default="", max_length=1000), db: Session = Depends(get_db)):
+                        category: str = Query(default="", max_length=1000), db: Session = Depends(get_db, scope="function")):
     from vendoo_studio.services.native_editor import vinted_brands as search
 
     return await _reply(search(conv_id, q, category, db))

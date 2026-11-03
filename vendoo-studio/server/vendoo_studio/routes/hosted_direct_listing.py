@@ -43,37 +43,37 @@ for path, handler, methods in (
 
 @router.get(PREFIX + '/native-marketplaces/preflight')
 def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
-              sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db)):
+              sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db, scope="function")):
     return native_marketplaces.preflight(conv_id, sellwild_category_id, sellwild_condition_id, db)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/list')
-async def list_now(conv_id: str, marketplace: Direct, body: ListRequest, db: Session = Depends(get_db)):
+async def list_now(conv_id: str, marketplace: Direct, body: ListRequest, db: Session = Depends(get_db, scope="function")):
     return await native_marketplaces.list_now(conv_id, marketplace, body, db)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/update')
-async def update_live(conv_id: str, marketplace: Direct, body: ListRequest, db: Session = Depends(get_db)):
+async def update_live(conv_id: str, marketplace: Direct, body: ListRequest, db: Session = Depends(get_db, scope="function")):
     return await native_marketplaces.update_live(conv_id, marketplace, body, db)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/draft')
-async def save_draft(conv_id: str, marketplace: Direct, body: native_marketplaces.SaveDraftRequest, db: Session = Depends(get_db)):
+async def save_draft(conv_id: str, marketplace: Direct, body: native_marketplaces.SaveDraftRequest, db: Session = Depends(get_db, scope="function")):
     return await native_marketplaces.save_draft(conv_id, marketplace, body, db)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/cancel')
-async def cancel(conv_id: str, marketplace: Direct, db: Session = Depends(get_db)):
+async def cancel(conv_id: str, marketplace: Direct, db: Session = Depends(get_db, scope="function")):
     return await native_marketplaces.cancel(conv_id, marketplace, db)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/check')
-async def check_result(conv_id: str, marketplace: Direct, body: CheckRequest | None = None, db: Session = Depends(get_db)):
+async def check_result(conv_id: str, marketplace: Direct, body: CheckRequest | None = None, db: Session = Depends(get_db, scope="function")):
     return await native_marketplaces.check_result(conv_id, marketplace, body, db)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/reset')
-def reset(conv_id: str, marketplace: Direct, body: native_marketplaces.ResetRequest, db: Session = Depends(get_db)):
+def reset(conv_id: str, marketplace: Direct, body: native_marketplaces.ResetRequest, db: Session = Depends(get_db, scope="function")):
     return native_marketplaces.reset(conv_id, marketplace, body, db)
 
 
@@ -81,7 +81,7 @@ router.add_api_route(PREFIX + '/marketplace-listings/delist', marketplace_listin
 
 
 @router.get(PREFIX + '/vendoo-api/fields')
-async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
+async def listing_fields(conv_id: str, db: Session = Depends(get_db, scope="function")):
     """The Etsy form: the category's saved fields and Etsy's own properties, built
     as on the Mac. The web never asks Chrome for a schema, so an unread leaf shows
     Etsy's live properties and the listing's own values."""

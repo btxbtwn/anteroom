@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
 
 @router.get("/categories")
-def categories(marketplace: str = "general", db: Session = Depends(get_db)):
+def categories(marketplace: str = "general", db: Session = Depends(get_db, scope="function")):
     tree = db.get(CategoryTree, marketplace)
     if tree:
         rows = db.query(CategoryTreeNode).filter_by(marketplace=marketplace).order_by(CategoryTreeNode.path).all()
@@ -37,7 +37,7 @@ def search(
     marketplace: str | None = None,
     kind: str = "all",
     top_k: int = 15,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     from vendoo_studio.services.catalog_index import search_catalog
 
@@ -55,7 +55,7 @@ def search(
 
 
 @router.get("/dropdown-options")
-def dropdown_options(db: Session = Depends(get_db)):
+def dropdown_options(db: Session = Depends(get_db, scope="function")):
     """Static Vendoo dropdown lists from the skill reference scrape.
 
     Used by the Forms editor when a category schema has not been cached yet, so
@@ -98,7 +98,7 @@ def fields(marketplace: str, category_id: str):
 
 
 @router.get("/schema")
-def schema(category_path: str, db: Session = Depends(get_db)):
+def schema(category_path: str, db: Session = Depends(get_db, scope="function")):
     rows = db.query(CategorySchema).filter_by(general_path=category_path).all()
     return {row.marketplace: {"category_path": row.category_path, "fields": row.fields,
                              "observed_at": cast(datetime, row.observed_at).isoformat()} for row in rows}

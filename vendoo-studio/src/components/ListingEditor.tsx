@@ -168,21 +168,6 @@ export function ListingEditor({
   const tabs = React.useMemo(() => editorTabs(marketplaceSettings?.selected, runtime), [marketplaceSettings?.selected, runtime]);
 
   React.useEffect(() => {
-    if (!data?.current_revision_id || unsaved || !sessionActive) return;
-    let cancelled = false;
-    const remaining = tabs.filter(tab => tab !== "general");
-    const warm = async () => {
-      while (!cancelled && remaining.length) {
-        const tab = remaining.shift()!;
-        await prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id!);
-      }
-    };
-    // Leave connections available for the selected form and the seller's edits.
-    void Promise.all([warm(), warm()]);
-    return () => { cancelled = true; };
-  }, [queryClient, convId, data, tabs, unsaved, sessionActive]);
-
-  React.useEffect(() => {
     if (!tabs.includes(editTab)) setEditTab("general");
   }, [editTab, tabs]);
 
