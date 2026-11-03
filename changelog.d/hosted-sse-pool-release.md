@@ -1,0 +1,1 @@
+- Listing generation releases its database connection while ChatGPT on your Mac is working
