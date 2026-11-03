@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.702 — 2026-11-03
+
+- Listing generation releases its database connection while ChatGPT on your Mac is working
+
 ## 0.1.701 — 2026-11-03
 
 - Anteroom Bridge 0.2.46 can read your Poshmark, Mercari, Depop, Sellwild and Vinted listings in Chrome for importing into your account on the web.
