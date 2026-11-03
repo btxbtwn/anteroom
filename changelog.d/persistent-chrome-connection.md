@@ -1,0 +1,1 @@
+- Remember approved Chrome accounts across tab closures, browser restarts and Bridge updates, reconnect automatically after temporary unavailability, and revoke approval when signing out or disconnecting.
