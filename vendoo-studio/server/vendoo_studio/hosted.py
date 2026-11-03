@@ -278,6 +278,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from vendoo_studio.routes import listing_promotions, promotion_automations
     app.include_router(listing_promotions.router)
     app.include_router(promotion_automations.router)
+    # Chrome inventory import: reads in the seller's own Chrome, through their Anteroom tab.
+    from vendoo_studio.routes import chrome_import
+    app.include_router(chrome_import.router)
     from vendoo_studio.routes import assistant
     app.include_router(assistant.router)
     from vendoo_studio.routes.hosted_automations import errors_router, router as automations_router

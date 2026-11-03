@@ -293,3 +293,21 @@ test('import reads wait for a running listing action and reject malformed IDs wi
   assert.equal((await listing(c, 'vinted', '4401')).error_code, 'busy');
   assert.equal(requests.length, 0);
 });
+
+// On the web the seller's Anteroom tab relays the same reads, and gets the same answer.
+test('a relayed import reads the same closet, and a refusal carries only the Bridge words and code', async () => {
+  const { c, requests } = worker({
+    [`/vm-rest/users/${POSH_ME}/posts/filtered`]: [200, { data: [{ id: POSH_POST, title: 'Denim jacket',
+      price_amount: { val: '45', currency_code: 'USD' }, inventory: { size_quantities: [{ quantity_available: 2 }] } }], more: {} }],
+    [`/vm-rest/posts/${POSH_POST}`]: [200, { data: { ...POSH_FULL, creator_id: 'cccccccccccccccccccccccc' } }],
+    '/vm-rest/meta/catalog_v2': [200, POSH_CATALOG],
+  }, { cookies: { jwt: jwt({ user_id: POSH_ME }) } });
+  const id = 'e'.repeat(32);
+  const run = async (type, payload) => plain(await c.runCloudMarketplaceCommand({ type, job_id: null, message_id: id, payload: { request_id: id, ...payload } }, []));
+  assert.deepEqual(await run('marketplace.import.page', { marketplace: 'poshmark' }), await page(c, 'poshmark'));
+  const refused = await run('marketplace.import.listing', { marketplace: 'poshmark', listing_id: POSH_POST });
+  assert.deepEqual(Object.keys(refused).sort(), ['error', 'error_code', 'ok']);
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /does not belong/);
+  readOnly(requests);
+});

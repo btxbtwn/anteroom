@@ -38,6 +38,8 @@
   }
   // Marketplace commands the hosted API relays, already approved and confirmed there.
   const COMMANDS = new Set(['marketplace.execute', 'marketplace.result', 'marketplace.delete', 'job.cancel']);
+  // The marketplaces the web reaches only through the seller's Chrome.
+  const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
   // Named commands other than marketplace actions, each with exactly the inputs it takes:
   // a maximum string length, the set of values allowed, or the pattern a value must match.
   const READS = {
@@ -47,8 +49,10 @@
     'marketplace.sellwild_account': {},
     'marketplace.sessions': {},
     'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted']) },
+    // Inventory import: a page of the seller's own active listings, or one of them.
+    'marketplace.import.page': { marketplace: MARKETPLACES, cursor: 300 },
+    'marketplace.import.listing': { marketplace: MARKETPLACES, listing_id: /^[a-z0-9][a-z0-9-]{0,200}$/ },
   };
-  const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
   const PROMOTION_COMMANDS = new Set(['marketplace.promotion_check', 'marketplace.promote', 'marketplace.promotion_result', 'marketplace.like_events']);
   function promotion(value) {
     const p = value.payload;

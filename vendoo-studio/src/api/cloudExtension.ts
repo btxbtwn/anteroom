@@ -16,7 +16,8 @@ const COMMAND_TIMEOUT_MS: Record<string, number> = {
   "marketplace.promotion_check": 100_000, "marketplace.promote": 160_000, "marketplace.promotion_result": 30_000, "marketplace.like_events": 55_000,
   "marketplace.sales_history": 1_210_000,
   "marketplace.execute": 200_000, "marketplace.result": 75_000, "marketplace.delete": 100_000, "job.cancel": 10_000,
-  "marketplace.vinted_categories": 45_000, "marketplace.vinted_brands": 45_000, "marketplace.sellwild_account": 45_000, "marketplace.sessions": 30_000, "marketplace.connect": 50_000, "marketplace.listing_state": 55_000,
+  "marketplace.vinted_categories": 45_000, "marketplace.vinted_brands": 45_000, "marketplace.sellwild_account": 45_000, "marketplace.sessions": 30_000, "marketplace.connect": 50_000,
+  "marketplace.import.page": 130_000, "marketplace.import.listing": 130_000,
 };
 const ERRORS: Record<string, string> = {
   not_connected: "Connect Chrome before loading the Poshmark form.",
@@ -47,7 +48,7 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
         }
         finish({ ok: data.ok === true, state: ["connected", "disconnected", "pending"].includes(data.state) ? data.state : "unavailable",
           extensionVersion: typeof data.extensionVersion === "string" ? data.extensionVersion.slice(0, 30) : "",
-          supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item: unknown) => item === "poshmark.form.read" || item === "marketplace.actions" || item === "vinted.choices" || item === "sellwild.account" || item === "marketplace.sessions" || item === "marketplace.sales_history" || item === "marketplace.promotions") : [] });
+          supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item: unknown) => item === "poshmark.form.read" || item === "marketplace.actions" || item === "vinted.choices" || item === "sellwild.account" || item === "marketplace.sessions" || item === "marketplace.sales_history" || item === "marketplace.promotions" || item === "marketplace.import") : [] });
       };
       const timeout = relay ? COMMAND_TIMEOUT_MS[relay.command.type] ?? 10_000 : action === "poshmark_form" ? 35000 : 2000;
       const timer = channel.setTimeout(() => finish({ ok: false, state: "unavailable", extensionVersion: "" }), timeout);
