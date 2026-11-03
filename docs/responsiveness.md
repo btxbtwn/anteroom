@@ -116,3 +116,14 @@ and cancellation rules, and stays alive while shutdown drains active work.
 The regression blocks the execution loop with two sellers' drafts active and
 verifies both leases renew with the correct seller and token. A full passing
 live generation retest remains required.
+
+## Marketplace form loading
+
+Following NextMaster's prefetching, the web app now warms each marketplace form
+when a listing opens (two at a time) and again when the seller points at, focuses
+or presses a marketplace tab. Before this, only the Mac app did; the web app
+waited for each form until its tab was opened. The eBay form also reads its
+category rules, business policies and item locations together instead of one
+after another, so it waits for the slowest eBay read rather than the sum of
+up to seven. Tests check that these reads overlap; no live eBay timing has been
+recorded yet.

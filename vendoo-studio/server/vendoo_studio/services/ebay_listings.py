@@ -574,8 +574,9 @@ async def listing_profiles(client: EbayClient | None = None) -> dict[str, list[d
     """The account's business policies and enabled locations, names and IDs only."""
     client = client or await EbayClient.connect()
     try:
-        return {"fulfillment": await _policies(client, "fulfillment"), "payment": await _policies(client, "payment"),
-                "return": await _policies(client, "return"), "locations": await _locations(client)}
+        fulfillment, payment, returns, locations = await asyncio.gather(
+            _policies(client, "fulfillment"), _policies(client, "payment"), _policies(client, "return"), _locations(client))
+        return {"fulfillment": fulfillment, "payment": payment, "return": returns, "locations": locations}
     except EbayFailure as exc:
         if exc.status != 403:
             raise

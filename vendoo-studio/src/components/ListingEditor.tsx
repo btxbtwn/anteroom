@@ -174,7 +174,7 @@ export function ListingEditor({
   }, [marketplaceSettings?.selected, runtime]);
 
   React.useEffect(() => {
-    if (runtime.hosted || !data?.current_revision_id || unsaved || !sessionActive) return;
+    if (!data?.current_revision_id || unsaved || !sessionActive) return;
     let cancelled = false;
     const remaining = tabs.filter(tab => tab !== "general");
     const warm = async () => {
@@ -186,7 +186,7 @@ export function ListingEditor({
     // Leave connections available for the selected form and the seller's edits.
     void Promise.all([warm(), warm()]);
     return () => { cancelled = true; };
-  }, [queryClient, convId, data, tabs, unsaved, sessionActive, runtime.hosted]);
+  }, [queryClient, convId, data, tabs, unsaved, sessionActive]);
 
   React.useEffect(() => {
     if (!tabs.includes(editTab)) setEditTab("general");
@@ -249,7 +249,7 @@ export function ListingEditor({
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
         disabled={generating || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
-          if (!runtime.hosted && !unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
+          if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
         }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
         railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}

@@ -595,6 +595,33 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((photos["path"], photos["input_type"], photos["section"]), ("marketplace_photos.ebay", "photos", "Photos & Video"))
         self.assertTrue(photos["help"].startswith("You can add up to 24 photos and a 1-minute video."))
 
+    async def test_ebay_form_reads_category_rules_and_policies_together(self):
+        """The category schema, format rules and account policies are independent eBay reads."""
+        import asyncio
+
+        in_flight = peak = 0
+
+        def slow(value):
+            async def read(*args, **kwargs):
+                nonlocal in_flight, peak
+                in_flight += 1
+                peak = max(peak, in_flight)
+                await asyncio.sleep(0.01)
+                in_flight -= 1
+                return value
+            return read
+
+        listing = {"direct_category_ids": {"ebay": "15687"}, "condition": "Good"}
+        empty = {"payment": [], "fulfillment": [], "return": [], "locations": []}
+        with patch.object(marketplace_schemas, "fields", new=slow([])), \
+                patch.object(ebay_listings, "listing_profiles", new=slow(empty)), \
+                patch.object(native_editor, "_ebay_format_fields", new=slow([
+                    native_editor.field("ebay_specifics.listingFormat", "Format", "FIXED_PRICE")])), \
+                patch.object(native_editor, "_ebay_variations_field", new=AsyncMock(return_value=[])):
+            form = await native_editor.ebay_form(listing)
+        self.assertEqual(peak, 3)
+        self.assertIn("ebay_specifics.paymentPolicyId", {row["path"] for row in form["fields"]})
+
     async def test_ebay_format_choices_come_from_ebays_category_rules(self):
         from vendoo_studio.services.ebay_client import EbayClient
 

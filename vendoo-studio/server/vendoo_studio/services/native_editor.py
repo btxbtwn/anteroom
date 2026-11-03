@@ -168,12 +168,19 @@ async def ebay_form(snapshot: dict) -> dict:
         category = ebay_category_id(snapshot)
     except ListingProblem:
         category = ""
-    try:
-        schema = await marketplace_schemas.fields("ebay", category) if category else []
-    except Exception as exc:  # noqa: BLE001 - never substitute a different form
-        raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from exc
-    aspects = ebay_aspects(snapshot, snapshot.get("form") or {})
+
+    async def category_rows() -> tuple[list[dict], list[dict]]:
+        try:
+            schema = await marketplace_schemas.fields("ebay", category) if category else []
+        except Exception as exc:  # noqa: BLE001 - never substitute a different form
+            raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from exc
+        return schema, await _ebay_variations_field(snapshot, category, schema)
+
     details = snapshot.get("ebay_specifics") or {}
+    # Independent eBay reads: the page waits for the slowest, not their sum.
+    (schema, variations), selling, (payment, shipping_policy, location, returns) = await asyncio.gather(
+        category_rows(), _ebay_format_fields(snapshot, category, details), _ebay_choices(snapshot))
+    aspects = ebay_aspects(snapshot, snapshot.get("form") or {})
 
     def aspect_field(row: dict, section: str) -> dict:
         name = row["name"]
@@ -210,10 +217,7 @@ async def ebay_form(snapshot: dict) -> dict:
     # Auction prices, offers and variations all travel with the category. The
     # editor shows the ones the current format uses, so a format change does
     # not load the form again.
-    selling = await _ebay_format_fields(snapshot, category, details)
-    variations = await _ebay_variations_field(snapshot, category, schema)
     condition_row = next((row for row in schema if row.get("id") == "condition"), None)
-    payment, shipping_policy, location, returns = await _ebay_choices(snapshot)
     schedule = details.get("schedule")
     if not isinstance(schedule, dict):
         schedule = {}

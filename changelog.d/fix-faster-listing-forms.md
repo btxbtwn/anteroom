@@ -1,0 +1,2 @@
+- Open the eBay listing form faster: its category rules, policies and item locations now load at the same time instead of one after another.
+- On the web, marketplace forms now load in the background as soon as a listing opens, and when you point at a marketplace tab, so switching tabs no longer waits.
