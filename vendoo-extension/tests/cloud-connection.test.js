@@ -6,12 +6,16 @@ const BOB = '22222222-2222-4222-8222-222222222222';
 const REQUEST = '33333333-3333-4333-8333-333333333333';
 function setup() {
   let data = {};
+  let approvals = {};
   let time = 1000;
   const opened = [];
   const closed = [];
   const api = {
     runtime: { id: 'bridge', getURL: path => 'chrome-extension://bridge/' + path, getManifest: () => ({ version: '0.2.38' }) },
-    storage: { session: { get: async () => structuredClone(data), set: async value => { data = structuredClone(value); } } },
+    storage: {
+      session: { get: async () => structuredClone(data), set: async value => { data = structuredClone(value); } },
+      local: { get: async () => structuredClone(approvals), set: async value => { approvals = structuredClone(value); } },
+    },
     windows: { create: async options => { opened.push(options); return { id: 9 }; }, remove: async id => closed.push(id) },
     tabs: { get: async () => ({ url: ORIGIN + '/' }), sendMessage: async () => ({ current: true }) },
   };
@@ -21,8 +25,41 @@ function setup() {
   const page = (action, accountId = ALICE, extra = {}) => bridge.handle({ type: 'cloud.connection', action, accountId,
     ...(action === 'connect' ? { email: accountId === ALICE ? 'alice@example.com' : 'bob@example.com' } : {}), ...extra }, sender);
   const approval = action => bridge.handle({ type: 'cloud.connection', action, requestId: REQUEST }, popup);
-  return { bridge, api, sender, popup, page, approval, opened, closed, advance: value => { time += value; }, records: () => data };
+  return { bridge, api, sender, popup, page, approval, opened, closed, advance: value => { time += value; }, records: () => data,
+    restart: () => { data = {}; return createCloudConnection(api, { now: () => time, randomId: () => REQUEST }); }, approvals: () => approvals };
 }
+
+test('approved account reconnects after tab close, Chrome restart and extension reload without another popup', async () => {
+  const s = setup();
+  await s.page('connect'); await s.approval('approve');
+  await s.bridge.clear(7);
+  const nextTab = { ...s.sender, tab: { id: 8, url: ORIGIN + '/' }, documentId: 'new-document' };
+  const message = { type: 'cloud.connection', action: 'status', accountId: ALICE };
+  assert.equal((await s.bridge.handle(message, nextTab)).state, 'connected');
+  const restarted = s.restart();
+  assert.equal((await restarted.handle(message, nextTab)).state, 'connected');
+  assert.equal(s.opened.length, 1);
+  assert.equal(JSON.stringify(s.approvals()).includes('alice@example.com'), false);
+  assert.equal((await restarted.handle({ ...message, accountId: BOB }, nextTab)).state, 'disconnected');
+});
+
+test('disconnect revokes remembered approval in every tab and after restarting Chrome', async () => {
+  const s = setup();
+  await s.page('connect'); await s.approval('approve');
+  const second = { ...s.sender, tab: { id: 8, url: ORIGIN + '/' }, documentId: 'second-document' };
+  const message = { type: 'cloud.connection', action: 'status', accountId: ALICE };
+  assert.equal((await s.bridge.handle(message, second)).state, 'connected');
+  await s.page('disconnect');
+  assert.equal((await s.bridge.handle(message, second)).state, 'disconnected');
+  assert.equal((await s.restart().handle(message, second)).state, 'disconnected');
+});
+
+test('unapproved requests never become remembered permissions', async () => {
+  const s = setup();
+  await s.page('connect');
+  assert.deepEqual(s.approvals(), {});
+  assert.equal((await s.restart().handle({ type: 'cloud.connection', action: 'status', accountId: ALICE }, s.sender)).state, 'disconnected');
+});
 
 test('connection requires approval from the extension page and targets the requesting document', async () => {
   const s = setup();

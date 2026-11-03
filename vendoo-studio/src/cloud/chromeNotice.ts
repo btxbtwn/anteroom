@@ -8,7 +8,8 @@ export function chromeNotice(connection: CloudConnection | null, attempted: bool
   const version = connection?.extensionVersion ? `Anteroom Bridge ${connection.extensionVersion}` : "Anteroom Bridge";
   if (connection?.ok && connection.state === "connected") {
     if (connection.supportedActions?.includes("marketplace.actions")) {
-      return { button: "Chrome connected", message: [`This Chrome tab is connected. ${version}.`] };
+      return { button: "Chrome connected", message: [`This account stays connected in Chrome until you disconnect or sign out. ${version}.`,
+        "Keep an Anteroom tab open in Chrome for marketplace reads and actions."] };
     }
     return { button: "Update Bridge", message: [
       `${version} is out of date and can’t list, update or delist from the web.`,
