@@ -75,6 +75,43 @@ class NativeMarketplacesTest(unittest.TestCase):
 
     # --- helpers ---------------------------------------------------------------
 
+    def test_form_preparation_copies_the_listing_once_and_keeps_input_independent(self):
+        import copy
+        from vendoo_studio.services.direct_preflight import prepare
+
+        copies = []
+
+        class ListingInput(dict):
+            def __deepcopy__(self, memo):
+                copies.append(True)
+                result = ListingInput(copy.deepcopy(dict(self), memo))
+                memo[id(self)] = result
+                return result
+
+        original = ListingInput(copy.deepcopy(LISTING))
+        saved = copy.deepcopy(dict(original))
+        snapshot = prepare(self.db, self.conv, original, 'mercari')
+        self.assertEqual(len(copies), 1)
+        snapshot['mercari_specifics']['shipsFrom'] = '10001'
+        self.assertEqual(original, saved)
+
+    def test_preflight_reads_photos_once_for_all_marketplaces(self):
+        from sqlalchemy import event
+
+        queries = []
+
+        def observe(_conn, _cursor, statement, _parameters, _context, _many):
+            if 'FROM photos' in statement:
+                queries.append(statement)
+
+        event.listen(self.db.bind, 'before_cursor_execute', observe)
+        try:
+            result = native.preflight(self.conv.id, self.db)
+        finally:
+            event.remove(self.db.bind, 'before_cursor_execute', observe)
+        self.assertEqual(set(result['marketplaces']), set(native.NAMES))
+        self.assertEqual(len(queries), 1)
+
     def run_jobs(self):
         while self.launched:
             asyncio.run(self.launched.pop(0))

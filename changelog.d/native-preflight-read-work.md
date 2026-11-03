@@ -1,0 +1,1 @@
+- Marketplace validation reuses one photo read across all marketplaces and avoids copying large listing snapshots twice before preparing a form.
