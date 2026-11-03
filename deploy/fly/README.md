@@ -1,5 +1,10 @@
 # Anteroom hosted API on Fly.io
 
+For current production requirements and known deployment gaps, follow
+[the Fly.io and Supabase operating guide](../../docs/hosted-production.md).
+The incremental feature descriptions below include earlier rollout stages;
+the hosted entry point's registered routes define the current API surface.
+
 This deploys `vendoo_studio.hosted:app`, not the desktop API. The cloud UI provides email-and-password accounts (sign in, create account, password reset) and private draft inventory, General listing fields and photos. `GET /api/health` is public; `/api/account` and every `/api/drafts` route
 require a verified seller session. Job and marketplace routes are not exposed. Chrome, Keychain
 and desktop timers do not run in this container.
@@ -95,14 +100,15 @@ never put the URI or its password in fly.toml, source, logs or the frontend.
 
 Keep the migration login on the session pooler (port `5432`).
 
-The API uses SQLAlchemy `NullPool` with psycopg automatic prepared statements
-disabled: transaction pooling can assign a different database backend after a
-commit. Closing a session releases its client
-connection instead of retaining an idle connection or waiting for one of five
-application slots. Supabase still enforces its own connection limits; this does
-not raise those limits or change the project's compute plan. Session mode ties
-each client to a backend and rejects clients beyond the configured pool size;
-transaction mode lets concurrent clients share the available backends.
+The hosted process keeps a small SQLAlchemy pool (4 connections, 1 overflow)
+to the transaction pooler and disables psycopg prepared statements. A new
+client connection measured about 800 ms from San Jose; reusing one measured
+about 70 ms, which was faster than session mode or a direct connection on
+2026-11-03. The pool waits at most one second for a free connection. Desktop
+and test processes still use `NullPool`. Supabase still enforces its own
+connection limit. On that date the database reported 60 `max_connections` and
+40 sessions already in `pg_stat_activity`, so this process stays within a
+budget of 5. A second process needs the same budget before it is added.
 
 The hosted API exposes only draft inventory and its General fields/photos. Full Mac inventory import and marketplace actions remain separate increments.
 

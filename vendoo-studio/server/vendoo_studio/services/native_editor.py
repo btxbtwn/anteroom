@@ -19,11 +19,11 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
         raise NativeMarketplaceError(404, "Conversation not found")
     listing = ListingRepo(db).get_current(conv_id)
     revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None
-    if not revision:
-        raise NativeMarketplaceError(404, "Generate a listing first.")
-    if revision_id and revision.id != revision_id:
+    if revision_id and (revision is None or revision.id != revision_id):
         raise NativeMarketplaceError(409, "The listing changed. Refresh its category choices.")
-    snapshot = direct_preflight.prepare(db, conv, revision.listing_json, marketplace)
+    # A draft nobody has generated yet still opens every form, empty, for the seller to fill in.
+    listing_json = revision.listing_json if revision else {}
+    snapshot = direct_preflight.prepare(db, conv, listing_json, marketplace)
     if marketplace == "poshmark":
         from vendoo_studio.services.poshmark_form import form
 
@@ -51,10 +51,10 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     if not refresh:
         from vendoo_studio.services import native_contract
 
-        saved_form = native_contract.editor_form(revision.listing_json, marketplace, values=snapshot)
+        saved_form = native_contract.editor_form(listing_json, marketplace, values=snapshot)
         if saved_form is not None:
             return saved_form
-        contract = (revision.listing_json.get(native_contract.KEY) or {}).get(marketplace)
+        contract = (listing_json.get(native_contract.KEY) or {}).get(marketplace)
         if isinstance(contract, dict) and not contract.get("unavailable") and "page_labels" in contract:
             raise NativeMarketplaceError(409, "The category or dependent choices changed. Reload this form's choices before continuing.")
     if marketplace == "ebay":

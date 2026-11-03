@@ -21,7 +21,8 @@ class MacUnavailable(RuntimeError):
 
 
 class MacInference:
-    def __init__(self):
+    def __init__(self, owner=None):
+        self.owner = owner
         self.condition = threading.Condition()
         self.worker = None
         self.seen = 0.0
@@ -32,7 +33,11 @@ class MacInference:
     @property
     def connected(self):
         with self.condition:
-            return self.worker is not None and time.monotonic() - self.seen < 45
+            local = self.worker is not None and time.monotonic() - self.seen < 45
+        if local:
+            return True
+        from vendoo_studio.services.device_routes import remote_fresh
+        return remote_fresh(self.owner, 'mac')
 
     def poll(self, worker, models, available=True, timeout=20):
         with self.condition:
@@ -76,6 +81,21 @@ class MacInference:
             return True
 
     async def invoke(self, operation, args, kwargs):
+        from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
+        try:
+            target = forward_target(self.owner, 'mac')
+        except RoutingUnavailable:
+            raise MacUnavailable from None
+        if target is not None:
+            try:
+                payload = await post(target, '/internal/mac-inference/invoke', {
+                    'user_id': self.owner, 'operation': operation, 'args': args, 'kwargs': kwargs,
+                }, timeout=310)
+            except RoutingUnavailable:
+                raise MacUnavailable from None
+            if not payload.get('ok'):
+                raise MacUnavailable
+            return payload.get('result')
         identity = uuid.uuid4().hex
         future = concurrent.futures.Future()
         with self.condition:
@@ -100,7 +120,11 @@ _lock = threading.Lock()
 
 def relay_for(owner):
     with _lock:
-        return _relays.setdefault(owner, MacInference())
+        relay = _relays.get(owner)
+        if relay is None:
+            relay = MacInference(owner)
+            _relays[owner] = relay
+        return relay
 
 
 class MacChatGPTProvider:

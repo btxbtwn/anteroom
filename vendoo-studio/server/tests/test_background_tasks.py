@@ -83,6 +83,30 @@ def test_cancelled_worker_cannot_write_and_expired_work_is_never_replayed(storag
         assert db.scalar(select(Conversation.title).where(Conversation.id == identity)) == 'My draft'
 
 
+@pytest.mark.parametrize('outcome', ['completed', 'failed', 'cancelled'])
+def test_lease_renewal_does_not_refresh_every_open_editor(storage, outcome):  # noqa: F811
+    from vendoo_studio.models.seller_change import SellerChange
+
+    engine, sessions, owner, _other, identity, task_id = prepare(storage)
+    _, _, token = queue.claim(engine)
+    with sessions(owner)() as db:
+        announced = db.scalar(select(SellerChange.changed_at).where(SellerChange.topic == 'listings'))
+        leased_until = db.get(BackgroundTask, task_id).leased_until
+    with service_context.use(replace(runtime(owner), session_factory=sessions(owner))):
+        queue.renew(task_id, token)
+        with sessions(owner)() as db:
+            assert db.get(BackgroundTask, task_id).leased_until > leased_until
+            assert db.scalar(select(SellerChange.changed_at).where(SellerChange.topic == 'listings')) == announced
+        if outcome == 'cancelled':
+            with sessions(owner)() as db:
+                queue.cancel(db, task_id)
+        else:
+            queue.finish(task_id, token, error='Interrupted' if outcome == 'failed' else None)
+    with sessions(owner)() as db:
+        assert db.get(BackgroundTask, task_id).status == outcome
+        assert db.scalar(select(SellerChange.changed_at).where(SellerChange.topic == 'listings')) > announced
+
+
 def test_assistant_task_finishes_without_a_listing(storage):  # noqa: F811
     from vendoo_studio.models.assistant import AssistantThread
 

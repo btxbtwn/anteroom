@@ -26,6 +26,12 @@ kill_timeout = 300
   auto_start_machines = true
   min_machines_running = 1
 
+  [http_service.concurrency]
+    # Requests, not TCP connections: long polls and listing reads share a
+    # connection. No hard limit until a measured second machine can absorb
+    # overflow; Fly's default soft limit stays in place for that reason.
+    type = 'requests'
+
   [[http_service.checks]]
     interval = '30s'
     timeout = '5s'

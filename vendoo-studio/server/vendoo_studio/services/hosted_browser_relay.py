@@ -55,8 +55,9 @@ SEEN_FOR_S = 30.0
 
 
 class BrowserRelay(ReplyWaits):
-    def __init__(self):
+    def __init__(self, owner: str | None = None):
         super().__init__()
+        self.owner = owner
         self._outbox: deque[dict] = deque()
         self._ready = asyncio.Event()
         self._seen_at = 0.0
@@ -72,7 +73,10 @@ class BrowserRelay(ReplyWaits):
 
     @property
     def connected(self) -> bool:
-        return self._can(MARKETPLACE_ACTIONS)
+        if self._can(MARKETPLACE_ACTIONS):
+            return True
+        from vendoo_studio.services.device_routes import remote_fresh
+        return remote_fresh(self.owner, 'chrome')
 
     def note_seen(self, capabilities: set[str]) -> None:
         self._seen_at = time.monotonic()
@@ -80,6 +84,14 @@ class BrowserRelay(ReplyWaits):
 
     def refusal(self, capability: str = MARKETPLACE_ACTIONS) -> str | None:
         """Why this seller's Chrome cannot take a command needing ``capability`` now, or None."""
+        if self._local_refusal(capability) is None:
+            return None
+        from vendoo_studio.services.device_routes import remote_fresh
+        if remote_fresh(self.owner, 'chrome'):
+            return None
+        return self._local_refusal(capability)
+
+    def _local_refusal(self, capability: str) -> str | None:
         if time.monotonic() - self._seen_at >= SEEN_FOR_S:
             return "Open Anteroom in Chrome on your computer and connect Chrome first."
         if capability not in self._capabilities:
@@ -94,7 +106,7 @@ class BrowserRelay(ReplyWaits):
         if future is not None and not future.get_loop().is_closed():
             future.get_loop().call_soon_threadsafe(super().resolve_wait, request_id, payload)
 
-    async def send_message(self, message: dict) -> bool:
+    async def deliver_local(self, message: dict) -> bool:
         capability = COMMANDS.get(str(message.get("type")))
         if capability is None or not self._can(capability):
             return False
@@ -107,6 +119,23 @@ class BrowserRelay(ReplyWaits):
         self._outbox.append(command)
         self._ready.set()
         return True
+
+    async def send_message(self, message: dict) -> bool:
+        if await self.deliver_local(message):
+            return True
+        from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
+        try:
+            target = forward_target(self.owner, 'chrome')
+        except RoutingUnavailable:
+            return False
+        if target is None:
+            return False
+        try:
+            payload = await post(target, '/internal/browser-relay/send',
+                                 {'user_id': self.owner, 'message': message}, timeout=10)
+        except RoutingUnavailable:
+            return False
+        return payload.get('sent') is True
 
     async def next_message(self, capabilities: set[str], timeout: float) -> dict | None:
         """The next command for this seller's Chrome, waiting up to ``timeout`` seconds."""
@@ -126,14 +155,14 @@ class BrowserRelay(ReplyWaits):
                 self._seen_at = time.monotonic()
         return self._outbox.popleft()
 
-    async def read(self, command: str, payload: dict, timeout: float) -> dict:
+    async def read_local(self, command: str, payload: dict, timeout: float) -> dict:
         """One named command other than a marketplace action, run in the seller's Chrome,
         and the Bridge's reply. Raises ``ChromeReadError`` when Chrome cannot take it or
         does not answer in time."""
         capability = COMMANDS.get(command)
         if capability is None or capability == MARKETPLACE_ACTIONS:
             raise ValueError(f"{command} is not a relayed read.")
-        if refusal := self.refusal(capability):
+        if refusal := self._local_refusal(capability):
             raise ChromeReadError(refusal)
         loop = self._loop
         if loop is not None and loop is not asyncio.get_running_loop():
@@ -142,8 +171,8 @@ class BrowserRelay(ReplyWaits):
             return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.read(command, payload, timeout), loop))
         request_id = uuid.uuid4().hex
         waiter = self.register_wait(request_id)
-        if not await self.send_message({"type": command, "job_id": None, "message_id": request_id,
-                                        "payload": {**payload, "request_id": request_id}}):
+        if not await self.deliver_local({"type": command, "job_id": None, "message_id": request_id,
+                                         "payload": {**payload, "request_id": request_id}}):
             self.cancel_wait(request_id)
             raise ChromeReadError("Open Anteroom in Chrome on your computer and connect Chrome first.")
         try:
@@ -153,6 +182,45 @@ class BrowserRelay(ReplyWaits):
         finally:
             self.cancel_wait(request_id)
         return reply if isinstance(reply, dict) else {"ok": False}
+
+    async def request_local(self, message: dict, timeout: float) -> dict:
+        """Send one command and wait for Chrome's reply on this process."""
+        request_id = message.get("message_id")
+        if not isinstance(request_id, str):
+            raise ChromeReadError("Chrome did not answer in time. Try again.")
+        waiter = self.register_wait(request_id, message.get("job_id"))
+        if not await self.deliver_local(message):
+            self.cancel_wait(request_id)
+            raise ChromeReadError("Open Anteroom in Chrome on your computer and connect Chrome first.")
+        try:
+            result = await asyncio.wait_for(waiter, timeout)
+        except TimeoutError:
+            raise ChromeReadError("Chrome did not answer in time. Try again.") from None
+        finally:
+            self.cancel_wait(request_id)
+        return result if isinstance(result, dict) else {"ok": False}
+
+    async def read(self, command: str, payload: dict, timeout: float) -> dict:
+        try:
+            return await self.read_local(command, payload, timeout)
+        except ChromeReadError as local_error:
+            from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
+            try:
+                target = forward_target(self.owner, 'chrome')
+            except RoutingUnavailable:
+                raise local_error from None
+            if target is None:
+                raise
+            try:
+                body = await post(target, '/internal/browser-relay/read', {
+                    'user_id': self.owner, 'command': command, 'payload': payload, 'timeout': timeout,
+                }, timeout=timeout + 5)
+            except RoutingUnavailable:
+                raise local_error from None
+            if not body.get('ok'):
+                raise ChromeReadError(body.get('error') or 'Chrome did not answer in time. Try again.') from None
+            reply = body.get('reply')
+            return reply if isinstance(reply, dict) else {"ok": False}
 
 
 class ChromeReadError(RuntimeError):
@@ -165,8 +233,11 @@ _lock = threading.Lock()
 
 def relay_for(seller_id: str) -> BrowserRelay:
     with _lock:
-        return _relays.setdefault(seller_id, BrowserRelay())
-
+        relay = _relays.get(seller_id)
+        if relay is None:
+            relay = BrowserRelay(seller_id)
+            _relays[seller_id] = relay
+        return relay
 
 def ready_sellers(capability: str) -> list[str]:
     """Sellers with a recently connected tab and the required Bridge capability."""
