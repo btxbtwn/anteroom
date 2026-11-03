@@ -50,14 +50,21 @@ test("hosted Chrome imports, saved-off rules and sale switches are available", a
   await page.getByRole("button", { name: "New offer rule", exact: true }).click();
   await expect(page.getByText("New offer rule · saved off", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  const loaded = page.waitForResponse(response => response.url().endsWith("/api/settings/sale-detection") && response.request().method() === "GET" && response.ok());
   await openConnections(page, phone);
+  const initialDetection = await (await loaded).json();
   await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toBeVisible();
   for (const name of ["Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
     await expect(page.getByRole("switch", { name: `Sale detection for ${name}`, exact: true })).toBeVisible();
   }
   const detection = page.getByRole("switch", { name: "Sale detection for Poshmark", exact: true });
+  await expect(detection).toBeChecked({ checked: initialDetection.enabled.poshmark !== false });
   const wasChecked = await detection.isChecked();
+  const saved = page.waitForResponse(response => response.url().endsWith("/api/settings/sale-detection") && response.request().method() === "PUT");
   await detection.click();
+  const response = await saved;
+  expect(response.ok()).toBeTruthy();
+  expect((await response.json()).enabled.poshmark).toBe(!wasChecked);
   await expect(detection).toBeChecked({ checked: !wasChecked });
   await page.reload();
   await openConnections(page, phone);
