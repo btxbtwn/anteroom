@@ -1,22 +1,23 @@
 import SwiftUI
 
-/// eBay's category tree, read once per session: it is about 4 MB.
+/// A synced category tree, read once per session per marketplace: eBay's and
+/// the shared General tree are each about 4 MB.
 @MainActor
-final class EbayCategoryCache {
-    static let shared = EbayCategoryCache()
-    private var loaded: CatalogCategories?
-    private var loading: Task<CatalogCategories, Error>?
+final class CategoryTreeCache {
+    static let shared = CategoryTreeCache()
+    private var loaded: [String: CatalogCategories] = [:]
+    private var loading: [String: Task<CatalogCategories, Error>] = [:]
 
-    func categories(api: AnteroomAPI) async throws -> CatalogCategories {
-        if let loaded { return loaded }
-        let task = loading ?? Task { try await api.catalogCategories(marketplace: "ebay") }
-        loading = task
+    func categories(api: AnteroomAPI, marketplace: String) async throws -> CatalogCategories {
+        if let value = loaded[marketplace] { return value }
+        let task = loading[marketplace] ?? Task { try await api.catalogCategories(marketplace: marketplace) }
+        loading[marketplace] = task
         do {
             let value = try await task.value
-            loaded = value
+            loaded[marketplace] = value
             return value
         } catch {
-            loading = nil
+            loading[marketplace] = nil
             throw error
         }
     }
@@ -54,7 +55,7 @@ struct EbayCategoryControl: View {
             .accessibilityValue(shown.isEmpty ? "Not set" : shown)
         }
         .sheet(isPresented: $picking) {
-            EbayCategorySheet(api: model.api, title: field.label, current: shown) { leaf in
+            CategoryTreeSheet(api: model.api, marketplace: "ebay", title: field.label, current: shown) { leaf in
                 model.setValue(.string(leaf.id), for: field)
                 model.setValue(.string(CategoryBrowse.breadcrumb(leaf.path)), at: pathKey)
             }
@@ -62,10 +63,11 @@ struct EbayCategoryControl: View {
     }
 }
 
-/// Browse eBay's categories one level at a time, or search them. While the
-/// synced tree is incomplete, eBay's own search fills the gaps.
-private struct EbayCategorySheet: View {
+/// Browse a synced category tree one level at a time, or search it. While
+/// eBay's tree is incomplete, eBay's own search fills the gaps.
+struct CategoryTreeSheet: View {
     let api: AnteroomAPI
+    let marketplace: String
     let title: String
     let current: String
     let onPick: (CategoryLeaf) -> Void
@@ -81,7 +83,10 @@ private struct EbayCategorySheet: View {
             Group {
                 if let tree {
                     if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                        if tree.leaves.isEmpty {
+                        if tree.leaves.isEmpty && !searchesEbay {
+                            ContentUnavailableView("No categories yet", systemImage: "list.bullet.indent",
+                                                   description: Text("Categories have not synced. Try again later."))
+                        } else if tree.leaves.isEmpty {
                             ContentUnavailableView("Search eBay categories", systemImage: "magnifyingglass",
                                                    description: Text("Type at least 3 characters to search eBay categories."))
                         } else {
@@ -109,7 +114,7 @@ private struct EbayCategorySheet: View {
             }
         }
         .task {
-            do { tree = try await EbayCategoryCache.shared.categories(api: api) } catch { failure = error.localizedDescription }
+            do { tree = try await CategoryTreeCache.shared.categories(api: api, marketplace: marketplace) } catch { failure = error.localizedDescription }
         }
         .task(id: query) { await searchEbay() }
     }
@@ -124,7 +129,7 @@ private struct EbayCategorySheet: View {
                     Text(CategoryBrowse.breadcrumb(leaf.path)).foregroundStyle(.primary)
                 }
             }
-            if tree.needsSearch {
+            if searchesEbay && tree.needsSearch {
                 Section { Text(remoteStatus).font(.footnote).foregroundStyle(.secondary) } header: {
                     if !tree.leaves.isEmpty { Text("Search if the category is not in the list yet.") }
                 }
@@ -134,9 +139,12 @@ private struct EbayCategorySheet: View {
         }
     }
 
+    /// Only eBay has a live search behind its synced tree.
+    private var searchesEbay: Bool { marketplace == "ebay" }
+
     /// eBay's search, only while the synced tree is incomplete; three characters or more.
     private func searchEbay() async {
-        guard tree?.needsSearch == true else { return }
+        guard searchesEbay, tree?.needsSearch == true else { return }
         let words = query.trimmingCharacters(in: .whitespaces)
         guard words.count >= 3 else {
             remote = []
