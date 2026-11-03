@@ -287,7 +287,7 @@ def test_analytics_missing_sales_data_lists_what_sales_records_flags(env):
     listed = inventory_analytics(env.db, range_id="30d")["incomplete_sales"]
     assert [row["id"] for row in listed] == [row["id"] for row in flagged]
     assert listed == [{"id": flagged[0]["id"], "conversation_id": "coat", "title": "Coat",
-                       "missing": ["sale price", "shipping collected", "refunds", "fees", "shipping cost", "item cost"]}]
+                       "missing": ["sale price", "shipping the buyer paid", "fees", "shipping you paid", "cost of goods"]}]
 
 
 def test_the_same_order_in_vendoo_and_the_ledger_counts_once(env):
@@ -301,7 +301,7 @@ def test_the_same_order_in_vendoo_and_the_ledger_counts_once(env):
     assert len(sold) == 1 and sold[0].sold_price == 38 and sold[0].fees == 4
     from vendoo_studio.services.sales_records import records
 
-    assert "shipping cost" in records(env.db)[0]["missing_sale_data"]
+    assert "shipping you paid" in records(env.db)[0]["missing_sale_data"]
     assert inventory_analytics(env.db, range_id="30d")["sales"]["count"] == 1
 
 

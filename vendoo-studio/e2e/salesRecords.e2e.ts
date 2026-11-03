@@ -79,9 +79,9 @@ test("recorded amounts appear in sales records and missing data marks sold inven
   const record = page.getByRole("listitem").filter({ has: page.getByText(title, { exact: true }) });
   await expect(record.getByText("Missing: fees", { exact: true })).toBeVisible();
   await record.getByRole("button", { name: "Record amounts" }).click();
-  await expect(page.getByLabel("Item revenue total", { exact: true })).toHaveValue("40");
-  await expect(page.getByLabel("Item cost total", { exact: true })).toHaveValue("5");
-  await page.getByLabel("Net fees", { exact: true }).fill("8");
+  await expect(page.getByLabel("Sale price", { exact: true })).toHaveValue("40");
+  await expect(page.getByText("Cost of goods: USD 5, from the item's form.", { exact: false })).toBeVisible();
+  await page.getByLabel("Fees", { exact: true }).fill("8");
   await page.getByRole("button", { name: "Save amounts", exact: true }).click();
   await expect(record.getByText("Profit: USD 23", { exact: true })).toBeVisible();
   const updated = await (await request.get(`/api/conversations/${id}`)).json();
@@ -121,10 +121,10 @@ test("historical sales can be corrected entirely in Anteroom", async ({ page, re
   const row = page.getByRole("listitem").filter({ has: page.getByText(title, { exact: true }) });
   await expect(row.getByText("Profit: USD 23", { exact: true })).toBeVisible();
   await row.getByRole("button", { name: "Record amounts", exact: true }).click();
-  await expect(page.getByLabel("Net fees", { exact: true })).toHaveValue("8");
-  await expect(page.getByLabel("Item revenue total", { exact: true })).toHaveValue("40");
-  await page.getByLabel("Net fees", { exact: true }).fill("9");
-  await page.getByLabel("Sale date (UTC)", { exact: true }).fill(new Date().toISOString().slice(0, 10));
+  await expect(page.getByLabel("Fees", { exact: true })).toHaveValue("8");
+  await expect(page.getByLabel("Sale price", { exact: true })).toHaveValue("40");
+  await page.getByLabel("Fees", { exact: true }).fill("9");
+  await page.getByLabel("Date", { exact: true }).fill(new Date().toISOString().slice(0, 10));
   await page.screenshot({ path: info.outputPath("imported-vendoo-details.png") });
   await page.getByRole("button", { name: "Save amounts", exact: true }).click();
   await page.getByRole("combobox", { name: "Sales completeness" }).click();

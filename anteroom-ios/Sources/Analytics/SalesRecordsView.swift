@@ -31,7 +31,7 @@ struct SalesRecordsView: View {
                     Button("Export sales CSV") { exportCSV(inventory: false) }
                 }
             } footer: {
-                Text("Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales from here.")
+                Text("Record sale prices, shipping and fees in Anteroom. Export your inventory and sales from here.")
             }
 
             if let data {
@@ -180,32 +180,27 @@ private struct SaleAmountsSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Enter totals for this sale, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Save imported sale corrections and new sale amounts here in Anteroom.")
+                    Text("Sold on \(Marketplaces.name(row.marketplace)) · quantity \(row.quantity.map(String.init) ?? "unknown") · \(row.orderStatus.replacingOccurrences(of: "_", with: " "))")
                         .font(.footnote).foregroundStyle(.secondary)
                     if row.financialsStale {
                         Text("This order changed. Review every amount before saving again.").font(.footnote).foregroundStyle(.orange)
                     }
                 }
                 Section {
-                    LabeledContent("Sale date (UTC)") {
+                    LabeledContent("Date") {
                         TextField("YYYY-MM-DD", text: $soldOn)
                             .multilineTextAlignment(.trailing)
                             .textInputAutocapitalization(.never)
                     }
-                    LabeledContent("Currency code") {
-                        TextField("USD", text: Binding(get: { currency }, set: { currency = String($0.uppercased().prefix(3)) }))
-                            .multilineTextAlignment(.trailing)
-                            .textInputAutocapitalization(.characters)
-                    }
                     ForEach(SalesLedgerRow.fields, id: \.self) { field in
                         LabeledContent(SalesLedgerRow.labels[field] ?? field) {
-                            TextField("Unknown", text: Binding(get: { values[field] ?? "" }, set: { values[field] = $0 }))
-                                .keyboardType(.numbersAndPunctuation)
+                            TextField("0.00", text: Binding(get: { values[field] ?? "" }, set: { values[field] = $0 }))
+                                .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                         }
                     }
                 } footer: {
-                    Text("\(Marketplaces.name(row.marketplace)) order \(row.orderID) · line \(row.lineID) · quantity \(row.quantity.map(String.init) ?? "unknown") · \(row.orderStatus.replacingOccurrences(of: "_", with: " "))")
+                    Text(footnote)
                 }
                 .disabled(working)
                 Section { Button("Reload record") { reload() }.disabled(working) }
@@ -220,7 +215,6 @@ private struct SaleAmountsSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     if working { ProgressView() } else {
                         Button("Save") { save() }.fontWeight(.semibold)
-                            .disabled(currency.count != 3 || !currency.allSatisfy(\.isLetter))
                     }
                 }
             }
@@ -229,9 +223,18 @@ private struct SaleAmountsSheet: View {
         .interactiveDismissDisabled(working)
     }
 
+    private var footnote: String {
+        let cost = SalesLedgerFormat.money((row.financials?["item_cost"] ?? nil), currency)
+        var refunded = ""
+        if let refunds = row.financials?["refunds"] ?? nil, let amount = Decimal(string: refunds), amount != 0 {
+            refunded = " Refunded: \(SalesLedgerFormat.money(refunds, currency))."
+        }
+        return "Cost of goods: \(cost), from the item's form.\(refunded) Leave an amount blank if you don't know it. Nothing changes on any marketplace."
+    }
+
     private func fill(_ record: SalesLedgerRow) {
         soldOn = record.soldAt.map { String($0.prefix(10)) } ?? ""
-        currency = record.currency ?? ""
+        currency = record.currency ?? "USD"
         values = Dictionary(uniqueKeysWithValues: SalesLedgerRow.fields.map { ($0, (record.financials?[$0] ?? nil) ?? "") })
     }
 
@@ -239,7 +242,8 @@ private struct SaleAmountsSheet: View {
         working = true
         error = nil
         let entered = Dictionary(uniqueKeysWithValues: SalesLedgerRow.fields.map { field -> (String, String?) in
-            let text = (values[field] ?? "").trimmingCharacters(in: .whitespaces)
+            var text = (values[field] ?? "").trimmingCharacters(in: .whitespaces)
+            if text.hasPrefix("$") { text.removeFirst() }
             return (field, text.isEmpty ? nil : text)
         })
         Task {

@@ -297,8 +297,8 @@ def _ledger_row(base: AnalyticsItem, line, listed_text: str, days_between) -> An
         shipping_cost=_amount(data.get("shipping_cost")) or 0.0,
         shipping_credit=_amount(data.get("shipping_credit")) or 0.0,
         refunds=refunds or 0.0,
-        cost=item_cost if isinstance(line.financials, dict) and "item_cost" in line.financials
-        else (base.cost * units if base.cost is not None else None),
+        # A sale without its own item cost uses the item's Cost of Goods.
+        cost=item_cost if item_cost is not None else (base.cost * units if base.cost is not None else None),
         sale_id=line.id,
     )
 

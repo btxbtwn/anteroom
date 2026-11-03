@@ -8,8 +8,10 @@ from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from vendoo_studio.services import sales_ledger
 from vendoo_studio.services.inventory_analytics import AnalyticsItem, load_rows
 
-FIELD_LABELS = {"item_revenue": "sale price", "shipping_credit": "shipping collected", "refunds": "refunds",
-                "fees": "fees", "shipping_cost": "shipping cost", "item_cost": "item cost"}
+# Named as Mark as sold and the item's form name them. Refunds are not asked for:
+# blank counts as none, and marketplaces fill them in when they happen.
+FIELD_LABELS = {"item_revenue": "sale price", "shipping_credit": "shipping the buyer paid", "fees": "fees",
+                "shipping_cost": "shipping you paid", "item_cost": "cost of goods"}
 
 
 def missing_fields(record: dict) -> list[str]:
@@ -39,7 +41,8 @@ def _amount(value) -> str | None:
         amount = Decimal(str(value))
     except InvalidOperation:
         return None
-    return format(amount, "f") if amount.is_finite() else None
+    # Whole amounts read as the seller typed them: 5, not 5.0.
+    return format(amount.normalize() if amount == amount.to_integral() else amount, "f") if amount.is_finite() else None
 
 
 def incomplete_sales(db: Session, rows: list[AnalyticsItem] | None = None) -> list[dict]:
@@ -68,10 +71,12 @@ def records(db: Session, conversation_id: str | None = None, analytics_rows: lis
         record = sales_ledger.sale_out(line, title)
         data = record["financials"]
         raw = line.financials if isinstance(line.financials, dict) else {}
-        # Vendoo's kept sales show the item's cost as Analytics counts it, as they always have.
+        # A sale without its own item cost uses the item's Cost of Goods, as Analytics counts it.
+        # Vendoo's kept sales always show the cost as Analytics counts it.
         effective_cost = costs.get(line.id)
-        if data is not None and raw.get("source") == "vendoo" and effective_cost is not None \
-                and (data["item_cost"] is None or Decimal(effective_cost) != Decimal(data["item_cost"])):
+        if data is not None and effective_cost is not None and not record["financials_stale"] \
+                and (data["item_cost"] is None
+                     or raw.get("source") == "vendoo" and Decimal(effective_cost) != Decimal(data["item_cost"])):
             data["item_cost"] = effective_cost
             record["net_revenue"], record["profit"] = sales_ledger.totals(data, record["financials_stale"])
         record["financials_source"] = raw.get("source")
