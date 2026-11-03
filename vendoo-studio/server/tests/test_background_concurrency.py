@@ -1,5 +1,6 @@
 import asyncio
 import threading
+import uuid
 
 import pytest
 
@@ -35,6 +36,24 @@ def test_worker_starts_independent_jobs_before_previous_jobs_finish_and_drains(m
             await asyncio.gather(worker, return_exceptions=True)
 
     asyncio.run(run())
+
+
+def test_worker_failure_logs_location_without_private_exception_text(monkeypatch, caplog):
+    finished = []
+
+    async def fail(*_args):
+        raise RuntimeError('private database credential')
+
+    def finish(*args, **kwargs):
+        finished.append((args, kwargs))
+
+    monkeypatch.setattr(background_worker, '_execute', fail)
+    monkeypatch.setattr(background_worker.queue, 'finish', finish)
+    asyncio.run(background_worker.run_claimed('test-task', str(uuid.uuid4()), 'test-lease'))
+    assert len(finished) == 1 and finished[0][1]['error']
+    assert 'RuntimeError' in caplog.text
+    assert 'test_background_concurrency.py' in caplog.text
+    assert 'private database credential' not in caplog.text
 
 
 def test_worker_cancellation_cleans_up_all_active_jobs(monkeypatch):

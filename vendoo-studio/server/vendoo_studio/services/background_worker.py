@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import traceback
 from sqlalchemy.exc import SQLAlchemyError
 
 from vendoo_studio.models.background_task import BackgroundTask
@@ -104,7 +105,12 @@ async def run_claimed(task_id, owner, token):
             # On shutdown the durable lease expires; never mark an incomplete
             # draft complete or silently replay it after a process restart.
             raise
-        except Exception:
+        except Exception as exc:
+            # Exception messages and formatted tracebacks can include private
+            # SQL parameters. Record only the type and source locations.
+            locations = ' > '.join(f'{frame.filename.rsplit("/", 1)[-1]}:{frame.lineno}:{frame.name}'
+                                   for frame in traceback.extract_tb(exc.__traceback__))
+            logging.getLogger(__name__).warning('Draft task failed (%s at %s)', type(exc).__name__, locations)
             try:
                 await asyncio.to_thread(queue.finish, task_id, token,
                                         error='The draft task stopped. Review the saved draft and try again.')

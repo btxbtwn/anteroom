@@ -86,3 +86,18 @@ worker heartbeats from running, independently of the inventory JSON cost.
 Drafts, automations, offers, watchdog and sourcing now have separate event-loop
 threads. A regression holds an offer scheduler in a blocking wait, verifies
 draft heartbeats and HTTP health still run, and checks shutdown joins all loops.
+
+Web 0.1.688 and the JSONB migration were deployed on 2026-11-02. Both real
+test drafts were claimed concurrently; one saved photo analysis and renewed
+its lease, but both ultimately failed. Opening another
+draft also produced reads beyond an eight-second client deadline. The full
+live generation test has therefore not passed.
+
+A separate regression reproduced Mac control-channel starvation: a blocked
+synchronous endpoint occupied the request thread limiter, preventing even the
+Mac's authentication, heartbeat, status and reply requests from completing.
+Authentication now uses the event loop's executor instead of the synchronous
+endpoint limiter, and the in-memory status/reply handlers are async. The test
+keeps the endpoint blocked while all three control requests finish. Worker
+failures record exception types and source locations without exception text,
+SQL parameters or credentials, so subsequent failures can be diagnosed safely.
