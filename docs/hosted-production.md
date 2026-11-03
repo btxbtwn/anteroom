@@ -57,12 +57,15 @@ From this Machine on 2026-11-03, `SELECT 1` through the current transaction
 pooler (port 6543, `sslmode=verify-full`) took 719–880 ms on a new connection
 and about 70 ms when the connection was reused. Session mode on port 5432 took
 about 160–240 ms reused. A direct connection took about 240 ms reused. The
-hosted process therefore keeps the transaction pooler and reuses up to 4
-connections plus 1 overflow, with prepared statements still disabled and a one
-second wait for a free connection. Desktop and test processes keep `NullPool`.
+hosted process therefore keeps the transaction pooler and reuses connections,
+with prepared statements still disabled. Desktop and test processes keep
+`NullPool`.
 
 The same sample reported `max_connections` 60 and 40 rows in
-`pg_stat_activity`. This process budgets 5 connections. A second process needs
+`pg_stat_activity`. Live two-seller generate traffic exhausted a 5-connection
+budget (`4` plus `1` overflow, 1s wait) with QueuePool timeouts. The hosted
+process now budgets 8 plus 4 overflow and waits up to 3s. Generate/assistant
+SSE open a short session only to enqueue, then stream. A second process needs
 its own budget inside the remainder. Do not raise the pool to one connection
 per seller.
 
