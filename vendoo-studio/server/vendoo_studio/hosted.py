@@ -158,7 +158,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             from vendoo_studio.database import engine
             from vendoo_studio.services import (
                 background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler,
-                hosted_sourcing_scheduler, hosted_sale_checks, hosted_promotion_scheduler,
+                hosted_sourcing_scheduler, hosted_sale_checks, hosted_promotion_scheduler, hosted_sales_scheduler,
             )
             from vendoo_studio.services import background_tasks as queue
             # Each service opens blocking database sessions. An offer or
@@ -182,6 +182,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             start_background(hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing')
             start_background(hosted_sale_checks.serve(), 'anteroom-chrome-sales')
             start_background(hosted_promotion_scheduler.serve(), 'anteroom-promotions')
+            start_background(hosted_sales_scheduler.serve(engine), 'anteroom-sales')
         app.state.background_worker = worker
         app.state.offer_scheduler = offers
         app.state.job_watchdog = watchdog
