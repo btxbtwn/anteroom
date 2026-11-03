@@ -95,26 +95,33 @@ def submit(db, conv_id, kind, text='', uploads=None, request=None):
         raise
     task_id = task.id
     db.rollback()
-    # The stream polls with short-lived sessions. Closing here returns the
-    # request connection before keepalives run for minutes waiting on a Mac.
-    db.close()
-    return task_stream(task_id)
+    return task_id
+
+
+def _seller_sessions():
+    context = current()
+    if context is None:
+        raise HTTPException(401, 'A verified seller session is required')
+    return context.session_factory
 
 
 @router.post('/generate', dependencies=[Depends(require_worker)])
-def generate(conv_id: str, resume: bool = False, db=Depends(get_seller_db)):
-    owned_conversation(db, conv_id)
-    existing = db.scalar(select(BackgroundTask).where(
-        BackgroundTask.conversation_id == conv_id, BackgroundTask.status.in_(queue.ACTIVE)))
-    if existing is not None:
-        task_id = existing.id
-        db.rollback()
-        db.close()
-        return task_stream(task_id)
-    if resume:
-        db.close()
-        return stream_finished()
-    return submit(db, conv_id, 'generate')
+def generate(conv_id: str, resume: bool = False):
+    # Open and close the seller session before streaming. A Depends(get_seller_db)
+    # session stays checked out until the SSE generator finishes, which drained
+    # the five-connection hosted pool while waiting on a Mac.
+    with _seller_sessions()() as db:
+        owned_conversation(db, conv_id)
+        existing = db.scalar(select(BackgroundTask).where(
+            BackgroundTask.conversation_id == conv_id, BackgroundTask.status.in_(queue.ACTIVE)))
+        if existing is not None:
+            task_id = existing.id
+            db.rollback()
+        elif resume:
+            return stream_finished()
+        else:
+            task_id = submit(db, conv_id, 'generate')
+    return task_stream(task_id)
 
 
 class MessageInput(BaseModel):
@@ -129,10 +136,8 @@ MAX_MESSAGE_BYTES = MAX_ATTACHMENTS * (MAX_ATTACHMENT_BYTES * 4 // 3 + 4096) + 5
 
 
 @router.post('/messages', dependencies=[Depends(require_worker)])
-async def message(conv_id: str, request: Request, db=Depends(get_seller_db)):
+async def message(conv_id: str, request: Request):
     async with request.app.state.chat_upload_slots:
-        await run_in_threadpool(owned_conversation, db, conv_id)
-        await run_in_threadpool(db.rollback)
         data = bytearray()
         try:
             async with asyncio.timeout(120):
@@ -149,7 +154,15 @@ async def message(conv_id: str, request: Request, db=Depends(get_seller_db)):
         del data
         if not body.text.strip() and not body.attachments:
             raise HTTPException(422, 'Write a message or attach an image')
-        return await run_in_threadpool(submit, db, conv_id, 'chat', body.text, body.attachments, request)
+
+        def enqueue():
+            with _seller_sessions()() as db:
+                owned_conversation(db, conv_id)
+                db.rollback()
+                return submit(db, conv_id, 'chat', body.text, body.attachments, request)
+
+        task_id = await run_in_threadpool(enqueue)
+        return task_stream(task_id)
 
 
 @router.post('/generate/cancel')
