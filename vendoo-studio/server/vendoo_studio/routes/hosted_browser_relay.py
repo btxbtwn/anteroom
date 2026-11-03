@@ -1,9 +1,13 @@
 """The seller's Anteroom tab relays marketplace commands to their Chrome and posts back replies."""
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import SQLAlchemyError
 
 from vendoo_studio.routes import jobs
 from vendoo_studio.services import extension_connection
+from vendoo_studio.services.device_routes import claim, lookup, replay_instance
 from vendoo_studio.services.hosted_browser_relay import relay_for
 from vendoo_studio.services.service_context import current
 
@@ -22,11 +26,42 @@ def _relay():
     return relay_for(context.seller_id)
 
 
+def _pinned(*, claim_route: bool):
+    context = current()
+    if context is None:
+        return None
+    try:
+        route = claim(context.seller_id, 'chrome') if claim_route else lookup(context.seller_id, 'chrome')
+    except SQLAlchemyError:
+        return None
+    instance = replay_instance(route)
+    if instance is None:
+        return None
+    return Response(status_code=409, headers={'fly-replay': f'instance={instance}'})
+
+
 @router.get('/next')
 async def next_command(capabilities: str = Query('', max_length=200)):
     """The next command for this seller's Chrome. Waits up to 20 seconds; 204 when there is none."""
+    if pinned := _pinned(claim_route=True):
+        return pinned
     message = await _relay().next_message({item for item in capabilities.split(',') if item}, WAIT_S)
     return message if message is not None else Response(status_code=204)
+
+
+class Heartbeat(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    capabilities: list[Literal['marketplace.actions', 'vinted.choices', 'sellwild.account',
+                               'marketplace.sessions', 'marketplace.sales_history']] = Field(max_length=5)
+
+
+@router.post('/heartbeat')
+async def heartbeat(body: Heartbeat):
+    """A connected tab remains present while Chrome is busy answering a long command."""
+    if pinned := _pinned(claim_route=True):
+        return pinned
+    _relay().note_seen(set(body.capabilities))
+    return {'ok': True}
 
 
 class Reply(BaseModel):
@@ -39,6 +74,8 @@ class Reply(BaseModel):
 async def post_reply(body: Reply):
     """Chrome's answer to one command this seller's relay sent. Resolved on the event
     loop that awaits it, so the waiting action wakes at once."""
+    if pinned := _pinned(claim_route=False):
+        return pinned
     relay = _relay()
     if not relay.is_waiting(body.request_id):
         raise HTTPException(404, 'Nothing is waiting for this reply.')

@@ -42,7 +42,7 @@ def share(form: dict) -> dict:
     named = {(marketplace, path): (name, load) for name, (marketplace, path, load) in _sources().items()}
     rows = []
     for row in form.get("fields") or []:
-        found = named.get((form.get("marketplace"), row.get("path")))
+        found = named.get((str(form.get("marketplace") or ""), str(row.get("path") or "")))
         if found:
             name, load = found
             payload = load()

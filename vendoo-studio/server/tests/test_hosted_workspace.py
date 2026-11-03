@@ -1,6 +1,7 @@
 """The shared editor's actual HTTP contracts run under two seller identities."""
 import io
 
+import pytest
 from PIL import Image
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,33 @@ from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from vendoo_studio.models.conversation import Photo
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.services import hosted_photos
+
+
+@pytest.mark.parametrize(('quantity', 'expected'), [(1, 'sold'), (3, 'active')])
+def test_paid_sales_reconcile_hosted_inventory_status(cloud, signing_keys, quantity, expected):  # noqa: F811
+    from datetime import datetime
+
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Recent eBay sale',
+        'notes': '{"vendooStatus":"active"}'}).json()['id']
+    with Session(engine) as db:
+        db.get(Conversation, identity).status = 'active'
+        db.add(ListingRevision(conversation_id=identity, user_id=USER_ID, source='agent',
+            inventory_quantity=quantity, listing_json={'title': 'Recent eBay sale', 'quantity': quantity}))
+        db.add(MarketplaceSale(user_id=USER_ID, conversation_id=identity, marketplace='ebay',
+            order_id='recent-order', line_id='recent-line', quantity=1, sold_at=datetime.now()))
+        db.commit()
+    summary = client.get('/api/conversations', headers=alice).json()[0]
+    assert summary['status'] == expected
+    assert bool(summary['settled_at']) == (expected == 'sold')
+    assert client.get(f'/api/conversations/{identity}', headers=alice).json()['status'] == expected
+    assert client.get('/api/conversations', headers=headers(signing_keys, BOB)).json() == []
+    with Session(engine) as db:
+        assert db.get(Conversation, identity).status == expected
 
 
 def test_missing_sale_badge_matches_ledger_and_clears_after_correction(cloud, signing_keys):  # noqa: F811

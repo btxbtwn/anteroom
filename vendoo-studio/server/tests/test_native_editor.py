@@ -289,7 +289,7 @@ class NativeEditorTest(unittest.TestCase):
 
         async def slow(*args, **kwargs):
             started.set()
-            time.sleep(0.6)  # a database or Chrome wait that does not yield
+            time.sleep(1.5)  # a database or Chrome wait that does not yield
             return await build(*args, **kwargs)
 
         async def run():
@@ -306,8 +306,20 @@ class NativeEditorTest(unittest.TestCase):
         with patch.object(native_editor, "editor_form", new=slow):
             health, waited, form = asyncio.run(run())
         self.assertEqual(health.status_code, 200)
-        self.assertLess(waited, 0.3)
+        self.assertLess(waited, 0.75)
         self.assertEqual(form.status_code, 200, form.text)
+
+    def test_forms_open_for_a_draft_with_no_listing_yet(self):
+        conv = ConversationRepo(self.db).create(title="Filled in by hand")
+        url = f"/api/conversations/{conv.id}/native-marketplaces"
+        for marketplace in ("poshmark", "depop", "mercari", "sellwild", "ebay"):
+            with self.subTest(marketplace=marketplace):
+                answer = self.client.get(f"{url}/{marketplace}/form")
+                self.assertEqual(answer.status_code, 200, answer.text)
+                self.assertTrue(answer.json()["fields"])
+        self.assertIsNone(ListingRepo(self.db).get_current(conv.id))
+        self.assertEqual(JobRepo(self.db).list_by_conversation(conv.id), [])
+        self.bridge.assert_not_called()
 
     def test_form_read_uses_posting_snapshot_and_does_not_save_or_launch(self):
         self.conv.notes = merge_notes(self.conv.notes, {"cog": "3.65", "packageDimensions": "13x10x3", "sku": "SKU1"})

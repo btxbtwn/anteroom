@@ -6,6 +6,26 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.697 — 2026-11-03
+
+- Generating a listing no longer refreshes every open listing each time the draft renews its lease. Saved changes, completion, failure and cancellation still update other devices.
+- The website reuses its database connection instead of opening a new one for every read.
+- A Mac or Chrome command stays on the server that computer is connected to, so another server can be added later without mixing accounts.
+
+## 0.1.696 — 2026-11-03
+
+- Fill in the eBay, Poshmark, Mercari, Depop and Sellwild forms yourself without generating a listing first.
+
+## 0.1.695 — 2026-11-03
+
+- Look up eBay notification orders through the same verified order reader as catch-up, preventing duplicate sales from differing notification IDs and preserving recorded amounts.
+- Keep a connected Chrome tab present during long marketplace reads with a separate heartbeat, instead of reporting it disconnected while it is busy.
+
+## 0.1.694 — 2026-11-03
+
+- Count an eBay sale once when notifications and order recovery use different forms of its line ID, while keeping amounts you already entered.
+- Move fully sold listings into the web app's Sold inventory when their sales arrive; keep partially sold stock Active.
+
 ## 0.1.693 — 2026-11-03
 
 - Keep running web draft generations alive when slow database work blocks their execution loop.

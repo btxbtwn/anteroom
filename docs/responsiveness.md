@@ -117,13 +117,45 @@ The regression blocks the execution loop with two sellers' drafts active and
 verifies both leases renew with the correct seller and token. A full passing
 live generation retest remains required.
 
+On 2026-11-03, web 0.1.695 was one shared-CPU Fly Machine with 2 GB in San Jose.
+About ten minutes after that deploy the one-minute load average was 19 on a
+single vCPU, and a later sample was still about 6. Roughly a quarter of the
+CPU time since boot was steal; the cgroup throttle counters read as zero, so
+that sample does not separate quota exhaustion from host contention. Memory
+had about 1.2 GB free. A new transaction-pooler connection took 719–880 ms to
+run `SELECT 1`. Reusing the connection took about 70 ms. Session mode and a
+direct connection were slower on reuse (about 160–240 ms). The database
+reported `max_connections` 60 with 40 sessions already present. Lease renewal
+no longer publishes a listing change. A passing live generation retest is
+still required before calling concurrent drafting fast enough.
+
 ## Marketplace form loading
 
-Following NextMaster's prefetching, the web app now warms each marketplace form
-when a listing opens (two at a time) and again when the seller points at, focuses
-or presses a marketplace tab. Before this, only the Mac app did; the web app
-waited for each form until its tab was opened. The eBay form also reads its
-category rules, business policies and item locations together instead of one
-after another, so it waits for the slowest eBay read rather than the sum of
-up to seven. Tests check that these reads overlap; no live eBay timing has been
-recorded yet.
+On 2026-11-03 the seller measured 12 s to open eBay's form, 8 s for Poshmark,
+Mercari and Depop and 9 s for Sellwild on the web. Every form ran about 60
+database queries before answering, one field-registry lookup per saved
+marketplace detail. With about 70 ms per reused hosted connection (above), that
+alone is several seconds. A form now reads the field registry once (at most six
+queries in total; `test_a_form_reads_the_database_a_handful_of_times`).
+
+Following NextMaster's split between a cached shell and per-item data, the
+Mercari, Depop and Poshmark forms no longer embed their brand and category
+lists (1.5 MB, 326 KB and 245 KB per form, the same for every listing). A row
+names its list and version, and clients download each version once from
+`/api/catalog/choice-lists/{name}`, which the browser keeps. The eBay form reads
+its category rules, policies and item locations together. The web app warms
+forms when a listing opens and when a marketplace tab is pointed at, as the Mac
+app already did. On the Mac, the form route builds in a worker thread so it no
+longer blocks other requests.
+
+In the local sandbox (production build, fast network, clicking right after
+opening a listing) Poshmark took 0.3 s, Mercari 1.3 s and Depop 1.2 s before
+these changes; with a 1.5 MB/s, 80 ms connection and 4x CPU throttling they took
+2.5–2.9 s. These are sandbox measurements, not hosted results; retest on the web
+after deploy.
+
+Hosted thumbnails read one row instead of three. Each thumbnail URL carries its
+photo's version, so the browser keeps it for that sign-in (`private`, `Vary:
+Authorization`); every other hosted response stays `no-store`. A dropped
+connection or a 429/5xx response is retried twice instead of leaving the row
+blank.

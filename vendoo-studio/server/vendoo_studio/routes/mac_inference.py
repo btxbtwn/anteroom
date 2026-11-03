@@ -1,8 +1,11 @@
 """The signed-in Mac polls outbound; ChatGPT credentials never leave that Mac."""
 import asyncio
+
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import SQLAlchemyError
 
+from vendoo_studio.services.device_routes import claim, lookup, replay_instance
 from vendoo_studio.services.mac_inference import MacUnavailable, relay_for
 from vendoo_studio.services.service_context import current
 
@@ -16,6 +19,20 @@ def relay():
     return relay_for(context.seller_id)
 
 
+def _pinned(device: str, *, claim_route: bool):
+    context = current()
+    if context is None:
+        return None
+    try:
+        route = claim(context.seller_id, device) if claim_route else lookup(context.seller_id, device)
+    except SQLAlchemyError:
+        return None
+    instance = replay_instance(route)
+    if instance is None:
+        return None
+    return Response(status_code=409, headers={'fly-replay': f'instance={instance}'})
+
+
 class Poll(BaseModel):
     model_config = ConfigDict(extra='forbid')
     worker: str = Field(pattern=r'^[0-9a-f]{32}$')
@@ -27,6 +44,8 @@ class Poll(BaseModel):
 
 @router.post('/next')
 async def next_call(body: Poll):
+    if pinned := _pinned('mac', claim_route=True):
+        return pinned
     deadline = asyncio.get_running_loop().time() + 20
     connection = relay()
     while True:
@@ -55,6 +74,8 @@ class Reply(BaseModel):
 
 @router.post('/reply')
 async def reply(body: Reply):
+    if pinned := _pinned('mac', claim_route=False):
+        return pinned
     if not relay().reply(body.worker, body.identity, body.result, body.failed):
         raise HTTPException(404, 'This inference call is no longer active')
     return {'ok': True}
@@ -62,5 +83,7 @@ async def reply(body: Reply):
 
 @router.get('/status')
 async def status():
+    if pinned := _pinned('mac', claim_route=False):
+        return pinned
     connection = relay()
     return {'connected': connection.connected, **connection.models}
