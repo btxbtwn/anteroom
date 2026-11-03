@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.716 — 2026-11-03
+
+- Correcting a Poshmark size or switching size systems now saves the selected size-group ID, so a displayed group name cannot keep a valid corrected size blocked by validation.
+- The sizing-system buttons follow the same editing lock as the size controls.
+- Typing a custom size no longer resets when listing activity refreshes.
+
 ## 0.1.715 — 2026-11-03
 
 - Notes and measurements typed while a listing loads stay visible and save correctly. Moving to another draft lets the pending save finish, and retrying keeps your edits and the listing's other saved details.
