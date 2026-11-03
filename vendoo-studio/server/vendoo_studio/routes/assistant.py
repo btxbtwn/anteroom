@@ -424,7 +424,10 @@ def _queue_retry(request: Request, db: Session, thread_id: str):
 def _follow_task(db: Session, task_id: str):
     from vendoo_studio.routes.hosted_tasks import task_stream
 
+    # Close before SSE keepalives so Depends(get_seller_db) cannot hold a pool
+    # connection for the whole answer wait.
     db.rollback()
+    db.close()
     return task_stream(task_id)
 
 

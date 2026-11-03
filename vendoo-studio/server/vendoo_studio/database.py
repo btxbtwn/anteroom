@@ -52,11 +52,15 @@ def make_engine(url: str):
     # tests and the desktop app, do not hold a pool.
     if os.environ.get("ANTEROOM_HOSTED") == "1":
         connect_args = {"prepare_threshold": None} if make_url(url).port == 6543 else {}
+        # Two sellers generating while Mac/Chrome poll and the UI refreshes need
+        # more than 5 checkouts. Stay well under Supabase's remaining headroom
+        # (max_connections 60 with ~40 already busy elsewhere); do not size this
+        # to one connection per seller.
         return create_engine(
             url,
-            pool_size=int(os.environ.get("ANTEROOM_DB_POOL_SIZE", "4")),
-            max_overflow=int(os.environ.get("ANTEROOM_DB_MAX_OVERFLOW", "1")),
-            pool_timeout=float(os.environ.get("ANTEROOM_DB_POOL_TIMEOUT", "1")),
+            pool_size=int(os.environ.get("ANTEROOM_DB_POOL_SIZE", "8")),
+            max_overflow=int(os.environ.get("ANTEROOM_DB_MAX_OVERFLOW", "4")),
+            pool_timeout=float(os.environ.get("ANTEROOM_DB_POOL_TIMEOUT", "3")),
             pool_recycle=300,
             connect_args=connect_args,
             echo=False, hide_parameters=True,

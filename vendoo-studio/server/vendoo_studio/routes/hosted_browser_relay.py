@@ -1,4 +1,5 @@
 """The seller's Anteroom tab relays marketplace commands to their Chrome and posts back replies."""
+import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -43,7 +44,7 @@ def _pinned(*, claim_route: bool):
 @router.get('/next')
 async def next_command(capabilities: str = Query('', max_length=200)):
     """The next command for this seller's Chrome. Waits up to 20 seconds; 204 when there is none."""
-    if pinned := _pinned(claim_route=True):
+    if pinned := await asyncio.to_thread(_pinned, claim_route=True):
         return pinned
     message = await _relay().next_message({item for item in capabilities.split(',') if item}, WAIT_S)
     return message if message is not None else Response(status_code=204)
@@ -58,7 +59,7 @@ class Heartbeat(BaseModel):
 @router.post('/heartbeat')
 async def heartbeat(body: Heartbeat):
     """A connected tab remains present while Chrome is busy answering a long command."""
-    if pinned := _pinned(claim_route=True):
+    if pinned := await asyncio.to_thread(_pinned, claim_route=True):
         return pinned
     _relay().note_seen(set(body.capabilities))
     return {'ok': True}
@@ -74,7 +75,7 @@ class Reply(BaseModel):
 async def post_reply(body: Reply):
     """Chrome's answer to one command this seller's relay sent. Resolved on the event
     loop that awaits it, so the waiting action wakes at once."""
-    if pinned := _pinned(claim_route=False):
+    if pinned := await asyncio.to_thread(_pinned, claim_route=False):
         return pinned
     relay = _relay()
     if not relay.is_waiting(body.request_id):
