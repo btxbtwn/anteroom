@@ -50,7 +50,18 @@ def test_sellwild_form_reads_the_account_choices_in_the_sellers_chrome(cloud, si
     assert fields['Shipping From']['value'] == 'Pat Seller\n1 Main St'
     assert fields['Sell it faster with a discount']['options'] == ['25% 25OFF']
 
+    # A later open shows the saved copy without asking Chrome again.
+    again = client.get(url, headers=alice).json()
+    assert again['account_connected'] is True
+    assert {row['label']: row for row in again['fields']}['Shipping From']['value'] == 'Pat Seller\n1 Main St'
+
     # Signed out of Sellwild in that Chrome.
+    # Drop the saved copy so this open reads Chrome again, as an explicit reload does.
+    from vendoo_studio.services import saved_choices
+    from vendoo_studio.services.hosted_context import for_seller
+    from vendoo_studio.services.service_context import use
+    with use(for_seller(USER_ID)):
+        saved_choices.forget('sellwild-account')
     thread, result = _in_background(lambda: client.get(url, headers=alice))
     _answer(client, alice, {'ok': False, 'error_code': 'signed_out'}, CAPABLE)
     thread.join(10)

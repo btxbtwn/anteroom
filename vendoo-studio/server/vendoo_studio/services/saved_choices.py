@@ -101,6 +101,32 @@ def saved(name: str, account: str) -> Any | None:
     return entry.get("value") if entry and entry.get("account") == account else None
 
 
+def forget(name: str) -> None:
+    """Drop the saved copy so the next open reads again (tests and an explicit reload)."""
+    if not _seller():
+        with _lock:
+            path = _path()
+            try:
+                stored = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                return
+            if not isinstance(stored, dict) or name not in stored:
+                return
+            stored.pop(name, None)
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(stored) + "\n")
+            tmp.replace(path)
+        return
+    from sqlalchemy import delete
+
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.models.user_preference import UserPreference
+
+    with SessionLocal() as db:
+        db.execute(delete(UserPreference).where(UserPreference.key == _key(name)))
+        db.commit()
+
+
 def in_thread(refresh: Refresh) -> None:
     """Refresh on a thread of its own, as this seller. For a form built on a short-lived loop."""
     context = contextvars.copy_context()

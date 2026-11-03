@@ -70,6 +70,14 @@ class SavedChoicesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(other, {"payment": ["p2"]})
         self.assertIsNone(saved_choices.saved("ebay-policies", "acct-1"))
 
+    async def test_forget_drops_the_saved_copy_so_the_next_open_reads_again(self):
+        await saved_choices.kept("vinted-categories", "", lambda: self.read(["Jeans"]))
+        saved_choices.forget("vinted-categories")
+        self.assertIsNone(saved_choices.saved("vinted-categories", ""))
+        again = await saved_choices.kept("vinted-categories", "", lambda: self.read(["Coats"]))
+        self.assertEqual(again, ["Coats"])
+        self.assertEqual(self.reads, 2)
+
 
 class EbayFormUsesSavedPoliciesTest(unittest.IsolatedAsyncioTestCase):
     async def test_the_ebay_form_reads_policies_through_the_saved_copy(self):
