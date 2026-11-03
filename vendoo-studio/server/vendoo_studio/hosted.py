@@ -19,7 +19,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import event
-from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
 
 from vendoo_studio.services.seller_sessions import (
@@ -55,9 +54,10 @@ class SellerSessionMiddleware:
             if scheme.lower() != "bearer" or not token or len(token) > 16384:
                 raise InvalidSession
             verifier = scope["app"].state.session_verifier
-            # JWKS retrieval is synchronous; never block streaming requests
-            # or other sellers while the public-key endpoint responds.
-            identity = await run_in_threadpool(verifier.verify, token)
+            # JWKS retrieval is synchronous. Keep it off the event loop and
+            # the request thread limiter: slow inventory endpoints must not
+            # prevent the Mac from authenticating its heartbeats and replies.
+            identity = await asyncio.to_thread(verifier.verify, token)
         except InvalidSession:
             response = JSONResponse(
                 {"detail": "A valid seller session is required"}, status_code=401,
