@@ -1,0 +1,1 @@
+- Notes and measurements typed while a listing loads stay visible and save correctly. Moving to another draft lets the pending save finish, and retrying keeps your edits and the listing's other saved details.

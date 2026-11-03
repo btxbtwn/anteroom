@@ -177,6 +177,52 @@ test("two editors generate while a third saves without preloading unused marketp
   }
 });
 
+test("typing before the initial details arrive preserves the pending edit and untouched fields", async ({ page, request }, info) => {
+  test.skip(info.project.name === "phone", "The same details autosave serves both layouts");
+  test.setTimeout(60_000);
+  const alice = await (await request.post(`${api}/local/auth/v1/token?grant_type=password`, {
+    data: { email: "alice@sandbox.test", password: "sandbox" },
+  })).json();
+  const headers = { Authorization: `Bearer ${alice.access_token}` };
+  const draft = await (await request.post(`${api}/api/drafts`, { headers, data: {
+    title: "Delayed details", notes: JSON.stringify({ sellerNotes: "Original notes", sku: "KEEP-123", knownFlaws: "Keep this mark" }),
+  } })).json();
+  const otherTitle = `Other details draft ${Date.now()}`;
+  await request.post(`${api}/api/drafts`, { headers, data: { title: otherTitle } });
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("alice@sandbox.test");
+  await page.getByLabel("Password").fill("sandbox");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible();
+  let release!: () => void;
+  const delayed = new Promise<void>(resolve => { release = resolve; });
+  await page.route(`**/api/conversations/${draft.id}/screen`, async route => {
+    await delayed;
+    await route.continue();
+  });
+  try {
+    await page.goto(`/?listing=${draft.id}`);
+    const notes = page.locator(`#item-notes-${draft.id}`);
+    await notes.fill("Typed while the initial read is pending");
+    release();
+    await expect.poll(async () => {
+      const response = await request.get(`${api}/api/conversations/${draft.id}`, { headers });
+      return JSON.parse((await response.json()).notes || "{}").sellerNotes;
+    }, { timeout: 15_000 }).toBe("Typed while the initial read is pending");
+    const saved = JSON.parse((await (await request.get(`${api}/api/conversations/${draft.id}`, { headers })).json()).notes);
+    expect(saved.sku).toBe("KEEP-123");
+    expect(saved.knownFlaws).toBe("Keep this mark");
+    await notes.fill("Saved after moving to another draft");
+    await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: otherTitle, exact: true }).click();
+    await expect.poll(async () => {
+      const response = await request.get(`${api}/api/conversations/${draft.id}`, { headers });
+      return JSON.parse((await response.json()).notes || "{}").sellerNotes;
+    }, { timeout: 15_000 }).toBe("Saved after moving to another draft");
+    await page.goto(`/?listing=${draft.id}`);
+    await expect(page.locator(`#item-notes-${draft.id}`)).toHaveValue("Saved after moving to another draft");
+  } finally { release(); }
+});
+
 test("the Mac window hands its account session to the native AI worker and clears it on logout", async ({ page }, info) => {
   test.skip(info.project.name === "phone", "The native Mac bridge is desktop-only");
   // Logout replaces the document; observe the native boundary across navigation.
