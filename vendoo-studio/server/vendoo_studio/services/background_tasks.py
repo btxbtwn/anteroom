@@ -76,6 +76,9 @@ def _sessions():
 
 def renew(task_id, token):
     with _sessions()() as db:
+        # Lease metadata is not a listing edit. Broadcasting each heartbeat
+        # makes every open device refetch its editor while generation runs.
+        db.info['quiet_changes'] = True
         changed = db.execute(update(BackgroundTask).where(
             BackgroundTask.id == task_id, BackgroundTask.status == 'running',
             BackgroundTask.lease_token == token, BackgroundTask.leased_until > func.now(),

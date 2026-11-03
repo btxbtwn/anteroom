@@ -1,0 +1,3 @@
+- Generating a listing no longer refreshes every open listing each time the draft renews its lease. Saved changes, completion, failure and cancellation still update other devices.
+- The website reuses its database connection instead of opening a new one for every read.
+- A Mac or Chrome command stays on the server that computer is connected to, so another server can be added later without mixing accounts.
