@@ -38,6 +38,8 @@
   }
   // Marketplace commands the hosted API relays, already approved and confirmed there.
   const COMMANDS = new Set(['marketplace.execute', 'marketplace.result', 'marketplace.delete', 'job.cancel']);
+  // The marketplaces the web reaches only through the seller's Chrome.
+  const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
   // Named commands other than marketplace actions, each with exactly the inputs it takes:
   // a maximum string length, the set of values allowed, or the pattern a value must match.
   const READS = {
@@ -47,8 +49,44 @@
     'marketplace.sellwild_account': {},
     'marketplace.sessions': {},
     'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted']) },
+    // Inventory import: a page of the seller's own active listings, or one of them.
+    'marketplace.import.page': { marketplace: MARKETPLACES, cursor: 300 },
+    'marketplace.import.listing': { marketplace: MARKETPLACES, listing_id: /^[a-z0-9][a-z0-9-]{0,200}$/ },
   };
-  const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
+  const PROMOTION_COMMANDS = new Set(['marketplace.promotion_check', 'marketplace.promote', 'marketplace.promotion_result', 'marketplace.like_events']);
+  function promotion(value) {
+    const p = value.payload;
+    const id = /^[A-Za-z0-9-]{1,64}$/;
+    if (typeof value.job_id !== 'string' || !id.test(value.job_id) || p.job_id !== value.job_id || size(value) > 10000) return false;
+    let keys = ['job_id', 'request_id'];
+    if (value.type === 'marketplace.promotion_result') {
+      keys.push('action_id');
+      if (!/^[A-Za-z0-9-]{6,64}$/.test(p.action_id || '')) return false;
+    } else if (value.type === 'marketplace.like_events') {
+      keys.push('marketplace');
+      if (!['poshmark', 'depop'].includes(p.marketplace)) return false;
+    } else {
+      keys.push('marketplace', 'action', 'listing_id');
+      const ids = { poshmark: /^[a-f0-9]{24}$/, mercari: /^m\d{6,}$/, depop: /^[a-z0-9][a-z0-9-]{0,200}$/ };
+      if (!Object.hasOwn(ids, p.marketplace) || typeof p.listing_id !== 'string' || !ids[p.marketplace].test(p.listing_id)
+          || !['share', 'offer'].includes(p.action) || (p.action === 'share' && p.marketplace !== 'poshmark')) return false;
+      if (value.type === 'marketplace.promotion_check') {
+        if (p.action === 'offer') {
+          keys.push('discount_percent');
+          if (!Number.isInteger(p.discount_percent) || p.discount_percent < 1 || p.discount_percent > 99) return false;
+        }
+      } else {
+        keys.push('action_id', 'confirm', 'price_cents', 'offer_price_cents', 'floor_cents', 'shipping_discount_id', 'gap_ms');
+        const cents = n => Number.isInteger(n) && n > 0 && n <= 2147483647;
+        if (p.confirm !== true || !/^[A-Za-z0-9-]{6,64}$/.test(p.action_id || '') || !cents(p.price_cents)) return false;
+        if (p.action === 'offer' ? (!cents(p.offer_price_cents) || !cents(p.floor_cents) || p.offer_price_cents < p.floor_cents)
+            : (p.offer_price_cents !== null || p.floor_cents !== null)) return false;
+        if (p.shipping_discount_id !== null && (typeof p.shipping_discount_id !== 'string' || !/^[A-Za-z0-9-]{1,40}$/.test(p.shipping_discount_id))) return false;
+        if (Object.hasOwn(p, 'gap_ms') && (p.action !== 'share' || !Number.isInteger(p.gap_ms) || p.gap_ms < 4000 || p.gap_ms > 30000)) return false;
+      }
+    }
+    return Object.keys(p).every(key => keys.includes(key));
+  }
   const MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
   function plain(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
   function size(value) { try { return JSON.stringify(value).length; } catch { return Infinity; } }
@@ -56,6 +94,7 @@
     if (!plain(value) || Object.keys(value).some(key => !['type', 'job_id', 'message_id', 'payload'].includes(key))) return null;
     const payload = value.payload;
     if (!/^[0-9a-f]{32}$/.test(value.message_id || '') || !plain(payload) || payload.request_id !== value.message_id) return null;
+    if (PROMOTION_COMMANDS.has(value.type)) return promotion(value) ? value : null;
     if (Object.hasOwn(READS, value.type)) {
       if (value.type === 'marketplace.sales_history' && (!Object.hasOwn(payload, 'marketplace') || !Object.hasOwn(payload, 'settled'))) return null;
       const inputs = READS[value.type];

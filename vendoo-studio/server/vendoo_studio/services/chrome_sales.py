@@ -65,7 +65,7 @@ def clear_check_error(marketplace: str) -> None:
 def arm_next(marketplace: str, now: float) -> float:
     """The next check for this shop, somewhere between four and twelve minutes out."""
     due = now + random.uniform(MIN_GAP_S, MAX_GAP_S)
-    _next[marketplace] = due
+    _next[_market_key(marketplace)] = due
     return due
 
 
@@ -190,16 +190,16 @@ async def check_due() -> None:
     for marketplace in CHROME_MARKETS:
         if not sale_detection_enabled(marketplace):
             clear_check_error(marketplace)
-            _next.pop(marketplace, None)
+            _next.pop(_market_key(marketplace), None)
             continue
-        if _next.get(marketplace, 0) > now:
+        if _next.get(_market_key(marketplace), 0) > now:
             continue
         arm_next(marketplace, now)
         try:
             await check_marketplace(marketplace)
         except Exception:  # noqa: BLE001 - one marketplace must not stop the others
             log.debug("could not check %s sales", marketplace, exc_info=True)
-            _errors[marketplace] = "Couldn't check sales. Sign in again in Chrome if this keeps happening."
+            _errors[_market_key(marketplace)] = "Couldn't check sales. Sign in again in Chrome if this keeps happening."
         return
 
 

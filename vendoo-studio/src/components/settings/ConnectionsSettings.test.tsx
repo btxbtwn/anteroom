@@ -72,7 +72,7 @@ describe("Connections settings", () => {
     expect(html).toContain("Reconnect eBay</button>");
   });
 
-  it("on the web, shows each Chrome marketplace's sign-in read through the seller's Chrome, without sale detection", () => {
+  it("on the web, shows Chrome sign-ins and seller-owned sale detection switches", () => {
     const html = renderToStaticMarkup(
       <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
     );
@@ -87,7 +87,8 @@ describe("Connections settings", () => {
     expect(html).toContain("Not signed in");
     expect(html).toContain("Sign in again");
     expect(html).toContain("Where the sign-in lives");
-    expect(html).not.toContain("Detect sales");
+    expect(html).toContain("Detect sales");
+    expect(html).toContain("Sale detection for Poshmark");
     expect(html).not.toContain("this Mac");
   });
 

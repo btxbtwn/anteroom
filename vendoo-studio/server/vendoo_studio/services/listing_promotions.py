@@ -167,9 +167,16 @@ def _save_floor(db: Session, marketplace: str, listing_id: str, conv_id: str, ce
 
 
 def require_chrome() -> None:
-    from vendoo_studio.services.extension_connection import extension_manager
+    from vendoo_studio.services.extension_connection import current_extension
+    from vendoo_studio.services.hosted_browser_relay import MARKETPLACE_PROMOTIONS, relay_for
+    from vendoo_studio.services.service_context import current
 
-    if not extension_manager.connected:
+    context = current()
+    if context is not None:
+        if refusal := relay_for(context.seller_id).refusal(MARKETPLACE_PROMOTIONS):
+            raise PromotionError(409, refusal, "chrome")
+        return
+    if not current_extension().connected:
         raise PromotionError(409, "Connect Chrome first.", "chrome")
 
 

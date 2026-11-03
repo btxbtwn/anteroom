@@ -1,0 +1,1 @@
+- Check Chrome marketplace sales on the web while your browser is connected, with separate settings and check schedules for each seller.

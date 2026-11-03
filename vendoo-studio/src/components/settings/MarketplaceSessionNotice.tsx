@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "../../api/client";
+import { useWorkspaceRuntime } from "../../app/runtime";
 import {
   EXTENSION_SESSION_MARKETS,
   EXTENSION_SESSION_NAMES,
@@ -34,6 +35,7 @@ function rememberSignIn(id: string) {
 
 /** Tells the seller when a Chrome marketplace sign-in has ended, and opens that shop. */
 export function MarketplaceSessionNotice() {
+  const { hosted } = useWorkspaceRuntime();
   const queryClient = useQueryClient();
   const seen = useRef(new Set<string>());
   const previous = useRef<Partial<Record<string, ExtensionSessionState>>>({});
@@ -57,9 +59,10 @@ export function MarketplaceSessionNotice() {
   const extension = useQuery({
     queryKey: ["extension-status"],
     queryFn: api.extension.status,
+    enabled: !hosted,
     refetchInterval: () => pollMs(EXTENSION_STATUS_POLL_MS),
   });
-  const chromeReady = Boolean(extension.data?.connected);
+  const chromeReady = hosted || Boolean(extension.data?.connected);
   const sessions = useQuery({
     queryKey: ["marketplace-sessions"],
     queryFn: api.marketplaceSessions.status,

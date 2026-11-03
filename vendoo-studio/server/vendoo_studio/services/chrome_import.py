@@ -1,7 +1,8 @@
 """Import active Poshmark, Mercari, Depop, Sellwild and Vinted listings through Chrome.
 
 The extension reads the seller's own listings with the seller's signed-in
-sessions and checks each one belongs to that account. Nothing here writes to a
+sessions and checks each one belongs to that account. On the web the seller's
+signed-in Anteroom tab relays the same two reads to their Chrome. Nothing here writes to a
 marketplace: it previews a page of listings, names the local item that already
 owns each one, suggests a likely match for the seller to review, and saves new
 local items through the same path as the eBay and Etsy imports.
@@ -70,9 +71,18 @@ def listing_id_from(marketplace: str, value: str) -> str:
 
 
 async def _ask(marketplace: str, message_type: str, payload: dict) -> dict:
+    """One read in the seller's Chrome: the Mac's paired Bridge, or on the web the seller's own tab relaying to theirs."""
+    from vendoo_studio.services.hosted_browser_relay import ChromeReadError, relay_for
+    from vendoo_studio.services.service_context import current
+
+    payload = {"marketplace": marketplace, **{key: value for key, value in payload.items() if value is not None}}
+    context = current()
     try:
-        reply = await browser_bridge.request(SimpleNamespace(id=None), message_type, {"marketplace": marketplace, **payload}, timeout=120)
-    except browser_bridge.BrowserBridgeError as exc:
+        if context is not None:
+            reply = await relay_for(context.seller_id).read(message_type, payload, timeout=120)
+        else:
+            reply = await browser_bridge.request(SimpleNamespace(id=None), message_type, payload, timeout=120)
+    except (browser_bridge.BrowserBridgeError, ChromeReadError) as exc:
         raise ChromeImportError(503, f"{exc} Then sign in to {_name(marketplace)} in Chrome.") from exc
     if not isinstance(reply, dict):
         raise ChromeImportError(502, f"Chrome did not return {_name(marketplace)}'s listings.")
