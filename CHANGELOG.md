@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.720 — 2026-11-03
+
+- Sales, marketplace-listing, and copy-preview/result reads release their database connections before sending the response or refreshing account data in the background.
+
 ## 0.1.719 — 2026-11-03
 
 - Hosted catalog indexing runs in a lower-priority process so tokenization does not share the API's Python interpreter. Completed indexes remain private to the seller and are published only after the build succeeds.

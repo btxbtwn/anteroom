@@ -1,1 +1,0 @@
-- Sales, marketplace-listing, and copy-preview/result reads release their database connections before sending the response or refreshing account data in the background.
