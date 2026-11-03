@@ -10,11 +10,11 @@ import xml.etree.ElementTree as ET
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.marketplace_sale import MarketplaceSale
+from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from vendoo_studio.services.api_job_lock import start_gate
 from vendoo_studio.services.ebay_client import EbayClient, NS, assert_identity, digest, trading_xml
 from vendoo_studio.services.etsy_workspace import EtsyClient
-from vendoo_studio.services.relay_sales import find_listing, reconcile_unmatched
+from vendoo_studio.services.relay_sales import find_listing, find_sale_line, reconcile_unmatched
 
 PAGE_SIZE = 25
 MAX_PAGES = 4000
@@ -186,6 +186,41 @@ async def _read(marketplace: str, start: datetime, end: datetime, page: int, exp
     return verified_orders, more == "true", lambda: assert_identity(client.seller), connection
 
 
+async def recover_ebay_notification(order_id: str, *, session_factory) -> list[str]:
+    """Treat a notification as an order hint; use the same verified keys as catch-up.
+
+    Notification and Trading order-line IDs are different namespaces. Never
+    construct a key from a notification's flattened, position-dependent IDs.
+    """
+    order_id = _id(order_id)
+    client = await EbayClient.connect()
+    root = ET.Element("GetOrdersRequest", xmlns=NS["e"])
+    ET.SubElement(root, "OrderRole").text = "Seller"
+    ET.SubElement(root, "OrderStatus").text = "All"
+    ET.SubElement(root, "DetailLevel").text = "ReturnAll"
+    ET.SubElement(ET.SubElement(root, "OrderIDArray"), "OrderID").text = order_id
+    response = (await client.request("POST", "/ws/api.dll", xml=trading_xml(root), call="GetOrders"))["xml"]
+    rows = response.findall("e:OrderArray/e:Order", NS)
+    if len(rows) != 1 or rows[0].findtext("e:OrderID", namespaces=NS) != order_id:
+        raise RecoveryError("eBay did not verify the notified order. This event will be retried.")
+    lines = await _ebay_payment(client, _ebay_lines(rows[0]))
+    observed = datetime.now(UTC).replace(tzinfo=None)
+
+    def store():
+        with session_factory() as db:
+            with start_gate():
+                assert_identity(client.seller)
+                before = {row.id for row in db.query(MarketplaceSale).filter_by(marketplace="ebay", order_id=order_id).all()}
+                result = _save(db, "ebay", lines, observed)
+                if result["conflicts"]:
+                    raise RecoveryError("The notified order conflicts with a saved line. This event will be retried.")
+            reconcile_unmatched(db, marketplace="ebay")
+            return [row.id for row in db.query(MarketplaceSale).filter_by(marketplace="ebay", order_id=order_id).all()
+                    if row.id not in before and row.order_status in PAID_STATUSES]
+
+    return await asyncio.to_thread(store)
+
+
 def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datetime) -> dict:
     counts = {"recorded": 0, "updated": 0, "unchanged": 0, "conflicts": 0}
     unique = {}
@@ -194,8 +229,10 @@ def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datet
         if key in unique and unique[key] != line:
             raise RecoveryError("The marketplace returned conflicting duplicate order lines. This page was not saved.")
         unique[key] = line
-    for line in unique.values():
-        sale = db.query(MarketplaceSale).filter_by(marketplace=marketplace, order_id=line.order_id, line_id=line.line_id).first()
+    # All recovery batches acquire order locks in the same order.
+    for key in sorted(unique):
+        line = unique[key]
+        sale = find_sale_line(db, marketplace, line.order_id, line.line_id, line.listing_id)
         if sale is None:
             # Older ID-only notices could use a listing/order ID when their
             # line ID was absent. Do not silently turn that into a second sale.
