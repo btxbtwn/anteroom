@@ -58,10 +58,14 @@ final class ListingEditorModel {
             let (conversation, current) = try await (detail, listing)
             // Without the lists the fields stay editable as text.
             if options == GeneralOptions(), let lists = try? await api.generalOptions() { options = lists }
-            if marketplaceTabs.isEmpty, let tabs = try? await api.marketplaceForms() {
+            if marketplaceTabs.isEmpty {
                 // Settings → Where you list decides which forms show, as on the web.
-                let selected = (try? await api.selectedMarketplaces()).map(Set.init)
-                marketplaceTabs = selected.map { chosen in tabs.filter(chosen.contains) } ?? tabs
+                async let forms = try? api.marketplaceForms()
+                async let chosen = try? api.selectedMarketplaces()
+                if let tabs = await forms {
+                    let selected = await chosen.map(Set.init)
+                    marketplaceTabs = selected.map { picked in tabs.filter(picked.contains) } ?? tabs
+                }
             }
             status = conversation.status ?? "draft"
             document = current.listing
