@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.696 — 2026-11-03
+
+- Fill in the eBay, Poshmark, Mercari, Depop and Sellwild forms yourself without generating a listing first.
+
 ## 0.1.695 — 2026-11-03
 
 - Look up eBay notification orders through the same verified order reader as catch-up, preventing duplicate sales from differing notification IDs and preserving recorded amounts.
