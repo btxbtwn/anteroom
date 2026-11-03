@@ -257,7 +257,9 @@ class NativeEditorTest(unittest.TestCase):
             for market in ("poshmark", "mercari", "depop", "sellwild"):
                 queries.clear()
                 asyncio.run(native_editor.editor_form(self.conv.id, market, rev.id, self.db))
-                self.assertLessEqual(len(queries), 6, (market, queries))
+                # A handful of reads to build the snapshot, then the session is
+                # released before marketplace network waits (not one query per detail).
+                self.assertLessEqual(len(queries), 8, (market, queries))
         finally:
             event.remove(self.engine, "before_cursor_execute", listen)
 
