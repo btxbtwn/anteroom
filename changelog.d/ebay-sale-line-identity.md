@@ -1,2 +1,0 @@
-- Count an eBay sale once when notifications and order recovery use different forms of its line ID, while keeping amounts you already entered.
-- Move fully sold listings into the web app's Sold inventory when their sales arrive; keep partially sold stock Active.
