@@ -140,9 +140,15 @@ def list_conversations(db=Depends(get_seller_db)):
     for identity, market in db.execute(select(MarketplaceListing.conversation_id, MarketplaceListing.marketplace)
                                       .where(MarketplaceListing.state.in_(LIVE_STATES))):
         direct.setdefault(identity, []).append(market)
-    from vendoo_studio.services.sales_records import missing_by_conversation
+    from vendoo_studio.services.inventory_analytics import read_analytics_inputs, rows_from_inputs
+    from vendoo_studio.services.sales_records import read_sale_lines, records_from_lines, missing_from_records
 
-    missing = missing_by_conversation(db)
+    analytics = read_analytics_inputs(db)
+    sales = read_sale_lines(db)
+    # Ledger validation, cost allocation and hashing are CPU work over loaded
+    # values. Keep scarce connections available while that work runs.
+    db.close()
+    missing = missing_from_records(records_from_lines(sales, rows_from_inputs(analytics)))
     summaries = []
     for row in rows:
         summary = conversation_response(row, current.get(row.id), direct.get(row.id), include_notes=False,
@@ -151,11 +157,6 @@ def list_conversations(db=Depends(get_seller_db)):
             from vendoo_studio.services.photos import cover_thumb_url
             summary['cover_photo_url'] = cover_thumb_url(*covers[row.id])
         summaries.append(summary)
-    # Plain dicts only from here. Close before FastAPI encodes and sends the
-    # full inventory body so a ~thousand-draft seller does not hold a pool slot
-    # for the whole response.
-    db.rollback()
-    db.close()
     return summaries
 
 

@@ -21,6 +21,35 @@ from vendoo_studio.services.service_context import ServiceContext, use
 from vendoo_studio.services.suggestions import list_suggestions
 
 
+def test_inventory_financial_calculations_release_the_read_connection(cloud, active_connections, signing_keys, monkeypatch):  # noqa: F811
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+    from vendoo_studio.services import sales_ledger
+    from vendoo_studio.services.hosted_database import SellerDatabaseSession
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Sold tee'}).json()['id']
+    with SellerDatabaseSession(bind=engine, user_id=USER_ID) as db:
+        db.add(MarketplaceSale(marketplace='ebay', order_id='order', line_id='line',
+                               conversation_id=identity, quantity=1,
+                               financials={'currency': 'USD', 'item_revenue': '25', 'fees': '3',
+                                           'shipping_credit': '0', 'shipping_cost': '4', 'item_cost': '2', 'refunds': '0'}))
+        db.commit()
+    original = sales_ledger.financial_values
+    checked = []
+
+    def calculate(sale):
+        assert not active_connections, 'Inventory financial calculations must run after the read session closes'
+        checked.append(sale.id)
+        return original(sale)
+
+    monkeypatch.setattr(sales_ledger, 'financial_values', calculate)
+    response = client.get('/api/conversations', headers=alice)
+    assert response.status_code == 200
+    assert len(checked) >= 2, 'Both Analytics and ledger conversion must release the connection'
+    assert response.json()[0]['missing_sale_data']
+
+
 @pytest.fixture(params=[5, 8], ids=['bounded-regression', 'production-burst'])
 def concurrent_cloud(cloud, monkeypatch, request):  # noqa: F811
     client, database = cloud
@@ -367,6 +396,9 @@ def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
             return None
 
     monkeypatch.setattr('vendoo_studio.repositories.queries.ConversationRepo', Repo)
-    monkeypatch.setattr('vendoo_studio.services.sales_records.missing_by_conversation', lambda _db: {})
+    from vendoo_studio.services.inventory_analytics import AnalyticsInputs
+    monkeypatch.setattr('vendoo_studio.services.inventory_analytics.read_analytics_inputs',
+                        lambda _db: AnalyticsInputs({}, {}, [], {}, {}))
+    monkeypatch.setattr('vendoo_studio.services.sales_records.read_sale_lines', lambda _db: [])
     assert hosted_workspace.list_conversations(DB()) == []
     assert closed == ['closed']

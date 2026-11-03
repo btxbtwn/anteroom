@@ -147,6 +147,15 @@ def inventory_analytics(
     }
 
 
+@dataclass
+class AnalyticsInputs:
+    facets: dict[str, tuple[Any, Any, Any, Any]]
+    box_share: dict[str, float]
+    conversations: list[tuple[str, Any, Any, dict, Any]]
+    statuses: dict[str, Any]
+    sales: dict[str, list[Any]]
+
+
 def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
     """Every listing as analytics rows. Current revision only.
 
@@ -156,6 +165,11 @@ def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
     ledger once (``vendoo_sales_archive``) and are not read from the notes. An
     item with some units sold and some left is an active row plus a row per sale.
     """
+    return rows_from_inputs(read_analytics_inputs(db, conversation_id))
+
+
+def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsInputs:
+    """Materialize the inputs so read-only callers can close before calculations."""
     from vendoo_studio.services.vendoo_sales_archive import ensure_archived
 
     ensure_archived(db)
@@ -163,8 +177,7 @@ def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
     from vendoo_studio.models.listing import Listing, ListingRevision
     from vendoo_studio.models.sourcing import SourceBox
     from vendoo_studio.services.item_status import paid_lines, statuses
-    from vendoo_studio.services.sell_through import _parse_moment
-    from vendoo_studio.services.vendoo_import import VENDOO_MARKETPLACE_ALIASES, parse_notes, split_vendoo_labels
+    from vendoo_studio.services.vendoo_import import parse_notes
 
     facets = {
         conv_id: (price, cost, brand, category)
@@ -184,7 +197,6 @@ def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
     # An item with no cost of its own carries its share of the box it came from.
     # Pieces that were not worth listing add their cost to the ones that were.
     box_share = {box.id: _money(box.landed / box.sellable) for box in db.query(SourceBox).all() if box.sellable}
-    rows: list[AnalyticsItem] = []
     conversations = [
         (conv_id, title, status, parse_notes(notes_raw), box_id)
         for conv_id, title, status, notes_raw, box_id in db.query(
@@ -197,6 +209,17 @@ def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
     ]
     own = statuses(db, [(conv_id, notes) for conv_id, _title, _status, notes, _box in conversations])
     lines = paid_lines(db, {conversation_id} if conversation_id else None)
+    return AnalyticsInputs(facets, box_share, conversations, own, lines)
+
+
+def rows_from_inputs(inputs: AnalyticsInputs) -> list[AnalyticsItem]:
+    """Calculate costs and sales from already-loaded values, without database I/O."""
+    from vendoo_studio.services.sell_through import _parse_moment
+    from vendoo_studio.services.vendoo_import import VENDOO_MARKETPLACE_ALIASES, split_vendoo_labels
+
+    facets, box_share, conversations, own, lines = (inputs.facets, inputs.box_share, inputs.conversations,
+                                                  inputs.statuses, inputs.sales)
+    rows: list[AnalyticsItem] = []
     for conv_id, title, status, notes, box_id in conversations:
         price, cost, brand, category = facets.get(conv_id, (None, None, None, None))
         dates = notes.get("vendooDates")
