@@ -1,0 +1,1 @@
+- Detect eBay and Etsy sale notifications on the web while the app is closed, and catch up recent eBay orders automatically.
