@@ -84,7 +84,10 @@ def runtime(request: Request, db=Depends(get_seller_db)):
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
     offers = getattr(request.app.state, 'offer_scheduler', None)
     watchdog = getattr(request.app.state, 'job_watchdog', None)
+    session_timers = (getattr(request.app.state, name, None) for name in ('sale_checks', 'promotion_scheduler'))
+    sessions = all(timer is not None and not timer.done() for timer in session_timers)
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant']
+            + (['marketplace_sessions'] if sessions else [])
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else [])
             + (['ebay_offers'] if offers is not None and not offers.done() else []),

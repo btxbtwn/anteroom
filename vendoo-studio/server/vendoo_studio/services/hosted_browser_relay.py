@@ -13,7 +13,9 @@ cancelling one (``job.cancel``). Besides those, a few named commands do what
 the Mac does outside its listing actions: reads that fill the seller's editor
 with their account's own choices (Vinted's categories and brands, Sellwild's
 address, discounts and package, which the Mac reads in its private account
-windows), and the sign-in status and Sign in of Settings → Connections. Each is a fixed command with fixed inputs; none takes a URL or a
+windows), the sign-in status and Sign in of Settings → Connections, and the Chrome
+inventory import's reads of the seller's own active listings. Each is a fixed
+command with fixed inputs; none takes a URL or a
 script. A command waits in the relay only while the tab is answering; when no
 tab has asked recently, Chrome counts as disconnected and the action is refused
 before it starts.
@@ -34,12 +36,15 @@ VINTED_CHOICES = "vinted.choices"
 SELLWILD_ACCOUNT = "sellwild.account"
 # Checking which marketplaces Chrome is signed in to, and opening one's sign-in page there.
 MARKETPLACE_SESSIONS = "marketplace.sessions"
+# Reading the seller's own active listings to import them.
+MARKETPLACE_IMPORT = "marketplace.import"
 SALES_HISTORY = "marketplace.sales_history"
 MARKETPLACE_PROMOTIONS = "marketplace.promotions"
 # The Bridge version that first declares each capability, and what it lets the web do.
 NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
          SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices"),
          MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in"),
+         MARKETPLACE_IMPORT: ("0.2.53", "import your listings"),
          SALES_HISTORY: ("0.2.47", "read marketplace orders"),
          MARKETPLACE_PROMOTIONS: ("0.2.52", "share listings and send offers")}
 
@@ -49,6 +54,7 @@ COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MA
             "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES,
             "marketplace.sellwild_account": SELLWILD_ACCOUNT,
             "marketplace.sessions": MARKETPLACE_SESSIONS, "marketplace.connect": MARKETPLACE_SESSIONS,
+            "marketplace.import.page": MARKETPLACE_IMPORT, "marketplace.import.listing": MARKETPLACE_IMPORT,
             "marketplace.sales_history": SALES_HISTORY,
             "marketplace.promotion_check": MARKETPLACE_PROMOTIONS, "marketplace.promote": MARKETPLACE_PROMOTIONS,
             "marketplace.promotion_result": MARKETPLACE_PROMOTIONS, "marketplace.like_events": MARKETPLACE_PROMOTIONS}

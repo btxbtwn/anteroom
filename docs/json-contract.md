@@ -75,6 +75,8 @@ hosted API to Anteroom Bridge (`services/hosted_browser_relay.py`,
 | `marketplace.sellwild_account` | `sellwild.account` | `null` | none | `{ok, ship_from, default_parcel, coupons}` or `{ok: false, error_code}` |
 | `marketplace.sessions` | `marketplace.sessions` | `null` | none | `{ok, sessions: {marketplace: {state, expires_at, label, expiring}}}` |
 | `marketplace.connect` | `marketplace.sessions` | `null` | `marketplace`, one of depop, poshmark, mercari, sellwild, vinted | `{ok, signed_in, state, expires_at, label, expiring}` or `{ok: false, error}` |
+| `marketplace.import.page` | `marketplace.import` | `null` | `marketplace`, one of poshmark, mercari, depop, sellwild, vinted; optional `cursor` (≤300) | `{ok, rows, next_cursor}` or `{ok: false, error, error_code}` |
+| `marketplace.import.listing` | `marketplace.import` | `null` | `marketplace`, as above; `listing_id` (lowercase letters, digits and dashes, ≤201) | `{ok, listing}` or `{ok: false, error, error_code}` |
 
 A read's `error_code` is one of `signed_out`, `challenge`, `rate_limited`,
 `schema_drift` or `network`; the marketplace's own words stay in Chrome.

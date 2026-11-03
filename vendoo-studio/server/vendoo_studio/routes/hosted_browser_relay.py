@@ -52,7 +52,8 @@ async def next_command(capabilities: str = Query('', max_length=200)):
 class Heartbeat(BaseModel):
     model_config = ConfigDict(extra='forbid')
     capabilities: list[Literal['marketplace.actions', 'vinted.choices', 'sellwild.account',
-                               'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions']] = Field(max_length=6)
+                               'marketplace.sessions', 'marketplace.sales_history',
+                               'marketplace.promotions', 'marketplace.import']] = Field(max_length=7)
 
 
 @router.post('/heartbeat')
