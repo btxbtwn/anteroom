@@ -18,10 +18,14 @@ start a marketplace job.
 2. Sign in at `https://myanteroom.com`.
 3. Choose **Connect Chrome** and approve **Connect browser** in the extension's
    confirmation window. The web page then shows **Chrome connected**.
-4. **Disconnect** removes that tab's connection. Signing out or changing
-   accounts also clears it. Closing the tab, navigating away from the hosted
-   origin, reloading/updating the extension or restarting Chrome disconnects it.
-   Refreshing the same signed-in hosted page preserves an approved connection.
+4. Approval is remembered for that account in this Chrome profile. Closing a
+   tab, refreshing the page, restarting Chrome or updating the Bridge does not
+   require approval again. The signed-in page reconnects automatically when the
+   Bridge returns. Keep an Anteroom tab open for marketplace reads and actions;
+   remembered permission does not make a closed or sleeping browser available.
+5. **Disconnect**, signing out or changing accounts revokes the old account's
+   remembered approval and disconnects its open tabs. Another account needs its
+   own approval. Pending requests still expire after two minutes.
 
 The extension has no toolbar popup. The new extension-owned window exists only
 to confirm a requested connection. Chrome on iPhone cannot run this extension.
@@ -37,10 +41,13 @@ connection transport. The optional Poshmark reader is described below. There is 
 or automation proxy exposed to the page.
 
 The worker independently checks Chrome's sender extension ID, frame ID, document
-ID, sender origin/URL and tab URL. It keeps per-tab account labels and pending
-approval in `chrome.storage.session`, which is not exposed to content scripts by
-default. A serialized mutation chain prevents concurrent tabs from losing each
-other's records. Status responses contain only connection state, extension
+ID, sender origin/URL and tab URL. It keeps pending approval and active tab
+bindings in `chrome.storage.session`. Approved account IDs and revocation
+generations live in `chrome.storage.local`, without email addresses or cloud
+credentials. A serialized mutation chain prevents concurrent tabs from losing
+each other's records. Every read/action verifies both the remembered approval
+and the current document/account. Disconnect invalidates all tab bindings and
+in-flight form reads for that approval. Status responses contain only connection state, extension
 version and an explicit supported-actions list, never another account's identity.
 
 Only the extension's own `cloud-connect.html` page can approve or deny a request.
@@ -71,11 +78,20 @@ Frontend transport tests cover request correlation, rejected foreign replies,
 identity-only payloads, timeout and unsupported origins. Run the complete extension
 and frontend suites before shipping.
 
-A live test still needs desktop Chrome with the updated unpacked extension:
-connect and approve; refresh and check it stays connected; disconnect and reconnect;
-sign out and verify it no longer reports connected for a new account. Approving an
-old request after signing out or reloading must fail. This test does not perform
-marketplace actions or touch listings.
+`node vendoo-studio/scripts/check-bridge-connection.mjs` uses real Chromium, the
+actual extension popup and a disposable profile. Network access is blocked and
+the trusted site is served from memory. It verifies approval survives tab/page
+reloads, browser restarts and a Bridge version update across restart, and
+Disconnect revokes every tab. Hosted
+desktop/phone browser tests also exercise recovery after a temporarily missing
+Bridge and wait for sign-out revocation before navigating. Pending-approval and
+account-isolation cases remain covered by the worker tests. These checks perform
+no marketplace actions and use no real accounts.
+
+An installed-build check still needs the seller's desktop Chrome: connect once,
+close/reopen the signed-in site, restart Chrome, then disconnect/sign out and
+verify approval is required again. Chrome on iPhone is not an extension host;
+the native iPhone app reads the same shared records after desktop Chrome saves them.
 
 Bridge 0.2.39 adds a strictly bounded read-only General-field payload and native
 form response for Poshmark previews. The original connection protocol remains
@@ -167,7 +183,7 @@ it returns normalized order lines without buyer details or credentials.
 Reads preserve seller corrections and frozen Vendoo history. A partial or
 unreadable history cannot clear older listing-only reports.
 
-Bridge 0.2.51 adds `marketplace.import.page` and `marketplace.import.listing`
+Bridge 0.2.53 adds `marketplace.import.page` and `marketplace.import.listing`
 under `marketplace.import`, for the Chrome inventory import on a marketplace's
 page on the web. They are the reads the Mac's import makes: a page of the
 seller's own active listings, or one listing checked against the signed-in

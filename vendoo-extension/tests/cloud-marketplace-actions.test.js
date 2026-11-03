@@ -24,10 +24,14 @@ test('sales history accepts bounded order ids and rejects arbitrary payloads', (
 
 function setup() {
   let data = {};
+  let approvals = {};
   const runs = [];
   const api = {
     runtime: { id: 'bridge', getURL: path => 'chrome-extension://bridge/' + path, getManifest: () => ({ version: '0.2.40' }) },
-    storage: { session: { get: async () => structuredClone(data), set: async value => { data = structuredClone(value); } } },
+    storage: {
+      session: { get: async () => structuredClone(data), set: async value => { data = structuredClone(value); } },
+      local: { get: async () => structuredClone(approvals), set: async value => { approvals = structuredClone(value); } },
+    },
     windows: { create: async () => ({ id: 9 }), remove: async () => {} },
     tabs: { get: async () => ({ url: ORIGIN + '/' }), sendMessage: async () => ({ current: true }) },
   };

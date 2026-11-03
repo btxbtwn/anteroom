@@ -56,8 +56,11 @@ function CloudApp() {
       if (previous && previous !== value?.user.id) {
         // The desktop workspace also has module-level stores. A new document
         // clears all of them before another account can render.
-        void cloudExtension({ id: previous, email: "" }).disconnect();
-        window.location.replace(window.location.origin);
+        // Let the Bridge revoke remembered approval before navigation unloads
+        // the content script and can discard the disconnect message.
+        void cloudExtension({ id: previous, email: "" }).disconnect().finally(() => {
+          window.location.replace(window.location.origin);
+        });
         return;
       }
       previous = value?.user.id;

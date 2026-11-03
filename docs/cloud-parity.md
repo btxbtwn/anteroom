@@ -56,6 +56,15 @@ execution state. Business-context cache keys include the seller. CSV downloads
 use authenticated transport and reject results if the account changes while
 the export is loading.
 
+On `feat/hosted-chrome-imports`, the Chrome inventory import reads Poshmark,
+Mercari, Depop, Sellwild and Vinted listings in the seller's own Chrome through
+their Anteroom tab, with two named reads under the Bridge capability
+`marketplace.import` (Bridge 0.2.53). The hosted API mounts the desktop
+`chrome-import` routes in the seller's row-secured context; imported photos go
+to their private Storage through the same safe public download as eBay and
+Etsy. The import stays behind `marketplace_sessions`, which the web runtime
+turns on once sale detection and the sharing and offers panels work too.
+
 ## Completion checklist
 
 - Shared inventory/editor, draft fields, notes, history and private photo reads
@@ -376,11 +385,10 @@ Sale detection switches stay on the Mac.
 
 Anteroom has no Facebook Marketplace or Grailed support on the Mac or the web.
 
-On `feat/hosted-chrome-imports`, the Chrome inventory import reads Poshmark,
-Mercari, Depop, Sellwild and Vinted listings in the seller's own Chrome through
-their Anteroom tab, with two named reads under the Bridge capability
-`marketplace.import` (Bridge 0.2.51). The hosted API mounts the desktop
-`chrome-import` routes in the seller's row-secured context; imported photos go
-to their private Storage through the same safe public download as eBay and
-Etsy. The import stays behind `marketplace_sessions`, which the web runtime
-turns on once sale detection and the sharing and offers panels work too.
+Bridge 0.2.51 remembers approved hosted accounts in the Chrome profile and the
+web page retries a temporarily unavailable Bridge automatically. Disconnect and
+sign-out revoke that account's approval across tabs. An open desktop Chrome tab
+is still required for hosted Chrome reads/actions; the Mac-local WebSocket is a
+separate connection. See [connection lifecycle and verification](cloud-extension.md).
+The lifecycle is covered by isolated Chromium and hosted desktop/phone tests;
+verification in an installed seller session remains a release check.
