@@ -259,3 +259,53 @@ def active_connections(cloud):  # noqa: F811
     finally:
         event.remove(engine, 'checkout', checkout)
         event.remove(engine, 'checkin', checkin)
+
+
+def test_generate_closes_the_request_session_before_streaming(monkeypatch):
+    """Keepalives must not retain the Depends(get_seller_db) pooled connection."""
+    from types import SimpleNamespace
+    from vendoo_studio.routes import hosted_tasks
+    from vendoo_studio.services.service_context import ServiceContext, use
+
+    closed = []
+
+    class DB:
+        def scalar(self, *_args, **_kwargs):
+            return SimpleNamespace(id='task1')
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            closed.append('closed')
+
+    monkeypatch.setattr(hosted_tasks, 'task_stream', lambda task_id: f'stream:{task_id}')
+    with use(ServiceContext(USER_ID, MagicMock(), MagicMock(), MagicMock(), MagicMock())):
+        assert hosted_tasks.generate('draft', db=DB()) == 'stream:task1'
+    assert closed == ['closed']
+
+
+def test_submit_closes_the_request_session_before_streaming(monkeypatch):
+    from vendoo_studio.routes import hosted_tasks
+    from vendoo_studio.services.service_context import ServiceContext, use
+
+    closed = []
+
+    class DB:
+        def rollback(self):
+            return None
+
+        def close(self):
+            closed.append('closed')
+
+    monkeypatch.setattr(hosted_tasks, 'owned_conversation', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hosted_tasks, 'get_listing_provider', lambda: object())
+    monkeypatch.setattr(hosted_tasks.ConversationRepo, 'get_photos', lambda *_args, **_kwargs: ['photo.jpg'])
+    monkeypatch.setattr(hosted_tasks.queue, 'require_idle', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hosted_tasks, 'store_uploads', lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(hosted_tasks.queue, 'draft_payload', lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(hosted_tasks.queue, 'enqueue', lambda *_args, **_kwargs: SimpleNamespace(id='task2'))
+    monkeypatch.setattr(hosted_tasks, 'task_stream', lambda task_id: f'stream:{task_id}')
+    with use(ServiceContext(USER_ID, MagicMock(), MagicMock(), MagicMock(), MagicMock())):
+        assert hosted_tasks.submit(DB(), 'draft', 'generate') == 'stream:task2'
+    assert closed == ['closed']
