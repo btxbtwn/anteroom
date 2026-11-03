@@ -360,6 +360,8 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
         from vendoo_studio.services.option_lookup import OptionCatalog
 
         catalog = OptionCatalog({market: {"fields": rows} for market, rows in rows_by_market.items()})
+        # Hosted pool is small; never keep a checkout while waiting on the Mac.
+        db.rollback()
         for attempt in range(2):
             text = await collect_provider_text(provider, messages, option_catalog=catalog)
             reply = _json_object(text)

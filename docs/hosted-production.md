@@ -57,12 +57,15 @@ From this Machine on 2026-11-03, `SELECT 1` through the current transaction
 pooler (port 6543, `sslmode=verify-full`) took 719–880 ms on a new connection
 and about 70 ms when the connection was reused. Session mode on port 5432 took
 about 160–240 ms reused. A direct connection took about 240 ms reused. The
-hosted process therefore keeps the transaction pooler and reuses up to 4
-connections plus 1 overflow, with prepared statements still disabled and a one
-second wait for a free connection. Desktop and test processes keep `NullPool`.
+hosted process therefore keeps the transaction pooler and reuses connections,
+with prepared statements still disabled. Desktop and test processes keep
+`NullPool`.
 
 The same sample reported `max_connections` 60 and 40 rows in
-`pg_stat_activity`. This process budgets 5 connections. A second process needs
+`pg_stat_activity`. Live two-seller generate traffic exhausted a 5-connection
+budget (`4` plus `1` overflow, 1s wait) with QueuePool timeouts. The hosted
+process now budgets 8 plus 4 overflow and waits up to 3s. Generate/assistant
+SSE open a short session only to enqueue, then stream. A second process needs
 its own budget inside the remainder. Do not raise the pool to one connection
 per seller.
 
@@ -125,6 +128,6 @@ was not pointed at production.
 | --- | --- | --- |
 | 1: Remove avoidable load | Lease renewal no longer publishes `listings`. Saves and terminal task states still do. | Live editor timing during generation. |
 | 2: Size and separate execution | Routing across processes is implemented and tested. One shared CPU measured load 6–19. | Approve a cost option before adding a Machine. Set `ANTEROOM_PROCESS_TOKEN` and apply `b6e2c4a81f09` first. |
-| 3: Tune database access | Transaction-pooler reuse was the fastest measured option and is what the hosted process uses. Budget is 5 connections against 60, with 40 already in use. | Re-measure editor p95 after deploy. |
-| 4: Operational readiness | Request concurrency is explicit. Readiness exists and is not the only Machine's routing check. | Dashboard review of plan, backups, Auth delivery, and storage egress. |
-| 5: Release load | Not passed. | Two real drafts finish while a third draft stays editable. Then a staging run toward the intended session count. |
+| 3: Tune database access | Transaction-pooler reuse was the fastest measured option and is what the hosted process uses. Budget is 5 connections against 60, with 40 already in use. Generate and assistant SSE now close the request session before keepalives; Mac and Chrome route claims run off the request event loop. Live generate still failed under pool pressure before that fix. | Re-measure editor p95 after deploy. Confirm two concurrent generate streams no longer exhaust the 5-connection budget. |
+| 4: Operational readiness | Request concurrency is explicit. Readiness exists and is not the only Machine's routing check. | Dashboard review of plan, backups, Auth delivery, and storage egress. Rotate the database password that appeared in an earlier SSH log. |
+| 5: Release load | Not passed. Mac ChatGPT connected for seller A on the current Machine. One Mac worker serves one hosted account at a time. | Two real drafts finish while a third draft stays editable. Concurrent ChatGPT for two sellers needs two Macs or a product change. Then a staging run toward the intended session count. |

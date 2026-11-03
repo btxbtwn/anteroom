@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.701 — 2026-11-03
+
+- Anteroom Bridge 0.2.46 can read your Poshmark, Mercari, Depop, Sellwild and Vinted listings in Chrome for importing into your account on the web.
+- Run your approved sharing and offer rules from connected Chrome on the web, with the same minimums, limits and protection against sending twice.
+- Private chat checks that a draft belongs to your account before reading an image upload, without keeping a database connection open while you upload or wait for an answer.
+- Check Chrome marketplace sales on the web while your browser is connected, with separate settings and check schedules for each seller.
+- Import listings from your connected Chrome marketplaces on the web, choose which shops detect sales, and manage sharing and offer rules on desktop or phone.
+- Generation and assistant progress no longer hold a cloud database connection open the whole time they wait
+- Mac and Chrome connection checks no longer talk to the database on the web request loop
+
 ## 0.1.700 — 2026-11-03
 
 - Sale records now ask for the same amounts as Mark as sold, with the same names, and use the item's Cost of Goods, so a sale entered on the form no longer shows missing refunds or item cost.

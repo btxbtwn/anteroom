@@ -6,7 +6,7 @@ if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(STUDIO_URL)) throw new Error('Antero
 // than the exact build, so an older copy keeps working until a change needs
 // something new. Add a name here when the Bridge gains a command an older copy
 // could not run, and require it in Anteroom.
-const BRIDGE_CAPABILITIES = ['marketplace.actions', 'marketplace.sales_history'];
+const BRIDGE_CAPABILITIES = ['marketplace.actions', 'marketplace.sales_history', 'marketplace.promotions'];
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 8000;
 // A socket that stays up this long counts as a good connection, and only then

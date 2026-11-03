@@ -437,21 +437,21 @@ async function runMarketplacePromotion(payload) {
   catch (error) { return promotionRefusal(error); }
 }
 
-async function handleMarketplacePromotion(msg) {
+async function handleMarketplacePromotion(msg, respond = result => sendBrowserResult(msg, result)) {
   const payload = msg.payload || {};
   if (msg.type === 'marketplace.promotion_result') {
     const stored = (await chrome.storage.local.get(promotionKey(payload.action_id)))[promotionKey(payload.action_id)];
-    sendBrowserResult(msg, stored?.finished ? { finished: true, result: stored.result } : { finished: false, known: Boolean(stored) });
+    respond(stored?.finished ? { finished: true, result: stored.result } : { finished: false, known: Boolean(stored) });
     return;
   }
   // Checks only read, so they never hold or wait for the automation slot.
   if (msg.type === 'marketplace.promotion_check') {
-    sendBrowserResult(msg, await checkMarketplacePromotion(payload));
+    respond(await checkMarketplacePromotion(payload));
     return;
   }
   const operation = claimNativeOperation('*', `promotion-${payload.action_id || payload.request_id || ''}`);
   if (!operation) {
-    sendBrowserResult(msg, marketplaceFailure(marketplaceError('Another automation job is running.'), true));
+    respond(marketplaceFailure(marketplaceError('Another automation job is running.'), true));
     return;
   }
   try {
@@ -459,13 +459,13 @@ async function handleMarketplacePromotion(msg) {
     const stored = (await chrome.storage.local.get(key))[key];
     if (stored) {
       // Never send the same action twice. An unfinished one is reported, not repeated.
-      sendBrowserResult(msg, stored.finished ? stored.result : marketplaceFailure(
+      respond(stored.finished ? stored.result : marketplaceFailure(
         marketplaceError('This action was interrupted. Check the listing on the marketplace before doing it again.'), false));
       return;
     }
     await chrome.storage.local.set({ [key]: { finished: false, at: Date.now(), marketplace: payload.marketplace, action: payload.action } });
     const result = await runMarketplacePromotion(payload);
     await chrome.storage.local.set({ [key]: { finished: true, at: Date.now(), result } });
-    sendBrowserResult(msg, result);
+    respond(result);
   } finally { releaseNativeOperation(operation); }
 }

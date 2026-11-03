@@ -124,14 +124,14 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.state.chat_upload_slots = asyncio.Semaphore(1)
         from vendoo_studio.database import engine as database_engine
         loop_checkouts = LoopCheckoutWarning(database_engine)
-        worker = offers = watchdog = None
+        worker = offers = watchdog = sale_checks = promotion_scheduler = None
         stopping = threading.Event()
         backgrounds = []
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
             from vendoo_studio.services import (
                 background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler,
-                hosted_sourcing_scheduler, hosted_sales_scheduler,
+                hosted_sourcing_scheduler, hosted_sale_checks, hosted_promotion_scheduler, hosted_sales_scheduler,
             )
             from vendoo_studio.services import background_tasks as queue
             # Each service opens blocking database sessions. An offer or
@@ -153,10 +153,14 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             watchdog = start_background(hosted_job_watchdog.serve(engine), 'anteroom-watchdog')
             # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
             start_background(hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing')
+            sale_checks = start_background(hosted_sale_checks.serve(), 'anteroom-chrome-sales')
+            promotion_scheduler = start_background(hosted_promotion_scheduler.serve(), 'anteroom-promotions')
             start_background(hosted_sales_scheduler.serve(engine), 'anteroom-sales')
         app.state.background_worker = worker
         app.state.offer_scheduler = offers
         app.state.job_watchdog = watchdog
+        app.state.sale_checks = sale_checks
+        app.state.promotion_scheduler = promotion_scheduler
         try:
             yield
         finally:
@@ -257,6 +261,12 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from vendoo_studio.routes.hosted_browser_relay import router as browser_relay_router, sessions_router
     app.include_router(browser_relay_router)
     app.include_router(sessions_router)
+    from vendoo_studio.routes import listing_promotions, promotion_automations
+    app.include_router(listing_promotions.router)
+    app.include_router(promotion_automations.router)
+    # Chrome inventory import: reads in the seller's own Chrome, through their Anteroom tab.
+    from vendoo_studio.routes import chrome_import
+    app.include_router(chrome_import.router)
     from vendoo_studio.routes import assistant
     app.include_router(assistant.router)
     from vendoo_studio.routes.hosted_automations import errors_router, router as automations_router
