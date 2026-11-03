@@ -68,3 +68,25 @@ class EbayListingProfilesPermissionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((caught.exception.status, caught.exception.code), (403, "needs_permission"))
         self.assertIn("Reconnect eBay", str(caught.exception))
         self.assertEqual(caught.exception.marketplace_message, "1100: Access denied")
+
+    async def test_policies_and_locations_are_read_together(self):
+        """Opening the eBay form waits for one eBay round trip, not four in a row."""
+        import asyncio
+
+        from vendoo_studio.services import ebay_listings
+
+        in_flight = peak = 0
+
+        async def request(method, path, **kwargs):
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return {}
+
+        client = AsyncMock()
+        client.request.side_effect = request
+        profiles = await ebay_listings.listing_profiles(client)
+        self.assertEqual(peak, 4)
+        self.assertEqual(profiles, {"fulfillment": [], "payment": [], "return": [], "locations": []})

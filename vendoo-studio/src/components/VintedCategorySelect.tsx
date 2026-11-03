@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { vintedCategoriesOptions } from "../api/listingForms";
 import { CategoryTreeSelect } from "./ListingFormControls";
 import type { CategoryChoice } from "./categoryTree";
 import { useWorkspaceRuntime } from "../app/runtime";
@@ -16,14 +17,11 @@ export function VintedCategorySelect({ convId, id, fieldKey, value, disabled, on
   const queryClient = useQueryClient();
   const signIn = useMutation({ mutationFn: () => api.nativeMarketplaces.vintedConnect(convId) });
   const categories = useQuery({
-    queryKey: ["vinted-categories", convId],
-    queryFn: () => api.nativeMarketplaces.vintedCategories(convId),
-    staleTime: 6 * 60 * 60 * 1000,
-    retry: false,
+    ...vintedCategoriesOptions(convId),
     refetchInterval: (query) => signIn.isSuccess && query.state.status === "error" && !disabled ? 3000 : false,
   });
   React.useEffect(() => {
-    if (categories.isSuccess) void queryClient.invalidateQueries({ queryKey: ["vinted-brands", convId] });
+    if (categories.isSuccess) void queryClient.invalidateQueries({ queryKey: ["vinted-brands"] });
   }, [categories.isSuccess, convId, queryClient]);
   const choices = React.useMemo<CategoryChoice[]>(
     () => (categories.data?.options ?? [])
@@ -47,7 +45,7 @@ export function VintedCategorySelect({ convId, id, fieldKey, value, disabled, on
       <button type="button" className="text-left text-xs text-primary underline" disabled={disabled || categories.isFetching}
         onClick={async () => {
           const result = await categories.refetch();
-          if (result.isSuccess) void queryClient.invalidateQueries({ queryKey: ["vinted-brands", convId] });
+          if (result.isSuccess) void queryClient.invalidateQueries({ queryKey: ["vinted-brands"] });
         }}>Reload Vinted choices</button>
       {value && <p className="text-xs text-muted-foreground">Saved category: {value}</p>}
     </div>;

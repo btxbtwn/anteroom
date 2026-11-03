@@ -73,11 +73,34 @@ export async function loadPrivateImage(src: string, signal?: AbortSignal): Promi
   });
 }
 
+/** A dropped connection or a busy server is tried again; a missing photo is not. */
+const RETRY_DELAYS_MS = [500, 2000];
+
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+  });
+}
+
+async function fetchImageBlob(src: string, signal: AbortSignal): Promise<Blob> {
+  for (let attempt = 0; ; attempt += 1) {
+    let response: Response | undefined;
+    try {
+      response = await studioFetch(src, { signal });
+    } catch (error) {
+      if (signal.aborted || attempt >= RETRY_DELAYS_MS.length) throw error;
+    }
+    if (response?.ok) return response.blob();
+    const transient = !response || response.status === 429 || response.status >= 500;
+    if (!transient || attempt >= RETRY_DELAYS_MS.length) throw new Error("Photo unavailable");
+    await wait(RETRY_DELAYS_MS[attempt], signal);
+  }
+}
+
 async function fetchPrivateImage(src: string, signal: AbortSignal): Promise<string> {
   const session = currentHostedSession();
-  const response = await studioFetch(src, { signal });
-  if (!response.ok) throw new Error("Photo unavailable");
-  const blob = await response.blob();
+  const blob = await fetchImageBlob(src, signal);
   if (currentHostedSession() !== session) throw new Error("Your account changed.");
   const cache = forCurrentSession();
   const raced = cache.get(src);

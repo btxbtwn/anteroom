@@ -42,6 +42,21 @@ def categories() -> tuple[dict, ...]:
     return tuple(result)
 
 
+@lru_cache(maxsize=1)
+def category_choices() -> dict:
+    """Mercari's category picker, the same for every listing."""
+    choices = categories()
+    return {"options": [row["path"] for row in choices], "option_values": {row["path"]: row["id"] for row in choices}}
+
+
+@lru_cache(maxsize=1)
+def brand_choices() -> dict:
+    """Mercari's brand picker, the same for every listing."""
+    brands = [row["name"] for row in catalog()["itemBrands"]]
+    return {"options": [*brands, "No brand / Not sure"],
+            "option_values": {**{name: name for name in brands}, "No brand / Not sure": NO_BRAND}}
+
+
 def _number(value) -> float:
     try:
         result = float(value or 0)
@@ -119,17 +134,18 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     fields["marketplace_photos.mercari"]["value"] = []
     price = price_for(listing, "mercari")
     fields["price"]["value"] = price if price is not None else ""
-    choices = categories()
-    fields["direct_category_ids.mercari"].update(value=category_id, options=[row["path"] for row in choices],
-                                               option_values={row["path"]: row["id"] for row in choices})
+    picker = category_choices()
+    fields["direct_category_ids.mercari"].update(value=category_id, options=list(picker["options"]),
+                                               option_values=dict(picker["option_values"]))
     brands = [row["name"] for row in catalog()["itemBrands"]]
     brand = marketplace_text(listing, "mercari", "brand")
     blank = re.sub(r"[^a-z0-9]+", " ", brand.casefold()).strip() in {
         "", "unbranded", "no brand", "not sure", "no brand not sure", "none", "n a", "na", "unknown"}
     brand = NO_BRAND if blank or specifics.get("noBrand") is True else next(
         (name for name in brands if name.casefold() == brand.casefold()), brand)
-    fields["mercari_specifics.brand"].update(value=brand, options=[*brands, "No brand / Not sure"],
-                                            option_values={**{name: name for name in brands}, "No brand / Not sure": NO_BRAND})
+    picker = brand_choices()
+    fields["mercari_specifics.brand"].update(value=brand, options=list(picker["options"]),
+                                            option_values=dict(picker["option_values"]))
     fields["mercari_specifics.condition"]["value"] = _condition(specifics.get("condition") or listing.get("condition"))
     sizes = _sizes(category)
     if sizes:

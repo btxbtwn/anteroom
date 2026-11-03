@@ -94,8 +94,8 @@ class FormSchemaTest(unittest.TestCase):
         with mock.patch.object(cf, "listing_category_ids", return_value=dict(LISTING["marketplace_category_ids"])), \
                 mock.patch.object(cf, "load_fields", side_effect=load_fields), \
                 mock.patch("vendoo_studio.repositories.queries.ConversationRepo.get", return_value=object()), \
-                mock.patch("vendoo_studio.repositories.queries.ListingRepo.get_revisions",
-                           return_value=[type("R", (), {"listing_json": stored})()]):
+                mock.patch("vendoo_studio.repositories.queries.ListingRepo.latest_revision",
+                           return_value=type("R", (), {"listing_json": stored})()):
             body = TestClient(app).get("/api/conversations/c1/vendoo-api/fields").json()
 
         forms = {form["marketplace"]: form for form in body["forms"]}

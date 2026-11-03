@@ -92,8 +92,9 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
         # Database reads and Etsy's token lookup block; keep them off the request loop.
         if not ConversationRepo(db).get(conv_id):
             raise HTTPException(404, 'Conversation not found')
-        revisions = ListingRepo(db).get_revisions(conv_id)
-        listing = revisions[0].listing_json if revisions else {}
+        # The newest version only: older ones can each be hundreds of KB.
+        latest = ListingRepo(db).latest_revision(conv_id)
+        listing = latest.listing_json if latest else {}
         db.commit()
         category_id = listing_category_ids(listing).get('etsy')
         if not category_id:

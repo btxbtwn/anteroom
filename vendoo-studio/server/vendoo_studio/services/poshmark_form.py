@@ -17,6 +17,16 @@ def catalog() -> dict:
     return json.loads((skills_dir() / "list-this/references/poshmark-native-form.json").read_text())
 
 
+CATEGORY_PATH = "direct_category_ids.poshmark"
+
+
+@lru_cache(maxsize=1)
+def category_choices() -> dict:
+    """Poshmark's category picker, the same for every listing."""
+    row = next(row for row in catalog()["fields"] if row["path"] == CATEGORY_PATH)
+    return {key: row[key] for key in ("options", "option_values", "cascade") if key in row}
+
+
 def _multiple(listing: dict) -> bool:
     def many(value):
         try:

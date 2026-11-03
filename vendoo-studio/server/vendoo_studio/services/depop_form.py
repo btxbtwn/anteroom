@@ -21,6 +21,19 @@ def fixed_options() -> dict:
 
 
 @lru_cache(maxsize=1)
+def category_choices() -> dict:
+    """Depop's category picker, the same for every listing."""
+    rows = catalog()["categories"]
+    return {"options": [row["path"] for row in rows], "option_values": {row["path"]: row["id"] for row in rows}}
+
+
+@lru_cache(maxsize=1)
+def brand_choices() -> dict:
+    """Depop's brand picker, the same for every listing."""
+    return {"options": list(catalog()["brands"])}
+
+
+@lru_cache(maxsize=1)
 def _by_id() -> dict:
     return {row["id"]: row for row in catalog()["categories"]}
 
@@ -71,7 +84,7 @@ def form(listing: dict) -> dict:
         field("depop_specifics.description", "Description", text("description"), required=True, max_length=1000,
               section="Description", placeholder="eg. small grey Nike t-shirt, only worn a few times", counter=True, hashtag_max=5),
         field("direct_category_ids.depop", "Category", category_id, required=True, selection_only=True,
-              options=[row["path"] for row in categories], option_values={row["path"]: row["id"] for row in categories},
+              options=list(category_choices()["options"]), option_values=dict(category_choices()["option_values"]),
               options_source="marketplace", section="Info",
               clears=["depop_specifics.size", "depop_specifics.nativeSizeId", "depop_specifics.type", "depop_specifics.attributes"]),
     ]
@@ -84,7 +97,7 @@ def form(listing: dict) -> dict:
             rows.append(choice(path, label, captured["options"], multi=True, max_values=maximum,
                                category_specific=True, help=f"Select up to {maximum}"))
         elif key == "brand":
-            row = choice("depop_specifics.brand", label, catalog()["brands"])
+            row = choice("depop_specifics.brand", label, brand_choices()["options"])
             row["value"] = text("brand")
             if str(row["value"]).strip().casefold() in {"unbranded", "no brand"}:
                 row["value"] = "Other"

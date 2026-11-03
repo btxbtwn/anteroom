@@ -27,6 +27,15 @@ struct NativeFormTests {
         precondition(fields["price"]!.half && fields["poshmark_specifics.earnings"]!.locked)
         precondition(fields["poshmark_specifics.colors"]!.multi)
 
+        // A list the same for every listing arrives by name and fills the row that names it.
+        let named = try JSONDecoder().decode(NativeForm.self, from: Data(#"""
+{"marketplace": "mercari", "fields": [{"key": "mercari_specifics.brand", "path": "mercari_specifics.brand", "label": "Brand", "value": "Nike", "selection_only": true, "choice_list": {"name": "mercari-brands", "version": "abc"}}]}
+"""#.utf8))
+        let ref = ChoiceListRef(name: "mercari-brands", version: "abc")
+        precondition(named.fields[0].choiceList == ref && named.fields[0].options.isEmpty)
+        let brand = named.filled(with: [ref: ChoiceList(options: ["Nike", "Adidas"], optionValues: ["Nike": "Nike"])]).fields[0]
+        precondition(brand.options == ["Nike", "Adidas"] && brand.stored(for: "Nike") == "Nike" && brand.choiceList == nil)
+
         // Dotted paths create objects on the way and keep every sibling.
         var listing: [String: JSONValue] = ["poshmark_specifics": .object(["brand": .string("Levi's")]), "price": .int(40)]
         listing.set(.bool(true), at: "poshmark_specifics.smartSell.enabled")

@@ -718,6 +718,13 @@ def map_marketplace_category_path(marketplace: str, category: str, listing: dict
 class RegistryService:
     def __init__(self, db: Session):
         self._repo = RegistryRepo(db)
+        self._options: dict[str | None, dict[tuple[str, str], list[str]]] = {}
+
+    def _valid(self, marketplace: str, field_label: str, category_path: str | None) -> list[str]:
+        # One query per category for every marketplace and field, not one per field.
+        if category_path not in self._options:
+            self._options[category_path] = self._repo.valid_options(category_path)
+        return self._options[category_path].get((marketplace, _normalize_label(field_label)), [])
 
     def normalize_value(
         self,
@@ -726,7 +733,7 @@ class RegistryService:
         value: str,
         category_path: str | None = None,
     ) -> tuple[str, bool, str]:
-        valid = self._repo.get_valid_options(marketplace, field_label, category_path)
+        valid = self._valid(marketplace, field_label, category_path)
         if not valid:
             return (value, True, "")
 
@@ -840,8 +847,11 @@ class RegistryService:
 
         category_path = listing.get("category_path") or None
         added: list[str] = []
+        learned: dict[str, list] = {}
+        for entry in self._repo.list_fields(None, category_path):
+            learned.setdefault(entry.marketplace, []).append(entry)
         for marketplace in LEARNED_MARKETPLACES:
-            entries = self._repo.list_fields(marketplace, category_path)
+            entries = learned.get(marketplace)
             if not entries:
                 continue
             specifics_key = f"{marketplace}_specifics"

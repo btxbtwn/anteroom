@@ -11,7 +11,7 @@ vi.mock("../api/client", () => ({
 describe("Vinted category picker", () => {
   it("shows Vinted's own breadcrumbs in the shared tree picker", () => {
     const client = new QueryClient();
-    client.setQueryData(["vinted-categories", "conversation"], {
+    client.setQueryData(["vinted-categories"], {
       options: ["Women > Clothing > Jeans > Straight jeans", "Men > Clothing > Jeans"],
     });
     const html = renderToStaticMarkup(
@@ -27,7 +27,7 @@ describe("Vinted category picker", () => {
 
   it("on the web, sends the seller to sign in to Vinted in their own Chrome", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
-    const query = client.getQueryCache().build(client, { queryKey: ["vinted-categories", "conversation"] });
+    const query = client.getQueryCache().build(client, { queryKey: ["vinted-categories"] });
     query.setState({ ...query.state, status: "error", error: new Error("Sign in to Vinted in Chrome, then reload Vinted's choices.") });
     const html = renderToStaticMarkup(
       <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}>

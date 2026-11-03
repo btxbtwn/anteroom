@@ -128,3 +128,34 @@ direct connection were slower on reuse (about 160–240 ms). The database
 reported `max_connections` 60 with 40 sessions already present. Lease renewal
 no longer publishes a listing change. A passing live generation retest is
 still required before calling concurrent drafting fast enough.
+
+## Marketplace form loading
+
+On 2026-11-03 the seller measured 12 s to open eBay's form, 8 s for Poshmark,
+Mercari and Depop and 9 s for Sellwild on the web. Every form ran about 60
+database queries before answering, one field-registry lookup per saved
+marketplace detail. With about 70 ms per reused hosted connection (above), that
+alone is several seconds. A form now reads the field registry once (at most six
+queries in total; `test_a_form_reads_the_database_a_handful_of_times`).
+
+Following NextMaster's split between a cached shell and per-item data, the
+Mercari, Depop and Poshmark forms no longer embed their brand and category
+lists (1.5 MB, 326 KB and 245 KB per form, the same for every listing). A row
+names its list and version, and clients download each version once from
+`/api/catalog/choice-lists/{name}`, which the browser keeps. The eBay form reads
+its category rules, policies and item locations together. The web app warms
+forms when a listing opens and when a marketplace tab is pointed at, as the Mac
+app already did. On the Mac, the form route builds in a worker thread so it no
+longer blocks other requests.
+
+In the local sandbox (production build, fast network, clicking right after
+opening a listing) Poshmark took 0.3 s, Mercari 1.3 s and Depop 1.2 s before
+these changes; with a 1.5 MB/s, 80 ms connection and 4x CPU throttling they took
+2.5–2.9 s. These are sandbox measurements, not hosted results; retest on the web
+after deploy.
+
+Hosted thumbnails read one row instead of three. Each thumbnail URL carries its
+photo's version, so the browser keeps it for that sign-in (`private`, `Vary:
+Authorization`); every other hosted response stays `no-store`. A dropped
+connection or a 429/5xx response is retried twice instead of leaving the row
+blank.

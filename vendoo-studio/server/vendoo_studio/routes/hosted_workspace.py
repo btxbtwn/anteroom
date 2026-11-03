@@ -441,17 +441,23 @@ def media_rules():
 
 
 @router.get('/photos/{photo_id}/thumb')
-def photo_thumbnail(photo_id: str, request: Request, size: int = Query(192, ge=32, le=512), db=Depends(get_seller_db)):
-    from vendoo_studio.services.hosted_photos import thumbnail
-    row = db.scalar(select(Photo).where(Photo.id == photo_id))
+def photo_thumbnail(photo_id: str, request: Request, size: int = Query(192, ge=32, le=512), v: str = '',
+                    db=Depends(get_seller_db)):
+    from vendoo_studio.services.hosted_photos import check_key, thumbnail
+    # One row: row security limits it to the seller, and the key must sit under their draft.
+    row = db.execute(select(Photo.conversation_id, Photo.stored_filename, Photo.checksum)
+                     .where(Photo.id == photo_id)).first()
     if row is None:
         raise HTTPException(404, 'Photo not found')
-    row = owned_photo(db, row.conversation_id, photo_id)
+    check_key(row.stored_filename, db.user_id, row.conversation_id)
     key, version = row.stored_filename, row.checksum
     # Release the read transaction before Storage I/O, as photo_bytes does.
     db.rollback()
     data = thumbnail(key, version, size, request.headers['authorization'].partition(' ')[2])
-    return Response(data, media_type='image/jpeg')
+    # The URL names this version of the photo, so the browser keeps it for this sign-in.
+    kept = bool(v) and v == (version or '')[:12]
+    return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'private, max-age=31536000, immutable',
+                                                           'Vary': 'Authorization'} if kept else None)
 
 
 @router.get('/conversations/{identity}/revisions')
@@ -511,13 +517,22 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
 async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'sellwild'],
                               revision_id: str | None = None, db=Depends(get_seller_db)):
     from starlette.concurrency import run_in_threadpool
+    from vendoo_studio.services.choice_lists import share
     from vendoo_studio.services.native_editor import editor_form, web_sellwild_account
     from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
     # Sellwild's account choices come from the seller's own Chrome, read here on
     # the event loop the relay runs on, before any query, so no transaction waits
     # on Chrome. The builder then runs in a worker thread and checks the listing.
-    account = await web_sellwild_account() if marketplace == 'sellwild' else None
+    if marketplace == 'sellwild':
+        from vendoo_studio.services import saved_choices
+        from vendoo_studio.services.native_editor import sellwild_account_complete
+
+        # The saved copy answers at once; the refresh stays on this loop with the relay.
+        account = await saved_choices.kept('sellwild-account', '', web_sellwild_account,
+                                           usable=sellwild_account_complete, background=saved_choices.on_this_loop)
+    else:
+        account = None
 
     def load():
         # These canonical builders read verified catalogs and the owned
@@ -529,7 +544,7 @@ async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'd
             current = db.get(Listing, identity)
             if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
                 raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
-            return asyncio.run(editor_form(identity, marketplace, revision_id, db, sellwild_account=account))
+            return share(asyncio.run(editor_form(identity, marketplace, revision_id, db, sellwild_account=account)))
         except NativeMarketplaceError as error:
             raise HTTPException(error.status_code, str(error)) from None
     return await run_in_threadpool(load)

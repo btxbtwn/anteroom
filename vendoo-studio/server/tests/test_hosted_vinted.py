@@ -56,6 +56,11 @@ def test_vinted_choices_are_read_in_the_sellers_own_chrome(cloud, signing_keys, 
     assert result['response'].status_code == 200
     assert result['response'].json() == {'options': ['Women > Clothing > Jeans > Straight jeans']}
 
+    # A later open shows the saved copy without asking Chrome again.
+    again = client.get(base + '/categories', headers=alice)
+    assert again.status_code == 200
+    assert again.json() == {'options': ['Women > Clothing > Jeans > Straight jeans']}
+
     thread, result = _in_background(lambda: client.get(base + '/brands?q=Lev&category=Women+%3E+Jeans', headers=alice))
     command = _answer(client, alice, {'ok': True, 'options': ["Levi's"]})
     thread.join(10)
@@ -64,6 +69,12 @@ def test_vinted_choices_are_read_in_the_sellers_own_chrome(cloud, signing_keys, 
     assert result['response'].json() == {'options': ["Levi's"]}
 
     # Signed out of Vinted in that Chrome: the seller is told where to sign in.
+    # Drop the saved copy so this open reads Chrome again, as an explicit reload does.
+    from vendoo_studio.services import saved_choices
+    from vendoo_studio.services.hosted_context import for_seller
+    from vendoo_studio.services.service_context import use
+    with use(for_seller(USER_ID)):
+        saved_choices.forget('vinted-categories')
     thread, result = _in_background(lambda: client.get(base + '/categories', headers=alice))
     _answer(client, alice, {'ok': False, 'error_code': 'signed_out'})
     thread.join(10)

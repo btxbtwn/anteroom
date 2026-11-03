@@ -80,6 +80,13 @@ async def _accounts() -> dict:
     return await asyncio.to_thread(get_marketplace_accounts)
 
 
+async def account_id(marketplace: str) -> str:
+    """The connected account's id, or "" when none is connected. Choices saved for one
+    account are never shown for another."""
+    account = (await _accounts()).get(_check(marketplace)) or {}
+    return str(account.get("accountId") or account.get("userId") or "")
+
+
 def _check(marketplace: str) -> str:
     if marketplace not in MARKETPLACES:
         raise ValueError(f"Unknown marketplace: {marketplace}")

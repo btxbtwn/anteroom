@@ -193,8 +193,9 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
     conv = ConversationRepo(db).get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
-    revisions = ListingRepo(db).get_revisions(conv_id)
-    listing = revisions[0].listing_json if revisions else {}
+    # The newest version only: older ones can each be hundreds of KB.
+    latest = ListingRepo(db).latest_revision(conv_id)
+    listing = latest.listing_json if latest else {}
     # End the read transaction before the Mercari sizes fetch below: a session
     # that has queried keeps its pool connection until it commits.
     db.commit()

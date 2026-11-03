@@ -368,8 +368,8 @@ class ListingFieldsRouteTest(unittest.TestCase):
         with mock.patch.object(cf, "listing_category_ids", return_value={"ebay": "53159"}), \
                 mock.patch.object(cf, "load_fields", return_value=specs), \
                 mock.patch("vendoo_studio.repositories.queries.ConversationRepo.get", return_value=object()), \
-                mock.patch("vendoo_studio.repositories.queries.ListingRepo.get_revisions",
-                           return_value=[type("R", (), {"listing_json": listing})()]):
+                mock.patch("vendoo_studio.repositories.queries.ListingRepo.latest_revision",
+                           return_value=type("R", (), {"listing_json": listing})()):
             client = TestClient(app)
             body = client.get("/api/conversations/c1/vendoo-api/fields").json()
 
@@ -403,8 +403,8 @@ class ListingFieldsRouteTest(unittest.TestCase):
         with mock.patch.object(cf, "listing_category_ids", return_value={"ebay": "53159"}), \
                 mock.patch.object(cf, "load_fields", return_value=specs), \
                 mock.patch("vendoo_studio.repositories.queries.ConversationRepo.get", return_value=object()), \
-                mock.patch("vendoo_studio.repositories.queries.ListingRepo.get_revisions",
-                           return_value=[type("R", (), {"listing_json": listing})()]):
+                mock.patch("vendoo_studio.repositories.queries.ListingRepo.latest_revision",
+                           return_value=type("R", (), {"listing_json": listing})()):
             body = TestClient(app).get("/api/conversations/c1/vendoo-api/fields").json()
 
         labels = {f["label"]: f for f in body["forms"][0]["fields"]}
@@ -418,7 +418,7 @@ class ListingFieldsRouteTest(unittest.TestCase):
         with mock.patch.object(cf, "listing_category_ids", return_value={"vinted": "9"}), \
                 mock.patch.object(cf, "load_fields", return_value=None), \
                 mock.patch("vendoo_studio.repositories.queries.ConversationRepo.get", return_value=object()), \
-                mock.patch("vendoo_studio.repositories.queries.ListingRepo.get_revisions", return_value=[]):
+                mock.patch("vendoo_studio.repositories.queries.ListingRepo.latest_revision", return_value=None):
             body = TestClient(app).get("/api/conversations/c1/vendoo-api/fields").json()
         self.assertEqual(body["forms"][0]["known"], False)
         self.assertEqual(body["forms"][0]["fields"], [])
@@ -430,8 +430,8 @@ class ListingFieldsRouteTest(unittest.TestCase):
         with mock.patch.object(cf, "listing_category_ids", return_value={"mercari": "1881"}), \
                 mock.patch.object(cf, "load_fields", return_value=None), \
                 mock.patch("vendoo_studio.repositories.queries.ConversationRepo.get", return_value=object()), \
-                mock.patch("vendoo_studio.repositories.queries.ListingRepo.get_revisions",
-                           return_value=[type("R", (), {"listing_json": listing})()]):
+                mock.patch("vendoo_studio.repositories.queries.ListingRepo.latest_revision",
+                           return_value=type("R", (), {"listing_json": listing})()):
             body = TestClient(app).get("/api/conversations/c1/vendoo-api/fields").json()
         self.assertEqual(body["forms"][0]["category_id"], "1881")
         self.assertFalse(any(f["key"] == "size" and f["options_source"] == "marketplace" for f in body["forms"][0]["fields"]))

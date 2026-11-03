@@ -16,6 +16,18 @@ from vendoo_studio.services.service_context import use
 MARKETS = ('poshmark', 'depop', 'mercari')
 
 
+def with_choice_lists(client, form, auth):
+    """The form as the editor shows it: each named marketplace list downloaded and filled in."""
+    for row in form['fields']:
+        ref = row.pop('choice_list', None)
+        if ref:
+            listed = client.get('/api/catalog/choice-lists/' + ref['name'] + '?v=' + ref['version'], headers=auth)
+            assert listed.status_code == 200, listed.text
+            assert 'immutable' in listed.headers['cache-control']
+            row.update(listed.json())
+    return form
+
+
 def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(cloud, signing_keys, monkeypatch):  # noqa: F811
     client, engine = cloud
     from vendoo_studio.services import mercari_api
@@ -43,7 +55,7 @@ def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(c
         assert response.status_code == 200, response.text
         with use(for_seller(USER_ID)), SellerDatabaseSession(user_id=USER_ID, bind=engine) as db:
             expected = asyncio.run(editor_form(identity, market, revision, db))
-        assert response.json() == expected
+        assert with_choice_lists(client, response.json(), alice) == expected
         category = next(row for row in expected['fields'] if row['path'] == 'direct_category_ids.' + market)
         choice = next(iter(category['option_values'].values()))
         listing.setdefault('direct_category_ids', {})[market] = choice

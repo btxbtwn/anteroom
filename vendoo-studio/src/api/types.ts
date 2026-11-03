@@ -568,6 +568,8 @@ export interface MarketplaceFormField {
   control_width?: "half";
   /** Department, then category, then subcategory. The closed category reads "Women Jeans". */
   cascade?: { id: string; label: string; items: unknown[] }[];
+  /** A marketplace list that is the same for every listing, downloaded once (`/catalog/choice-lists`). */
+  choice_list?: { name: string; version: string };
   /** Shipping-discount id to the dollars the seller pays, for Your Earnings. */
   option_amounts?: Record<string, number>;
   /** A question the page asks over several consecutive inputs ("How heavy will the package be?"). */
@@ -1106,3 +1108,6 @@ export interface ScoutState {
   track_record: { checks: number; bought: number; sold: number; median_ratio: number | null; close: number };
 }
 
+
+/** A shared marketplace choice list: the parts of a form row it fills in. */
+export type ChoiceList = Pick<MarketplaceFormField, "options" | "option_values" | "cascade">;

@@ -39,7 +39,10 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     if marketplace == "sellwild":
         from vendoo_studio.services.sellwild_browser import account_choices
 
-        session = sellwild_account if sellwild_account is not None else await asyncio.to_thread(account_choices)
+        from vendoo_studio.services import saved_choices
+
+        session = sellwild_account if sellwild_account is not None else await saved_choices.kept(
+            "sellwild-account", "", lambda: asyncio.to_thread(account_choices), usable=sellwild_account_complete)
         result = sellwild_form(snapshot, conv_id, db, ship_from=session["ship_from"], coupons=session["coupons"],
                                default_parcel=session["default_parcel"])
         result["account_connected"] = len(session.get("unavailable", [])) < 3
@@ -126,11 +129,14 @@ async def _ebay_choices(snapshot: dict) -> list[dict]:
 
     Each starts from the listing's own choice, then Settings, then the account's only one.
     """
-    from vendoo_studio.services.ebay_listings import LISTING_CHOICE_KEYS, listing_profiles, own_listing_choices
+    from vendoo_studio.services import ebay_listings, saved_choices
+    from vendoo_studio.services.ebay_listings import LISTING_CHOICE_KEYS, own_listing_choices
+    from vendoo_studio.services.marketplace_accounts import account_id
     from vendoo_studio.services.user_settings import get_ebay_listing_defaults
 
     try:
-        profiles = await listing_profiles()
+        # The saved copy opens the form at once; eBay is asked again behind it.
+        profiles = await saved_choices.kept("ebay-policies", await account_id("ebay"), ebay_listings.listing_profiles)
         note = ""
     except Exception as exc:  # noqa: BLE001 - the rest of the form still loads; List checks these again
         profiles = {"fulfillment": [], "payment": [], "return": [], "locations": []}
@@ -168,12 +174,19 @@ async def ebay_form(snapshot: dict) -> dict:
         category = ebay_category_id(snapshot)
     except ListingProblem:
         category = ""
-    try:
-        schema = await marketplace_schemas.fields("ebay", category) if category else []
-    except Exception as exc:  # noqa: BLE001 - never substitute a different form
-        raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from exc
-    aspects = ebay_aspects(snapshot, snapshot.get("form") or {})
+
+    async def category_rows() -> tuple[list[dict], list[dict]]:
+        try:
+            schema = await marketplace_schemas.fields("ebay", category) if category else []
+        except Exception as exc:  # noqa: BLE001 - never substitute a different form
+            raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from exc
+        return schema, await _ebay_variations_field(snapshot, category, schema)
+
     details = snapshot.get("ebay_specifics") or {}
+    # Independent eBay reads: the page waits for the slowest, not their sum.
+    (schema, variations), selling, (payment, shipping_policy, location, returns) = await asyncio.gather(
+        category_rows(), _ebay_format_fields(snapshot, category, details), _ebay_choices(snapshot))
+    aspects = ebay_aspects(snapshot, snapshot.get("form") or {})
 
     def aspect_field(row: dict, section: str) -> dict:
         name = row["name"]
@@ -210,10 +223,7 @@ async def ebay_form(snapshot: dict) -> dict:
     # Auction prices, offers and variations all travel with the category. The
     # editor shows the ones the current format uses, so a format change does
     # not load the form again.
-    selling = await _ebay_format_fields(snapshot, category, details)
-    variations = await _ebay_variations_field(snapshot, category, schema)
     condition_row = next((row for row in schema if row.get("id") == "condition"), None)
-    payment, shipping_policy, location, returns = await _ebay_choices(snapshot)
     schedule = details.get("schedule")
     if not isinstance(schedule, dict):
         schedule = {}
@@ -528,18 +538,22 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
 
 async def vinted_categories(conv_id: str, db: Session) -> dict:
     """Vinted's native categories: the Mac reads them in its private account window,
-    the web in the seller's own Chrome."""
-    from vendoo_studio.services import vinted_browser
+    the web in the seller's own Chrome. The saved copy answers at once."""
+    from vendoo_studio.services import saved_choices, vinted_browser
 
     if not ConversationRepo(db).get(conv_id):
         raise NativeMarketplaceError(404, "Conversation not found")
-    if seller := _web_seller():
-        options = await _chrome_read(seller, "Vinted","marketplace.vinted_categories", {})
-    else:
+
+    async def read() -> list[str]:
+        if seller := _web_seller():
+            return await _chrome_read(seller, "Vinted", "marketplace.vinted_categories", {})
         try:
-            options = vinted_browser.category_options(await asyncio.to_thread(vinted_browser.category_rows))
+            return vinted_browser.category_options(await asyncio.to_thread(vinted_browser.category_rows))
         except vinted_browser.VintedConnectionError as exc:
             raise NativeMarketplaceError(409, str(exc)) from exc
+
+    # Called on the app's own loop, where the web's Chrome relay runs.
+    options = await saved_choices.kept("vinted-categories", "", read, usable=bool, background=saved_choices.on_this_loop)
     if not options:
         raise NativeMarketplaceError(409, "Vinted returned no category choices.")
     return {"options": options}
@@ -589,6 +603,11 @@ async def _chrome_read(seller: str, name: str, command: str, payload: dict) -> l
         message = _READ_ERRORS.get(str(reply.get("error_code")), "Chrome could not read {name}'s choices. Reload them to try again.")
         raise NativeMarketplaceError(409, message.format(name=name))
     return list(dict.fromkeys(item.strip() for item in options if isinstance(item, str) and item.strip()))
+
+
+def sellwild_account_complete(session: dict) -> bool:
+    """Every Sellwild account choice was read; only then is the answer worth saving."""
+    return not session.get("unavailable")
 
 
 async def web_sellwild_account() -> dict:

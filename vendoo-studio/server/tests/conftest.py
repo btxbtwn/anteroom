@@ -102,6 +102,14 @@ def _fresh_sales_archive(_isolate_studio_settings):
     update_settings(lambda settings: settings.pop(ARCHIVED_KEY, None))
 
 
+@pytest.fixture(autouse=True)
+def _fresh_saved_choices(_isolate_studio_settings):
+    """Saved marketplace account choices belong to one test, never the next."""
+    from vendoo_studio.services import saved_choices
+
+    saved_choices._path().unlink(missing_ok=True)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _no_sourcing_timer():
     """Keep app startup from refreshing Sourcing in the background.
