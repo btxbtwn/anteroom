@@ -1,1 +1,0 @@
-- Live updates finish the current screen read before refreshing newer changes, so simultaneous drafts do not repeatedly restart the same inventory requests.

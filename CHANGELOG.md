@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.706 — 2026-11-03
+
+- Live updates finish the current screen read before refreshing newer changes, so simultaneous drafts do not repeatedly restart the same inventory requests.
+
 ## 0.1.705 — 2026-11-03
 
 - Release database connections before ranking inventory suggestions so other drafts can keep loading while ranking runs.
