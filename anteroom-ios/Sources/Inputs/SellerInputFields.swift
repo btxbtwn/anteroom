@@ -1,17 +1,13 @@
 import SwiftUI
 
 /// Native controls for the desktop ItemDetails contract, before generated fields.
+/// SKU, cost and package dimensions are edited once, in the General fields.
 struct SellerInputFields: View {
     @Binding var inputs: SellerInputs
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         ListingInspectorSection("Notes & Labels") {
-            WorkspaceField("SKU") {
-                TextField("Optional", text: $inputs.sku)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .accessibilityIdentifier("seller-sku")
-            }
             WorkspaceField("Notes") {
                 TextField("Provenance, sizing quirks, or anything the description should mention", text: $inputs.sellerNotes, axis: .vertical)
                     .lineLimit(2...6).accessibilityIdentifier("seller-notes")
@@ -41,21 +37,6 @@ struct SellerInputFields: View {
                             .accessibilityLabel("Remove label \(label)")
                         }
                     }
-                }
-            }
-        }
-        ListingInspectorSection("Pricing & Shipping") {
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-                : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
-            layout {
-                WorkspaceField("COG ($)") {
-                    TextField("Cost of goods", text: $inputs.cog)
-                        .keyboardType(.decimalPad).accessibilityIdentifier("seller-cog")
-                }
-                WorkspaceField("Package L×W×H") {
-                    TextField("Length × width × height", text: $inputs.packageDimensions)
-                        .autocorrectionDisabled().accessibilityIdentifier("seller-package")
                 }
             }
         }
