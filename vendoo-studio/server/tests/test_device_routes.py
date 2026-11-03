@@ -25,8 +25,8 @@ def test_hosted_process_reuses_a_few_postgres_connections(monkeypatch):
     pooled = make_engine('postgresql+psycopg://anteroom_api:secret@127.0.0.1:6543/postgres')
     try:
         assert pooled.pool.__class__.__name__ == 'QueuePool'
-        assert pooled.pool._pool.maxsize == 4
-        assert pooled.pool._max_overflow == 1
+        assert pooled.pool._pool.maxsize == 8
+        assert pooled.pool._max_overflow == 4
     finally:
         pooled.dispose()
     monkeypatch.delenv('ANTEROOM_HOSTED', raising=False)
