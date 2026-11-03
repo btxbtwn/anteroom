@@ -96,6 +96,26 @@ class NativeContractTest(unittest.TestCase):
         self.assertEqual(updated["ebay_specifics"], listing["ebay_specifics"])
         self.assertEqual(updated["depop_specifics"], listing["depop_specifics"])
 
+    def test_choosing_the_general_answer_on_the_ebay_form_counts_as_the_sellers_answer(self):
+        from vendoo_studio.services.listing_editor import prepared_listing
+
+        listing = ebay_tshirt()
+        row = {"path": "ebay_specifics.Department", "label": "Department", "required": True,
+               "category_specific": True, "selection_only": True, "options": ["Men", "Unisex Adults"],
+               "option_values": {"Men": "Men", "Unisex Adults": "Unisex Adults"}}
+        listing[contract.KEY]["ebay"]["fields"].append(row)
+        listing["ebay_specifics"]["Department"] = "Unisex Adults"
+        listing[contract.EVIDENCE_KEY] = {"ebay_specifics.Department": {"value": "Unisex Adults", "quote": "department: Unisex"}}
+        # The seller set General's department, then picks the same answer on the eBay form.
+        listing["department"] = "Men"
+        listing["seller_fields"] = ["department"]
+        submitted = copy.deepcopy(listing)
+        submitted["ebay_specifics"]["Department"] = "Men"
+        updated = prepared_listing(listing, submitted)
+        self.assertEqual(updated["ebay_specifics"]["Department"], "Men")
+        self.assertFalse(any(gap["field"] == "ebay_specifics.Department" for gap in contract.gaps(updated, "ebay")),
+                         contract.gaps(updated, "ebay"))
+
     def test_unrelated_edit_does_not_invent_etsy_fields_for_an_ineligible_item(self):
         from vendoo_studio.services.listing_editor import prepared_listing
 
