@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.708 — 2026-11-03
+
+- Inventory, suggestions and sales totals read small saved fields without repeatedly unpacking every marketplace form, leaving the database available for draft generation and edits.
+
 ## 0.1.707 — 2026-11-03
 
 - Your inventory list no longer keeps a cloud database connection open while the app sends the full list
