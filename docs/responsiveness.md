@@ -143,9 +143,8 @@ Mercari, Depop and Poshmark forms no longer embed their brand and category
 lists (1.5 MB, 326 KB and 245 KB per form, the same for every listing). A row
 names its list and version, and clients download each version once from
 `/api/catalog/choice-lists/{name}`, which the browser keeps. The eBay form reads
-its category rules, policies and item locations together. The web app warms
-forms when a listing opens and when a marketplace tab is pointed at, as the Mac
-app already did. On the Mac, the form route builds in a worker thread so it no
+its category rules, policies and item locations together. Forms warm when a
+marketplace tab is pointed at. On the Mac, the form route builds in a worker thread so it no
 longer blocks other requests.
 
 In the local sandbox (production build, fast network, clicking right after
@@ -159,3 +158,24 @@ photo's version, so the browser keeps it for that sign-in (`private`, `Vary:
 Authorization`); every other hosted response stays `no-store`. A dropped
 connection or a 429/5xx response is retried twice instead of leaving the row
 blank.
+
+## Poshmark size corrections
+
+On 2026-11-03, a Mac sizing-error report led to two reproducible editor defects:
+selecting a size could retain a displayed group label instead of the group's
+ID, and routine activity refreshes could reset custom-size text before blur.
+The editor now emits the resolved group ID for row edits and size-system
+changes, and resets local rows only when their saved values change. The sizing
+system switch also honors the field's editing lock.
+
+The sandbox browser regressions failed before these fixes. All six correction
+cases now pass across desktop and phone layouts, including preflight checks
+that no inventory-size gap remains. The full local browser suite passed 28
+cases; the Bridge's Poshmark payload suite passed 40 tests. These tests do not
+establish the cause of the brother's specific incident, whose listing and error
+text were unavailable.
+
+The bundled 747 category paths, 263 size groups and 16,126 size choices were
+checked against [Poshmark's public catalog](https://poshmark.com/vm-rest/meta/catalog_v2).
+No bundled category or size IDs were missing at the time of the check. This
+does not rule out changes elsewhere in Poshmark's listing flow.

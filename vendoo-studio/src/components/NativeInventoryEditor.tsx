@@ -10,10 +10,16 @@ function sizesFor(group: NativeInventoryGroup | undefined, system: string) {
   return group?.systems?.[system] || group?.sizes || [];
 }
 
+function groupFor(row: NativeInventoryRow, groups: NativeInventoryGroup[]) {
+  return groups.find(group => group.id === row.sizeSetId) || groups.find(group => group.label === row.sizeSetId);
+}
+
 function remapRow(row: NativeInventoryRow, groups: NativeInventoryGroup[], from: string, to: string): NativeInventoryRow {
-  if (row.sizeSetId === "custom" || from === to) return row;
-  const current = sizesFor(groups.find(group => group.id === row.sizeSetId), from).find(size => size.id === row.sizeId);
-  return { ...row, sizeId: current?.equivalents?.[to] || "" };
+  const group = groupFor(row, groups);
+  const selected = { ...row, sizeSetId: group?.id || row.sizeSetId };
+  if (selected.sizeSetId === "custom" || from === to) return selected;
+  const current = sizesFor(group, from).find(size => size.id === row.sizeId);
+  return { ...selected, sizeId: current?.equivalents?.[to] || "" };
 }
 
 /** Poshmark's size picker: one size for Single Item, a quantity table for Multi Item, and the US/AU/EU/UK switch. */
@@ -28,19 +34,23 @@ export function NativeInventoryEditor({ value, groups, disabled, onChange, multi
   onSizeSystem?: (system: string, rows: NativeInventoryRow[]) => void;
 }) {
   const shown = multi ? value : value.slice(0, 1);
+  const signature = JSON.stringify(value);
   const [rows, setRows] = React.useState(shown.length ? shown : [{ sizeSetId: groups[0]?.id || "custom", sizeId: "", quantity: 1, sku: "" }]);
-  const [source, setSource] = React.useState(value);
+  const [source, setSource] = React.useState(signature);
   const [system, setSystem] = React.useState(sizeSystem);
   const [skuOpen, setSkuOpen] = React.useState(value.some(row => String(row.sku || "").trim() !== ""));
-  if (source !== value || system !== sizeSystem) {
-    setSource(value);
+  if (source !== signature || system !== sizeSystem) {
+    setSource(signature);
     setSystem(sizeSystem);
     const next = multi ? value : value.slice(0, 1);
     setRows(next.length ? next : [{ sizeSetId: groups[0]?.id || "custom", sizeId: "", quantity: 1, sku: "" }]);
   }
   const systems = groups.some(group => group.systems && Object.keys(group.systems).length > 0) ? [...SIZE_SYSTEMS] : [];
   const commit = (next: NativeInventoryRow[]) => {
-    const saved = multi ? next : [{ ...(next[0] || { sizeSetId: "", sizeId: "", quantity: 1 }), quantity: 1 }];
+    // The picker can display a stored label, but every edit must send the
+    // selected group's identifier, which the native contract validates.
+    const selected = next.map(row => ({ ...row, sizeSetId: groupFor(row, groups)?.id || row.sizeSetId }));
+    const saved = multi ? selected : [{ ...(selected[0] || { sizeSetId: "", sizeId: "", quantity: 1 }), quantity: 1 }];
     setRows(saved);
     onChange(saved);
   };
@@ -58,14 +68,13 @@ export function NativeInventoryEditor({ value, groups, disabled, onChange, multi
   };
   const systemSwitch = systems.length > 1 ? (
     <SegmentedTabs tabs={systems.map(id => ({ id, label: id.toUpperCase() }))} value={systems.includes(system as typeof systems[number]) ? system : systems[0]}
-      onChange={switchSystem} label="Sizing" />
+      onChange={switchSystem} label="Sizing" disabled={disabled} />
   ) : null;
   const sizeFields = (row: NativeInventoryRow, index: number) => {
     // A row stores the set's id, but older drafts and imported rows store the
     // set's label. Match either so the picker shows the group the seller chose
     // instead of its raw id, and so it can still be replaced or cleared.
-    const group = groups.find(entry => entry.id === row.sizeSetId)
-      || groups.find(entry => entry.label === row.sizeSetId);
+    const group = groupFor(row, groups);
     const choices = sizesFor(group, system);
     const prefix = `inventory-row-${index}`;
     return <>
