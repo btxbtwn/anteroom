@@ -78,7 +78,7 @@ def listing_response(db, identity):
 
 
 @router.get('/runtime')
-def runtime(request: Request, db=Depends(get_seller_db)):
+def runtime(request: Request, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.category_tree import categories_ready
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
@@ -97,7 +97,7 @@ def runtime(request: Request, db=Depends(get_seller_db)):
 
 
 @router.get('/status')
-def status(db=Depends(get_seller_db)):
+def status(db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.listing_provider import provider_is_configured
     active = db.scalars(select(Job.id).where(Job.status.in_(ACTIVE_JOB_STATUSES)).limit(1)).first()
     return {'version': app_version(), 'provider_configured': provider_is_configured(), 'extension_connected': False,
@@ -113,7 +113,7 @@ class ConversationInput(BaseModel):
 
 
 @router.get('/conversations')
-def list_conversations(db=Depends(get_seller_db)):
+def list_conversations(db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.repositories.queries import ConversationRepo
 
     # The shared sidebar filters stored inventory status. Reconcile it from
@@ -161,7 +161,7 @@ def list_conversations(db=Depends(get_seller_db)):
 
 
 @router.post('/conversations')
-def create_conversation(body: ConversationInput, db=Depends(get_seller_db)):
+def create_conversation(body: ConversationInput, db=Depends(get_seller_db, scope="function")):
     check_box(db, body.box_id)
     row = Conversation(title=body.title or 'New Listing', notes=body.notes or '', box_id=body.box_id, status='draft')
     db.add(row)
@@ -171,7 +171,7 @@ def create_conversation(body: ConversationInput, db=Depends(get_seller_db)):
 
 
 @router.get('/conversations/{identity}')
-def get_conversation(identity: str, db=Depends(get_seller_db)):
+def get_conversation(identity: str, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.sales_records import missing_by_conversation
 
     row = conversation(db, identity)
@@ -179,7 +179,7 @@ def get_conversation(identity: str, db=Depends(get_seller_db)):
 
 
 @router.patch('/conversations/{identity}')
-def edit_conversation(identity: str, body: ConversationInput, db=Depends(get_seller_db)):
+def edit_conversation(identity: str, body: ConversationInput, db=Depends(get_seller_db, scope="function")):
     row = conversation(db, identity, lock=True)
     assert_idle(db, identity)
     if "box_id" in body.model_fields_set:
@@ -192,20 +192,23 @@ def edit_conversation(identity: str, body: ConversationInput, db=Depends(get_sel
 
 
 @router.get('/conversations/{identity}/screen')
-def listing_screen(identity: str, db=Depends(get_seller_db)):
+def listing_screen(identity: str, db=Depends(get_seller_db, scope="function")):
     """Core editor reads share one seller transaction; marketplace lookups stay separate."""
     # Keep the owned row alive in the identity map for the constituent reads.
     row = conversation(db, identity)
     loaded_messages = messages(identity, db)
-    return {'conversation': conversation_response(row), 'listing': get_listing(identity, db),
+    payload = {'conversation': conversation_response(row), 'listing': get_listing(identity, db),
             'photos': photos(identity, db=db), 'messages': loaded_messages,
             'jobs': jobs(identity, db),
             'activity': activity_response(db, identity, len(loaded_messages),
                 loaded_messages[-1]['id'] if loaded_messages else None)}
+    # The DTO is fully materialized. Encoding and sending it need no transaction.
+    db.close()
+    return payload
 
 
 @router.get('/conversations/{identity}/listing')
-def get_listing(identity: str, db=Depends(get_seller_db)):
+def get_listing(identity: str, db=Depends(get_seller_db, scope="function")):
     conversation(db, identity)
     return listing_response(db, identity)
 
@@ -217,7 +220,7 @@ class ListingInput(BaseModel):
 
 
 @router.put('/conversations/{identity}/listing')
-def save_listing(identity: str, body: ListingInput, db=Depends(get_seller_db)):
+def save_listing(identity: str, body: ListingInput, db=Depends(get_seller_db, scope="function")):
     import copy
     payload = copy.deepcopy(editable_listing(body.listing))
     conversation(db, identity, lock=True)
@@ -255,7 +258,7 @@ def save_listing(identity: str, body: ListingInput, db=Depends(get_seller_db)):
 
 
 @router.get('/conversations/{identity}/messages')
-def messages(identity: str, db=Depends(get_seller_db)):
+def messages(identity: str, db=Depends(get_seller_db, scope="function")):
     conversation(db, identity)
     rows = db.scalars(select(Message).where(Message.conversation_id == identity).order_by(Message.created_at, Message.id)).all()
     return [{'id': row.id, 'conversation_id': identity, 'role': row.role, 'text': row.text,
@@ -264,7 +267,7 @@ def messages(identity: str, db=Depends(get_seller_db)):
 
 
 @router.get('/conversations/{identity}/activity')
-def activity(identity: str, db=Depends(get_seller_db)):
+def activity(identity: str, db=Depends(get_seller_db, scope="function")):
     conversation(db, identity)
     count = db.scalar(select(func.count()).select_from(Message).where(Message.conversation_id == identity))
     last = db.scalar(select(Message.id).where(Message.conversation_id == identity).order_by(Message.created_at.desc()).limit(1))
@@ -296,12 +299,12 @@ class UiInput(BaseModel):
 
 
 @router.get('/settings/ui')
-def ui(db=Depends(get_seller_db)):
+def ui(db=Depends(get_seller_db, scope="function")):
     return {'ok': True, **user_settings.get_ui_prefs()}
 
 
 @router.put('/settings/ui')
-def save_ui(body: UiInput, db=Depends(get_seller_db)):
+def save_ui(body: UiInput, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.routes.settings import UiPrefsConfig, put_ui_prefs
     put_ui_prefs(UiPrefsConfig(**body.model_dump(exclude_unset=True, exclude_none=True)))
     return ui(db)
@@ -314,7 +317,7 @@ def job_response(row):
 
 
 @router.get('/jobs')
-def jobs(conversation_id: str | None = None, db=Depends(get_seller_db)):
+def jobs(conversation_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     # The list shows status only; each job's listing copy is tens of kilobytes.
     statement = select(Job).options(defer(Job.listing_snapshot, raiseload=True))
     if conversation_id:
@@ -324,7 +327,7 @@ def jobs(conversation_id: str | None = None, db=Depends(get_seller_db)):
 
 
 @router.get('/jobs/queue')
-def queue(db=Depends(get_seller_db)):
+def queue(db=Depends(get_seller_db, scope="function")):
     rows = db.scalars(select(Job).where(Job.status.in_(ACTIVE_JOB_STATUSES)).order_by(Job.created_at)).all()
     return {'work': [], 'jobs': [job_response(row) for row in rows]}
 
@@ -335,7 +338,7 @@ class ResetInput(BaseModel):
 
 
 @router.post('/conversations/{identity}/reset')
-def reset_conversation(identity: str, request: Request, body: ResetInput | None = None, db=Depends(get_seller_db)):
+def reset_conversation(identity: str, request: Request, body: ResetInput | None = None, db=Depends(get_seller_db, scope="function")):
     """Clear, or with keep_inputs Regenerate's wipe. Never contacts a marketplace."""
     from vendoo_studio.services import hosted_listing_delete
     from vendoo_studio.services.hidden_fields import clear_listing_hidden_fields
@@ -372,7 +375,7 @@ def owned_photo(db, identity, photo_id):
 
 
 @router.get('/conversations/{identity}/photos')
-def photos(identity: str, marketplace: str | None = None, db=Depends(get_seller_db)):
+def photos(identity: str, marketplace: str | None = None, db=Depends(get_seller_db, scope="function")):
     conversation(db, identity)
     statement = select(Photo).where(Photo.conversation_id == identity)
     statement = statement.where(Photo.marketplace == marketplace) if marketplace else statement.where(Photo.marketplace.is_(None))
@@ -380,7 +383,7 @@ def photos(identity: str, marketplace: str | None = None, db=Depends(get_seller_
 
 
 @router.get('/conversations/{identity}/photos/{photo_id}/bytes')
-def photo_bytes(identity: str, photo_id: str, request: Request, db=Depends(get_seller_db)):
+def photo_bytes(identity: str, photo_id: str, request: Request, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.hosted_photos import storage_call
     row = owned_photo(db, identity, photo_id)
     key = row.stored_filename
@@ -392,7 +395,7 @@ def photo_bytes(identity: str, photo_id: str, request: Request, db=Depends(get_s
 
 
 @router.get('/photos/{photo_id}')
-def photo_by_id(photo_id: str, request: Request, db=Depends(get_seller_db)):
+def photo_by_id(photo_id: str, request: Request, db=Depends(get_seller_db, scope="function")):
     row = db.get(Photo, photo_id)
     if row is None:
         raise HTTPException(404, 'Photo not found')
@@ -400,7 +403,7 @@ def photo_by_id(photo_id: str, request: Request, db=Depends(get_seller_db)):
 
 
 @router.delete('/conversations/{identity}/photos/{photo_id}')
-def delete_photo(identity: str, photo_id: str, request: Request, db=Depends(get_seller_db)):
+def delete_photo(identity: str, photo_id: str, request: Request, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.hosted_photos import check_key, storage_call
     conversation(db, identity, lock=True)
     assert_idle(db, identity)
@@ -424,7 +427,7 @@ def delete_photo(identity: str, photo_id: str, request: Request, db=Depends(get_
 
 
 @router.patch('/conversations/{identity}/photos/order')
-def order_photos(identity: str, body: list[str], db=Depends(get_seller_db)):
+def order_photos(identity: str, body: list[str], db=Depends(get_seller_db, scope="function")):
     conversation(db, identity, lock=True)
     assert_idle(db, identity)
     if len(body) > 30:
@@ -448,7 +451,7 @@ def media_rules():
 
 @router.get('/photos/{photo_id}/thumb')
 def photo_thumbnail(photo_id: str, request: Request, size: int = Query(192, ge=32, le=512), v: str = '',
-                    db=Depends(get_seller_db)):
+                    db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.hosted_photos import check_key, thumbnail
     # One row: row security limits it to the seller, and the key must sit under their draft.
     row = db.execute(select(Photo.conversation_id, Photo.stored_filename, Photo.checksum)
@@ -467,7 +470,7 @@ def photo_thumbnail(photo_id: str, request: Request, size: int = Query(192, ge=3
 
 
 @router.get('/conversations/{identity}/revisions')
-def revisions(identity: str, db=Depends(get_seller_db)):
+def revisions(identity: str, db=Depends(get_seller_db, scope="function")):
     conversation(db, identity)
     rows = db.scalars(select(ListingRevision).where(ListingRevision.conversation_id == identity)
                       .order_by(ListingRevision.created_at.desc(), ListingRevision.id.desc())).all()
@@ -487,7 +490,7 @@ def owned_revision(db, identity, revision_id):
 
 
 @router.get('/conversations/{identity}/revisions/{revision_id}')
-def get_revision(identity: str, revision_id: str, db=Depends(get_seller_db)):
+def get_revision(identity: str, revision_id: str, db=Depends(get_seller_db, scope="function")):
     row = owned_revision(db, identity, revision_id)
     return {'id': row.id, 'listing': stored_listing_fields(row.listing_json)}
 
@@ -498,14 +501,14 @@ class RestoreInput(BaseModel):
 
 
 @router.post('/conversations/{identity}/revisions/{revision_id}/restore')
-def restore_revision(identity: str, revision_id: str, body: RestoreInput, db=Depends(get_seller_db)):
+def restore_revision(identity: str, revision_id: str, body: RestoreInput, db=Depends(get_seller_db, scope="function")):
     earlier = get_revision(identity, revision_id, db)
     result = save_listing(identity, ListingInput(listing=earlier['listing'], expected_revision_id=body.expected_revision_id), db)
     return {'ok': True, 'revision_id': result['revision_id']}
 
 
 @router.delete('/conversations/{identity}')
-def delete_conversation(identity: str, request: Request, db=Depends(get_seller_db)):
+def delete_conversation(identity: str, request: Request, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services import hosted_listing_delete
     conversation(db, identity, lock=True)
     assert_idle(db, identity)
@@ -521,7 +524,7 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
 async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'sellwild'],
-                              revision_id: str | None = None, db=Depends(get_seller_db)):
+                              revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     from starlette.concurrency import run_in_threadpool
     from vendoo_studio.services.choice_lists import share
     from vendoo_studio.services.native_editor import editor_form, web_sellwild_account

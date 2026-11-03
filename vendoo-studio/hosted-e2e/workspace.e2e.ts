@@ -112,6 +112,71 @@ test("generation waits for all four photos and saves the listing from the editor
   expect(saved.title).toContain("Sandbox Levi's");
 });
 
+test("two editors generate while a third saves without preloading unused marketplace forms", async ({ page, context, request }, info) => {
+  test.skip(info.project.name === "phone", "Multiple independent browser tabs exercise the shared hosted API");
+  test.setTimeout(240_000);
+  const alice = await (await request.post(`${api}/local/auth/v1/token?grant_type=password`, {
+    data: { email: "alice@sandbox.test", password: "sandbox" },
+  })).json();
+  const headers = { Authorization: `Bearer ${alice.access_token}` };
+  const drafts: { id: string }[] = [];
+  for (let index = 0; index < 3; index++) {
+    const created = await request.post(`${api}/api/drafts`, { headers, data: { title: `Concurrent editor ${index} ${Date.now()}` } });
+    expect(created.status()).toBe(201);
+    const draft = await created.json();
+    drafts.push(draft);
+    if (index < 2) {
+      for (let photo = 0; photo < 4; photo++) {
+        expect((await request.post(`${api}/api/drafts/${draft.id}/photos`, { headers, data: pixel })).status()).toBe(201);
+      }
+    }
+  }
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("alice@sandbox.test");
+  await page.getByLabel("Password").fill("sandbox");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible();
+  const editors = [page, await context.newPage(), await context.newPage()];
+  const failures: string[] = [];
+  const unusedForms: string[] = [];
+  for (const editor of editors) {
+    editor.on("response", response => {
+      if (response.url().includes("/api/") && response.status() >= 500) failures.push(`${response.status()} ${new URL(response.url()).pathname}`);
+    });
+    editor.on("request", request => {
+      if (/\/native-marketplaces\/[^/]+\/form(?:\?|$)/.test(request.url())) unusedForms.push(new URL(request.url()).pathname);
+    });
+  }
+  try {
+    await Promise.all(editors.map(async (editor, index) => {
+      await editor.goto(`/?listing=${drafts[index].id}`);
+      await expect(editor.locator(`#item-notes-${drafts[index].id}`)).toBeVisible();
+    }));
+    await Promise.all(editors.slice(0, 2).map(editor => editor.getByRole("button", { name: "Generate listing", exact: true }).click()));
+    await expect.poll(async () => Promise.all(drafts.slice(0, 2).map(async draft => {
+      return (await (await request.get(`${api}/api/conversations/${draft.id}/activity`, { headers })).json()).busy;
+    })), { timeout: 30_000 }).toEqual([true, true]);
+    const marker = "Saved while both other drafts generate";
+    const saved = editors[2].waitForResponse(response => response.url().includes(`/api/conversations/${drafts[2].id}`)
+      && response.request().method() === "PATCH");
+    await editors[2].locator(`#item-notes-${drafts[2].id}`).fill(marker);
+    expect((await saved).status()).toBe(200);
+    await editors[2].goto(`/?listing=${drafts[2].id}`);
+    await expect(editors[2].locator(`#item-notes-${drafts[2].id}`)).toHaveValue(marker);
+    for (let index = 0; index < 2; index++) {
+      await expect(editors[index].getByRole("textbox", { name: "Title", exact: true }).first()).toHaveValue(/Sandbox Levi's/, { timeout: 150_000 });
+      await expect.poll(async () => (await (await request.get(`${api}/api/conversations/${drafts[index].id}/activity`, { headers })).json()).busy,
+        { timeout: 150_000 }).toBe(false);
+      await editors[index].goto(`/?listing=${drafts[index].id}`);
+      await expect(editors[index].getByRole("textbox", { name: "Title", exact: true }).first()).toHaveValue(/Sandbox Levi's/);
+    }
+    expect(unusedForms).toEqual([]);
+    expect(failures).toEqual([]);
+  } finally {
+    await Promise.all(editors.slice(1).map(editor => editor.close()));
+  }
+});
+
 test("the Mac window hands its account session to the native AI worker and clears it on logout", async ({ page }, info) => {
   test.skip(info.project.name === "phone", "The native Mac bridge is desktop-only");
   // Logout replaces the document; observe the native boundary across navigation.

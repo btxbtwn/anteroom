@@ -86,6 +86,16 @@ several full-form JSON facet queries were active for about 16 seconds without
 blocking locks. Do not treat the CPU upgrade or refresh coalescing as proof of
 two-reseller readiness.
 
+Editor reads must share the existing `/screen` request on a cold open as well
+as navigation prefetch. Fetch marketplace forms on tab intent or selection;
+never warm every marketplace again after each listing revision. JSON route
+dependencies use FastAPI's `scope="function"` to return connections before
+sending responses. Fully materialized screen DTOs close the session before
+encoding too. Streaming routes retain their separate, short enqueue sessions.
+The regression holds three editor responses open with a three-connection pool
+while another draft saves. This proves response delivery cannot reserve that
+pool; production generation and latency still require a live browser run.
+
 ## 3. Keep traffic and refresh costs proportional to useful work
 
 Fly's HTTP concurrency type is `requests`, which is what

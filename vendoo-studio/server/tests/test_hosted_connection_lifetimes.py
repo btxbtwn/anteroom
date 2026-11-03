@@ -21,6 +21,27 @@ from vendoo_studio.services.service_context import ServiceContext, use
 from vendoo_studio.services.suggestions import list_suggestions
 
 
+@pytest.mark.parametrize('part', ['screen', 'listing', 'photos', 'messages', 'activity'])
+def test_editor_reads_release_connections_before_sending_json(cloud, active_connections, signing_keys, monkeypatch, part):  # noqa: F811
+    from starlette.responses import JSONResponse
+
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Tee'}).json()['id']
+    send_response = JSONResponse.__call__
+    observed = []
+
+    async def send_without_connection(response, scope, receive, send):
+        if scope['path'] == f'/api/conversations/{identity}/{part}':
+            observed.append(True)
+            assert not active_connections, 'Sending an editor response must not reserve a database connection'
+        await send_response(response, scope, receive, send)
+
+    monkeypatch.setattr(JSONResponse, '__call__', send_without_connection)
+    assert client.get(f'/api/conversations/{identity}/{part}', headers=alice).status_code == 200
+    assert observed
+
+
 def test_inventory_financial_calculations_release_the_read_connection(cloud, active_connections, signing_keys, monkeypatch):  # noqa: F811
     from vendoo_studio.models.marketplace_sale import MarketplaceSale
     from vendoo_studio.services import sales_ledger
@@ -58,6 +79,46 @@ def concurrent_cloud(cloud, monkeypatch, request):  # noqa: F811
     monkeypatch.setattr('vendoo_studio.database.engine', engine)
     try:
         yield client, request.param
+    finally:
+        engine.dispose()
+
+
+def test_three_slow_editors_leave_connections_available_for_another_save(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from starlette.responses import JSONResponse
+
+    client, database = cloud
+    alice = headers(signing_keys)
+    drafts = [client.post('/api/drafts', headers=alice, json={'title': f'Editor {index}'}).json()
+              for index in range(4)]
+    engine = create_engine(database.url, pool_size=3, max_overflow=0, pool_timeout=0.1)
+    monkeypatch.setattr('vendoo_studio.database.engine', engine)
+    waiting = threading.Barrier(4, timeout=10)
+    release = threading.Event()
+    send_response = JSONResponse.__call__
+
+    async def slow_response(response, scope, receive, send):
+        if scope['path'].endswith('/screen'):
+            await asyncio.to_thread(waiting.wait)
+            await asyncio.to_thread(release.wait, 15)
+        await send_response(response, scope, receive, send)
+
+    monkeypatch.setattr(JSONResponse, '__call__', slow_response)
+    try:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            responses = [executor.submit(client.get, f"/api/conversations/{draft['id']}/screen", headers=alice)
+                         for draft in drafts[:3]]
+            try:
+                waiting.wait()
+                assert client.get('/api/status', headers=alice).status_code == 200
+                other = drafts[3]
+                saved = client.patch(f"/api/conversations/{other['id']}", headers=alice, json={
+                    'notes': 'Saved while three editors are still receiving responses',
+                })
+                assert saved.status_code == 200
+                assert saved.json()['notes'].startswith('Saved while')
+            finally:
+                release.set()
+            assert [response.result().status_code for response in responses] == [200] * 3
     finally:
         engine.dispose()
 
