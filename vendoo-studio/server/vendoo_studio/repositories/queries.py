@@ -241,15 +241,20 @@ class ConversationRepo:
         A listing wears its own inventory label (draft / active / sold, see
         ``services/item_status.py``), except while it is generating.
         """
-        from vendoo_studio.services import activity
-        from vendoo_studio.services.streaming import active_generation
         from vendoo_studio.services.vendoo_import import parse_notes
         from vendoo_studio.services.item_status import statuses
 
-        changed = False
         conversations = self.db.query(Conversation).all()
         notes = {conv.id: parse_notes(conv.notes) for conv in conversations}
         own = statuses(self.db, list(notes.items()))
+        self.reconcile_item_statuses(conversations, notes, own)
+
+    def reconcile_item_statuses(self, conversations, notes, own) -> None:
+        """Persist already-derived inventory statuses without repeating their reads."""
+        from vendoo_studio.services import activity
+        from vendoo_studio.services.streaming import active_generation
+
+        changed = False
         for conv in conversations:
             if conv.status == "in_progress" and (
                 active_generation(conv.id) is not None or activity.running(conv.id)

@@ -1,0 +1,1 @@
+- Inventory refreshes reuse the status calculations already needed for sale summaries, reducing repeated database reads and note parsing.
