@@ -56,6 +56,27 @@ execution state. Business-context cache keys include the seller. CSV downloads
 use authenticated transport and reject results if the account changes while
 the export is loading.
 
+On `feat/hosted-chrome-sale-detection`, connected web sellers get the Mac's
+Chrome order-history checks on the same uneven schedule. Each seller has their
+own schedule, errors and sale-detection settings; disconnected tabs and Bridges
+without `marketplace.sales_history` are skipped. The hosted reader uses the
+existing named Bridge 0.2.47 command, with no desktop socket envelope, and saves
+orders under the seller's row-secured context. Sign-in cookies and tokens stay
+in Chrome. Vinted retains the Mac's current limitation: unverified order
+responses are reported as unreadable rather than inferred from listing status.
+The shared `marketplace_sessions` UI capability stays off until the remaining
+automation panels are ported.
+
+On `feat/hosted-chrome-promotions`, the desktop sharing and offers services are
+mounted in the hosted seller context. The seller can save rules off, explicitly
+enable them, pause them and review their own activity. Each connected seller's
+timer uses named commands under `marketplace.promotions` (Bridge 0.2.52): review,
+recent likes, a journal read, and a confirmed share or offer. The desktop
+operation lock, caps, minimums, cooldowns and no-retry journal are retained;
+unconfirmed sends pause their rule. No command lists, publishes or delists.
+The shared `marketplace_sessions` UI capability remains off until the separate
+imports and sale-detection layers are combined with these panels.
+
 ## Completion checklist
 
 - Shared inventory/editor, draft fields, notes, history and private photo reads
@@ -376,23 +397,10 @@ Sale detection switches stay on the Mac.
 
 Anteroom has no Facebook Marketplace or Grailed support on the Mac or the web.
 
-On `feat/hosted-chrome-sale-detection`, connected web sellers get the Mac's
-Chrome order-history checks on the same uneven schedule. Each seller has their
-own schedule, errors and sale-detection settings; disconnected tabs and Bridges
-without `marketplace.sales_history` are skipped. The hosted reader uses the
-existing named Bridge 0.2.47 command, with no desktop socket envelope, and saves
-orders under the seller's row-secured context. Sign-in cookies and tokens stay
-in Chrome. Vinted retains the Mac's current limitation: unverified order
-responses are reported as unreadable rather than inferred from listing status.
-The shared `marketplace_sessions` UI capability stays off until the remaining
-automation panels are ported.
-
-On `feat/hosted-chrome-promotions`, the desktop sharing and offers services are
-mounted in the hosted seller context. The seller can save rules off, explicitly
-enable them, pause them and review their own activity. Each connected seller's
-timer uses named commands under `marketplace.promotions` (Bridge 0.2.52): review,
-recent likes, a journal read, and a confirmed share or offer. The desktop
-operation lock, caps, minimums, cooldowns and no-retry journal are retained;
-unconfirmed sends pause their rule. No command lists, publishes or delists.
-The shared `marketplace_sessions` UI capability remains off until the separate
-imports and sale-detection layers are combined with these panels.
+Bridge 0.2.51 remembers approved hosted accounts in the Chrome profile and the
+web page retries a temporarily unavailable Bridge automatically. Disconnect and
+sign-out revoke that account's approval across tabs. An open desktop Chrome tab
+is still required for hosted Chrome reads/actions; the Mac-local WebSocket is a
+separate connection. See [connection lifecycle and verification](cloud-extension.md).
+The lifecycle is covered by isolated Chromium and hosted desktop/phone tests;
+verification in an installed seller session remains a release check.
