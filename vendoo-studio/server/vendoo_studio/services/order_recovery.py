@@ -14,7 +14,7 @@ from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.services.api_job_lock import start_gate
 from vendoo_studio.services.ebay_client import EbayClient, NS, assert_identity, digest, trading_xml
 from vendoo_studio.services.etsy_workspace import EtsyClient
-from vendoo_studio.services.relay_sales import find_listing, reconcile_unmatched
+from vendoo_studio.services.relay_sales import find_listing, find_sale_line, reconcile_unmatched
 
 PAGE_SIZE = 25
 MAX_PAGES = 4000
@@ -194,8 +194,10 @@ def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datet
         if key in unique and unique[key] != line:
             raise RecoveryError("The marketplace returned conflicting duplicate order lines. This page was not saved.")
         unique[key] = line
-    for line in unique.values():
-        sale = db.query(MarketplaceSale).filter_by(marketplace=marketplace, order_id=line.order_id, line_id=line.line_id).first()
+    # All recovery batches acquire order locks in the same order.
+    for key in sorted(unique):
+        line = unique[key]
+        sale = find_sale_line(db, marketplace, line.order_id, line.line_id, line.listing_id)
         if sale is None:
             # Older ID-only notices could use a listing/order ID when their
             # line ID was absent. Do not silently turn that into a second sale.
