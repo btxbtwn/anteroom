@@ -1,1 +1,2 @@
 - Run your approved sharing and offer rules from connected Chrome on the web, with the same minimums, limits and protection against sending twice.
+- Private chat checks that a draft belongs to your account before reading an image upload, without keeping a database connection open while you upload or wait for an answer.

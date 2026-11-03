@@ -137,6 +137,13 @@ MAX_MESSAGE_BYTES = MAX_ATTACHMENTS * (MAX_ATTACHMENT_BYTES * 4 // 3 + 4096) + 5
 
 @router.post('/messages', dependencies=[Depends(require_worker)])
 async def message(conv_id: str, request: Request):
+    def authorize():
+        # Reject foreign drafts before reading uploads, without retaining a
+        # connection while the seller uploads images or waits for an answer.
+        with _seller_sessions()() as db:
+            owned_conversation(db, conv_id)
+
+    await run_in_threadpool(authorize)
     async with request.app.state.chat_upload_slots:
         data = bytearray()
         try:
