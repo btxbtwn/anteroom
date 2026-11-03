@@ -1,4 +1,5 @@
 import { useWorkspaceRuntime } from "../app/runtime";
+import { editorTabs } from "./editorTabs";
 import { GENERAL_LISTING_FIELDS } from "../generalListingFields";
 import editorFields from "../../../skills/list-this/references/listing-editor-fields.json";
 import { SellwildAccountChoices } from "./SellwildAccountChoices";
@@ -164,14 +165,7 @@ export function ListingEditor({
     queryFn: () => api.conversations.get(convId),
   });
 
-  const tabs = React.useMemo(() => {
-    const selected = new Set(marketplaceSettings?.selected ?? ["ebay", "etsy", "poshmark", "mercari", "depop"]);
-    return [
-      "general",
-      ...["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild"].filter((id) => (!runtime.hosted || runtime.marketplaceForms.has(id)) && (id === "vinted" || selected.has(id))),
-
-    ];
-  }, [marketplaceSettings?.selected, runtime]);
+  const tabs = React.useMemo(() => editorTabs(marketplaceSettings?.selected, runtime), [marketplaceSettings?.selected, runtime]);
 
   React.useEffect(() => {
     if (!data?.current_revision_id || unsaved || !sessionActive) return;

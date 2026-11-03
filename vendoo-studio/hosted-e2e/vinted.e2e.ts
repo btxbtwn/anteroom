@@ -5,6 +5,8 @@ const api = `http://127.0.0.1:${process.env.VENDOO_STUDIO_PORT || "4341"}`;
 test("on the web, the Vinted tab reads its choices through the seller's Chrome", async ({ page, request }, info) => {
   const alice = await (await request.post(`${api}/local/auth/v1/token?grant_type=password`, { data: { email: "alice@sandbox.test", password: "sandbox" } })).json();
   const headers = { Authorization: `Bearer ${alice.access_token}` };
+  // Vinted's tab shows only when the seller lists there.
+  expect((await request.put(`${api}/api/settings/marketplaces`, { headers, data: { selected: ["ebay", "poshmark", "vinted"] } })).status()).toBe(200);
   const title = `Hosted Vinted ${info.project.name} ${Date.now()}`;
   const draft = await (await request.post(`${api}/api/drafts`, { headers, data: { title } })).json();
   // No Anteroom tab has connected Chrome, so Vinted's choices are not read and nothing waits.
