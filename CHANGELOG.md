@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.697 — 2026-11-03
+
+- Generating a listing no longer refreshes every open listing each time the draft renews its lease. Saved changes, completion, failure and cancellation still update other devices.
+- The website reuses its database connection instead of opening a new one for every read.
+- A Mac or Chrome command stays on the server that computer is connected to, so another server can be added later without mixing accounts.
+
 ## 0.1.696 — 2026-11-03
 
 - Fill in the eBay, Poshmark, Mercari, Depop and Sellwild forms yourself without generating a listing first.
