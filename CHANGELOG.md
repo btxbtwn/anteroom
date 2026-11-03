@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.718 — 2026-11-03
+
+- Marketplace validation reuses one photo read across all marketplaces and avoids copying large listing snapshots twice before preparing a form.
+
 ## 0.1.717 — 2026-11-03
 
 - Inventory refreshes reuse the status calculations already needed for sale summaries, reducing repeated database reads and note parsing.
