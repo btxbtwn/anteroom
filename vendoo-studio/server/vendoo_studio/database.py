@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
@@ -41,10 +43,24 @@ def make_engine(url: str):
         )
         event.listen(sqlite_engine, "connect", enable_wal)
         return sqlite_engine
-    # Supabase manages the hosted connection pool. Do not add a second, capped
-    # queue in this process or reserve idle client connections between requests.
-    # Transaction pooling can move consecutive transactions between backends;
-    # named prepared statements belong to a backend session, not this client.
+    # A new client connection to Supabase's transaction pooler measured about
+    # 800 ms from the hosted machine; the same connection reused for another
+    # statement measured about 70 ms, and was faster than session mode or a
+    # direct connection. The hosted process keeps a few of those client
+    # connections. Transaction mode can still move the server session, so
+    # prepared statements stay off on port 6543. Other processes, including
+    # tests and the desktop app, do not hold a pool.
+    if os.environ.get("ANTEROOM_HOSTED") == "1":
+        connect_args = {"prepare_threshold": None} if make_url(url).port == 6543 else {}
+        return create_engine(
+            url,
+            pool_size=int(os.environ.get("ANTEROOM_DB_POOL_SIZE", "4")),
+            max_overflow=int(os.environ.get("ANTEROOM_DB_MAX_OVERFLOW", "1")),
+            pool_timeout=float(os.environ.get("ANTEROOM_DB_POOL_TIMEOUT", "1")),
+            pool_recycle=300,
+            connect_args=connect_args,
+            echo=False, hide_parameters=True,
+        )
     return create_engine(url, poolclass=NullPool, connect_args={"prepare_threshold": None},
                          echo=False, hide_parameters=True)
 

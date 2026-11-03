@@ -40,7 +40,8 @@ class SellerSessionMiddleware:
             await send({"type": "websocket.close", "code": 1008})
             return
         if scope["type"] != "http" or (
-            (scope["path"] in {"/api/health", "/api/auth-config"} and scope["method"] == "GET")
+            (scope["path"] in {"/api/health", "/api/ready", "/api/auth-config"} and scope["method"] == "GET")
+            or scope["path"].startswith("/internal/")
             or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
                 and (scope["path"] == "/" or scope["path"].startswith("/assets/")))
         ):
@@ -181,7 +182,12 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         docs_url=None, redoc_url=None, openapi_url=None,
     )
     app.state.web_dir = web_dir
-    app.state.background_worker_enabled = os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1'
+    app.state.process_role = os.environ.get('ANTEROOM_PROCESS_ROLE', 'all')
+    # A web process serves sellers and device connections. Heavy scheduled work
+    # runs on a worker process once that split is deployed. One process keeps both.
+    app.state.background_worker_enabled = (
+        os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1' and app.state.process_role != 'web'
+    )
     app.add_middleware(SellerSessionMiddleware)
 
     @app.middleware("http")
@@ -214,6 +220,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
 
     from vendoo_studio.routes.hosted_drafts import router
     app.include_router(router)
+    from vendoo_studio.routes.internal_devices import router as internal_router
+    app.include_router(internal_router)
     from vendoo_studio.routes.hosted_workspace import router as workspace_router
     app.include_router(workspace_router)
     from vendoo_studio.routes.hosted_photos import router as photo_router
@@ -290,7 +298,35 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "version": app_version(), "service": "anteroom-hosted"}
+        worker = getattr(app.state, "background_worker", None)
+        return {
+            "status": "ok", "version": app_version(), "service": "anteroom-hosted",
+            "role": app.state.process_role,
+            "background_worker": bool(app.state.background_worker_enabled and worker is not None and not worker.done()),
+        }
+
+    @app.get("/api/ready")
+    def ready():
+        """Whether this process can reach Postgres. Not the Fly routing check.
+
+        With one machine, a database blip must not stop the proxy from routing
+        anywhere. ``/api/health`` stays the liveness check until a second
+        machine can take traffic.
+        """
+        from sqlalchemy import text
+        from sqlalchemy.exc import SQLAlchemyError
+
+        from vendoo_studio.database import engine
+        if engine.dialect.name != "postgresql":
+            return {"status": "ok"}
+        try:
+            with engine.connect() as connection, connection.begin():
+                # LOCAL so a reused connection does not keep the one-second limit.
+                connection.execute(text("SET LOCAL statement_timeout = '1000'"))
+                connection.execute(text("SELECT 1"))
+        except SQLAlchemyError:
+            return JSONResponse({"status": "unavailable"}, status_code=503, headers={"Cache-Control": "no-store"})
+        return {"status": "ok"}
 
     @app.get("/api/account", response_model=AccountResponse)
     def account(request: Request):

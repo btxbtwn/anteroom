@@ -133,14 +133,14 @@ def test_heartbeat_before_first_poll_wakes_the_background_reader(cloud, signing_
     import threading
     queued = threading.Event()
     relay = hosted_browser_relay.relay_for(USER_ID)
-    send = relay.send_message
+    send = relay.deliver_local
 
     async def sent(message):
         result = await send(message)
         asyncio.get_running_loop().call_soon(queued.set)
         return result
 
-    monkeypatch.setattr(relay, 'send_message', sent)
+    monkeypatch.setattr(relay, 'deliver_local', sent)
     thread, result = _in_background(check)
     assert queued.wait(5), 'The background command must be queued before the first poll'
     _answer(client, alice, {'ok': True, 'orders': []}, CAPABLE)
