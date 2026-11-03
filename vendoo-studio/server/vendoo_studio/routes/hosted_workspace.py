@@ -131,10 +131,21 @@ def inventory_response(db):
 
     # The shared sidebar filters stored inventory status. Reconcile it from
     # listings and paid sales just as the desktop list endpoint does.
-    ConversationRepo(db).reconcile_job_statuses()
+    from vendoo_studio.services.inventory_analytics import read_analytics_inputs, rows_from_inputs
+
+    analytics = read_analytics_inputs(db)
+    ConversationRepo(db).reconcile_item_statuses(
+        [row for row in db.scalars(select(Conversation).options(defer(Conversation.notes))).all()
+         if row.id in analytics.statuses],
+        {identity: notes for identity, _title, _status, notes, _box in analytics.conversations},
+        analytics.statuses)
     # Keep the existing sidebar's complete-list contract; it filters and
     # virtualizes locally. No historical pointers or fallback file URLs escape.
     rows = db.scalars(select(Conversation).options(defer(Conversation.notes)).order_by(Conversation.updated_at.desc(), Conversation.id.desc())).all()
+    reconciled = {row.id: row.status for row in rows}
+    # Another device may create or delete a draft between these committed reads.
+    analytics.conversations = [(identity, title, reconciled.get(identity, status), notes, box)
+                              for identity, title, status, notes, box in analytics.conversations]
     ordered = select(Photo.conversation_id, Photo.id, Photo.checksum, func.row_number().over(
         partition_by=Photo.conversation_id, order_by=(Photo.display_order, Photo.id)).label('position')).where(
             Photo.marketplace.is_(None)).subquery()
@@ -153,10 +164,8 @@ def inventory_response(db):
     for identity, market in db.execute(select(MarketplaceListing.conversation_id, MarketplaceListing.marketplace)
                                       .where(MarketplaceListing.state.in_(LIVE_STATES))):
         direct.setdefault(identity, []).append(market)
-    from vendoo_studio.services.inventory_analytics import read_analytics_inputs, rows_from_inputs
     from vendoo_studio.services.sales_records import read_sale_lines, records_from_lines, missing_from_records
 
-    analytics = read_analytics_inputs(db)
     sales = read_sale_lines(db)
     # Ledger validation, cost allocation and hashing are CPU work over loaded
     # values. Keep scarce connections available while that work runs.

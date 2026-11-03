@@ -477,7 +477,9 @@ def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
         def __init__(self, db):
             self.db = db
 
-        def reconcile_job_statuses(self):
+        def reconcile_item_statuses(self, conversations, notes, statuses):
+            assert conversations == []
+            assert notes == statuses == {}
             return None
 
     monkeypatch.setattr('vendoo_studio.repositories.queries.ConversationRepo', Repo)
@@ -487,3 +489,36 @@ def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
     monkeypatch.setattr('vendoo_studio.services.sales_records.read_sale_lines', lambda _db: [])
     assert hosted_workspace.inventory_response(DB()) == []
     assert closed == ['closed']
+
+
+def test_inventory_derives_status_once_and_reconciles_stale_busy_rows(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.services import item_status
+    from vendoo_studio.services.hosted_database import SellerDatabaseSession
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={
+        'title': 'Sold imported tee', 'notes': '{"vendooStatus":"sold"}',
+    }).json()['id']
+    with SellerDatabaseSession(bind=engine, user_id=USER_ID) as db:
+        db.get(Conversation, identity).status = 'in_progress'
+        db.commit()
+    derive = item_status.statuses
+    calls = []
+
+    def counted(db, conversations):
+        calls.append(len(conversations))
+        return derive(db, conversations)
+
+    monkeypatch.setattr(item_status, 'statuses', counted)
+    response = client.get('/api/conversations', headers=alice)
+    assert response.status_code == 200
+    row = next(row for row in response.json() if row['id'] == identity)
+    assert row['status'] == 'sold'
+    assert row['missing_sale_data']
+    assert calls == [1]
+    with SellerDatabaseSession(bind=engine, user_id=USER_ID) as db:
+        stored = db.get(Conversation, identity)
+        assert stored.status == 'sold'
+        assert stored.settled_at is not None
