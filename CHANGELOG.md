@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.710 — 2026-11-03
+
+- A marketplace you turn off under Settings → Where you list no longer shows on your listings, Vinted included, on the Mac, web and iPhone.
+
 ## 0.1.709 — 2026-11-03
 
 - Picking the same answer on the eBay form as in General (like Department) now counts as your answer, so List no longer asks you to check it against the photos.
