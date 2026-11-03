@@ -155,7 +155,7 @@ def get_conversation(conv_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{conv_id}/copy-preview")
-def preview_copy(conv_id: str, response: Response, db: Session = Depends(get_db)):
+def preview_copy(conv_id: str, response: Response, db: Session = Depends(get_db, scope="function")):
     from vendoo_studio.services import listing_copy
 
     response.headers["Cache-Control"] = "no-store"
@@ -177,7 +177,7 @@ def copy_conversation(conv_id: str, body: CopyRequest, db: Session = Depends(get
 
 
 @router.get("/{conv_id}/copy-result/{request_id}", response_model=ConversationResponse)
-def copy_result(conv_id: str, request_id: str, response: Response, db: Session = Depends(get_db)):
+def copy_result(conv_id: str, request_id: str, response: Response, db: Session = Depends(get_db, scope="function")):
     from vendoo_studio.services import listing_copy
 
     response.headers["Cache-Control"] = "no-store"

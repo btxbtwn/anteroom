@@ -21,7 +21,7 @@ from vendoo_studio.services.service_context import ServiceContext, use
 from vendoo_studio.services.suggestions import list_suggestions
 
 
-@pytest.mark.parametrize('part', ['screen', 'listing', 'photos', 'messages', 'activity'])
+@pytest.mark.parametrize('part', ['screen', 'listing', 'photos', 'messages', 'activity', 'marketplace-listings', 'copy-preview'])
 def test_editor_reads_release_connections_before_sending_json(cloud, active_connections, signing_keys, monkeypatch, part):  # noqa: F811
     from starlette.responses import JSONResponse
 
@@ -489,6 +489,25 @@ def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
     monkeypatch.setattr('vendoo_studio.services.sales_records.read_sale_lines', lambda _db: [])
     assert hosted_workspace.inventory_response(DB()) == []
     assert closed == ['closed']
+
+
+def test_sales_read_releases_its_connection_before_account_refresh(cloud, active_connections, signing_keys, monkeypatch):  # noqa: F811
+    from vendoo_studio.services import recent_ebay_orders
+
+    client, _ = cloud
+    refreshed = []
+
+    async def refresh():
+        # The real refresh can read credentials and call eBay. Its caller's
+        # inventory session must already have returned its pooled connection.
+        assert not active_connections
+        refreshed.append(True)
+
+    monkeypatch.setattr(recent_ebay_orders, 'refresh', refresh)
+    response = client.get('/api/marketplace-sales', headers=headers(signing_keys))
+    assert response.status_code == 200
+    assert response.json() == {'sales': []}
+    assert refreshed == [True]
 
 
 def test_inventory_derives_status_once_and_reconciles_stale_busy_rows(cloud, signing_keys, monkeypatch):  # noqa: F811
