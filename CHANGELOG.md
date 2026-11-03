@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.700 — 2026-11-03
+
+- Sale records now ask for the same amounts as Mark as sold, with the same names, and use the item's Cost of Goods, so a sale entered on the form no longer shows missing refunds or item cost.
+
 ## 0.1.699 — 2026-11-03
 
 - Sort sold items by their latest sale, including sales Anteroom recorded from the marketplaces, so a new eBay sale shows at the top of Sold.
