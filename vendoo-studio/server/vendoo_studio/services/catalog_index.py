@@ -7,9 +7,12 @@ import json
 import logging
 import re
 import shutil
+import subprocess
+import sys
+import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from contextvars import copy_context
 from pathlib import Path
 from typing import Any
@@ -587,13 +590,41 @@ def _build_unlocked(snapshot: CatalogSnapshot) -> dict[str, Any]:
 
 def rebuild_catalog_index(db: Session) -> dict[str, Any]:
     """Export catalog/skill/fill docs and rebuild the Semble index."""
-    with _REBUILD_LOCK:
-        return _build_unlocked(catalog_snapshot(db))
+    return build_catalog_index(catalog_snapshot(db))
 
 
 def build_catalog_index(snapshot: CatalogSnapshot) -> dict[str, Any]:
     with _REBUILD_LOCK:
+        from vendoo_studio.services.service_context import current
+
+        context = current()
+        if context is not None:
+            return _build_hosted(snapshot, context.seller_id)
         return _build_unlocked(snapshot)
+
+
+def _build_hosted(snapshot: CatalogSnapshot, owner: str) -> dict[str, Any]:
+    """Tokenize in a lower-priority process, then publish the completed index.
+
+    The child receives plain catalog data, never a session, token or lease.
+    Keeping its Python interpreter separate prevents tokenization from holding
+    the API's GIL. The OS also gives interactive work priority on one vCPU.
+    """
+    from semble import SembleIndex
+
+    root = _catalog_root()
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='build-', dir=root) as directory:
+        output = Path(directory)
+        subprocess.run(
+            [sys.executable, '-m', 'vendoo_studio.services.catalog_index_worker', owner, directory],
+            input=json.dumps(asdict(snapshot)), text=True, check=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        result = json.loads((output / 'result.json').read_text())
+        index = SembleIndex.load_from_disk(output / 'index') if result.pop('indexed') else None
+        _publish_index(index, json.dumps(snapshot.fingerprint, sort_keys=True))
+        return result
 
 
 def _kick_rebuild() -> None:
