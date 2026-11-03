@@ -176,7 +176,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
           <p className="confirm-dialog-description">
             Drag photos to set their order; the first one is the cover, and a click enlarges one. Rotate or remove a photo from its corners.
             Chat and every generated field are discarded, then each listing is written again from its
-            photos and these details, one at a time. Flaws and notes are kept.
+            photos and these details concurrently. Flaws and notes are kept.
             {" "}Read from photos fills blank measurements from yardstick photos; check them before rewriting.
           </p>
         </div>

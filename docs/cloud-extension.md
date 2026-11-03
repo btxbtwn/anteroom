@@ -167,7 +167,7 @@ it returns normalized order lines without buyer details or credentials.
 Reads preserve seller corrections and frozen Vendoo history. A partial or
 unreadable history cannot clear older listing-only reports.
 
-Bridge 0.2.49 adds `marketplace.promotions`: bounded reads of a listing's share
+Bridge 0.2.52 adds `marketplace.promotions`: bounded reads of a listing's share
 or offer eligibility, recent Poshmark/Depop likes, and an action's stored
 result; and a seller-approved share or offer on one Poshmark, Mercari or Depop
 listing. Shares are Poshmark-only. The four commands are

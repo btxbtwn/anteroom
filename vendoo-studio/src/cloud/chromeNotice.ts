@@ -1,9 +1,9 @@
-/** What the Connect Chrome button and its panel say for each Bridge state. */
+/** What the Connect Anteroom Extension button and its panel say for each Bridge state. */
 import type { CloudConnection } from "../api/cloudExtension";
 
 export interface ChromeNotice { button: string; message: string[] }
 
-/** `attempted` is true once the seller has pressed Connect Chrome on this page. */
+/** `attempted` is true once the seller has pressed Connect Anteroom Extension on this page. */
 export function chromeNotice(connection: CloudConnection | null, attempted: boolean): ChromeNotice {
   const version = connection?.extensionVersion ? `Anteroom Bridge ${connection.extensionVersion}` : "Anteroom Bridge";
   if (connection?.ok && connection.state === "connected") {
@@ -19,9 +19,9 @@ export function chromeNotice(connection: CloudConnection | null, attempted: bool
     return { button: "Approve in Chrome…", message: ["Choose Connect browser in the Anteroom Bridge window. Keep this page open."] };
   }
   if (connection?.ok && attempted) {
-    return { button: "Connect Chrome", message: ["Chrome didn’t approve the connection. Choose Connect Chrome to try again."] };
+    return { button: "Connect Anteroom Extension", message: ["Chrome didn’t approve the connection. Choose Connect Anteroom Extension to try again."] };
   }
-  return { button: "Connect Chrome", message: [
+  return { button: "Connect Anteroom Extension", message: [
     "Anteroom Bridge isn’t answering in this Chrome.",
     "Open Anteroom on your Mac and choose Connect Chrome there to install it, then reload this page. Chrome on iPhone can’t run the Bridge.",
   ] };

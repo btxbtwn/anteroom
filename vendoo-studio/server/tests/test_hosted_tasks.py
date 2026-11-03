@@ -1,4 +1,6 @@
 import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.responses import StreamingResponse
@@ -13,6 +15,71 @@ from vendoo_studio.hosted import create_app
 from vendoo_studio.models.background_task import BackgroundTask, BackgroundTaskEvent
 from vendoo_studio.models.conversation import Message, Photo
 from vendoo_studio.services import schema_migrations
+
+
+def test_three_drafts_overlap_across_sellers_while_reads_and_cancellation_work(
+        migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
+    if migration_engine.dialect.name != 'postgresql':
+        pytest.skip('Hosted work requires Postgres')
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services.service_context import current
+
+    schema_migrations.ensure_schema(migration_engine)
+    monkeypatch.setattr('vendoo_studio.database.engine', migration_engine)
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setattr('vendoo_studio.routes.hosted_tasks.get_listing_provider', lambda: object())
+    ready, release = threading.Condition(), threading.Event()
+    started = {}
+
+    async def generation(identity, db=None):
+        with ready:
+            started[identity] = current().seller_id
+            ready.notify_all()
+        await asyncio.to_thread(release.wait)
+        with SessionLocal() as session:
+            ConversationRepo(session).add_message(identity, 'assistant', 'Saved ' + identity)
+
+        async def stream():
+            yield 'data: Saved draft\n\ndata: [DONE]\n\n'
+        return StreamingResponse(stream(), media_type='text/event-stream')
+
+    monkeypatch.setattr('vendoo_studio.routes.chat.generate_listing', generation)
+    with TestClient(create_app(PROJECT_URL)) as client:
+        owners = [USER_ID, BOB, USER_ID]
+        drafts = []
+        for index, owner in enumerate(owners):
+            response = client.post('/api/conversations', headers=headers(signing_keys, owner),
+                                   json={'title': f'Concurrent draft {index}'})
+            assert response.status_code == 200
+            drafts.append(response.json()['id'])
+        with Session(migration_engine) as session:
+            for identity, owner in zip(drafts, owners, strict=True):
+                session.add(Photo(user_id=owner, conversation_id=identity, original_filename='photo.jpg',
+                                  stored_filename=f'{owner}/{identity}/{"a" * 32}.jpg',
+                                  size_bytes=1, mime_type='image/jpeg'))
+            session.commit()
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            responses = [executor.submit(client.post, f'/api/conversations/{identity}/generate',
+                                         headers=headers(signing_keys, owner))
+                         for identity, owner in zip(drafts, owners, strict=True)]
+            try:
+                with ready:
+                    assert ready.wait_for(lambda: len(started) == 3, 5), 'Independent sellers must not wait for another draft'
+                assert started == dict(zip(drafts, owners, strict=True))
+                assert client.get('/api/health').status_code == 200
+                assert client.get(f'/api/conversations/{drafts[1]}', headers=headers(signing_keys)).status_code == 404
+                assert client.get(f'/api/conversations/{drafts[2]}', headers=headers(signing_keys)).status_code == 200
+                assert client.post(f'/api/conversations/{drafts[0]}/stop', headers=headers(signing_keys)).status_code == 200
+            finally:
+                release.set()
+            assert [response.result(timeout=10).status_code for response in responses] == [200] * 3
+        with Session(migration_engine) as session:
+            statuses = {task.conversation_id: task.status for task in session.scalars(select(BackgroundTask))}
+            assert statuses == {drafts[0]: 'cancelled', drafts[1]: 'completed', drafts[2]: 'completed'}
+            assert set(session.execute(select(Message.conversation_id, Message.user_id)).all()) == {
+                (drafts[1], BOB), (drafts[2], USER_ID),
+            }
 
 
 def test_durable_chat_finishes_preparation_before_done_and_isolates_other_accounts(

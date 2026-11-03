@@ -390,7 +390,7 @@ automation panels are ported.
 On `feat/hosted-chrome-promotions`, the desktop sharing and offers services are
 mounted in the hosted seller context. The seller can save rules off, explicitly
 enable them, pause them and review their own activity. Each connected seller's
-timer uses named commands under `marketplace.promotions` (Bridge 0.2.49): review,
+timer uses named commands under `marketplace.promotions` (Bridge 0.2.52): review,
 recent likes, a journal read, and a confirmed share or offer. The desktop
 operation lock, caps, minimums, cooldowns and no-retry journal are retained;
 unconfirmed sends pause their rule. No command lists, publishes or delists.

@@ -13,6 +13,8 @@ def test_shutdown_finishes_claimed_work_before_leaving(monkeypatch):
     claims, finished = [], []
 
     def claim(engine):
+        if claims:
+            return None
         claims.append(engine)
         return ('draft-task', 'seller', 'lease')
 
@@ -76,7 +78,8 @@ def test_hosted_shutdown_drains_a_draft_after_its_browser_disconnects(monkeypatc
         await asyncio.Event().wait()
 
     monkeypatch.setattr(background_worker, 'serve', tracked_worker)
-    monkeypatch.setattr(background_worker.queue, 'claim', lambda _engine: ('draft', 'seller', 'lease'))
+    jobs = iter([('draft', 'seller', 'lease')])
+    monkeypatch.setattr(background_worker.queue, 'claim', lambda _engine: next(jobs, None))
     monkeypatch.setattr(background_worker, 'run_claimed', execute)
     for name in ('hosted_automation_scheduler', 'hosted_offer_scheduler', 'hosted_job_watchdog'):
         monkeypatch.setattr(f'vendoo_studio.services.{name}.serve', scheduler)
@@ -96,3 +99,46 @@ def test_hosted_shutdown_drains_a_draft_after_its_browser_disconnects(monkeypatc
             release.set()
             closing.result(timeout=5)
     assert finished.is_set()
+
+
+def test_blocked_marketplace_scheduler_cannot_stop_draft_heartbeats(monkeypatch):
+    from vendoo_studio import hosted
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    blocked, release, pulse = Event(), Event(), Event()
+    loops = []
+    original_loop = hosted.BackgroundLoop
+
+    def tracked_loop(*args, **kwargs):
+        loop = original_loop(*args, **kwargs)
+        loops.append(loop)
+        return loop
+
+    async def worker(_engine, stopping):
+        await asyncio.to_thread(blocked.wait)
+        pulse.set()
+        while not stopping.is_set():
+            await asyncio.sleep(.01)
+
+    async def blocking_offers(_engine):
+        blocked.set()
+        # Reproduce a synchronous database wait in a scheduler coroutine.
+        release.wait(timeout=5)
+        await asyncio.Event().wait()
+
+    async def idle(_engine):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(hosted, 'BackgroundLoop', tracked_loop)
+    monkeypatch.setattr(background_worker, 'serve', worker)
+    monkeypatch.setattr('vendoo_studio.services.hosted_offer_scheduler.serve', blocking_offers)
+    for name in ('hosted_automation_scheduler', 'hosted_job_watchdog', 'hosted_sourcing_scheduler'):
+        monkeypatch.setattr(f'vendoo_studio.services.{name}.serve', idle)
+    with TestClient(hosted.create_app('https://example.supabase.co')) as client:
+        try:
+            assert blocked.wait(2)
+            assert pulse.wait(1), 'Marketplace database waits must not interrupt draft lease renewal'
+            assert client.get('/api/health').status_code == 200
+        finally:
+            release.set()
+    assert all(not loop.thread.is_alive() for loop in loops)
