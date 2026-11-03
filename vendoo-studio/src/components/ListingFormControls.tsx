@@ -467,6 +467,28 @@ export function EbayCategorySelect({ id, value, onChange, disabled }: {
 }
 
 /**
+ * The General category, picked from Anteroom's shared category tree. The seller
+ * drills or searches to a final category. When the tree has not synced, the
+ * fallback (a plain text box) keeps the field editable.
+ */
+export function GeneralCategorySelect({ id, fieldKey, value, onChange, disabled, fallback }: {
+  id: string; fieldKey: string; value: string; disabled?: boolean;
+  onChange: (path: string) => void; fallback: React.ReactNode;
+}) {
+  const tree = useQuery({
+    queryKey: ["catalog-categories", "general"],
+    queryFn: () => api.catalog.categories("general"),
+    staleTime: Infinity,
+    retry: false,
+  });
+  const leaves = React.useMemo(() => catalogLeafChoices(tree.data), [tree.data]);
+  if (tree.isPending) return <p role="status" className="text-xs text-muted-foreground">Loading categories…</p>;
+  if (!leaves.length) return <>{fallback}</>;
+  return <CategoryTreeSelect key={value} id={id} fieldKey={fieldKey} value={value} disabled={disabled} choices={leaves}
+    onChange={(choice) => onChange(choice.label)} />;
+}
+
+/**
  * The category paths to offer for a saved value and a search result.
  *
  * The search endpoint can return one category under differently cased paths,

@@ -372,10 +372,6 @@ export function ItemDetails({ convId }: Props) {
     <div className="@container relative flex min-w-0 flex-col">
       <InspectorSection title="Notes & Labels" titleId={`item-section-listing-${convId}`} className="gap-2">
         <div>
-          <FieldLabel htmlFor={`item-sku-${convId}`}>SKU</FieldLabel>
-          <Input nativeInput id={`item-sku-${convId}`} {...f("sku")} autoComplete="off" spellCheck={false} placeholder="Optional" />
-        </div>
-        <div>
           <FieldLabel htmlFor={`item-notes-${convId}`}>Notes</FieldLabel>
           <Textarea
             id={`item-notes-${convId}`}
@@ -524,26 +520,6 @@ export function ItemDetails({ convId }: Props) {
             </div>
           )}
         </div>
-      </InspectorSection>
-
-      <InspectorSection title="Pricing & Shipping" titleId={`item-section-pricing-${convId}`}>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="min-w-0">
-            <FieldLabel htmlFor={`item-cog-${convId}`}>COG ($)</FieldLabel>
-            <Input
-              nativeInput
-              id={`item-cog-${convId}`}
-              {...f("cog", "number")}
-              step="0.01"
-              placeholder={box?.cost_per_piece != null ? box.cost_per_piece.toFixed(2) : "0.00"}
-              title={box?.cost_per_piece != null ? "Blank uses the box's cost per piece" : undefined}
-            />
-          </div>
-          <div className="min-w-0">
-            <FieldLabel htmlFor={`item-package-${convId}`}>Package L×W×H</FieldLabel>
-            <Input nativeInput id={`item-package-${convId}`} {...f("packageDimensions")} placeholder={defaultPackageDimensions} />
-          </div>
-        </div>
         {boxes.length ? (
           <div>
             <FieldLabel htmlFor={`item-box-${convId}`}>Box</FieldLabel>
@@ -557,9 +533,13 @@ export function ItemDetails({ convId }: Props) {
                 <option key={row.id} value={row.id}>{boxStoreName(row.store)} · {row.title}</option>
               ))}
             </NativeSelect>
+            {box?.cost_per_piece != null && (
+              <p className="mt-1 text-xs text-muted-foreground">A blank Cost uses this box's ${box.cost_per_piece.toFixed(2)} per piece.</p>
+            )}
           </div>
         ) : null}
       </InspectorSection>
+
 
       <InspectorSection
         title="Measurements (in)"

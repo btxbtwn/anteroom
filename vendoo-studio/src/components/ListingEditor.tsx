@@ -41,8 +41,8 @@ import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { BookmarkCheckIcon, BookmarkPlusIcon, HistoryIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
-import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
-import { groupFieldsIntoSections } from "./listingFieldSections";
+import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, GeneralCategorySelect, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
+import { generalFormSections, groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { gapsByField, rowForField } from "./nativeFieldWarnings";
 import type { NativeMarketplace } from "../api/nativeMarketplaces";
@@ -452,6 +452,11 @@ export function StructuredEditor({
     queryFn: api.settings.ebayInventoryLocation,
     staleTime: 30_000,
   });
+  const { data: packageDefault } = useQuery({
+    queryKey: ["settings-package-dimensions"],
+    queryFn: api.settings.packageDimensions,
+    enabled: tab === "general",
+  });
   const { data: savedDefaults } = useQuery({
     queryKey: ["settings-listing-defaults"],
     queryFn: api.settings.listingDefaults,
@@ -509,14 +514,17 @@ export function StructuredEditor({
         ? nativeEditorDependencies(built, listing)
         : withDropdownOptions(built, tab, dropdownOptions?.forms);
       const fallback = inventoryLocation?.location || "";
-      if (!fallback) return rows;
+      const packageHint = tab === "general" && packageDefault
+        ? `${packageDefault.length}x${packageDefault.width}x${packageDefault.height}` : "";
+      if (!fallback && !packageHint) return rows;
       return rows.map((field) => (
-        field.key === "zipCode" && !formFieldText(getListingEditorValue(listing, field.key))
+        fallback && field.key === "zipCode" && !formFieldText(getListingEditorValue(listing, field.key))
           ? { ...field, defaultValue: fallback }
+          : packageHint && field.key === "package_dimensions_in" ? { ...field, placeholder: packageHint }
           : field
       ));
     },
-    [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location],
+    [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location, packageDefault],
   );
   const [drafts, setDrafts] = React.useState<Record<string, string>>({});
   // The seller's open or closed choice for "Show more" and "See … options". A saved value starts open.
@@ -672,7 +680,8 @@ export function StructuredEditor({
     : [];
   // A marketplace form that names its headings keeps them, with its order and row layout.
   const pageLayout = nativeTab && renderedFields.some((field) => field.section);
-  const sections = pageLayout ? nativeFormSections(renderedFields) : groupFieldsIntoSections(renderedFields);
+  const sections = pageLayout ? nativeFormSections(renderedFields)
+    : tab === "general" ? generalFormSections(renderedFields) : groupFieldsIntoSections(renderedFields);
   // Only loading, errors and gaps get a line; a form that loaded fine needs none.
   const formStatus = nativeTab && !nativeQuery.data && nativeQuery.isFetching
     ? "Loading the marketplace’s category fields and choices…"
@@ -803,6 +812,12 @@ export function StructuredEditor({
       return <VintedBrandSelect convId={convId} category={formFieldText(local["vinted_specifics.category"])}
         id={id} fieldKey={f.key} value={text} disabled={locked}
         onChange={(value) => commitField(f.key, value)} />;
+    }
+    if (tab === "general" && f.key === "category_path") {
+      return <GeneralCategorySelect id={id} fieldKey={f.key} value={text} disabled={locked}
+        onChange={(path) => commitField(f.key, path)}
+        fallback={<Input nativeInput id={id} data-listing-field={f.key} value={text} readOnly={locked} disabled={locked}
+          placeholder="Men > Shirts > T-Shirts" onChange={(e) => { setFieldDraft(f.key, e.target.value); }} onBlur={() => handleBlur(f.key)} />} />;
     }
     if (f.options?.length || f.selectionOnly) {
       return (
