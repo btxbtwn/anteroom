@@ -27,3 +27,14 @@ def test_runtime_exposes_complete_chrome_session_workflows(cloud, signing_keys):
 
     client.app.state.promotion_scheduler = SimpleNamespace(done=lambda: True)
     assert 'marketplace_sessions' not in client.get('/api/runtime', headers=alice).json()['features']
+
+
+def test_heartbeat_accepts_the_complete_bridge_capabilities(cloud, signing_keys):  # noqa: F811
+    client, _ = cloud
+    capabilities = ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions',
+                    'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import']
+    response = client.post('/api/browser-relay/heartbeat', headers=headers(signing_keys), json={'capabilities': capabilities})
+    assert response.status_code == 200, response.text
+    unknown = client.post('/api/browser-relay/heartbeat', headers=headers(signing_keys),
+                          json={'capabilities': [*capabilities, 'arbitrary.proxy']})
+    assert unknown.status_code == 422

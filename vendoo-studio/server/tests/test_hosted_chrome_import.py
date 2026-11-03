@@ -67,3 +67,11 @@ def test_chrome_import_reads_the_sellers_own_listings_through_their_tab(cloud, s
     assert client.get(f"/api/conversations/{imported['conversation_id']}", headers=bob).status_code == 404
     again = client.post('/api/chrome-import/poshmark', headers=alice, json={'listing': POST}).json()
     assert again['reused'] is True and again['conversation_id'] == imported['conversation_id']
+
+
+def test_heartbeat_accepts_the_import_bridge_capabilities(cloud, signing_keys):  # noqa: F811
+    client, _ = cloud
+    capabilities = ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions',
+                    'marketplace.sales_history', 'marketplace.import']
+    response = client.post('/api/browser-relay/heartbeat', headers=headers(signing_keys), json={'capabilities': capabilities})
+    assert response.status_code == 200, response.text
