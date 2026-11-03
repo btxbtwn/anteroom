@@ -153,6 +153,8 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Compile Bridge network rules in Chromium
         run: node scripts/check-bridge-network.mjs
+      - name: Verify remembered Bridge approval in Chromium
+        run: node scripts/check-bridge-connection.mjs
       - name: Desktop and phone layouts against the sandbox
         run: npm run e2e
       - name: Hosted desktop and phone against disposable Postgres
