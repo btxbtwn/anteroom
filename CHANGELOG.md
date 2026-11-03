@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.717 — 2026-11-03
+
+- Inventory refreshes reuse the status calculations already needed for sale summaries, reducing repeated database reads and note parsing.
+
 ## 0.1.716 — 2026-11-03
 
 - Correcting a Poshmark size or switching size systems now saves the selected size-group ID, so a displayed group name cannot keep a valid corrected size blocked by validation.
