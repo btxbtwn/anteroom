@@ -55,7 +55,7 @@ if changed '^vendoo-studio/'; then
   run "Anteroom code health" bash -c "cd vendoo-studio && npm run knip && '$BIN/lint-imports' && '$PY' scripts/check-dead-code.py && '$PY' scripts/check-design.py"
   run "Anteroom types" bash -c "cd vendoo-studio && CI=true '$PY' -m basedpyright"
   if [[ "$FAST" == "0" ]]; then
-    run "Anteroom browser tests (sandbox)" bash -c "cd vendoo-studio && npm run e2e && npm run e2e:hosted"
+    run "Anteroom browser tests (sandbox)" bash -c "cd vendoo-studio && node scripts/check-bridge-connection.mjs && npm run e2e && npm run e2e:hosted"
   fi
 fi
 

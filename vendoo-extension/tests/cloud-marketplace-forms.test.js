@@ -11,8 +11,12 @@ const FORM = { marketplace: 'poshmark', native: true, known: true, category_id: 
 
 async function connected(reader) {
   let records = {};
+  let approvals = {};
   const api = { runtime: { id: 'bridge', getURL: path => 'chrome-extension://bridge/' + path, getManifest: () => ({ version: '0.2.39' }) },
-    storage: { session: { get: async () => structuredClone(records), set: async value => { records = structuredClone(value); } } },
+    storage: {
+      session: { get: async () => structuredClone(records), set: async value => { records = structuredClone(value); } },
+      local: { get: async () => structuredClone(approvals), set: async value => { approvals = structuredClone(value); } },
+    },
     windows: { create: async () => ({ id: 9 }), remove: async () => {} },
     tabs: { get: async () => ({ url: ORIGIN + '/' }), sendMessage: async () => ({ current: true }) } };
   const bridge = createCloudConnection(api, { randomId: () => REQUEST, readForm: reader });
@@ -99,5 +103,19 @@ test('disconnecting during the final document probe also discards the result', a
   };
   const pending = s.page('poshmark_form', { listing: { title: 'Coat' } });
   await started; await s.page('disconnect'); finish({ current: true });
+  assert.equal((await pending).error_code, 'account_changed');
+});
+
+test('disconnect from another tab revokes an in-flight form read', async () => {
+  let finish, entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const s = await connected(() => { entered(); return new Promise(resolve => { finish = resolve; }); });
+  const second = { ...s.sender, tab: { id: 8, url: ORIGIN + '/' }, documentId: 'second-document' };
+  const message = { type: 'cloud.connection', action: 'status', accountId: ACCOUNT };
+  assert.equal((await s.bridge.handle(message, second)).state, 'connected');
+  const pending = s.page('poshmark_form', { listing: { title: 'Coat' } });
+  await started;
+  await s.bridge.handle({ ...message, action: 'disconnect' }, second);
+  finish({ ok: true, form: FORM });
   assert.equal((await pending).error_code, 'account_changed');
 });
