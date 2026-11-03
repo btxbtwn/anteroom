@@ -406,7 +406,10 @@ function ChromeSessionRow({
 }
 
 /** On the web, Chrome's marketplace sign-ins are read through this seller's connected Anteroom tab. */
-function HostedChromeSessions() {
+function HostedChromeSessions({ salesSwitch, checks }: {
+  salesSwitch?: (marketplace: string, name: string) => ReactNode;
+  checks?: Record<string, string>;
+}) {
   const sessions = useQuery({
     queryKey: ["marketplace-sessions"],
     queryFn: api.marketplaceSessions.status,
@@ -417,11 +420,12 @@ function HostedChromeSessions() {
   return (
     <>
       {CHROME_MARKET_ORDER.map((marketplace) => (
-        <ChromeSessionRow key={marketplace} marketplace={marketplace} chromeReady={chromeReady} unavailable={sessions.error?.message} />
+        <ChromeSessionRow key={marketplace} marketplace={marketplace} chromeReady={chromeReady} unavailable={sessions.error?.message}
+          salesSwitch={salesSwitch?.(marketplace, EXTENSION_SESSION_NAMES[marketplace])} checkError={checks?.[marketplace]} />
       ))}
       <SettingsRow
         title="Where the sign-in lives"
-        description="Depop, Poshmark, Mercari, Sellwild, and Vinted stay signed in through the Chrome where Anteroom Bridge runs. Anteroom reads only whether each is signed in, never the cookies or tokens. Sale detection runs in the Mac app."
+        description="Depop, Poshmark, Mercari, Sellwild, and Vinted stay signed in through the Chrome where Anteroom Bridge runs. Anteroom reads only whether each is signed in, never the cookies or tokens. Sales are checked while your browser is connected."
       >
         {sessions.isError ? <SettingsNote>{sessions.error.message}</SettingsNote> : null}
       </SettingsRow>
@@ -431,8 +435,9 @@ function HostedChromeSessions() {
 
 function MarketplaceSection() {
   const queryClient = useQueryClient();
-  // The web app has eBay and Etsy sign-in, and reads Chrome's sign-ins through the seller's tab. Sale detection stays on the Mac.
-  const { hosted } = useWorkspaceRuntime();
+  // Chrome sign-ins and sale checks use the seller's connected browser on the web.
+  const { hosted, features } = useWorkspaceRuntime();
+  const sessionWorkflows = !hosted || features.has("marketplace_sessions");
   const extension = useQuery({
     queryKey: ["extension-status"],
     queryFn: api.extension.status,
@@ -451,7 +456,7 @@ function MarketplaceSection() {
     queryKey: ["sale-detection"],
     queryFn: () => api.settings.saleDetection(),
     refetchInterval: 60_000,
-    enabled: !hosted,
+    enabled: sessionWorkflows,
   });
   const saveDetection = useMutation({
     mutationFn: ({ marketplace, enabled }: { marketplace: string; enabled: boolean }) =>
@@ -481,9 +486,14 @@ function MarketplaceSection() {
     return (
       <SettingsSection id="accounts" title="Accounts">
         {DIRECT_MARKETPLACES.map((marketplace) => (
-          <DirectConnectionRow key={marketplace.id} marketplace={marketplace} account={accounts?.[marketplace.id]} />
+          <DirectConnectionRow key={marketplace.id} marketplace={marketplace} account={accounts?.[marketplace.id]}
+            salesSwitch={sessionWorkflows ? salesSwitch(marketplace.id, marketplace.name) : undefined} checkError={detection.data?.checks?.[marketplace.id]} />
         ))}
-        <HostedChromeSessions />
+        <HostedChromeSessions salesSwitch={sessionWorkflows ? salesSwitch : undefined} checks={detection.data?.checks} />
+        {sessionWorkflows ? <SettingsRow id="sale-detection" title="Sale detection"
+          description="Chrome checks your marketplace sales while this browser is connected. If orders cannot be read, saved sales are kept.">
+          {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
+        </SettingsRow> : null}
       </SettingsSection>
     );
   }
