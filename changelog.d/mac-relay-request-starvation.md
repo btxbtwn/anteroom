@@ -1,1 +1,0 @@
-- Keep the Mac's AI connection responsive while slow web requests are running, and improve diagnostics for failed draft generation.

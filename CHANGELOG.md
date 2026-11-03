@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.690 — 2026-11-03
+
+- Keep the Mac's AI connection responsive while slow web requests are running, and improve diagnostics for failed draft generation.
+
 ## 0.1.689 — 2026-11-03
 
 - Fix website Chrome connections dropping the sales-history capability, preventing marketplace orders from reaching the shared account used by the website and iPhone.
