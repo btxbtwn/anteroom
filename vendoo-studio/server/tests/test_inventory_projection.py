@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from test_seller_ownership import migration_config, migration_engine  # noqa: F401
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.listing import Listing, ListingRevision
-from vendoo_studio.routes.hosted_workspace import list_conversations
+from vendoo_studio.routes.hosted_workspace import inventory_response
 from vendoo_studio.services import schema_migrations
 from vendoo_studio.services.account_import import _row
 from vendoo_studio.services.inventory_analytics import load_rows
@@ -37,7 +37,7 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
         try:
             suggestion = _listing_rows(db)[0]
             analytics = load_rows(db)[0]
-            summary = list_conversations(db)[0]
+            summary = inventory_response(db)[0]
         finally:
             event.remove(engine, "before_cursor_execute", capture)
         assert suggestion[3:] == ("Example", ["Men", "Coats"], ["Winter"], "Wool coat", "Coat", ["Wool"])

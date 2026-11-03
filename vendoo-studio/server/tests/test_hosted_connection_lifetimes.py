@@ -485,5 +485,5 @@ def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
     monkeypatch.setattr('vendoo_studio.services.inventory_analytics.read_analytics_inputs',
                         lambda _db: AnalyticsInputs({}, {}, [], {}, {}))
     monkeypatch.setattr('vendoo_studio.services.sales_records.read_sale_lines', lambda _db: [])
-    assert hosted_workspace.list_conversations(DB()) == []
+    assert hosted_workspace.inventory_response(DB()) == []
     assert closed == ['closed']

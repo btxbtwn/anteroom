@@ -221,6 +221,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         # fields and unknown extra keys. The hosted boundary never reflects them.
         return JSONResponse({'detail': 'Check the supplied values and try again'}, status_code=422)
 
+    from vendoo_studio.services.hosted_read_snapshots import SellerReadSnapshots
+    app.state.seller_reads = SellerReadSnapshots()
     from vendoo_studio.routes.hosted_drafts import router
     app.include_router(router)
     from vendoo_studio.routes.internal_devices import router as internal_router
@@ -244,12 +246,11 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.include_router(shared_router)
     from vendoo_studio.routes.photos import edit_router
     app.include_router(edit_router)
-    from vendoo_studio.routes import listing_templates, listing_copies, similar_items, changelog, suggestions
+    from vendoo_studio.routes import listing_templates, listing_copies, similar_items, changelog
     app.include_router(listing_templates.router)
     app.include_router(listing_copies.router)
     app.include_router(similar_items.router)
     app.include_router(changelog.router)
-    app.include_router(suggestions.router)
     from vendoo_studio.routes.hosted_prices import router as prices_router
     app.include_router(prices_router)
     from vendoo_studio.routes.hosted_marketplace_accounts import router as accounts_router
