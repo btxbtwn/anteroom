@@ -1,0 +1,1 @@
+- Sale records now ask for the same amounts as Mark as sold, with the same names, and use the item's Cost of Goods, so a sale entered on the form no longer shows missing refunds or item cost.

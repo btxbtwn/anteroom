@@ -36,10 +36,11 @@ struct SalesLedgerPage: Decodable, Sendable {
 }
 
 struct SalesLedgerRow: Decodable, Identifiable, Sendable {
-    static let fields = ["item_revenue", "shipping_credit", "refunds", "fees", "shipping_cost", "item_cost"]
-    static let labels = ["item_revenue": "Item revenue total", "shipping_credit": "Shipping collected",
-                         "refunds": "Revenue refunded", "fees": "Net fees", "shipping_cost": "Shipping cost total",
-                         "item_cost": "Item cost total"]
+    /// The amounts Mark as sold asks for, in its order and words (SALE_FORM_FIELDS).
+    /// Refunds and the item's cost are left as they are.
+    static let fields = ["item_revenue", "shipping_credit", "fees", "shipping_cost"]
+    static let labels = ["item_revenue": "Sale price", "shipping_credit": "Shipping the buyer paid",
+                         "fees": "Fees", "shipping_cost": "Shipping you paid"]
 
     let id: String
     let marketplace: String
