@@ -1,0 +1,3 @@
+- Pick the General category from a dropdown: click through the levels or search, instead of typing the path.
+- The General form now reads in order: Item (category, department, brand), Listing, Condition & details, Pricing, Shipping, then Inventory.
+- SKU, Cost and Package dimensions appear once on the General tab instead of twice. The Box picker sits under Notes & Labels and shows the cost a blank Cost uses.
