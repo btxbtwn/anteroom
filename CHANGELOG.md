@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.704 — 2026-11-03
+
+- Recorded the 0.1.702 hosted deploy measurements and left the database password unchanged
+
 ## 0.1.703 — 2026-11-03
 
 - Open every marketplace form (eBay, Poshmark, Mercari, Depop and Sellwild) much faster on the web: a form now checks your saved details with a single database read instead of about sixty.
