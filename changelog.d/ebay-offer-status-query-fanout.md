@@ -1,0 +1,1 @@
+- Speed up eBay offer status by loading inventory data in bulk instead of making extra database queries for every listing.
