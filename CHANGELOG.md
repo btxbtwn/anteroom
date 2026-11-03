@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.714 — 2026-11-03
+
+- Open tabs share inventory and suggestion results until your account data changes, so refreshing the same lists does not repeatedly rebuild them while you work on other drafts.
+
 ## 0.1.713 — 2026-11-03
 
 - Opening and editing several listings shares the initial screen reads and loads marketplace forms when you use their tabs, instead of repeatedly loading every form in the background.
