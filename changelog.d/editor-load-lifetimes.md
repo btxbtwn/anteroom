@@ -1,2 +1,0 @@
-- Opening and editing several listings shares the initial screen reads and loads marketplace forms when you use their tabs, instead of repeatedly loading every form in the background.
-- Editor, catalog and marketplace responses return their database connections before sending data, leaving connections available for other listings and sellers.

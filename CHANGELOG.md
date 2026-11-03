@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.713 — 2026-11-03
+
+- Opening and editing several listings shares the initial screen reads and loads marketplace forms when you use their tabs, instead of repeatedly loading every form in the background.
+- Editor, catalog and marketplace responses return their database connections before sending data, leaving connections available for other listings and sellers.
+
 ## 0.1.712 — 2026-11-03
 
 - Inventory releases its database connection before calculating sale totals and missing sale details, keeping draft generation and other screens responsive during refreshes.
