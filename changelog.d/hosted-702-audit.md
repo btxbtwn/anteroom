@@ -1,0 +1,1 @@
+- Recorded the 0.1.702 hosted deploy measurements and left the database password unchanged
