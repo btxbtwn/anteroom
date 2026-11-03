@@ -92,7 +92,7 @@ def _sale_out(sale: MarketplaceSale, conv: Conversation | None, listings: dict, 
 
 
 @router.get("/api/marketplace-sales")
-def list_sales(background_tasks: BackgroundTasks, state: str | None = "new", conversation_id: str | None = None, db: Session = Depends(get_db)):
+def list_sales(background_tasks: BackgroundTasks, state: str | None = "new", conversation_id: str | None = None, db: Session = Depends(get_db, scope="function")):
     from vendoo_studio.services import recent_ebay_orders
 
     background_tasks.add_task(recent_ebay_orders.refresh)

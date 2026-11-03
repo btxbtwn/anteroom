@@ -24,7 +24,7 @@ class MarkRequest(BaseModel):
 
 
 @router.get("")
-def listings(conv_id: str, db: Session = Depends(get_db)):
+def listings(conv_id: str, db: Session = Depends(get_db, scope="function")):
     try:
         return marketplace_delist.listings(db, conv_id)
     except marketplace_delist.DelistError as exc:
