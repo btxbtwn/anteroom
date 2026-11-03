@@ -1,0 +1,1 @@
+- Inventory, suggestions and sales totals read small saved fields without repeatedly unpacking every marketplace form, leaving the database available for draft generation and edits.

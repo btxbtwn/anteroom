@@ -2,11 +2,11 @@
 from importlib import import_module
 
 from alembic import command
+from sqlalchemy import MetaData, Table
 from sqlalchemy.orm import Session
 
 from test_seller_ownership import migration_config, migration_engine  # noqa: F401
-from vendoo_studio.services import listing_persistence
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ListingRepo
 from vendoo_studio.services.native_category_match import native_rows
 
 backfill = import_module("vendoo_studio.migrations.versions.b4e9d2c7a813_marketplace_tabs_keep_their_own_category")
@@ -44,11 +44,19 @@ def test_a_tabs_own_category_and_unknown_ids_are_left_alone():
 def test_upgrade_fills_the_current_revision(migration_engine):  # noqa: F811
     config = migration_config(migration_engine)
     command.upgrade(config, backfill.down_revision)
-    with Session(migration_engine) as db:
-        conv = ConversationRepo(db).create(title="Tee")
-        old = listing_persistence.save_revision(db, conv.id, {"title": "Tee"}, "model")
-        current = listing_persistence.save_revision(db, conv.id, {"title": "Tee", **VENDOO}, "model", parent_revision_id=old.id)
-        ids = (old.id, current.id)
+    # Seed the historical layout with its own reflected tables, rather than
+    # using current models that require columns added by later migrations.
+    ids = ("old-revision", "current-revision")
+    with migration_engine.begin() as connection:
+        metadata = MetaData()
+        conversations = Table("conversations", metadata, autoload_with=connection)
+        revisions = Table("listing_revisions", metadata, autoload_with=connection)
+        listings = Table("listings", metadata, autoload_with=connection)
+        connection.execute(conversations.insert().values(id="item", title="Tee"))
+        connection.execute(revisions.insert().values(id=ids[0], conversation_id="item", listing_json={"title": "Tee"}, source="model"))
+        connection.execute(revisions.insert().values(id=ids[1], conversation_id="item", listing_json={"title": "Tee", **VENDOO},
+                                                     source="model", parent_revision_id=ids[0]))
+        connection.execute(listings.insert().values(conversation_id="item", current_revision_id=ids[1]))
     command.upgrade(config, "head")
     with Session(migration_engine) as db:
         repo = ListingRepo(db)

@@ -153,6 +153,11 @@ def test_populated_previous_release_upgrade_preserves_records_and_old_foreign_ke
     schema_migrations.ensure_schema(engine)
     for row in before.get("listing_revisions", []):
         row["inventory_quantity"] = None
+        row["inventory_fields"] = {
+            "sku": None, "price": 42, "quantity": None, "cost": None, "brand": None,
+            "category_path": None, "title": "Vintage coat", "type": None,
+            "season": None, "material": None,
+        }
     assert read_rows(engine, names) == before
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
