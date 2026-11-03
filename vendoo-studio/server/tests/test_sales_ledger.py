@@ -189,8 +189,8 @@ def test_inventory_reports_missing_sale_fields_and_clears_them_when_recorded(led
     response = ledger.client.get("/api/conversations")
     assert response.status_code == 200, response.text
     coat = next(row for row in response.json() if row["id"] == "coat")
-    assert coat["missing_sale_data"] == ["fees", "shipping cost"]
-    assert report(ledger)["rows"][0]["missing_sale_data"] == ["fees", "shipping cost"]
+    assert coat["missing_sale_data"] == ["fees", "shipping you paid"]
+    assert report(ledger)["rows"][0]["missing_sale_data"] == ["fees", "shipping you paid"]
     save(ledger)
     assert ledger.client.get("/api/conversations/coat").json()["missing_sale_data"] == []
     assert ledger.client.get("/api/conversations").json()[0]["missing_sale_data"] == []
@@ -237,7 +237,7 @@ def test_import_uses_the_same_recorded_item_cost_as_analytics(ledger):
     # The saved listing costs $5 per unit and this order has two units.
     assert float(row["financials"]["item_cost"]) == 10
     assert row["profit"] == "30.15"
-    assert "item cost" not in row["missing_sale_data"]
+    assert "cost of goods" not in row["missing_sale_data"]
 
 
 def test_import_dates_are_filtered_in_utc_and_unknown_dates_are_flagged(ledger):
@@ -288,7 +288,9 @@ def test_local_unknown_amounts_are_not_replaced_with_old_imported_amounts(ledger
     response = save(ledger, fees=None, item_cost=None, item_revenue=None)
     assert response.status_code == 200
     row = next(item for item in load_rows(ledger.db) if item.sale_id == ledger.sale.id)
-    assert row.fees is None and row.cost is None and row.sold_price is None
+    assert row.fees is None and row.sold_price is None
+    # With no item cost of its own, the sale uses the item's cost: $10 from Vendoo for each of two units.
+    assert row.cost == 20
 
 
 def test_financials_are_saved_on_the_existing_line_and_use_exact_decimal_totals(ledger):
@@ -395,7 +397,7 @@ def test_csv_preserves_unknowns_and_numeric_fee_credits_while_neutralizing_text_
     response = ledger.client.get("/api/sales-ledger/export/sales.csv", params=filters())
     row = next(csv.DictReader(StringIO(response.content.decode("utf-8-sig"))))
     assert row["title"].startswith("'=")
-    assert row["fees"] == "-1.25" and row["item_cost"] == row["profit"] == ""
+    assert row["fees"] == "-1.25" and row["item_cost"] == "10" and row["profit"] == "35.65"
     assert "never-export" not in response.text
     assert response.headers["cache-control"] == "no-store"
 
@@ -414,3 +416,28 @@ def test_date_filters_are_utc_and_export_errors_remain_json(ledger):
     assert ledger.client.get("/api/sales-ledger", params={"start": "2000-02-02", "end": "2000-01-01"}).status_code == 422
     assert ledger.client.get("/api/sales-ledger/export/sales.csv", params={**filters(), "marketplace": "vendoo"}).status_code == 422
     assert ledger.client.get("/api/sales-ledger/missing").status_code == 404
+
+
+def test_mark_as_sold_amounts_make_a_complete_record_using_the_items_cost_of_goods(ledger):
+    sold_on = datetime.now(UTC).date().isoformat()
+    response = ledger.client.post("/api/conversations/coat/marketplace-listings/sold", json={
+        "marketplace": "other", "sold_on": sold_on, "quantity": 1, "currency": "USD", "item_revenue": "40",
+        "shipping_credit": "5", "fees": "4", "shipping_cost": "6", "request_id": "a" * 32})
+    assert response.status_code == 200, response.text
+    sale = response.json()["sale"]
+    # Exactly what the form took, plus the item's $5 Cost of Goods; no refund was asked for.
+    assert {key: sale["financials"][key] for key in ("item_revenue", "shipping_credit", "fees", "shipping_cost", "item_cost")} == {
+        "item_revenue": "40", "shipping_credit": "5", "fees": "4", "shipping_cost": "6", "item_cost": "5"}
+    assert sale["missing_sale_data"] == [] and sale["profit"] == "30"
+    assert sale["sold_at"].startswith(sold_on)
+
+
+def test_record_form_keeps_amounts_it_does_not_show(ledger):
+    assert save(ledger, refunds="2.00", item_cost="7").status_code == 200
+    current = record(ledger)
+    response = ledger.client.put(f"/api/sales-ledger/{ledger.sale.id}/financials", json={
+        "currency": "USD", "item_revenue": "50", "shipping_credit": "0", "fees": "5", "shipping_cost": "4",
+        "expected_revision": current["financial_revision"], "expected_order_basis": current["order_basis"]})
+    assert response.status_code == 200, response.text
+    saved = response.json()["financials"]
+    assert saved["refunds"] == "2.00" and saved["item_cost"] == "7" and saved["item_revenue"] == "50"
