@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.688 — 2026-11-03
+
+- Speed up web inventory, filters and sales checks by reading saved listing fields without repeatedly parsing large marketplace forms.
+- Keep slow marketplace checks from interrupting draft generation or its lease renewal.
+
 ## 0.1.687 — 2026-11-03
 
 - Fix a Chrome network-rule limit that prevented marketplace requests and sales reads across the Bridge.
