@@ -78,7 +78,7 @@ The combined marketplace-session workflow below exposes these panels.
 On `feat/hosted-chrome-imports`, the Chrome inventory import reads Poshmark,
 Mercari, Depop, Sellwild and Vinted listings in the seller's own Chrome through
 their Anteroom tab, with two named reads under the Bridge capability
-`marketplace.import` (Bridge 0.2.51). The hosted API mounts the desktop
+`marketplace.import` (Bridge 0.2.53). The hosted API mounts the desktop
 `chrome-import` routes in the seller's row-secured context; imported photos go
 to their private Storage through the same safe public download as eBay and
 Etsy. The import is enabled with the combined `marketplace_sessions` workflow below.
@@ -89,6 +89,15 @@ confirmation or a seller-enabled rule and never publish or delist. Vinted
 retains the desktop order-response limitation described above. Facebook,
 Grailed and Vendoo stay excluded, and video remains desktop-only. No deployment
 or extension publication is implied by these PRs.
+
+On `feat/hosted-marketplace-sessions`, the imports, sale checks and promotion
+layers are combined. Hosted `/api/runtime` declares `marketplace_sessions`
+while both the sale-check and promotion timers are running. The shared Chrome
+marketplace pages show their inventory imports, Settings → Connections shows
+seller-owned Detect sales switches, and Automations shows sharing schedules
+and offers to likers. The pages work at desktop and phone sizes; saving a rule
+leaves it off, and sale-detection changes survive reload. Session notices read
+the hosted browser relay instead of querying the Mac's extension status.
 
 ## Completion checklist
 
@@ -408,16 +417,6 @@ only each sign-in's state, expiry and account label, never cookies or tokens.
 The later marketplace-session layers below add hosted sale-detection switches.
 
 Anteroom has no Facebook Marketplace or Grailed support on the Mac or the web.
-
-
-On `feat/hosted-marketplace-sessions`, the imports, sale checks and promotion
-layers are combined. Hosted `/api/runtime` declares `marketplace_sessions`
-while both the sale-check and promotion timers are running. The shared Chrome
-marketplace pages show their inventory imports, Settings → Connections shows
-seller-owned Detect sales switches, and Automations shows sharing schedules
-and offers to likers. The pages work at desktop and phone sizes; saving a rule
-leaves it off, and sale-detection changes survive reload. Session notices read
-the hosted browser relay instead of querying the Mac's extension status.
 
 Bridge 0.2.51 remembers approved hosted accounts in the Chrome profile and the
 web page retries a temporarily unavailable Bridge automatically. Disconnect and

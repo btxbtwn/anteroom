@@ -44,7 +44,7 @@ MARKETPLACE_PROMOTIONS = "marketplace.promotions"
 NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
          SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices"),
          MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in"),
-         MARKETPLACE_IMPORT: ("0.2.51", "import your listings"),
+         MARKETPLACE_IMPORT: ("0.2.53", "import your listings"),
          SALES_HISTORY: ("0.2.47", "read marketplace orders"),
          MARKETPLACE_PROMOTIONS: ("0.2.52", "share listings and send offers")}
 
