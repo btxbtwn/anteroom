@@ -36,8 +36,6 @@ final class SellerInputSandboxTests: XCTestCase {
         enter("seller-flaws", text: "Small mark near hem", app: app)
         enter("seller-labels", text: "Spring, Ready", app: app)
         attach(app, name: "Seller notes flaws and labels")
-        enter("seller-cog", text: "8.50", app: app)
-        enter("seller-package", text: "12x9x3", app: app)
         enter("measurement-top-pitToPit", text: "22.5", app: app)
         let picker = app.segmentedControls["seller-garment"]
         XCTAssertTrue(picker.exists)
@@ -65,7 +63,6 @@ final class SellerInputSandboxTests: XCTestCase {
         // The editor opens at once and fills its fields when the listing loads.
         expectValue("seller-notes", "Found at a local estate sale", app: app)
         expectValue("seller-flaws", "Small mark near hem", app: app)
-        expectValue("seller-package", "12x9x3", app: app)
         expectValue("measurement-top-pitToPit", "22.5", app: app)
         reveal(app.segmentedControls["seller-garment"], app: app)
         app.segmentedControls["seller-garment"].buttons["Pants"].tap()

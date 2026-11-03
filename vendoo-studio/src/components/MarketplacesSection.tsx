@@ -1,6 +1,6 @@
 import { useWorkspaceRuntime } from "../app/runtime";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
@@ -26,7 +26,7 @@ const REMOVED: Record<Marketplace, string> = {
   ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted", sellwild: "Delisted", vinted: "Deleted",
 };
 
-type Tone = "live" | "neutral" | "busy" | "attention" | "failed" | "idle";
+type Tone = "live" | "sold" | "neutral" | "busy" | "attention" | "failed" | "idle";
 type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; detail?: string | null; said?: string | null };
 
 const BUSY = new Set(["saving", "publishing", "updating"]);
@@ -72,6 +72,7 @@ function secondsUntil(iso: string | null | undefined, now: number): number {
 
 const TONE_ICON: Record<Tone, ReactNode> = {
   live: <CheckCircle2Icon aria-hidden className="size-3.5 text-success" />,
+  sold: <BadgeDollarSignIcon aria-hidden className="size-3.5 text-info" />,
   neutral: <MinusCircleIcon aria-hidden className="size-3.5 text-muted-foreground" />,
   busy: <Spinner size="sm" tone="muted" />,
   attention: <AlertTriangleIcon aria-hidden className="size-3.5 text-warning" />,
@@ -86,7 +87,7 @@ export function deletable(entry: MarketplaceListing | undefined): boolean {
 /** One status per marketplace. A live listing wins. Anything else is not listed; Anteroom holds the listing. */
 export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | undefined, draft: NativeDraft | undefined,
   _revisionId: string | null, etsyEligible: boolean): Status {
-  if (live?.sold_here) return { tone: "neutral", label: "Sold here", href: live.url ?? undefined, hrefLabel: "View" };
+  if (live?.sold_here) return { tone: "sold", label: "Sold here", href: live.url ?? undefined, hrefLabel: "View" };
   const said = draft?.marketplace_message ? `${marketplaceName(marketplace)} said: ${draft.marketplace_message}` : null;
   if (draft && isRunning(draft)) {
     return { tone: "busy", label: draft.state === "updating" ? "Updating…" : draft.action === "save_draft" ? "Saving draft…" : "Listing…", detail: draft.progress ? `${draft.progress.label}…` : null };
@@ -653,7 +654,8 @@ export function MarketplacesLayout({
                     <span className="block truncate font-medium text-foreground">{name}</span>
                     {status && !quiet && (
                       <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground",
-                        status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground")}>
+                        status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
+                        status.tone === "sold" && "text-info-foreground")}>
                         {TONE_ICON[status.tone]}
                         <span className="truncate">{status.label}</span>
                       </span>
@@ -700,7 +702,10 @@ export function MarketplacesLayout({
         {selling && <MarkSoldForm key={selling.key} initial={selling.marketplace} pending={recordSale.isPending}
           error={recordSale.error?.message} onSubmit={(sale) => recordSale.mutate(sale)} onCancel={() => setSelling(null)} />}
         {selectedMarketplace && selectedStatus && (
-          <section data-marketplace-pane={selectedMarketplace} className="flex flex-col gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs">
+          <section data-marketplace-pane={selectedMarketplace} data-tone={selectedStatus.tone}
+            className={cn("flex flex-col gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs",
+              // The marketplace where the item sold stands apart from the ones still listed.
+              selectedStatus.tone === "sold" && "border border-info/32 bg-info/4")}>
             {/* Name on the left, every action on the right. A listed item's state is
                 already on its rail row, so the bar only spells out the others. */}
             <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -708,7 +713,7 @@ export function MarketplacesLayout({
                 <MarketplaceLogo id={selectedMarketplace} label={railLabel(selectedMarketplace)} size={16} />
                 <span className="truncate font-medium text-foreground text-sm">{railLabel(selectedMarketplace)}</span>
                 {selectedStatus.tone !== "live" && (
-                  <span className={cn("flex min-w-0 items-center gap-1 text-muted-foreground", selectedStatus.tone === "failed" && "text-destructive-foreground", selectedStatus.tone === "attention" && "text-warning-foreground")}>
+                  <span className={cn("flex min-w-0 items-center gap-1 text-muted-foreground", selectedStatus.tone === "failed" && "text-destructive-foreground", selectedStatus.tone === "attention" && "text-warning-foreground", selectedStatus.tone === "sold" && "font-medium text-info-foreground")}>
                     {selectedStatus.tone !== "idle" && TONE_ICON[selectedStatus.tone]}
                     <span className="truncate">{selectedStatus.tone === "idle" ? "Not listed yet" : selectedStatus.label}</span>
                   </span>

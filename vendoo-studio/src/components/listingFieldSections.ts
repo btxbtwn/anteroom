@@ -134,3 +134,35 @@ export function groupFieldsIntoSections<T extends SectionField>(fields: T[]): Fi
     return [{ id, title: titles.get(id) || id, fields: sorted.map((entry) => entry.field) }];
   });
 }
+
+/**
+ * The General tab's own order. It reads the way a seller describes an item:
+ * what it is, how it is presented, its condition, then price, shipping and
+ * stock. Category comes first because it is the one required field and it
+ * decides the category each marketplace form uses. Rows sit in pairs only
+ * when they belong together (price and cost, weight and dimensions).
+ */
+const GENERAL_SECTIONS: { id: string; title: string; keys: string[] }[] = [
+  { id: "item", title: "Item", keys: ["category_path", "department", "brand"] },
+  { id: "listing", title: "Listing", keys: ["title", "description"] },
+  { id: "details", title: "Condition & details", keys: ["condition", "size", "primaryColor", "secondaryColor"] },
+  { id: "pricing", title: "Pricing", keys: ["price", "cost"] },
+  { id: "shipping", title: "Shipping", keys: ["weight_oz", "package_dimensions_in", "zipCode"] },
+  { id: "inventory", title: "Inventory", keys: ["quantity", "sku"] },
+];
+
+export function generalFormSections<T extends SectionField>(fields: T[]): FieldSection<T>[] {
+  const byKey = new Map(fields.map((field) => [field.key, field]));
+  const placed = new Set<string>();
+  const sections = GENERAL_SECTIONS.flatMap((section) => {
+    const rows = section.keys.flatMap((key) => {
+      const field = byKey.get(key);
+      if (!field) return [];
+      placed.add(key);
+      return [field];
+    });
+    return rows.length ? [{ id: section.id, title: section.title, fields: rows }] : [];
+  });
+  const rest = fields.filter((field) => !placed.has(field.key));
+  return rest.length ? [...sections, { ...OTHER, fields: rest }] : sections;
+}

@@ -6,6 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.699 — 2026-11-03
+
+- Sort sold items by their latest sale, including sales Anteroom recorded from the marketplaces, so a new eBay sale shows at the top of Sold.
+- Show the marketplace where an item sold in its own blue color on the listing form.
+
+## 0.1.698 — 2026-11-03
+
+- Pick the General category from a dropdown: click through the levels or search, instead of typing the path.
+- The General form now reads in order: Item (category, department, brand), Listing, Condition & details, Pricing, Shipping, then Inventory.
+- SKU, Cost and Package dimensions appear once on the General tab instead of twice. The Box picker sits under Notes & Labels and shows the cost a blank Cost uses.
+- On iPhone, the General form uses the same order and category picker, and SKU, Cost and Package dimensions appear once.
+
 ## 0.1.697 — 2026-11-03
 
 - Generating a listing no longer refreshes every open listing each time the draft renews its lease. Saved changes, completion, failure and cancellation still update other devices.

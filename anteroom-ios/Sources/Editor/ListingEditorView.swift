@@ -56,7 +56,7 @@ struct ListingEditorView: View {
                         PhotoStrip(api: model.api, listingID: model.listingID, canAdd: model.isDraft)
                     }
                     SellerInputFields(inputs: $model.form.sellerInputs)
-                    GeneralListingFields(form: $model.form, options: model.options)
+                    GeneralListingFields(form: $model.form, options: model.options, api: model.api)
                 } else {
                     MarketplaceFormView(model: model, marketplace: tab)
                 }

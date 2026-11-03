@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupFieldsIntoSections } from "./listingFieldSections";
+import { generalFormSections, groupFieldsIntoSections } from "./listingFieldSections";
 
 const titles = (fields: { key: string; label: string; required?: boolean }[]) =>
   Object.fromEntries(groupFieldsIntoSections(fields).map((s) => [s.title, s.fields.map((f) => f.label)]));
@@ -57,5 +57,26 @@ describe("groupFieldsIntoSections", () => {
     expect(groups["Color & material"]).toEqual(["Fabric Weight"]);
     expect(groups["Inventory & identifiers"]).toEqual(["Unit Type"]);
     expect(groups["More details"]).toEqual(["Occasion *", "Theme", "Garment Care"]);
+  });
+});
+
+describe("generalFormSections", () => {
+  it("leads with the category and follows the seller's order", () => {
+    const keys = ["title", "description", "price", "cost", "quantity", "brand", "condition", "primaryColor",
+      "secondaryColor", "size", "sku", "zipCode", "category_path", "department", "weight_oz", "package_dimensions_in"];
+    const sections = generalFormSections(keys.map((key) => ({ key, label: key })));
+    expect(sections.map((s) => [s.title, s.fields.map((f) => f.key)])).toEqual([
+      ["Item", ["category_path", "department", "brand"]],
+      ["Listing", ["title", "description"]],
+      ["Condition & details", ["condition", "size", "primaryColor", "secondaryColor"]],
+      ["Pricing", ["price", "cost"]],
+      ["Shipping", ["weight_oz", "package_dimensions_in", "zipCode"]],
+      ["Inventory", ["quantity", "sku"]],
+    ]);
+  });
+
+  it("keeps a field it does not place under More details", () => {
+    const sections = generalFormSections([{ key: "title", label: "Title" }, { key: "tags", label: "Tags" }]);
+    expect(sections.map((s) => s.title)).toEqual(["Listing", "More details"]);
   });
 });
