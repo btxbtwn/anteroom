@@ -1,0 +1,1 @@
+- Speed up web inventory, filters and sales checks by reading saved listing fields without repeatedly parsing large marketplace forms.

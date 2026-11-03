@@ -62,3 +62,20 @@ Physical database, device and upstream provider capacity still exists. Handle
 backpressure and failures visibly, preserve drafts, allow cancellation and keep
 other work usable. Do not replace a removed limit with an undocumented global
 serialization gate or hide provider throttling behind a successful status.
+
+The real two-draft test on web/Mac 0.1.686 submitted both drafts, but both lost
+their worker leases and failed. Inventory field reads
+were CPU-heavy: fetching 1,332 current revision IDs took 364 ms, whereas reading
+three JSON fields took 3,850 ms. A seller-scoped field read exceeded a 15-second
+statement deadline during the same session. These observations do not establish
+a single cause for every timeout.
+
+Hosted `listing_revisions.listing_json` now uses PostgreSQL `jsonb`, avoiding
+the repeated full-document parsing described in the
+[PostgreSQL JSON documentation](https://www.postgresql.org/docs/current/datatype-json.html).
+SQLite keeps its existing JSON storage. A local PostgreSQL comparison using
+1,000 synthetic 192 KB forms and six extracted fields recorded three reads per
+format: median 306 ms for JSON and 104 ms for JSONB. This isolates storage cost;
+it is not a production latency or throughput result. The migration regression
+checks large nested forms, Unicode, numbers, nulls, current revision pointers,
+quantity history and two-seller row security against the previous schema.
