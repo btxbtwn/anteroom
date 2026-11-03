@@ -1,1 +1,0 @@
-- Fix a Chrome network-rule limit that prevented marketplace requests and sales reads across the Bridge.

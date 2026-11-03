@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.687 — 2026-11-03
+
+- Fix a Chrome network-rule limit that prevented marketplace requests and sales reads across the Bridge.
+
 ## 0.1.686 — 2026-11-02
 
 - Generate independent drafts concurrently across accounts and devices, including overlapping batches, without locking unrelated inventory work.
