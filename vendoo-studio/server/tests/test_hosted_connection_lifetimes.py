@@ -304,3 +304,39 @@ def test_submit_returns_the_task_id_for_streaming(monkeypatch):
     monkeypatch.setattr(hosted_tasks.queue, 'draft_payload', lambda *_args, **_kwargs: {})
     monkeypatch.setattr(hosted_tasks.queue, 'enqueue', lambda *_args, **_kwargs: SimpleNamespace(id='task2'))
     assert hosted_tasks.submit(DB(), 'draft', 'generate') == 'task2'
+
+
+def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
+    """A large inventory JSON body must not keep a pooled connection checked out."""
+    from vendoo_studio.routes import hosted_workspace
+
+    closed = []
+
+    class Result:
+        def all(self):
+            return []
+
+    class DB:
+        def scalars(self, *_args, **_kwargs):
+            return Result()
+
+        def execute(self, *_args, **_kwargs):
+            return []
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            closed.append('closed')
+
+    class Repo:
+        def __init__(self, db):
+            self.db = db
+
+        def reconcile_job_statuses(self):
+            return None
+
+    monkeypatch.setattr('vendoo_studio.repositories.queries.ConversationRepo', Repo)
+    monkeypatch.setattr('vendoo_studio.services.sales_records.missing_by_conversation', lambda _db: {})
+    assert hosted_workspace.list_conversations(DB()) == []
+    assert closed == ['closed']

@@ -1,0 +1,1 @@
+- Your inventory list no longer keeps a cloud database connection open while the app sends the full list
