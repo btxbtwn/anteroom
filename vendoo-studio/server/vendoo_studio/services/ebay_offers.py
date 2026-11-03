@@ -56,13 +56,16 @@ def account_id() -> str:
     return str(account["accountId"])
 
 
-def _listing_id(db: Session, conv: Conversation) -> str | None:
-    from vendoo_studio.services.marketplace_delist import listings
-
-    entry = listings(db, conv.id).get("ebay") or {}
+def _offer_listing_id(entry: dict) -> str | None:
     if entry.get("sold_here") or entry.get("state") not in (None, "live", "failed"):
         return None
     return entry.get("listing_id")
+
+
+def _listing_id(db: Session, conv: Conversation) -> str | None:
+    from vendoo_studio.services.marketplace_delist import listings
+
+    return _offer_listing_id(listings(db, conv.id).get("ebay") or {})
 
 
 def _local_check(db: Session, rule: EbayOfferRule) -> None:
@@ -96,6 +99,10 @@ def attempt_out(attempt: EbayOfferAttempt, rule: EbayOfferRule, title: str | Non
 
 
 def status(db: Session) -> dict:
+    from vendoo_studio.models.marketplace_listing import MarketplaceListing
+    from vendoo_studio.services.marketplace_delist import known_listings, reported_sales
+    from vendoo_studio.services.vendoo_import import parse_notes
+
     last_check, last_error = _checks.get(_seller(), (None, None))
     account = get_marketplace_accounts().get("ebay") or {}
     seller = str(account.get("accountId") or "")
@@ -104,9 +111,18 @@ def status(db: Session) -> dict:
     listings = []
     seen = set()
     sold = {row[0] for row in db.query(MarketplaceSale.conversation_id).filter(MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending"))).all()}
+    # Sale-backed items are excluded below. Load the remaining links once;
+    # calling the full delist read for every item made thousands of queries.
+    native = {identity: {'ebay': {'listing_url': url}} for identity, url in db.query(
+        MarketplaceListing.conversation_id, MarketplaceListing.listing_url,
+    ).filter(MarketplaceListing.marketplace == 'ebay').all()}
     for conv in db.query(Conversation).filter(Conversation.status != "sold").order_by(Conversation.title).all():
-        listing_id = _listing_id(db, conv)
-        if not listing_id or listing_id in seen or conv.id in sold:
+        if conv.id in sold:
+            continue
+        notes = parse_notes(conv.notes)
+        entry = known_listings(notes, native.get(conv.id, {}), reported_sales(notes)).get('ebay') or {}
+        listing_id = _offer_listing_id(entry)
+        if not listing_id or listing_id in seen:
             continue
         seen.add(listing_id)
         rule = rules.get(listing_id)

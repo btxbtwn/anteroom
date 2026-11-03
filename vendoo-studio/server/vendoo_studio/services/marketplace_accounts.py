@@ -464,8 +464,8 @@ def _handler():
 def start_listening() -> None:
     """Listen for sales while any account is connected. Call on the server loop.
 
-    The web app does not listen yet: a sale there would need the seller's own
-    worker to record it and, if they turned it on, delist elsewhere.
+    Hosted sales use hosted_sales_scheduler with a separate context per seller;
+    this process-wide stream belongs only to the desktop.
     """
     if _on_web():
         return
