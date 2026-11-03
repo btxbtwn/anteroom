@@ -1,2 +1,0 @@
-- Sort sold items by their latest sale, including sales Anteroom recorded from the marketplaces, so a new eBay sale shows at the top of Sold.
-- Show the marketplace where an item sold in its own blue color on the listing form.

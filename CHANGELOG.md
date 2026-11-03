@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.699 — 2026-11-03
+
+- Sort sold items by their latest sale, including sales Anteroom recorded from the marketplaces, so a new eBay sale shows at the top of Sold.
+- Show the marketplace where an item sold in its own blue color on the listing form.
+
 ## 0.1.698 — 2026-11-03
 
 - Pick the General category from a dropdown: click through the levels or search, instead of typing the path.
