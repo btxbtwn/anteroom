@@ -101,3 +101,18 @@ endpoint limiter, and the in-memory status/reply handlers are async. The test
 keeps the endpoint blocked while all three control requests finish. Worker
 failures record exception types and source locations without exception text,
 SQL parameters or credentials, so subsequent failures can be diagnosed safely.
+
+Web 0.1.690 was deployed after PR #1157 passed its required checks. In the live
+retest, both drafts saved photo analysis, Mac status stayed responsive while
+another draft was open, and a note edit on that third draft was saved and
+cleared. Ordinary editor reads still took seconds, including requests beyond
+six seconds. Both generations later lost their leases. The safe worker logs
+confirmed `TaskLeaseExpired` while appending durable events.
+
+Draft lease renewal now has its own event-loop thread, shared by the worker's
+active drafts, rather than running on the execution loop that makes blocking
+database calls. It keeps each draft's seller context, existing lease fencing
+and cancellation rules, and stays alive while shutdown drains active work.
+The regression blocks the execution loop with two sellers' drafts active and
+verifies both leases renew with the correct seller and token. A full passing
+live generation retest remains required.

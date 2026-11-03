@@ -139,3 +139,11 @@ def test_generic_read_cannot_send_a_promotion():
     relay = hosted_browser_relay.BrowserRelay()
     with pytest.raises(ValueError, match='not a relayed read'):
         asyncio.run(relay.read('marketplace.promote', {'confirm': True}, 1))
+
+
+def test_heartbeat_accepts_the_promotion_bridge_capabilities(cloud, signing_keys):  # noqa: F811
+    client, _ = cloud
+    capabilities = ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions',
+                    'marketplace.sales_history', 'marketplace.promotions']
+    response = client.post('/api/browser-relay/heartbeat', headers=headers(signing_keys), json={'capabilities': capabilities})
+    assert response.status_code == 200, response.text

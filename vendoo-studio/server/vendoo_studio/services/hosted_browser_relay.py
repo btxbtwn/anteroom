@@ -84,6 +84,10 @@ class BrowserRelay(ReplyWaits):
     def connected(self) -> bool:
         return self._can(MARKETPLACE_ACTIONS)
 
+    def note_seen(self, capabilities: set[str]) -> None:
+        self._seen_at = time.monotonic()
+        self._capabilities = frozenset(capabilities)
+
     def refusal(self, capability: str = MARKETPLACE_ACTIONS) -> str | None:
         """Why this seller's Chrome cannot take a command needing ``capability`` now, or None."""
         if time.monotonic() - self._seen_at >= SEEN_FOR_S:
@@ -121,8 +125,7 @@ class BrowserRelay(ReplyWaits):
 
     async def next_message(self, capabilities: set[str], timeout: float) -> dict | None:
         """The next command for this seller's Chrome, waiting up to ``timeout`` seconds."""
-        self._seen_at = time.monotonic()
-        self._capabilities = frozenset(capabilities)
+        self.note_seen(capabilities)
         self._loop = asyncio.get_running_loop()
         deadline = time.monotonic() + timeout
         while not self._outbox:

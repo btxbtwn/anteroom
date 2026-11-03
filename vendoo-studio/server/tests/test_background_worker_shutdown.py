@@ -21,7 +21,7 @@ def test_shutdown_finishes_claimed_work_before_leaving(monkeypatch):
     async def exercise():
         started, release = asyncio.Event(), asyncio.Event()
 
-        async def execute(*claimed):
+        async def execute(*claimed, **_kwargs):
             started.set()
             await release.wait()
             finished.append(claimed)
@@ -69,7 +69,7 @@ def test_hosted_shutdown_drains_a_draft_after_its_browser_disconnects(monkeypatc
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)
 
-    async def execute(*_claimed):
+    async def execute(*_claimed, **_kwargs):
         started.set()
         await asyncio.to_thread(release.wait)
         finished.set()
