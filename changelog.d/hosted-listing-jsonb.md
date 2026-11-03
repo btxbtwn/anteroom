@@ -1,0 +1,2 @@
+- Speed up web inventory, filters and sales checks by reading saved listing fields without repeatedly parsing large marketplace forms.
+- Keep slow marketplace checks from interrupting draft generation or its lease renewal.
