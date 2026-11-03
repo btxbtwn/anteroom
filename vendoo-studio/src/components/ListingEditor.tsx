@@ -8,7 +8,7 @@ import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { listingEdits } from "../api/listingEdits";
-import { DIRECT_FORM_MARKETS, nativeFormOptions, prefetchListingForm } from "../api/listingForms";
+import { DIRECT_FORM_MARKETS, nativeFormOptions, prefetchListingForm, prefetchVintedChoices } from "../api/listingForms";
 import { PhotoTray } from "./PhotoTray";
 import { useListingSessionActive } from "./listingSession";
 import { VintedBrandSelect } from "./VintedBrandSelect";
@@ -249,6 +249,7 @@ export function ListingEditor({
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
         disabled={generating || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
+          if (tab === "vinted") void prefetchVintedChoices(queryClient, convId);
           if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
         }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}

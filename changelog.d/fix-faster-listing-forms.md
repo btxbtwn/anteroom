@@ -4,3 +4,5 @@
 - Marketplace forms now start loading in the background as soon as a listing opens on the web, and when you point at a marketplace tab.
 - On the Mac, loading a form no longer holds up the rest of the app.
 - Listing thumbnails load faster on the web, stay cached in your browser, and retry on their own when a download fails, instead of staying blank.
+- Vinted's categories now load once and are reused for every listing, and start loading when you point at the Vinted tab.
+- The Vinted, Etsy and General tabs read only the listing's newest version instead of every saved version.

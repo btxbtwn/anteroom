@@ -2,7 +2,7 @@ import { QueryObserver } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "./client";
 import { createStudioQueryClient } from "./queryClient";
-import { nativeFormOptions, prefetchListingForm } from "./listingForms";
+import { nativeFormOptions, prefetchListingForm, prefetchVintedChoices, vintedCategoriesOptions } from "./listingForms";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -41,5 +41,16 @@ it("downloads a marketplace's shared choice list once for every listing's form",
       expect(form?.fields[0]).not.toHaveProperty("choice_list");
     }
     expect(list).toHaveBeenCalledExactlyOnceWith("mercari-brands", "v1");
+  } finally { client.clear(); }
+});
+
+it("reads Vinted's category tree once for every listing and warms it before the tab opens", async () => {
+  const client = createStudioQueryClient();
+  const read = vi.spyOn(api.nativeMarketplaces, "vintedCategories").mockResolvedValue({ options: ["Women > Jeans"] });
+  try {
+    await prefetchVintedChoices(client, "one");
+    await client.fetchQuery(vintedCategoriesOptions("two"));
+    expect(client.getQueryData(vintedCategoriesOptions("three").queryKey)).toEqual({ options: ["Women > Jeans"] });
+    expect(read).toHaveBeenCalledExactlyOnceWith("one");
   } finally { client.clear(); }
 });

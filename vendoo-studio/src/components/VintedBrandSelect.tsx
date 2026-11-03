@@ -15,7 +15,8 @@ export function VintedBrandSelect({ convId, category, id, fieldKey, value, disab
     return () => clearTimeout(timer);
   }, [query]);
   const brands = useQuery({
-    queryKey: ["vinted-brands", convId, category, search],
+    // Vinted's brands do not depend on the listing; a search answered for one serves them all.
+    queryKey: ["vinted-brands", category, search],
     queryFn: () => api.nativeMarketplaces.vintedBrands(convId, search, category),
     enabled: !disabled,
     staleTime: 60_000,

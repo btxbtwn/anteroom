@@ -45,3 +45,22 @@ export function prefetchListingForm(client: QueryClient, convId: string, tab: st
     client.prefetchQuery({ queryKey: ["catalog-dropdown-options"], queryFn: api.catalog.dropdownOptions, staleTime: Infinity, retry: false }),
   ]);
 }
+
+/**
+ * Vinted's category tree is the same for every listing; the request only names a
+ * listing the seller can open. On the web it is read in the seller's Chrome, so
+ * one read serves every listing.
+ */
+export function vintedCategoriesOptions(convId: string) {
+  return queryOptions({
+    queryKey: ["vinted-categories"],
+    queryFn: () => api.nativeMarketplaces.vintedCategories(convId),
+    staleTime: 6 * 60 * 60 * 1000,
+    retry: false,
+  });
+}
+
+/** Warm Vinted's choices when the seller reaches for its tab, not on every listing open. */
+export function prefetchVintedChoices(client: QueryClient, convId: string) {
+  return client.prefetchQuery(vintedCategoriesOptions(convId));
+}
