@@ -179,3 +179,28 @@ The bundled 747 category paths, 263 size groups and 16,126 size choices were
 checked against [Poshmark's public catalog](https://poshmark.com/vm-rest/meta/catalog_v2).
 No bundled category or size IDs were missing at the time of the check. This
 does not rule out changes elsewhere in Poshmark's listing flow.
+
+## Hosted DeepSeek generation, 2026-11-03
+
+Production 0.1.720 completed a browser run with two concurrent drafts, a third
+draft's edit surviving reload, and mobile-web copy surviving reload, with no
+HTTP 5xx responses. The workflow took 391 seconds. Generation validation still
+reported a missing Mercari shipping-label choice on one draft; the other had
+no blockers. This proves saved drafts, not universal publishing readiness or
+native Mac/iOS parity.
+
+The selected OpenRouter model, `deepseek/deepseek-v4.1-flash-1017`, advertises
+high reasoning by default. A low-reasoning trial on the same release took 339
+seconds for the browser workflow, with no HTTP 5xx responses. One draft passed
+validation; the other had a provider-call failure during field finishing and
+six unverified required fields. Default reasoning was restored. The trial
+does not establish a reliable speed improvement. Its GET p95 was 4.77 seconds
+across 1,999 requests, so interactive read latency remains unresolved.
+
+Finishing refreshed and captured marketplace forms, then unnecessarily rebuilt
+them before filling fields. Filling now reuses the captured definitions while
+their category and dependent inputs match. Missing or stale definitions still
+refresh, and the final capture remains. The regression reduces four form-load
+passes to three for a simple strict fill without changing its validated
+answer. Production latency for this change still needs measurement after
+deployment.

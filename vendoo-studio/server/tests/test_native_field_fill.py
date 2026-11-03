@@ -144,6 +144,44 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         saved = self.repo.get_current(self.conv.id)
         return self.repo.get_revision(saved.current_revision_id)
 
+    async def test_finishing_reuses_the_form_it_just_recorded(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "12", "fields": [
+            row("ebay_specifics.Rise", "Rise", ["High"], required=True)]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "12"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        listing_persistence.save_revision(self.db, self.conv.id, listing, "native_schema")
+        reply = json.dumps({"fields": {"ebay_specifics.Rise": {"value": "High", "evidence": "high rise"}}})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})) as load, \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="Tag: high rise", markets={"ebay"})
+        self.assertEqual(saved["ebay_specifics"]["Rise"], "High")
+        self.assertEqual(native_contract.gaps(saved, "ebay"), [])
+        # Category inspection, capture before filling, and final capture only.
+        self.assertEqual(load.await_count, 3)
+
+    async def test_changed_category_does_not_reuse_previous_choices(self):
+        from vendoo_studio.services import native_contract
+
+        old_form = {"category_id": "12", "fields": [
+            row("ebay_specifics.Size", "Size", ["S"], required=True)]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "12"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": old_form}, ["ebay"])
+        listing["direct_category_ids"]["ebay"] = "13"
+        listing_persistence.save_revision(self.db, self.conv.id, listing, "native_schema")
+        new_form = {"category_id": "13", "fields": [
+            row("ebay_specifics.Size", "Size", ["M"], required=True)]}
+        reply = json.dumps({"fields": {"ebay_specifics.Size": {"value": "M", "evidence": "size M"}}})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": new_form})) as load, \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
+            saved = await native_field_fill._fill_native_fields(
+                self.db, self.conv.id, object(), evidence="Tag: size M", markets={"ebay"}, categories=False)
+        load.assert_awaited_once_with(self.db, self.conv.id, {"ebay"})
+        self.assertIn("choices: M", ask.call_args.args[1][1]["content"])
+        self.assertNotIn("choices: S", ask.call_args.args[1][1]["content"])
+        self.assertEqual(saved["ebay_specifics"]["Size"], "M")
+
     async def test_required_gap_gets_a_focused_evidence_checked_repair(self):
         from vendoo_studio.services import native_contract
 
