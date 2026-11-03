@@ -100,15 +100,15 @@ never put the URI or its password in fly.toml, source, logs or the frontend.
 
 Keep the migration login on the session pooler (port `5432`).
 
-The hosted process keeps a small SQLAlchemy pool (4 connections, 1 overflow)
+The hosted process keeps a small SQLAlchemy pool (8 connections, 4 overflow)
 to the transaction pooler and disables psycopg prepared statements. A new
 client connection measured about 800 ms from San Jose; reusing one measured
 about 70 ms, which was faster than session mode or a direct connection on
-2026-11-03. The pool waits at most one second for a free connection. Desktop
+2026-11-03. The pool waits at most three seconds for a free connection. Desktop
 and test processes still use `NullPool`. Supabase still enforces its own
 connection limit. On that date the database reported 60 `max_connections` and
-40 sessions already in `pg_stat_activity`, so this process stays within a
-budget of 5. A second process needs the same budget before it is added.
+about 40 sessions already in `pg_stat_activity`, so this process stays within a
+budget of 12. A second process needs its own budget before it is added.
 
 The hosted API exposes only draft inventory and its General fields/photos. Full Mac inventory import and marketplace actions remain separate increments.
 
