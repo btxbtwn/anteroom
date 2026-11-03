@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.715 — 2026-11-03
+
+- Notes and measurements typed while a listing loads stay visible and save correctly. Moving to another draft lets the pending save finish, and retrying keeps your edits and the listing's other saved details.
+
 ## 0.1.714 — 2026-11-03
 
 - Open tabs share inventory and suggestion results until your account data changes, so refreshing the same lists does not repeatedly rebuild them while you work on other drafts.
