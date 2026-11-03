@@ -23,3 +23,7 @@ PyJWKClient.fetch_data
 
 # direct_preflight.requirement("vinted") registers this callback for preflight checks.
 vinted_requirements
+
+# SQLAlchemy's @compiles registry calls these for generated-column DDL.
+sqlite_projection
+postgres_projection

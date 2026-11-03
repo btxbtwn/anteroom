@@ -129,8 +129,8 @@ def list_conversations(db=Depends(get_seller_db)):
         select(ordered.c.conversation_id, ordered.c.id, ordered.c.checksum).where(ordered.c.position == 1))}
     current = {}
     for identity, sku, price, quantity in db.execute(select(Listing.conversation_id,
-            json_value(ListingRevision.listing_json, 'sku'), json_value(ListingRevision.listing_json, 'price'),
-            json_value(ListingRevision.listing_json, 'quantity')).join(
+            json_value(ListingRevision.inventory_fields, 'sku'), json_value(ListingRevision.inventory_fields, 'price'),
+            json_value(ListingRevision.inventory_fields, 'quantity')).join(
             ListingRevision, (ListingRevision.id == Listing.current_revision_id)
             & (ListingRevision.conversation_id == Listing.conversation_id)
             & (ListingRevision.user_id == Listing.user_id))):

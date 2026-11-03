@@ -64,7 +64,9 @@ def _row(table: Table, raw: dict, user_id: str) -> dict:
     if unknown:
         # A newer Mac build than this server: refuse rather than drop fields.
         raise HTTPException(409, 'This Mac has a newer version of Anteroom than your account. Try again after the next account update.')
-    row = {name: _value(table.c[name], value) for name, value in raw.items() if name != 'user_id'}
+    # Generated inventory fields come from listing_json on this database.
+    row = {name: _value(table.c[name], value) for name, value in raw.items()
+           if name != 'user_id' and table.c[name].computed is None}
     row['user_id'] = user_id
     if table.name == 'jobs' and row.get('status') in ACTIVE_JOB_STATUSES:
         # Mac-side work cannot continue in the account; it stops, never retries.

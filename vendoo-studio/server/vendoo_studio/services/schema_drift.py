@@ -60,7 +60,8 @@ def _database_schema(path: Path) -> dict[str, set[str]]:
             if not row[0].startswith("sqlite_")
         ]
         return {
-            table: {row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')}
+            # table_info omits generated columns; table_xinfo includes them.
+            table: {row[1] for row in connection.execute(f'PRAGMA table_xinfo("{table}")')}
             for table in tables
         }
     finally:

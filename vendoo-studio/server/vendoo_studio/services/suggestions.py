@@ -163,7 +163,7 @@ def _photo_counts(db: Session) -> dict[str, int]:
 
 def _listing_rows(db: Session):
     """Read the current revision facets without ranking them in the transaction."""
-    doc = ListingRevision.listing_json
+    doc = ListingRevision.inventory_fields
     return (
         db.query(
             Listing.conversation_id,
@@ -171,10 +171,10 @@ def _listing_rows(db: Session):
             Listing.validation_status,
             json_value(doc, "brand"),
             json_value(doc, "category_path"),
-            json_value(doc, "ebay_specifics.season"),
+            json_value(doc, "season"),
             json_value(doc, "title"),
             json_value(doc, "type"),
-            json_value(doc, "ebay_specifics.material"),
+            json_value(doc, "material"),
         )
         .outerjoin(ListingRevision, ListingRevision.id == Listing.current_revision_id)
         .all()
