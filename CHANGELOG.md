@@ -6,6 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.708 — 2026-11-03
+
+- Inventory, suggestions and sales totals read small saved fields without repeatedly unpacking every marketplace form, leaving the database available for draft generation and edits.
+
+## 0.1.707 — 2026-11-03
+
+- Your inventory list no longer keeps a cloud database connection open while the app sends the full list
+
+## 0.1.706 — 2026-11-03
+
+- Live updates finish the current screen read before refreshing newer changes, so simultaneous drafts do not repeatedly restart the same inventory requests.
+
 ## 0.1.705 — 2026-11-03
 
 - Release database connections before ranking inventory suggestions so other drafts can keep loading while ranking runs.

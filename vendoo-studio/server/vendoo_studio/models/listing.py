@@ -9,6 +9,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Computed,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -22,6 +23,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import new_id, utcnow
 from vendoo_studio.models.ownership import SellerOwned
+from vendoo_studio.models.inventory_projection import InventoryProjection
 
 
 class Listing(SellerOwned, Base):
@@ -64,6 +66,10 @@ class ListingRevision(SellerOwned, Base):
     # Inventory reads extract several fields from large marketplace forms.
     # PostgreSQL JSON reparses the whole form for each field; JSONB does not.
     listing_json: Mapped[Any] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), nullable=False)
+    # Routine inventory reads never decompress the large marketplace forms.
+    # Database generation keeps ORM, import and direct SQL writes consistent.
+    inventory_fields: Mapped[Any] = mapped_column(JSON().with_variant(JSONB(), "postgresql"),
+                                                Computed(InventoryProjection(), persisted=True), nullable=False)
     # Status reads scan quantity history, never the large marketplace form JSON.
     inventory_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True, default=revision_quantity)
     source: Mapped[str] = mapped_column(String, nullable=False)

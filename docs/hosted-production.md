@@ -44,7 +44,9 @@ rates for continuous Machines in the cheapest US regions (`iad` / `ewr`) as of
 | B | Replace the Machine with performance-1x, 2 GB | $33.00 | One full core. HTTP and workers still share the process. |
 | C | Keep the shared web Machine and add a performance-1x, 2 GB worker | about $45.70 | Separates interactive traffic from generation and gives the worker a full core. |
 
-No option above is approved. Do not scale the app until one is.
+The seller approved option B on 2026-11-03. The existing Machine now has one
+performance CPU and 2 GB RAM. No additional Machine or larger configuration
+has been approved.
 
 ## 2. Use database connections deliberately
 
@@ -73,6 +75,16 @@ Transaction-local `set_config` for the seller role still runs at the start of
 every transaction. The isolation check runs once per pooled connection. Keep
 the unprivileged runtime login, certificate verification, and the separate
 migration login. Do not bypass row security.
+
+Inventory, suggestions and sales totals read the stored generated
+`listing_revisions.inventory_fields` projection. The complete marketplace
+forms remain in `listing_json`; routine inventory reads must not extract their
+small fields from that large document. Large PostgreSQL values can be compressed
+or stored out of line ([TOAST](https://www.postgresql.org/docs/current/storage-toast.html)).
+Production 0.1.706 still exhausted the pool during two concurrent generations;
+several full-form JSON facet queries were active for about 16 seconds without
+blocking locks. Do not treat the CPU upgrade or refresh coalescing as proof of
+two-reseller readiness.
 
 ## 3. Keep traffic and refresh costs proportional to useful work
 
@@ -104,6 +116,12 @@ is not marked complete or replayed. See
 
 Apply Alembic revision `b6e2c4a81f09` with the migration login before starting
 a second process. The runtime Machines do not have the migration password.
+Apply `ca4d82e917f6` before deploying a build that reads `inventory_fields`.
+It computes the projection for existing revisions and keeps future writes
+consistent in the database, including Mac imports and direct SQL updates.
+It needs a table lock; its five-second Postgres lock timeout refuses to wait
+behind long transactions. Check for active work and allow reads to drain before
+applying it rather than extending that timeout on a busy system.
 
 The Supabase plan, backup restore, Auth SMTP, and storage egress were not
 re-checked from the dashboard in this change. The Free plan can pause and has
@@ -126,7 +144,7 @@ was not pointed at production.
 
 | Priority | State on 2026-11-03 | Still required |
 | --- | --- | --- |
-| 1: Remove avoidable load | Lease renewal no longer publishes `listings`. Saves and terminal task states still do. Seller A inventory list is about 1.3k drafts / 565 KB and took 7–71 s on 0.1.702. | Shrink or page the conversation list so a single read cannot hold a pool slot that long. |
+| 1: Remove avoidable load | Lease renewal no longer publishes `listings`. Saves and terminal task states still do. Seller A inventory list is about 1.3k drafts / 565 KB and took 7–71 s on 0.1.702. The list endpoint now closes its seller session before encoding that body. | Page or slim the inventory payload so the encode/send itself is cheap; measure again under generate. |
 | 2: Size and separate execution | Routing across processes is implemented and tested. One shared CPU idle load about 0.17 after the 0.1.702 deploy. | Set `ANTEROOM_PROCESS_TOKEN` and apply `b6e2c4a81f09` before a second Machine. Cost options above are unchanged. |
 | 3: Tune database access | Hosted pool is 8 plus 4 overflow, 3 s wait, on the transaction pooler. Generate/assistant SSE close the request session before keepalives; Mac/Chrome claims use worker threads. After deploying `hosted-main-8264a81dd` (0.1.702): idle draft GET p50 557 ms / p95 720 ms; under two concurrent generate SSE streams, overlapping draft GET p50 3.2 s / p95 5.7 s; QueuePool timeouts still logged. | Find remaining checkouts that survive across generate keepalives and the large inventory list. Do not raise the pool further. |
 | 4: Operational readiness | Request concurrency is explicit. Readiness exists and is not the only Machine's routing check. Seller asked to keep the existing database password (no rotation). | Dashboard review of plan, backups, Auth delivery, and storage egress. |
