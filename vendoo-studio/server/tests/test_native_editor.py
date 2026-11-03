@@ -193,6 +193,12 @@ class NativeEditorTest(unittest.TestCase):
                                if row["path"] == "mercari_specifics.nativeSizeId" for choice in row["options"]])
         self.bridge.assert_not_called()
 
+    def forget_saved_choices(self):
+        """Each account state below is a fresh read, not the copy a previous read saved."""
+        from vendoo_studio.services import saved_choices
+
+        saved_choices._path().unlink(missing_ok=True)
+
     def with_choice_lists(self, form):
         """The form as the editor shows it: each named marketplace list downloaded and filled in."""
         for row in form["fields"]:
@@ -458,6 +464,7 @@ class NativeEditorTest(unittest.TestCase):
             with self.subTest(unavailable=unavailable):
                 self.sellwild.return_value = {"ship_from": None, "default_parcel": "", "coupons": [],
                                              "unavailable": unavailable}
+                self.forget_saved_choices()
                 response = self.client.get(f"{self.url}/sellwild/form")
                 self.assertEqual(response.status_code, 200)
                 self.assertIs(response.json()["account_connected"], connected)
@@ -488,9 +495,11 @@ class NativeEditorTest(unittest.TestCase):
         row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
         self.assertEqual((row["value"], row["locked"], row["section"], row.get("help")), (card, True, "Item Shipping", None))
         self.sellwild.return_value = {"ship_from": "", "coupons": [], "default_parcel": ""}
+        self.forget_saved_choices()
         row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
         self.assertEqual((row["value"], row["help"]), ("", "Add a Shipping From address in Sellwild's Address Book."))
         self.sellwild.return_value = {"ship_from": None, "coupons": [], "default_parcel": ""}
+        self.forget_saved_choices()
         with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
             row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
         self.assertEqual(row["help"], "Sign in to Sellwild in Anteroom, then reload choices to show your address.")

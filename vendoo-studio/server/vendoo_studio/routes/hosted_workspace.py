@@ -521,7 +521,15 @@ async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'd
     # Sellwild's account choices come from the seller's own Chrome, read here on
     # the event loop the relay runs on, before any query, so no transaction waits
     # on Chrome. The builder then runs in a worker thread and checks the listing.
-    account = await web_sellwild_account() if marketplace == 'sellwild' else None
+    if marketplace == 'sellwild':
+        from vendoo_studio.services import saved_choices
+        from vendoo_studio.services.native_editor import sellwild_account_complete
+
+        # The saved copy answers at once; the refresh stays on this loop with the relay.
+        account = await saved_choices.kept('sellwild-account', '', web_sellwild_account,
+                                           usable=sellwild_account_complete, background=saved_choices.on_this_loop)
+    else:
+        account = None
 
     def load():
         # These canonical builders read verified catalogs and the owned
