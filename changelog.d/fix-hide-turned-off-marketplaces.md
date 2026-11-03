@@ -1,1 +1,0 @@
-- A marketplace you turn off under Settings → Where you list no longer shows on your listings, Vinted included, on the Mac, web and iPhone.
