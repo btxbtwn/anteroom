@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.707 — 2026-11-03
+
+- Your inventory list no longer keeps a cloud database connection open while the app sends the full list
+
 ## 0.1.706 — 2026-11-03
 
 - Live updates finish the current screen read before refreshing newer changes, so simultaneous drafts do not repeatedly restart the same inventory requests.

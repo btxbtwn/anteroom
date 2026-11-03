@@ -151,6 +151,11 @@ def list_conversations(db=Depends(get_seller_db)):
             from vendoo_studio.services.photos import cover_thumb_url
             summary['cover_photo_url'] = cover_thumb_url(*covers[row.id])
         summaries.append(summary)
+    # Plain dicts only from here. Close before FastAPI encodes and sends the
+    # full inventory body so a ~thousand-draft seller does not hold a pool slot
+    # for the whole response.
+    db.rollback()
+    db.close()
     return summaries
 
 
