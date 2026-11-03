@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IDLE_POLL_MS, LIVE_IDLE_POLL_MS, pollMs, setLiveUpdates } from "../api/polling";
 import { createStudioQueryClient, LIVE_STALE_MS, STALE_MS } from "../api/queryClient";
@@ -40,6 +40,28 @@ describe("queryKeyMatchesTopic", () => {
 });
 
 describe("invalidateTopics", () => {
+  it("finishes an in-flight read before refreshing changes without duplicating server work", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["conversations"], "before");
+    let complete!: (value: string) => void;
+    const read = vi.fn(() => new Promise<string>(resolve => { complete = resolve; }));
+    const observer = new QueryObserver(client, { queryKey: ["conversations"], queryFn: read });
+    const stop = observer.subscribe(() => {});
+    try {
+      expect(read).toHaveBeenCalledTimes(1);
+      const refreshes = [invalidateTopics(client, ["listings"]), invalidateTopics(client, ["jobs"])];
+      // API reads do not consume React Query's AbortSignal. Cancelling a
+      // refetch abandons its result but leaves the server using a connection.
+      expect(read).toHaveBeenCalledTimes(1);
+      complete("during");
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+      complete("after");
+      await Promise.all(refreshes);
+      expect(client.getQueryData(["conversations"])).toBe("after");
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally { stop(); client.clear(); }
+  });
+
   it("marks only the matching queries stale", async () => {
     const client = new QueryClient();
     for (const key of [["conversations"], ["assistant", "threads"], ["settings-ui"]]) client.setQueryData(key, 1);
@@ -47,6 +69,47 @@ describe("invalidateTopics", () => {
     expect(client.getQueryState(["conversations"])?.isInvalidated).toBe(true);
     expect(client.getQueryState(["assistant", "threads"])?.isInvalidated).toBe(false);
     expect(client.getQueryState(["settings-ui"])?.isInvalidated).toBe(false);
+  });
+
+  it("refreshes after a failed read and leaves closed screens stale", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["conversations"], "before");
+    let reject!: (error: Error) => void;
+    const read = vi.fn().mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }))
+      .mockResolvedValue("after");
+    const observer = new QueryObserver(client, { queryKey: ["conversations"], queryFn: read });
+    const stop = observer.subscribe(() => {});
+    const refresh = invalidateTopics(client, ["listings"]);
+    reject(new Error("Temporary read failure"));
+    await refresh;
+    expect(client.getQueryData(["conversations"])).toBe("after");
+    expect(read).toHaveBeenCalledTimes(2);
+    stop();
+    await invalidateTopics(client, ["listings"]);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(client.getQueryState(["conversations"])?.isInvalidated).toBe(true);
+    client.clear();
+  });
+
+  it("fetches changes arriving during the follow-up read too", async () => {
+    const client = new QueryClient();
+    client.setQueryData(["conversations"], "before");
+    let complete!: (value: string) => void;
+    const read = vi.fn(() => new Promise<string>(resolve => { complete = resolve; }));
+    const observer = new QueryObserver(client, { queryKey: ["conversations"], queryFn: read });
+    const stop = observer.subscribe(() => {});
+    try {
+      const first = invalidateTopics(client, ["listings"]);
+      complete("during");
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+      const latest = invalidateTopics(client, ["listings"]);
+      expect(read).toHaveBeenCalledTimes(2);
+      complete("after first change");
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+      complete("latest change");
+      await Promise.all([first, latest]);
+      expect(client.getQueryData(["conversations"])).toBe("latest change");
+    } finally { stop(); client.clear(); }
   });
 });
 
