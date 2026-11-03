@@ -95,6 +95,9 @@ def submit(db, conv_id, kind, text='', uploads=None, request=None):
         raise
     task_id = task.id
     db.rollback()
+    # The stream polls with short-lived sessions. Closing here returns the
+    # request connection before keepalives run for minutes waiting on a Mac.
+    db.close()
     return task_stream(task_id)
 
 
@@ -106,8 +109,10 @@ def generate(conv_id: str, resume: bool = False, db=Depends(get_seller_db)):
     if existing is not None:
         task_id = existing.id
         db.rollback()
+        db.close()
         return task_stream(task_id)
     if resume:
+        db.close()
         return stream_finished()
     return submit(db, conv_id, 'generate')
 

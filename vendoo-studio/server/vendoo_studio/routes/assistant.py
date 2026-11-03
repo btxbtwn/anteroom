@@ -425,6 +425,8 @@ def _follow_task(db: Session, task_id: str):
     from vendoo_studio.routes.hosted_tasks import task_stream
 
     db.rollback()
+    # Keepalives outlive this request; do not retain the pooled connection.
+    db.close()
     return task_stream(task_id)
 
 

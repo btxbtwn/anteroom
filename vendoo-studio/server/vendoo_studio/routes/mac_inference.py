@@ -44,7 +44,8 @@ class Poll(BaseModel):
 
 @router.post('/next')
 async def next_call(body: Poll):
-    if pinned := _pinned('mac', claim_route=True):
+    # claim() talks to Postgres; keep it off the request event loop.
+    if pinned := await asyncio.to_thread(_pinned, 'mac', claim_route=True):
         return pinned
     deadline = asyncio.get_running_loop().time() + 20
     connection = relay()
@@ -74,7 +75,7 @@ class Reply(BaseModel):
 
 @router.post('/reply')
 async def reply(body: Reply):
-    if pinned := _pinned('mac', claim_route=False):
+    if pinned := await asyncio.to_thread(_pinned, 'mac', claim_route=False):
         return pinned
     if not relay().reply(body.worker, body.identity, body.result, body.failed):
         raise HTTPException(404, 'This inference call is no longer active')
@@ -83,7 +84,7 @@ async def reply(body: Reply):
 
 @router.get('/status')
 async def status():
-    if pinned := _pinned('mac', claim_route=False):
+    if pinned := await asyncio.to_thread(_pinned, 'mac', claim_route=False):
         return pinned
     connection = relay()
     return {'connected': connection.connected, **connection.models}
