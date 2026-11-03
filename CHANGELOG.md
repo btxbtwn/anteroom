@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.705 — 2026-11-03
+
+- Release database connections before ranking inventory suggestions so other drafts can keep loading while ranking runs.
+- Use the approved performance CPU for the hosted app while retaining 2 GB of memory.
+
 ## 0.1.704 — 2026-11-03
 
 - Recorded the 0.1.702 hosted deploy measurements and left the database password unchanged
