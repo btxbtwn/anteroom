@@ -151,7 +151,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.state.chat_upload_slots = asyncio.Semaphore(1)
         from vendoo_studio.database import engine as database_engine
         loop_checkouts = LoopCheckoutWarning(database_engine)
-        worker = offers = watchdog = None
+        worker = offers = watchdog = sale_checks = promotion_scheduler = None
         stopping = threading.Event()
         background = None
         if app.state.background_worker_enabled:
@@ -178,11 +178,13 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
             background.run(hosted_sourcing_scheduler.serve(engine))
             # Only connected sellers can read Chrome marketplaces, in their own browser.
-            background.run(hosted_sale_checks.serve())
-            background.run(hosted_promotion_scheduler.serve())
+            sale_checks = background.run(hosted_sale_checks.serve())
+            promotion_scheduler = background.run(hosted_promotion_scheduler.serve())
         app.state.background_worker = worker
         app.state.offer_scheduler = offers
         app.state.job_watchdog = watchdog
+        app.state.sale_checks = sale_checks
+        app.state.promotion_scheduler = promotion_scheduler
         try:
             yield
         finally:

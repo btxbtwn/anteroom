@@ -1,0 +1,69 @@
+import { test, expect, type Page } from "@playwright/test";
+
+async function navigate(page: Page, name: string, phone: boolean) {
+  if (phone) {
+    const navigation = page.getByRole("button", { name: "Open navigation", exact: true });
+    if (!await navigation.isVisible()) await page.getByRole("button", { name: "Inventory", exact: true }).click();
+    await navigation.click();
+  }
+  await page.getByRole("button", { name, exact: true }).click();
+}
+
+async function openConnections(page: Page, phone: boolean) {
+  await navigate(page, "Settings", phone);
+  const connections = page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Connections", exact: true });
+  if (phone && !await connections.isVisible()) await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await connections.click();
+}
+
+test("hosted Chrome imports, saved-off rules and sale switches are available", async ({ page }, info) => {
+  test.setTimeout(90_000);
+  const phone = info.project.name === "phone";
+  const errors: string[] = [], macReads: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("request", request => { if (request.url().endsWith("/api/extension/status")) macReads.push(request.url()); });
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("alice@sandbox.test");
+  await page.getByLabel("Password").fill("sandbox");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await navigate(page, "Marketplaces", phone);
+  for (const name of ["Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
+    await page.getByRole("tablist", { name: "Marketplaces" }).getByRole("tab").filter({ hasText: name }).click();
+    await expect(page.getByRole("heading", { name: `Import from ${name}`, exact: true })).toBeVisible();
+    await expect(page.getByText(/connect Chrome first/).first()).toBeVisible();
+    if (name === "Poshmark") {
+      await page.getByRole("heading", { name: `Import from ${name}`, exact: true }).scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `e2e/results/hosted/session-import-${info.project.name}.png` });
+    }
+  }
+  await navigate(page, "Automations", phone);
+  await expect(page.getByRole("heading", { name: "Sharing and offers to likers", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New sharing schedule", exact: true }).click();
+  const ruleName = `Web sharing ${info.project.name} ${Date.now()}`;
+  const sharing = page.getByText("New sharing schedule · saved off", { exact: true }).locator("..");
+  await sharing.getByRole("textbox", { name: "Name", exact: true }).fill(ruleName);
+  await sharing.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(`${ruleName} · Poshmark`, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Turn on", exact: true }).first()).toBeVisible();
+  await page.screenshot({ path: `e2e/results/hosted/session-automations-${info.project.name}.png`, fullPage: true });
+  await page.getByRole("button", { name: "New offer rule", exact: true }).click();
+  await expect(page.getByText("New offer rule · saved off", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await openConnections(page, phone);
+  await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toBeVisible();
+  for (const name of ["Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
+    await expect(page.getByRole("switch", { name: `Sale detection for ${name}`, exact: true })).toBeVisible();
+  }
+  const detection = page.getByRole("switch", { name: "Sale detection for Poshmark", exact: true });
+  const wasChecked = await detection.isChecked();
+  await detection.click();
+  await expect(detection).toBeChecked({ checked: !wasChecked });
+  await page.reload();
+  await openConnections(page, phone);
+  await expect(page.getByRole("switch", { name: "Sale detection for Poshmark", exact: true })).toBeChecked({ checked: !wasChecked });
+  await page.locator("#chrome-poshmark").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `e2e/results/hosted/session-settings-${info.project.name}.png`, fullPage: true });
+  expect(macReads).toEqual([]);
+  expect(errors).toEqual([]);
+});

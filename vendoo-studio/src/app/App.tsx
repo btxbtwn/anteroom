@@ -635,7 +635,7 @@ export function App() {
       />
       {runtime.hosted && isMobile && <div className="cloud-mobile-account">{runtime.accountControls}</div>}
       <div
-        className={`app-content mobile-pane-${mobilePane}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
+        className={`app-content mobile-pane-${activeView === "listings" ? mobilePane : "workspace"}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
       >
         {sidebarHidden ? null : (
           <ListingSidebar
