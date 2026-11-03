@@ -1,0 +1,1 @@
+- Keep running web draft generations alive when slow database work blocks their execution loop.
