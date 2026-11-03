@@ -138,6 +138,15 @@ MAX_MESSAGE_BYTES = MAX_ATTACHMENTS * (MAX_ATTACHMENT_BYTES * 4 // 3 + 4096) + 5
 @router.post('/messages', dependencies=[Depends(require_worker)])
 async def message(conv_id: str, request: Request):
     async with request.app.state.chat_upload_slots:
+        # Confirm ownership with a short session before reading bytes, so another
+        # seller's missing draft answers 404 instead of 422 on a bad body, and so
+        # the pool is free while the upload streams in.
+        def assert_owned():
+            with _seller_sessions()() as db:
+                owned_conversation(db, conv_id)
+                db.rollback()
+
+        await run_in_threadpool(assert_owned)
         data = bytearray()
         try:
             async with asyncio.timeout(120):
