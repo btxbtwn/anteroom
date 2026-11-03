@@ -19,9 +19,8 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
     return () => { active = false; window.removeEventListener("focus", check); };
   }, [bridge]);
   useEffect(() => {
-    if (connection?.state !== "pending" && connection?.state !== "connected") return;
     let active = true;
-    const interval = window.setInterval(() => { void bridge.status().then(status => { if (active) setConnection(status); }); }, connection.state === "pending" ? 1500 : 15000);
+    const interval = window.setInterval(() => { void bridge.status().then(status => { if (active) setConnection(status); }); }, connection?.state === "pending" ? 1500 : 15000);
     return () => { active = false; window.clearInterval(interval); };
   }, [bridge, connection?.state]);
   const connectedNow = connection?.ok === true && connection.state === "connected";

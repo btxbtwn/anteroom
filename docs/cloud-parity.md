@@ -375,3 +375,11 @@ only each sign-in's state, expiry and account label, never cookies or tokens.
 Sale detection switches stay on the Mac.
 
 Anteroom has no Facebook Marketplace or Grailed support on the Mac or the web.
+
+Bridge 0.2.51 remembers approved hosted accounts in the Chrome profile and the
+web page retries a temporarily unavailable Bridge automatically. Disconnect and
+sign-out revoke that account's approval across tabs. An open desktop Chrome tab
+is still required for hosted Chrome reads/actions; the Mac-local WebSocket is a
+separate connection. See [connection lifecycle and verification](cloud-extension.md).
+The lifecycle is covered by isolated Chromium and hosted desktop/phone tests;
+verification in an installed seller session remains a release check.
