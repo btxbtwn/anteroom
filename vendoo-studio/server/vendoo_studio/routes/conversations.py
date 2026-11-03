@@ -65,6 +65,8 @@ class ConversationSummary(BaseModel):
     # with. An Active row with some sold reads "1 of 3 sold".
     units_sold: int = 0
     quantity: int | None = None
+    # When Anteroom's sales ledger last saw a unit of this item sell.
+    sold_at: str | None = None
     # Each marketplace listing's own page, where the imported history recorded one.
     vendoo_listing_urls: dict[str, str] = {}
     # Imported Vendoo time tracking for the item: when it was created, last
@@ -521,6 +523,7 @@ def _extras(
         "direct_listing_urls": dict(direct_listing_urls or {}),
         "units_sold": sold.units_sold if sold else 0,
         "quantity": sold.quantity if sold else None,
+        "sold_at": _iso(sold.sold_at) if sold else None,
         "missing_sale_data": missing_sale_data or [],
     }
 
@@ -673,6 +676,7 @@ def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
         removed_marketplaces=removed_marketplaces(notes, row.get("direct_listing_urls") or {}),
         units_sold=int(row.get("units_sold") or 0),
         quantity=row.get("quantity"),
+        sold_at=row.get("sold_at"),
         missing_sale_data=row.get("missing_sale_data", []),
         vendoo_listing_urls=_listing_urls(notes),
         unsent_edits=bool(row.get("unsent_edits")),

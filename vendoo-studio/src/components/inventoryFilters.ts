@@ -1,5 +1,6 @@
 /** Inventory filters and sorts over Studio's own listing rows. */
 
+import { soldAtMs } from "./sidebar/listingShelves";
 import { inventoryStatus, liveMarketplaces } from "./sidebar/listingStatus";
 
 export type ListingSortId =
@@ -60,6 +61,7 @@ export type FilterableListing = {
   removed_marketplaces?: string[];
   vendoo_listed_at?: string | null;
   vendoo_sold_at?: string | null;
+  sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
   vendoo_sold_dates?: Record<string, string>;
   unsent_edits?: boolean;
@@ -247,7 +249,7 @@ export function compareListings(sort: ListingSortId): ((left: FilterableListing,
     case "freshest":
       return (l, r) => byNumber(oldestLiveListedMs(l) || null, oldestLiveListedMs(r) || null, -1);
     case "sold_desc":
-      return (l, r) => byNumber(timeMs(l.vendoo_sold_at) || null, timeMs(r.vendoo_sold_at) || null, -1);
+      return (l, r) => byNumber(soldAtMs(l) || null, soldAtMs(r) || null, -1);
     default:
       return null;
   }
