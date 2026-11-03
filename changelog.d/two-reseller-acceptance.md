@@ -1,0 +1,2 @@
+- Release database connections before ranking inventory suggestions so other drafts can keep loading while ranking runs.
+- Use the approved performance CPU for the hosted app while retaining 2 GB of memory.
