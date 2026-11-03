@@ -1,1 +1,0 @@
-- Marketplace form refreshes during listing generation no longer keep a cloud database connection open while waiting on eBay or Chrome

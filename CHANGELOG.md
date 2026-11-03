@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.711 — 2026-11-03
+
+- Marketplace form refreshes during listing generation no longer keep a cloud database connection open while waiting on eBay or Chrome
+
 ## 0.1.710 — 2026-11-03
 
 - A marketplace you turn off under Settings → Where you list no longer shows on your listings, Vinted included, on the Mac, web and iPhone.
