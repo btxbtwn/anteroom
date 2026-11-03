@@ -21,8 +21,12 @@ def missing_fields(record: dict) -> list[str]:
 
 
 def missing_by_conversation(db: Session, conversation_id: str | None = None) -> dict[str, list[str]]:
+    return missing_from_records(records(db, conversation_id))
+
+
+def missing_from_records(records: list[dict]) -> dict[str, list[str]]:
     grouped: dict[str, list[dict]] = {}
-    for row in records(db, conversation_id):
+    for row in records:
         if row["conversation_id"] and row["order_status"] in PAID_STATUSES:
             grouped.setdefault(row["conversation_id"], []).append(row)
     result = {}
@@ -62,12 +66,21 @@ def records(db: Session, conversation_id: str | None = None, analytics_rows: lis
     ensure_archived(db)
     # Reuse Analytics' cost basis, including box allocations and order quantities.
     analytics_rows = load_rows(db, conversation_id) if analytics_rows is None else analytics_rows
-    costs = {row.sale_id: _amount(row.cost) for row in analytics_rows if row.status == "sold" and row.sale_id}
+    return records_from_lines(read_sale_lines(db, conversation_id), analytics_rows)
+
+
+def read_sale_lines(db: Session, conversation_id: str | None = None) -> list:
     query = db.query(MarketplaceSale, Conversation.title).outerjoin(Conversation, Conversation.id == MarketplaceSale.conversation_id)
     if conversation_id:
         query = query.filter(MarketplaceSale.conversation_id == conversation_id)
+    return query.order_by(MarketplaceSale.received_at, MarketplaceSale.id).all()
+
+
+def records_from_lines(lines: list, analytics_rows: list[AnalyticsItem]) -> list[dict]:
+    """Build the ledger view from materialized rows, without holding its session."""
+    costs = {row.sale_id: _amount(row.cost) for row in analytics_rows if row.status == "sold" and row.sale_id}
     rows = []
-    for line, title in query.order_by(MarketplaceSale.received_at, MarketplaceSale.id).all():
+    for line, title in lines:
         record = sales_ledger.sale_out(line, title)
         data = record["financials"]
         raw = line.financials if isinstance(line.financials, dict) else {}

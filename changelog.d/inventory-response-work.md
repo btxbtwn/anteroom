@@ -1,0 +1,1 @@
+- Inventory releases its database connection before calculating sale totals and missing sale details, keeping draft generation and other screens responsive during refreshes.
