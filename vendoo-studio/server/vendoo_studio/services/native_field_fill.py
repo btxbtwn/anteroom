@@ -319,7 +319,14 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
         return None
     listing = revision.listing_json
     strict = native_contract.KEY in listing and not categories
-    forms = await load_forms(db, conv_id, markets)
+    # Finishing just captured these definitions. Reuse them while their
+    # controlling inputs match; parent/category edits still need fresh forms.
+    requested = set(markets)
+    forms = {market: form for market in MARKETS
+             if strict and market in requested and (form := native_contract.editor_form(listing, market)) is not None}
+    missing = requested - forms.keys()
+    if missing:
+        forms.update(await load_forms(db, conv_id, missing))
     rows_by_market = {market: rows for market, form in forms.items()
                       if (rows := category_rows(form, listing) if categories else fillable_rows(form, market, listing, evidence=evidence))}
     if required_only:
