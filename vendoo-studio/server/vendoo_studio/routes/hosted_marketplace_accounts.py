@@ -2,8 +2,8 @@
 
 Each seller registers as their own relay device; tokens live in that seller's
 Vault through the same keychain boundary the Mac uses. The seller's browser
-opens the sign-in page. Sales are not streamed here yet, and nothing here
-lists, delists or changes a marketplace listing.
+opens the sign-in page. The hosted sales worker reads each seller's relay
+inbox separately; these routes never list, delist or change a marketplace listing.
 """
 from fastapi import APIRouter
 
