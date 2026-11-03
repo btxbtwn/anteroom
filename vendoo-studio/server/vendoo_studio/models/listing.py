@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import new_id, utcnow
@@ -60,7 +61,9 @@ class ListingRevision(SellerOwned, Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
-    listing_json: Mapped[Any] = mapped_column(JSON, nullable=False)
+    # Inventory reads extract several fields from large marketplace forms.
+    # PostgreSQL JSON reparses the whole form for each field; JSONB does not.
+    listing_json: Mapped[Any] = mapped_column(JSON().with_variant(JSONB(), "postgresql"), nullable=False)
     # Status reads scan quantity history, never the large marketplace form JSON.
     inventory_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True, default=revision_quantity)
     source: Mapped[str] = mapped_column(String, nullable=False)

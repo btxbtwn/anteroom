@@ -28,6 +28,7 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
     await page.getByRole("button", { name: "Inventory", exact: true }).click();
   }
   await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: title, exact: true }).click();
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "More listing actions", exact: true })).toBeVisible();
 });
@@ -132,6 +133,7 @@ test("the Mac window hands its account session to the native AI worker and clear
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const current = () => calls.at(-1);
   await expect.poll(current).toMatchObject({ hasToken: true, owner: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByLabel("Email address")).toBeVisible();
   await expect.poll(current).toMatchObject({ hasToken: false, owner: null });

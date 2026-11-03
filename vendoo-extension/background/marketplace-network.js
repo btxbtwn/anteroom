@@ -31,16 +31,28 @@ const DEPOP_PAGE_RULES = [
   [17023, '^https://webapi\\.depop\\.com/presentation/api/v1/offers/'],
 ];
 
+// Keep paths separate: even a short alternation can exceed Chrome's 2KB
+// compiled-regex limit and reject the entire batch for every marketplace.
+const SELLWILD_PAGE_RULES = [
+  [17003, '^https://sellwild\\.com/api/auth/session(\\?|$)'],
+  [17031, '^https://sellwild\\.com/api/addresses(\\?|$)'],
+  [17032, '^https://sellwild\\.com/api/listings/create(\\?|$)'],
+  [17033, '^https://sellwild\\.com/api/listings/\\d+(/confirm-photos)?(\\?|$)'],
+  [17034, '^https://sellwild\\.com/api/seller/listings/bulk-status(\\?|$)'],
+  [17035, '^https://sellwild\\.com/api/search/listings(\\?|$)'],
+  [17036, '^https://sellwild\\.com/api/transactions/seller(\\?|$)'],
+];
+
 function ensureMarketplaceRequestContext() {
   if (!marketplaceNetworkReady) {
     marketplaceNetworkReady = chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: [17001, 17002, 17003, 17004, 17005, 17006, 17011, 17012, 17013, 17014, 17015, 17016, 17017, 17018, 17019, 17020, 17021, 17022, 17023, 17024, 17025, 17026, 17027, 17028, 17030],
+      removeRuleIds: [17001, 17002, 17003, 17004, 17005, 17006, 17011, 17012, 17013, 17014, 17015, 17016, 17017, 17018, 17019, 17020, 17021, 17022, 17023, 17024, 17025, 17026, 17027, 17028, 17030, 17031, 17032, 17033, 17034, 17035, 17036],
       addRules: [
         ...DEPOP_PAGE_RULES.map(([id, regexFilter]) => marketplaceHeaderRule(id, DEPOP_PAGE_HEADERS, regexFilter, DEPOP_PAGE_METHODS)),
         marketplaceHeaderRule(17002, { Origin: 'https://www.mercari.com', Referer: 'https://www.mercari.com/sell/' },
           '^https://www\\.mercari\\.com/v1/(api|initialize)$', ['get', 'post']),
-        marketplaceHeaderRule(17003, { Origin: 'https://sellwild.com', Referer: 'https://sellwild.com/sell' },
-          '^https://sellwild\\.com/api/(auth/session|addresses|listings/create|listings/\\d+|listings/\\d+/confirm-photos|seller/listings/bulk-status|search/listings|transactions/seller)(\\?|$)', ['get', 'post']),
+        ...SELLWILD_PAGE_RULES.map(([id, regexFilter]) => marketplaceHeaderRule(id,
+          { Origin: 'https://sellwild.com', Referer: 'https://sellwild.com/sell' }, regexFilter, ['get', 'post'])),
         marketplaceHeaderRule(17004, { Origin: 'https://www.depop.com', Referer: 'https://www.depop.com/sellinghub/' },
           '^https://webapi\\.depop\\.com/(presentation/)?api/v1/receipts/', ['get']),
         marketplaceHeaderRule(17005, { Origin: 'https://poshmark.com', Referer: 'https://poshmark.com/create-listing' },

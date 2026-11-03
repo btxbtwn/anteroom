@@ -28,6 +28,16 @@ test('content script copies only the connection contract and strips private resp
   assert.equal(current, true);
 });
 
+test('content script preserves the sales history capability without admitting unknown actions', async () => {
+  const s = setup(() => ({ ok: true, state: 'connected', extensionVersion: '0.2.50',
+    supportedActions: ['marketplace.actions', 'marketplace.sales_history', 'unknown.capability'] }));
+  const status = { ...s.data, action: 'status' }; delete status.email;
+  s.emit({ data: status });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(JSON.stringify(s.replies[0][0].supportedActions)),
+    ['marketplace.actions', 'marketplace.sales_history']);
+});
+
 test('page cannot send credentials, marketplace commands or embedded/cross-origin requests', async () => {
   const s = setup();
   s.emit({ origin: 'https://evil.example' }); s.emit({ source: {} });

@@ -123,7 +123,7 @@ test('Vinted draft, photo, wardrobe and package-size calls each have their own r
   c.chrome.declarativeNetRequest.updateSessionRules = async value => { updates.push(value); };
   await c.ensureMarketplaceRequestContext();
   const rules = Object.fromEntries(updates[0].addRules.map(rule => [rule.id, rule]));
-  assert.deepEqual(JSON.parse(JSON.stringify(updates[0].removeRuleIds.filter(id => id >= 17025))), [17025, 17026, 17027, 17028, 17030]);
+  assert.ok([17025, 17026, 17027, 17028].every(id => updates[0].removeRuleIds.includes(id)));
   const cases = [
     [17025, [
       'https://www.vinted.com/api/v2/item_upload/catalogs',
@@ -154,15 +154,21 @@ test('Vinted draft, photo, wardrobe and package-size calls each have their own r
   }
 });
 
-test('Sellwild request context covers a seller shop search from this extension', async () => {
+test('Sellwild request context keeps each supported endpoint in a separate scoped rule', async () => {
   const c = loadWorker();
   const updates = [];
   c.chrome.declarativeNetRequest.updateSessionRules = async value => { updates.push(value); };
   await c.ensureMarketplaceRequestContext();
-  const rule = updates[0].addRules.find(value => value.id === 17003);
-  const target = new RegExp(rule.condition.regexFilter);
-  assert.ok(target.test('https://sellwild.com/api/search/listings?userId=99&limit=200&page=1'));
-  assert.ok(target.test('https://sellwild.com/api/listings/105101406'));
-  assert.equal(target.test('https://sellwild.com/api/users/99'), false);
-  assert.equal(target.test('https://sellwild.com.evil/api/search/listings'), false);
+  const rules = updates[0].addRules.filter(rule => rule.action.requestHeaders.some(header => header.value === 'https://sellwild.com'));
+  const target = url => rules.some(rule => new RegExp(rule.condition.regexFilter).test(url));
+  for (const suffix of ['auth/session', 'addresses', 'listings/create', 'listings/105101406',
+    'listings/105101406/confirm-photos', 'seller/listings/bulk-status', 'search/listings?userId=99&limit=200&page=1',
+    'transactions/seller?page=1']) assert.ok(target(`https://sellwild.com/api/${suffix}`), suffix);
+  for (const rule of rules) {
+    assert.deepEqual([...rule.condition.initiatorDomains], ['test-extension-id']);
+    assert.deepEqual([...rule.condition.requestMethods], ['get', 'post']);
+    assert.ok(updates[0].removeRuleIds.includes(rule.id));
+  }
+  assert.equal(target('https://sellwild.com/api/users/99'), false);
+  assert.equal(target('https://sellwild.com.evil/api/search/listings'), false);
 });

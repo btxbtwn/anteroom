@@ -46,7 +46,7 @@ describe("bulkRegenerateWarning", () => {
   it("names one listing and a count of many", () => {
     expect(bulkRegenerateWarning(1)).toContain("Rewrite this listing from scratch?");
     expect(bulkRegenerateWarning(4)).toContain("Rewrite 4 listings from scratch?");
-    expect(bulkRegenerateWarning(4)).toContain("one listing at a time");
+    expect(bulkRegenerateWarning(4)).toContain("concurrently");
   });
 });
 
@@ -146,6 +146,21 @@ describe("bulkPriceDrops", () => {
 });
 
 describe("runBulkRegenerate", () => {
+  it("starts every selected listing without a fixed generation limit", async () => {
+    const gate = deferred();
+    const ids = Array.from({ length: 24 }, (_, i) => `draft-${i}`);
+    const started: string[] = [];
+    const run = runBulkRegenerate(ids, deps({
+      generate: async (id) => { started.push(id); await gate.promise; },
+    }), { cancelled: () => false });
+    try {
+      await vi.waitFor(() => expect(started).toEqual(ids));
+    } finally {
+      gate.resolve();
+      expect((await run).completed).toHaveLength(ids.length);
+    }
+  });
+
   it("runs three generation streams concurrently and refills a free slot", async () => {
     const gates = new Map(["a", "b", "c", "d"].map((id) => [id, deferred()]));
     const started: string[] = [];
@@ -243,7 +258,7 @@ describe("runBulkRegenerate", () => {
         pending = false;
         return true;
       },
-    }), { cancelled: () => false });
+    }), { cancelled: () => false, concurrency: 1 });
 
     expect(order).toEqual(["reset:a", "generate:a", "reset:b", "generate:b"]);
     expect(result.completed).toEqual(["a", "b"]);
@@ -283,7 +298,7 @@ describe("runBulkRegenerate", () => {
         generated.push(id);
         cancel = true;
       },
-    }), { cancelled: () => cancel });
+    }), { cancelled: () => cancel, concurrency: 1 });
 
     expect(generated).toEqual(["a"]);
     expect(result.completed).toEqual(["a"]);
@@ -326,7 +341,7 @@ describe("runBulkRegenerate", () => {
       generate: async (id) => {
         order.push(`generate:${id}`);
       },
-    }), { cancelled: () => cancel });
+    }), { cancelled: () => cancel, concurrency: 1 });
 
     expect(order).toEqual(["drop:a", "reset:a", "generate:a"]);
     expect(result.completed).toEqual(["a"]);
@@ -343,7 +358,7 @@ describe("runBulkRegenerate", () => {
       generate: async (id) => {
         generated.push(id);
       },
-    }), { cancelled: () => cancel });
+    }), { cancelled: () => cancel, concurrency: 1 });
 
     expect(generated).toEqual(["a"]);
     expect(result.completed).toEqual(["a"]);
