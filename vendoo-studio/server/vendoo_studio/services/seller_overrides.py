@@ -408,6 +408,21 @@ def lock_seller_edits(previous: dict, submitted: dict) -> None:
     _write_locks(submitted, locks)
 
 
+def lock_native_edits(previous: dict, submitted: dict, markets) -> None:
+    """A native form keeps its own copy of each answer, so the seller's edit there stays theirs.
+
+    ``reconcile_followed_fields`` unlocks a form copy that matches General
+    because it expects to drop that copy. A native form's block is put back
+    afterwards, so the copy survives and must keep its lock.
+    """
+    prefixes = tuple(f"{market}_specifics." for market in markets)
+    if not prefixes or not isinstance(submitted, dict):
+        return
+    changed = _changed_paths(previous if isinstance(previous, dict) else {}, submitted)
+    locks = locked_paths(submitted) | {path for path in changed if path.startswith(prefixes) and not is_price_path(path)}
+    _write_locks(submitted, locks)
+
+
 def _specifics_block(listing: dict | None, marketplace: str) -> dict | None:
     raw = listing.get(f"{marketplace}_specifics") if isinstance(listing, dict) else None
     return raw if isinstance(raw, dict) else None

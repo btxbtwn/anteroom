@@ -33,7 +33,7 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     from vendoo_studio.services.chrome_catalog import keep_direct_categories
     from vendoo_studio.services.depop_category import align_depop_category
     from vendoo_studio.services.listing_generate import align_size_fields, sanitize_listing_sizes
-    from vendoo_studio.services.seller_overrides import prepare_user_listing, preserving_locks
+    from vendoo_studio.services.seller_overrides import lock_native_edits, prepare_user_listing, preserving_locks
 
     updated = copy.deepcopy(listing)
     reject_corrupt_listing(updated)
@@ -52,6 +52,7 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     preserving_locks(updated, _normalize)
     for market, block in native_blocks.items():
         updated[f"{market}_specifics"] = block
+    lock_native_edits(previous, updated, native_blocks)
     return updated
 
 

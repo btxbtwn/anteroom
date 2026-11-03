@@ -1,0 +1,1 @@
+- Picking the same answer on the eBay form as in General (like Department) now counts as your answer, so List no longer asks you to check it against the photos.
