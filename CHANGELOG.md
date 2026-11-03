@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.709 — 2026-11-03
+
+- Picking the same answer on the eBay form as in General (like Department) now counts as your answer, so List no longer asks you to check it against the photos.
+
 ## 0.1.708 — 2026-11-03
 
 - Inventory, suggestions and sales totals read small saved fields without repeatedly unpacking every marketplace form, leaving the database available for draft generation and edits.
