@@ -43,3 +43,21 @@ test("the sandbox refuses to publish or delist", async ({ request }, info) => {
     expect(response.status(), path).toBe(403);
   }
 });
+
+test("a marketplace form can be filled in without generating", async ({ page, phone, request }, info) => {
+  const title = `E2E by hand ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  await openListing(page, phone, title);
+  await expect(await titleBox(page, phone)).toBeVisible();
+  await page.getByRole("navigation", { name: "Marketplaces" }).getByRole("button", { name: /^Poshmark Poshmark/ }).click();
+  const form = page.getByRole("group", { name: "Poshmark listing fields" });
+  const field = form.getByRole("textbox", { name: "Title *" });
+  await field.fill("Hand typed tee");
+  await field.blur();
+  // The first edit saves the draft's first version; no generation is needed.
+  await expect.poll(async () => {
+    const saved = await (await request.get(`/api/conversations/${id}/listing`)).json();
+    return saved.current_revision_id ? JSON.stringify(saved.listing) : "";
+  }, { timeout: 15_000 }).toContain("Hand typed tee");
+  await expect(form.getByRole("textbox", { name: "Title *" })).toHaveValue("Hand typed tee");
+});
