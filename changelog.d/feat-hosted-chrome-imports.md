@@ -1,1 +1,0 @@
-- Anteroom Bridge 0.2.46 can read your Poshmark, Mercari, Depop, Sellwild and Vinted listings in Chrome for importing into your account on the web.

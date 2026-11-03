@@ -1,1 +1,0 @@
-- Import listings from your connected Chrome marketplaces on the web, choose which shops detect sales, and manage sharing and offer rules on desktop or phone.

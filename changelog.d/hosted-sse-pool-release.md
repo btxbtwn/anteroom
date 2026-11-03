@@ -1,2 +1,0 @@
-- Generation and assistant progress no longer hold a cloud database connection open the whole time they wait
-- Mac and Chrome connection checks no longer talk to the database on the web request loop
