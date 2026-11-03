@@ -96,6 +96,22 @@ The regression holds three editor responses open with a three-connection pool
 while another draft saves. This proves response delivery cannot reserve that
 pool; production generation and latency still require a live browser run.
 
+The 0.1.713 production browser run still reproduced pool exhaustion. Its first
+error stack showed repeated full inventory reconciliation and suggestion
+calculations from several open tabs, including notes parsing and quantity
+derivation while transactions remained open. Hosted inventory and suggestion
+reads therefore share one build per seller and view. Completed snapshots are
+validated with the seller's complete change-feed vector on each request.
+The active draft-ID set is checked too, so durable task changes made by worker
+SQL invalidate busy suggestions even without a feed notification. Lease renewal
+timestamps and queued-to-running transitions do not change that set.
+Time-dependent suggestions also refresh after at most 60 seconds. A change
+during a build leaves that result uncached. Waiting tabs hold neither a database connection nor a
+worker thread; the build owns its session and survives a tab disconnect.
+The completed cache retains at most 64 seller/view entries for memory usage,
+without limiting requests, sellers or generation tasks. Results never cross
+seller accounts, and errors are not cached.
+
 ## 3. Keep traffic and refresh costs proportional to useful work
 
 Fly's HTTP concurrency type is `requests`, which is what

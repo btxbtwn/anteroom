@@ -21,6 +21,7 @@ from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceLis
 from vendoo_studio.services.validation import etsy_eligible, validate_listing
 from vendoo_studio.repositories import hosted_drafts
 from vendoo_studio.routes.hosted_direct_listing import ACTION_MARKETPLACES
+from vendoo_studio.routes.suggestions import SuggestionsResponse
 from vendoo_studio.services import user_settings
 from vendoo_studio.services.hosted_database import get_seller_db
 from vendoo_studio.services.hosted_listing_contract import editable_listing, stored_listing_fields
@@ -113,7 +114,19 @@ class ConversationInput(BaseModel):
 
 
 @router.get('/conversations')
-def list_conversations(db=Depends(get_seller_db, scope="function")):
+async def list_conversations(request: Request):
+    return await request.app.state.seller_reads.read('inventory', inventory_response)
+
+
+@router.get('/suggestions', response_model=SuggestionsResponse)
+async def suggestions(request: Request):
+    from vendoo_studio.services.suggestions import list_suggestions
+
+    return await request.app.state.seller_reads.read('suggestions',
+                                                    lambda db: {'suggestions': list_suggestions(db)}, refresh_seconds=60)
+
+
+def inventory_response(db):
     from vendoo_studio.repositories.queries import ConversationRepo
 
     # The shared sidebar filters stored inventory status. Reconcile it from

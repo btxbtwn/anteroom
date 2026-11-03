@@ -1,0 +1,1 @@
+- Open tabs share inventory and suggestion results until your account data changes, so refreshing the same lists does not repeatedly rebuild them while you work on other drafts.
