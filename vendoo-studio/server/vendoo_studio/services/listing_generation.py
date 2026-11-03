@@ -240,6 +240,8 @@ async def run_listing_generation(
 
         async def choose_categories():
             # Its own session: comps and this run's stream write beside it.
+            # Release before any provider wait — a held checkout starves the
+            # hosted pool while categories talk to the Mac.
             db = SessionLocal()
             try:
                 async with live_trace.agent("categories", "Categories") as agent:
@@ -247,6 +249,7 @@ async def run_listing_generation(
                         run.publish(sse_event("status", message))
                         agent.update(message)
 
+                    db.rollback()
                     seed = await prepare_generation_schema(
                         db,
                         conv_id,
@@ -280,6 +283,7 @@ async def run_listing_generation(
         schema_task.result()
         from vendoo_studio.services.native_field_fill import prepare_generation_forms
 
+        stream_db.rollback()
         native_forms = await timed("native_forms", prepare_generation_forms(
             stream_db, conv_id, provider, evidence=f"{prompt_analysis}\n{item_details}"))
         if comps_task is not None:
@@ -302,6 +306,8 @@ async def run_listing_generation(
             native_forms=native_forms,
         )
         expected_revision_id = ConversationRepo(stream_db).current_revision_id(conv_id) or ""
+        # Do not keep a pooled connection while ChatGPT on the Mac writes the listing.
+        stream_db.rollback()
         run.publish(sse_event("status", "thinking"))
 
         from vendoo_studio.services.option_lookup import OptionCatalog, chat_with_options
