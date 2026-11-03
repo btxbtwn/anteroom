@@ -71,6 +71,20 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 Reference observations, verification steps and recorded gaps live in
 [docs/responsiveness.md](docs/responsiveness.md).
 
+## Hosted production changes
+
+Before changing hosted capacity, connections, workers, storage or deployment,
+follow [the Fly.io and Supabase operating guide](docs/hosted-production.md).
+Keep web requests isolated from heavy background work; measure sustained CPU,
+database time, query count and p95 latency under concurrent load. Choose database
+connection mode for the actual runtime and budget connections across every
+process and replica. Do not treat removing a pool cap as a scaling strategy.
+Before adding processes or Machines, remove process-local relay dependencies
+and prove Mac/Chrome request and reply routing across replicas. Preserve seller
+isolation, fenced saves, cancellation and explicit marketplace approval.
+Record evidence of compliance and remaining gaps; documentation or green CI
+alone does not establish production readiness.
+
 ## How to Work on a Change
 
 Every bug fix, feature and refactor follows the same loop. Component details

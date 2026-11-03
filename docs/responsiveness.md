@@ -116,3 +116,15 @@ and cancellation rules, and stays alive while shutdown drains active work.
 The regression blocks the execution loop with two sellers' drafts active and
 verifies both leases renew with the correct seller and token. A full passing
 live generation retest remains required.
+
+On 2026-11-03, web 0.1.695 was one shared-CPU Fly Machine with 2 GB in San Jose.
+About ten minutes after that deploy the one-minute load average was 19 on a
+single vCPU, and a later sample was still about 6. Roughly a quarter of the
+CPU time since boot was steal; the cgroup throttle counters read as zero, so
+that sample does not separate quota exhaustion from host contention. Memory
+had about 1.2 GB free. A new transaction-pooler connection took 719–880 ms to
+run `SELECT 1`. Reusing the connection took about 70 ms. Session mode and a
+direct connection were slower on reuse (about 160–240 ms). The database
+reported `max_connections` 60 with 40 sessions already present. Lease renewal
+no longer publishes a listing change. A passing live generation retest is
+still required before calling concurrent drafting fast enough.
