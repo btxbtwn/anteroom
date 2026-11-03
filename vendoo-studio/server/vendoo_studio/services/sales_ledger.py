@@ -87,10 +87,11 @@ def totals(data: dict | None, stale: bool = False) -> tuple[str | None, str | No
     if data is None or stale:
         return None, None
     values = {key: Decimal(data[key]) if data.get(key) is not None else None for key in AMOUNTS}
-    revenue, shipping_credit, refunds = (values[key] for key in ("item_revenue", "shipping_credit", "refunds"))
+    revenue, shipping_credit = values["item_revenue"], values["shipping_credit"]
+    # The forms never ask for refunds; none recorded means none happened.
+    refunds = values["refunds"] if values["refunds"] is not None else Decimal(0)
     fees, shipping_cost, item_cost = (values[key] for key in ("fees", "shipping_cost", "item_cost"))
-    net = (revenue + shipping_credit - refunds
-           if revenue is not None and shipping_credit is not None and refunds is not None else None)
+    net = revenue + shipping_credit - refunds if revenue is not None and shipping_credit is not None else None
     profit = (net - fees - shipping_cost - item_cost
               if net is not None and fees is not None and shipping_cost is not None and item_cost is not None else None)
     return format(net, "f") if net is not None else None, format(profit, "f") if profit is not None else None
@@ -133,6 +134,12 @@ def save_financials(db: Session, sale_id: str, body: FinancialSave) -> dict:
         if order_basis(sale) != body.expected_order_basis:
             raise LedgerError("The order or its item link changed. Reload the record before saving.", 409)
         data = body.model_dump(exclude={"expected_revision", "expected_order_basis", "sold_on"})
+        # The record form asks what Mark as sold asks. Amounts it leaves out
+        # (a marketplace's refund, an imported item cost) stay as they were.
+        kept = sale.financials if isinstance(sale.financials, dict) else {}
+        for key in ("refunds", "item_cost"):
+            if key not in body.model_fields_set:
+                data[key] = kept.get(key)
         data.update(order_basis=order_basis(sale), updated_at=_iso(utcnow()), source="seller")
         values: dict = {"financials": data, "financial_revision": MarketplaceSale.financial_revision + 1}
         if "sold_on" in body.model_fields_set:

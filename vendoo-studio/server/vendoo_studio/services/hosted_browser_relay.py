@@ -13,7 +13,9 @@ cancelling one (``job.cancel``). Besides those, a few named commands do what
 the Mac does outside its listing actions: reads that fill the seller's editor
 with their account's own choices (Vinted's categories and brands, Sellwild's
 address, discounts and package, which the Mac reads in its private account
-windows), and the sign-in status and Sign in of Settings → Connections. Each is a fixed command with fixed inputs; none takes a URL or a
+windows), the sign-in status and Sign in of Settings → Connections, and the Chrome
+inventory import's reads of the seller's own active listings. Each is a fixed
+command with fixed inputs; none takes a URL or a
 script. A command waits in the relay only while the tab is answering; when no
 tab has asked recently, Chrome counts as disconnected and the action is refused
 before it starts.
@@ -34,12 +36,17 @@ VINTED_CHOICES = "vinted.choices"
 SELLWILD_ACCOUNT = "sellwild.account"
 # Checking which marketplaces Chrome is signed in to, and opening one's sign-in page there.
 MARKETPLACE_SESSIONS = "marketplace.sessions"
+# Reading the seller's own active listings to import them.
+MARKETPLACE_IMPORT = "marketplace.import"
 SALES_HISTORY = "marketplace.sales_history"
+MARKETPLACE_PROMOTIONS = "marketplace.promotions"
 # The Bridge version that first declares each capability, and what it lets the web do.
 NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
          SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices"),
          MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in"),
-         SALES_HISTORY: ("0.2.47", "read marketplace orders")}
+         MARKETPLACE_IMPORT: ("0.2.53", "import your listings"),
+         SALES_HISTORY: ("0.2.47", "read marketplace orders"),
+         MARKETPLACE_PROMOTIONS: ("0.2.52", "share listings and send offers")}
 
 # Each command, and the capability the Bridge must declare to receive it.
 COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
@@ -47,7 +54,10 @@ COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MA
             "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES,
             "marketplace.sellwild_account": SELLWILD_ACCOUNT,
             "marketplace.sessions": MARKETPLACE_SESSIONS, "marketplace.connect": MARKETPLACE_SESSIONS,
-            "marketplace.sales_history": SALES_HISTORY}
+            "marketplace.import.page": MARKETPLACE_IMPORT, "marketplace.import.listing": MARKETPLACE_IMPORT,
+            "marketplace.sales_history": SALES_HISTORY,
+            "marketplace.promotion_check": MARKETPLACE_PROMOTIONS, "marketplace.promote": MARKETPLACE_PROMOTIONS,
+            "marketplace.promotion_result": MARKETPLACE_PROMOTIONS, "marketplace.like_events": MARKETPLACE_PROMOTIONS}
 # A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
 CONTRACT = ("type", "job_id", "message_id", "payload")
 # The page asks again as soon as it answers, and at least this often while idle.
@@ -62,6 +72,7 @@ class BrowserRelay(ReplyWaits):
         self._ready = asyncio.Event()
         self._seen_at = 0.0
         self._capabilities: frozenset[str] = frozenset()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _can(self, capability: str) -> bool:
         return capability in self._capabilities and time.monotonic() - self._seen_at < SEEN_FOR_S
@@ -98,7 +109,19 @@ class BrowserRelay(ReplyWaits):
             return f"Update Anteroom Bridge in Chrome to {version} or later to {purpose} from the web."
         return None
 
+    def resolve_wait(self, request_id: str, payload: dict) -> None:
+        # Timed promotions wait on the background loop, while the tab replies
+        # on the web loop. A future must be completed on the loop that owns it.
+        future = self._waits.get(request_id)
+        if future is not None and not future.get_loop().is_closed():
+            future.get_loop().call_soon_threadsafe(super().resolve_wait, request_id, payload)
+
     async def deliver_local(self, message: dict) -> bool:
+        loop = self._loop
+        if loop is not None and loop is not asyncio.get_running_loop():
+            if loop.is_closed():
+                return False
+            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.deliver_local(message), loop))
         capability = COMMANDS.get(str(message.get("type")))
         if capability is None or not self._can(capability):
             return False
@@ -132,6 +155,7 @@ class BrowserRelay(ReplyWaits):
     async def next_message(self, capabilities: set[str], timeout: float) -> dict | None:
         """The next command for this seller's Chrome, waiting up to ``timeout`` seconds."""
         self.note_seen(capabilities)
+        self._loop = asyncio.get_running_loop()
         deadline = time.monotonic() + timeout
         while not self._outbox:
             remaining = deadline - time.monotonic()
@@ -151,10 +175,15 @@ class BrowserRelay(ReplyWaits):
         and the Bridge's reply. Raises ``ChromeReadError`` when Chrome cannot take it or
         does not answer in time."""
         capability = COMMANDS.get(command)
-        if capability is None or capability == MARKETPLACE_ACTIONS:
+        if capability is None or capability == MARKETPLACE_ACTIONS or command == "marketplace.promote":
             raise ValueError(f"{command} is not a relayed read.")
         if refusal := self._local_refusal(capability):
             raise ChromeReadError(refusal)
+        loop = self._loop
+        if loop is not None and loop is not asyncio.get_running_loop():
+            if loop.is_closed():
+                raise ChromeReadError("Open Anteroom in Chrome and connect Chrome first.")
+            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.read(command, payload, timeout), loop))
         request_id = uuid.uuid4().hex
         waiter = self.register_wait(request_id)
         if not await self.deliver_local({"type": command, "job_id": None, "message_id": request_id,
@@ -224,3 +253,9 @@ def relay_for(seller_id: str) -> BrowserRelay:
             relay = BrowserRelay(seller_id)
             _relays[seller_id] = relay
         return relay
+
+def ready_sellers(capability: str) -> list[str]:
+    """Sellers with a recently connected tab and the required Bridge capability."""
+    with _lock:
+        relays = list(_relays.items())
+    return [seller for seller, relay in relays if relay.refusal(capability) is None]

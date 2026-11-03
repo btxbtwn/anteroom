@@ -359,6 +359,15 @@ describe("marketplaces section", () => {
     expect(render({}, sold)).not.toContain("List everywhere…");
   });
 
+  it("sets the marketplace where the item sold apart in its own color", () => {
+    const sold = { ebay: { ...live, url: "https://www.ebay.com/itm/1", listing_id: "1", sold_here: true }, mercari: live };
+    expect(rowStatus("ebay", sold.ebay, undefined, null, true).tone).toBe("sold");
+    const html = render({}, sold, { selected: "ebay" });
+    expect(row(html, "eBay")).toContain("text-info-foreground");
+    expect(row(html, "Mercari")).not.toContain("text-info-foreground");
+    expect(html).toMatch(/data-marketplace-pane="ebay" data-tone="sold" class="[^"]*bg-info\/4/);
+  });
+
   it("offers no new listings once the item sold somewhere", () => {
     const sold = { poshmark: { ...live, url: "https://poshmark.com/listing/x", listing_id: "x", sold_here: true } };
     expect(render({}, sold, { selected: "mercari" })).not.toContain("List…");

@@ -287,7 +287,7 @@ def test_analytics_missing_sales_data_lists_what_sales_records_flags(env):
     listed = inventory_analytics(env.db, range_id="30d")["incomplete_sales"]
     assert [row["id"] for row in listed] == [row["id"] for row in flagged]
     assert listed == [{"id": flagged[0]["id"], "conversation_id": "coat", "title": "Coat",
-                       "missing": ["sale price", "shipping collected", "refunds", "fees", "shipping cost", "item cost"]}]
+                       "missing": ["sale price", "shipping the buyer paid", "fees", "shipping you paid", "cost of goods"]}]
 
 
 def test_the_same_order_in_vendoo_and_the_ledger_counts_once(env):
@@ -301,7 +301,7 @@ def test_the_same_order_in_vendoo_and_the_ledger_counts_once(env):
     assert len(sold) == 1 and sold[0].sold_price == 38 and sold[0].fees == 4
     from vendoo_studio.services.sales_records import records
 
-    assert "shipping cost" in records(env.db)[0]["missing_sale_data"]
+    assert "shipping you paid" in records(env.db)[0]["missing_sale_data"]
     assert inventory_analytics(env.db, range_id="30d")["sales"]["count"] == 1
 
 
@@ -468,3 +468,16 @@ def test_undated_revision_still_establishes_quantity(env, has_sale):
     env.db.commit()
     first_sales = {"undated": datetime.now(UTC)} if has_sale else {}
     assert _quantities(env.db, {"undated"}, first_sales) == {"undated": 3}
+
+
+def test_listing_rows_carry_the_latest_sale_anteroom_recorded(env):
+    item(env.db, "sold-on-ebay", notes={"vendooStatus": "active", "vendooDates": {"sold": ""}})
+    line(env.db, "sold-on-ebay", when=datetime(2026, 11, 2, 3, 51, 17))
+    item(env.db, "unsold")
+
+    rows = {row["id"]: row for row in env.client.get("/api/conversations").json()}
+
+    assert rows["sold-on-ebay"]["status"] == "sold"
+    assert rows["sold-on-ebay"]["sold_at"] == "2026-11-02T03:51:17+00:00"
+    assert rows["unsold"]["sold_at"] is None
+    assert env.client.get("/api/conversations/sold-on-ebay").json()["sold_at"] == "2026-11-02T03:51:17+00:00"

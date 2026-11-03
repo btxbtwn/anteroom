@@ -3,7 +3,7 @@ import { useDeferredValue, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { DownloadLink } from "./DownloadLink";
-import { FINANCIAL_FIELDS, type FinancialEntry, type FinancialField, type SalesLedgerPage, type SalesLedgerRow } from "../api/salesLedger";
+import { SALE_FORM_FIELDS, type SaleFormField, type SalesLedgerPage, type SalesLedgerRow } from "../api/salesLedger";
 import { pollMs } from "../api/polling";
 import { marketplaceName } from "./marketplaceNames";
 import { EmptyRow, PageError, PageHeader, PageNote, PageSection, PageSkeleton, Panel } from "./WorkspacePage";
@@ -13,7 +13,6 @@ import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 
 const MARKETS = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "other"];
-const LABELS: Record<FinancialField, string> = { item_revenue: "Item revenue total", shipping_credit: "Shipping collected", refunds: "Revenue refunded", fees: "Net fees", shipping_cost: "Shipping cost total", item_cost: "Item cost total" };
 
 export function ledgerMoney(value: string | null | undefined, currency: string | undefined): string {
   return value == null || !currency ? "Not recorded" : `${currency} ${value}`;
@@ -57,7 +56,7 @@ export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenList
     enabled: valid, retry: false, refetchInterval: () => pollMs(15000) });
   const data = valid ? query.data : undefined;
   return <>
-    <PageHeader title="Analytics" description="Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales from here." actions={<div className="flex flex-wrap gap-2">
+    <PageHeader title="Analytics" description="Record sale prices, shipping and fees in Anteroom. Export your inventory and sales from here." actions={<div className="flex flex-wrap gap-2">
       <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.inventoryCsv()} filename="anteroom-inventory.csv">Export inventory CSV</DownloadLink>
       {valid ? <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.salesCsv(filters)} filename="anteroom-sales.csv">Export sales CSV</DownloadLink> : <Button size="sm" variant="outline" disabled>Export sales CSV</Button>}
     </div>}>
@@ -102,7 +101,7 @@ export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenList
             {row.financials_stale ? <p className="text-xs text-warning-foreground">Order changed or recorded amounts need review.</p> : null}
           </div>
           <dl className="grid w-full grid-cols-3 gap-4 text-right text-xs tabular-nums sm:w-72">
-            <div><dt className="text-muted-foreground">Item revenue</dt><dd className="mt-1">{ledgerMoney(row.financials?.item_revenue, row.financials?.currency)}</dd></div>
+            <div><dt className="text-muted-foreground">Sale price</dt><dd className="mt-1">{ledgerMoney(row.financials?.item_revenue, row.financials?.currency)}</dd></div>
             <div><dt className="text-muted-foreground">Fees</dt><dd className="mt-1">{ledgerMoney(row.financials?.fees, row.financials?.currency)}</dd></div>
             <div><dt className="text-muted-foreground">Profit</dt><dd className={cn("mt-1 font-medium", row.profit == null ? "text-muted-foreground" : Number(row.profit) < 0 && "text-destructive-foreground")}><span className="sr-only">Profit: </span>{ledgerMoney(row.profit, row.financials?.currency)}</dd></div>
           </dl>
@@ -127,26 +126,28 @@ export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenList
 function FinancialEditor({ row, onClose, onSaved, onReload }: { row: SalesLedgerRow; onClose: () => void; onSaved: () => void; onReload: (row: SalesLedgerRow) => void }) {
   const [today] = useState(() => new Date().toISOString().slice(0, 10));
   const [soldOn, setSoldOn] = useState(row.sold_at?.slice(0, 10) || "");
-  const [currency, setCurrency] = useState(row.financials?.currency || "");
-  const [values, setValues] = useState<Record<FinancialField, string>>(() => Object.fromEntries(FINANCIAL_FIELDS.map((field) => [field, row.financials?.[field] || ""])) as Record<FinancialField, string>);
+  const currency = row.financials?.currency || "USD";
+  const [values, setValues] = useState<Record<SaleFormField, string>>(() => Object.fromEntries(SALE_FORM_FIELDS.map(([field]) => [field, row.financials?.[field] || ""])) as Record<SaleFormField, string>);
+  // The same amounts Mark as sold takes. Refunds and the item's cost are left as they are.
   const save = useMutation({ mutationFn: () => api.salesLedger.save(row.id, {
-    sold_on: soldOn || null,
-    currency, ...Object.fromEntries(FINANCIAL_FIELDS.map((field) => [field, values[field].trim() || null])) as Omit<FinancialEntry, "currency">,
+    sold_on: soldOn || null, currency,
+    ...Object.fromEntries(SALE_FORM_FIELDS.map(([field]) => [field, values[field].trim().replace(/^\$/, "") || null])),
     expected_revision: row.financial_revision, expected_order_basis: row.order_basis,
   }), retry: false, onSuccess: onSaved });
   const reload = useMutation({ mutationFn: () => api.salesLedger.get(row.id), retry: false, onSuccess: onReload });
   const busy = save.isPending || reload.isPending;
+  const refunds = row.financials?.refunds;
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
-    <DialogPopup className="sm:max-w-xl"><DialogHeader className="shrink-0"><DialogTitle>Record sale amounts</DialogTitle><DialogDescription>{marketplaceName(row.marketplace)} order {row.order_id} · line {row.line_id} · quantity {row.quantity ?? "unknown"} · {row.order_status.replace(/_/g, " ")}</DialogDescription></DialogHeader>
+    <DialogPopup className="sm:max-w-xl"><DialogHeader className="shrink-0"><DialogTitle>Record sale amounts</DialogTitle><DialogDescription>Sold on {marketplaceName(row.marketplace)} · quantity {row.quantity ?? "unknown"} · {row.order_status.replace(/_/g, " ")}</DialogDescription></DialogHeader>
       <form className="flex min-h-0 flex-col" onSubmit={(event) => { event.preventDefault(); if (!busy) save.mutate(); }}><DialogPanel className="space-y-4">
-        <PageNote>Enter totals for this sale, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures in Anteroom; quantities and marketplace listings stay unchanged.</PageNote>
-        {row.financials_source === "vendoo" ? <PageNote>These are imported historical sale details. Save corrections here in Anteroom.</PageNote> : null}
         {row.financials_stale ? <PageNote>This order changed. Review every amount before saving again.</PageNote> : null}
-        <label className="block space-y-1 text-xs">Sale date (UTC)<Input type="date" min="1970-01-01" max={today} value={soldOn} disabled={busy} onChange={event => setSoldOn(event.target.value)} /></label>
-        <label className="block space-y-1 text-xs">Currency code<Input required pattern="[A-Z]{3}" maxLength={3} value={currency} placeholder="USD" disabled={busy} onChange={(event) => setCurrency(event.target.value.toUpperCase())} /></label>
-        <div className="grid gap-3 sm:grid-cols-2">{FINANCIAL_FIELDS.map((field) => <label key={field} className="space-y-1 text-xs">{LABELS[field]}<Input inputMode="decimal" value={values[field]} placeholder="Unknown" disabled={busy} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}</div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="space-y-1 text-xs">Date<Input nativeInput type="date" min="1970-01-01" max={today} value={soldOn} disabled={busy} onChange={event => setSoldOn(event.target.value)} /></label>
+          {SALE_FORM_FIELDS.map(([field, label]) => <label key={field} className="space-y-1 text-xs">{label}<Input inputMode="decimal" value={values[field]} placeholder="0.00" disabled={busy} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}
+        </div>
+        <PageNote>Cost of goods: {ledgerMoney(row.financials?.item_cost, currency)}, from the item's form.{refunds != null && Number(refunds) !== 0 ? ` Refunded: ${ledgerMoney(refunds, currency)}.` : ""} Leave an amount blank if you don't know it. Nothing changes on any marketplace.</PageNote>
         {save.error ? <PageError message={save.error.message} /> : null}{reload.error ? <PageError message={reload.error.message} /> : null}
-      </DialogPanel><DialogFooter className="shrink-0"><Button type="button" variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Reload record</Button><Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" disabled={busy || !/^[A-Z]{3}$/.test(currency)}>{save.isPending ? "Saving…" : "Save amounts"}</Button></DialogFooter></form>
+      </DialogPanel><DialogFooter className="shrink-0"><Button type="button" variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Reload record</Button><Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" disabled={busy}>{save.isPending ? "Saving…" : "Save amounts"}</Button></DialogFooter></form>
     </DialogPopup>
   </Dialog>;
 }
