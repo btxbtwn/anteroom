@@ -1,0 +1,1 @@
+- Notes the hosted pool re-measure after releasing marketplace form DB holds.
