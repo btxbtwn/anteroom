@@ -3,6 +3,7 @@ import asyncio
 import json
 from contextlib import nullcontext
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -12,11 +13,13 @@ from sqlalchemy.orm import Session
 
 from test_hosted_drafts import BOB, cloud  # noqa: F401
 from test_hosted_marketplaces import _fake_vault
+from test_relay_sales import ebay_notification_client
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.models.user_secret import UserSecretReference
 from vendoo_studio.services import hosted_sales_scheduler as worker
+from vendoo_studio.services import order_recovery
 from vendoo_studio.services.hosted_context import for_seller
 from vendoo_studio.services.service_context import current, use
 
@@ -51,6 +54,9 @@ def test_sales_worker_records_each_seller_before_ack_and_replays_safely(cloud, m
 
     monkeypatch.setattr(worker.relay_client, 'relay_request', relay)
     monkeypatch.setattr(worker.recent_ebay_orders, 'refresh', catchup)
+    monkeypatch.setattr(order_recovery.EbayClient, 'connect', AsyncMock(
+        side_effect=lambda: ebay_notification_client('same-order', [('line-1', '123456789012')])))
+    monkeypatch.setattr(order_recovery, 'assert_identity', lambda _: None)
 
     async def run():
         for _ in range(2):

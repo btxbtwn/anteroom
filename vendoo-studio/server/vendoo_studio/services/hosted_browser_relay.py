@@ -74,6 +74,10 @@ class BrowserRelay(ReplyWaits):
     def connected(self) -> bool:
         return self._can(MARKETPLACE_ACTIONS)
 
+    def note_seen(self, capabilities: set[str]) -> None:
+        self._seen_at = time.monotonic()
+        self._capabilities = frozenset(capabilities)
+
     def refusal(self, capability: str = MARKETPLACE_ACTIONS) -> str | None:
         """Why this seller's Chrome cannot take a command needing ``capability`` now, or None."""
         if time.monotonic() - self._seen_at >= SEEN_FOR_S:
@@ -82,6 +86,13 @@ class BrowserRelay(ReplyWaits):
             version, purpose = NEEDS[capability]
             return f"Update Anteroom Bridge in Chrome to {version} or later to {purpose} from the web."
         return None
+
+    def resolve_wait(self, request_id: str, payload: dict) -> None:
+        # Timed promotions wait on the background loop, while the tab replies
+        # on the web loop. A future must be completed on the loop that owns it.
+        future = self._waits.get(request_id)
+        if future is not None and not future.get_loop().is_closed():
+            future.get_loop().call_soon_threadsafe(super().resolve_wait, request_id, payload)
 
     async def send_message(self, message: dict) -> bool:
         capability = COMMANDS.get(str(message.get("type")))
@@ -99,8 +110,7 @@ class BrowserRelay(ReplyWaits):
 
     async def next_message(self, capabilities: set[str], timeout: float) -> dict | None:
         """The next command for this seller's Chrome, waiting up to ``timeout`` seconds."""
-        self._seen_at = time.monotonic()
-        self._capabilities = frozenset(capabilities)
+        self.note_seen(capabilities)
         self._loop = asyncio.get_running_loop()
         deadline = time.monotonic() + timeout
         while not self._outbox:

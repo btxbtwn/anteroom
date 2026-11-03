@@ -115,3 +115,35 @@ def test_failed_check_errors_stay_with_the_seller(monkeypatch):
     finally:
         chrome_sales._next.clear()
         chrome_sales._errors.clear()
+
+
+def test_heartbeat_before_first_poll_wakes_the_background_reader(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, _ = cloud
+    alice = headers(signing_keys)
+    monkeypatch.setattr('vendoo_studio.routes.hosted_browser_relay.WAIT_S', 0.1)
+    monkeypatch.setattr(order_history, 'READ_TIMEOUT_S', 5)
+    hosted_browser_relay._relays.clear()
+    assert client.post('/api/browser-relay/heartbeat', headers=alice,
+                       json={'capabilities': CAPABLE.split(',')}).status_code == 200
+
+    def check():
+        with use(for_seller(USER_ID)):
+            return asyncio.run(order_history.sync('poshmark'))
+
+    import threading
+    queued = threading.Event()
+    relay = hosted_browser_relay.relay_for(USER_ID)
+    send = relay.send_message
+
+    async def sent(message):
+        result = await send(message)
+        asyncio.get_running_loop().call_soon(queued.set)
+        return result
+
+    monkeypatch.setattr(relay, 'send_message', sent)
+    thread, result = _in_background(check)
+    assert queued.wait(5), 'The background command must be queued before the first poll'
+    _answer(client, alice, {'ok': True, 'orders': []}, CAPABLE)
+    thread.join(1)
+    assert not thread.is_alive(), 'A browser reply must wake the background reader immediately'
+    assert result['response']['ok'] is True
