@@ -54,9 +54,9 @@ def _time(value) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _sold_on(db: Session, conv_id: str, notes: dict) -> dict[str, datetime | None]:
+def _sold_on(db: Session, conv_id: str, notes: dict, native: dict) -> dict[str, datetime | None]:
     """Where the item sold, and when that was last reported (None when unknown)."""
-    sold: dict[str, datetime | None] = {}
+    sold = reported_sales(notes)
 
     def add(marketplace: str, when) -> None:
         stamp, known = _time(when), sold.get(marketplace)
@@ -64,7 +64,6 @@ def _sold_on(db: Session, conv_id: str, notes: dict) -> dict[str, datetime | Non
 
     from vendoo_studio.services.sale_inventory import stock_after_sale
 
-    native = MarketplaceListingRepo(db).for_conversation(conv_id)
     stocks = {}
     for row in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id == conv_id, MarketplaceSale.order_status.in_(PAID_STATUSES)):
         mark = _notes_dict(notes, "marketplaceMarks").get(row.marketplace) or {}
@@ -78,11 +77,17 @@ def _sold_on(db: Session, conv_id: str, notes: dict) -> dict[str, datetime | Non
             stocks[key] = stock_after_sale(db, conv_id, row.marketplace, row.listing_id)
         if stocks[key]["status"] == "sold_out":
             add(row.marketplace, row.received_at)
+    return sold
+
+
+def reported_sales(notes: dict) -> dict[str, datetime | None]:
+    """Sale reports stored on the item, without querying native sale records."""
+    sold: dict[str, datetime | None] = {}
     sale = notes.get("vendooSale")
     if not isinstance(sale, dict):
         sale = {}
     if sale.get("marketplace"):
-        add(str(sale["marketplace"]).lower(), None)
+        sold[str(sale["marketplace"]).lower()] = None
     dates = notes.get("vendooDates")
     if not isinstance(dates, dict):
         dates = {}
@@ -91,7 +96,8 @@ def _sold_on(db: Session, conv_id: str, notes: dict) -> dict[str, datetime | Non
         sold_by = {}
     for name, when in sold_by.items():
         if when:
-            add(str(name).lower(), when)
+            marketplace = str(name).lower()
+            sold[marketplace] = max(filter(None, (_time(when), sold.get(marketplace))), default=None)
     return sold
 
 
@@ -144,11 +150,15 @@ def listings(db: Session, conv_id: str) -> dict:
     if not conv:
         raise DelistError(404, "Conversation not found")
     notes = parse_notes(conv.notes)
-    urls = _notes_dict(notes, "vendooListingUrls")
     native = MarketplaceListingRepo(db).for_conversation(conv_id)
+    return known_listings(notes, native, _sold_on(db, conv_id, notes, native))
+
+
+def known_listings(notes: dict, native: dict, sold: dict) -> dict:
+    """Interpret already-loaded listing links, removals and sale reports."""
+    urls = _notes_dict(notes, "vendooListingUrls")
     delists = _notes_dict(notes, "marketplaceDelists")
     marks = _notes_dict(notes, "marketplaceMarks")
-    sold = _sold_on(db, conv_id, notes)
     result = {}
     for marketplace in MARKETPLACES:
         binding = native.get(marketplace)

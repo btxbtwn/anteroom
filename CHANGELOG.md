@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.694 — 2026-11-03
+
+- Count an eBay sale once when notifications and order recovery use different forms of its line ID, while keeping amounts you already entered.
+- Move fully sold listings into the web app's Sold inventory when their sales arrive; keep partially sold stock Active.
+
+## 0.1.693 — 2026-11-03
+
+- Keep running web draft generations alive when slow database work blocks their execution loop.
+- Speed up eBay offer status by loading inventory data in bulk instead of making extra database queries for every listing.
+
 ## 0.1.692 — 2026-11-03
 
 - Remember approved Chrome accounts across tab closures, browser restarts and Bridge updates, reconnect automatically after temporary unavailability, and revoke approval when signing out or disconnecting.

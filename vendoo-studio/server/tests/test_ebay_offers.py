@@ -28,6 +28,45 @@ from vendoo_studio.services.vendoo_import import merge_notes
 ITEM_ID = "123456789012"
 
 
+def test_status_reads_inventory_in_a_fixed_number_of_queries(offers):
+    for index in range(100):
+        offers.db.add(Conversation(id=f'bulk-{index}', title=f'Coat {index}', status='active',
+                                   notes=merge_notes(None, {'vendooListingUrls': {
+                                       'ebay': f'https://www.ebay.com/itm/{200000000000 + index}'}})))
+    offers.db.commit()
+    statements = []
+
+    def counted(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith('SELECT'):
+            statements.append(statement)
+
+    engine = offers.db.get_bind()
+    event.listen(engine, 'before_cursor_execute', counted)
+    try:
+        result = ebay_offers.status(offers.db)
+    finally:
+        event.remove(engine, 'before_cursor_execute', counted)
+    assert len(result['listings']) == 101
+    assert len(statements) <= 8, f'One status request issued {len(statements)} SELECT queries for 101 listings'
+
+
+@pytest.mark.parametrize(('extra', 'eligible'), [
+    ({'vendooSale': {'marketplace': 'ebay'}}, False),
+    ({'marketplaceMarks': {'ebay': {'state': 'sold'}}}, False),
+    ({'marketplaceMarks': {'ebay': {'state': 'not_listed', 'listing_id': ITEM_ID}}}, False),
+    ({'marketplaceDelists': {'ebay': {'state': 'deleted', 'listing_id': ITEM_ID}}}, False),
+    ({'marketplaceDelists': {'ebay': {'state': 'failed', 'listing_id': ITEM_ID}}}, True),
+    ({'vendooDates': {'soldByMarketplace': {'ebay': '2026-10-01T12:00:00Z'}},
+      'marketplaceMarks': {'ebay': {'state': 'listed', 'url': f'https://www.ebay.com/itm/{ITEM_ID}',
+                                  'at': '2026-10-02T12:00:00Z'}}}, True),
+])
+def test_bulk_status_preserves_sold_removed_and_relisted_item_rules(offers, extra, eligible):
+    offers.conv.notes = merge_notes(offers.conv.notes, extra)
+    offers.db.commit()
+    result = ebay_offers.status(offers.db)
+    assert bool(result['listings']) is eligible
+
+
 class EbayStandIn(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
