@@ -2,6 +2,7 @@
 (function () {
   const ORIGIN = 'https://myanteroom.com';
   const KEY = 'anteroom_cloud_connections';
+  const APPROVALS_KEY = 'anteroom_cloud_approvals';
   const TTL = 2 * 60 * 1000;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
@@ -27,6 +28,8 @@
     const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? RELAY_CAPABILITIES : [])] });
     async function read() { return (await api.storage.session.get(KEY))[KEY] || {}; }
     async function write(records) { await api.storage.session.set({ [KEY]: records }); }
+    async function readApprovals() { return (await api.storage.local.get(APPROVALS_KEY))[APPROVALS_KEY] || {}; }
+    async function writeApprovals(records) { await api.storage.local.set({ [APPROVALS_KEY]: records }); }
     async function closeApproval(record) {
       if (Number.isInteger(record?.pending?.windowId)) {
         try { await api.windows.remove(record.pending.windowId); } catch { /* Already closed. */ }
@@ -39,6 +42,18 @@
       await write(records);
       await closeApproval(record);
     }
+    async function disconnect(accountId) {
+      const approvals = await readApprovals();
+      delete approvals[accountId];
+      await writeApprovals(approvals);
+      const records = await read();
+      for (const [id, record] of Object.entries(records)) {
+        if (record.accountId !== accountId) continue;
+        delete records[id];
+        await closeApproval(record);
+      }
+      await write(records);
+    }
     async function handle(message, sender) {
       if (!message || typeof message !== 'object' || message.type !== 'cloud.connection') return undefined;
       if (PAGE_ACTIONS.has(message.action)) {
@@ -49,7 +64,7 @@
         const id = sender.tab.id;
         let record = records[id];
         if (message.action === 'disconnect') {
-          if (record?.accountId === message.accountId) await clear(id);
+          await disconnect(message.accountId);
           return status('disconnected');
         }
         // Identity labels are supplied by the signed-in page, not an API
@@ -66,7 +81,18 @@
           record = null;
           await write(records);
         }
-        if (record?.approved) return status('connected');
+        const approval = (await readApprovals())[message.accountId];
+        if (UUID.test(approval?.connectionId || '')) {
+          await closeApproval(record);
+          records[id] = { accountId: message.accountId, approved: true, connectionId: approval.connectionId };
+          await write(records);
+          return status('connected');
+        }
+        if (record?.approved) {
+          delete records[id];
+          record = null;
+          await write(records);
+        }
         if (record?.pending) return status('pending');
         if (message.action === 'status') return status('disconnected');
         const requestId = randomId();
@@ -101,29 +127,32 @@
           { documentId: record.pending.documentId });
         if (reply?.current !== true) throw new Error('Account changed');
       } catch { await clear(id); return { ok: false }; }
-      records[id] = { accountId: record.accountId, approved: true, connectionId: randomId() };
+      const connectionId = randomId();
+      const approvals = await readApprovals();
+      approvals[record.accountId] = { connectionId };
+      await writeApprovals(approvals);
+      records[id] = { accountId: record.accountId, approved: true, connectionId };
       await write(records);
       return { ok: true };
     }
     // A checker for the page's approved connection, document and account, or null when it has none.
     async function approvedPage(message, sender) {
-      const connection = await serial(async () => {
+      const granted = async () => {
         const record = (await read())[sender.tab.id];
-        return record?.approved && record.accountId === message.accountId ? record.connectionId : null;
-      });
+        const approval = (await readApprovals())[message.accountId];
+        return record?.approved && record.accountId === message.accountId && approval?.connectionId === record.connectionId
+          ? record.connectionId : null;
+      };
+      const connection = await serial(granted);
       if (!connection) return null;
       return async function current() {
-        const record = await serial(async () => (await read())[sender.tab.id]);
-        if (!record?.approved || record.accountId !== message.accountId || record.connectionId !== connection) return false;
+        if (await serial(granted) !== connection) return false;
         try {
           const tab = await api.tabs.get(sender.tab.id);
           if (!site(tab.url)) return false;
           const reply = await api.tabs.sendMessage(sender.tab.id, { type: 'cloud.connection.probe', accountId: message.accountId }, { documentId: sender.documentId });
           if (reply?.current !== true) return false;
-          return await serial(async () => {
-            const latest = (await read())[sender.tab.id];
-            return Boolean(latest?.approved && latest.accountId === message.accountId && latest.connectionId === connection);
-          });
+          return await serial(granted) === connection;
         } catch { return false; }
       };
     }
