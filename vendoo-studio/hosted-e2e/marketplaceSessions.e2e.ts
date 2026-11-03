@@ -43,7 +43,9 @@ test("hosted Chrome imports, saved-off rules and sale switches are available", a
   const ruleName = `Web sharing ${info.project.name} ${Date.now()}`;
   const sharing = page.getByText("New sharing schedule · saved off", { exact: true }).locator("..");
   await sharing.getByRole("textbox", { name: "Name", exact: true }).fill(ruleName);
+  const ruleSaved = page.waitForResponse(response => response.url().endsWith("/api/promotion-automations") && response.request().method() === "POST");
   await sharing.getByRole("button", { name: "Save", exact: true }).click();
+  expect((await ruleSaved).ok()).toBeTruthy();
   await expect(page.getByText(`${ruleName} · Poshmark`, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Turn on", exact: true }).first()).toBeVisible();
   await page.screenshot({ path: `e2e/results/hosted/session-automations-${info.project.name}.png`, fullPage: true });
