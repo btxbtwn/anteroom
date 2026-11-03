@@ -16,7 +16,6 @@ hold them, so a marketplace's rules plug in by adding one name.
 """
 from __future__ import annotations
 
-import copy
 import importlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -95,7 +94,7 @@ def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
     from vendoo_studio.services.native_form import attach_form
 
-    snapshot = prepare_listing_snapshot(db, conv, copy.deepcopy(listing_json))
+    snapshot = prepare_listing_snapshot(db, conv, listing_json)
     from vendoo_studio.services.seller_overrides import apply_marketplace_overrides
 
     apply_marketplace_overrides(snapshot, marketplace)
