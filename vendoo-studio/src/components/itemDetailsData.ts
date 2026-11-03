@@ -104,4 +104,3 @@ export function mergeDetailNotes(notes: string | null, patch: Partial<ItemDetail
   } catch { /* Seller text is retained by parseNotes. */ }
   return JSON.stringify({ ...managed, ...applyDetailsPatch(parseNotes(notes, dimensions), patch), condition: "", poshmarkOriginalPrice: "0" });
 }
-
