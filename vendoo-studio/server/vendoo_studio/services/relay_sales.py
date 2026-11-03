@@ -1,8 +1,8 @@
 """Turn relay events into sales the seller can act on.
 
-The relay sends IDs only. An eBay ORDER_CONFIRMATION names the order and each
-line's listing ID; an Etsy order.paid names the receipt, whose lines Studio
-reads through the relay's Etsy forwarding. Each line becomes one
+The relay sends IDs only. An eBay ORDER_CONFIRMATION names an order which is
+read through the same verified order reader as catch-up; an Etsy order.paid
+names the receipt, whose lines Studio reads through the relay's Etsy forwarding. Each line becomes one
 MarketplaceSale, matched to the Studio listing whose Vendoo-reported URL on
 that marketplace carries the same listing ID. Nothing here delists: a sale
 waits for the seller.
@@ -10,10 +10,12 @@ waits for the seller.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -101,6 +103,35 @@ def _parse_time(value: Any) -> datetime | None:
     return None
 
 
+def find_sale_line(db: Session, marketplace: str, order_id: str, line_id: str,
+                   listing_id: str | None) -> MarketplaceSale | None:
+    """Match exact line IDs or an eBay item/transaction pair, never a listing alone.
+
+    Trading supplies ItemID-TransactionID; some relay events supply only the
+    transaction suffix. An alias is accepted only against an existing row with
+    the same order and exact listing ID. Keep the existing row and its money.
+    """
+    query = db.query(MarketplaceSale).filter_by(marketplace=marketplace, order_id=order_id)
+    if marketplace == 'ebay' and db.get_bind().dialect.name == 'postgresql':
+        # Both writers must observe the other's committed identity before inserting
+        # another representation of the same line. The lock ends at commit/rollback.
+        db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))'),
+                   {'identity': f'ebay-sale:{getattr(db, "user_id", "local")}:{order_id}'})
+    exact = query.filter_by(line_id=line_id).first()
+    if exact is not None:
+        return exact
+    if marketplace != 'ebay' or not listing_id or not re.fullmatch(r'[0-9]{9,15}', listing_id):
+        return None
+    prefix = listing_id + '-'
+    if re.fullmatch(r'[0-9]+', line_id):
+        alias = prefix + line_id
+    elif line_id.startswith(prefix) and re.fullmatch(r'[0-9]+', line_id[len(prefix):]):
+        alias = line_id[len(prefix):]
+    else:
+        return None
+    return query.filter_by(line_id=alias, listing_id=listing_id).first()
+
+
 def record_sale(
     db: Session,
     *,
@@ -118,11 +149,7 @@ def record_sale(
     owner even when the marketplace link alone cannot: a sale always protects
     the listing it was found on.
     """
-    exists = (
-        db.query(MarketplaceSale.id)
-        .filter_by(marketplace=marketplace, order_id=order_id, line_id=line_id)
-        .first()
-    )
+    exists = find_sale_line(db, marketplace, order_id, line_id, listing_id)
     if exists:
         return None
     conv = db.get(Conversation, conversation_id) if conversation_id else None
@@ -153,29 +180,6 @@ def record_sale(
 def _first(ids: dict, key: str) -> str | None:
     values = ids.get(key) or []
     return str(values[0]) if values else None
-
-
-def ebay_lines(event: dict) -> list[dict]:
-    """eBay sends one notification per line, but each names all of the order's lines.
-
-    The relay keeps IDs as flat lists, so lines pair up by position.
-    """
-    ids = event.get("ids") or {}
-    order_id = _first(ids, "orderId")
-    if not order_id:
-        return []
-    listing_ids = [str(v) for v in ids.get("listingId") or []]
-    line_ids = [str(v) for v in ids.get("orderLineItemId") or []]
-    if not line_ids:
-        line_ids = listing_ids or [order_id]
-    return [
-        {
-            "order_id": order_id,
-            "line_id": line_id,
-            "listing_id": listing_ids[i] if i < len(listing_ids) else None,
-        }
-        for i, line_id in enumerate(line_ids)
-    ]
 
 
 EtsyReceiptReader = Callable[[str, str], Awaitable[dict]]
@@ -229,12 +233,11 @@ async def handle_event(
     if not sale_detection_enabled(str(source)):
         return []
     if source == "ebay":
-        lines = ebay_lines(event)
-        sold_at = _parse_time(event.get("occurredAt"))
-        for line in lines:
-            line.setdefault("sold_at", sold_at)
-    else:
-        lines = await etsy_lines(event, read_etsy_receipt)
+        from vendoo_studio.services.order_recovery import recover_ebay_notification
+
+        order_id = _first(event.get("ids") or {}, "orderId")
+        return await recover_ebay_notification(order_id, session_factory=session_factory) if order_id else []
+    lines = await etsy_lines(event, read_etsy_receipt)
     created = []
     with session_factory() as db:
         for line in lines:

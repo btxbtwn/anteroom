@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import unittest
+import xml.etree.ElementTree as ET
 from unittest import mock
 
 import websockets
@@ -16,7 +17,7 @@ from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.queries import ConversationRepo
-from vendoo_studio.services import keychain, marketplace_accounts, relay_client, relay_sales, user_settings
+from vendoo_studio.services import keychain, marketplace_accounts, order_recovery, relay_client, relay_sales, user_settings
 from vendoo_studio.services.marketplace_delist import DelistError
 
 
@@ -48,6 +49,36 @@ def _ebay_event(order="12-345", lines=(("li-1", "1234567890"),), user="seller-a"
     }
 
 
+def ebay_notification_client(order, lines):
+    """A read-only order lookup whose verified IDs need not match the notification."""
+    client = mock.Mock(seller=("seller-a", "1"))
+
+    async def request(method, path, *, xml=None, call=None):
+        if method == "GET":
+            assert path == f"/sell/fulfillment/v1/order/{order}"
+            return {"orderId": order, "orderPaymentStatus": "PAID"}
+        assert (method, path, call) == ("POST", "/ws/api.dll", "GetOrders")
+        payload = ET.fromstring(xml)
+        assert payload.findtext("e:OrderIDArray/e:OrderID", namespaces=order_recovery.NS) == order
+        root = ET.Element("GetOrdersResponse", xmlns=order_recovery.NS["e"])
+        row = ET.SubElement(ET.SubElement(root, "OrderArray"), "Order")
+        for key, value in {"OrderID": order, "OrderStatus": "Completed", "PaidTime": "2026-10-24T01:00:00Z"}.items():
+            ET.SubElement(row, key).text = value
+        checkout = ET.SubElement(row, "CheckoutStatus")
+        ET.SubElement(checkout, "Status").text = "Complete"
+        ET.SubElement(checkout, "eBayPaymentStatus").text = "NoPaymentFailure"
+        transactions = ET.SubElement(row, "TransactionArray")
+        for line, listing in lines:
+            transaction = ET.SubElement(transactions, "Transaction")
+            ET.SubElement(transaction, "OrderLineItemID").text = line
+            ET.SubElement(transaction, "QuantityPurchased").text = "1"
+            ET.SubElement(ET.SubElement(transaction, "Item"), "ItemID").text = listing
+        return {"xml": ET.fromstring(ET.tostring(root))}
+
+    client.request = request
+    return client
+
+
 class ListingUrlTest(unittest.TestCase):
     def test_reads_listing_ids_from_vendoo_urls(self):
         self.assertEqual(relay_sales.listing_id_from_url("ebay", "https://www.ebay.com/itm/1234567890"), "1234567890")
@@ -74,12 +105,56 @@ class RecordSalesTest(unittest.TestCase):
             # Same digits inside another listing's notes must not match.
             _listing(db, "decoy", {"ebay": "https://www.ebay.com/itm/91234567890"})
 
-    def handle(self, event, receipt=None):
+    def handle(self, event, receipt=None, verified_lines=None):
         async def read_receipt(shop_id, receipt_id):
             self.assertEqual((shop_id, receipt_id), ("42", "9001"))
             return receipt
 
-        return asyncio.run(relay_sales.handle_event(event, session_factory=self.Session, read_etsy_receipt=read_receipt))
+        ids = event.get("ids") or {}
+        client = ebay_notification_client((ids.get("orderId") or ["none"])[0],
+            verified_lines if verified_lines is not None else zip(ids.get("orderLineItemId") or [], ids.get("listingId") or [], strict=True))
+        with mock.patch.object(order_recovery.EbayClient, "connect", mock.AsyncMock(return_value=client)), \
+                mock.patch.object(order_recovery, "assert_identity"):
+            return asyncio.run(relay_sales.handle_event(event, session_factory=self.Session, read_etsy_receipt=read_receipt))
+
+    def test_notification_and_recovery_use_one_verified_identity_without_overwriting_amounts(self):
+        financials = {"currency": "USD", "item_revenue": "19.50", "item_cost": "3.25", "source": "seller"}
+        with self.Session() as db:
+            db.add(MarketplaceSale(marketplace="ebay", order_id="12-345", line_id="1234567890-777",
+                listing_id="1234567890", quantity=1, financials=financials, financial_revision=4, state="dismissed"))
+            db.commit()
+        event = _ebay_event(lines=(("different-modern-id", "1234567890"),))
+        self.assertEqual(self.handle(event, verified_lines=[("1234567890-777", "1234567890")]), [])
+        with self.Session() as db:
+            sale = db.query(MarketplaceSale).one()
+            self.assertEqual(sale.financials, financials)
+            self.assertEqual((sale.financial_revision, sale.state), (4, "dismissed"))
+
+    def test_verified_lines_do_not_depend_on_flattened_notification_listing_positions(self):
+        event = _ebay_event(lines=(("modern-a", "1234567890"), ("modern-b", "1234567890")))
+        event["ids"]["listingId"] = ["1234567890"]  # The relay deduplicates flat ID lists.
+        verified = [("1234567890-700", "1234567890"), ("1234567890-701", "1234567890")]
+        self.assertEqual(len(self.handle(event, verified_lines=verified)), 2)
+        self.assertEqual(self.handle(event, verified_lines=verified), [])
+        with self.Session() as db:
+            self.assertEqual({(sale.line_id, sale.listing_id, sale.quantity) for sale in db.query(MarketplaceSale)},
+                {("1234567890-700", "1234567890", 1), ("1234567890-701", "1234567890", 1)})
+
+    def test_a_different_order_response_is_not_saved(self):
+        client = ebay_notification_client("12-345", [("verified-line", "1234567890")])
+        request = client.request
+
+        async def wrong_order(*args, **kwargs):
+            result = await request(*args, **kwargs)
+            result["xml"].find("e:OrderArray/e:Order/e:OrderID", order_recovery.NS).text = "another-order"
+            return result
+
+        client.request = wrong_order
+        with mock.patch.object(order_recovery.EbayClient, "connect", mock.AsyncMock(return_value=client)):
+            with self.assertRaises(order_recovery.RecoveryError):
+                asyncio.run(relay_sales.handle_event(_ebay_event(), session_factory=self.Session, read_etsy_receipt=mock.AsyncMock()))
+        with self.Session() as db:
+            self.assertEqual(db.query(MarketplaceSale).count(), 0)
 
     def test_ebay_order_matches_the_listing_once(self):
         created = self.handle(_ebay_event())
@@ -352,7 +427,11 @@ class AutodelistOptionTest(unittest.TestCase):
         async def read_receipt(shop_id, receipt_id):
             return {}
 
-        return asyncio.run(relay_sales.handle_event(event, session_factory=self.Session, read_etsy_receipt=read_receipt))
+        ids = event["ids"]
+        client = ebay_notification_client(ids["orderId"][0], zip(ids["orderLineItemId"], ids["listingId"], strict=True))
+        with mock.patch.object(order_recovery.EbayClient, "connect", mock.AsyncMock(return_value=client)), \
+                mock.patch.object(order_recovery, "assert_identity"):
+            return asyncio.run(relay_sales.handle_event(event, session_factory=self.Session, read_etsy_receipt=read_receipt))
 
     def test_off_does_not_delist(self):
         created = self.handle(_ebay_event())

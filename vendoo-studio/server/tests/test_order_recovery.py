@@ -244,6 +244,45 @@ def test_ebay_recovery_uses_trading_order_line_ids_and_only_reads(ebay_recovery)
     assert fixture.recovery_calls == ["GetOrders", "getOrder"] and "private@example" not in json.dumps(result.json())
 
 
+@pytest.mark.parametrize('first', ['recovery', 'relay'])
+def test_ebay_transaction_alias_replay_preserves_one_sale_and_seller_amounts(ebay_recovery, first):
+    from vendoo_studio.services import relay_sales
+
+    fixture = ebay_recovery
+    if first == 'recovery':
+        result = fixture.client.post('/api/marketplace-sales/recover', json={'marketplace': 'ebay', 'connected_at': '1', **dates()})
+        assert result.status_code == 200
+    else:
+        relay_sales.record_sale(fixture.db, marketplace='ebay', order_id='12-12345-12345', line_id='1234567',
+                                listing_id='123456789012', quantity=None, sold_at=None)
+    sale = fixture.db.query(MarketplaceSale).one()
+    identity = sale.id
+    money = {'source': 'seller', 'currency': 'USD', 'item_revenue': '40', 'fees': '8', 'item_cost': '5'}
+    sale.financials, sale.financial_revision = money, 3
+    fixture.db.commit()
+    for _ in range(2):
+        relay_sales.record_sale(fixture.db, marketplace='ebay', order_id='12-12345-12345', line_id='1234567',
+                                listing_id='123456789012', quantity=None, sold_at=None)
+        result = fixture.client.post('/api/marketplace-sales/recover', json={'marketplace': 'ebay', 'connected_at': '1', **dates()})
+        assert result.status_code == 200, result.text
+    fixture.db.expire_all()
+    sale = fixture.db.query(MarketplaceSale).one()
+    assert sale.id == identity and sale.financials == money and sale.financial_revision == 3
+    assert sale.quantity == 2
+
+
+def test_ebay_same_listing_with_different_transactions_remains_separate(ebay_recovery):
+    from vendoo_studio.services import relay_sales
+
+    fixture = ebay_recovery
+    for transaction in ('1234567', '7654321'):
+        relay_sales.record_sale(fixture.db, marketplace='ebay', order_id='12-12345-12345', line_id=transaction,
+                                listing_id='123456789012', quantity=1, sold_at=None)
+    result = fixture.client.post('/api/marketplace-sales/recover', json={'marketplace': 'ebay', 'connected_at': '1', **dates()})
+    assert result.status_code == 200, result.text
+    assert fixture.db.query(MarketplaceSale).count() == 2
+
+
 def test_legacy_notice_with_a_guessed_line_id_is_reported_as_conflict_not_duplicated(recovery):
     recovery.db.add(MarketplaceSale(marketplace="etsy", order_id="100", line_id="555", listing_id="555", quantity=1))
     recovery.db.commit()

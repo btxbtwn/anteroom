@@ -48,11 +48,23 @@ export async function relayOnce(bridge: RelayBridge, capabilities: readonly stri
 /** Relay until stopped. A failed request waits a few seconds before asking again. */
 export function startChromeRelay(bridge: RelayBridge, capabilities: readonly string[]): () => void {
   let active = true;
+  let beating = false;
+  const heartbeat = async () => {
+    if (!active || beating) return;
+    beating = true;
+    try {
+      await studioFetch("/api/browser-relay/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ capabilities: RELAY_CAPABILITIES.filter(capability => capabilities.includes(capability)) }) });
+    } catch { /* The relay loop retries network failures; presence expires without another beat. */ }
+    finally { beating = false; }
+  };
+  void heartbeat();
+  const interval = window.setInterval(() => { void heartbeat(); }, 10000);
   void (async () => {
     while (active) {
       try { await relayOnce(bridge, capabilities); }
       catch { await new Promise((resolve) => window.setTimeout(resolve, 3000)); }
     }
   })();
-  return () => { active = false; };
+  return () => { active = false; window.clearInterval(interval); };
 }

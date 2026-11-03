@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 import asyncio
-import concurrent.futures
 import logging
 import threading
 import traceback
@@ -27,6 +26,7 @@ from vendoo_studio.services.seller_sessions import (
     SessionVerifier,
 )
 from vendoo_studio.version import app_version
+from vendoo_studio.services.background_loop import BackgroundLoop
 
 
 class SellerSessionMiddleware:
@@ -76,34 +76,6 @@ class SellerSessionMiddleware:
                 await self.app(scope, receive, send)
             return
         await response(scope, receive, send)
-
-
-class BackgroundLoop:
-    """An event loop on its own thread for work that must not share the request loop."""
-
-    def __init__(self, name: str):
-        self.loop = asyncio.new_event_loop()
-        self.thread = threading.Thread(target=self.loop.run_forever, name=name, daemon=True)
-        self.thread.start()
-
-    def run(self, coroutine) -> concurrent.futures.Future:
-        return asyncio.run_coroutine_threadsafe(coroutine, self.loop)
-
-    def stop(self) -> None:
-        async def cancel_all():
-            tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-        try:
-            asyncio.run_coroutine_threadsafe(cancel_all(), self.loop).result(timeout=10)
-        except concurrent.futures.TimeoutError:
-            pass
-        self.loop.call_soon_threadsafe(self.loop.stop)
-        self.thread.join(timeout=10)
-        if not self.thread.is_alive():
-            self.loop.close()
 
 
 class LoopCheckoutWarning:

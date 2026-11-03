@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 import traceback
 from sqlalchemy.exc import SQLAlchemyError
@@ -11,6 +12,7 @@ from vendoo_studio.models.background_task import BackgroundTask
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import background_tasks as queue
 from vendoo_studio.services.hosted_context import for_seller
+from vendoo_studio.services.background_loop import BackgroundLoop
 from vendoo_studio.services.service_context import current, use
 
 # Handlers for queued work that is not a draft task, by kind. The assistant's
@@ -84,17 +86,21 @@ async def _execute(task_id, token):
     return False
 
 
-async def run_claimed(task_id, owner, token):
+async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
     with use(for_seller(owner, task_lease=(task_id, token))) as context:
         work = asyncio.create_task(_execute(task_id, token))
+        completed = threading.Event()
 
         async def heartbeat():
-            while not work.done():
+            while not completed.is_set():
                 await asyncio.sleep(20)
-                if not work.done():
+                if not completed.is_set():
                     await asyncio.to_thread(queue.renew, task_id, token)
 
-        pulse = asyncio.create_task(heartbeat())
+        # Canonical generation still makes synchronous database calls. Its
+        # event loop may block, but lease renewal must keep running for every
+        # draft, in that draft's captured seller context.
+        pulse = asyncio.wrap_future(heartbeat_loop.run(heartbeat()))
         try:
             done, _pending = await asyncio.wait({work, pulse}, return_when=asyncio.FIRST_COMPLETED)
             if pulse in done:
@@ -117,6 +123,7 @@ async def run_claimed(task_id, owner, token):
             except queue.TaskLeaseExpired:
                 pass
         finally:
+            completed.set()
             pending = {work, pulse, *context.spawned_tasks}
             for task in pending:
                 if not task.done():
@@ -126,6 +133,7 @@ async def run_claimed(task_id, owner, token):
 
 async def serve(engine, stopping):
     active = set()
+    heartbeats = BackgroundLoop('anteroom-draft-leases')
 
     def settled(task):
         active.discard(task)
@@ -145,7 +153,7 @@ async def serve(engine, stopping):
             if claimed is None:
                 await asyncio.sleep(1)
             else:
-                task = asyncio.create_task(run_claimed(*claimed))
+                task = asyncio.create_task(run_claimed(*claimed, heartbeat_loop=heartbeats))
                 active.add(task)
                 task.add_done_callback(settled)
         # Stop claiming on shutdown, but let every claimed draft save first.
@@ -155,3 +163,4 @@ async def serve(engine, stopping):
         for task in remaining:
             task.cancel()
         await asyncio.gather(*remaining, return_exceptions=True)
+        await asyncio.to_thread(heartbeats.stop)
