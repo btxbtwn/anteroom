@@ -79,3 +79,10 @@ format: median 306 ms for JSON and 104 ms for JSONB. This isolates storage cost;
 it is not a production latency or throughput result. The migration regression
 checks large nested forms, Unicode, numbers, nulls, current revision pointers,
 quantity history and two-seller row security against the previous schema.
+
+A production stack sample also found the shared background event loop blocked
+in an eBay offer scheduler's synchronous database read. That prevented draft
+worker heartbeats from running, independently of the inventory JSON cost.
+Drafts, automations, offers, watchdog and sourcing now have separate event-loop
+threads. A regression holds an offer scheduler in a blocking wait, verifies
+draft heartbeats and HTTP health still run, and checks shutdown joins all loops.
