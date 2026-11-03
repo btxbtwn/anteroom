@@ -110,14 +110,18 @@ def list_suggestions(
     repo = ConversationRepo(db)
     covers = repo.cover_photos()
     photo_counts = _photo_counts(db)
-    listings = _listing_state(db)
+    listing_rows = _listing_rows(db)
     conversations = repo.list_all()
-    selling = _recent_sales(conversations, listings, when)
-    in_demand = SEASONS_IN_DEMAND[when.month]
     from vendoo_studio.models.background_task import BackgroundTask
 
     busy = set(db.scalars(select(BackgroundTask.conversation_id).where(
         BackgroundTask.status.in_(("queued", "running")))))
+    # Ranking parses every item's cues and notes. It needs only loaded data;
+    # return the connection before that CPU work so other requests can read.
+    db.close()
+    listings = _listing_state(listing_rows)
+    selling = _recent_sales(conversations, listings, when)
+    in_demand = SEASONS_IN_DEMAND[when.month]
 
     cards: list[dict[str, Any]] = []
     for conv in conversations:
@@ -157,24 +161,28 @@ def _photo_counts(db: Session) -> dict[str, int]:
     return {conv_id: int(count) for conv_id, count in rows}
 
 
-def _listing_state(db: Session) -> dict[str, dict[str, Any]]:
-    """Current revision state, plus the facets stale ranking compares on."""
-    doc = ListingRevision.listing_json
-    rows = (
+def _listing_rows(db: Session):
+    """Read the current revision facets without ranking them in the transaction."""
+    doc = ListingRevision.inventory_fields
+    return (
         db.query(
             Listing.conversation_id,
             Listing.current_revision_id,
             Listing.validation_status,
             json_value(doc, "brand"),
             json_value(doc, "category_path"),
-            json_value(doc, "ebay_specifics.season"),
+            json_value(doc, "season"),
             json_value(doc, "title"),
             json_value(doc, "type"),
-            json_value(doc, "ebay_specifics.material"),
+            json_value(doc, "material"),
         )
         .outerjoin(ListingRevision, ListingRevision.id == Listing.current_revision_id)
         .all()
     )
+
+
+def _listing_state(rows) -> dict[str, dict[str, Any]]:
+    """Current revision state, plus the facets stale ranking compares on."""
     state: dict[str, dict[str, Any]] = {}
     for conv_id, revision_id, validation_status, brand, category, season, title, kind, material in rows:
         cues = " ".join(str(part) for part in (title, category, kind, material) if part)

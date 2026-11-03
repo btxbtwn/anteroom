@@ -44,12 +44,22 @@ export function queryKeyMatchesTopic(topic: string, queryKey: QueryKey): boolean
 }
 
 /** Re-reads every query a set of topics covers; screens not on display only go stale. */
-export function invalidateTopics(queryClient: QueryClient, topics: Iterable<string>): void {
+export async function invalidateTopics(queryClient: QueryClient, topics: Iterable<string>): Promise<void> {
   const wanted = [...topics];
   if (!wanted.length) return;
-  void queryClient.invalidateQueries({
-    predicate: (query) => wanted.some((topic) => queryKeyMatchesTopic(topic, query.queryKey)),
-  });
+  const filters = {
+    predicate: (query: { queryKey: QueryKey }) => wanted.some((topic) => queryKeyMatchesTopic(topic, query.queryKey)),
+  };
+  // Cancelling a browser query cannot stop synchronous work already running
+  // on the API. A change burst must not start a fresh inventory scan for each
+  // event while previous scans still occupy database connections. Wait for
+  // current reads, then fetch the change; overlapping refreshes share that
+  // next read. Merely sharing the current read could miss the newer change.
+  const running = queryClient.getQueryCache().findAll(filters)
+    .filter(query => query.state.fetchStatus === "fetching")
+    .flatMap(query => query.promise ? [query.promise] : []);
+  if (running.length) await Promise.allSettled(running);
+  await queryClient.invalidateQueries(filters, { cancelRefetch: false });
 }
 
 /** Bursts (a send writes many rows) arrive as one refresh. */

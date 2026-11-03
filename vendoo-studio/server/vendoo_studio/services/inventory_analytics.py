@@ -171,10 +171,10 @@ def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
         for conv_id, price, cost, brand, category in (
             db.query(
                 Listing.conversation_id,
-                json_value(ListingRevision.listing_json, "price"),
-                json_value(ListingRevision.listing_json, "cost"),
-                json_value(ListingRevision.listing_json, "brand"),
-                json_value(ListingRevision.listing_json, "category_path"),
+                json_value(ListingRevision.inventory_fields, "price"),
+                json_value(ListingRevision.inventory_fields, "cost"),
+                json_value(ListingRevision.inventory_fields, "brand"),
+                json_value(ListingRevision.inventory_fields, "category_path"),
             )
             .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
             .filter(Listing.conversation_id == conversation_id if conversation_id else True)

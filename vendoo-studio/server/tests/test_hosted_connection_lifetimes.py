@@ -219,6 +219,36 @@ def test_suggestions_read_settings_before_holding_the_inventory_connection(tmp_p
         engine.dispose()
 
 
+def test_suggestion_ranking_releases_its_connection_before_cpu_work(single_connection, monkeypatch):
+    from sqlalchemy import text
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.listing import Listing, ListingRevision
+    from vendoo_studio.services import suggestions
+
+    with single_connection() as db:
+        db.add(Conversation(id='ranked-tee', title='Cotton tee'))
+        db.commit()
+        db.add(ListingRevision(id='ranked-revision', conversation_id='ranked-tee', source='test',
+                               listing_json={'title': 'Cotton tee', 'category_path': 'Men > Shirts > Tees'}))
+        db.add(Listing(conversation_id='ranked-tee', current_revision_id='ranked-revision'))
+        db.commit()
+    seasons = suggestions._seasons
+    ranked = []
+
+    def rank_without_holding_connection(*args):
+        with single_connection() as other:
+            assert other.scalar(text('SELECT 1')) == 1
+        ranked.append(True)
+        return seasons(*args)
+
+    monkeypatch.setattr('vendoo_studio.services.user_settings.get_stale_listing_days', lambda: 90)
+    monkeypatch.setattr(suggestions, '_seasons', rank_without_holding_connection)
+    with single_connection() as db:
+        cards = suggestions.list_suggestions(db)
+        assert [(card['conversation_id'], card['title']) for card in cards] == [('ranked-tee', 'Cotton tee')]
+    assert ranked == [True]
+
+
 @pytest.mark.parametrize('route', ['draft', 'bytes', 'photo', 'thumb'])
 def test_photo_reads_return_the_database_connection_before_storage(cloud, active_connections, signing_keys, monkeypatch, route):  # noqa: F811
     client, _engine = cloud
@@ -304,3 +334,39 @@ def test_submit_returns_the_task_id_for_streaming(monkeypatch):
     monkeypatch.setattr(hosted_tasks.queue, 'draft_payload', lambda *_args, **_kwargs: {})
     monkeypatch.setattr(hosted_tasks.queue, 'enqueue', lambda *_args, **_kwargs: SimpleNamespace(id='task2'))
     assert hosted_tasks.submit(DB(), 'draft', 'generate') == 'task2'
+
+
+def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
+    """A large inventory JSON body must not keep a pooled connection checked out."""
+    from vendoo_studio.routes import hosted_workspace
+
+    closed = []
+
+    class Result:
+        def all(self):
+            return []
+
+    class DB:
+        def scalars(self, *_args, **_kwargs):
+            return Result()
+
+        def execute(self, *_args, **_kwargs):
+            return []
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            closed.append('closed')
+
+    class Repo:
+        def __init__(self, db):
+            self.db = db
+
+        def reconcile_job_statuses(self):
+            return None
+
+    monkeypatch.setattr('vendoo_studio.repositories.queries.ConversationRepo', Repo)
+    monkeypatch.setattr('vendoo_studio.services.sales_records.missing_by_conversation', lambda _db: {})
+    assert hosted_workspace.list_conversations(DB()) == []
+    assert closed == ['closed']
