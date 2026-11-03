@@ -42,6 +42,8 @@ export interface ConversationSummary {
   vendoo_modified_at?: string | null;
   vendoo_listed_at?: string | null;
   vendoo_sold_at?: string | null;
+  /** When Anteroom's sales ledger last saw a unit sell. */
+  sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
   vendoo_sold_dates?: Record<string, string>;
   /** When Studio last wrote this listing onto its Vendoo item. A marketplace
