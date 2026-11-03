@@ -1,0 +1,3 @@
+- Correcting a Poshmark size or switching size systems now saves the selected size-group ID, so a displayed group name cannot keep a valid corrected size blocked by validation.
+- The sizing-system buttons follow the same editing lock as the size controls.
+- Typing a custom size no longer resets when listing activity refreshes.

@@ -3,6 +3,14 @@ import { describe, expect, it } from "vitest";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
 
 describe("native size inventory", () => {
+  it("disables the size-system switch when the field is locked", () => {
+    const html = renderToStaticMarkup(<NativeInventoryEditor disabled
+      groups={[{ id: "standard", label: "Standard", sizes: [], systems: { us: [], au: [] } }]}
+      value={[{ sizeSetId: "standard", sizeId: "M", quantity: 1 }]} onChange={() => {}} />);
+    const tabs = html.match(/<button[^>]*role="tab"[^>]*>/g) || [];
+    expect(tabs).toHaveLength(4);
+    expect(tabs.every(tab => tab.includes('disabled=""'))).toBe(true);
+  });
   it("renders standard and custom sizes with separate quantities and SKUs without saving", () => {
     const html = renderToStaticMarkup(<NativeInventoryEditor
       groups={[{ id: "standard", label: "Standard", sizes: [{ id: "M", label: "Medium" }] },
