@@ -29,6 +29,30 @@ async def request(job, message_type: str, payload: dict[str, Any] | None = None,
     manager = _manager()
     if not manager.connected:
         raise BrowserBridgeError("Connect Chrome first.")
+    owner = getattr(manager, "owner", None)
+    if owner:
+        from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
+        try:
+            target = forward_target(owner, "chrome")
+        except RoutingUnavailable:
+            raise BrowserBridgeError("Could not reach the Chrome extension.") from None
+        if target is not None:
+            # One attempt. A lost reply stays uncertain; it is not sent again.
+            request_id = uuid.uuid4().hex
+            message = ProtocolMessage(
+                type=message_type, job_id=job.id, message_id=request_id,
+                payload={**(payload or {}), "job_id": job.id, "request_id": request_id},
+            ).model_dump(mode="json")
+            try:
+                body = await post(target, "/internal/browser-relay/request", {
+                    "user_id": owner, "message": message, "timeout": timeout,
+                }, timeout=timeout + 5)
+            except RoutingUnavailable:
+                raise BrowserBridgeError("Could not reach the Chrome extension.") from None
+            if not body.get("ok"):
+                raise BrowserBridgeError(body.get("error") or "Could not reach the Chrome extension.")
+            reply = body.get("reply")
+            return reply if isinstance(reply, dict) else {"ok": False, "error": "Malformed browser reply"}
     request_id = uuid.uuid4().hex
     waiter = manager.register_wait(request_id, getattr(job, "id", None))
     sent = await manager.send_message(ProtocolMessage(

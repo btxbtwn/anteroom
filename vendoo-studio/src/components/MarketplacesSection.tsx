@@ -292,7 +292,7 @@ export function MarketplacesLayout({
         }
         return undefined;
       }
-      if (!revisionId) throw new Error("Generate a listing first.");
+      if (!revisionId) throw new Error("Fill in the listing first.");
       if (kind === "save_draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId);
       if (kind === "update") return api.nativeMarketplaces.update(convId, marketplace, revisionId);
       return api.nativeMarketplaces.list(convId, marketplace, revisionId);
