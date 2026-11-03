@@ -151,6 +151,8 @@ jobs:
           .venv/bin/python -m pip install -e ".[dev]"
           npm ci
           npx playwright install --with-deps chromium
+      - name: Compile Bridge network rules in Chromium
+        run: node scripts/check-bridge-network.mjs
       - name: Desktop and phone layouts against the sandbox
         run: npm run e2e
       - name: Hosted desktop and phone against disposable Postgres
