@@ -7,7 +7,7 @@ import pytest
 
 from test_hosted_drafts import cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
-from test_seller_sessions import jwks, signing_keys  # noqa: F401
+from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from vendoo_studio.services import hosted_read_snapshots as snapshots
 from vendoo_studio.services.service_context import ServiceContext, use
 
@@ -141,3 +141,36 @@ def test_inventory_refreshes_share_work_until_the_seller_data_changes(cloud, sig
     fresh = client.get('/api/conversations', headers=alice)
     assert fresh.json()[0]['title'] == 'Edited tee'
     assert len(calls) == 2, 'A committed change must rebuild the snapshot'
+
+
+def test_busy_membership_changes_the_version_but_lease_renewals_do_not(cloud, signing_keys):  # noqa: F811
+    from datetime import UTC, datetime, timedelta
+    from sqlalchemy.orm import Session
+
+    from vendoo_studio.models.background_task import BackgroundTask
+    from vendoo_studio.services.hosted_context import for_seller
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Busy tee'}).json()['id']
+    owner = for_seller(USER_ID)
+    idle = snapshots._version(owner)
+    # The trusted worker also uses SQL outside SellerDatabaseSession. Cache
+    # correctness cannot depend exclusively on ORM feed notifications.
+    with Session(engine) as db:
+        task = BackgroundTask(user_id=USER_ID, conversation_id=identity, kind='chat', payload={})
+        db.add(task)
+        db.commit()
+        task_id = task.id
+    busy = snapshots._version(owner)
+    assert busy != idle
+    with Session(engine) as db:
+        task = db.get(BackgroundTask, task_id)
+        task.status = 'running'
+        task.leased_until = datetime.now(UTC) + timedelta(minutes=2)
+        db.commit()
+    assert snapshots._version(owner) == busy
+    with Session(engine) as db:
+        db.get(BackgroundTask, task_id).status = 'cancelled'
+        db.commit()
+    assert snapshots._version(owner) == idle

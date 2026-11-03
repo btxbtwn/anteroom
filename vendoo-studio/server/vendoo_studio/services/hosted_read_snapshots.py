@@ -12,6 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from vendoo_studio.models.seller_change import SellerChange
+from vendoo_studio.models.background_task import BackgroundTask
+from vendoo_studio.services.background_tasks import ACTIVE
 from vendoo_studio.services.service_context import current
 
 
@@ -23,7 +25,13 @@ def _version(context):
     with context.session_factory() as db:
         changes = tuple(db.execute(select(SellerChange.topic, SellerChange.changed_at)
                                    .order_by(SellerChange.topic)).all())
-    return changes
+        # Trusted worker SQL can change durable task state without publishing
+        # a feed row. Busy membership must still invalidate suggestions. Lease
+        # timestamps and queued -> running do not change that membership.
+        busy = tuple(db.scalars(select(BackgroundTask.conversation_id).where(
+            BackgroundTask.status.in_(ACTIVE), BackgroundTask.conversation_id.isnot(None))
+            .distinct().order_by(BackgroundTask.conversation_id)).all())
+    return changes, busy
 
 
 def _load(context, read):

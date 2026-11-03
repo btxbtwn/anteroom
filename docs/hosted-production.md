@@ -102,6 +102,9 @@ calculations from several open tabs, including notes parsing and quantity
 derivation while transactions remained open. Hosted inventory and suggestion
 reads therefore share one build per seller and view. Completed snapshots are
 validated with the seller's complete change-feed vector on each request.
+The active draft-ID set is checked too, so durable task changes made by worker
+SQL invalidate busy suggestions even without a feed notification. Lease renewal
+timestamps and queued-to-running transitions do not change that set.
 Time-dependent suggestions also refresh after at most 60 seconds. A change
 during a build leaves that result uncached. Waiting tabs hold neither a database connection nor a
 worker thread; the build owns its session and survives a tab disconnect.
