@@ -365,6 +365,30 @@ def test_submit_returns_the_task_id_for_streaming(monkeypatch):
     assert hosted_tasks.submit(DB(), 'draft', 'generate') == 'task2'
 
 
+def test_native_editor_form_releases_the_connection_before_marketplace_waits(single_connection, monkeypatch):
+    """eBay/Chrome form refreshes must not pin the hosted pool during network I/O."""
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.services import native_editor
+
+    released = []
+
+    async def ebay_form(snapshot):
+        with single_connection() as other:
+            assert other.scalar(__import__('sqlalchemy').text('SELECT 1')) == 1
+        released.append(snapshot.get('title'))
+        return {'marketplace': 'ebay', 'fields': []}
+
+    monkeypatch.setattr(native_editor, 'ebay_form', ebay_form)
+    monkeypatch.setattr(native_editor.direct_preflight, 'prepare',
+                        lambda db, conv, listing_json, marketplace: {'title': conv.title})
+    with single_connection() as db:
+        db.add(Conversation(id='form-tee', title='Cotton tee'))
+        db.commit()
+        form = asyncio.run(native_editor.editor_form('form-tee', 'ebay', None, db, refresh=True))
+    assert form['marketplace'] == 'ebay'
+    assert released == ['Cotton tee']
+
+
 def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
     """A large inventory JSON body must not keep a pooled connection checked out."""
     from vendoo_studio.routes import hosted_workspace

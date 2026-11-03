@@ -24,6 +24,9 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     # A draft nobody has generated yet still opens every form, empty, for the seller to fill in.
     listing_json = revision.listing_json if revision else {}
     snapshot = direct_preflight.prepare(db, conv, listing_json, marketplace)
+    # Snapshot is plain data. Release before eBay/Chrome/Mercari waits so two
+    # concurrent generates cannot pin the hosted pool on form refreshes.
+    db.rollback()
     if marketplace == "poshmark":
         from vendoo_studio.services.poshmark_form import form
 
@@ -63,7 +66,6 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     if marketplace == "ebay":
         return await ebay_form(snapshot)
     raise NativeMarketplaceError(404, "This marketplace has no native editor form.")
-
 
 def field(path: str, label: str, value, **extra) -> dict:
     return {"key": path, "path": path, "label": label, "value": value if value is not None else "",
