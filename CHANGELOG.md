@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.691 — 2026-11-03
+
+- Detect eBay and Etsy sale notifications on the web while the app is closed, and catch up recent eBay orders automatically.
+
 ## 0.1.690 — 2026-11-03
 
 - Keep the Mac's AI connection responsive while slow web requests are running, and improve diagnostics for failed draft generation.
