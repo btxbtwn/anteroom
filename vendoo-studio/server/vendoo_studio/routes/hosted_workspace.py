@@ -111,6 +111,11 @@ class ConversationInput(BaseModel):
 
 @router.get('/conversations')
 def list_conversations(db=Depends(get_seller_db)):
+    from vendoo_studio.repositories.queries import ConversationRepo
+
+    # The shared sidebar filters stored inventory status. Reconcile it from
+    # listings and paid sales just as the desktop list endpoint does.
+    ConversationRepo(db).reconcile_job_statuses()
     # Keep the existing sidebar's complete-list contract; it filters and
     # virtualizes locally. No historical pointers or fallback file URLs escape.
     rows = db.scalars(select(Conversation).options(defer(Conversation.notes)).order_by(Conversation.updated_at.desc(), Conversation.id.desc())).all()
