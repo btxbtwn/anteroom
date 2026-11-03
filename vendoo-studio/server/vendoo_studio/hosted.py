@@ -19,7 +19,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import event
-from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
 
 from vendoo_studio.services.seller_sessions import (
@@ -55,9 +54,10 @@ class SellerSessionMiddleware:
             if scheme.lower() != "bearer" or not token or len(token) > 16384:
                 raise InvalidSession
             verifier = scope["app"].state.session_verifier
-            # JWKS retrieval is synchronous; never block streaming requests
-            # or other sellers while the public-key endpoint responds.
-            identity = await run_in_threadpool(verifier.verify, token)
+            # JWKS retrieval is synchronous. Keep it off the event loop and
+            # the request thread limiter: slow inventory endpoints must not
+            # prevent the Mac from authenticating its heartbeats and replies.
+            identity = await asyncio.to_thread(verifier.verify, token)
         except InvalidSession:
             response = JSONResponse(
                 {"detail": "A valid seller session is required"}, status_code=401,
@@ -81,9 +81,9 @@ class SellerSessionMiddleware:
 class BackgroundLoop:
     """An event loop on its own thread for work that must not share the request loop."""
 
-    def __init__(self):
+    def __init__(self, name: str):
         self.loop = asyncio.new_event_loop()
-        self.thread = threading.Thread(target=self.loop.run_forever, name="anteroom-background", daemon=True)
+        self.thread = threading.Thread(target=self.loop.run_forever, name=name, daemon=True)
         self.thread.start()
 
     def run(self, coroutine) -> concurrent.futures.Future:
@@ -153,7 +153,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         loop_checkouts = LoopCheckoutWarning(database_engine)
         worker = offers = watchdog = None
         stopping = threading.Event()
-        background = None
+        backgrounds = []
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
             from vendoo_studio.services import (
@@ -161,22 +161,25 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 hosted_sourcing_scheduler,
             )
             from vendoo_studio.services import background_tasks as queue
-            # Background work opens blocking database sessions. It gets its own
-            # thread and event loop: waiting for a pooled connection on the
-            # request loop froze every request, including the ones that would
-            # have returned their connections, until the pool timed out.
-            background = BackgroundLoop()
+            # Each service opens blocking database sessions. An offer or
+            # watchdog read must not stop draft lease renewal, another service
+            # or the request loop while it waits for the database.
+            def start_background(coroutine, name):
+                background = BackgroundLoop(name)
+                backgrounds.append(background)
+                return background.run(coroutine)
+
             from vendoo_studio.routes.assistant import answer_task
             # Assistant answers share the draft worker; the route supplies how to answer one.
             background_worker.register(queue.ASSISTANT, answer_task)
-            worker = background.run(background_worker.serve(engine, stopping))
-            # Automations regenerate through the same draft queue, so both run together.
-            background.run(hosted_automation_scheduler.serve(engine))
-            offers = background.run(hosted_offer_scheduler.serve(engine))
+            worker = start_background(background_worker.serve(engine, stopping), 'anteroom-drafts')
+            # Automations still submit regenerations through the same durable queue.
+            start_background(hosted_automation_scheduler.serve(engine), 'anteroom-automations')
+            offers = start_background(hosted_offer_scheduler.serve(engine), 'anteroom-offers')
             # Frees the marketplace slot a restart left held and reads unconfirmed results.
-            watchdog = background.run(hosted_job_watchdog.serve(engine))
+            watchdog = start_background(hosted_job_watchdog.serve(engine), 'anteroom-watchdog')
             # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
-            background.run(hosted_sourcing_scheduler.serve(engine))
+            start_background(hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing')
         app.state.background_worker = worker
         app.state.offer_scheduler = offers
         app.state.job_watchdog = watchdog
@@ -184,7 +187,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             yield
         finally:
             loop_checkouts.close()
-            if background is not None:
+            if backgrounds:
                 stopping.set()
                 try:
                     if worker is not None:
@@ -196,7 +199,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 except Exception:
                     logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
                 finally:
-                    await asyncio.to_thread(background.stop)
+                    await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,

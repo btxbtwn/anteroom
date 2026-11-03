@@ -6,6 +6,51 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.690 — 2026-11-03
+
+- Keep the Mac's AI connection responsive while slow web requests are running, and improve diagnostics for failed draft generation.
+
+## 0.1.689 — 2026-11-03
+
+- Fix website Chrome connections dropping the sales-history capability, preventing marketplace orders from reaching the shared account used by the website and iPhone.
+
+## 0.1.688 — 2026-11-03
+
+- Speed up web inventory, filters and sales checks by reading saved listing fields without repeatedly parsing large marketplace forms.
+- Keep slow marketplace checks from interrupting draft generation or its lease renewal.
+
+## 0.1.687 — 2026-11-03
+
+- Fix a Chrome network-rule limit that prevented marketplace requests and sales reads across the Bridge.
+
+## 0.1.686 — 2026-11-02
+
+- Generate independent drafts concurrently across accounts and devices, including overlapping batches, without locking unrelated inventory work.
+- Let the Mac ChatGPT worker handle concurrent model calls and make iPhone bulk regeneration concurrent.
+- Set McMaster-Carr and NextMaster as ongoing responsiveness references for the web, Mac and iPhone apps, with explicit performance targets and load verification.
+
+## 0.1.685 — 2026-11-02
+
+- Your account now lives behind a profile button, with Connect Anteroom Extension and Sign out inside.
+
+## 0.1.684 — 2026-11-02
+
+- Show the Missing sale data badge on sold inventory in the web app, and clear it after you record the missing amounts.
+
+## 0.1.683 — 2026-11-02
+
+- Let concurrent website requests share Supabase database connections through transaction pooling, with session-dependent prepared statements disabled.
+
+## 0.1.682 — 2026-11-02
+
+- Retry temporary sales-history failures, refresh Mercari's session for each check, and explain marketplace sign-in, browser-check and rate-limit failures while keeping saved sales.
+
+- Catch up recent eBay orders every five minutes while the workspace is open so missed sale notifications do not leave orders out of the ledger.
+
+## 0.1.681 — 2026-11-02
+
+- Remove the website's five-connection cap so concurrent draft requests can use the connections available from Supabase.
+
 ## 0.1.680 — 2026-11-02
 
 - Remove Send to Vendoo and Grailed from Anteroom so listings use direct marketplace connections.

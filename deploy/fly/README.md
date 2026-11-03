@@ -85,13 +85,24 @@ privileges, and be able to SET ROLE to `anteroom_seller`. Hosted work must use
 `SellerDatabaseSession`, which sets the transaction role and verified owner.
 Do not give Fly the migration account's password.
 
-Use a session-pooler connection URI with `sslmode=verify-full` and
+Use the transaction-pooler runtime URI (port `6543`) with `sslmode=verify-full` and
 `sslrootcert=/app/supabase-prod-ca-2021.crt` on Fly. The image includes Supabase's
 public root CA, downloaded over HTTPS from the same URL used by its dashboard:
 https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt
 This is a public certificate, not a private key. Renew it if Supabase rotates
 the issuer. Supply the runtime URI via Fly secrets as `ANTEROOM_DATABASE_URL`;
 never put the URI or its password in fly.toml, source, logs or the frontend.
+
+Keep the migration login on the session pooler (port `5432`).
+
+The API uses SQLAlchemy `NullPool` with psycopg automatic prepared statements
+disabled: transaction pooling can assign a different database backend after a
+commit. Closing a session releases its client
+connection instead of retaining an idle connection or waiting for one of five
+application slots. Supabase still enforces its own connection limits; this does
+not raise those limits or change the project's compute plan. Session mode ties
+each client to a backend and rejects clients beyond the configured pool size;
+transaction mode lets concurrent clients share the available backends.
 
 The hosted API exposes only draft inventory and its General fields/photos. Full Mac inventory import and marketplace actions remain separate increments.
 

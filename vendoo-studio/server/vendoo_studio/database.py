@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from vendoo_studio.config import DATABASE_URL
 
@@ -40,11 +41,12 @@ def make_engine(url: str):
         )
         event.listen(sqlite_engine, "connect", enable_wal)
         return sqlite_engine
-    # Supabase's session pool allows 15 connections per login. Keep request
-    # bursts below that limit, with room for an overlapping release or operator
-    # connection. Excess requests wait for a checkout instead of failing at
-    # Supabase. pre_ping replaces connections dropped while idle.
-    return create_engine(url, pool_size=5, max_overflow=0, pool_pre_ping=True, echo=False, hide_parameters=True)
+    # Supabase manages the hosted connection pool. Do not add a second, capped
+    # queue in this process or reserve idle client connections between requests.
+    # Transaction pooling can move consecutive transactions between backends;
+    # named prepared statements belong to a backend session, not this client.
+    return create_engine(url, poolclass=NullPool, connect_args={"prepare_threshold": None},
+                         echo=False, hide_parameters=True)
 
 
 def enable_wal(dbapi_connection, _connection_record):

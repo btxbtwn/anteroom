@@ -46,6 +46,31 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
+## Responsiveness and concurrent work
+
+- Use [McMaster-Carr](https://www.mcmaster.com/) and
+  [NextMaster](https://github.com/stratolark/NextMaster) as ongoing references
+  for the web, Mac and iOS apps: persistent usable screens, immediate feedback,
+  fast search/filter/navigation, cached data and selective prefetching. Study
+  the behavior; keep Anteroom's stack and never copy disabled build checks.
+- Independent drafts and accounts must run concurrently. Do not introduce
+  product quotas, global single-job gates or fixed batch-generation limits.
+  A long model, photo or network task must not block navigation, typing,
+  editing another draft, submitting more work or another seller's work.
+- Keep operations scoped to their draft, account and task. Preserve atomic
+  saves, stale-edit protection, cancellation, row security and explicit
+  marketplace confirmation. Provider and physical resource limits must be
+  handled visibly without losing work or freezing the interface; never promise
+  unlimited capacity or zero network/model latency.
+- Target visible acknowledgement of input within 100 ms and cached navigation
+  within 200 ms on supported devices. Treat these as measured engineering
+  targets, not claimed benchmark results. Verify interaction latency and normal
+  reads/writes while multiple sellers generate multiple drafts; report p50/p95,
+  errors and the tested load. A single idle-user smoke test is insufficient.
+
+Reference observations, verification steps and recorded gaps live in
+[docs/responsiveness.md](docs/responsiveness.md).
+
 ## How to Work on a Change
 
 Every bug fix, feature and refactor follows the same loop. Component details

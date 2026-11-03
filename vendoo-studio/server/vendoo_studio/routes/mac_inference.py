@@ -54,13 +54,13 @@ class Reply(BaseModel):
 
 
 @router.post('/reply')
-def reply(body: Reply):
+async def reply(body: Reply):
     if not relay().reply(body.worker, body.identity, body.result, body.failed):
         raise HTTPException(404, 'This inference call is no longer active')
     return {'ok': True}
 
 
 @router.get('/status')
-def status():
+async def status():
     connection = relay()
     return {'connected': connection.connected, **connection.models}

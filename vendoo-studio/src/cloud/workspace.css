@@ -10,3 +10,8 @@
 .sign-in-links{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;margin-top:16px}
 .cloud-auth .sign-in-links button.link,.cloud-auth .sign-in-links a.link{width:auto;margin:0;padding:0;border:0;background:none;color:var(--muted-foreground);font-size:14px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 .cloud-drag{position:fixed;inset:0 0 auto 0;height:38px}
+.cloud-account .cloud-profile{display:grid;place-items:center;width:32px;height:32px;padding:0;border-radius:50%;background:var(--accent);color:var(--foreground);font-size:13px;font-weight:600}
+.cloud-profile-menu{font-size:13px}.cloud-profile-menu button{padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer}.cloud-profile-menu button:disabled{opacity:.5}
+.cloud-profile-email{margin:0 0 10px;color:var(--muted-foreground);overflow-wrap:anywhere}
+.cloud-profile-menu .connection-controls button:first-child{flex:1;min-width:0}
+.cloud-profile-signout{width:100%;margin-top:10px}
