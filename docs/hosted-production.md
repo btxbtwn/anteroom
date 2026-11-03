@@ -112,6 +112,15 @@ The completed cache retains at most 64 seller/view entries for memory usage,
 without limiting requests, sellers or generation tasks. Results never cross
 seller accounts, and errors are not cached.
 
+The 0.1.714 browser run reached a separate editor failure without reproducing
+pool errors: a late conversation or default-package read cancelled the pending
+notes autosave. The deterministic hosted browser regression delays the initial
+screen read, types before it completes, and verifies the saved note plus
+untouched SKU/flaws. Detail edits now live with their QueryClient and draft ID,
+overlay only changed fields on incoming reads, and finish after the editor
+unmounts. Saves merge against loaded notes and retain managed metadata; failed
+edits remain available for retry. This still requires a production rerun.
+
 ## 3. Keep traffic and refresh costs proportional to useful work
 
 Fly's HTTP concurrency type is `requests`, which is what
