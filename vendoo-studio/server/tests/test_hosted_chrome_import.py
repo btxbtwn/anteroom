@@ -22,7 +22,7 @@ def test_chrome_import_reads_the_sellers_own_listings_through_their_tab(cloud, s
     # A Bridge from before the import reads asks for an update instead of being sent one.
     client.get('/api/browser-relay/next?capabilities=marketplace.actions', headers=alice)
     old = client.get('/api/chrome-import/poshmark/active', headers=alice)
-    assert old.status_code == 503 and '0.2.48' in old.json()['detail']
+    assert old.status_code == 503 and '0.2.51' in old.json()['detail']
 
     client.get('/api/browser-relay/next?capabilities=' + CAPABLE, headers=alice)
     # Bob's account never reaches Alice's Chrome.

@@ -57,7 +57,7 @@ export function useListingSelection({
   }, [eligibleIds, pickedIds]);
 
   useEffect(() => {
-    if (!selecting || bulk.running) return;
+    if (!selecting) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds || editIds || copyIds || marketIds || promoteIds || deleteIds) return;
       setSelecting(false);
@@ -66,7 +66,7 @@ export function useListingSelection({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds, editIds, copyIds, marketIds, promoteIds, deleteIds]);
+  }, [selecting, pricePrompt, reviewPrompt, markdownIds, editIds, copyIds, marketIds, promoteIds, deleteIds]);
 
   const exitSelecting = useCallback(() => {
     setSelecting(false);
@@ -104,7 +104,7 @@ export function useListingSelection({
       const suggestion = suggestions.find((item) => item.conversation_id === id);
       return [id, listing?.title || suggestion?.title || "Untitled"];
     }));
-    // The bulk bar tracks the run on its own; checkboxes would only sit locked.
+    // The progress bar stays visible while the seller selects other work.
     exitSelecting();
     const result = await bulk.start(ids, titles, "rewrite", drops);
     if (!result) return;
@@ -121,7 +121,7 @@ export function useListingSelection({
 
   const regenerateSelected = useCallback(async () => {
     const ids = regenerateIds;
-    if (!ids.length || bulk.running) return;
+    if (!ids.length) return;
     const rows: BulkRegenerateListing[] = ids.map((id) => {
       const listing = listingsById.get(id);
       const suggestion = suggestions.find((item) => item.conversation_id === id);
@@ -137,7 +137,7 @@ export function useListingSelection({
       return;
     }
     setPricePrompt(rows);
-  }, [bulk.running, regenerateIds, listingsById, suggestions]);
+  }, [regenerateIds, listingsById, suggestions]);
 
   return {
     selecting,

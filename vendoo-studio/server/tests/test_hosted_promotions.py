@@ -41,7 +41,7 @@ def test_review_then_confirmed_share_reaches_only_own_chrome_once(cloud, signing
     refused = client.post('/api/promotions/preview', headers=alice, json=body)
     assert refused.status_code == 409 and 'Chrome' in refused.json()['detail']
     client.get('/api/browser-relay/next?capabilities=marketplace.actions', headers=alice)
-    assert '0.2.49' in client.post('/api/promotions/preview', headers=alice, json=body).json()['detail']
+    assert '0.2.52' in client.post('/api/promotions/preview', headers=alice, json=body).json()['detail']
     client.get('/api/browser-relay/next?capabilities=' + CAPABLE, headers=alice)
     thread, reviewed = _in_background(lambda: client.post('/api/promotions/preview', headers=alice, json=body))
     command = _answer(client, alice, {'ok': True, 'price_cents': 4500, 'like_count': 2}, CAPABLE)

@@ -70,25 +70,24 @@ class MacAIWorker:
         from vendoo_studio.services.chatgpt_oauth import chatgpt_signed_in
         from vendoo_studio.providers.chatgpt_codex import ChatGPTCodexProvider
         worker = uuid.uuid4().hex
-        active = None
-        active_identity = None
-        active_owner = None
-        async with httpx.AsyncClient(base_url=HOSTED_URL, timeout=30, follow_redirects=False) as client:
+        active = {}
+
+        async def cancel(identities):
+            tasks = [active.pop(identity)[1] for identity in identities]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        async with httpx.AsyncClient(base_url=HOSTED_URL, timeout=30, follow_redirects=False,
+                                    limits=httpx.Limits(max_connections=None)) as client:
             try:
                 while True:
                     with self._lock:
                         token = self._token
                         owner = self._owner
-                    if active is not None and active_owner != owner:
-                        active.cancel()
-                        await asyncio.gather(active, return_exceptions=True)
-                        active, active_identity = None, None
+                    await cancel([identity for identity, (account, _task) in active.items()
+                                  if account != owner or not token])
                     if not token:
-                        if active is not None:
-                            active.cancel()
-                            await asyncio.gather(active, return_exceptions=True)
-                            active = None
-                            active_identity = None
                         await asyncio.sleep(1)
                         continue
                     if not await asyncio.to_thread(chatgpt_signed_in):
@@ -96,29 +95,59 @@ class MacAIWorker:
                         continue
                     provider = ChatGPTCodexProvider()
                     headers = {'Authorization': 'Bearer ' + token}
-                    if active is not None and active.done():
-                        await active
-                        active = None
-                        active_identity = None
+                    for identity, (_account, task) in list(active.items()):
+                        if task.done():
+                            del active[identity]
+                            task.result()
                     try:
                         response = await client.post('/api/mac-ai/next', headers=headers, json={
                             'worker': worker, 'vision_model': provider.vision_model, 'listing_model': provider.listing_model,
-                            'available': active is None,
-                            'active_call': active_identity,
+                            'available': True,
                         })
                         with self._lock:
-                            unchanged = self._token == token
+                            unchanged = self._owner == owner and self._token is not None
                         if not unchanged:
                             continue
                         if response.status_code == 200:
                             command = response.json()
 
                             async def answer(command, provider, owner):
+                                async def watch():
+                                    # Each call checks its own cancellation. A long
+                                    # poll or another slow call cannot delay Stop.
+                                    while True:
+                                        await asyncio.sleep(2)
+                                        with self._lock:
+                                            token = self._token if self._owner == owner else None
+                                        if not token:
+                                            return
+                                        try:
+                                            heartbeat = await client.post('/api/mac-ai/next',
+                                                headers={'Authorization': 'Bearer ' + token}, json={
+                                                    'worker': worker, 'vision_model': provider.vision_model,
+                                                    'listing_model': provider.listing_model, 'available': False,
+                                                    'active_call': command['id'],
+                                                })
+                                        except httpx.HTTPError:
+                                            continue
+                                        if heartbeat.status_code == 204 and heartbeat.headers.get('X-Anteroom-Call-Active') == '0':
+                                            return
+
+                                work = asyncio.create_task(execute(command, provider))
+                                pulse = asyncio.create_task(watch())
                                 try:
-                                    result = await execute(command, provider)
+                                    done, _pending = await asyncio.wait({work, pulse}, return_when=asyncio.FIRST_COMPLETED)
+                                    if pulse in done:
+                                        pulse.result()
+                                        return
+                                    result = work.result()
                                     body = {'result': result, 'failed': False}
                                 except Exception:
                                     body = {'result': None, 'failed': True}
+                                finally:
+                                    for task in (work, pulse):
+                                        task.cancel()
+                                    await asyncio.gather(work, pulse, return_exceptions=True)
                                 with self._lock:
                                     current_token = self._token if self._owner == owner else None
                                 if not current_token:
@@ -129,23 +158,13 @@ class MacAIWorker:
                                     })
                                 except httpx.HTTPError:
                                     pass
-                            active = asyncio.create_task(answer(command, provider, owner))
-                            active_identity = command['id']
-                            active_owner = owner
-                        elif response.status_code == 204 and active is not None and response.headers.get('X-Anteroom-Call-Active') == '0':
-                            active.cancel()
-                            await asyncio.gather(active, return_exceptions=True)
-                            active, active_identity = None, None
+                            active[command['id']] = (owner, asyncio.create_task(answer(command, provider, owner)))
                         elif response.status_code != 204:
                             await asyncio.sleep(5)
-                        if active is not None:
-                            await asyncio.sleep(2)
                     except httpx.HTTPError:
                         await asyncio.sleep(5)
             finally:
-                if active is not None:
-                    active.cancel()
-                    await asyncio.gather(active, return_exceptions=True)
+                await cancel(list(active))
 
 
 class MacAIAPI:

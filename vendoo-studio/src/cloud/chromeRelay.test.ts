@@ -7,6 +7,7 @@ vi.mock("../api/transport", () => ({
 }));
 
 import { relayOnce } from "./chromeRelay";
+import { cloudExtension } from "../api/cloudExtension";
 
 const command = { type: "marketplace.execute", job_id: "job-1", message_id: "a".repeat(32),
   payload: { marketplace: "poshmark", action: "list", confirm: true, photos: [{ id: "0f1e", mime_type: "image/jpeg" }] } };
@@ -14,6 +15,35 @@ const command = { type: "marketplace.execute", job_id: "job-1", message_id: "a".
 afterEach(() => { fetches.length = 0; responses = []; });
 
 describe("Chrome relay", () => {
+  it("keeps the connected Bridge's sales reader through status, command delivery and reply", async () => {
+    const origin = "https://myanteroom.com";
+    const listeners = new Set<(event: MessageEvent) => void>();
+    const target = {
+      location: { origin }, setTimeout, clearTimeout,
+      addEventListener: (_name: string, listener: (event: MessageEvent) => void) => listeners.add(listener),
+      removeEventListener: (_name: string, listener: (event: MessageEvent) => void) => listeners.delete(listener),
+      postMessage: (data: Record<string, unknown>) => queueMicrotask(() => {
+        const response = { source: "anteroom-extension", version: 1, requestId: data.requestId, ok: true,
+          state: "connected", extensionVersion: "0.2.50",
+          supportedActions: ["marketplace.actions", "marketplace.sales_history", "unknown.capability"],
+          reply: { ok: true, orders: [], more: false } };
+        for (const listener of listeners) listener({ source: target, origin, data: response } as unknown as MessageEvent);
+      }),
+    } as unknown as Window;
+    const bridge = cloudExtension({ id: "11111111-1111-4111-8111-111111111111", email: "alice@example.com" }, target);
+    const connection = await bridge.status();
+    const read = { type: "marketplace.sales_history", job_id: null, message_id: "c".repeat(32), payload: { marketplace: "depop", settled: [] } };
+    responses = [Response.json(read), Response.json({ ok: true })];
+
+    await relayOnce(bridge, connection.supportedActions ?? []);
+
+    expect(fetches[0].url).toBe("/api/browser-relay/next?capabilities=marketplace.actions,marketplace.sales_history");
+    expect(fetches).toHaveLength(2);
+    expect(JSON.parse(String(fetches[1].options?.body))).toEqual({ request_id: read.message_id,
+      payload: { ok: true, orders: [], more: false } });
+    expect(listeners.size).toBe(0);
+  });
+
   it("asks for the next command, sends it to Chrome with its approved photos, and posts the reply", async () => {
     responses = [Response.json(command), new Response(new Uint8Array([1, 2, 3])), Response.json({ ok: true })];
     const bridge = { runMarketplaceCommand: vi.fn(async () => ({ ok: true, state: "published" })) };

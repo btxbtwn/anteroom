@@ -465,14 +465,6 @@ export function App() {
       .filter((listing) => listing.count > 0)
       .map((listing) => ({ convId: listing.convId, title: listingTitleForFolder(listing.folder) }));
     if (!listings.length) return;
-    if (bulk.running) {
-      toastManager.add({
-        type: "warning",
-        title: "Anteroom is already working through a batch",
-        description: "Generate these from the sidebar's Regenerate button when it finishes.",
-      });
-      return;
-    }
     const ids = listings.map((listing) => listing.convId);
     const titles = new Map(listings.map((listing) => [listing.convId, listing.title]));
     const result = await bulk.start(ids, titles, "generate");

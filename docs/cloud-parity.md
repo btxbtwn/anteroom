@@ -378,7 +378,7 @@ Anteroom has no Facebook Marketplace or Grailed support on the Mac or the web.
 On `feat/hosted-chrome-imports`, the Chrome inventory import reads Poshmark,
 Mercari, Depop, Sellwild and Vinted listings in the seller's own Chrome through
 their Anteroom tab, with two named reads under the Bridge capability
-`marketplace.import` (Bridge 0.2.48). The hosted API mounts the desktop
+`marketplace.import` (Bridge 0.2.51). The hosted API mounts the desktop
 `chrome-import` routes in the seller's row-secured context; imported photos go
 to their private Storage through the same safe public download as eBay and
 Etsy. The import is enabled with the combined `marketplace_sessions` workflow below.
@@ -396,7 +396,7 @@ The combined marketplace-session workflow below exposes these checks in Settings
 On `feat/hosted-chrome-promotions`, the desktop sharing and offers services are
 mounted in the hosted seller context. The seller can save rules off, explicitly
 enable them, pause them and review their own activity. Each connected seller's
-timer uses named commands under `marketplace.promotions` (Bridge 0.2.49): review,
+timer uses named commands under `marketplace.promotions` (Bridge 0.2.52): review,
 recent likes, a journal read, and a confirmed share or offer. The desktop
 operation lock, caps, minimums, cooldowns and no-retry journal are retained;
 unconfirmed sends pause their rule. No command lists, publishes or delists.

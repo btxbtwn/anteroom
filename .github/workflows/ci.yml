@@ -151,6 +151,8 @@ jobs:
           .venv/bin/python -m pip install -e ".[dev]"
           npm ci
           npx playwright install --with-deps chromium
+      - name: Compile Bridge network rules in Chromium
+        run: node scripts/check-bridge-network.mjs
       - name: Desktop and phone layouts against the sandbox
         run: npm run e2e
       - name: Hosted desktop and phone against disposable Postgres
@@ -164,7 +166,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Keep the report, screenshots and traces
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: studio-browser-report

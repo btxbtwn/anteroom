@@ -81,7 +81,7 @@ hosted API to Anteroom Bridge (`services/hosted_browser_relay.py`,
 A read's `error_code` is one of `signed_out`, `challenge`, `rate_limited`,
 `schema_drift` or `network`; the marketplace's own words stay in Chrome.
 
-### Hosted shares and offers (Bridge 0.2.49)
+### Hosted shares and offers (Bridge 0.2.52)
 
 All four commands require `marketplace.promotions`, a bounded non-null job ID,
 and the matching `job_id` and `request_id` in their payload. Other fields are
