@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.719 — 2026-11-03
+
+- Hosted catalog indexing runs in a lower-priority process so tokenization does not share the API's Python interpreter. Completed indexes remain private to the seller and are published only after the build succeeds.
+
 ## 0.1.718 — 2026-11-03
 
 - Marketplace validation reuses one photo read across all marketplaces and avoids copying large listing snapshots twice before preparing a form.

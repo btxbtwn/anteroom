@@ -1,1 +1,0 @@
-- Hosted catalog indexing runs in a lower-priority process so tokenization does not share the API's Python interpreter. Completed indexes remain private to the seller and are published only after the build succeeds.
