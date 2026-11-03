@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.689 — 2026-11-03
+
+- Fix website Chrome connections dropping the sales-history capability, preventing marketplace orders from reaching the shared account used by the website and iPhone.
+
 ## 0.1.688 — 2026-11-03
 
 - Speed up web inventory, filters and sales checks by reading saved listing fields without repeatedly parsing large marketplace forms.

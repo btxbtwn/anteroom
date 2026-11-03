@@ -1,1 +1,0 @@
-- Fix website Chrome connections dropping the sales-history capability, preventing marketplace orders from reaching the shared account used by the website and iPhone.
