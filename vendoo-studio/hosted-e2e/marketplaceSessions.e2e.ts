@@ -26,7 +26,7 @@ test("hosted Chrome imports, saved-off rules and sale switches are available", a
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible();
   await navigate(page, "Marketplaces", phone);
   for (const name of ["Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
     await page.getByRole("tablist", { name: "Marketplaces" }).getByRole("tab").filter({ hasText: name }).click();
