@@ -41,6 +41,32 @@ def test_relay_is_per_seller_and_refuses_other_commands():
     asyncio.run(scenario())
 
 
+def test_heartbeat_keeps_a_busy_reader_connected_and_expires_after_tab_loss(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(hosted_browser_relay, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    relay = hosted_browser_relay.BrowserRelay()
+    relay.note_seen({MARKETPLACE_ACTIONS, hosted_browser_relay.SALES_HISTORY})
+    # A command can take minutes; the tab sends heartbeats while waiting for its reply.
+    for _ in range(6):
+        clock[0] += 20
+        relay.note_seen({MARKETPLACE_ACTIONS, hosted_browser_relay.SALES_HISTORY})
+    assert relay.connected and relay.refusal(hosted_browser_relay.SALES_HISTORY) is None
+    clock[0] += hosted_browser_relay.SEEN_FOR_S + 1
+    assert not relay.connected
+
+
+def test_heartbeat_is_authenticated_and_scoped_to_the_seller(cloud, signing_keys):  # noqa: F811
+    client, _ = cloud
+    hosted_browser_relay._relays.clear()
+    body = {'capabilities': [MARKETPLACE_ACTIONS, hosted_browser_relay.SALES_HISTORY]}
+    assert client.post('/api/browser-relay/heartbeat', json=body).status_code == 401
+    assert client.post('/api/browser-relay/heartbeat', headers=headers(signing_keys), json=body).status_code == 200
+    assert hosted_browser_relay.relay_for(USER_ID).connected
+    assert not hosted_browser_relay.relay_for(BOB).connected
+    assert client.post('/api/browser-relay/heartbeat', headers=headers(signing_keys),
+                       json={'capabilities': ['browser.open']}).status_code == 422
+
+
 def test_page_relays_commands_and_replies_for_its_own_seller(cloud, signing_keys):  # noqa: F811
     client, _ = cloud
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)

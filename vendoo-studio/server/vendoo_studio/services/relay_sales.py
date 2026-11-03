@@ -1,8 +1,8 @@
 """Turn relay events into sales the seller can act on.
 
-The relay sends IDs only. An eBay ORDER_CONFIRMATION names the order and each
-line's listing ID; an Etsy order.paid names the receipt, whose lines Studio
-reads through the relay's Etsy forwarding. Each line becomes one
+The relay sends IDs only. An eBay ORDER_CONFIRMATION names an order which is
+read through the same verified order reader as catch-up; an Etsy order.paid
+names the receipt, whose lines Studio reads through the relay's Etsy forwarding. Each line becomes one
 MarketplaceSale, matched to the Studio listing whose Vendoo-reported URL on
 that marketplace carries the same listing ID. Nothing here delists: a sale
 waits for the seller.
@@ -155,29 +155,6 @@ def _first(ids: dict, key: str) -> str | None:
     return str(values[0]) if values else None
 
 
-def ebay_lines(event: dict) -> list[dict]:
-    """eBay sends one notification per line, but each names all of the order's lines.
-
-    The relay keeps IDs as flat lists, so lines pair up by position.
-    """
-    ids = event.get("ids") or {}
-    order_id = _first(ids, "orderId")
-    if not order_id:
-        return []
-    listing_ids = [str(v) for v in ids.get("listingId") or []]
-    line_ids = [str(v) for v in ids.get("orderLineItemId") or []]
-    if not line_ids:
-        line_ids = listing_ids or [order_id]
-    return [
-        {
-            "order_id": order_id,
-            "line_id": line_id,
-            "listing_id": listing_ids[i] if i < len(listing_ids) else None,
-        }
-        for i, line_id in enumerate(line_ids)
-    ]
-
-
 EtsyReceiptReader = Callable[[str, str], Awaitable[dict]]
 
 
@@ -229,12 +206,11 @@ async def handle_event(
     if not sale_detection_enabled(str(source)):
         return []
     if source == "ebay":
-        lines = ebay_lines(event)
-        sold_at = _parse_time(event.get("occurredAt"))
-        for line in lines:
-            line.setdefault("sold_at", sold_at)
-    else:
-        lines = await etsy_lines(event, read_etsy_receipt)
+        from vendoo_studio.services.order_recovery import recover_ebay_notification
+
+        order_id = _first(event.get("ids") or {}, "orderId")
+        return await recover_ebay_notification(order_id, session_factory=session_factory) if order_id else []
+    lines = await etsy_lines(event, read_etsy_receipt)
     created = []
     with session_factory() as db:
         for line in lines:
