@@ -4,7 +4,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { addLabel, removeLabel, splitLabels } from "./itemLabels";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
-import { GARMENTS, type Garment, type Measurements } from "./garmentMeasurements";
+import { GARMENTS } from "./garmentMeasurements";
+import { DEFAULTS, applyDetailsPatch, changedDetails, parseNotes, type ItemDetailsData } from "./itemDetailsData";
+import { itemDetailsEdits } from "../api/itemDetailsEdits";
 import { XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { FieldLabel, InspectorSection, NativeSelect } from "./ListingFormControls";
@@ -17,18 +19,6 @@ import { toggleVariants } from "./ui/toggle";
 
 interface Props {
   convId: string;
-}
-
-interface ItemDetailsData {
-  sku: string;
-  sellerNotes: string;
-  knownFlaws: string;
-  descriptionMeasurements: string;
-  cog: string;
-  packageDimensions: string;
-  vendooLabels: string;
-  garment: Garment;
-  measurements: Measurements;
 }
 
 type TextKey = Exclude<keyof ItemDetailsData, "garment" | "measurements">;
@@ -52,91 +42,12 @@ function clearLegacyStoredLabels() {
   }
 }
 
-function rememberLabels(
-  raw: string,
-  restore: string[],
-  queryClient?: ReturnType<typeof useQueryClient>,
-) {
-  void api.settings
-    .setUi({ remember_labels: raw, ...(restore.length ? { restore_labels: restore } : {}) })
-    .then(() => {
-      queryClient?.invalidateQueries({ queryKey: ["settings-ui"] });
-    })
-    .catch(() => {
-      /* disk prefs are best-effort; listing notes still save */
-    });
-}
-
-const DEFAULTS: ItemDetailsData = {
-  sku: "",
-  sellerNotes: "",
-  knownFlaws: "",
-  descriptionMeasurements: "",
-  cog: "",
-  packageDimensions: "13x10x3",
-  vendooLabels: "",
-  garment: "top",
-  measurements: { top: {}, pants: {}, skirt: {} },
-};
-
-function parseMeasurements(raw: unknown): Measurements {
-  const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const out: Measurements = { top: {}, pants: {}, skirt: {} };
-  for (const garment of GARMENTS) {
-    // Listings saved before shorts folded into pants kept a separate shorts set.
-    const values = source[garment.id] ?? (garment.id === "pants" ? source.shorts : undefined);
-    if (!values || typeof values !== "object") continue;
-    for (const field of garment.fields) {
-      const value = (values as Record<string, unknown>)[field.key];
-      if (typeof value === "string" && value) out[garment.id][field.key] = value;
-    }
-  }
-  return out;
-}
-
-/** Keys the server and the editor write into a listing's notes besides the seller's own details. */
-const MANAGED_NOTE_KEYS = new Set([
-  "categoryOverride", "askingPrice", "titlePinned", "mergedInto", "condition", "poshmarkOriginalPrice",
-  "vendooItemId", "vendooUrl", "vendooCoverUrl", "vendooFormUpdatedAt", "vendooUpdatedAt",
-  "vendooRelistPending", "vendooMarketplaces", "vendooStatus",
-]);
-
-/** Notes saved as an object of Anteroom's keys, as opposed to seller text that happens to be JSON. */
-function isStructuredNotes(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
-    && Object.keys(value as object).some((key) => key in DEFAULTS || MANAGED_NOTE_KEYS.has(key));
-}
-
-export function parseNotes(notes: string | null, defaultPackageDimensions = DEFAULTS.packageDimensions): ItemDetailsData {
-  if (!notes) return { ...DEFAULTS, packageDimensions: defaultPackageDimensions, measurements: parseMeasurements(null) };
-  try {
-    const value: unknown = JSON.parse(notes);
-    const parsed = isStructuredNotes(value) ? value as Omit<Partial<ItemDetailsData>, "garment"> & { garment?: string } : { sellerNotes: notes };
-    return {
-      sku: parsed.sku || "",
-      sellerNotes: parsed.sellerNotes || "",
-      knownFlaws: parsed.knownFlaws || "",
-      descriptionMeasurements: parsed.descriptionMeasurements || "",
-      cog: parsed.cog || "",
-      packageDimensions: parsed.packageDimensions || defaultPackageDimensions,
-      vendooLabels: parsed.vendooLabels ?? DEFAULTS.vendooLabels,
-      garment: parsed.garment === "shorts"
-        ? "pants"
-        : GARMENTS.some((g) => g.id === parsed.garment) ? parsed.garment as Garment : DEFAULTS.garment,
-      measurements: parseMeasurements(parsed.measurements),
-    };
-  } catch {
-    return { ...DEFAULTS, sellerNotes: notes, packageDimensions: defaultPackageDimensions, measurements: parseMeasurements(null) };
-  }
-}
-
 export function ItemDetails({ convId }: Props) {
   const queryClient = useQueryClient();
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
-  const [saving, setSaving] = useState(false);
+  const edits = useMemo(() => itemDetailsEdits(queryClient, convId), [queryClient, convId]);
+  const editState = React.useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
+  const saving = editState.saving;
   const [saveError, setSaveError] = useState<string | null>(null);
-  const saveGenRef = useRef(0);
   const [labelMenuOpen, setLabelMenuOpen] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   const [labelDraft, setLabelDraft] = useState("");
@@ -208,32 +119,10 @@ export function ItemDetails({ convId }: Props) {
     return ordered;
   }, [conversations, uiPrefs?.recent_vendoo_labels, hiddenLabelKeys]);
 
-  const [details, setDetails] = useState<ItemDetailsData>({ ...DEFAULTS });
-  const detailsRef = useRef(details);
-
-  useEffect(() => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    saveGenRef.current += 1;
-    if (conv) {
-      const parsed = parseNotes(conv.notes, defaultPackageDimensions);
-      detailsRef.current = parsed;
-      setDetails(parsed);
-    } else {
-      const defaults = { ...DEFAULTS, packageDimensions: defaultPackageDimensions };
-      detailsRef.current = defaults;
-      setDetails(defaults);
-    }
-  }, [convId, conv?.notes, conv?.updated_at, defaultPackageDimensions]);
-
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveGenRef.current += 1;
-    };
-  }, []);
+  const details = useMemo(() => applyDetailsPatch(parseNotes(conv?.notes ?? null, defaultPackageDimensions), editState.patch),
+    [conv?.notes, defaultPackageDimensions, editState.patch]);
+  const detailsRef = useRef<ItemDetailsData>(details);
+  useEffect(() => { detailsRef.current = details; }, [details]);
 
   useEffect(() => {
     setLabelMenuOpen(false);
@@ -242,53 +131,17 @@ export function ItemDetails({ convId }: Props) {
     setLabelDraft("");
   }, [convId]);
 
-  const save = useCallback(async (updated: ItemDetailsData) => {
-    const gen = ++saveGenRef.current;
-    setSaving(true);
-    setSaveError(null);
+  const save = useCallback((updated: ItemDetailsData) => {
+    const patch = changedDetails(detailsRef.current, updated);
     detailsRef.current = updated;
-    setDetails(updated);
-    // Labels newly typed into this listing come back even if removed from the history.
-    const savedKeys = new Set(splitLabels(parseNotes(conv?.notes ?? null).vendooLabels).map((l) => l.toLowerCase()));
-    const added = splitLabels(updated.vendooLabels).filter((label) => !savedKeys.has(label.toLowerCase()));
-    rememberLabels(updated.vendooLabels, added, queryClient);
-    const persist = async () => {
-      try {
-        if (gen !== saveGenRef.current) return;
-        await api.conversations.update(convId, { notes: JSON.stringify({
-          // Clear obsolete seller-entered condition; categoryOverride stays agent-managed.
-          condition: "",
-          sku: updated.sku,
-          sellerNotes: updated.sellerNotes,
-          knownFlaws: updated.knownFlaws,
-          descriptionMeasurements: updated.descriptionMeasurements,
-          cog: updated.cog,
-          packageDimensions: updated.packageDimensions,
-          vendooLabels: updated.vendooLabels,
-          poshmarkOriginalPrice: "0",
-          garment: updated.garment,
-          measurements: updated.measurements,
-        })});
-        if (gen !== saveGenRef.current) return;
-        queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
-      } catch (err) {
-        if (gen !== saveGenRef.current) return;
-        setSaveError(err instanceof Error ? err.message : "Could not save seller details");
-      } finally {
-        if (gen === saveGenRef.current) setSaving(false);
-      }
-    };
-    const queued = saveChainRef.current.catch(() => undefined).then(persist);
-    saveChainRef.current = queued;
-    await queued;
-  }, [convId, conv?.notes, queryClient]);
+    edits.change(patch, true);
+  }, [edits]);
 
   const scheduleSave = useCallback((updated: ItemDetailsData) => {
+    const patch = changedDetails(detailsRef.current, updated);
     detailsRef.current = updated;
-    setDetails(updated);
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => save(updated), 500);
-  }, [save]);
+    edits.change(patch);
+  }, [edits]);
 
   const f = (key: TextKey, type = "text") => ({
     type,
@@ -329,7 +182,6 @@ export function ItemDetails({ convId }: Props) {
 
   const commitLabels = (vendooLabels: string, draft = "") => {
     const next = { ...detailsRef.current, vendooLabels };
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     labelDraftRef.current = draft;
     setLabelDraft(draft);
     setActiveSuggestion(0);
@@ -556,7 +408,6 @@ export function ItemDetails({ convId }: Props) {
                 className={cn(toggleVariants({ variant: "segmented", size: "segmented" }))}
                 onClick={() => {
                   if (g.id === garment.id) return;
-                  if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
                   void save({ ...details, garment: g.id });
                 }}
               >
@@ -604,12 +455,12 @@ export function ItemDetails({ convId }: Props) {
           Saving…
         </span>
       )}
-      {saveError && (
+      {(saveError || editState.error) && (
         <span className="flex items-center gap-2 text-destructive-foreground text-xs" role="alert">
-          {saveError}
-          <Button variant="ghost" size="xs" onClick={() => void save(details)}>
+          {saveError || editState.error}
+          {editState.error && <Button variant="ghost" size="xs" onClick={edits.retry}>
             Retry
-          </Button>
+          </Button>}
         </span>
       )}
     </div>
