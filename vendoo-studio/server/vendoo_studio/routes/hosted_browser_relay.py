@@ -1,4 +1,6 @@
 """The seller's Anteroom tab relays marketplace commands to their Chrome and posts back replies."""
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,6 +29,19 @@ async def next_command(capabilities: str = Query('', max_length=200)):
     """The next command for this seller's Chrome. Waits up to 20 seconds; 204 when there is none."""
     message = await _relay().next_message({item for item in capabilities.split(',') if item}, WAIT_S)
     return message if message is not None else Response(status_code=204)
+
+
+class Heartbeat(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    capabilities: list[Literal['marketplace.actions', 'vinted.choices', 'sellwild.account',
+                               'marketplace.sessions', 'marketplace.sales_history']] = Field(max_length=5)
+
+
+@router.post('/heartbeat')
+async def heartbeat(body: Heartbeat):
+    """A connected tab remains present while Chrome is busy answering a long command."""
+    _relay().note_seen(set(body.capabilities))
+    return {'ok': True}
 
 
 class Reply(BaseModel):

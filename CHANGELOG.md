@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.695 — 2026-11-03
+
+- Look up eBay notification orders through the same verified order reader as catch-up, preventing duplicate sales from differing notification IDs and preserving recorded amounts.
+- Keep a connected Chrome tab present during long marketplace reads with a separate heartbeat, instead of reporting it disconnected while it is busy.
+
 ## 0.1.694 — 2026-11-03
 
 - Count an eBay sale once when notifications and order recovery use different forms of its line ID, while keeping amounts you already entered.

@@ -6,8 +6,9 @@ vi.mock("../api/transport", () => ({
   studioFetch: vi.fn(async (url: string, options?: RequestInit) => { fetches.push({ url, options }); return responses.shift()!; }),
 }));
 
-import { relayOnce } from "./chromeRelay";
+import { relayOnce, startChromeRelay } from "./chromeRelay";
 import { cloudExtension } from "../api/cloudExtension";
+import { studioFetch } from "../api/transport";
 
 const command = { type: "marketplace.execute", job_id: "job-1", message_id: "a".repeat(32),
   payload: { marketplace: "poshmark", action: "list", confirm: true, photos: [{ id: "0f1e", mime_type: "image/jpeg" }] } };
@@ -15,6 +16,39 @@ const command = { type: "marketplace.execute", job_id: "job-1", message_id: "a".
 afterEach(() => { fetches.length = 0; responses = []; });
 
 describe("Chrome relay", () => {
+  it("keeps heartbeats running during a long read and stops them when the tab disconnects", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", { setInterval, clearInterval, setTimeout });
+    const fetch = vi.mocked(studioFetch);
+    const previous = fetch.getMockImplementation();
+    const calls: string[] = [];
+    const read = { type: "marketplace.sales_history", job_id: null, message_id: "d".repeat(32), payload: { marketplace: "depop", settled: [] } };
+    let finish!: (reply: Record<string, unknown>) => void;
+    const bridge = { runMarketplaceCommand: vi.fn(() => new Promise<Record<string, unknown>>(resolve => { finish = resolve; })) };
+    fetch.mockImplementation(async url => {
+      calls.push(String(url));
+      return Response.json(String(url).includes("/next?") ? read : { ok: true });
+    });
+    let stop: (() => void) | undefined;
+    try {
+      stop = startChromeRelay(bridge, ["marketplace.actions", "marketplace.sales_history"]);
+      await vi.advanceTimersByTimeAsync(35000);
+      expect(bridge.runMarketplaceCommand).toHaveBeenCalledTimes(1);
+      const beats = calls.filter(url => url.endsWith("/heartbeat")).length;
+      expect(beats).toBeGreaterThanOrEqual(4);
+      stop();
+      await vi.advanceTimersByTimeAsync(20000);
+      expect(calls.filter(url => url.endsWith("/heartbeat"))).toHaveLength(beats);
+      finish({ ok: true, orders: [], more: false });
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      stop?.();
+      fetch.mockImplementation(previous!);
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps the connected Bridge's sales reader through status, command delivery and reply", async () => {
     const origin = "https://myanteroom.com";
     const listeners = new Set<(event: MessageEvent) => void>();
