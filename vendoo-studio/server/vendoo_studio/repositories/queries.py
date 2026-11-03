@@ -5,7 +5,7 @@ from sqlalchemy.engine import CursorResult
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -848,11 +848,20 @@ class RegistryRepo:
         return entry
 
     def get_valid_options(self, marketplace: str, field_label: str, category_path: str | None = None) -> list[str]:
-        label = _normalize_label(field_label)
-        entry = self.get_by_identity(marketplace, category_path, label)
-        if not entry and category_path:
-            entry = self.get_by_identity(marketplace, None, label)
-        return sorted(entry.known_options) if entry else []
+        return self.valid_options(category_path).get((marketplace, _normalize_label(field_label)), [])
+
+    def valid_options(self, category_path: str | None = None) -> dict[tuple[str, str], list[str]]:
+        """Every marketplace's known choices by (marketplace, label), in one query.
+        The category's own entry wins over the general one."""
+        scope = FieldRegistry.category_path.is_(None)
+        if category_path:
+            scope = or_(scope, FieldRegistry.category_path == category_path)
+        rows = self.db.query(FieldRegistry.marketplace, FieldRegistry.normalized_label, FieldRegistry.category_path,
+                             FieldRegistry.known_options).filter(scope).all()
+        options: dict[tuple[str, str], list[str]] = {}
+        for marketplace, label, _path, known in sorted(rows, key=lambda row: row[2] is not None):
+            options[(marketplace, label)] = sorted(known or [])
+        return options
 
     def upsert_schema_fields(
         self,

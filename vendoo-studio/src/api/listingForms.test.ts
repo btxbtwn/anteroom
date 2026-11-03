@@ -24,3 +24,22 @@ it("opens warmed forms synchronously and fetches again only when their structure
     expect(read).toHaveBeenCalledTimes(3);
   } finally { client.clear(); }
 });
+
+it("downloads a marketplace's shared choice list once for every listing's form", async () => {
+  const client = createStudioQueryClient();
+  const ref = { name: "mercari-brands", version: "v1" };
+  vi.spyOn(api.nativeMarketplaces, "form").mockImplementation(async (convId) => ({
+    marketplace: "mercari",
+    fields: [{ key: "mercari_specifics.brand", path: "mercari_specifics.brand", label: "Brand", value: convId, choice_list: ref }],
+  }) as never);
+  const list = vi.spyOn(api.catalog, "choiceList").mockResolvedValue({ options: ["Nike", "Adidas"], option_values: { Nike: "Nike" } });
+  try {
+    for (const id of ["one", "two"]) {
+      await prefetchListingForm(client, id, "mercari", {}, "r1");
+      const form = client.getQueryData(nativeFormOptions(id, "mercari", {}, "r1").queryKey);
+      expect(form?.fields[0]).toMatchObject({ value: id, options: ["Nike", "Adidas"], option_values: { Nike: "Nike" } });
+      expect(form?.fields[0]).not.toHaveProperty("choice_list");
+    }
+    expect(list).toHaveBeenCalledExactlyOnceWith("mercari-brands", "v1");
+  } finally { client.clear(); }
+});

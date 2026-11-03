@@ -17,6 +17,7 @@ import type {
 import type {
   BackupSnapshot,
   BackupsStatus,
+  ChoiceList,
   Conversation,
   ConversationSummary,
   DatabaseReport,
@@ -224,6 +225,8 @@ export const api = {
       }),
   },
   catalog: {
+    choiceList: (name: string, version: string) =>
+      request<ChoiceList>(`/catalog/choice-lists/${encodeURIComponent(name)}?v=${encodeURIComponent(version)}`),
     dropdownOptions: () =>
       request<{ forms: Record<string, Record<string, string[]>> }>("/catalog/dropdown-options"),
     searchCategories: (q: string, marketplace: string) =>

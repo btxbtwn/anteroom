@@ -75,3 +75,22 @@ it("stops a download once its only viewer scrolls away", async () => {
   await expect(shown).rejects.toThrow();
   await vi.waitFor(() => expect(aborted).toBe(true));
 });
+
+it("tries a photo again when the network or server fails for a moment", async () => {
+  vi.useFakeTimers();
+  try {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(new Response("busy", { status: 503 }));
+    const shown = loadPrivateImage("/api/photos/retry/thumb?size=96&v=abc");
+    await vi.runAllTimersAsync();
+    expect(await shown).toMatch(/^blob:/);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  } finally { vi.useRealTimers(); }
+});
+
+it("does not retry a photo that is gone", async () => {
+  fetchMock.mockResolvedValueOnce(new Response("", { status: 404 }));
+  await expect(loadPrivateImage("/api/photos/gone/thumb?size=96&v=abc")).rejects.toThrow("Photo unavailable");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

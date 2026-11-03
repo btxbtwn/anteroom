@@ -185,7 +185,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     @app.middleware("http")
     async def response_headers(request, call_next):
         response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
+        # A route may let the browser keep a versioned private image; nothing else is kept.
+        response.headers.setdefault("Cache-Control", "no-store")
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
         # pywebview builds its native API methods with Function(). WebKit
@@ -261,7 +262,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(bulk_delete_router)
     from vendoo_studio.routes.listings import apply_price_drop
     app.add_api_route('/api/conversations/{conv_id}/price-drop', apply_price_drop, methods=['POST'])
-    from vendoo_studio.routes.catalog import categories as catalog_categories, dropdown_options, search as catalog_search
+    from vendoo_studio.routes.catalog import categories as catalog_categories, choice_list, dropdown_options, search as catalog_search
+    app.add_api_route('/api/catalog/choice-lists/{name}', choice_list, methods=['GET'])
     app.add_api_route('/api/catalog/dropdown-options', dropdown_options, methods=['GET'])
     app.add_api_route('/api/catalog/categories', catalog_categories, methods=['GET'])
     app.add_api_route('/api/catalog/search', catalog_search, methods=['GET'])

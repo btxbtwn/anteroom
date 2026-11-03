@@ -15,6 +15,7 @@ final class AnteroomAPI: Sendable {
     private let accessToken: @Sendable () async throws -> String
     private let session = URLSession(configuration: .ephemeral)
     private let thumbnails = RequestGate(limit: 4)
+    private let choiceLists = ChoiceListCache()
 
     init(baseURL: URL, accessToken: @escaping @Sendable () async throws -> String) {
         self.baseURL = baseURL
@@ -104,7 +105,15 @@ final class AnteroomAPI: Sendable {
     }
 
     func nativeForm(_ id: String, marketplace: String) async throws -> NativeForm {
-        try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/\(marketplace)/form"))
+        let form: NativeForm = try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/\(marketplace)/form"))
+        var lists: [ChoiceListRef: ChoiceList] = [:]
+        for ref in Set(form.fields.compactMap(\.choiceList)) {
+            lists[ref] = try await choiceLists.list(ref) { () async throws -> ChoiceList in
+                try await self.decode(self.request("GET", "api/catalog/choice-lists/\(ref.name)",
+                                                   query: [URLQueryItem(name: "v", value: ref.version)]))
+            }
+        }
+        return form.filled(with: lists)
     }
 
     // MARK: Listings settings (hosted rows of Settings → Listings)
@@ -787,6 +796,23 @@ final class AnteroomAPI: Sendable {
             }
         }
         return "Something went wrong (\(status)). Try again."
+    }
+}
+
+/// Shared marketplace lists, downloaded once per version while the app runs.
+actor ChoiceListCache {
+    private var lists: [ChoiceListRef: Task<ChoiceList, Error>] = [:]
+
+    func list(_ ref: ChoiceListRef, load: @escaping @Sendable () async throws -> ChoiceList) async throws -> ChoiceList {
+        let task = lists[ref] ?? Task { try await load() }
+        lists[ref] = task
+        do {
+            return try await task.value
+        } catch {
+            // A failed download is tried again the next time a form names the list.
+            lists[ref] = nil
+            throw error
+        }
     }
 }
 

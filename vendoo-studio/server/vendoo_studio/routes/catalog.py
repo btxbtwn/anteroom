@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
@@ -102,3 +102,16 @@ def schema(category_path: str, db: Session = Depends(get_db)):
     rows = db.query(CategorySchema).filter_by(general_path=category_path).all()
     return {row.marketplace: {"category_path": row.category_path, "fields": row.fields,
                              "observed_at": cast(datetime, row.observed_at).isoformat()} for row in rows}
+
+
+@router.get("/choice-lists/{name}")
+def choice_list(name: str, v: str = ""):
+    """A marketplace choice list a form names. Its URL carries the version, so the browser keeps it."""
+    from vendoo_studio.services.choice_lists import choice_list as read
+
+    listed = read(name)
+    if listed is None:
+        raise HTTPException(404, "Unknown choice list")
+    body, version = listed
+    cache = "private, max-age=31536000, immutable" if v == version else "no-cache"
+    return Response(body, media_type="application/json", headers={"Cache-Control": cache})

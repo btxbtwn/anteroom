@@ -1,2 +1,6 @@
-- Open the eBay listing form faster: its category rules, policies and item locations now load at the same time instead of one after another.
-- On the web, marketplace forms now load in the background as soon as a listing opens, and when you point at a marketplace tab, so switching tabs no longer waits.
+- Open every marketplace form (eBay, Poshmark, Mercari, Depop and Sellwild) much faster on the web: a form now checks your saved details with a single database read instead of about sixty.
+- Mercari, Depop and Poshmark forms no longer download their full brand and category lists for every listing. Each list downloads once and is reused.
+- The eBay form loads its category rules, policies and item locations at the same time instead of one after another.
+- Marketplace forms now start loading in the background as soon as a listing opens on the web, and when you point at a marketplace tab.
+- On the Mac, loading a form no longer holds up the rest of the app.
+- Listing thumbnails load faster on the web, stay cached in your browser, and retry on their own when a download fails, instead of staying blank.

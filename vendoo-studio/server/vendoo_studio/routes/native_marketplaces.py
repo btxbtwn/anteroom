@@ -80,9 +80,21 @@ async def cancel(conv_id: str, marketplace: Marketplace, db: Session = Depends(g
 @router.get("/{marketplace}/form")
 async def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "sellwild"],
                       revision_id: str | None = None, db: Session = Depends(get_db)):
-    from vendoo_studio.services.native_editor import editor_form as load_form
+    import asyncio
 
-    return await _reply(load_form(conv_id, marketplace, revision_id, db))
+    from starlette.concurrency import run_in_threadpool
+
+    from vendoo_studio.services import native_editor
+    from vendoo_studio.services.choice_lists import share
+
+    # The form reads the database and may wait on eBay or Chrome. A worker thread
+    # keeps those waits from holding up every other request the app is answering.
+    def load():
+        return share(asyncio.run(native_editor.editor_form(conv_id, marketplace, revision_id, db)))
+    try:
+        return await run_in_threadpool(load)
+    except native.NativeMarketplaceError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @router.get("/sellwild/options")

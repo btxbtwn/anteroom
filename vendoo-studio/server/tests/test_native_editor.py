@@ -76,7 +76,7 @@ class NativeEditorTest(unittest.TestCase):
             answer = self.client.get(f"{self.url}/poshmark/form")
             generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"poshmark"}))
         self.assertEqual(answer.status_code, 200, answer.text)
-        fields = {row["path"]: row for row in answer.json()["fields"]}
+        fields = {row["path"]: row for row in self.with_choice_lists(answer.json())["fields"]}
         self.assertEqual(len(fields["direct_category_ids.poshmark"]["options"]), 747)
         self.assertIn("poshmark_specifics.inventoryRows", fields)
         self.assertIn("poshmark", generation_forms)
@@ -93,7 +93,7 @@ class NativeEditorTest(unittest.TestCase):
             answer = self.client.get(f"{self.url}/depop/form")
             generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"depop"}))
         self.assertEqual(answer.status_code, 200, answer.text)
-        fields = {row["path"]: row for row in answer.json()["fields"]}
+        fields = {row["path"]: row for row in self.with_choice_lists(answer.json())["fields"]}
         self.assertEqual(len(fields["direct_category_ids.depop"]["option_values"]), 281)
         self.assertIn("Cotton", fields["depop_specifics.attributes.material"]["options"])
         self.assertIn('32"', fields["depop_specifics.size"]["options"])
@@ -193,6 +193,16 @@ class NativeEditorTest(unittest.TestCase):
                                if row["path"] == "mercari_specifics.nativeSizeId" for choice in row["options"]])
         self.bridge.assert_not_called()
 
+    def with_choice_lists(self, form):
+        """The form as the editor shows it: each named marketplace list downloaded and filled in."""
+        for row in form["fields"]:
+            ref = row.pop("choice_list", None)
+            if ref:
+                listed = self.client.get(f"/api/catalog/choice-lists/{ref['name']}?v={ref['version']}")
+                self.assertEqual(listed.status_code, 200, listed.text)
+                row.update(listed.json())
+        return form
+
     def setUp(self):
         load_models()
         self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -223,6 +233,81 @@ class NativeEditorTest(unittest.TestCase):
         app.dependency_overrides.pop(get_db, None)
         self.db.close()
         self.engine.dispose()
+
+    def test_a_form_reads_the_database_a_handful_of_times(self):
+        """On the hosted database every query is a network round trip. A form once made
+        one per saved marketplace detail (about 60), which took eight seconds to open."""
+        import asyncio
+
+        from sqlalchemy import event
+
+        listing = {**self.listing, **{f"{market}_specifics": {f"Detail {n}": "Value" for n in range(12)}
+                                      for market in ("poshmark", "mercari", "depop", "etsy", "ebay")}}
+        rev = listing_persistence.save_revision(self.db, self.conv.id, listing, "test")
+        queries = []
+        listen = lambda *args: queries.append(args[2])  # noqa: E731
+        event.listen(self.engine, "before_cursor_execute", listen)
+        try:
+            for market in ("poshmark", "mercari", "depop", "sellwild"):
+                queries.clear()
+                asyncio.run(native_editor.editor_form(self.conv.id, market, rev.id, self.db))
+                self.assertLessEqual(len(queries), 6, (market, queries))
+        finally:
+            event.remove(self.engine, "before_cursor_execute", listen)
+
+    def test_forms_name_shared_catalogs_that_download_once(self):
+        """A listing's form carries its own values. The marketplace's brand and category
+        lists are the same for every listing, so the form names them and the client keeps them."""
+        import asyncio
+
+        for market in ("mercari", "depop", "poshmark"):
+            answer = self.client.get(f"{self.url}/{market}/form?revision_id={self.rev.id}")
+            self.assertEqual(answer.status_code, 200, answer.text)
+            self.assertLess(len(answer.content), 100_000, market)
+            form = answer.json()
+            named = [row for row in form["fields"] if "choice_list" in row]
+            self.assertTrue(named, market)
+            for row in named:
+                ref = row.pop("choice_list")
+                listed = self.client.get(f"/api/catalog/choice-lists/{ref['name']}?v={ref['version']}")
+                self.assertEqual(listed.status_code, 200, listed.text)
+                self.assertIn("immutable", listed.headers["cache-control"])
+                row.update(listed.json())
+            self.assertEqual(form, asyncio.run(native_editor.editor_form(self.conv.id, market, self.rev.id, self.db)))
+        self.assertEqual(self.client.get("/api/catalog/choice-lists/unknown?v=1").status_code, 404)
+
+    def test_building_a_form_leaves_other_requests_answering(self):
+        """The Mac's form read runs beside the app's other requests, not in front of them."""
+        import asyncio
+        import threading
+        import time
+
+        import httpx
+
+        started = threading.Event()
+        build = native_editor.editor_form
+
+        async def slow(*args, **kwargs):
+            started.set()
+            time.sleep(0.6)  # a database or Chrome wait that does not yield
+            return await build(*args, **kwargs)
+
+        async def run():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+                began = time.monotonic()
+                form = asyncio.create_task(client.get(f"{self.url}/poshmark/form"))
+                while not started.is_set() and not form.done():
+                    await asyncio.sleep(0.01)
+                self.assertFalse(form.done(), form.result().text if form.done() else "")
+                health = await client.get("/api/health")
+                return health, time.monotonic() - began, await form
+
+        with patch.object(native_editor, "editor_form", new=slow):
+            health, waited, form = asyncio.run(run())
+        self.assertEqual(health.status_code, 200)
+        self.assertLess(waited, 0.3)
+        self.assertEqual(form.status_code, 200, form.text)
 
     def test_form_read_uses_posting_snapshot_and_does_not_save_or_launch(self):
         self.conv.notes = merge_notes(self.conv.notes, {"cog": "3.65", "packageDimensions": "13x10x3", "sku": "SKU1"})
@@ -258,7 +343,7 @@ class NativeEditorTest(unittest.TestCase):
             answer = self.client.get(f"{self.url}/mercari/form")
             generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"mercari"}))
         self.assertEqual(answer.status_code, 200, answer.text)
-        fields = {row["path"]: row for row in answer.json()["fields"]}
+        fields = {row["path"]: row for row in self.with_choice_lists(answer.json())["fields"]}
         self.assertIn("Nike", fields["mercari_specifics.brand"]["options"])
         self.assertIn("Women > Maternity > Sweaters", fields["direct_category_ids.mercari"]["options"])
         self.assertIn("mercari", generation_forms)

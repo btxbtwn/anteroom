@@ -5,6 +5,7 @@ from PIL import Image
 from sqlalchemy.orm import Session
 
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
+from test_hosted_native_forms import with_choice_lists
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from vendoo_studio.models.conversation import Photo
@@ -82,7 +83,8 @@ def test_poshmark_category_choice_saves_and_reloads_its_native_form(cloud, signi
     form_path = path + '/native-marketplaces/poshmark/form'
     response = client.get(form_path, headers=alice)
     assert response.status_code == 200, response.text
-    category = next(row for row in response.json()['fields'] if row['path'] == 'direct_category_ids.poshmark')
+    category = next(row for row in with_choice_lists(client, response.json(), alice)['fields']
+                    if row['path'] == 'direct_category_ids.poshmark')
     picked = next(iter(category['option_values'].values()))
     payload = {'title': 'Coat', 'direct_category_ids': {'poshmark': picked}}
     saved = client.put(path + '/listing', headers=alice, json={'listing': payload, 'expected_revision_id': initial.json()['revision_id']})
@@ -399,3 +401,39 @@ def test_screen_matches_core_reads_and_refuses_other_sellers(cloud, signing_keys
     assert response.json()['jobs'] == client.get('/api/jobs', params={'conversation_id': identity}, headers=alice).json()
     assert client.get(path + '/screen', headers=headers(signing_keys, BOB)).status_code == 404
     assert client.get(path + '/screen').status_code == 401
+
+
+def test_thumbnails_are_kept_by_the_browser_and_read_one_row(cloud, signing_keys, monkeypatch):  # noqa: F811
+    """A photo's thumbnail URL changes with the photo, so the browser keeps it. Each
+    query is a network round trip on the hosted database, so a thumbnail reads one row."""
+    from sqlalchemy import event
+
+    client, engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    stored = {}
+
+    def storage(method, key, token, data=None):
+        if method == 'POST':
+            stored[key] = data
+        return stored.get(key, b'')
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    image = io.BytesIO()
+    Image.new('RGB', (200, 100), 'red').save(image, 'JPEG')
+    assert client.post('/api/drafts/' + identity + '/photos', headers=alice, content=image.getvalue()).status_code == 201
+    cover = client.get('/api/conversations', headers=alice).json()[0]['cover_photo_url']
+    photo = cover.split('/')[3]
+    queries = []
+    listen = lambda *args: queries.append(args[2])  # noqa: E731
+    event.listen(engine, 'before_cursor_execute', listen)
+    try:
+        kept = client.get(cover, headers=alice)
+    finally:
+        event.remove(engine, 'before_cursor_execute', listen)
+    assert kept.status_code == 200
+    assert 'immutable' in kept.headers['cache-control'] and 'private' in kept.headers['cache-control']
+    assert len([query for query in queries if 'photos' in query]) == 1, queries
+    # Without the photo's version the URL could outlive the photo.
+    unversioned = client.get('/api/photos/' + photo + '/thumb?size=96', headers=alice)
+    assert unversioned.status_code == 200 and 'immutable' not in unversioned.headers.get('cache-control', '')
+    assert client.get(cover, headers=bob).status_code == 404

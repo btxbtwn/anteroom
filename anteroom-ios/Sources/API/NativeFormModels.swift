@@ -6,7 +6,7 @@ import Foundation
 struct NativeForm: Decodable, Sendable {
     let marketplace: String
     let categoryID: String?
-    let fields: [NativeField]
+    var fields: [NativeField]
 
     enum CodingKeys: String, CodingKey {
         case marketplace, fields
@@ -45,6 +45,8 @@ struct NativeField: Decodable, Identifiable, Sendable {
     var step: Double?
     /// eBay: the aspects variations can differ by in this category.
     var variationAspects: [VariationAspect]
+    /// A list the same for every listing (Mercari's brands): the form names it and the app downloads it once.
+    var choiceList: ChoiceListRef?
 
     var id: String { key }
 
@@ -52,6 +54,7 @@ struct NativeField: Decodable, Identifiable, Sendable {
         case key, path, label, value, required, multi, options, help, section, locked, placeholder, clears, width, reveal, step
         case minValue = "min_value"
         case variationAspects = "variation_aspects"
+        case choiceList = "choice_list"
         case selectionOnly = "selection_only"
         case optionValues = "option_values"
         case inputType = "input_type"
@@ -94,6 +97,7 @@ struct NativeField: Decodable, Identifiable, Sendable {
         minValue = try? c.decodeIfPresent(Double.self, forKey: .minValue)
         step = try? c.decodeIfPresent(Double.self, forKey: .step)
         variationAspects = (try? c.decodeIfPresent([VariationAspect].self, forKey: .variationAspects)) ?? []
+        choiceList = try c.decodeIfPresent(ChoiceListRef.self, forKey: .choiceList)
     }
 
     /// The label a stored value is shown as.
@@ -104,6 +108,48 @@ struct NativeField: Decodable, Identifiable, Sendable {
     /// The value a chosen label is stored as.
     func stored(for label: String) -> String {
         optionValues[label] ?? label
+    }
+}
+
+/// A shared marketplace list a form names (`/api/catalog/choice-lists/{name}?v={version}`).
+struct ChoiceListRef: Decodable, Hashable, Sendable {
+    let name: String
+    let version: String
+}
+
+/// The choices a shared list fills into the rows that name it.
+struct ChoiceList: Decodable, Sendable {
+    let options: [String]
+    let optionValues: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case options
+        case optionValues = "option_values"
+    }
+
+    init(options: [String], optionValues: [String: String]) {
+        self.options = options
+        self.optionValues = optionValues
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        options = try c.decodeIfPresent([String].self, forKey: .options) ?? []
+        optionValues = try c.decodeIfPresent([String: String].self, forKey: .optionValues) ?? [:]
+    }
+}
+
+extension NativeForm {
+    /// The form with each named shared list filled into its rows.
+    func filled(with lists: [ChoiceListRef: ChoiceList]) -> NativeForm {
+        var form = self
+        for index in form.fields.indices {
+            guard let ref = form.fields[index].choiceList, let list = lists[ref] else { continue }
+            form.fields[index].options = list.options
+            form.fields[index].optionValues = list.optionValues
+            form.fields[index].choiceList = nil
+        }
+        return form
     }
 }
 
