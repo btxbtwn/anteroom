@@ -53,7 +53,7 @@ def test_sales_worker_records_each_seller_before_ack_and_replays_safely(cloud, m
         catchups.append(current().seller_id)
 
     monkeypatch.setattr(worker.relay_client, 'relay_request', relay)
-    monkeypatch.setattr(worker.recent_ebay_orders, 'refresh', catchup)
+    monkeypatch.setattr(worker.recent_orders, 'refresh', catchup)
     monkeypatch.setattr(order_recovery.EbayClient, 'connect', AsyncMock(
         side_effect=lambda: ebay_notification_client('same-order', [('line-1', '123456789012')])))
     monkeypatch.setattr(order_recovery, 'assert_identity', lambda _: None)
@@ -89,7 +89,7 @@ def test_failed_event_is_not_acknowledged_and_catchup_still_runs(monkeypatch):
     monkeypatch.setattr(worker, 'get_marketplace_accounts', lambda: {'ebay': {}})
     monkeypatch.setattr(worker.relay_client, 'relay_request', relay)
     monkeypatch.setattr(worker.relay_sales, 'handle_event', fail)
-    monkeypatch.setattr(worker.recent_ebay_orders, 'refresh', catchup)
+    monkeypatch.setattr(worker.recent_orders, 'refresh', catchup)
     asyncio.run(worker.check_owner(USER_ID))
     assert '/studio/ack' not in calls
     assert 'failed-event' in calls

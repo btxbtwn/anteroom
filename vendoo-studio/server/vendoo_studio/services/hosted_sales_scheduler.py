@@ -7,7 +7,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from vendoo_studio.services import marketplace_accounts, recent_ebay_orders, relay_client, relay_sales
+from vendoo_studio.services import marketplace_accounts, recent_orders, relay_client, relay_sales
 from vendoo_studio.services.hosted_context import for_seller
 from vendoo_studio.services.keychain import get_marketplace_accounts
 from vendoo_studio.services.service_context import use
@@ -47,7 +47,7 @@ async def check_owner(owner: str) -> None:
             log.warning('Hosted sales inbox could not be checked; the next poll will retry')
         # The shared seven-day reader throttles itself to once per five minutes.
         # It also runs after an inbox failure, so missing notifications are recovered.
-        await recent_ebay_orders.refresh()
+        await recent_orders.refresh()
 
 
 async def serve(engine) -> None:

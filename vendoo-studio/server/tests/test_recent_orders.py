@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from vendoo_studio.services import recent_ebay_orders as sync
+from vendoo_studio.services import recent_orders as sync
 
 
 @pytest.fixture
@@ -56,6 +56,54 @@ def test_failed_catch_up_retries_after_interval(setup_sync):
     recover.side_effect = None
     asyncio.run(sync.refresh())
     assert recover.await_count == 2
+
+
+def test_etsy_orders_are_caught_up_with_the_same_read_only_recovery(setup_sync, monkeypatch):
+    recover, _factory, _clock = setup_sync
+    monkeypatch.setattr("vendoo_studio.services.keychain.get_marketplace_accounts",
+                        lambda: {"etsy": {"accountId": "shop", "connectedAt": 456}})
+    asyncio.run(sync.refresh())
+    assert recover.await_count == 1
+    args = recover.call_args.args
+    assert args[1] == "etsy"
+    assert (args[3] - args[2]).days == 6
+    assert args[4:] == (1, "456", None, None)
+
+
+def test_failed_ebay_catch_up_does_not_stop_etsy(setup_sync, monkeypatch):
+    recover, _factory, _clock = setup_sync
+    monkeypatch.setattr("vendoo_studio.services.keychain.get_marketplace_accounts",
+                        lambda: {"ebay": {"accountId": "seller", "connectedAt": 123},
+                                 "etsy": {"accountId": "shop", "connectedAt": 456}})
+
+    async def read(_db, marketplace, *_args):
+        if marketplace == "ebay":
+            raise RuntimeError("private provider response")
+        return {"nextPage": None}
+
+    recover.side_effect = read
+    asyncio.run(sync.refresh())
+    assert [call.args[1] for call in recover.call_args_list] == ["ebay", "etsy"]
+
+
+def test_marketplaces_have_independent_throttles(setup_sync, monkeypatch):
+    recover, _factory, _clock = setup_sync
+    asyncio.run(sync.refresh())
+    monkeypatch.setattr("vendoo_studio.services.keychain.get_marketplace_accounts",
+                        lambda: {"ebay": {"accountId": "seller", "connectedAt": 123},
+                                 "etsy": {"accountId": "shop", "connectedAt": 456}})
+    asyncio.run(sync.refresh())
+    assert [call.args[1] for call in recover.call_args_list] == ["ebay", "etsy"]
+
+
+def test_disabled_etsy_detection_makes_no_etsy_read(setup_sync, monkeypatch):
+    recover, _factory, _clock = setup_sync
+    monkeypatch.setattr(sync, "sale_detection_enabled", lambda name: name != "etsy")
+    monkeypatch.setattr("vendoo_studio.services.keychain.get_marketplace_accounts",
+                        lambda: {"ebay": {"accountId": "seller", "connectedAt": 123},
+                                 "etsy": {"accountId": "shop", "connectedAt": 456}})
+    asyncio.run(sync.refresh())
+    assert [call.args[1] for call in recover.call_args_list] == ["ebay"]
 
 
 def test_disabled_detection_makes_no_remote_read(setup_sync, monkeypatch):
