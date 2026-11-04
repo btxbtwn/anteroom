@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.726 — 2026-11-04
+
+- Etsy order recovery and the automatic Etsy order check now record paid, completed, cancelled and refunded Etsy orders. Before, every Etsy order was skipped, so missing Etsy sales never came back.
+
 ## 0.1.725 — 2026-11-04
 
 - Etsy sales now appear in Anteroom even when Etsy's sale notification is missed: Anteroom checks your last 7 days of Etsy orders every few minutes, the same way it already does for eBay.

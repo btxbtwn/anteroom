@@ -77,6 +77,18 @@ def test_recovery_records_direct_sale_and_reuses_its_webhook_identity(recovery):
     recovery.autodelist.assert_not_called()
 
 
+@pytest.mark.parametrize(("status", "expected"), [
+    ("Paid", "paid"), ("Completed", "paid"), ("Canceled", "cancelled"),
+    ("Fully Refunded", "refunded"), ("Partially Refunded", "partially_refunded"),
+])
+def test_recovery_reads_etsy_title_case_statuses(recovery, status, expected):
+    recovery.remote.receipts = [receipt(status)]
+    result = recover(recovery)
+    assert result.status_code == 200, result.text
+    assert result.json()["recorded"] == 1
+    assert recovery.db.query(MarketplaceSale).one().order_status == expected
+
+
 def test_recovery_fills_missing_webhook_quantity_but_preserves_dismissal(recovery):
     sale = MarketplaceSale(marketplace="etsy", order_id="100", line_id="200", listing_id="555", state="dismissed")
     recovery.db.add(sale)
