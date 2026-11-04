@@ -277,13 +277,21 @@ class ChatCompletionsProvider:
             call.usage(payload.get("usage"), anthropic=False)
             return payload
 
-    async def _complete(self, messages: list[dict], model: str) -> str:
-        payload = await self._post(self._body(messages, model))
+    async def _complete(self, messages: list[dict], model: str, *, reasoning: bool = True) -> str:
+        payload = await self._post(self._body(messages, model, reasoning=reasoning))
         text = chunk_text(payload)
         if not text.strip():
-            raise EmptyCompletionError(
+            error = EmptyCompletionError(
                 self.spec.label, model, finish_reason(payload), len(chunk_thinking(payload)),
             )
+            if reasoning and self.spec.reasoning and chunk_thinking(payload).strip():
+                # Field fills and photo reads use plain completions too. Give
+                # reasoning-only replies the same bounded recovery as streams.
+                try:
+                    return await self._complete(messages, model, reasoning=False)
+                except EmptyCompletionError as retry:
+                    raise RuntimeError(f"{error} Retried with reasoning off and {retry}") from retry
+            raise error
         return text
 
     async def _stream(self, messages: list[dict], model: str, *, reasoning: bool = True):
