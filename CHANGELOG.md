@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.725 — 2026-11-04
+
+- Etsy sales now appear in Anteroom even when Etsy's sale notification is missed: Anteroom checks your last 7 days of Etsy orders every few minutes, the same way it already does for eBay.
+
 ## 0.1.724 — 2026-11-04
 
 - Manual General edits now carry through to marketplace forms without regeneration. Native-form saves keep the reconciled values instead of restoring stale generated copies, while deliberate marketplace edits remain independent. Hosted saves apply the same seller-edit rules.

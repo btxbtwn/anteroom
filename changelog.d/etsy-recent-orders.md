@@ -1,1 +1,0 @@
-- Etsy sales now appear in Anteroom even when Etsy's sale notification is missed: Anteroom checks your last 7 days of Etsy orders every few minutes, the same way it already does for eBay.
