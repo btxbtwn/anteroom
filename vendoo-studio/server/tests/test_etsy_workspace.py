@@ -107,7 +107,7 @@ def test_page_totals_keep_currencies_and_unknown_amounts_separate(workspace):
 
 
 @pytest.mark.parametrize("extra", [
-    {"status": "canceled"}, {"status": "fully refunded"}, {"is_paid": False}, {"is_shipped": True},
+    {"status": "canceled"}, {"status": "fully refunded"}, {"status": "Canceled"}, {"status": "Fully Refunded"}, {"is_paid": False}, {"is_shipped": True},
     {"transactions": [{"transaction_id": 20, "is_digital": True, "title": "Download"}]}, {"transactions": []},
 ])
 def test_shipping_counts_exclude_cancelled_refunded_digital_and_unknown_orders(workspace, extra):
