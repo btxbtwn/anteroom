@@ -426,7 +426,11 @@ async def _timer() -> None:
     while True:
         # Never send as a side effect of startup or enabling a rule.
         await asyncio.sleep(CHECK_INTERVAL_S)
-        await run_automation()
+        from vendoo_studio.services.mac_workspace import account_shown
+
+        # The account sends them while this Mac's window shows it.
+        if not account_shown():
+            await run_automation()
 
 
 def recover_interrupted() -> None:

@@ -18,7 +18,6 @@ from pathlib import Path
 
 from vendoo_studio.config import (
     BASE_DIR,
-    DATA_DIR,
     HOST,
     HOSTED_URL,
     PORT,
@@ -72,8 +71,6 @@ MODERN_MACOS_SDK = 26
 MODERN_CHROME_ENV = "VENDOO_STUDIO_MODERN_CHROME"
 HEALTH_URL = f"http://{HOST}:{PORT}/api/health"
 APP_URL = f"http://{HOST}:{PORT}"
-# Which of the two the window showed last, so the app reopens on it.
-WORKSPACE_FILE = Path(DATA_DIR) / "desktop-workspace.json"
 LOG_PATH = Path.home() / "Library" / "Application Support" / CHANNEL["app_name"] / "logs" / CHANNEL["log"]
 
 _server = None
@@ -400,22 +397,21 @@ def _workspace_for(url: str | None) -> str | None:
 
 def remember_workspace(url: str | None) -> None:
     """Save which workspace the window shows; splash and other pages are ignored."""
+    from vendoo_studio.services import mac_workspace
+
     workspace = _workspace_for(url)
     if workspace is None:
         return
     try:
-        WORKSPACE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        WORKSPACE_FILE.write_text(json.dumps({"workspace": workspace}), encoding="utf-8")
+        mac_workspace.save(workspace)
     except OSError as exc:
         print(f"could not save the open workspace: {exc}", flush=True)
 
 
 def saved_workspace_url() -> str:
-    try:
-        saved = json.loads(WORKSPACE_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return APP_URL
-    return HOSTED_URL if isinstance(saved, dict) and saved.get("workspace") == "account" else APP_URL
+    from vendoo_studio.services import mac_workspace
+
+    return HOSTED_URL if mac_workspace.saved() == "account" else APP_URL
 
 
 def open_in_window(url: str) -> None:

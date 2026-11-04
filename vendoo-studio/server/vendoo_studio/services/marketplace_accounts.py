@@ -360,9 +360,11 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
     The marketplace that sold is never included. ``confirm`` is the seller's saved choice,
     and the names are the other listings Anteroom still has up. Nothing is retried.
     """
+    from vendoo_studio.services.mac_workspace import account_shown
     from vendoo_studio.services.user_settings import autodelist_enabled
 
-    if not sale_ids or not autodelist_enabled():
+    # While the Mac's window shows the account, the account delists after its own copy of the sale.
+    if not sale_ids or not autodelist_enabled() or account_shown():
         return {}
     if session_factory is None:
         from vendoo_studio.database import SessionLocal

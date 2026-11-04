@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, call, patch
 
 from vendoo_studio import desktop
 from vendoo_studio.routes import desktop as desktop_routes
+from vendoo_studio.services import mac_workspace
 
 
 class StudioWindowChromeTest(unittest.TestCase):
@@ -498,7 +499,7 @@ class AccountWorkspaceTest(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
-        patcher = patch.object(desktop, "WORKSPACE_FILE", Path(self.folder.name) / "desktop-workspace.json")
+        patcher = patch.object(mac_workspace, "WORKSPACE_FILE", Path(self.folder.name) / "desktop-workspace.json")
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -518,7 +519,7 @@ class AccountWorkspaceTest(unittest.TestCase):
         self.assertEqual(desktop.saved_workspace_url(), desktop.HOSTED_URL)
 
     def test_an_unreadable_choice_opens_this_macs_listings(self):
-        desktop.WORKSPACE_FILE.write_text("{not json", encoding="utf-8")
+        mac_workspace.WORKSPACE_FILE.write_text("{not json", encoding="utf-8")
         self.assertEqual(desktop.saved_workspace_url(), desktop.APP_URL)
 
     def test_a_choice_made_while_starting_opens_after_boot(self):

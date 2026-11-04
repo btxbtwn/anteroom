@@ -1,0 +1,1 @@
+- While the Mac app shows your account, this Mac's own listings stop checking sales, delisting after a sale, and running price drops, promotions, eBay offers and sourcing on their own, so nothing happens twice. Switching back to This Mac's Listings turns them on again.
