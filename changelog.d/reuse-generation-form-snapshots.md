@@ -1,1 +1,0 @@
-- Draft generation reuses freshly loaded marketplace choices while filling fields, avoiding repeated form requests.

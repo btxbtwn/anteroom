@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.721 — 2026-11-04
+
+- Draft generation reuses freshly loaded marketplace choices while filling fields, avoiding repeated form requests.
+
 ## 0.1.720 — 2026-11-03
 
 - Sales, marketplace-listing, and copy-preview/result reads release their database connections before sending the response or refreshing account data in the background.
