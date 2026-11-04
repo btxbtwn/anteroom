@@ -312,6 +312,7 @@ def activity_response(db, identity, count, last):
 class UiInput(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     theme: Literal['dark', 'light', 'system'] | None = None
+    listing_mode: Literal["direct", "vendoo"] | None = None
     listing_names: Literal['title', 'sku'] | None = None
     settled_shelf_expanded: bool | None = None
     stale_listing_days: int | None = Field(None, ge=15, le=120)
@@ -331,7 +332,7 @@ def ui(db=Depends(get_seller_db, scope="function")):
 @router.put('/settings/ui')
 def save_ui(body: UiInput, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.routes.settings import UiPrefsConfig, put_ui_prefs
-    put_ui_prefs(UiPrefsConfig(**body.model_dump(exclude_unset=True, exclude_none=True)))
+    put_ui_prefs(UiPrefsConfig(**body.model_dump(exclude_unset=True, exclude_none=True)), db)
     return ui(db)
 
 

@@ -381,6 +381,36 @@ def active_connections(cloud):  # noqa: F811
         event.remove(engine, 'checkin', checkin)
 
 
+@pytest.mark.parametrize('approved', [False, True])
+def test_relay_job_photos_release_the_connection_before_private_storage(cloud, active_connections, signing_keys, monkeypatch, approved):  # noqa: F811
+    from sqlalchemy.orm import Session
+    from vendoo_studio.models.conversation import Photo
+    from vendoo_studio.models.job import Job
+    from vendoo_studio.services.approved_photos import KEY
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Private draft'}).json()['id']
+    data = image_bytes()
+    def storage(method, *_args):
+        if method == 'GET':
+            assert not active_connections, 'Job photo storage must not hold a database connection'
+        return data
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    uploaded = client.post(f'/api/drafts/{identity}/photos', headers=alice, content=data)
+    photo_id = uploaded.json()['id']
+    with Session(engine) as db:
+        photo = db.get(Photo, photo_id)
+        job = Job(user_id=USER_ID, conversation_id=identity, approved_revision_id='', status='dispatched',
+            current_step='vendoo_photos', listing_snapshot={KEY: [{'id': photo_id,
+                'stored_filename': photo.stored_filename, 'mime_type': photo.mime_type}]} if approved else {})
+        db.add(job)
+        db.commit()
+        job_id = job.id
+    response = client.get(f'/api/browser-relay/jobs/{job_id}/photos/{photo_id}', headers=alice)
+    assert response.status_code == 200, response.text
+
+
 def test_generate_releases_the_seller_session_before_streaming(monkeypatch):
     """Keepalives must not retain a seller session for the whole Mac wait."""
     from types import SimpleNamespace

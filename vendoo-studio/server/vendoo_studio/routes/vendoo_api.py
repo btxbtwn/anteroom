@@ -121,7 +121,9 @@ def _listing_only_fields(
 
 async def _with_live_schema(listing: dict, marketplace: str, fields: list[dict]) -> list[dict]:
     """eBay and Etsy editor rows gain the live schema. Other marketplaces are unchanged."""
-    if marketplace not in ("ebay", "etsy"):
+    from vendoo_studio.services.listing_mode import read
+
+    if read() == "vendoo" or marketplace not in ("ebay", "etsy"):
         return fields
     from vendoo_studio.services.direct_categories import overlay_live_fields
 

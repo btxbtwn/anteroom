@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anteroom Bridge",
-  "version": "0.2.54",
+  "version": "0.2.55",
   "minimum_chrome_version": "116",
   "description": "Connect Anteroom to automate marketplace listing drafts",
   "permissions": [
@@ -15,6 +15,15 @@
     "system.display"
   ],
   "host_permissions": [
+    "https://web.vendoo.co/*",
+    "https://app.vendoo.co/*",
+    "https://api.web.vendoo.co/*",
+    "https://us.vendoo.co/*",
+    "https://us-central1-vendoo-prod-7948f.cloudfunctions.net/*",
+    "https://securetoken.googleapis.com/*",
+    "https://firestore.googleapis.com/*",
+    "https://storage.googleapis.com/*",
+    "https://firebasestorage.googleapis.com/*",
     "https://www.ebay.com/*",
     "https://poshmark.com/*",
     "https://www.mercari.com/*",

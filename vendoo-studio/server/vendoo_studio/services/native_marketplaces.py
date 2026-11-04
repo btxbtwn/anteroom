@@ -395,6 +395,9 @@ def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tupl
 
 
 async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, db: Session) -> dict:
+    from vendoo_studio.services import listing_mode
+
+    listing_mode.require("direct", db)
     name = NAMES[marketplace]
     if kind == "save_draft" and marketplace not in DRAFT_MARKETPLACES:
         raise NativeMarketplaceError(400, f"Saving a private {name} draft is not supported.")
@@ -429,7 +432,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
                    "readiness_state_id": body.readiness_state_id or defaults.get("readiness_state_id"),
                    "return_policy_id": body.return_policy_id or defaults.get("return_policy_id"),
                    "package": body.etsy_package.model_dump() if body.etsy_package else listing_package(snapshot)}
-    with start_gate():
+    with listing_mode.guard(db, "direct"):
         record = _record(db, conv_id, marketplace)
         if record.get("state") in UNSETTLED_STATES:
             raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")

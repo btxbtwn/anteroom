@@ -41,7 +41,7 @@ MARKETPLACE_IMPORT = "marketplace.import"
 SALES_HISTORY = "marketplace.sales_history"
 MARKETPLACE_PROMOTIONS = "marketplace.promotions"
 # The Bridge version that first declares each capability, and what it lets the web do.
-NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
+NEEDS = {"vendoo.drafts": ("0.2.55", "save Vendoo drafts"), MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
          SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices"),
          MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in"),
          MARKETPLACE_IMPORT: ("0.2.53", "import your listings"),
@@ -49,7 +49,7 @@ NEEDS = {MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHO
          MARKETPLACE_PROMOTIONS: ("0.2.52", "share listings and send offers")}
 
 # Each command, and the capability the Bridge must declare to receive it.
-COMMANDS = {"marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
+COMMANDS = {"job.vendoo_api": "vendoo.drafts", "marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
             "marketplace.delete": MARKETPLACE_ACTIONS, "job.cancel": MARKETPLACE_ACTIONS,
             "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES,
             "marketplace.sellwild_account": SELLWILD_ACCOUNT,
