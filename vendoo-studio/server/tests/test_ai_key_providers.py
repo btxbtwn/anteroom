@@ -139,6 +139,50 @@ def test_reasoning_only_stream_is_retried_without_reasoning(fake_http):
     assert json.loads(calls[1].content)["reasoning"] == {"enabled": False}
 
 
+def test_reasoning_only_field_reply_is_retried_without_reasoning(fake_http):
+    from vendoo_studio.services.listing_generate import collect_provider_text
+    from vendoo_studio.services.native_field_fill import validated_values
+    from vendoo_studio.services.option_lookup import OptionCatalog
+
+    answer = '{"fields":{"ebay_specifics.Size":{"value":"XL","evidence":"size: XL"}}}'
+    replies = iter([
+        {"choices": [{"message": {"content": "", "reasoning": "Checking the size"}, "finish_reason": "length"}]},
+        {"choices": [{"message": {"content": answer}, "finish_reason": "stop"}]},
+    ])
+    calls = fake_http(lambda request: httpx.Response(200, json=next(replies)))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "listing-m", "high")
+    messages = [{"role": "user", "content": "Fill the size from evidence: size: XL"}]
+    row = {"path": "ebay_specifics.Size", "options": ["S", "M", "L", "XL"], "selection_only": True}
+    catalog = OptionCatalog({"ebay": {"fields": [row]}})
+    text = run(collect_provider_text(provider, messages, option_catalog=catalog))
+    assert text == answer
+    assert validated_values(json.loads(text), {row["path"]: row}, evidence="size: XL")[row["path"]][0] == "XL"
+    assert len(calls) == 2
+    bodies = [json.loads(call.content) for call in calls]
+    assert [body["reasoning"] for body in bodies] == [{"effort": "high"}, {"enabled": False}]
+    assert all(body["model"] == "listing-m" and body["messages"] == messages for body in bodies)
+    assert provider.reasoning_effort == "high"
+
+
+def test_reasoning_only_plain_reply_retry_is_bounded(fake_http):
+    calls = fake_http(lambda request: httpx.Response(200, json={
+        "choices": [{"message": {"content": "", "reasoning": "Still thinking"}, "finish_reason": "length"}],
+    }))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "listing-m")
+    with pytest.raises(RuntimeError, match="Retried with reasoning off.*finish: length"):
+        run(collect(provider.chat([{"role": "user", "content": "Fill the size"}], stream=False)))
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("status", [401, 402])
+def test_plain_reply_does_not_retry_key_or_credit_rejection(fake_http, status):
+    calls = fake_http(lambda request: httpx.Response(status, json={"error": {"message": "Rejected"}}))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "listing-m")
+    with pytest.raises(RuntimeError, match=f"HTTP {status}"):
+        run(collect(provider.chat([{"role": "user", "content": "Fill the size"}], stream=False)))
+    assert len(calls) == 1
+
+
 def test_no_text_after_retry_names_the_finish_reason(fake_http):
     calls = fake_http(lambda request: httpx.Response(200, content=sse(
         {"choices": [{"delta": {"reasoning_content": "hmm"}, "finish_reason": "length"}]},

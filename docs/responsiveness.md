@@ -204,3 +204,23 @@ refresh, and the final capture remains. The regression reduces four form-load
 passes to three for a simple strict fill without changing its validated
 answer. Production latency for this change still needs measurement after
 deployment.
+
+After the OpenRouter account credit block was cleared, production 0.1.721 saved
+two concurrent photo-based drafts in a 248-second browser workflow. Both copies
+survived desktop and mobile-web reloads, and a third draft's edit survived
+reload during generation. There were no HTTP 5xx responses. GET p50/p95 was
+625/3,416 ms across 1,849 requests; input acknowledgement was not measured.
+
+One generation passed validation; the other finished with six unverified
+required fields after a provider exception. Its underlying response was not
+retained, so the exact provider failure is unconfirmed. A diagnostic retry of
+that QA draft's finishing step produced usable replies and reduced the gaps to
+one missing eBay size, but did not prove reliable automatic completion.
+
+Plain provider completions lacked the existing streaming recovery for a reply
+containing reasoning without an answer. They now retry that case once on the
+same model with reasoning disabled for the retry only. Authentication and
+credit rejections are not replayed, and evidence validation still rejects
+unsupported field values. Deterministic tests cover recovery through the
+field-fill collector and validator plus bounded failure. Production validation
+of this recovery remains pending.
