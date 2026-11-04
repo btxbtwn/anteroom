@@ -1,2 +1,0 @@
-- Listing field checks are advisory. Sellers can confirm List despite missing fields, stale category or size choices, or eligibility warnings. Anteroom submits the attempt and shows the marketplace's rejection so sellers can edit and retry.
-- Duplicate listing protection, seller ownership, approved photos, and checks for an uncertain previous publication remain enforced.

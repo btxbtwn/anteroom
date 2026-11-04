@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.723 — 2026-11-04
+
+- Listing field checks are advisory. Sellers can confirm List despite missing fields, stale category or size choices, or eligibility warnings. Anteroom submits the attempt and shows the marketplace's rejection so sellers can edit and retry.
+- Duplicate listing protection, seller ownership, approved photos, and checks for an uncertain previous publication remain enforced.
+
 ## 0.1.722 — 2026-11-04
 
 - Retry once when OpenRouter returns thinking without an answer during photo analysis or marketplace field filling.
