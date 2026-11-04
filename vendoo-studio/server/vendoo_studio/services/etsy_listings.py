@@ -199,11 +199,9 @@ _WHAT = dict(ETSY_WHAT_CODES, **{"false": "0", "true": "1", "finished product": 
 
 def etsy_quantity(snapshot: dict) -> int:
     try:
-        quantity = int(str(snapshot.get("quantity") or 1).strip())
+        quantity = int(str(snapshot.get("quantity", 1)).strip())
     except ValueError:
         quantity = 0
-    if not 1 <= quantity <= 999:
-        raise missing("Enter an Etsy quantity from 1 to 999.", "quantity")
     return quantity
 
 
@@ -211,10 +209,12 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     from vendoo_studio.services.seller_overrides import marketplace_text
 
     title, description = etsy_title(snapshot), marketplace_text(snapshot, "etsy", "description")
-    if not title.strip() or not description.strip():
-        raise missing("Add an Etsy title and description before listing.",
-                      *[name for name, value in (("title", title), ("description", description)) if not value.strip()])
-    fields = {"title": title, "description": description, "price": str(_price(snapshot.get("price")))}
+    raw_price = snapshot.get("price")
+    try:
+        price = str(_price(raw_price))
+    except (ValueError, InvalidOperation):
+        price = str(raw_price) if raw_price is not None else ""
+    fields = {"title": title, "description": description, "price": price}
     # Etsy takes list fields as comma-separated values.
     fields.update({key: ",".join(values) for key, values in list_fields(snapshot).items()})
     if not creating:
@@ -226,17 +226,11 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     what = _code(details.get("what_is") or details.get("whatIsIt"), _WHAT)
     when = etsy_when_to_store(etsy_when_raw(details, snapshot), snapshot, etsy_when_options())
     when = etsy_when_made_code(when)
-    if not who or what is None or not when:
-        raise missing("Complete Etsy's who made it, what is it, and when made details before listing.",
-                      *[f"etsy_specifics.{name}" for name, value in (("who_made", who), ("what_is", what), ("when_made", when))
-                        if not value])
     from vendoo_studio.services.direct_categories import direct_category_id
 
     category = direct_category_id(snapshot, "etsy")
-    if not re.fullmatch(r"[1-9]\d*", category):
-        raise missing("Choose a verified Etsy category before listing.", "direct_category_ids.etsy")
     # Like the Vendoo path: is_supply is Etsy's "What is it?" answer, a supply or tool.
-    fields.update(quantity=str(etsy_quantity(snapshot)), who_made=who, when_made=when, is_supply="true" if what == "1" else "false",
+    fields.update(quantity=str(etsy_quantity(snapshot)), who_made=who or "", when_made=when, is_supply="true" if what == "1" else "false",
                   taxonomy_id=category, type="physical", should_auto_renew="false")
     # Only use explicit seller-selected IDs. Preparation renames these to
     # Vendoo's camelCase; the listing may still have the snake_case spelling.
@@ -277,6 +271,8 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
         reason = (f"Etsy titles are at most {_ETSY_TITLE_MAX} characters" if len(source_title) > _ETSY_TITLE_MAX
                   else "Etsy allows %, :, & and + once each and no emoji or special symbols")
         found.append(gap("title", f"{reason}, so Etsy gets: {fields['title']}", blocking=False))
+    if not fields["taxonomy_id"]:
+        found.append(gap("direct_category_ids.etsy", "Choose an Etsy category."))
     if seeded_leaf(context.db, "etsy", fields["taxonomy_id"]) is False:
         found.append(gap("direct_category_ids.etsy", "That Etsy category has subcategories. Choose the most specific one."))
     found.extend(_cached_property_gaps(snapshot))
@@ -284,7 +280,7 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
 
 
 def _cached_property_gaps(snapshot: dict) -> list[dict]:
-    """Required Etsy category properties from the cached live schema. No cache means List still checks them."""
+    """Advisory Etsy category property issues from the cached schema."""
     from vendoo_studio.services.category_fields import load_rows
     from vendoo_studio.services.direct_categories import direct_category_id
     from vendoo_studio.services.marketplace_schemas import ETSY_PROPERTIES
@@ -298,11 +294,9 @@ def _cached_property_gaps(snapshot: dict) -> list[dict]:
         return []
     if not rows:
         return []
-    try:
-        property_values(snapshot, rows)
-    except ListingProblem as exc:
-        return [gap(item["field"], item["message"]) for item in exc.fields or []]
-    return []
+    assigned = {row["property_id"] for row in property_values(snapshot, rows)}
+    return [gap(f"etsy_specifics.category_specifics.{row['name']}", f"Etsy needs {row['name']} in this category.")
+            for row in rows if row.get("required") and row["id"] not in assigned]
 
 
 # --- category properties ----------------------------------------------------------
@@ -360,11 +354,10 @@ def _match(value: str, choices: list[dict]) -> dict | None:
 def property_values(snapshot: dict, properties: list[dict]) -> list[dict]:
     """The category properties to write, matched against Etsy's own (``marketplace_schemas``).
 
-    A required one with no answer is refused before anything is written.
+    Missing answers remain empty for Etsy to validate on the confirmed attempt.
     """
     answers = _answers(snapshot)
     assignments: list[dict] = []
-    problems: list[dict] = []
     for prop in properties:
         name = prop["name"]
         values = answers.get(_key(name)) or answers.get(_key(prop.get("alias") or "")) or []
@@ -376,9 +369,6 @@ def property_values(snapshot: dict, properties: list[dict]) -> list[dict]:
         limit = int(prop.get("max_values") or (len(hits) if prop.get("multi") else 1) or 1)
         hits = hits[:limit]
         if not hits:
-            if prop.get("required"):
-                message = (f"Choose one of Etsy's {name} values." if values else f"Etsy needs {name} in this category.")
-                problems.append({"field": f"etsy_specifics.category_specifics.{name}", "message": message})
             continue
         row = {"property_id": prop["id"], "name": name, "value_ids": [hit["id"] for hit in hits if hit["id"] is not None],
                "values": [hit["label"].replace("(", "").replace(")", "") for hit in hits]}
@@ -386,8 +376,6 @@ def property_values(snapshot: dict, properties: list[dict]) -> list[dict]:
         if scale:
             row["scale_id"] = scale
         assignments.append(row)
-    if problems:
-        raise ListingProblem(" ".join(item["message"] for item in problems), "missing_fields", fields=problems)
     return assignments
 
 
@@ -752,7 +740,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                 # An earlier activation finished after its reply was lost.
                 record({"etsy_pending_write": None})
                 return _success(remote)
-            if remote.get("state") != "draft" or not _matches(remote, snapshot) or not remote.get("images"):
+            if remote.get("state") != "draft" or not _matches(remote, snapshot):
                 raise ValueError("Etsy did not accept this listing's fields or photos.")
             if not await _video_kept(item_id, snapshot, binding):
                 # A flagged, removed or missing video is never published. Save Draft uploads it again.
@@ -768,46 +756,22 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
 
         if action != "save_draft":
             raise ValueError("Unsupported Etsy API action.")
-        if not etsy_eligible(snapshot):
-            # Etsy refuses modern resale outright; nothing is sent.
-            raise ValueError(NOT_ELIGIBLE)
         creating = not binding.get("draft_url")
         fields = draft_fields(snapshot, creating=True)
         taxonomy = fields["taxonomy_id"]
-        if taxonomy not in await marketplace_schemas.etsy_leaves():
-            raise missing("Etsy no longer offers that category, or it has subcategories. Choose a current Etsy category.",
-                          "direct_category_ids.etsy")
-        # Every required category property is answered before anything is written.
-        assignments = property_values(snapshot, await marketplace_schemas.etsy_properties(taxonomy))
+        properties = await marketplace_schemas.etsy_properties(taxonomy) if re.fullmatch(r"[1-9]\d*", taxonomy) else []
+        assignments = property_values(snapshot, properties)
         if not creating:
             fields = draft_fields(snapshot, creating=False)
         if creating:
             selected = shipping_profile_id or fields.get("shipping_profile_id")
             processing = readiness_state_id or fields.get("readiness_state_id")
             returns = return_policy_id or fields.get("return_policy_id")
-            if not selected:
-                raise ValueError("Choose an Etsy shipping profile in Settings before listing.")
-            if not processing:
-                raise ValueError("Choose an Etsy processing profile in Settings before listing.")
-            if not returns:
-                raise ValueError("Choose an Etsy return policy in Settings before listing.")
-            profiles = await listing_profiles()
-            if selected not in {profile["id"] for profile in profiles["shipping"]}:
-                raise ValueError("Choose a shipping profile from the connected Etsy shop.")
-            if processing not in {profile["id"] for profile in profiles["processing"]}:
-                raise ValueError("Choose a processing profile from the connected Etsy shop.")
-            if returns not in {profile["id"] for profile in profiles["returns"]}:
-                raise ValueError("Choose a return policy from the connected Etsy shop.")
-            shipping = next(profile for profile in profiles["shipping"] if profile["id"] == selected)
-            if shipping["is_calculated"] and not package:
-                raise ValueError("Enter packed weight and dimensions for Etsy calculated shipping.")
-            fields["shipping_profile_id"] = selected
-            fields["readiness_state_id"] = processing
-            fields["return_policy_id"] = returns
+            fields.update({key: value for key, value in {
+                "shipping_profile_id": selected, "readiness_state_id": processing, "return_policy_id": returns,
+            }.items() if value is not None})
             if package:
                 fields.update({key: str(value) for key, value in package.items()})
-            if not 1 <= len(photos) <= 20:
-                raise missing("Choose between one and twenty Etsy photos.", "photos")
             remote = await write("POST", f"shops/{shop_id}/listings", "create", data=fields)
             item_id = str(remote.get("listing_id") or "")
             if str(remote.get("shop_id")) != shop_id or remote.get("state") != "draft":
@@ -842,7 +806,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         await _sync_photos(write, shop_id, item_id, remote, photos, binding, record)
         await _sync_video(write, shop_id, item_id, snapshot, binding, record)
         remote = await _read(shop_id, item_id)
-        if remote.get("state") != "draft" or not _matches(remote, snapshot) or not remote.get("images"):
+        if remote.get("state") != "draft" or not _matches(remote, snapshot):
             raise ValueError("Etsy did not retain the private draft fields and photos. Check its result.")
         if binding.get("etsy_photo_ids") and len(remote["images"]) != len(binding["etsy_photo_ids"]):
             raise ValueError("Etsy did not retain every draft photo. Check its result.")

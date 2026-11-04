@@ -32,7 +32,7 @@ def capture(photos: list) -> list[dict]:
 
 def load(snapshot: dict) -> list[SimpleNamespace]:
     rows = snapshot.get(KEY)
-    if not isinstance(rows, list) or not rows:
+    if not isinstance(rows, list):
         raise ValueError("This action has no approved photos. Review the listing before starting a new action.")
     for row in rows:
         if not photo_store().exists(row["stored_filename"]):

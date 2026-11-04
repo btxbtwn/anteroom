@@ -31,7 +31,7 @@ type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; de
 
 const BUSY = new Set(["saving", "publishing", "updating"]);
 type ActionKind = "check" | "list" | "save_draft" | "update" | "cancel" | "reset" | "reconnect";
-export const ETSY_NOT_ELIGIBLE = "Etsy only allows vintage (20+ years), handmade or craft supplies. This item doesn't qualify.";
+export const ETSY_NOT_ELIGIBLE = "Etsy generally requires vintage (20+ years), handmade or craft supplies. You can still try listing; Etsy decides whether to accept it.";
 
 /** A record whose job is running now. A busy state with no job running is unconfirmed until checked. */
 export function isRunning(draft: NativeDraft | undefined): boolean {
@@ -119,7 +119,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   // eBay keeps a saved draft as an unpublished offer, which has no page to open.
   if (draft?.state === "draft" && marketplace === "ebay") return { tone: "neutral", label: "Saved on eBay",
     detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to eBay." : "Not listed. Buyers cannot see it until you List." };
-  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Not eligible", detail: ETSY_NOT_ELIGIBLE };
+  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Review eligibility", detail: ETSY_NOT_ELIGIBLE };
   return { tone: "idle", label: "Not listed" };
 }
 
@@ -427,16 +427,7 @@ export function MarketplacesLayout({
     return preflight.data?.marketplaces?.[marketplace as NativeMarketplace]?.gaps ?? [];
   }
   function listBlocked(marketplace: Marketplace): boolean {
-    if (!preflight.data || preflight.isPlaceholderData || preflight.isError) return true;
-    if (retryIn(marketplace) > 0) return true;
-    if (preflightGaps(marketplace).some((gap) => gap.blocking)) return true;
-    if (marketplace === "etsy" && !etsyEligible) return true;
-    if (marketplace === "etsy") {
-      const draft = drafts.etsy;
-      const current = draft?.state === "draft" && draft.revision_id === revisionId && Boolean(draft.draft_url);
-      return !current && !etsyReady;
-    }
-    return false;
+    return retryIn(marketplace) > 0;
   }
 
   /** The marketplace holds an older revision than the one being edited. */
@@ -524,8 +515,8 @@ export function MarketplacesLayout({
     const fields = [...new Set(gaps.map((gap) => gap.field))];
     const prompt = [
       blocking
-        ? `${name} still needs details before this item can be listed.`
-        : `${name} will leave these fields empty when this item is listed.`,
+        ? `Anteroom suggests reviewing these fields. You can still try listing on ${name}.`
+        : `Anteroom may leave these fields empty. You can still try listing on ${name}.`,
       ...all.map((gap) => `${gap.field}: ${gap.message}`),
       blocking
         ? "Fill those fields in this listing. Do not list it; I will press List again."

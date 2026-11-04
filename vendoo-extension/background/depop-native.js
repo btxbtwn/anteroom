@@ -477,28 +477,13 @@ function depopLocation(listing, row) {
 // shipping method whose parcel field is parcel_size.
 async function depopResolvedFields(payload) {
   const listing = payload.listing || {};
-  const missing = [];
   const quantity = Number(listing.quantity ?? 1);
-  const price = depopPrice(listing);
   const worldwide = listing.depop_specifics?.worldwideShipping;
   const internationalPrice = Number(worldwide?.price);
-  if (worldwide?.enabled === true && (worldwide.price == null || worldwide.price === ''
-    || !Number.isFinite(internationalPrice) || internationalPrice < 0 || internationalPrice >= 100
-    || Math.abs(internationalPrice * 100 - Math.round(internationalPrice * 100)) > 0.000001)) {
-    missing.push({ field: 'depop_specifics.worldwideShipping.price', needs: 'a worldwide shipping price from $0 to $99.99, in dollars and cents' });
-  }
-  if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: 'quantity', needs: 'a positive whole-number quantity' });
-  const base = depopBaseDescription(listing);
-  if (!base) missing.push({ field: 'description', needs: 'a description' });
-  if (base.length > DEPOP_MAX_DESCRIPTION) missing.push({ field: 'description', needs: `a description of ${DEPOP_MAX_DESCRIPTION} characters or fewer` });
-  if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(base)) missing.push({ field: 'description', needs: 'a description without an email address' });
-  if (!(Number(price) >= 1)) missing.push({ field: 'price_amount', needs: 'a price of $1 or more' });
-  if (!depopCondition(listing.depop_specifics?.condition || listing.form?.overrides?.condition || listing.condition)) missing.push({ field: 'condition', needs: 'a condition' });
   const attributes = await depopAttributes(payload.deadline);
   const category = depopCategory(listing, attributes);
   const fields = depopFormFields(listing, attributes);
-    if (!category) missing.push({ field: 'product_type', needs: 'a Depop category' });
-  else {
+  if (category) {
     // The listing site stores product type, kids, and gender. Department and
     // group are how the catalog is organised, not fields on the draft.
     const gender = category.department === 'kidswear'
@@ -507,31 +492,17 @@ async function depopResolvedFields(payload) {
     Object.assign(fields, { product_type: category.productType, is_kids: category.department === 'kidswear',
       ...(gender ? { gender } : {}) });
     const size = depopSize(listing, category, attributes);
-    if (size.problem) missing.push({ field: 'size', needs: size.problem });
-    else if (!size.none) Object.assign(fields, { variant_set: size.set, variants: { [size.id]: quantity } });
-    else Object.assign(fields, { variant_set: null, variants: {}, quantity });
+    if (!size.problem && !size.none) Object.assign(fields, { variant_set: size.set, variants: { [size.id]: quantity } });
+    else if (size.none) Object.assign(fields, { variant_set: null, variants: {}, quantity });
     const extra = depopAttributeValues(listing, category, attributes);
     fields.attributes = extra.values;
-    missing.push(...extra.missing);
   }
   fields.brand = depopBrand(listing, attributes);
   // Depop's listing site leaves sku off when it is blank, and so does Anteroom.
   const sku = String(listing.depop_specifics?.sku ?? listing.sku ?? '').trim();
   if (sku) fields.sku = sku;
-  if (sku.length > 50) missing.push({ field: 'depop_specifics.sku', needs: 'a SKU of 50 characters or fewer' });
   fields.international_shipping_cost = worldwide?.enabled === true ? internationalPrice.toFixed(2) : null;
-  const parcelLabel = String(listing.depop_specifics?.parcelSize || listing.depop_specifics?.parcel_size || '').trim();
-  if (missing.length) throw marketplaceMissing('depop', missing);
   const shipping = await depopShippingFields(listing, category, payload.deadline);
-  const { from, parcel } = shipping;
-  if (!from) {
-    const zip = String(listing.form?.ships_from_zip || '').replace(/\D/g, '').slice(0, 5);
-    missing.push({ field: 'address', needs: zip
-      ? `a Depop ship-from address for ZIP ${zip} (the ZIP in Settings → Listings does not match an address saved in Depop)`
-      : 'a ship-from address (set your Ships from ZIP in Settings → Listings)' });
-  }
-  if (!parcel?.id) missing.push({ field: 'parcel_size', needs: `a parcel size Depop offers (it has no "${parcelLabel}")` });
-  if (missing.length) throw marketplaceMissing('depop', missing);
   Object.assign(fields, shipping.fields);
   return fields;
 }
@@ -1586,9 +1557,6 @@ async function runDepopNative(msg, recovery = false) {
   const photosChosen = () => {
     const chosen = depopChosenPhotos(payload.photos);
     payload.photos = chosen.photos;
-    if (!payload.photos?.length) {
-      throw marketplaceMissing('depop', [{ field: 'photos', needs: 'between one and eight photos' }]);
-    }
     if (chosen.omitted) payload.photo_warning = `Depop kept 8 photos and left ${chosen.omitted} off.`;
   };
   try {

@@ -83,6 +83,19 @@ function worker({ read, attributes = ATTRIBUTES, accessToken = token(3600), curr
   return { c, requests, journal, sent };
 }
 
+function rejectDraft(c, path = '/api/v2/item_upload/drafts') {
+  const fetch = c.fetch;
+  const attempted = [];
+  c.fetch = async (url, options = {}) => {
+    if (new URL(url).pathname === path && options.method === 'POST') {
+      attempted.push(JSON.parse(options.body));
+      return reply(400, { message: 'Please correct the selected fields.' });
+    }
+    return fetch(url, options);
+  };
+  return attempted;
+}
+
 test('a Vinted hour that ran out is renewed before the draft, and keeps the sign-in', async () => {
   const { c, requests, sent } = worker({ accessToken: token(-60) });
   const result = await c.runVintedNative(message());
@@ -348,15 +361,15 @@ test('Vinted refuses to publish without the seller confirming, and does not call
   assert.equal(requests.length, 0);
 });
 
-test('a Vinted listing without a category does not save a draft', async () => {
+test('a missing category reaches Vinted for validation', async () => {
   const { c, sent } = worker();
   const bare = { title: 'Test jacket', description: 'Private draft', price: 24, vinted_specifics: { condition: 'Good' } };
+  const attempted = rejectDraft(c, '/api/v2/item_upload/attributes');
   const result = await c.runVintedNative(message({ listing: bare }));
-  assert.equal(result.ok, false);
-  assert.equal(result.error_code, 'missing_fields');
-  assert.match(result.error, /category/);
+  assert.equal(result.marketplace_message, 'Please correct the selected fields.');
+  assert.equal(attempted.length, 1);
   assert.equal(sent('POST', '/api/v2/item_upload/drafts').length, 0);
-  assert.equal(sent('GET', '/api/v2/item_upload/catalogs').length, 0);
+
 });
 
 test('the app size is matched to Vinted\'s own size title', async () => {
@@ -407,12 +420,12 @@ test('a Vinted size left blank on its form uses the listing\'s General size', as
   assert.equal(saved.size_id, 3);
 });
 
-test('a size Vinted does not offer is refused instead of guessed', async () => {
+test('an unrecognized size is submitted for Vinted to validate', async () => {
   const { c, sent } = worker({ attributes: WOMENS_SIZES });
+  rejectDraft(c);
   for (const size of ['Elle', '0.5', '42']) {
     const result = await c.runVintedNative(message({ listing: { ...listing, vinted_specifics: { ...listing.vinted_specifics, size } } }));
-    assert.equal(result.ok, false, size);
-    assert.equal(result.error_code, 'missing_fields', size);
+    assert.equal(result.marketplace_message, 'Please correct the selected fields.', size);
   }
   assert.equal(sent('POST', '/api/v2/item_upload/drafts').length, 0);
 });
@@ -435,15 +448,14 @@ test('Vinted requests carry the Locale its sell page sends', async () => {
   for (const request of calls) assert.equal(request.headers?.Locale, 'en-US', request.pathname);
 });
 
-test('Good does not match Very good, and that refusal writes nothing', async () => {
+test('an unmatched condition is submitted without guessing another condition', async () => {
   const { c, sent } = worker({ attributes: { attributes: [
     { code: 'condition', configuration: { options: [{ id: 6, title: 'Very good' }] } },
   ] } });
+  rejectDraft(c);
   const result = await c.runVintedNative(message());
-  assert.equal(result.ok, false);
-  assert.match(result.error, /condition/);
-  assert.equal(sent('POST', '/api/v2/item_upload/drafts').length, 0);
-  assert.equal(sent('POST', '/api/v2/photos').length, 0);
+  assert.equal(result.marketplace_message, 'Please correct the selected fields.');
+  assert.equal(sent('POST', '/api/v2/photos').length, 1);
 });
 
 

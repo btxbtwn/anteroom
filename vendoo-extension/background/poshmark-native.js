@@ -399,19 +399,19 @@ function poshmarkSize(category, listing, { kids = false, leaf = category.id } = 
 
 // Smart Pricing's lowest accepted offer in whole dollars, or 0 for off. The
 // listing's form decides when it has the setting, off included; otherwise the
-// Poshmark specifics' minimum. A minimum at or above the price is off.
-function poshmarkSmartMinimum(listing, price) {
+// Poshmark specifics' minimum. Poshmark validates the selected amount.
+function poshmarkSmartMinimum(listing) {
   if (listing.poshmark_specifics?.availability === 'not_for_sale') return 0;
   const direct = listing.poshmark_specifics?.smartSell;
   if (direct && typeof direct.enabled === 'boolean') {
     const value = direct.enabled ? Math.round(Number(direct.minimumPrice)) : 0;
-    return value > 0 && value < price ? value : 0;
+    return value;
   }
   const smart = listing.form?.specifics?.smartSell;
   const minimum = smart && typeof smart === 'object'
     ? (smart.enabled ? Math.round(Number(smart.minPrice)) : 0)
     : Math.round(Number(listing.poshmark_specifics?.smartSellMinimumPrice || listing.poshmark_specifics?.smartSell?.minimumPrice || 0));
-  return minimum > 0 && minimum < price ? minimum : 0;
+  return minimum;
 }
 
 // What the saved post says about Smart Pricing, when it differs from what was
@@ -439,88 +439,55 @@ function poshmarkMultiItem(listing, sizes) {
 function poshmarkInventory(category, listing) {
   let rows = listing.poshmark_specifics?.inventoryRows;
   if (Object.hasOwn(listing.poshmark_specifics || {}, 'inventoryRows') && !Array.isArray(rows)) {
-    throw marketplaceMissing('poshmark', [{ field: 'poshmark_specifics.inventoryRows', needs: 'an inventory list of sizes and quantities' }]);
+    return [];
   }
   const system = poshmarkSizeSystem(listing);
   const single = listing.poshmark_specifics?.multiItem === false || listing.poshmark_specifics?.multiItem === 'false';
   if (!Array.isArray(rows)) {
-    const picked = poshmarkSize(category.category, listing, { kids: category.department.display === 'Kids', leaf: category.leaf });
-    if (!picked?.size) throw marketplaceMissing('poshmark', [{ field: 'size', needs: picked?.problem || 'a size Poshmark offers in this category' }]);
+    const picked = poshmarkSize(category?.category || {}, listing, { kids: category?.department?.display === 'Kids', leaf: category?.leaf });
+    const id = picked?.size?.id ?? String(listing.poshmark_specifics?.nativeSizeId ?? marketplaceCopy(listing, 'poshmark', 'size') ?? '').trim();
     const quantity = single ? 1 : Number(listing.quantity ?? 1);
-    return [{ size_id: picked.size.id, size_obj: picked.size, size_system: picked.size.size_system || 'us', quantity_available: quantity,
-      quantity_sold: 0, size_set_tags: picked.set.tags || [], seller_inventory_private_info: {} }];
+    return [{ size_id: id, ...(picked?.size ? { size_obj: picked.size } : {}), size_system: picked?.size?.size_system || system,
+      quantity_available: quantity, quantity_sold: 0, size_set_tags: picked?.set?.tags || [], seller_inventory_private_info: {} }];
   }
   if (single) rows = rows.slice(0, 1);
-  const missing = [];
-  if (!rows.length) missing.push({ field: 'poshmark_specifics.inventoryRows', needs: 'at least one size and quantity' });
-  const seen = new Set();
-  const inventory = rows.map((row, index) => {
-    const field = `poshmark_specifics.inventoryRows.${index}`;
+  const inventory = rows.map(row => {
     const custom = row?.sizeSetId === 'custom';
-    const set = category.category.size_sets?.find(set => set.id === row?.sizeSetId);
+    const set = category?.category?.size_sets?.find(set => set.id === row?.sizeSetId);
     const id = String(row?.sizeId ?? '').trim();
     const size = custom && id ? { id, display: id, display_with_size_set: id, size_system: system }
       : set?.size_systems?.[system]?.sizes?.find(size => size.id === id);
-    if (!size) missing.push({ field: `${field}.sizeId`, needs: 'a size from this category and group, or a nonblank custom size' });
-    if (seen.has(id)) missing.push({ field: `${field}.sizeId`, needs: 'a size that is not already in this inventory' });
-    seen.add(id);
     const quantity = single ? 1 : Number(row?.quantity);
     const sku = String(row?.sku ?? '').trim();
-    if (sku.length > 50) missing.push({ field: `${field}.sku`, needs: 'a SKU of 50 characters or fewer' });
-    if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: `${field}.quantity`, needs: 'a positive whole-number quantity' });
-    return { size_id: id, size_obj: size, size_system: system, quantity_available: quantity, quantity_sold: 0,
+    return { size_id: id, ...(size ? { size_obj: size } : {}), size_system: system, quantity_available: quantity, quantity_sold: 0,
       size_set_tags: custom ? [] : set?.tags || [], seller_inventory_private_info: { sku } };
   });
-  if (missing.length) throw marketplaceMissing('poshmark', missing);
   return inventory;
 }
 
 function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {}) {
-  const missing = [];
   const category = poshmarkCategory(catalog, listing);
-  if (!category) missing.push({ field: 'category', needs: 'a Poshmark category' });
-  const sizes = category ? poshmarkInventory(category, listing) : [];
+  const sizes = poshmarkInventory(category, listing);
   const condition = poshmarkCondition(listing);
-  if (!condition) missing.push({ field: 'condition', needs: 'a condition' });
   const price = poshmarkPrice(listing);
-  if (!(price >= 3)) missing.push({ field: 'price', needs: 'a price of $3 or more' });
-  if (listing.poshmark_specifics?.availability !== 'not_for_sale'
-      && listing.poshmark_specifics?.smartSell?.enabled === true && !poshmarkSmartMinimum(listing, price)) {
-    missing.push({ field: 'poshmark_specifics.smartSell.minimumPrice', needs: 'a Smart Pricing minimum above $0 and below the listing price' });
-  }
   const title = String(marketplaceCopy(listing, 'poshmark', 'title') || '').trim();
-  if (!title) missing.push({ field: 'title', needs: 'a title' });
-  if (title.length > 80) missing.push({ field: 'title', needs: 'a title of 80 characters or fewer' });
   const description = String(marketplaceCopy(listing, 'poshmark', 'description') || '').trim();
-  if (!description) missing.push({ field: 'description', needs: 'a description' });
-  if (description.length > 1500) missing.push({ field: 'description', needs: 'a description of 1500 characters or fewer' });
-  const quantity = sizes.reduce((total, row) => total + row.quantity_available, 0);
-  if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: 'quantity', needs: 'a positive whole-number quantity' });
   const originalPrice = poshmarkOriginalPrice(listing);
-  if (!Number.isSafeInteger(originalPrice) || originalPrice < 0) missing.push({ field: 'originalPrice', needs: 'an original price in whole dollars, or 0 if unknown' });
   const sku = String(listing.poshmark_specifics?.poshmarkSku ?? listing.sku ?? '').trim();
-  if (sku.length > 50) missing.push({ field: 'poshmark_specifics.poshmarkSku', needs: 'a SKU of 50 characters or fewer' });
-  const notes = String(listing.poshmark_specifics?.sellerNotes ?? '');
-  if (notes.length > 500) missing.push({ field: 'poshmark_specifics.sellerNotes', needs: 'other info of 500 characters or fewer' });
   const availability = listing.poshmark_specifics?.availability || 'available';
-  if (!['available', 'not_for_sale', 'coming_soon'].includes(availability)) {
-    missing.push({ field: 'poshmark_specifics.availability', needs: 'For Sale, Not For Sale, or Drops' });
-  }
   let makeAvailableAt = '';
   if (availability === 'coming_soon') {
-    const at = Date.parse(String(listing.poshmark_specifics?.makeAvailableAt || ''));
-    const now = Date.now();
-    if (!Number.isFinite(at) || at < now - 60 * 1000 || at > now + 7 * 24 * 60 * 60 * 1000) {
-      missing.push({ field: 'poshmark_specifics.makeAvailableAt', needs: 'a drop time within 7 days from today' });
-    } else makeAvailableAt = new Date(at).toISOString();
+    const raw = String(listing.poshmark_specifics?.makeAvailableAt || '');
+    const at = Date.parse(raw);
+    makeAvailableAt = Number.isFinite(at) ? new Date(at).toISOString() : raw;
   }
   const cost = Number(listing.cost);
   const hasCost = Object.hasOwn(listing, 'cost');
   const blankCost = listing.cost == null || listing.cost === '';
-  if (hasCost && !blankCost && (!Number.isFinite(cost) || cost < 0)) missing.push({ field: 'cost', needs: 'a cost of $0 or more, or a blank cost' });
-  if (missing.length) throw marketplaceMissing('poshmark', missing);
   const colors = poshmarkColors(listing, catalog);
-  const minimum = poshmarkSmartMinimum(listing, price);
+  const minimum = poshmarkSmartMinimum(listing);
+  const smartEnabled = minimum > 0 || listing.poshmark_specifics?.smartSell?.enabled === true;
+  const categoryIds = String(listing.direct_category_ids?.poshmark || '').split('/');
   // The item's cost (Anteroom's share of the box price), in dollars and cents as Poshmark's editor keeps it.
   const privateFields = {
     ...(sku || Object.hasOwn(listing.poshmark_specifics || {}, 'poshmarkSku') ? { sku } : {}),
@@ -530,7 +497,8 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   };
   return {
     title, description,
-    catalog: category.catalog,
+    catalog: category?.catalog || { department: categoryIds[0] || null, category: categoryIds[1] || null,
+      category_features: categoryIds[2] ? [categoryIds[2]] : [] },
     inventory: { status: availability, multi_item: poshmarkMultiItem(listing, sizes), size_quantity_revision: 0, size_quantities: sizes },
     price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
     original_price_amount: { val: String(originalPrice), currency_code: 'USD', currency_symbol: '$' },
@@ -538,8 +506,9 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
     brand,
     colors: [...new Set(colors)].slice(0, 2),
     style_tags: styleTags,
-    offer_auto_actions_v2_enabled: minimum > 0,
-    offer_auto_actions_min_price_amount: minimum > 0 ? { val: String(minimum), currency_code: 'USD' } : null,
+    offer_auto_actions_v2_enabled: smartEnabled,
+    offer_auto_actions_min_price_amount: smartEnabled
+      ? { val: String(minimum || listing.poshmark_specifics?.smartSell?.minimumPrice || 0), currency_code: 'USD' } : null,
     ...(makeAvailableAt ? { make_available_at: makeAvailableAt } : {}),
     ...(Object.keys(privateFields).length ? { seller_private_info: privateFields } : {}),
   };
@@ -556,8 +525,7 @@ async function poshmarkPreparedPost(listing, deadline) {
     const discounts = await poshmarkShippingDiscounts(deadline);
     const selected = discountId ? discounts.find(row => row.id === discountId)
       : discounts.find(row => Number(row.discount_amount?.val) === 0);
-    if (!selected) throw marketplaceMissing('poshmark', [{ field: 'poshmark_specifics.shippingDiscountId', needs: 'a current shipping discount from Poshmark' }]);
-    post.seller_shipping_discount = { id: selected.id };
+    post.seller_shipping_discount = { id: selected?.id ?? discountId };
   }
   return post;
 }
@@ -611,12 +579,6 @@ function poshmarkPostDifferences(actual, expected, photoCount) {
   return Object.entries(fields).filter(([, pair]) => JSON.stringify(pair[0]) !== JSON.stringify(pair[1])).map(([field]) => field);
 }
 
-function poshmarkPhotoCount(photos) {
-  if (!photos?.length || photos.length > 16) {
-    throw marketplaceMissing('poshmark', [{ field: 'photos', needs: 'between one and sixteen photos' }]);
-  }
-}
-
 // Edit the post that is already published. The same field save the editor uses,
 // without creating a post and without calling publish again.
 async function updatePoshmarkPost(msg, recovery = false) {
@@ -645,7 +607,6 @@ async function updatePoshmarkPost(msg, recovery = false) {
       const warning = [poshmarkSmartWarning(post, existing), poshmarkVideoPending(existing, post) ? 'Poshmark is still processing the video.' : ''].filter(Boolean).join(' ');
       return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id), ...(warning ? { warning } : {}) };
     }
-    poshmarkPhotoCount(p.photos);
     post.inventory.size_quantity_revision = Number(existing.inventory?.size_quantity_revision) || 0;
     client.csrf = await poshmarkCsrf(deadline);
     await poshmarkSendVideo(client, id, p, msg.job_id, post, key);
@@ -700,7 +661,6 @@ async function runPoshmarkApi(msg, recovery = false) {
       return marketplaceFailure(new Error(`Poshmark has post ${journal.poshmark_post_id} but it is not listed. Check your Poshmark closet before trying again.`), false);
     }
     if (!draftOnly && p.confirm !== true) return marketplaceFailure(marketplaceError('Confirm listing on Poshmark.'), true);
-    poshmarkPhotoCount(p.photos);
     const account = await poshmarkAccount();
     const post = await poshmarkPreparedPost(p.listing || {}, deadline);
     poshmarkVideoData(p);

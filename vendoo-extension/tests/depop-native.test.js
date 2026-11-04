@@ -70,7 +70,8 @@ test('Depop sends and verifies an exact SKU and quantity, and leaves a blank SKU
   const size = Object.keys(fields.variants)[0];
   assert.ok(c.depopDraftMismatch({ ...draft, variants: { [size]: 1 } }, item, fields).includes('quantity'));
   assert.ok(c.depopDraftMismatch({ ...draft, sku: 'old-sku' }, item, fields).includes('SKU'));
-  await assert.rejects(c.depopResolvedFields({ listing: { ...item, quantity: 0 }, deadline: Date.now() + 30000 }), /whole-number quantity/);
+  const zero = await c.depopResolvedFields({ listing: { ...item, quantity: 0 }, deadline: Date.now() + 30000 });
+  assert.deepEqual(Array.from(Object.values(zero.variants)), [0]);
 });
 
 test('Depop posts the parcel id the sell page uses for that title', async () => {
@@ -113,7 +114,8 @@ test('Depop worldwide shipping accepts free or paid shipping and verifies cleari
   assert.ok(c.depopDraftMismatch({ international_shipping_cost: '10.00' }, FULL, off).includes('worldwide shipping'));
   for (const price of ['', -1, 100, 'bad', 1.111]) {
     const item = { ...FULL, depop_specifics: { ...FULL.depop_specifics, worldwideShipping: { enabled: true, price } } };
-    await assert.rejects(c.depopResolvedFields({ listing: item, deadline: Date.now() + 30000 }), /worldwide shipping price/);
+    const fields = await c.depopResolvedFields({ listing: item, deadline: Date.now() + 30000 });
+    assert.equal(fields.international_shipping_cost, Number(price).toFixed(2));
   }
 });
 
@@ -1044,13 +1046,13 @@ test('a live Depop move to crop tops sends the new type with its own size set an
   assert.deepEqual(body.picture_ids, [3, 4]);
   assert.deepEqual(body.shipping_methods, [{ payer: 'buyer', parcel_size: 'small', shipping_provider_id: 'USPS', ship_from_address_id: 41 }]);
 
-  // A size id chosen for the tank-top set is not in the crop-top set: nothing is sent.
-  const stale = liveDepop({ product, attributes });
+  // A stale size must reach Depop; its own rejection is shown.
+  const stale = liveDepop({ product, attributes, put: () => reply(400, { message: 'Please select a valid size.' }) });
   const refused = await stale.update({ ...moved, depop_specifics: { ...moved.depop_specifics, nativeSizeId: 40 } });
   assert.equal(refused.ok, false);
   assert.equal(refused.safe_to_retry, true);
-  assert.match(refused.error, /a size Depop offers for this category/);
-  assert.deepEqual(stale.puts(), []);
+  assert.match(refused.marketplace_message, /^Please select a valid size\./);
+  assert.equal(stale.puts().length, 1);
 });
 
 test('a refused live Depop update keeps Depop\'s words and the field names sent, never an address or token', async () => {

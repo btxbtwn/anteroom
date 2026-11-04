@@ -16,8 +16,9 @@ import hashlib
 import html
 import re
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
+from math import isfinite
 import time
 from typing import Any
 
@@ -76,7 +77,6 @@ _ASPECT_NAMES = {
 _PRODUCT_IDS = {"upc": "upc", "ean": "ean", "isbn": "isbn"}
 TITLE_MAX = 80
 PRODUCT_DESCRIPTION_MAX = 4000
-LISTING_DESCRIPTION_MAX = 500000
 MAX_PHOTOS = 24
 MAX_ASPECT_VALUES = 30
 # Studio's conditions as eBay's apparel grades, which is where eBay keeps the
@@ -110,22 +110,6 @@ def ebay_condition(listing: dict) -> str:
         if re.search(pattern, text.lower()):
             return code
     return "USED_EXCELLENT"
-
-
-async def _check_condition(client: EbayClient, category_id: str, condition: str) -> None:
-    """Refuse a condition this category does not take, when eBay says which ones it does.
-
-    Without that answer the listing goes ahead and eBay's own refusal explains it.
-    """
-    try:
-        policy = await marketplace_schemas.ebay_conditions(client, category_id)
-    except EbayFailure:
-        return
-    allowed = {item["id"]: item["label"] for item in policy["conditions"]}
-    if allowed and CONDITION_IDS[condition] not in allowed:
-        names = ", ".join(name for name in allowed.values() if name)
-        message = f"eBay does not take this condition in this category. Choose one of: {names}."
-        raise ListingProblem(message, "missing_fields", fields=[{"field": "condition", "message": message}])
 
 
 def item_key(conversation_id: str) -> str:
@@ -287,23 +271,21 @@ def duration_label(value: str) -> str:
 
 
 @overload
-def _format_amount(details: dict, key: str, label: str, *, required: Literal[True]) -> str: ...
+def _format_amount(details: dict, key: str, *, required: Literal[True]) -> str: ...
 
 
 @overload
-def _format_amount(details: dict, key: str, label: str, *, required: Literal[False] = False) -> str | None: ...
+def _format_amount(details: dict, key: str, *, required: Literal[False] = False) -> str | None: ...
 
 
-def _format_amount(details: dict, key: str, label: str, *, required: bool = False) -> str | None:
+def _format_amount(details: dict, key: str, *, required: bool = False) -> str | None:
     text = str(details.get(key) or "").replace("$", "").replace(",", "").strip()
     if not text:
-        if required:
-            raise missing(f"Enter the eBay {label}.", f"ebay_specifics.{key}")
-        return None
+        return "" if required else None
     try:
         return dollars(money_cents(text))
-    except ValueError as exc:
-        raise missing(f"Enter the eBay {label} as a positive amount.", f"ebay_specifics.{key}") from exc
+    except (ValueError, ArithmeticError):
+        return text
 
 
 def listing_format(snapshot: dict) -> dict:
@@ -320,38 +302,18 @@ def listing_format(snapshot: dict) -> dict:
     raw = str(details.get("listingFormat") or "").strip()
     kind = _ebay_listing_type(raw) if raw else FIXED_PRICE
     if kind is None:
-        raise missing("Choose Fixed price or Auction for eBay.", "ebay_specifics.listingFormat")
+        kind = raw
     chosen = str(details.get("listingDuration") or "").strip()
     duration = ebay_duration(chosen) if chosen else ("GTC" if kind == FIXED_PRICE else DEFAULT_AUCTION_DURATION)
     if duration is None:
-        raise missing("Choose an eBay listing duration.", "ebay_specifics.listingDuration")
-    if kind == FIXED_PRICE and duration != "GTC":
-        raise missing("eBay fixed-price listings run Good 'Til Cancelled.", "ebay_specifics.listingDuration")
-    if kind == AUCTION and duration == "GTC":
-        raise missing("Choose how many days the eBay auction runs.", "ebay_specifics.listingDuration")
+        duration = chosen
     out: dict = {"format": kind, "duration": duration}
     if kind == AUCTION:
-        start = _format_amount(details, "auctionStartPrice", "starting bid", required=True)
-        reserve = _format_amount(details, "auctionReservePrice", "reserve price")
-        buy_now = _format_amount(details, "auctionBuyItNow", "Buy It Now price")
-        if reserve and Decimal(reserve) <= Decimal(start):
-            raise missing("The eBay reserve price must be higher than the starting bid.", "ebay_specifics.auctionReservePrice")
-        if buy_now and Decimal(buy_now) <= Decimal(start):
-            raise missing("The eBay Buy It Now price must be higher than the starting bid.", "ebay_specifics.auctionBuyItNow")
+        start = _format_amount(details, "auctionStartPrice", required=True)
+        reserve = _format_amount(details, "auctionReservePrice")
+        buy_now = _format_amount(details, "auctionBuyItNow")
         out.update(start=start, reserve=reserve, buy_it_now=buy_now)
     return out
-
-
-async def _check_format(client: EbayClient, category_id: str, chosen: dict) -> None:
-    """Refuse a format or duration eBay does not offer in this category, before anything is written."""
-    if chosen["format"] != AUCTION:
-        return
-    allowed = (await marketplace_schemas.ebay_listing_types(client, category_id)).get(AUCTION) or []
-    if not allowed:
-        raise missing("eBay does not offer auctions in this category. Choose Fixed price.", "ebay_specifics.listingFormat")
-    if chosen["duration"] not in allowed:
-        lengths = ", ".join(duration_label(value) for value in allowed)
-        raise missing(f"eBay auctions in this category run {lengths}.", "ebay_specifics.listingDuration")
 
 
 def _short_description(text: str) -> str:
@@ -390,8 +352,7 @@ def card_condition(listing: dict, category_id: str) -> tuple[str, list[dict]] | 
     ungraded = _CARD_CONDITIONS.get(said.get("cardcondition", "").lower())
     if ungraded:
         return "USED_VERY_GOOD", [{"name": "40001", "values": [ungraded]}]
-    raise missing("eBay needs the card's condition (Near Mint or Better, Excellent, Very Good or Poor), "
-                  "or its professional grader and grade.", "ebay_specifics.Card Condition")
+    return ebay_condition(listing), []
 
 
 def ebay_category_id(listing: dict) -> str:
@@ -399,8 +360,6 @@ def ebay_category_id(listing: dict) -> str:
     from vendoo_studio.services.direct_categories import direct_category_id
 
     category = direct_category_id(listing, "ebay")
-    if not category:
-        raise missing("Choose an eBay category before listing.", "direct_category_ids.ebay")
     return category
 
 
@@ -414,10 +373,8 @@ def package_ounces(listing: dict, form: dict) -> str:
     ounces = total(listing)
     if ounces <= 0:
         ounces = total((form.get("overrides") or {}).get("weight") or {})
-    if ounces <= 0:
-        raise missing("Enter the packed weight before listing on eBay.", "weight_oz")
-    if ounces > 2400:
-        raise missing("Enter a packaged weight of at most 2400 ounces.", "weight_oz")
+    if not isfinite(ounces):
+        return "0"
     return str(int(ounces)) if ounces == int(ounces) else f"{ounces:.2f}".rstrip("0").rstrip(".")
 
 
@@ -585,18 +542,14 @@ async def listing_profiles(client: EbayClient | None = None) -> dict[str, list[d
                           marketplace_message=exc.marketplace_message) from exc
 
 
-def _pick(options: list[dict], chosen: str | None, kind: str, setting: str) -> str:
-    """The seller's stored choice, else the account's only one. Several and no choice: ask."""
+def _pick(options: list[dict], chosen: str | None) -> str:
+    """The seller's choice or the only account choice; eBay checks missing or stale IDs."""
     ids = [option["id"] for option in options]
-    if chosen is not None and chosen in ids:
+    if chosen:
         return chosen
     if len(ids) == 1:
         return ids[0]
-    if not ids:
-        raise missing(f"Add an eBay {kind} in eBay before listing.", f"settings.ebay.{setting}")
-    plural = kind.replace("policy", "policies").replace("location", "locations")
-    raise missing(f"This eBay account has {len(ids)} {plural}. Choose the one new listings use in Settings → Connections.",
-                  f"settings.ebay.{setting}")
+    return ""
 
 
 LISTING_CHOICE_KEYS = {"fulfillmentPolicyId": "fulfillment_policy_id", "paymentPolicyId": "payment_policy_id",
@@ -616,15 +569,14 @@ async def listing_choices(client: EbayClient, snapshot: dict | None = None) -> d
     defaults = {**get_ebay_listing_defaults(),
                 **{LISTING_CHOICE_KEYS[key]: value for key, value in own_listing_choices(snapshot).items()}}
     chosen = {
-        "fulfillmentPolicyId": _pick(profiles["fulfillment"], defaults.get("fulfillment_policy_id"), "shipping policy", "fulfillment_policy_id"),
-        "paymentPolicyId": _pick(profiles["payment"], defaults.get("payment_policy_id"), "payment policy", "payment_policy_id"),
-        "returnPolicyId": _pick(profiles["return"], defaults.get("return_policy_id"), "return policy", "return_policy_id"),
+        "fulfillmentPolicyId": _pick(profiles["fulfillment"], defaults.get("fulfillment_policy_id")),
+        "paymentPolicyId": _pick(profiles["payment"], defaults.get("payment_policy_id")),
+        "returnPolicyId": _pick(profiles["return"], defaults.get("return_policy_id")),
     }
     locations = profiles["locations"]
-    if not locations:
+    if not locations and _ship_from_postal_code():
         locations = [await _create_ship_from_location(client)]
-    chosen["merchantLocationKey"] = _pick(locations, defaults.get("merchant_location_key"),
-                                          "inventory location", "merchant_location_key")
+    chosen["merchantLocationKey"] = _pick(locations, defaults.get("merchant_location_key"))
     return chosen
 
 
@@ -714,14 +666,8 @@ async def _complete_aspects(client: EbayClient, category_id: str, aspects: dict[
     or invalid is reported at once, under eBay's name, as fields the seller (or
     chat) can fill.
     """
-    try:
-        schema = await marketplace_schemas.ebay_aspects(client, category_id)
-    except EbayFailure as exc:
-        if exc.code == "rejected" and exc.status in {400, 404}:
-            raise missing("eBay does not list items in that category. Choose a current, most specific eBay category.",
-                          "direct_category_ids.ebay") from exc
-        raise
-    return _match_aspects(schema, aspects)
+    schema = await marketplace_schemas.ebay_aspects(client, category_id)
+    return _match_aspects(schema, aspects)[0]
 
 
 def apply_custom_aspect(aspects: dict, fields: dict) -> dict:
@@ -732,8 +678,8 @@ def apply_custom_aspect(aspects: dict, fields: dict) -> dict:
     return aspects
 
 
-def _match_aspects(schema: list[dict], aspects: dict[str, list[str]]) -> dict[str, list[str]]:
-    """Match the listing's aspects to one category's schema. Required misses are refused together."""
+def _match_aspects(schema: list[dict], aspects: dict[str, list[str]]) -> tuple[dict[str, list[str]], list[dict]]:
+    """Prepare aspect names and advisory issues; eBay decides whether to accept values."""
     given = {_aspect_key(name): values for name, values in aspects.items()}
     completed: dict[str, list[str]] = {}
     problems: list[tuple[str, str]] = []
@@ -746,14 +692,11 @@ def _match_aspects(schema: list[dict], aspects: dict[str, list[str]]) -> dict[st
         constrained = {value["label"] for value in field["values"] if value.get("constraints")}
         if any(value in constrained and value not in allowed for value in values):
             problems.append((name, f"Choose {name} for the selected parent aspects."))
-            continue
         if field["mode"] == "selection" and values:
             matched = [_choice(value, allowed) for value in values]
             if not all(matched) and field["required"]:
                 problems.append((name, f"Choose one of eBay's values for {name}."))
-                continue
-            # eBay would refuse the whole listing over an optional value it does not offer.
-            values = [value for value in matched if value]
+            values = [matched_value or value for matched_value, value in zip(matched, values, strict=True)]
         elif allowed and values:
             # Free text still reads best in eBay's own spelling, when one is the same value.
             near = _aspect_key(name) not in _IDENTITY_ASPECTS
@@ -762,8 +705,6 @@ def _match_aspects(schema: list[dict], aspects: dict[str, list[str]]) -> dict[st
         if limit and any(len(value) > limit for value in values):
             if field["required"]:
                 problems.append((name, f"eBay takes at most {limit} characters for {name}."))
-                continue
-            values = [value for value in values if len(value) <= limit]
         if field["required"] and not values:
             unknown = next((choice for choice in allowed if choice.casefold() == "does not apply"), None)
             if unknown:
@@ -773,11 +714,7 @@ def _match_aspects(schema: list[dict], aspects: dict[str, list[str]]) -> dict[st
                 continue
         if values:
             completed[name] = values
-    if problems:
-        raise ListingProblem(" ".join(message for _, message in problems), "missing_fields",
-                             fields=[{"field": f"ebay_specifics.{name}", "message": message}
-                                     for name, message in problems])
-    return completed
+    return completed, [{"field": f"ebay_specifics.{name}", "message": message} for name, message in problems]
 
 
 def _loose(text: str) -> str:
@@ -982,82 +919,49 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
 
     title = ebay_title(snapshot)
     description = marketplace_text(snapshot, "ebay", "description").strip()
-    if not title or not description:
-        raise missing("Add an eBay title and description before listing.", *[name for name, value in (("title", title), ("description", description)) if not value])
-    if len(description_html(description)) > LISTING_DESCRIPTION_MAX:
-        raise missing("eBay descriptions are at most 500,000 characters. Shorten it.", "description")
     from vendoo_studio.services import ebay_variations
     from vendoo_studio.services.seller_overrides import price_for
-    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_enabled
 
     varied = ebay_variations.has_variations(snapshot)
     try:
-        quantity = int(str(snapshot.get("quantity") or 1).strip())
+        quantity = int(str(snapshot.get("quantity", 1)).strip())
     except ValueError:
         quantity = 0
     if varied:
         # Each variation has its own stock; the listing's quantity is their sum.
         quantity = ebay_variations.total_quantity(snapshot) or 0
-    elif not 1 <= quantity <= 10000:
-        raise missing("Enter an eBay quantity from 1 to 10000.", "quantity")
     chosen = listing_format(snapshot)
-    if varied:
-        # eBay: a listing with variations is fixed price, Good 'Til Cancelled, without Best Offer.
-        if chosen["format"] != FIXED_PRICE:
-            raise missing("An eBay listing with variations is fixed price. Choose Fixed price, or remove the variations.",
-                          "ebay_specifics.listingFormat")
-        offer = (snapshot.get("ebay_specifics") or {}).get("bestOffer")
-        if isinstance(offer, dict) and "enabled" in offer and best_offer_enabled(offer):
-            raise missing("eBay does not take offers on a listing with variations. Turn off Allow offers.",
-                          "ebay_specifics.bestOffer.enabled")
-        if (snapshot.get("ebay_specifics") or {}).get("videoId"):
-            raise missing("eBay does not take a video on a listing with variations. Clear the video, or remove the variations.",
-                          VIDEO_FIELD)
     if chosen["format"] == AUCTION:
-        if quantity != 1:
-            raise missing("An eBay auction sells one item. Set quantity to 1.", "quantity")
-        offer = (snapshot.get("ebay_specifics") or {}).get("bestOffer")
-        if isinstance(offer, dict) and offer and best_offer_enabled(offer):
-            raise missing("Turn off eBay offers for an auction. Anteroom sends offers only on fixed-price listings.",
-                          "ebay_specifics.bestOffer.enabled")
         # The price on an auction is its optional Buy It Now.
         price = chosen["buy_it_now"] or ""
     else:
         try:
             price = dollars(money_cents(str(price_for(snapshot, "ebay"))))
-        except (ValueError, ArithmeticError) as exc:
-            raise missing("Set a positive eBay price before listing.", "price") from exc
+        except (ValueError, ArithmeticError):
+            value = price_for(snapshot, "ebay")
+            price = str(value) if value is not None else ""
     category_id = ebay_category_id(snapshot)
     condition, descriptors = card_condition(snapshot, category_id) or (ebay_condition(snapshot), [])
     condition_note = condition_description(snapshot, form)
-    if len(condition_note) > 1000:
-        raise missing("eBay condition descriptions are at most 1,000 characters.", "ebay_specifics.conditionDescription")
     fields = {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
               "condition": condition, "condition_descriptors": descriptors, "store_categories": store_category_names(snapshot),
-              "condition_description": condition_note, "format": chosen, **listing_options(snapshot, category_id)}
+              "condition_description": condition_note, "format": chosen, **listing_options(snapshot)}
     if varied:
         fields["variations"] = ebay_variations.plan(snapshot, price)
     return fields
 
 
-SUBTITLE_MAX = 55
-
-
-def listing_options(snapshot: dict, category_id: str) -> dict:
+def listing_options(snapshot: dict) -> dict:
     """The rest of eBay's listing form: subtitle, second category, start time, lot, private listing, irregular package."""
     details = snapshot.get("ebay_specifics")
     if not isinstance(details, dict):
         details = {}
     options: dict = {}
     subtitle = str(details.get("subtitle") or "").strip()
-    if len(subtitle) > SUBTITLE_MAX:
-        raise missing(f"eBay subtitles are at most {SUBTITLE_MAX} characters.", "ebay_specifics.subtitle")
     if subtitle:
         options["subtitle"] = subtitle
     second = str(details.get("secondaryCategoryId") or "").strip()
     if second:
-        if not re.fullmatch(r"\d{1,12}", second) or second == category_id:
-            raise missing("Choose a second eBay category different from the first, or clear it.", "ebay_specifics.secondaryCategoryId")
         options["secondary_category_id"] = second
     schedule = details.get("schedule")
     if not isinstance(schedule, dict):
@@ -1065,19 +969,14 @@ def listing_options(snapshot: dict, category_id: str) -> dict:
     if schedule.get("enabled") in (True, "true"):
         try:
             start = datetime.fromisoformat(str(schedule.get("startAt") or "").strip())
-        except ValueError as exc:
-            raise missing("Choose the date and time the eBay listing starts.", "ebay_specifics.schedule.startAt") from exc
-        start = (start if start.tzinfo else start.astimezone()).astimezone(UTC)
-        now = datetime.now(UTC)
-        # eBay schedules a listing up to three weeks ahead.
-        if not now < start <= now + timedelta(days=21):
-            raise missing("Choose an eBay start time within the next three weeks.", "ebay_specifics.schedule.startAt")
-        options["start_date"] = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        except ValueError:
+            options["start_date"] = str(schedule.get("startAt") or "")
+        else:
+            start = (start if start.tzinfo else start.astimezone()).astimezone(UTC)
+            options["start_date"] = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     lot = str(details.get("lotSize") or "").strip()
     if lot:
-        if not lot.isdigit() or not 2 <= int(lot) <= 100000:
-            raise missing("Enter how many items are in the lot, 2 or more, or clear it.", "ebay_specifics.lotSize")
-        options["lot_size"] = int(lot)
+        options["lot_size"] = int(lot) if lot.isdigit() else lot
     if details.get("privateListing") in (True, "true"):
         options["private"] = True
     if details.get("irregularPackage") in (True, "true"):
@@ -1088,10 +987,6 @@ def listing_options(snapshot: dict, category_id: str) -> dict:
     custom_name = str(details.get("customAspectName") or "").strip()
     custom_value = str(details.get("customAspectValue") or "").strip()
     if custom_name or custom_value:
-        if not custom_name:
-            raise missing("Name the custom item specific.", "ebay_specifics.customAspectName")
-        if not custom_value:
-            raise missing("Enter the custom item specific.", "ebay_specifics.customAspectValue")
         options["custom_aspect"] = {"name": custom_name, "value": custom_value}
     return options
 
@@ -1106,16 +1001,12 @@ def _charity(details: dict) -> dict | None:
     percent = str(details.get("donationPercent") or "").strip().rstrip("%")
     if not charity_id and not percent:
         return None
-    if not re.fullmatch(r"\d{1,12}", charity_id):
-        raise missing("Choose a charity.", "ebay_specifics.charityId")
-    if percent not in CHARITY_PERCENTS:
-        raise missing("Choose the percentage of the sale to donate, from 10% to 100%.", "ebay_specifics.donationPercent")
-    return {"charityId": charity_id, "donationPercentage": f"{int(percent)}.0"}
+    return {"charityId": charity_id, "donationPercentage": f"{int(percent)}.0" if percent.isdigit() else percent}
 
 
 @requirement("ebay")
 def requirements(snapshot: dict, context: Context) -> list[dict]:
-    """What eBay would refuse, read from the listing alone. Aspects, policies and conditions are checked live at List."""
+    """Advisory issues from the listing and cached schema; these never gate List."""
     form = snapshot.get("form")
     if not isinstance(form, dict):
         form = vendoo_form(snapshot, "ebay")
@@ -1134,6 +1025,8 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
         found.append(gap("title", f"eBay titles are at most {TITLE_MAX} characters, so eBay gets: {ebay_title(snapshot)}", blocking=False))
     from vendoo_studio.services.direct_categories import direct_category_id
 
+    if not direct_category_id(snapshot, "ebay"):
+        found.append(gap("direct_category_ids.ebay", "Choose an eBay category."))
     if seeded_leaf(context.db, "ebay", direct_category_id(snapshot, "ebay")) is False:
         found.append(gap("direct_category_ids.ebay", "That eBay category has subcategories. Choose the most specific one."))
     found.extend(_cached_aspect_gaps(snapshot, form))
@@ -1141,7 +1034,7 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
 
 
 def _cached_aspect_gaps(snapshot: dict, form: dict) -> list[dict]:
-    """Required eBay aspects from the cached live schema. No cache means List still checks them."""
+    """Advisory eBay aspect issues from the cached schema."""
     from vendoo_studio.services.category_fields import load_rows
     from vendoo_studio.services.direct_categories import direct_category_id
     from vendoo_studio.services.marketplace_schemas import EBAY_ASPECTS
@@ -1164,11 +1057,8 @@ def _cached_aspect_gaps(snapshot: dict, form: dict) -> list[dict]:
             aspects = ebay_variations.with_first_values(aspects, ebay_variations.plan(snapshot, "1.00"))
         except ListingProblem:
             pass
-    try:
-        _match_aspects(rows, aspects)
-    except ListingProblem as exc:
-        return [gap(item["field"], item["message"]) for item in exc.fields or []]
-    return []
+    _values, problems = _match_aspects(rows, aspects)
+    return [gap(item["field"], item["message"]) for item in problems]
 
 
 async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict, terms: dict | None = None,
@@ -1304,18 +1194,11 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
     try:
         if not active():
             raise ValueError("The eBay update stopped. Check its result before trying again.")
-        if not 1 <= len(photos) <= MAX_PHOTOS:
-            raise missing(f"Choose between one and {MAX_PHOTOS} eBay photos.", "photos")
         client = await EbayClient.connect()
         form = snapshot.get("form")
         if not isinstance(form, dict):
             form = vendoo_form(snapshot, "ebay")
         fields = _listing_fields(snapshot, form)
-        from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
-
-        problem = best_offer_error(snapshot)
-        if problem:
-            raise ValueError(problem)
         listing_id = str(binding.get("listing_id") or binding.get("ebay_listing_id") or "")
         offer_id = str(binding.get("ebay_offer_id") or "")
         if not re.fullmatch(r"\d{6,20}", listing_id):
@@ -1331,7 +1214,6 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
             fields = {**fields, "variations": chosen}
             aspects = apply_custom_aspect(await _complete_aspects(
                 client, fields["category_id"], ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen)), fields)
-            await _check_condition(client, fields["category_id"], fields["condition"])
             return await ebay_variations.update_live(client, snapshot, form, fields, photos, binding, record, active, aspects)
         if not offer_id:
             video_ids = await _video_ids(client, snapshot, binding, record, active)
@@ -1345,7 +1227,6 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         if offer.get("format", FIXED_PRICE) != fields["format"]["format"]:
             raise ValueError("eBay cannot change a live listing between fixed price and auction. End it on eBay and list it again.")
         aspects = apply_custom_aspect(await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form)), fields)
-        await _check_condition(client, fields["category_id"], fields["condition"])
         sku = str(offer.get("sku") or binding.get("ebay_sku") or "")
         if not sku:
             raise ValueError("eBay did not return this listing's SKU. Check eBay before updating it.")
@@ -1387,18 +1268,11 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             raise ValueError("Confirm listing on eBay.")
         if not active():
             raise ValueError("The eBay listing stopped before it started.")
-        if not 1 <= len(photos) <= MAX_PHOTOS:
-            raise missing(f"Choose between one and {MAX_PHOTOS} eBay photos.", "photos")
         client = await EbayClient.connect()
         form = snapshot.get("form")
         if not isinstance(form, dict):
             form = vendoo_form(snapshot, "ebay")
         fields = _listing_fields(snapshot, form)
-        from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
-
-        problem = best_offer_error(snapshot)
-        if problem:
-            raise ValueError(problem)
         if fields.get("variations"):
             from vendoo_studio.services import ebay_variations
 
@@ -1407,7 +1281,6 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             fields = {**fields, "variations": chosen}
             aspects = apply_custom_aspect(await _complete_aspects(
                 client, fields["category_id"], ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen)), fields)
-            await _check_condition(client, fields["category_id"], fields["condition"])
             in_flight: dict = {"write": None}
             try:
                 return await ebay_variations.execute(action, client, snapshot, form, fields, photos, binding, record, active,
@@ -1415,8 +1288,6 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             finally:
                 pending = in_flight["write"]
         aspects = apply_custom_aspect(await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form)), fields)
-        await _check_condition(client, fields["category_id"], fields["condition"])
-        await _check_format(client, fields["category_id"], fields["format"])
         choices = await listing_choices(client, snapshot)
         sku = ebay_sku(snapshot, binding, conversation_id)
         if not binding.get("ebay_inventory_written") and sku != item_key(conversation_id):
@@ -1543,7 +1414,7 @@ def offer_differences(offer: dict, sku: str, fields: dict) -> list[str]:
         checks["starting bid"] = _same_amount(pricing.get("auctionStartPrice"), chosen["start"])
         checks["reserve price"] = _same_amount(pricing.get("auctionReservePrice"), chosen.get("reserve"))
     else:
-        checks["quantity"] = str(offer.get("availableQuantity") or "") == str(fields["quantity"])
+        checks["quantity"] = str(offer.get("availableQuantity", "")) == str(fields["quantity"])
     return [name for name, same in checks.items() if not same]
 
 

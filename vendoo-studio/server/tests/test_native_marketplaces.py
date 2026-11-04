@@ -167,16 +167,48 @@ class NativeMarketplacesTest(unittest.TestCase):
 
     # --- listing -----------------------------------------------------------------
 
-    def test_list_without_a_category_never_starts_a_marketplace_job(self):
+    def test_local_field_gaps_do_not_hide_a_marketplace_rejection(self):
+        message = "Please select a valid size."
+        fields = [{"field": "mercari_specifics.size", "message": message}]
+        self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error": "Mercari rejected the listing.",
+                                   "error_code": "missing_fields", "marketplace_message": message, "fields": fields}
+        with patch.object(native.direct_preflight, "gaps", return_value=[
+                {"field": "mercari_specifics.size", "message": "Size needs review.", "blocking": True}]):
+            response = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["running"])
+        self.run_jobs()
+        self.assertEqual(self.actions(), ["save_draft"])
+        record = self.record("mercari")
+        self.assertEqual(record["marketplace_message"], message)
+        self.assertEqual(record["error_fields"], fields)
+
+        # A seller correction remains saveable after a rejection and the next
+        # confirmed attempt uses that new revision, rather than a stale form.
+        corrected = {**LISTING, "size": "L"}
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, corrected, "user_form")
+
+        async def accepted(_job, _kind, payload, **_kwargs):
+            self.assertEqual(payload["listing"]["size"], "L")
+            if payload["action"] == "save_draft":
+                return {"ok": True, "state": "draft", "draft_url": URLS["mercari"]}
+            return self.published("mercari")
+
+        self.bridge.side_effect = accepted
+        result = self.list("mercari")
+        self.assertEqual(result["state"], "published", result)
+        self.assertFalse(result.get("marketplace_message"))
+
+    def test_list_without_a_category_starts_a_marketplace_attempt(self):
         listing = {**LISTING, "marketplace_category_ids": {}, "marketplace_category_objects": {},
                    "marketplace_categories": {}, "direct_category_ids": {}}
         revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "user_form")
         self.bridge.reset_mock()
         response = self.client.post(f"{self.base}/mercari/list", json={"revision_id": revision.id, "confirm": True})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["error_code"], "missing_fields")
-        self.assertEqual(self.launched, [])
-        self.assertNotIn("list", self.actions())
+        self.assertTrue(response.json()["running"])
+        self.run_jobs()
+        self.assertIn("save_draft", self.actions())
 
     def test_save_draft_runs_one_private_step_and_never_publishes_on_check(self):
         for platform in URLS:
@@ -526,8 +558,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         mens = {**LISTING, "condition": "Pre-Owned - Good", "category_path": "Clothing, Shoes & Accessories > Men > Coats & Jackets"}
         mens.pop("marketplace_category_ids")
         rev = listing_persistence.save_revision(self.db, self.conv.id, mens, "model")
-        with self.assertRaises(native.NativeMarketplaceError):
-            native.save_local_sellwild_draft(self.conv.id, native.ListRequest(revision_id=rev.id, sellwild_condition_id=2), self.db)
+        native.save_local_sellwild_draft(self.conv.id, native.ListRequest(revision_id=rev.id, sellwild_condition_id=2), self.db)
         native.save_local_sellwild_draft(self.conv.id, native.ListRequest(
             revision_id=rev.id, sellwild_category_id=272, sellwild_condition_id=2), self.db)
         record = self.record("sellwild")
@@ -540,15 +571,16 @@ class NativeMarketplacesTest(unittest.TestCase):
         payload = native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, boys, [], "job")["sellwild"]
         self.assertEqual((payload["category_id"], payload["condition_id"]), (272, 2))
 
-    def test_sellwild_needs_a_category_and_condition(self):
+    def test_sellwild_submits_unknown_categories_and_conditions(self):
         for extra in ({"sellwild_category_id": 183, "sellwild_condition_id": 2}, {"sellwild_category_id": 272, "sellwild_condition_id": 9}):
             response = self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **extra})
             self.assertEqual(response.status_code, 200, response.text)
             body = response.json()
-            self.assertFalse(body["running"])
-            self.assertEqual(body["error_code"], "missing_fields")
-        self.bridge.assert_not_called()
-        self.assertFalse(self.launched)
+            self.assertTrue(body["running"])
+            self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error_code": "rejected", "error": "Rejected", "marketplace_message": "Invalid category or condition."}
+            self.run_jobs()
+            self.assertEqual(self.record("sellwild")["marketplace_message"], "Invalid category or condition.")
+        self.assertEqual(self.bridge.await_count, 2)
 
     def test_sellwild_match_prefers_marketplace_categories_and_ignores_sleeve_words(self):
         tee = {"title": "Graphic tee", "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts",

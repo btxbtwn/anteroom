@@ -6,11 +6,7 @@
 // PUT /api/listings/{id}/edit. Only a seller-confirmed Publish or Update runs
 // these, once; a lost reply is never retried.
 const SELLWILD = 'https://sellwild.com';
-const SELLWILD_MAX_PHOTOS = 20;
 const SELLWILD_PHOTO_EDGE = 1280;
-const SELLWILD_MAX_PRICE = 999999;
-// Sellwild's sell page flags any side of 108 inches or more.
-const SELLWILD_MAX_SIDE_IN = 108;
 // Vehicle leaves take a VIN and mileage instead of a package (Sellwild's client, 2026-10-25).
 const SELLWILD_VEHICLES = new Set([43, 95, 157, 158, 159, 160, 161, 162, 163, 164, 291, 292]);
 
@@ -107,23 +103,6 @@ function sellwildCreateBody(listing, choice, address, photoCount) {
     photos: photoCount };
 }
 
-// What Sellwild would refuse in this listing, before anything is sent.
-function sellwildMissing(listing, choice, box) {
-  const vehicle = SELLWILD_VEHICLES.has(Number(choice.category_id));
-  const specifics = listing.sellwild_specifics || {};
-  const title = String(marketplaceCopy(listing, 'sellwild', 'title') || '').trim();
-  return [(title.length < 3 || title.length > 255) && { field: 'title', needs: 'a title of 3 to 255 characters' },
-    !(Number(listing.price) >= 5 && Number(listing.price) <= SELLWILD_MAX_PRICE) && { field: 'price', needs: 'a price from $5 to $999,999' },
-    !(Number.isInteger(Number(choice.category_id)) && Number(choice.category_id) > 0) && { field: 'sellwild_specifics.nativeCategoryId', needs: 'a Sellwild category' },
-    !(Number.isInteger(Number(choice.condition_id)) && Number(choice.condition_id) > 0) && { field: 'sellwild_specifics.nativeConditionId', needs: 'a Sellwild condition' },
-    vehicle && !String(specifics.vin || '').trim() && { field: 'sellwild_specifics.vin', needs: "the vehicle's VIN" },
-    vehicle && !String(specifics.mileage || '').trim() && { field: 'sellwild_specifics.mileage', needs: "the vehicle's mileage" },
-    !vehicle && !choice.fixed_package && !sellwildWeightLb(listing) && { field: 'weight', needs: 'a package weight' },
-    !vehicle && !box && { field: 'dimensions', needs: 'package dimensions' },
-    !vehicle && box && Math.max(box.depth, box.width, box.height) >= SELLWILD_MAX_SIDE_IN
-      && { field: 'dimensions', needs: `a package under ${SELLWILD_MAX_SIDE_IN} inches on every side` }].filter(Boolean);
-}
-
 async function runSellwildNative(msg, recovery = false) {
   const p = { ...msg.payload, deadline: Date.now() + 150000 };
   const key = `native_operation_${p.operation_id}`;
@@ -148,16 +127,11 @@ async function runSellwildNative(msg, recovery = false) {
     const listing = p.listing || {};
     const photos = p.photos || [];
     const choice = p.sellwild || {};
-    const box = p.sellwild?.package_dimensions || sellwildBox(listing);
-    const missing = [...sellwildMissing(listing, choice, box),
-      ...(!photos.length || photos.length > SELLWILD_MAX_PHOTOS ? [{ field: 'photos', needs: `between 1 and ${SELLWILD_MAX_PHOTOS} photos` }] : [])];
-    if (missing.length) throw marketplaceMissing('sellwild', missing);
 
     const session = await sellwildFetch('/api/auth/session', { deadline: p.deadline, step: 'session' });
     if (!session?.user) throw marketplaceError('Sign in to Sellwild: reconnect it in Anteroom. Publishing will not open a tab.', { code: 'signed_out' });
     const addresses = await sellwildFetch('/api/addresses', { deadline: p.deadline, step: 'addresses' });
     const address = addresses?.success ? sellwildAddress(addresses.addresses) : null;
-    if (!address) throw marketplaceMissing('sellwild', [{ field: 'address', needs: 'your ship-from address (street, city, state and ZIP) on Sellwild' }]);
     const blobs = [];
     for (const photo of photos) blobs.push(await sellwildPhotoBlob(await nativePhoto(msg.job_id, photo, p.deadline)));
 
@@ -267,8 +241,6 @@ async function updateSellwildListing(p, recovery) {
         { code: 'uncertain', rejected: false }), false);
     }
     if (p.confirm !== true) throw marketplaceError('Confirm updating the live Sellwild listing.');
-    const missing = sellwildMissing(listing, choice, p.sellwild?.package_dimensions || sellwildBox(listing));
-    if (missing.length) throw marketplaceMissing('sellwild', missing);
     const session = await sellwildFetch('/api/auth/session', { deadline: p.deadline, step: 'session' });
     if (!session?.user) throw marketplaceError('Sign in to Sellwild: reconnect it in Anteroom. Updating will not open a tab.', { code: 'signed_out' });
     const current = await read();

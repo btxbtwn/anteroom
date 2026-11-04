@@ -19,7 +19,6 @@ test('ship on your own uses Mercari’s zero class sentinel and seller payer wit
   assert.deepEqual(Array.from(common.shipping.classIds), [0]);
   assert.deepEqual(Array.from(common.shipping.suggestedClassIds), []);
   assert.equal(common.shipping.dimensions.unit, undefined);
-  assert.ok(!c.mercariMissing(ownListing, common).some(row => /weight|shippingClassIds/.test(row.field)));
   const draft = { ...common, photo_count: 1, payerId: 2, classIds: [], isAutoPriceDrop: false };
   assert.ok(!c.mercariDraftDifferences(draft, common, 1).includes('shipping'));
   draft.classIds = [2509];
@@ -67,6 +66,13 @@ function worker({ session = SESSION, respond, http, prepareCatalog = false } = {
 
 const message = extra => ({ job_id: 'job-1', payload: { marketplace: 'mercari', action: 'save_draft', operation_id: 'op-1',
   listing, photos: [{ id: 'p1', mime_type: 'image/jpeg' }, { id: 'p2', mime_type: 'image/jpeg' }], ...extra } });
+
+function rejectingWorker() {
+  const result = worker({ http: op => op === 'addDraftItemMutation'
+    ? reply(200, { errors: [{ message: 'Please correct the selected fields.' }] }) : undefined });
+  result.c.mercariBrandLookup = async () => null;
+  return result;
+}
 
 test('a new Mercari draft uploads photos, saves once, and is confirmed by reading it back, with no tab', async () => {
   const { c, requests, initializes, journal, opsOf } = worker();
@@ -234,19 +240,17 @@ test('the Mercari category is the one Anteroom stored, never Vendoo\'s', () => {
   assert.equal(c.mercariCategoryId({ form: { overrides: { categoryV2: { id: '303' } } } }), null);
 });
 
-test('Mercari needs a package weight, sent in whole ounces', async () => {
+test('Mercari receives a missing package weight and returns its own rejection', async () => {
   const c = loadWorker();
   assert.equal(c.mercariWeightOz({ weight_lb: 1, weight_oz: 2.2 }), 19);
   assert.equal(c.mercariWeightOz({ weight_oz: 8 }), 8);
   assert.equal(c.mercariWeightOz({}), null);
   assert.equal(c.mercariWeightOz({ form: { overrides: { weight: { pounds: '0', ounces: '8' } } } }), 8);
-  const { c: w, requests } = worker();
+  const { c: w, opsOf } = rejectingWorker();
   const result = await w.runMercariNative(message({ listing: { ...listing, weight_lb: 0, weight_oz: 0 } }));
-  assert.match(result.error, /package weight/);
-  assert.equal(result.error_code, 'missing_fields');
-  assert.deepEqual(JSON.parse(JSON.stringify(result.fields)), [{ field: 'weight', message: 'Mercari needs a package weight' }]);
+  assert.equal(result.marketplace_message, 'Please correct the selected fields.');
   assert.equal(result.safe_to_retry, true);
-  assert.equal(requests.length, 0);
+  assert.ok(opsOf().includes('addDraftItemMutation'));
 });
 
 const DRAFT_URL = 'https://www.mercari.com/sell/draft/m9AbC123/';
@@ -373,15 +377,14 @@ test('a Mercari draft that lost its label, payer, size or brand is refused, and 
   }
 });
 
-test('a Mercari parent category is never published, even with its id stored', async () => {
+test('a Mercari parent category is submitted for marketplace validation', async () => {
   const parent = clothing({ form: { overrides: { condition: '3', brand: 'Nike', categoryV2: { id: '1881', hasChildren: true } },
     specifics: { shipping: { payerId: 1, carrierId: 2508 } }, sizes: [] } });
   parent.direct_category_ids = { mercari: '1881' };
-  const { c, opsOf } = worker();
-  const result = await c.runMercariNative(publish({ listing: parent }));
-  assert.equal(result.error_code, 'missing_fields');
-  assert.ok(result.fields.some(entry => entry.field === 'categoryId'));
-  assert.deepEqual(opsOf(), []);
+  const { c, opsOf } = rejectingWorker();
+  const result = await c.runMercariNative(message({ listing: parent }));
+  assert.equal(result.marketplace_message, 'Please correct the selected fields.');
+  assert.ok(opsOf().includes('addDraftItemMutation'));
 });
 
 test('a stored Mercari category is the one that is listed, and the Vendoo id stays put', () => {
@@ -475,34 +478,31 @@ test('Mercari schema errors retain the reason after a long input echo', () => {
   assert.equal(failure.marketplace_message, reason);
 });
 
-test('a sized Mercari listing whose size list could not be read stops before any upload', async () => {
+test('an unread Mercari size list does not prevent a marketplace attempt', async () => {
   const unread = clothing();
   delete unread.form.sizes;
-  const { c, requests } = worker();
+  const { c, opsOf } = rejectingWorker();
   const result = await c.runMercariNative(message({ listing: unread }));
-  assert.equal(result.error_code, 'missing_fields');
-  assert.ok(result.fields.some(entry => entry.field === 'sizeId' && /could not read/.test(entry.message)));
-  assert.equal(requests.length, 0);
+  assert.equal(result.marketplace_message, 'Please correct the selected fields.');
+  assert.ok(opsOf().includes('addDraftItemMutation'));
 });
 
-test('a Mercari listing with no prepaid label stops before any upload rather than going ship-on-your-own', async () => {
-  const { c, requests } = worker();
+test('a missing prepaid label reaches Mercari without choosing ship-on-your-own', async () => {
+  const { c, opsOf } = rejectingWorker();
   const result = await c.runMercariNative(message({ listing: { ...listing, form: { specifics: { shipping: { payerId: 1 } } } } }));
-  assert.equal(result.error_code, 'missing_fields');
-  assert.ok(result.fields.some(entry => entry.field === 'shippingClassIds'));
-  assert.equal(requests.length, 0);
+  assert.equal(result.marketplace_message, 'Please correct the selected fields.');
+  assert.ok(opsOf().includes('addDraftItemMutation'));
 });
 
-test('a Mercari listing Mercari would refuse stops before any upload and names each field', async () => {
+test('Mercari validates seller fields after receiving an attempt', async () => {
   for (const [listing, field] of [[clothing({ size: 'L/XL' }), 'sizeId'], [clothing({ price: 2400 }), 'price'], [clothing({ price: 0.4 }), 'price'],
     [clothing({ description: 'x'.repeat(1001) }), 'description'], [clothing({ weight_lb: 51 }), 'weight'],
     [clothing({ direct_category_ids: { mercari: '1885' }, form: { overrides: { condition: '3', categoryV2: { id: '1885', hasChildren: true } } } }), 'categoryId']]) {
-    const { c, requests } = worker();
+    const { c, opsOf } = rejectingWorker();
     const result = await c.runMercariNative(message({ listing }));
-    assert.equal(result.error_code, 'missing_fields', field);
+    assert.equal(result.marketplace_message, 'Please correct the selected fields.', field);
     assert.equal(result.safe_to_retry, true);
-    assert.ok(result.fields.some(entry => entry.field === field), field);
-    assert.equal(requests.length, 0, field);
+    assert.ok(opsOf().includes('addDraftItemMutation'), field);
   }
 });
 
@@ -510,10 +510,9 @@ test('a Mercari brand catalog failure stops before any upload', async () => {
   const { c, requests, journal } = worker();
   withVendooBrand(c, journal, [503, {}]);
   const result = await c.runMercariNative(message({ listing: clothing() }));
-  assert.equal(result.error_code, 'missing_fields');
+  assert.equal(result.error_code, 'rejected');
+  assert.ok(result.error);
   assert.equal(result.safe_to_retry, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(result.fields.map(entry => entry.field))), ['brandId']);
-  assert.match(result.error, /could not read/);
   assert.equal(requests.length, 0);
 });
 
@@ -594,7 +593,6 @@ test('Mercari Smart Pricing sends its floor and refuses mismatched read-back or 
   assert.deepEqual(Array.from(c.mercariDraftDifferences(draft, common)), []);
   assert.ok(c.mercariDraftDifferences({ ...draft, isAutoPriceDrop: false }, common).includes('Smart Pricing'));
   assert.ok(c.mercariDraftDifferences({ ...draft, conditionId: 1 }, common).includes('condition'));
-  assert.ok(c.mercariMissing(item, { ...common, minPriceForAutoPriceDrop: common.price }).some(field => field.field === 'minPriceForAutoPriceDrop'));
 });
 
 test('Mercari reads its own catalog over GraphQL without Vendoo or session export', async () => {
@@ -609,12 +607,10 @@ test('Mercari reads its own catalog over GraphQL without Vendoo or session expor
     form: { sizes: [{ id: 999, name: 'XL (18/20)' }] } }, master);
   assert.equal(c.mercariSize(prepared, 1911).id, 168);
   assert.equal(prepared.form.sizes[0].name, 'XL (14-16)');
-  assert.throws(() => c.mercariCatalogListing({ direct_category_ids: { mercari: '999999' } }, master), /current list/);
+  assert.equal(c.mercariCatalogListing({ direct_category_ids: { mercari: '999999' } }, master).direct_category_ids.mercari, '999999');
   // Mercari's picker offers a category with subcategories ("All Girls tops & t-shirts"), but not a top-level one.
   const parent = c.mercariCatalogListing({ direct_category_ids: { mercari: '1877' } }, master);
-  assert.ok(!c.mercariMissing(parent, c.mercariCommon(parent)).some(row => row.field === 'categoryId'));
   const top = c.mercariCatalogListing({ direct_category_ids: { mercari: '3' } }, master);
-  assert.ok(c.mercariMissing(top, c.mercariCommon(top)).some(row => row.field === 'categoryId' && /Girls tops/.test(row.needs)));
 });
 
 test('native Mercari preparation replaces stale sizes and labels before uploading and verifies its result', async () => {
