@@ -16,7 +16,6 @@ from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import native_editor, marketplace_schemas, ebay_listings
-from vendoo_studio.services.listing_result import ListingProblem
 from vendoo_studio.services.vendoo_import import merge_notes
 
 
@@ -837,25 +836,25 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["values"][0]["constraints"], [{"parentName": "Size Type", "parentValues": ["Regular"]}])
         self.assertEqual(marketplace_schemas.constraints_by_label(stored["values"])["M"],
                          [{"parentName": "Size Type", "parentValues": ["Regular", "Petites"]}])
-        matched = ebay_listings._match_aspects([size_type, size], {"Size": ["M"], "Size Type": ["Regular"]})
+        matched, warnings = ebay_listings._match_aspects([size_type, size], {"Size": ["M"], "Size Type": ["Regular"]})
         self.assertEqual(matched["Size"], ["M"])
         self.assertEqual(matched["Size Type"], ["Regular"])
         listing = {"size": "S", "sizeType": "Petites", "ebay_specifics": {"size": "M", "sizeType": "Regular"}}
         aspects = ebay_listings.ebay_aspects(listing, {})
         self.assertEqual(aspects["Size"], ["M"])
         self.assertEqual(aspects["Size Type"], ["Regular"])
-        with self.assertRaises(ListingProblem) as caught:
-            ebay_listings._match_aspects([size_type, size], {"Size": ["S"], "Size Type": ["Petites"]})
-        self.assertIn("Choose Size for the selected parent aspects", str(caught.exception))
+        matched, warnings = ebay_listings._match_aspects([size_type, size], {"Size": ["S"], "Size Type": ["Petites"]})
+        self.assertEqual(matched["Size"], ["S"])
+        self.assertIn("Choose Size for the selected parent aspects", warnings[0]["message"])
 
-    def test_ebay_parent_constraints_are_preserved_and_enforced_before_posting(self):
+    def test_ebay_parent_constraints_are_preserved_as_advice(self):
         field = marketplace_schemas._ebay_field({"localizedAspectName": "Model", "aspectConstraint": {"aspectMode": "SELECTION_ONLY"},
             "aspectValues": [{"localizedValue": "Air Max", "valueConstraints": [{"parentName": "Brand", "parentValues": ["Nike"]}]},
                              {"localizedValue": "Gazelle", "valueConstraints": [{"parentName": "Brand", "parentValues": ["Adidas"]}]}]})
         self.assertEqual([v["label"] for v in marketplace_schemas.aspect_options(field, {"Brand": ["Nike"]})], ["Air Max"])
-        with self.assertRaises(ListingProblem) as caught:
-            ebay_listings._match_aspects([field], {"Brand": ["Adidas"], "Model": ["Air Max"]})
-        self.assertIn("selected parent aspects", str(caught.exception))
+        matched, warnings = ebay_listings._match_aspects([field], {"Brand": ["Adidas"], "Model": ["Air Max"]})
+        self.assertEqual(matched["Model"], ["Air Max"])
+        self.assertIn("selected parent aspects", warnings[0]["message"])
 
     def test_an_explicitly_cleared_ebay_aspect_does_not_reappear_from_general_values(self):
         listing = {"brand": "Nike", "material": "Cotton", "ebay_specifics": {"brand": "", "material": []}}

@@ -71,23 +71,23 @@ PROGRESS_EVENT = "native_progress"
 
 
 class EtsyPackage(BaseModel):
-    item_weight: float = Field(gt=0, allow_inf_nan=False)
-    item_length: float = Field(gt=0, allow_inf_nan=False)
-    item_width: float = Field(gt=0, allow_inf_nan=False)
-    item_height: float = Field(gt=0, allow_inf_nan=False)
-    item_weight_unit: Literal["oz", "lb", "g", "kg"]
-    item_dimensions_unit: Literal["in", "cm", "mm", "m", "ft", "yd"]
+    item_weight: float = Field(allow_inf_nan=False)
+    item_length: float = Field(allow_inf_nan=False)
+    item_width: float = Field(allow_inf_nan=False)
+    item_height: float = Field(allow_inf_nan=False)
+    item_weight_unit: str
+    item_dimensions_unit: str
 
 
 class ListRequest(BaseModel):
     revision_id: str
     confirm: bool = False
-    shipping_profile_id: str | None = Field(default=None, pattern=r"^[1-9]\d*$")
-    readiness_state_id: str | None = Field(default=None, pattern=r"^[1-9]\d*$")
-    return_policy_id: str | None = Field(default=None, pattern=r"^[1-9]\d*$")
+    shipping_profile_id: str | None = None
+    readiness_state_id: str | None = None
+    return_policy_id: str | None = None
     etsy_package: EtsyPackage | None = None
-    sellwild_category_id: int | None = Field(default=None, ge=1)
-    sellwild_condition_id: int | None = Field(default=None, ge=1)
+    sellwild_category_id: int | None = None
+    sellwild_condition_id: int | None = None
 
 
 class CheckRequest(BaseModel):
@@ -357,8 +357,8 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
     if revision is None:
         raise NativeMarketplaceError(409, "The listing changed. Refresh it before continuing.")
     snapshot = revision.listing_json
-    if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
-        raise NativeMarketplaceError(400, "Add a listing title first.")
+    if not isinstance(snapshot, dict):
+        raise NativeMarketplaceError(400, "The saved listing could not be read.")
     snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
     from vendoo_studio.services.listing_videos import VIDEO_MARKETPLACES, selected_video
 
@@ -370,14 +370,10 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
     if marketplace == "etsy":
-        from vendoo_studio.services.etsy_fields import etsy_eligible
-
         try:
             etsy_listings.connected_shop_id()
         except ValueError as exc:
             raise NativeMarketplaceError(409, str(exc)) from exc
-        if not etsy_eligible(snapshot):
-            raise NativeMarketplaceError(409, etsy_listings.NOT_ELIGIBLE)
     elif marketplace == "ebay":
         from vendoo_studio.services.ebay_client import EbayClient
         from vendoo_studio.services.marketplace_accounts import SignInRequired
@@ -415,18 +411,13 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         if existing.get("listing_id") and existing.get("state") != "deleted":
             raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
     snapshot, photos = await _preflight(db, conv_id, marketplace, body)
-    if not photos:
-        raise NativeMarketplaceError(400, "Add photos before updating the live listing." if kind == "update" else "Add photos before listing.")
-    from vendoo_studio.services.chrome_catalog import apply_direct_ids, apply_preview, live_preview, remember_direct_categories
+    from vendoo_studio.services.chrome_catalog import apply_direct_ids, live_preview, remember_direct_categories
 
     preview = await live_preview(snapshot) if marketplace in {"poshmark", "depop"} else None
     if preview and apply_direct_ids(snapshot, preview.get("categories") or {}):
         remember_direct_categories(db, ListingRepo(db).get_revision(body.revision_id), snapshot.get("direct_category_ids") or {})
-    found = apply_preview(
-        direct_preflight.gaps(snapshot, marketplace, _context(db, conv_id, marketplace, body)), preview, marketplace,
-    )
-    if direct_preflight.blocking(found):
-        return _refuse(db, conv_id, marketplace, direct_preflight.refusal(marketplace, found))
+    # Local field checks are advisory. The seller-confirmed attempt goes to
+    # the marketplace, whose response is recorded for correction and retry.
     if marketplace == "sellwild" and kind == "list":
         save_local_sellwild_draft(conv_id, body, db)
     options = {}
@@ -503,18 +494,6 @@ def _context(db: Session, conv_id: str, marketplace: str, body: ListRequest | No
         choices = {"sellwild_category_id": (body and body.sellwild_category_id) or record.get("sellwild_category_id"),
                    "sellwild_condition_id": (body and body.sellwild_condition_id) or record.get("sellwild_condition_id")}
     return direct_preflight.Context(db=db, choices=choices)
-
-
-def _refuse(db: Session, conv_id: str, marketplace: str, result: dict) -> dict:
-    """Record a List the pre-flight refused. No job, nothing sent; the record keeps its state."""
-    with start_gate():
-        record = _record(db, conv_id, marketplace)
-        if record.get("state") in UNSETTLED_STATES:
-            raise NativeMarketplaceError(409, f"Check the last {NAMES[marketplace]} action first; Anteroom has not confirmed it.")
-        stored = _store(db, conv_id, marketplace, {**_CLEARED_ERROR, **_contract(result), "error": result["error"],
-                                                   "state": record.get("state") or "not_saved"})
-    stored["running"] = False
-    return stored
 
 
 def preflight(conv_id: str, db: Session, sellwild_category_id: int | None = None,
@@ -991,16 +970,9 @@ def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> d
     if revision is None:
         raise NativeMarketplaceError(409, "The listing changed. Refresh it before continuing.")
     snapshot = revision.listing_json
-    if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
-        raise NativeMarketplaceError(400, "Add a listing title first.")
-    catalog = sellwild_catalog()
+    if not isinstance(snapshot, dict):
+        raise NativeMarketplaceError(400, "The saved listing could not be read.")
     picked = {"sellwild_category_id": body.sellwild_category_id, "sellwild_condition_id": body.sellwild_condition_id}
-    choice = chosen(snapshot, picked)
-    category_id, condition_id = choice["category_id"], choice["condition_id"]
-    if category_id not in {option["id"] for option in catalog["categories"]}:
-        raise NativeMarketplaceError(400, "Choose a Sellwild category before continuing.")
-    if condition_id not in {option["id"] for option in catalog["conditions"]}:
-        raise NativeMarketplaceError(400, "Anteroom couldn't match a Sellwild condition for this item. Choose one with Change.")
     with start_gate():
         previous = _record(db, conv_id, "sellwild")
         if previous.get("state") in {*UNSETTLED_STATES, "published", "pending_review"}:

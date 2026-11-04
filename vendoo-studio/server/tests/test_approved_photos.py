@@ -45,3 +45,9 @@ def test_a_source_that_does_not_match_its_approved_checksum_is_refused(store):
     with pytest.raises(ValueError, match="changed"):
         approved_photos.capture([photo("front.jpg", b"Front")])
     assert [path.name for path in store.root.iterdir()] == ["front.jpg"]
+
+
+def test_explicitly_approved_empty_photos_can_reach_marketplace_validation(store):
+    assert approved_photos.load({approved_photos.KEY: approved_photos.capture([])}) == []
+    with pytest.raises(ValueError):
+        approved_photos.load({})

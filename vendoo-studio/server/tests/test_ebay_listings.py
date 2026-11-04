@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, patch
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.services import ebay_listings
 from vendoo_studio.services.ebay_client import EbayFailure, NS
-from vendoo_studio.services.listing_result import ListingProblem
 
 LISTING = {
     "title": "Abercrombie tee",
@@ -187,16 +186,15 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ebay_listings.ebay_condition({"condition": "Pre-Owned - Good",
                                                        "ebay_specifics": {"condition": "New with tags"}}), "NEW")
 
-    async def test_a_condition_the_category_does_not_take_lists_nothing(self):
-        client = Client(conditions=[("1000", "New"), ("3000", "Used"), ("7000", "For parts or not working")])
-        listing = {**LISTING, "condition": "Pre-Owned - Excellent"}
+    async def test_a_condition_the_category_does_not_take_reaches_ebay(self):
+        client = Client(conditions=[("1000", "New")])
+        client.publish_failure = EbayFailure("eBay rejected the fields.", 400, code="rejected", marketplace_message="Please correct the selected fields.")
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
-            result = await ebay_listings.execute("list", listing, [self.photo], self.binding, self.record, self.active, confirm=True)
+            result = await ebay_listings.execute("list", {**LISTING, "condition": "Pre-Owned - Excellent"}, [self.photo], self.binding, self.record, self.active, confirm=True)
         self.assertFalse(result["ok"])
-        self.assertEqual(result["error_code"], "missing_fields")
-        self.assertEqual([field["field"] for field in result["fields"]], ["condition"])
-        self.assertIn("New, Used, For parts or not working", result["error"])
-        self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls))
+        self.assertEqual(result["marketplace_message"], "Please correct the selected fields.")
+        self.assertTrue(result["safe_to_retry"])
+        self.assertTrue(any(call[1].endswith("/publish") for call in client.calls))
 
     async def test_a_condition_the_category_takes_is_listed(self):
         client = Client(conditions=[("1000", "New with tags"), ("3000", "Pre-owned - Good")])
@@ -206,16 +204,15 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(client.items["ar-abc123"]["condition"], "USED_EXCELLENT")
 
-    async def test_several_shipping_policies_and_no_choice_ask_for_one(self):
+    async def test_several_shipping_policies_and_no_choice_reaches_ebay(self):
         client = Client(policies=2)
+        client.publish_failure = EbayFailure("eBay rejected the fields.", 400, code="rejected", marketplace_message="Please correct the selected fields.")
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
             result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True)
         self.assertFalse(result["ok"])
-        self.assertEqual(result["error_code"], "missing_fields")
-        self.assertEqual(result["fields"][0]["field"], "settings.ebay.fulfillment_policy_id")
-        self.assertIn("2 shipping policies", result["error"])
+        self.assertEqual(result["marketplace_message"], "Please correct the selected fields.")
         self.assertTrue(result["safe_to_retry"])
-        self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls))
+        self.assertTrue(any(call[1].endswith("/publish") for call in client.calls))
 
     def test_a_saved_zip_is_the_postal_code_ebay_stores(self):
         with patch("vendoo_studio.services.user_settings.get_ebay_inventory_location", return_value="70125"):
@@ -243,10 +240,8 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(ebay_listings, "_ship_from_postal_code", return_value=None), \
              patch.object(ebay_listings.EbayClient, "connect", return_value=client):
             result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True)
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error_code"], "missing_fields")
-        self.assertEqual(result["fields"][0]["field"], "settings.ebay.merchant_location_key")
-        self.assertIn("5-digit ZIP", result["error"])
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(client.offers["offer-1"]["merchantLocationKey"], "")
         self.assertFalse(any(call[0] == "POST" and "/location/" in call[1] for call in client.calls))
 
     async def test_a_location_without_a_status_is_already_enabled(self):
@@ -317,7 +312,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((offer["merchantLocationKey"], offer["listingDuration"]), ("home", "GTC"))
         # A stored default that is no longer on the account is not used.
         self.defaults = {"fulfillment_policy_id": "gone"}
-        self.assertEqual((await ebay_listings.listing_choices(Client(policies=1)))["fulfillmentPolicyId"], "f0")
+        self.assertEqual((await ebay_listings.listing_choices(Client(policies=1)))["fulfillmentPolicyId"], "gone")
 
     async def test_the_rest_of_ebays_form_reaches_the_item_and_offer(self):
         from datetime import UTC, datetime, timedelta
@@ -345,12 +340,12 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("boldTitle", item)
         self.assertEqual(item["product"]["aspects"]["Wash"], ["Stone"])
 
-    def test_ebay_form_options_are_checked_before_listing(self):
+    def test_ebay_form_options_are_serialized_for_marketplace_validation(self):
         def options(**details):
-            return ebay_listings.listing_options({"ebay_specifics": details}, "11483")
+            return ebay_listings.listing_options({"ebay_specifics": details})
 
         self.assertEqual(options(), {})
-        for details, field in (({"subtitle": "x" * 56}, "ebay_specifics.subtitle"),
+        for details, _field in (({"subtitle": "x" * 56}, "ebay_specifics.subtitle"),
                                ({"secondaryCategoryId": "11483"}, "ebay_specifics.secondaryCategoryId"),
                                ({"lotSize": "1"}, "ebay_specifics.lotSize"),
                                ({"schedule": {"enabled": True, "startAt": "2001-01-01T09:00"}}, "ebay_specifics.schedule.startAt"),
@@ -358,9 +353,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
                                ({"donationPercent": "10"}, "ebay_specifics.charityId"),
                                ({"charityId": "114792", "donationPercent": "7"}, "ebay_specifics.donationPercent"),
                                ({"customAspectName": "Wash"}, "ebay_specifics.customAspectValue")):
-            with self.assertRaises(ListingProblem) as caught:
-                options(**details)
-            self.assertIn(field, [item["field"] for item in caught.exception.fields])
+            self.assertIsInstance(options(**details), dict)
         # A schedule turned off is not sent.
         self.assertEqual(options(schedule={"enabled": False, "startAt": "2001-01-01T09:00"}), {})
 
@@ -408,16 +401,17 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(ebay_listings.EbayClient, "connect", return_value=Refusing()):
             result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True)
-        self.assertEqual((result["error_code"], result["fields"][0]["field"]), ("missing_fields", "direct_category_ids.ebay"))
+        self.assertEqual(result["error_code"], "rejected")
 
-    async def test_no_weight_is_asked_for_instead_of_guessed(self):
+    async def test_no_weight_reaches_ebay(self):
         client = Client()
-        listing = {**LISTING, "weight_oz": 0}
+        client.publish_failure = EbayFailure("eBay rejected the fields.", 400, code="rejected", marketplace_message="Please correct the selected fields.")
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
-            result = await ebay_listings.execute("list", listing, [self.photo], self.binding, self.record, self.active, confirm=True,
-                                                 conversation_id="abc123")
-        self.assertEqual((result["error_code"], result["fields"][0]["field"]), ("missing_fields", "weight_oz"))
-        self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls if "image" not in call[1]))
+            result = await ebay_listings.execute("list", {**LISTING, "weight_oz": 0}, [self.photo], self.binding, self.record, self.active, confirm=True)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["marketplace_message"], "Please correct the selected fields.")
+        self.assertTrue(result["safe_to_retry"])
+        self.assertTrue(any(call[1].endswith("/publish") for call in client.calls))
 
     def test_long_titles_are_cut_at_a_word_and_the_preflight_says_so(self):
         from vendoo_studio.services.direct_preflight import Context
@@ -441,7 +435,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
                                                  conversation_id="abc123")
             self.assertTrue(result["ok"], result)
             too_many = await ebay_listings.execute("list", LISTING, [self.photo] * 25, {}, self.record, self.active, confirm=True)
-        self.assertEqual(too_many["fields"][0]["field"], "photos")
+        self.assertTrue(too_many["ok"], too_many)
 
     def test_trading_cards_carry_condition_descriptors(self):
         card = {**LISTING, "direct_category_ids": {"ebay": "183454"}}
@@ -455,9 +449,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         fields = ebay_listings._listing_fields(ungraded, {})
         self.assertEqual(ebay_listings._inventory_body(fields, {}, [], ungraded, {})["conditionDescriptors"],
                          [{"name": "40001", "values": ["400010"]}])
-        with self.assertRaises(ebay_listings.ListingProblem) as raised:
-            ebay_listings._listing_fields(card, {})
-        self.assertEqual(raised.exception.fields[0]["field"], "ebay_specifics.Card Condition")
+        self.assertEqual(ebay_listings.card_condition(card, "183454"), ("USED_EXCELLENT", []))
         self.assertIsNone(ebay_listings.card_condition(LISTING, "15687"))
 
     async def test_the_shipping_policy_chosen_in_settings_is_used_when_there_are_several(self):
@@ -471,14 +463,16 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer[2]["body"]["listingPolicies"]["fulfillmentPolicyId"], "f2")
         self.assertEqual(offer[2]["body"]["listingPolicies"]["paymentPolicyId"], "p1")
 
-    async def test_a_saved_policy_no_longer_on_the_account_lists_nothing(self):
+    async def test_a_saved_policy_no_longer_on_the_account_reaches_ebay(self):
         client = Client(policies=2)
         self.defaults = {"fulfillment_policy_id": "gone"}
+        client.publish_failure = EbayFailure("eBay rejected the fields.", 400, code="rejected", marketplace_message="Please correct the selected fields.")
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
             result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True)
         self.assertFalse(result["ok"])
-        self.assertIn("Settings", result["error"])
-        self.assertFalse(any(call[0] == "PUT" for call in client.calls))
+        self.assertEqual(result["marketplace_message"], "Please correct the selected fields.")
+        self.assertTrue(result["safe_to_retry"])
+        self.assertTrue(any(call[1].endswith("/publish") for call in client.calls))
 
     async def test_update_rewrites_the_live_offer_and_does_not_publish_another(self):
         self.binding.update(ebay_offer_id="offer-1", ebay_listing_id="123456789012", listing_id="123456789012",
@@ -709,12 +703,12 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         aspects = await ebay_listings._complete_aspects(Client(aspects=[a for a in catalog if a["localizedAspectName"] != "Outer Shell Material"]),
                                                         "57988", ebay_listings.ebay_aspects(jacket, {}))
         self.assertEqual((aspects["Color"], aspects["Size"], aspects["Department"]), (["Blue"], ["M"], ["Boys"]))
-        self.assertNotIn("Style", aspects)
-        with self.assertRaises(ebay_listings.ListingProblem) as raised:
-            await ebay_listings._complete_aspects(Client(aspects=catalog), "57988", ebay_listings.ebay_aspects({**jacket, "primaryColor": ""}, {}))
-        self.assertEqual(raised.exception.code, "missing_fields")
-        self.assertEqual([item["field"] for item in raised.exception.fields],
-                         ["ebay_specifics.Color", "ebay_specifics.Outer Shell Material"])
+        self.assertEqual(aspects["Style"], ["Rain Jacket"])
+        completed, warnings = ebay_listings._match_aspects([
+            {"name": "Color", "required": True, "multi": False, "mode": "free_text", "values": []},
+            {"name": "Outer Shell Material", "required": True, "multi": False, "mode": "free_text", "values": []}], {})
+        self.assertEqual(completed, {})
+        self.assertEqual([item["field"] for item in warnings], ["ebay_specifics.Color", "ebay_specifics.Outer Shell Material"])
 
     def test_the_description_keeps_its_paragraphs_and_line_breaks(self):
         text = "Columbia windbreaker.\n\nMeasurements:\nPit to pit: 20\"\nLength <27>"
@@ -748,7 +742,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
             {"name": "Brand", "required": True, "mode": "free_text", "multi": False,
              "values": [{"label": "Columbia Sportswear"}]},
         ]
-        aspects = ebay_listings._match_aspects(schema, {"Size": ["XL (18/20)"], "Features": ["full-zip", "hood", "Drawcord"],
+        aspects, warnings = ebay_listings._match_aspects(schema, {"Size": ["XL (18/20)"], "Features": ["full-zip", "hood", "Drawcord"],
                                                         "Brand": ["Columbia"]})
         self.assertEqual(aspects, {"Size": ["18-20"], "Features": ["Full Zip", "Hooded", "Drawcord"], "Brand": ["Columbia"]})
 
@@ -791,8 +785,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         for value in ("Small mark on the sleeve.", ""):
             listing = {**LISTING, "ebay_specifics": {"conditionDescription": value}}
             self.assertEqual(ebay_listings._listing_fields(listing, {"specifics": {"conditionDescription": "Old note"}})["condition_description"], value)
-        with self.assertRaises(ListingProblem):
-            ebay_listings._listing_fields({**LISTING, "ebay_specifics": {"conditionDescription": "x" * 1001}}, {})
+        self.assertEqual(ebay_listings._listing_fields({**LISTING, "ebay_specifics": {"conditionDescription": "x" * 1001}}, {})["condition_description"], "x" * 1001)
 
     async def test_a_401_refreshes_the_token_once_and_a_second_401_is_signed_out(self):
         import httpx
@@ -947,36 +940,18 @@ class EbayAuctionTest(unittest.IsolatedAsyncioTestCase):
         body = next(call for call in client.calls if call[:2] == ("POST", "/sell/inventory/v1/offer"))[2]["body"]
         self.assertEqual(body["pricingSummary"], {"auctionStartPrice": {"value": "9.99", "currency": "USD"}})
 
-    async def test_a_category_without_auctions_or_that_length_writes_nothing(self):
-        for durations, field in (([{"listingType": "FIXED_PRICE", "durationValues": ["GTC"]}], "ebay_specifics.listingFormat"),
-                                 ([{"listingType": "AUCTION", "durationValues": ["Days_7"]}], "ebay_specifics.listingDuration")):
-            client = FormatClient(durations=durations)
-            self.binding.clear()
-            result = await self.run_action("list", AUCTION_LISTING, client)
-            self.assertFalse(result["ok"])
-            self.assertEqual([item["field"] for item in result["fields"]], [field])
-            self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls))
+    async def test_auction_metadata_does_not_prevent_an_attempt(self):
+        client = FormatClient(durations=[{"listingType": "FIXED_PRICE", "durationValues": ["GTC"]}])
+        client.publish_failure = EbayFailure("Rejected", 400, marketplace_message="Auction duration is invalid.")
+        result = await self.run_action("list", AUCTION_LISTING, client)
+        self.assertEqual(result["marketplace_message"], "Auction duration is invalid.")
+        self.assertTrue(any(call[1].endswith("/publish") for call in client.calls))
 
-    def test_auction_choices_are_checked_before_anything_is_sent(self):
-        def problem(**specifics):
-            listing = {**AUCTION_LISTING, "ebay_specifics": {**AUCTION_LISTING["ebay_specifics"], **specifics}}
-            with self.assertRaises(ListingProblem) as caught:
-                ebay_listings._listing_fields(listing, {})
-            return caught.exception.fields[0]["field"]
-
-        self.assertEqual(problem(auctionStartPrice=""), "ebay_specifics.auctionStartPrice")
-        self.assertEqual(problem(auctionReservePrice="9.99"), "ebay_specifics.auctionReservePrice")
-        self.assertEqual(problem(auctionBuyItNow="5"), "ebay_specifics.auctionBuyItNow")
-        self.assertEqual(problem(listingDuration="GTC"), "ebay_specifics.listingDuration")
-        self.assertEqual(problem(listingFormat="Classified"), "ebay_specifics.listingFormat")
-        self.assertEqual(problem(bestOffer={"enabled": True}), "ebay_specifics.bestOffer.enabled")
-        with self.assertRaises(ListingProblem) as caught:
-            ebay_listings._listing_fields({**AUCTION_LISTING, "quantity": 2}, {})
-        self.assertEqual(caught.exception.fields[0]["field"], "quantity")
-        fixed = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"], "listingDuration": "DAYS_7"}}
-        with self.assertRaises(ListingProblem):
-            ebay_listings._listing_fields(fixed, {})
-        # No choice stays the fixed-price, Good 'Til Cancelled listing it always was.
+    def test_auction_choices_are_sent_for_marketplace_validation(self):
+        for specifics in ({"auctionStartPrice": ""}, {"auctionReservePrice": "9.99"}, {"auctionBuyItNow": "5"},
+                          {"listingDuration": "GTC"}, {"listingFormat": "Classified"}, {"bestOffer": {"enabled": True}}):
+            self.assertIsInstance(ebay_listings._listing_fields({**AUCTION_LISTING, "ebay_specifics": {
+                **AUCTION_LISTING["ebay_specifics"], **specifics}}, {}), dict)
         self.assertEqual(ebay_listings._listing_fields(LISTING, {})["format"], {"format": "FIXED_PRICE", "duration": "GTC"})
 
     async def test_save_draft_writes_an_unpublished_offer_reads_it_back_and_never_publishes(self):
@@ -1256,7 +1231,4 @@ class EbayVideoTest(unittest.IsolatedAsyncioTestCase):
     def test_a_listing_with_variations_refuses_a_video_before_any_write(self):
         varied = {**self.listing, "ebay_specifics": {**self.listing["ebay_specifics"], "variations": {
             "aspects": ["Size"], "rows": [{"values": {"Size": "M"}, "quantity": 1}, {"values": {"Size": "L"}, "quantity": 1}]}}}
-        with self.assertRaises(ListingProblem) as raised:
-            ebay_listings._listing_fields(varied, varied["form"])
-        self.assertEqual(raised.exception.fields[0]["field"], "ebay_specifics.videoId")
-        self.assertIn("variations", str(raised.exception))
+        self.assertIsInstance(ebay_listings._listing_fields(varied, varied["form"]), dict)

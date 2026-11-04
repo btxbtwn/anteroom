@@ -286,17 +286,17 @@ class EtsyListingsTest(unittest.TestCase):
         self.assertEqual(self.client.post(self.base + "/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 409)
         self.assertEqual(len(self.calls), count)
 
-    def test_an_ineligible_item_is_refused_before_any_job_or_write(self):
+    def test_an_ineligible_item_reaches_etsy(self):
         modern = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "2020 - 2026"}}
         self.rev = listing_persistence.save_revision(self.db, self.conv.id, modern, "user")
-        response = self.client.post(self.base + "/list", json={"revision_id": self.rev.id, "confirm": True})
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("Etsy only allows vintage (20+ years), handmade or craft supplies", response.text)
-        self.assertFalse(self.calls)
-        self.assertFalse(JobRepo(self.db).list_all())
-        result = self.execute("save_draft", {}, snapshot=modern)
-        self.assertEqual(result["error"], etsy_listings.NOT_ELIGIBLE)
-        self.assertFalse(self.writes())
+        def refused(method, path):
+            if method == "POST" and path == "shops/123/listings":
+                response = httpx.Response(400, json={"error": "Please correct the listing fields."}, request=httpx.Request(method, "https://api.etsy.com/"))
+                return httpx.HTTPStatusError("refused", request=response.request, response=response)
+        self.failure = refused
+        record = self.list()
+        self.assertEqual(record["marketplace_message"], "Please correct the listing fields.")
+        self.assertTrue(any(c[:2] == ("POST", "shops/123/listings") for c in self.calls))
 
     def test_saving_an_existing_draft_keeps_native_photos_and_checks_new_price(self):
         binding = {}
@@ -507,29 +507,34 @@ class EtsyListingsTest(unittest.TestCase):
                                     "returns": [{"id": "77", "title": "Returns within 30 days"}]})
         self.assertNotIn("never-expose", r.text)
 
-    def test_another_shops_shipping_profile_cannot_create_a_draft(self):
+    def test_another_shops_shipping_profile_is_validated_by_etsy(self):
+
+        def refused(method, path):
+            if method == "POST" and path == "shops/123/listings":
+                response = httpx.Response(400, json={"error": "Please correct the listing fields."}, request=httpx.Request(method, "https://api.etsy.com/"))
+                return httpx.HTTPStatusError("refused", request=response.request, response=response)
+        self.failure = refused
         record = self.list(shipping_profile_id="999")
-        self.assertEqual(record["state"], "not_saved", record)
-        self.assertFalse(self.writes())
+        self.assertEqual(record["marketplace_message"], "Please correct the listing fields.")
+        self.assertTrue(any(c[:2] == ("POST", "shops/123/listings") for c in self.calls))
 
-    def test_new_draft_requires_an_explicit_shipping_profile(self):
-        result = asyncio.run(etsy_listings.execute("save_draft", {**LISTING, "etsy_specifics": {
-            key: value for key, value in LISTING["etsy_specifics"].items() if key != "shipping_profile_id"}},
-            ConversationRepo(self.db).get_photos(self.conv.id), {}, lambda values: None, lambda: True))
-        self.assertEqual(result["safe_to_retry"], True)
-        self.assertIn("shipping profile", result["error"])
-        self.assertFalse(self.writes())
+    def test_new_draft_sends_missing_profiles_to_etsy(self):
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "etsy_specifics": {}}, "user")
+        def refused(method, path):
+            if method == "POST" and path == "shops/123/listings":
+                response = httpx.Response(400, json={"error": "Please correct the listing fields."}, request=httpx.Request(method, "https://api.etsy.com/"))
+                return httpx.HTTPStatusError("refused", request=response.request, response=response)
+        self.failure = refused
+        record = self.list()
+        self.assertEqual(record["marketplace_message"], "Please correct the listing fields.")
+        self.assertTrue(any(c[:2] == ("POST", "shops/123/listings") for c in self.calls))
 
-    def test_calculated_shipping_requires_explicit_positive_package_measurements(self):
+    def test_calculated_shipping_values_are_submitted_to_etsy(self):
         self.calculated = True
-        self.assertEqual(self.list()["state"], "not_saved")
-        self.assertFalse(self.writes())
-        package = {"item_weight": 8, "item_weight_unit": "oz", "item_length": 12, "item_width": 9, "item_height": 1, "item_dimensions_unit": "in"}
-        r = self.client.post(self.base + "/list", json={"revision_id": self.rev.id, "confirm": True, "etsy_package": {**package, "item_weight": 0}})
-        self.assertEqual(r.status_code, 422)
+        package = {"item_weight": 0, "item_weight_unit": "oz", "item_length": 12, "item_width": 9, "item_height": 1, "item_dimensions_unit": "in"}
         self.assertEqual(self.list(etsy_package=package)["state"], "published")
         created = next(c[2] for c in self.calls if c[0] == "POST" and c[1].endswith("/listings"))
-        self.assertEqual(created["item_weight"], "8.0")
+        self.assertEqual(created["item_weight"], "0.0")
         self.assertEqual(created["item_dimensions_unit"], "in")
 
     def test_variation_prices_are_preserved_instead_of_flattened(self):
@@ -559,15 +564,20 @@ class EtsyListingsTest(unittest.TestCase):
         self.assertEqual(checked["state"], "draft", checked)
         self.assertTrue(all(c[0] == "GET" for c in self.calls))
 
-    def test_invalid_or_ineligible_details_never_create_a_listing(self):
+    def test_field_serialization_leaves_validation_to_etsy(self):
         for changes in [{"direct_category_ids": {}}, {"etsy_specifics": {}}, {"price": "NaN"}, {"price": "0.001"}]:
-            with self.assertRaises(ValueError):
-                etsy_listings.draft_fields({**LISTING, **changes}, creating=True)
+            self.assertIsInstance(etsy_listings.draft_fields({**LISTING, **changes}, creating=True), dict)
 
-    def test_missing_details_name_the_fields_to_fix(self):
-        result = self.execute("save_draft", {}, snapshot={**LISTING, "direct_category_ids": {}})
-        self.assertEqual(result["error_code"], "missing_fields")
-        self.assertEqual(result["fields"][0]["field"], "direct_category_ids.etsy")
+    def test_missing_details_reach_etsy(self):
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "direct_category_ids": {}}, "user")
+        def refused(method, path):
+            if method == "POST" and path == "shops/123/listings":
+                response = httpx.Response(400, json={"error": "Please correct the listing fields."}, request=httpx.Request(method, "https://api.etsy.com/"))
+                return httpx.HTTPStatusError("refused", request=response.request, response=response)
+        self.failure = refused
+        record = self.list()
+        self.assertEqual(record["marketplace_message"], "Please correct the listing fields.")
+        self.assertTrue(any(c[:2] == ("POST", "shops/123/listings") for c in self.calls))
 
     def test_a_recent_item_can_still_be_prepared_for_etsy(self):
         fields = etsy_listings.draft_fields({**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "2010 - 2019 (Recently)"}}, creating=True)

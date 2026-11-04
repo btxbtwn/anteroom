@@ -100,10 +100,8 @@ test('Sellwild packaging is sent with native dimensions and description remains 
   assert.equal(body.weight, undefined);
 });
 
-test('Sellwild publishing needs confirmation and complete fields before any request', async () => {
-  for (const extra of [{ confirm: false }, { action: 'review' }, { sellwild: { category_id: 272 } },
-    { listing: { ...listing, price: 4 } }, { listing: { ...listing, weight_lb: 0, weight_oz: 0 } },
-    { listing: { ...listing, package_dimensions_in: '' } }, { photos: [] }]) {
+test('Sellwild publishing still requires confirmation', async () => {
+  for (const extra of [{ confirm: false }, { action: 'review' }]) {
     const { c, requests } = worker();
     const result = await c.runSellwildNative(message(extra));
     assert.equal(result.ok, false);
@@ -112,14 +110,25 @@ test('Sellwild publishing needs confirmation and complete fields before any requ
   }
 });
 
-test('a missing session or ship-from address stops before creating anything', async () => {
-  for (const routes of [{ 'GET /api/auth/session': [200, {}] }, { 'GET /api/addresses': [200, { success: true, addresses: [] }] },
-    { 'GET /api/addresses': [200, { success: true, addresses: [{ ...ADDRESS, line1: '' }] }] }, { 'GET /api/auth/session': [401, {}] }]) {
-    const { c, requests } = worker({ routes });
-    const result = await c.runSellwildNative(message());
+test('missing fields and ship-from address reach Sellwild and keep its rejection', async () => {
+  for (const extra of [{ sellwild: { category_id: 272 } }, { listing: { ...listing, price: 4 } },
+    { listing: { ...listing, weight_lb: 0, weight_oz: 0 } }, { listing: { ...listing, package_dimensions_in: '' } }, { photos: [] }]) {
+    const { c, requests } = worker({ routes: {
+      'GET /api/addresses': [200, { success: true, addresses: [] }],
+      'POST /api/listings/create': [400, { success: false, error: 'Please correct the listing fields.' }],
+    } });
+    const result = await c.runSellwildNative(message(extra));
+    assert.equal(result.marketplace_message, 'Please correct the listing fields.');
     assert.equal(result.safe_to_retry, true);
-    assert.ok(!requests.some(r => r.route === 'POST /api/listings/create'));
+    assert.ok(requests.some(r => r.route === 'POST /api/listings/create'));
   }
+});
+
+test('a missing session stops before creating anything', async () => {
+  const { c, requests } = worker({ routes: { 'GET /api/auth/session': [200, {}] } });
+  const result = await c.runSellwildNative(message());
+  assert.equal(result.safe_to_retry, true);
+  assert.ok(!requests.some(r => r.route === 'POST /api/listings/create'));
 });
 
 test('a rejected create can be retried; a lost create reply cannot', async () => {

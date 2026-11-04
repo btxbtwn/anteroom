@@ -105,10 +105,7 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listing["marketplace_category_ids"]["ebay"], "111")
 
     def test_vendoos_ebay_category_is_not_the_ebay_tabs(self):
-        from vendoo_studio.services.listing_result import ListingProblem
-
-        with self.assertRaises(ListingProblem):
-            ebay_category_id({"marketplace_category_ids": {"ebay": "111"}})
+        self.assertEqual(ebay_category_id({"marketplace_category_ids": {"ebay": "111"}}), "")
         self.assertEqual(ebay_category_id({"direct_category_ids": {"ebay": "111"}}), "111")
 
     def test_matching_live_field_keeps_the_vendoo_key_and_takes_live_choices(self):

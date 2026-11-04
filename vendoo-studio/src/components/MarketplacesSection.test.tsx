@@ -50,6 +50,17 @@ const enabledButton = (html: string, label: string) => new RegExp(`<button(?![^>
 describe("marketplaces section", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it("keeps List available when local field checks are incomplete or unavailable", () => {
+    for (const options of [
+      { preflightMissing: true }, { preflightPlaceholder: true }, { preflightError: true },
+      { preflight: { marketplaces: { mercari: { ready: false, gaps: [
+        { field: "mercari_specifics.size", message: "Size needs review.", blocking: true },
+      ] } } } },
+    ]) {
+      expect(enabledButton(render({}, {}, { selected: "mercari", ...options }), "List…")).toBe(true);
+    }
+  });
+
   it("reloads the editor when a refill saves a new definition for the same category", () => {
     const queryKey = (options: { label: string }) => {
       render({}, {}, { selected: "mercari", notes: [], listing: {
@@ -64,7 +75,7 @@ describe("marketplaces section", () => {
     expect(before).not.toEqual(after);
   });
 
-  it.each(["placeholder", "error"])("hides previous revision field warnings during %s checks while keeping List blocked", (state) => {
+  it.each(["placeholder", "error"])("hides previous revision field warnings during %s checks while allowing List", (state) => {
     const message = "Brand: Required field is empty.";
     const options = {
       selected: "mercari", notes: [] as string[],
@@ -77,7 +88,7 @@ describe("marketplaces section", () => {
       preflightPlaceholder: state === "placeholder", preflightError: state === "error",
     });
     expect(html).not.toContain(message);
-    expect(disabledButton(html, "List…")).toBe(true);
+    expect(enabledButton(html, "List…")).toBe(true);
     const withField = { ...options, nativeFields: [{ key: "mercari_specifics.brand", path: "mercari_specifics.brand",
       label: "Brand", value: "Anne Klein", required: true, options: [] as string[] }] };
     expect(render({}, {}, withField)).toContain(message);
@@ -99,7 +110,7 @@ describe("marketplaces section", () => {
     expect(html).toContain("Mercari needs a title.");
     expect(html).toContain("A separate form note.");
     expect(html).toContain("Edit Title");
-    expect(disabledButton(html, "List…")).toBe(true);
+    expect(enabledButton(html, "List…")).toBe(true);
     const standalone = render({}, {}, { selected: "mercari", notes: [message, message] });
     expect(standalone.split(message)).toHaveLength(2);
   });
@@ -133,10 +144,10 @@ describe("marketplaces section", () => {
     expect(html.split(message)).toHaveLength(2);
   });
 
-  it("holds List until the current revision has passed preflight", () => {
+  it("allows List while the current revision is being checked", () => {
     for (const state of [{ preflightMissing: true }, { preflightPlaceholder: true }, { preflightError: true }]) {
       const html = render({}, {}, { selected: "mercari", ...state });
-      expect(disabledButton(html, "List…")).toBe(true);
+      expect(enabledButton(html, "List…")).toBe(true);
     }
   });
 
@@ -193,14 +204,14 @@ describe("marketplaces section", () => {
     expect(enabledButton(render({}, {}, { selected: "vinted" }), "List…")).toBe(true);
   });
 
-  it("uses the Sellwild form selections and blocks listing when its category is missing", () => {
+  it("uses the Sellwild form selections and allows listing when its category is missing", () => {
     const html = render({}, {}, { selected: "sellwild" });
     expect(html).not.toContain(">Change</button>");
     expect(html).not.toContain('aria-label="Sellwild category"');
     expect(enabledButton(html, "List…")).toBe(true);
     const unmatched = render({}, {}, { selected: "sellwild", preflight: { marketplaces: { sellwild: { ready: false,
       gaps: [{ field: "sellwild_specifics.nativeCategoryId", message: "Choose a Sellwild category.", blocking: true }] } } } });
-    expect(disabledButton(unmatched, "List…")).toBe(true);
+    expect(enabledButton(unmatched, "List…")).toBe(true);
     expect(unmatched).toContain("Choose a Sellwild category.");
   });
 
@@ -208,14 +219,14 @@ describe("marketplaces section", () => {
     const html = render({}, {}, { selected: "etsy" });
     expect(html).not.toContain("Shipping profile");
     expect(html).toContain("Settings → Connections");
-    expect(disabledButton(html, "List…")).toBe(true);
+    expect(enabledButton(html, "List…")).toBe(true);
   });
 
-  it("disables Etsy's List with the reason when the item does not qualify", () => {
+  it("warns about Etsy eligibility without disabling List", () => {
     const html = render({}, {}, { etsyEligible: false, etsyReady: true, selected: "etsy" });
-    expect(row(html, "Etsy")).toContain("Not eligible");
-    expect(html).toContain("Etsy only allows vintage (20+ years), handmade or craft supplies.");
-    expect(disabledButton(html, "List…")).toBe(true);
+    expect(row(html, "Etsy")).toContain("Review eligibility");
+    expect(html).toContain("Etsy generally requires vintage (20+ years), handmade or craft supplies.");
+    expect(enabledButton(html, "List…")).toBe(true);
     expect(html).not.toContain("Ask chat");
   });
 
@@ -310,7 +321,7 @@ describe("marketplaces section", () => {
     }
   });
 
-  it("shows missing fields and stops List before anything is written", () => {
+  it("shows missing fields as advice without stopping List", () => {
     const gaps = [{ field: "ebay_specifics.category_specifics.Color", message: "eBay needs Color.", blocking: true }];
     const html = render({}, {}, {
       selected: "ebay", onAskChat: vi.fn(), onEditField: vi.fn(),
@@ -319,7 +330,7 @@ describe("marketplaces section", () => {
     expect(html).toContain("eBay needs Color.");
     expect(enabledButton(html, "Edit Color")).toBe(true);
     expect(enabledButton(html, "Ask chat")).toBe(true);
-    expect(disabledButton(html, "List…")).toBe(true);
+    expect(enabledButton(html, "List…")).toBe(true);
   });
 
   it("offers Edit and Ask chat for a value the marketplace will leave empty, without stopping List", () => {
@@ -354,7 +365,7 @@ describe("marketplaces section", () => {
     expect(html).toContain("List everywhere…");
     expect(html).toContain('title="List on eBay, Etsy, Poshmark, Depop, Sellwild, Vinted"');
     const blocked = render({}, {}, { preflight: { marketplaces: { ebay: { ready: false, gaps: [{ field: "price", message: "eBay needs a price.", blocking: true }] } } } });
-    expect(blocked).toContain('title="List on Poshmark, Mercari, Depop, Sellwild, Vinted"');
+    expect(blocked).toContain('title="List on eBay, Etsy, Poshmark, Mercari, Depop, Sellwild, Vinted"');
     const sold = { poshmark: { ...live, url: "https://poshmark.com/listing/x", listing_id: "x", sold_here: true } };
     expect(render({}, sold)).not.toContain("List everywhere…");
   });

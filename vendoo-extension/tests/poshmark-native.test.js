@@ -65,6 +65,17 @@ function setup({ publishAnswer = [200, {}], status = 'published' } = {}) {
   return { c, msg, requests, journal };
 }
 
+function rejectPost(c, requests, message = 'Please correct the selected fields.') {
+  const fetch = c.fetch;
+  c.fetch = async (url, options = {}) => {
+    if (new URL(url).pathname === `/vm-rest/posts/${POST}` && options.method === 'POST') {
+      requests.push({ method: options.method, path: new URL(url).pathname, body: JSON.parse(options.body) });
+      return response(400, { error: { errorType: 'ValidationError', userMessage: message } });
+    }
+    return fetch(url, options);
+  };
+}
+
 test('Poshmark lists in one step with every field, no draft save, no tab', async () => {
   const { c, msg, requests, journal } = setup();
   const result = JSON.parse(JSON.stringify(await c.runPoshmarkApi(msg)));
@@ -89,6 +100,26 @@ test('Poshmark lists in one step with every field, no draft save, no tab', async
   assert.equal(post.cover_shot.id.length, 24);
   assert.equal(post.pictures.length, 1);
   assert.equal(journal['native_operation_op-1'].poshmark_post_id, POST);
+});
+
+test('Poshmark receives an unrecognised size group and its rejection reaches Anteroom', async () => {
+  const { c, msg, requests } = setup();
+  msg.payload.listing = { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics,
+    inventoryRows: [{ sizeSetId: 'catalog-drift', sizeId: 'XL', quantity: 1 }] } };
+  const fetch = c.fetch;
+  c.fetch = async (url, options = {}) => {
+    if (new URL(url).pathname === `/vm-rest/posts/${POST}` && options.method === 'POST') {
+      requests.push({ method: options.method, path: new URL(url).pathname, body: JSON.parse(options.body) });
+      return response(200, { error: { errorType: 'ValidationError', field: 'size', userMessage: 'Please select a valid size.' } });
+    }
+    return fetch(url, options);
+  };
+  const result = await c.runPoshmarkApi(msg);
+  assert.ok(savedPost(requests), 'the chosen fields must reach Poshmark');
+  assert.equal(savedPost(requests).inventory.size_quantities[0].size_id, 'XL');
+  assert.equal(result.ok, false);
+  assert.equal(result.marketplace_message, 'Please select a valid size.');
+  assert.equal(result.error_code, 'missing_fields');
 });
 
 test('Save Draft uses the native user_draft transition and never publishes, including recovery', async () => {
@@ -225,7 +256,7 @@ test('private Poshmark drafts save multiple sizes, custom sizes and per-size SKU
   assert.ok(c.poshmarkPostDifferences(changed, post, 2).includes('sizes'));
 });
 
-test('invalid Poshmark inventory stops before creating or uploading a post', async () => {
+test('Poshmark receives invalid inventory and returns its own rejection', async () => {
   for (const rows of [null, {}, 'invalid', [], [{ sizeSetId: 'custom', sizeId: ' ', quantity: 1 }],
     [{ sizeSetId: 'custom', sizeId: 'M', quantity: 0 }],
     [{ sizeSetId: 'custom', sizeId: 'M', quantity: 1.5 }],
@@ -234,8 +265,10 @@ test('invalid Poshmark inventory stops before creating or uploading a post', asy
     const { c, msg, requests } = setup({ status: 'user_draft' });
     msg.payload = { ...msg.payload, action: 'save_draft', confirm: false,
       listing: { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, inventoryRows: rows } } };
-    assert.equal((await c.runNativeMarketplace(msg)).ok, false);
-    assert.ok(requests.every(row => row.method === 'GET'));
+    rejectPost(c, requests);
+    const result = await c.runNativeMarketplace(msg);
+    assert.equal(result.marketplace_message, 'Please correct the selected fields.');
+    assert.ok(savedPost(requests));
   }
 });
 
@@ -317,7 +350,7 @@ test('Poshmark sends the selected quantity, original price and explicit SKU inst
   assert.equal(post.inventory.size_quantities[0].size_system, 'us');
   assert.equal(post.original_price_amount.val, '55');
   assert.deepEqual(JSON.parse(JSON.stringify(post.seller_private_info)), { sku: '' });
-  assert.throws(() => c.poshmarkPostFields(CATALOG.data, { ...listing, quantity: 1.5 }, {}), /whole-number quantity/);
+  assert.equal(c.poshmarkPostFields(CATALOG.data, { ...listing, quantity: 1.5 }, {}).inventory.size_quantities[0].quantity_available, 1.5);
   const single = c.poshmarkPostFields(CATALOG.data, { ...listing, quantity: 3, poshmark_specifics: { ...listing.poshmark_specifics, multiItem: 'false' } }, {});
   assert.equal(single.inventory.multi_item, false);
   assert.equal(single.inventory.size_quantities[0].quantity_available, 1);
@@ -340,8 +373,8 @@ test('Poshmark sends the size system the seller picked and a drop time for Drops
   assert.equal(post.inventory.size_quantities[0].size_system, 'au');
   assert.equal(post.inventory.size_quantities[0].size_id, '0AU');
   assert.equal(post.make_available_at, new Date(soon).toISOString());
-  assert.throws(() => c.poshmarkPostFields(catalog, { ...listing, poshmark_specifics: { ...listing.poshmark_specifics, makeAvailableAt: '' } }, {}), /drop time/);
-  assert.throws(() => c.poshmarkPostFields(catalog, { ...listing, poshmark_specifics: { ...listing.poshmark_specifics, makeAvailableAt: new Date(Date.now() + 9 * 24 * 60 * 60 * 1000).toISOString() } }, {}), /7 days/);
+  assert.equal(c.poshmarkPostFields(catalog, { ...listing, poshmark_specifics: { ...listing.poshmark_specifics, makeAvailableAt: '' } }, {}).make_available_at, undefined);
+  assert.ok(c.poshmarkPostFields(catalog, { ...listing, poshmark_specifics: { ...listing.poshmark_specifics, makeAvailableAt: new Date(Date.now() + 9 * 24 * 60 * 60 * 1000).toISOString() } }, {}).make_available_at);
 });
 
 test('Poshmark private notes and cost support clearing, and shipping discounts require a live option', async () => {
@@ -364,9 +397,9 @@ test('Poshmark private notes and cost support clearing, and shipping discounts r
   assert.equal(cleared.seller_private_info.cost_price_amount, null);
   assert.equal(cleared.seller_shipping_discount.id, 'e'.repeat(24));
   assert.deepEqual(Array.from(c.poshmarkPostDifferences(cleared, cleared, 0)), []);
-  assert.throws(() => c.poshmarkPostFields(CATALOG.data, { ...listing, cost: -1 }, {}), /cost of \$0/);
+  assert.equal(c.poshmarkPostFields(CATALOG.data, { ...listing, cost: -1 }, {}).seller_private_info.cost_price_amount.val, '-1.00');
   c.poshmarkShippingDiscounts = async () => [];
-  await assert.rejects(c.poshmarkPreparedPost(listing, Date.now() + 30000), /current shipping discount/);
+  await c.poshmarkPreparedPost(listing, Date.now() + 30000);
 });
 
 test('an update writes the live Poshmark post and does not create or publish another', async () => {
@@ -455,13 +488,15 @@ test('big sizes are found in the Big & Tall set', () => {
   assert.equal(c.poshmarkSize(category, { size: '40R' }), null);
 });
 
-test('missing category, size, price, condition or confirmation stops before creating anything', async () => {
+test('field warnings reach Poshmark but confirmation is still required', async () => {
   for (const change of [{ direct_category_ids: {} }, { size: '40R' }, { price: 2 }, { description: '' }, { condition: '' }]) {
     const { c, msg, requests } = setup();
     msg.payload.listing = { ...LISTING, ...change };
+    rejectPost(c, requests);
     const result = await c.runPoshmarkApi(msg);
     assert.equal(result.safe_to_retry, true);
-    assert.ok(!requests.some(r => r.method !== 'GET'));
+    assert.equal(result.marketplace_message, 'Please correct the selected fields.');
+    assert.ok(savedPost(requests));
   }
   const { c, msg, requests } = setup();
   msg.payload.confirm = false;
@@ -655,18 +690,17 @@ test('a Global & Traditional Wear leaf skips the grouping id', () => {
     { department: DEPT, category: 'k'.repeat(24), category_features: [] });
 });
 
-test('a kids listing with no gender stops before anything is written and names the size', async () => {
+test('a kids listing with no gender is submitted without inventing a size group', async () => {
   const kids = liveCategory('Kids', 'Shirts & Tops');
   const { c, msg, requests } = setup();
   const original = c.fetch;
   c.fetch = async (url, options = {}) => (new URL(url).pathname === '/vm-rest/meta/catalog_v2' ? response(200, LIVE) : original(url, options));
   msg.payload.listing = { ...LISTING, size: 'XL (18/20)', direct_category_ids: { poshmark: `${kids.dept.id}/${kids.category.id}` } };
+  rejectPost(c, requests, 'Please select a valid size.');
   const result = await c.runPoshmarkApi(msg);
-  assert.equal(result.error_code, 'missing_fields');
+  assert.equal(result.marketplace_message, 'Please select a valid size.');
   assert.equal(result.safe_to_retry, true);
-  assert.equal(result.fields[0].field, 'size');
-  assert.match(result.fields[0].message, /boys' or girls'/);
-  assert.ok(!requests.some(r => r.method !== 'GET'));
+  assert.equal(savedPost(requests).inventory.size_quantities[0].size_id, 'XL (18/20)');
 });
 
 test('Poshmark brand, style tags, certification and limits follow Poshmark\'s own catalog', async () => {
@@ -680,9 +714,10 @@ test('Poshmark brand, style tags, certification and limits follow Poshmark\'s ow
   assert.ok(requests.some(r => r.method === 'PUT' && r.path.endsWith('/status/published')));
   const { c: other, msg: second, requests: none } = setup();
   second.payload.listing = { ...LISTING, description: 'x'.repeat(1501) };
+  rejectPost(other, none);
   const refused = await other.runPoshmarkApi(second);
-  assert.equal(refused.error_code, 'missing_fields');
-  assert.ok(!none.some(r => r.method !== 'GET'));
+  assert.equal(refused.marketplace_message, 'Please correct the selected fields.');
+  assert.equal(savedPost(none).description.length, 1501);
 });
 
 test('a Poshmark catalog that cannot be read stops safely and says why', async () => {
@@ -712,8 +747,8 @@ test('Smart Pricing follows the listing form, off included, and cost keeps its c
   assert.equal(on.seller_private_info, undefined);
   // No form setting: the Poshmark specifics' minimum (12 of 18).
   assert.equal(fields({ ...LISTING, form: {} }).offer_auto_actions_min_price_amount.val, '12');
-  // A minimum at or above the price is off.
-  assert.equal(fields({ ...LISTING, form: { specifics: { smartSell: { enabled: true, minPrice: 18 } } } }).offer_auto_actions_v2_enabled, false);
+  // An invalid selected minimum is sent for Poshmark to validate.
+  assert.equal(fields({ ...LISTING, form: { specifics: { smartSell: { enabled: true, minPrice: 18 } } } }).offer_auto_actions_v2_enabled, true);
 });
 
 test('a published post that did not keep Smart Pricing is listed with a warning', async () => {

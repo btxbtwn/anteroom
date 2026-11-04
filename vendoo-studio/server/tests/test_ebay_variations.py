@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 
 from vendoo_studio.services import ebay_listings, ebay_variations, marketplace_schemas, native_editor
 from vendoo_studio.services.ebay_client import EbayFailure
-from vendoo_studio.services.listing_result import ListingProblem
 from tests import test_ebay_listings as single
 
 FormatClient = single.FormatClient
@@ -252,7 +251,7 @@ class EbayVariationsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Adding a variation", result["error"])
         self.assertEqual(len(client.writes()), writes)
 
-    async def test_ebays_rules_are_checked_before_anything_is_written(self):
+    async def test_field_warnings_allow_attempts_but_identity_and_photo_guards_remain(self):
         cases = {
             "auction": {**VARIED, "ebay_specifics": {**VARIED["ebay_specifics"], "listingFormat": "AUCTION", "auctionStartPrice": "5"}},
             "offers": {**VARIED, "ebay_specifics": {**VARIED["ebay_specifics"], "bestOffer": {"enabled": True}}},
@@ -276,16 +275,19 @@ class EbayVariationsTest(unittest.IsolatedAsyncioTestCase):
                 self.binding = {}
                 client = GroupClient()
                 result = await self.run_action("save_draft", listing, client)
-                self.assertFalse(result["ok"], name)
-                self.assertTrue(result["safe_to_retry"], name)
-                self.assertEqual(client.writes(), [], name)
+                if name in {"duplicate sku", "same values", "unknown photo"}:
+                    self.assertFalse(result["ok"], name)
+                    self.assertTrue(result["safe_to_retry"], name)
+                    self.assertEqual(client.writes(), [], name)
+                else:
+                    self.assertTrue(result["ok"], (name, result))
+                    self.assertTrue(client.writes(), name)
 
-    async def test_a_category_without_variations_is_refused(self):
+    async def test_cached_variation_support_does_not_block_an_attempt(self):
         client = GroupClient(supported=False)
         result = await self.run_action("save_draft", VARIED, client)
-        self.assertFalse(result["ok"])
-        self.assertIn("does not take listings with variations", result["error"])
-        self.assertEqual(client.writes(), [])
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(client.writes())
 
     async def test_a_sellers_sku_already_on_ebay_is_never_overwritten(self):
         client = GroupClient()
@@ -331,14 +333,12 @@ class EbayVariationsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(ebay_variations.total_quantity(LISTING))
         self.assertEqual(ebay_listings._listing_fields(VARIED, VARIED["form"])["quantity"], 5)
 
-    def test_preflight_reports_variation_problems_on_their_rows(self):
+    def test_variation_fields_are_serialized_for_marketplace_validation(self):
         listing = varied(rows=[{"values": {"Size": "M", "Color": "Red"}, "quantity": "x"},
                                {"values": {"Size": "", "Color": "Blue"}, "quantity": 1}])
-        with self.assertRaises(ListingProblem) as raised:
-            ebay_listings._listing_fields(listing, listing["form"])
-        fields = {item["field"] for item in raised.exception.fields}
-        self.assertIn("ebay_specifics.variations.rows.0.quantity", fields)
-        self.assertIn("ebay_specifics.variations.rows.1.values.Size", fields)
+        fields = ebay_listings._listing_fields(listing, listing["form"])
+        self.assertEqual(fields["variations"]["rows"][0]["quantity"], 0)
+        self.assertEqual(fields["variations"]["rows"][1]["values"]["Size"], "")
 
 
     def test_cached_aspect_check_takes_a_varied_aspect_from_the_rows(self):

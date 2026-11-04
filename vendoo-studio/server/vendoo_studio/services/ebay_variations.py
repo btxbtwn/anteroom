@@ -25,14 +25,10 @@ from collections.abc import Callable
 
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, segment
-from vendoo_studio.services.listing_result import ListingProblem, missing
+from vendoo_studio.services.listing_result import missing
 
 FIELD = "ebay_specifics.variations"
-MAX_VARIATIONS = 250
-MAX_ASPECTS = 5
-MAX_VALUE_LENGTH = 50
 MAX_SKU_LENGTH = 50
-MAX_PHOTOS_PER_VARIATION = 12
 _SKU = re.compile(r"[A-Za-z0-9_-]{1,50}")
 
 
@@ -55,93 +51,44 @@ def _text(value) -> str:
 
 def _quantity(value) -> int | None:
     text = str(value if value is not None else "").strip()
-    return int(text) if re.fullmatch(r"\d{1,5}", text) else None
-
-
-def _problem(problems: list[tuple[str, str]]) -> ListingProblem:
-    return ListingProblem(" ".join(dict.fromkeys(message for _, message in problems)), "missing_fields",
-                          fields=[{"field": field, "message": message} for field, message in problems])
+    return int(text) if re.fullmatch(r"\d+", text) else None
 
 
 def plan(snapshot: dict, listing_price: str) -> dict:
-    """The seller's variations, checked against eBay's documented rules. Raises with every problem at once."""
+    """Serialize the seller's variations; eBay decides which field values it accepts."""
     data = raw(snapshot)
     names = [_text(name) for name in data.get("aspects") or [] if _text(name)]
     rows = data.get("rows")
     if not isinstance(rows, list):
         rows = []
-    problems: list[tuple[str, str]] = []
-    if not names:
-        problems.append((f"{FIELD}.aspects", "Choose what the eBay variations differ by, such as Size."))
-    if len(names) > MAX_ASPECTS:
-        problems.append((f"{FIELD}.aspects", f"eBay variations can differ by at most {MAX_ASPECTS} aspects."))
-    if len({name.casefold() for name in names}) != len(names):
-        problems.append((f"{FIELD}.aspects", "Each aspect the variations differ by is named once."))
-    if len(rows) > MAX_VARIATIONS:
-        problems.append((FIELD, f"An eBay listing has at most {MAX_VARIATIONS} variations."))
     out_rows: list[dict] = []
-    seen_values: set[tuple] = set()
-    seen_skus: set[str] = set()
-    for index, row in enumerate(rows):
+    for row in rows:
         row = row if isinstance(row, dict) else {}
-        prefix = f"{FIELD}.rows.{index}"
         given = row.get("values")
         if not isinstance(given, dict):
             given = {}
         folded = {_text(key).casefold(): _text(value) for key, value in given.items()}
         values = {name: folded.get(name.casefold(), "") for name in names}
-        for name, value in values.items():
-            if not value:
-                problems.append((f"{prefix}.values.{name}", f"Enter {name} for variation {index + 1}."))
-            elif len(value) > MAX_VALUE_LENGTH:
-                problems.append((f"{prefix}.values.{name}", f"eBay takes at most {MAX_VALUE_LENGTH} characters for a variation value."))
-        key = tuple(value.casefold() for value in values.values())
-        if all(key) and key in seen_values:
-            problems.append((f"{prefix}.values", f"Variation {index + 1} repeats another variation's {', '.join(names)}."))
-        seen_values.add(key)
         quantity = _quantity(row.get("quantity"))
-        if quantity is None or quantity > 10000:
-            problems.append((f"{prefix}.quantity", f"Enter a quantity from 0 to 10000 for variation {index + 1}."))
         sku = _text(row.get("sku"))
-        if sku and not _SKU.fullmatch(sku):
-            problems.append((f"{prefix}.sku", "An eBay variation SKU uses letters, digits, - and _ and is at most 50 characters."))
-        if sku and sku.casefold() in seen_skus:
-            problems.append((f"{prefix}.sku", f"SKU {sku} is used by another variation. Each variation needs its own SKU."))
-        if sku:
-            seen_skus.add(sku.casefold())
         price_text = _text(row.get("price")).replace("$", "").replace(",", "")
         price = listing_price
         if price_text:
             try:
                 price = dollars(money_cents(price_text))
             except (ValueError, ArithmeticError):
-                problems.append((f"{prefix}.price", f"Enter a positive price for variation {index + 1}, or leave it blank for the listing price."))
-        if not price:
-            problems.append((f"{prefix}.price", f"Set a price for variation {index + 1}."))
+                price = price_text
         out_rows.append({"values": values, "quantity": quantity or 0, "sku": sku, "price": price})
-    if rows and not problems and sum(row["quantity"] for row in out_rows) < 1:
-        problems.append((f"{FIELD}.rows.0.quantity", "At least one eBay variation needs a quantity."))
-    for name in names:
-        # eBay: each aspect the listing varies by has two or more values.
-        if len({row["values"].get(name, "").casefold() for row in out_rows}) < 2:
-            problems.append((f"{FIELD}.aspects", f"Every variation has the same {name}. Set it under item specifics instead, "
-                                                  "or give the variations different values."))
     photos_by = _text(data.get("photosBy"))
-    if photos_by and photos_by.casefold() not in {name.casefold() for name in names}:
-        problems.append((f"{FIELD}.photosBy", "Photos can vary only by one of the aspects the variations differ by."))
-    photos_by = next((name for name in names if name.casefold() == photos_by.casefold()), names[0] if names else "")
+    photos_by = next((name for name in names if name.casefold() == photos_by.casefold()), photos_by or (names[0] if names else ""))
     chosen_photos = data.get("photos")
     if not isinstance(chosen_photos, dict):
         chosen_photos = {}
     photos: dict[str, list[str]] = {}
     for value, ids in chosen_photos.items():
         ids = [str(item) for item in ids or [] if str(item or "").strip()] if isinstance(ids, list) else []
-        if len(ids) > MAX_PHOTOS_PER_VARIATION:
-            problems.append((f"{FIELD}.photos.{value}", f"eBay takes at most {MAX_PHOTOS_PER_VARIATION} photos for each {photos_by}."))
         if ids:
             photos[_text(value)] = list(dict.fromkeys(ids))
-    if problems:
-        raise _problem(problems)
     return {"aspects": names, "photos_by": photos_by, "rows": out_rows, "photos": photos}
 
 
@@ -178,56 +125,32 @@ def assign_skus(chosen: dict, base: str) -> dict:
 
 
 async def check_category(client: EbayClient, category_id: str, chosen: dict) -> dict:
-    """Refuse what eBay's category rules refuse, and spell aspects and values as eBay does."""
+    """Use known catalog spellings without refusing values absent from our catalog."""
     from vendoo_studio.services import marketplace_schemas
     from vendoo_studio.services.ebay_listings import _aspect_key, _choice
 
-    supported = await marketplace_schemas.ebay_variations_supported(client, category_id)
-    if supported is False:
-        raise missing("eBay does not take listings with variations in this category. List each variation as its own item, "
-                      "or choose another category.", FIELD)
     schema = await marketplace_schemas.ebay_aspects(client, category_id)
     by_key = {_aspect_key(row["name"]): row for row in schema}
-    allowed = [row["name"] for row in schema if row.get("variations")]
-    problems: list[tuple[str, str]] = []
-    names: dict[str, str] = {}
-    for name in chosen["aspects"]:
-        row = by_key.get(_aspect_key(name))
-        if row is None or not row.get("variations"):
-            choices = ", ".join(allowed) or "none"
-            problems.append((f"{FIELD}.aspects", f"eBay does not let {name} vary in this category. It allows: {choices}."))
-            continue
-        names[name] = row["name"]
-    if problems:
-        raise _problem(problems)
+    names = {name: (by_key.get(_aspect_key(name)) or {"name": name})["name"] for name in chosen["aspects"]}
     rows = []
-    for index, row in enumerate(chosen["rows"]):
+    for row in chosen["rows"]:
         values = {}
         for name, value in row["values"].items():
-            field = by_key[_aspect_key(name)]
+            field = by_key.get(_aspect_key(name)) or {"name": name, "mode": "free_text"}
             labels = [entry["label"] for entry in field.get("values") or []]
             if field["mode"] == "selection":
                 matched = _choice(value, labels)
-                if not matched:
-                    problems.append((f"{FIELD}.rows.{index}.values.{name}", f"Choose one of eBay's values for {field['name']}."))
-                    continue
-                value = matched
+                value = matched or value
             elif labels:
                 value = _choice(value, labels, near=False) or value
-            limit = field.get("max_length")
-            if limit and len(value) > limit:
-                problems.append((f"{FIELD}.rows.{index}.values.{name}", f"eBay takes at most {limit} characters for {field['name']}."))
             values[names[name]] = value
         rows.append({**row, "values": values})
-    if problems:
-        raise _problem(problems)
     photos_by = names.get(chosen["photos_by"], chosen["photos_by"])
     photos = {}
     for value, ids in chosen["photos"].items():
         spelled = next((row["values"][photos_by] for row in rows if row["values"].get(photos_by, "").casefold() == value.casefold()
                         or _aspect_key(row["values"].get(photos_by, "")) == _aspect_key(value)), None)
-        if spelled:
-            photos[spelled] = ids
+        photos[spelled or value] = ids
     return {**chosen, "aspects": [names[name] for name in chosen["aspects"]], "photos_by": photos_by, "rows": rows, "photos": photos}
 
 

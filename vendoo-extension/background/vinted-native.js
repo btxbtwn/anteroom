@@ -335,18 +335,9 @@ async function vintedFields(call, listing, currency) {
   const title = String(marketplaceCopy(listing, 'vinted', 'title') || '').trim();
   const description = String(marketplaceCopy(listing, 'vinted', 'description') || '').trim();
   const price = vintedAmount(specifics.price ?? listing.price);
-  const missing = [];
-  if (!title) missing.push({ field: 'title', needs: 'a title' });
-  if (title.length > 100) missing.push({ field: 'title', needs: 'a title of at most 100 characters' });
-  if (!description) missing.push({ field: 'description', needs: 'a description' });
-  if (!(price > 0)) missing.push({ field: 'price', needs: 'a price' });
   const parts = String(specifics.category || '').split('>').map(part => marketplaceText(part).toLowerCase()).filter(Boolean);
-  if (!parts.length) missing.push({ field: 'vinted_specifics.category', needs: 'a category' });
-  if (!String(specifics.condition || '').trim()) missing.push({ field: 'vinted_specifics.condition', needs: 'a condition' });
-  if (missing.length) throw marketplaceMissing('vinted', missing);
   const catalogs = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/catalogs`, { step: 'category' });
   const catalogId = vintedFindCatalog(catalogs?.catalogs || catalogs, parts);
-  if (!catalogId) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.category', needs: 'a category Vinted offers' }]);
   const attributes = await call('POST', `${VINTED_ORIGIN}/api/v2/item_upload/attributes`, {
     step: 'category', body: { attributes: [{ code: 'category', value: [catalogId] }] }, retry: true,
   });
@@ -357,42 +348,34 @@ async function vintedFields(call, listing, currency) {
     sizes = vintedFlatten((groups?.size_groups || []).flatMap(group => group?.sizes || group?.options || []));
   }
   const condition = vintedMatch(byCode('condition').concat(byCode('status')), specifics.condition);
-  if (!condition) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.condition', needs: 'a condition Vinted offers' }]);
   // A size the Vinted form leaves blank still has the listing's General size.
   const sizeName = String(marketplaceCopy(listing, 'vinted', 'size') || '').trim();
   const size = vintedSizeMatch(sizes, sizeName);
-  if (sizeName && !size) {
-    throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.size', needs: 'a size Vinted offers in this category' }]);
-  }
-  if (!size && sizes.length) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.size', needs: 'a size' }]);
   let brandId = null;
   let brand = null;
   const brandName = String(marketplaceCopy(listing, 'vinted', 'brand') || '').trim();
   if (brandName) {
     const found = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/brands?keyword=${encodeURIComponent(brandName)}&category_id=${catalogId}`, { step: 'brand' });
     const match = vintedMatch((found?.brands || []).map(row => ({ id: Number(row.id), title: row.title })), brandName);
-    if (!match) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.brand', needs: 'a brand Vinted offers' }]);
-    brandId = match.id;
-    brand = match.title;
+    brandId = match?.id ?? null;
+    brand = match?.title ?? brandName;
   }
   const colorIds = [];
   const colorName = String(marketplaceCopy(listing, 'vinted', 'color') || '').trim();
   if (colorName) {
     const colors = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/colors`, { step: 'color' });
     const match = vintedMatch((colors?.colors || []).map(row => ({ id: Number(row.id), title: row.title })), colorName);
-    if (!match) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.color', needs: 'a color Vinted offers' }]);
-    colorIds.push(match.id);
+    if (match) colorIds.push(match.id);
   }
   const packages = await call('GET', `https://api.www.vinted.com/shipping-estimation/external/catalogs/${catalogId}/package_sizes`, { step: 'package' });
   const packageSize = vintedPackageMatch((packages?.package_sizes || []).map(row => ({
     id: Number(row.id), title: row.title || row.name || row.code, code: row.code || '',
   })), specifics.packageSize || 'Medium');
-  if (!packageSize) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.packageSize', needs: 'a package size Vinted offers' }]);
-  const itemAttributes = [{ code: 'condition', ids: [condition.id] }];
+  const itemAttributes = condition ? [{ code: 'condition', ids: [condition.id] }] : [];
   if (size) itemAttributes.push({ code: 'size', ids: [size.id] });
   return {
-    title, description, price, currency, catalog_id: catalogId, condition_id: condition.id, size_id: size ? size.id : null,
-    brand_id: brandId, brand, color_ids: colorIds, package_size_id: packageSize.id, item_attributes: itemAttributes,
+    title, description, price, currency, catalog_id: catalogId, condition_id: condition?.id ?? null, size_id: size ? size.id : null,
+    brand_id: brandId, brand, color_ids: colorIds, package_size_id: packageSize?.id ?? null, item_attributes: itemAttributes,
   };
 }
 
@@ -618,9 +601,6 @@ async function runVintedNative(msg, recovery = false) {
       }
       payload.draft_url = vintedDraftUrl(view.id);
       return { ok: true, state: 'draft', draft_url: payload.draft_url };
-    }
-    if (!photos.length || photos.length > VINTED_MAX_PHOTOS) {
-      throw marketplaceMissing('vinted', [{ field: 'photos', needs: `between one and ${VINTED_MAX_PHOTOS} photos` }]);
     }
     const fields = await vintedFields(call, listing, session.currency);
     if (payload.action === 'publish') {

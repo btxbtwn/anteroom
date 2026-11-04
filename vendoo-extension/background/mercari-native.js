@@ -21,7 +21,6 @@ const MERCARI_OPERATIONS = {
   // way the client hashes the drafts' operations above.
   editListing: '53785e33b5b6ddeaedd8a31b9cfdccc0b00cd6e571810e369c87e5c74ddf591d',
 };
-const MERCARI_MAX_PHOTOS = 12;
 const MERCARI_PHOTO_EDGE = 1200;
 
 // Mercari's masterQuery fields, read from its web client (2026-10-26).
@@ -88,19 +87,17 @@ function mercariCatalogCategories(master) {
 function mercariCatalogListing(listing, master) {
   const id = mercariCategoryId(listing);
   const category = master.itemCategories.find(row => Number(row.id) === id);
-  if (!category) throw marketplaceMissing('mercari', [{ field: 'categoryId', needs: 'a category from Mercari’s current list' }]);
   const children = master.itemCategories.filter(row => Number(row.parentId) === id);
-  const group = master.itemSizeGroups.find(row => Number(row.id) === Number(category.itemSizeGroupId));
-  if (category.itemSizeGroupId && !group) throw marketplaceError('Mercari’s size group is missing. Refresh its catalog.', { code: 'schema_drift' });
+  const group = master.itemSizeGroups.find(row => Number(row.id) === Number(category?.itemSizeGroupId));
   const byId = new Map(master.itemSizes.map(row => [Number(row.id), row]));
   const subgroups = new Map(master.itemSizeSubGroups.map(row => [Number(row.id), row]));
   const sizes = (group?.sizeIds || []).map(sizeId => {
     const row = byId.get(Number(sizeId));
-    if (!row) throw marketplaceError('Mercari’s size list is incomplete. Refresh its catalog.', { code: 'schema_drift' });
+    if (!row) return null;
     const label = [row.title, row.subtitle].filter(Boolean).join(' ');
     return { id: row.id, name: label, title: label, group: row.itemSizeSubGroupId,
       group_name: subgroups.get(Number(row.itemSizeSubGroupId))?.title || '' };
-  });
+  }).filter(Boolean);
   return { ...listing, form: { ...listing.form, sizes, overrides: { ...listing.form?.overrides,
     categoryV2: { id, hasChildren: children.length > 0, children: children.map(row => row.name),
       displayPath: mercariCatalogCategories(master).find(row => Number(row.value) === id)?.label.split(' > ') || [] },
@@ -174,8 +171,6 @@ function mercariConditionId(condition) {
 }
 
 const MERCARI_SHIPPING_PAYER = { SELLER: 2, BUYER: 1 };
-// Mercari's prepaid labels stop at 50 lb.
-const MERCARI_MAX_LABEL_OZ = 800;
 
 // The leaf a direct list sends: the Mercari id Anteroom stored. A category with
 // subcategories is too broad: Mercari then lists it with no size. Only the
@@ -473,7 +468,9 @@ function mercariCommon(listing) {
   if (conditionId != null) common.conditionId = conditionId;
   if (categoryId != null) {
     const size = mercariSize(listing, categoryId);
+    const selected = Number(listing.mercari_specifics?.nativeSizeId);
     if (size.id) common.sizeId = size.id;
+    else if (Number.isInteger(selected) && selected > 0) common.sizeId = selected;
   } else {
     // Without a category there is no size list to read, so a stored id is the
     // only size this item has.
@@ -497,53 +494,12 @@ function mercariCommon(listing) {
   return common;
 }
 
-// Everything Mercari would refuse, named before the first upload.
-function mercariMissing(listing, common) {
-  const missing = [];
-  const category = mercariCategory(listing);
-  if (!common.name) missing.push({ field: 'name', needs: 'a title' });
-  if (common.name.length > 80) missing.push({ field: 'name', needs: 'a title of 80 characters or fewer' });
-  if (!common.description) missing.push({ field: 'description', needs: 'a description' });
-  if ((common.description || '').length > 1000) missing.push({ field: 'description', needs: 'a description of 1000 characters or fewer' });
-  const dollars = (common.price || 0) / 100;
-  if (!(dollars >= 1 && dollars <= 2000)) missing.push({ field: 'price', needs: 'a price from $1 to $2,000' });
-  if (common.isAutoPriceDrop && !(Number.isInteger(Number(listing.mercari_specifics?.smartPricing?.minimumPrice))
-    && common.minPriceForAutoPriceDrop > 0 && common.minPriceForAutoPriceDrop < common.price)) {
-    missing.push({ field: 'minPriceForAutoPriceDrop', needs: 'a whole-dollar Smart Pricing floor below the listing price' });
-  }
-  if (!category) missing.push({ field: 'categoryId', needs: 'a Mercari category' });
-  else if (category.parent) missing.push({ field: 'categoryId', needs: `a more specific Mercari category${listing.form?.overrides?.categoryV2?.children?.length
-    ? ` (${listing.form.overrides.categoryV2.children.join(', ')})` : ''}` });
-  if (common.conditionId == null) missing.push({ field: 'conditionId', needs: 'a condition' });
-  if (category) {
-    const size = mercariSize(listing, category.id);
-    if (size.problem) missing.push({ field: 'sizeId', needs: size.problem });
-    else if (size.none === 'unknown' && mercariWantedSize(listing)) missing.push({ field: 'sizeId', needs: 'its size list, which Anteroom could not read (try again)' });
-  }
-  const method = listing.mercari_specifics?.shippingMethod ?? 'MERCARI';
-  if (!['MERCARI', 'SOYO'].includes(method)) missing.push({ field: 'mercari_specifics.shippingMethod', needs: 'a shipping method from Mercari' });
-  if (!common.shipping.classIds) missing.push({ field: 'shippingClassIds', needs: 'a prepaid shipping label' });
-  const weight = common.shipping.weight?.weight;
-  if (method !== 'SOYO') {
-    if (!weight) missing.push({ field: 'weight', needs: 'a package weight' });
-    else if (weight > MERCARI_MAX_LABEL_OZ) missing.push({ field: 'weight', needs: 'a package of 50 lb or less for a Mercari label' });
-  }
-  return missing;
-}
-
 // Only an exact name from Mercari's own catalog is accepted. Encoded brand
 // ids from other services are not a substitute for checking the name.
 async function mercariBrandSelection(listing, deadline) {
   const wanted = mercariBrandRequest(listing);
   if (wanted.omit) return { id: null, explicit: wanted.explicit };
-  let id;
-  try {
-    id = await mercariBrandLookup(wanted.name, deadline);
-  } catch (error) {
-    marketplaceLog('mercari', 'brand', { error_code: 'unresolved' });
-    throw marketplaceMissing('mercari', [{ field: 'brandId', needs: `its brand id for ${wanted.name}, which Anteroom could not read (try again)` }],
-      String(error?.message || error));
-  }
+  const id = await mercariBrandLookup(wanted.name, deadline);
   // Mercari accepts a listing with no brand. An unmatched name is left off,
   // including on a draft that already has some other brand.
   if (!id) return { id: null, explicit: true };
@@ -799,13 +755,8 @@ async function runMercariNative(msg, recovery = false) {
     }
     const listing = await mercariPreparedListing(payload.listing, payload.deadline);
     const common = mercariCommon(listing);
-    const missing = mercariMissing(listing, common);
-    if (missing.length) throw marketplaceMissing('mercari', missing);
     applyMercariBrand(common, await mercariBrandSelection(payload.listing, payload.deadline));
     const photos = payload.photos || [];
-    if (!photos.length || photos.length > MERCARI_MAX_PHOTOS) {
-      throw marketplaceMissing('mercari', [{ field: 'photos', needs: `between one and ${MERCARI_MAX_PHOTOS} photos` }]);
-    }
     // Mercari replaces the image list on edit too; leaving it out clears the draft's photos.
     common.imageIds = await mercariUploadPhotos(msg.job_id, photos, payload.deadline);
     const expectedPhotos = photos.length;
@@ -856,8 +807,6 @@ async function publishMercariDraft(payload, storeReceipt, recovery) {
   try {
     const listing = await mercariPreparedListing(payload.listing, payload.deadline);
     const common = mercariCommon(listing);
-    const missing = mercariMissing(listing, common);
-    if (missing.length) throw marketplaceMissing('mercari', missing);
     applyMercariBrand(common, await mercariBrandSelection(payload.listing, payload.deadline));
     const draft = await readMercariDraft(id, payload.deadline);
     const mismatch = mercariDraftMismatch(draft, common, null, 'Mercari\'s draft does not match this revision');
@@ -1009,24 +958,6 @@ function mercariEditInput(form, changed) {
   return input;
 }
 
-function mercariLiveMissing(listing, input, changed) {
-  const missing = [];
-  if (!input.name) missing.push({ field: 'name', needs: 'a title' });
-  else if (input.name.length > 80) missing.push({ field: 'name', needs: 'a title of 80 characters or fewer' });
-  if (!input.description) missing.push({ field: 'description', needs: 'a description' });
-  else if (input.description.length > 1000) missing.push({ field: 'description', needs: 'a description of 1000 characters or fewer' });
-  if (!(input.price >= 100 && input.price <= 200000)) missing.push({ field: 'price', needs: 'a price from $1 to $2,000' });
-  if (input.isAutoPriceDrop && !(input.minPriceForAutoPriceDrop > 0 && input.minPriceForAutoPriceDrop < input.price)) {
-    missing.push({ field: 'minPriceForAutoPriceDrop', needs: 'a whole-dollar Smart Pricing floor below the listing price' });
-  }
-  if (Object.hasOwn(changed, 'categoryId')) {
-    const category = mercariCategory(listing);
-    if (category?.parent) missing.push({ field: 'categoryId', needs: 'a more specific Mercari category' });
-    const size = mercariSize(listing, input.categoryId);
-    if (size.problem) missing.push({ field: 'sizeId', needs: size.problem });
-  }
-  return missing;
-}
 
 // Seller-confirmed only, sent at most once. A lost reply is answered by
 // reading the item, never by sending the edit again.
@@ -1062,8 +993,6 @@ async function updateMercariItem(payload, recovery) {
     const changed = mercariLiveChanges(form, wanted);
     if (!Object.keys(changed).length) return { ok: true, state: 'published', listing_url: listingUrl };
     const input = mercariEditInput(form, changed);
-    const missing = mercariLiveMissing(listing, input, changed);
-    if (missing.length) throw marketplaceMissing('mercari', missing);
     stage = 'writing';
     await mercariRequest(mercariOperation('editListing', { input }), { deadline: payload.deadline });
     stage = 'written';

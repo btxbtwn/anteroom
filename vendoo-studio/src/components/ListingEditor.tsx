@@ -400,8 +400,8 @@ export function StructuredEditor({
       return previous;
     },
   });
-  // What List would say about a field is said under that field, where the seller
-  // is typing. The same gaps stay beside List, which is what a blocking one holds.
+  // Field checks appear beside the form as advice; the marketplace validates
+  // the seller-confirmed List attempt.
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.preflight(convId),
