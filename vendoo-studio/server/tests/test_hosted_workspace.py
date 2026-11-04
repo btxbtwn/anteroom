@@ -14,6 +14,34 @@ from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.services import hosted_photos
 
 
+def test_manual_general_changes_follow_across_marketplaces_and_keep_own_edits(cloud, signing_keys):  # noqa: F811
+    from vendoo_studio.services.seller_overrides import MARKETPLACES
+
+    client, _engine = cloud
+    auth = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=auth, json={'title': 'Manual test'}).json()['id']
+    path = f'/api/conversations/{identity}/listing'
+    listing = {'title': 'Old title', 'description': 'Old description', 'brand': 'Hanes', 'price': 25,
+               **{f'{m}_specifics': {'title': 'Old title'} for m in MARKETPLACES}}
+    first = client.put(path, headers=auth, json={'expected_revision_id': '', 'listing': listing})
+    assert first.status_code == 200
+    listing = first.json()['listing']
+    listing['title'] = 'New title'
+    second = client.put(path, headers=auth, json={'expected_revision_id': first.json()['revision_id'], 'listing': listing})
+    assert second.status_code == 200
+    saved = second.json()['listing']
+    for market in MARKETPLACES:
+        assert saved.get(f'{market}_specifics', {}).get('title', saved['title']) == 'New title'
+    saved['poshmark_specifics'] = {**saved.get('poshmark_specifics', {}), 'title': 'My Poshmark title'}
+    third = client.put(path, headers=auth, json={'expected_revision_id': second.json()['revision_id'], 'listing': saved})
+    assert third.status_code == 200
+    saved = third.json()['listing']
+    saved['title'] = 'Another general title'
+    fourth = client.put(path, headers=auth, json={'expected_revision_id': third.json()['revision_id'], 'listing': saved})
+    assert fourth.status_code == 200
+    assert fourth.json()['listing']['poshmark_specifics']['title'] == 'My Poshmark title'
+
+
 @pytest.mark.parametrize(('quantity', 'expected'), [(1, 'sold'), (3, 'active')])
 def test_paid_sales_reconcile_hosted_inventory_status(cloud, signing_keys, quantity, expected):  # noqa: F811
     from datetime import datetime

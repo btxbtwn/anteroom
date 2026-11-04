@@ -419,7 +419,8 @@ def lock_native_edits(previous: dict, submitted: dict, markets) -> None:
     if not prefixes or not isinstance(submitted, dict):
         return
     changed = _changed_paths(previous if isinstance(previous, dict) else {}, submitted)
-    locks = locked_paths(submitted) | {path for path in changed if path.startswith(prefixes) and not is_price_path(path)}
+    locks = locked_paths(submitted) | {path for path in changed if path.startswith(prefixes)
+                                     and get_path(submitted, path) is not None and not is_price_path(path)}
     _write_locks(submitted, locks)
 
 

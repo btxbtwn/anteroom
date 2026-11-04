@@ -258,6 +258,9 @@ def save_listing(identity: str, body: ListingInput, db=Depends(get_seller_db, sc
         raise HTTPException(409, 'This listing changed on another device. Reload before saving again.')
     if current and expected and before is None:
         raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
+    from vendoo_studio.services.seller_overrides import prepare_user_listing
+
+    prepare_user_listing(before.listing_json if before else {}, payload)
     revision = ListingRevision(conversation_id=identity, listing_json=payload, source='user_form',
                                parent_revision_id=before.id if before else None)
     db.add(revision)
