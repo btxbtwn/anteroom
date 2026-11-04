@@ -1,1 +1,0 @@
-- Manual General edits now carry through to marketplace forms without regeneration. Native-form saves keep the reconciled values instead of restoring stale generated copies, while deliberate marketplace edits remain independent. Hosted saves apply the same seller-edit rules.

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.724 — 2026-11-04
+
+- Manual General edits now carry through to marketplace forms without regeneration. Native-form saves keep the reconciled values instead of restoring stale generated copies, while deliberate marketplace edits remain independent. Hosted saves apply the same seller-edit rules.
+
 ## 0.1.723 — 2026-11-04
 
 - Listing field checks are advisory. Sellers can confirm List despite missing fields, stale category or size choices, or eligibility warnings. Anteroom submits the attempt and shows the marketplace's rejection so sellers can edit and retry.
