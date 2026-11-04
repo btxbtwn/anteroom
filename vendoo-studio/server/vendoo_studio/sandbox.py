@@ -70,6 +70,8 @@ def refusal(method: str, path: str) -> str | None:
     clean = path.split("?", 1)[0].rstrip("/")
     if method.upper() == "POST" and any(pattern.match(clean) for pattern in _LISTING_POSTS):
         return LISTING_DETAIL
+    if method.upper() == "POST" and re.fullmatch(r"/api/conversations/[^/]+/vendoo-draft(?:/check)?", clean):
+        return OFFLINE_DETAIL
     if any(pattern.match(clean) for pattern in _OFFLINE_ROUTES):
         return OFFLINE_DETAIL
     return None

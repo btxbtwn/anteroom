@@ -16,13 +16,16 @@ async function photoData(jobId: string, photo: { id: string; mime_type: string }
 }
 
 function approvedPhotos(command: RelayedCommand): { id: string; mime_type: string }[] {
+  if (command.type === "job.vendoo_api" && Array.isArray(command.payload.ops)) {
+    return command.payload.ops.filter(op => op?.op === "upload_photo").map(op => op.photo);
+  }
   if (command.type !== "marketplace.execute" || !Array.isArray(command.payload.photos)) return [];
   return command.payload.photos.filter((photo): photo is { id: string; mime_type: string } =>
     typeof photo?.id === "string" && typeof photo?.mime_type === "string");
 }
 
 /** What a Bridge may declare it runs for the hosted API: marketplace actions, and each named read. */
-export const RELAY_CAPABILITIES = ["marketplace.actions", "vinted.choices", "sellwild.account", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import"] as const;
+export const RELAY_CAPABILITIES = ["marketplace.actions", "vinted.choices", "sellwild.account", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts"] as const;
 
 /** One relay turn: wait for the next command, run it in Chrome, post the reply. False when nothing came. */
 export async function relayOnce(bridge: RelayBridge, capabilities: readonly string[]): Promise<boolean> {

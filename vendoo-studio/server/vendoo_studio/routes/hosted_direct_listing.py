@@ -85,6 +85,10 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db, scope="func
     """The Etsy form: the category's saved fields and Etsy's own properties, built
     as on the Mac. The web never asks Chrome for a schema, so an unread leaf shows
     Etsy's live properties and the listing's own values."""
+    from vendoo_studio.services import listing_mode
+    if listing_mode.read(db) == "vendoo":
+        from vendoo_studio.routes.vendoo_api import listing_fields as vendoo_fields
+        return await vendoo_fields(conv_id, db)
     from vendoo_studio.models.listing_values import marketplace_dropdown_forms
     from vendoo_studio.services.category_fields import listing_category_ids, load_fields
 

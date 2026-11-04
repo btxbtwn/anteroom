@@ -986,6 +986,7 @@ class UiPrefsConfig(BaseModel):
     model_favorites: list[dict] | None = None
     stale_listing_days: int | None = None
     label_colors: dict[str, str] | None = None
+    listing_mode: Literal["direct", "vendoo"] | None = None
 
 
 @router.get("/ui")
@@ -996,10 +997,13 @@ def get_ui_prefs():
 
 
 @router.put("/ui")
-def put_ui_prefs(config: UiPrefsConfig):
+def put_ui_prefs(config: UiPrefsConfig, db: Session = Depends(get_db)):
     from vendoo_studio.services import user_settings
 
     try:
+        if config.listing_mode is not None:
+            from vendoo_studio.services.listing_mode import change
+            change(db, config.listing_mode)
         if config.remember_labels is not None or config.restore_labels:
             user_settings.remember_vendoo_labels(config.remember_labels, config.restore_labels)
         if config.forget_label is not None:

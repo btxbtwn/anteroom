@@ -1,3 +1,4 @@
+import { VendooLayout, useListingMode } from "./VendooLayout";
 import { useWorkspaceRuntime } from "../app/runtime";
 import { editorTabs } from "./editorTabs";
 import { GENERAL_LISTING_FIELDS } from "../generalListingFields";
@@ -135,6 +136,8 @@ export function ListingEditor({
   chat,
 }: Props) {
   const runtime = useWorkspaceRuntime();
+  const mode = useListingMode();
+  const vendoo = mode.data?.listing_mode === "vendoo";
   const queryClient = useQueryClient();
   const edits = React.useMemo(() => listingEdits(queryClient, convId), [queryClient, convId]);
   const editState = React.useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
@@ -165,6 +168,7 @@ export function ListingEditor({
     queryFn: () => api.conversations.get(convId),
   });
 
+  const Layout = vendoo ? VendooLayout : MarketplacesLayout;
   const tabs = React.useMemo(() => editorTabs(marketplaceSettings?.selected, runtime), [marketplaceSettings?.selected, runtime]);
 
   React.useEffect(() => {
@@ -225,9 +229,12 @@ export function ListingEditor({
 
 
       <div className={cn("listing-form-area", chat && "has-chat")}>
-      <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
+      {mode.isPending ? <p role="status" className="p-3 text-xs text-muted-foreground">Loading listing workflow…</p> : mode.error && !mode.data ?
+        <p role="alert" className="p-3 text-xs text-destructive-foreground">{mode.error.message}</p> :
+      <Layout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
         disabled={generating || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
+          if (vendoo) return;
           if (tab === "vinted") void prefetchVintedChoices(queryClient, convId);
           if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
         }}
@@ -282,7 +289,7 @@ export function ListingEditor({
             </Button>
           </div>
         </>
-      </MarketplacesLayout>
+      </Layout>}
       {chat}
       </div>
 
@@ -384,7 +391,8 @@ export function StructuredEditor({
   const emitChange = (updated: ListingData) => {
     if (!editingDisabled.current) onChange(updated);
   };
-  const nativeTab = DIRECT_FORM_MARKETS.has(tab);
+  const vendoo = useListingMode().data?.listing_mode === "vendoo";
+  const nativeTab = !vendoo && DIRECT_FORM_MARKETS.has(tab);
   // The form's rows come from the category. A price, brand, format, or shipping
   // edit must not start a new read: that used to drop every row until the form
   // answered, leaving only the marketplace price on screen. A new category,

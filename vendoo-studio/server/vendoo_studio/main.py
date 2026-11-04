@@ -24,6 +24,7 @@ from vendoo_studio.routes import ai_keys, sales_ledger, bulk_delete, bulk_edit, 
 from vendoo_studio.routes import automations as automations_route
 from vendoo_studio.routes import errors as errors_route
 from vendoo_studio.routes import listing_videos
+from vendoo_studio.routes.vendoo_drafts import router as vendoo_drafts_router
 
 
 @asynccontextmanager
@@ -267,6 +268,7 @@ app.include_router(errors_route.router)
 app.include_router(attachments.router)
 app.include_router(scout.router)
 app.include_router(vendoo_api.router)
+app.include_router(vendoo_drafts_router)
 app.include_router(backups.router)
 app.include_router(updates.router)
 app.include_router(changelog.router)

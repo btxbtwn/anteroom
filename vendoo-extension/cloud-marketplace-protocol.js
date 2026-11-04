@@ -94,6 +94,20 @@
     if (!plain(value) || Object.keys(value).some(key => !['type', 'job_id', 'message_id', 'payload'].includes(key))) return null;
     const payload = value.payload;
     if (!/^[0-9a-f]{32}$/.test(value.message_id || '') || !plain(payload) || payload.request_id !== value.message_id) return null;
+    if (value.type === 'job.vendoo_api') {
+      if (payload.listing_mode !== 'vendoo' || !/^[a-f0-9-]{1,64}$/i.test(value.job_id || '')
+          || size(value) > 2_000_000 || !Array.isArray(payload.ops) || !payload.ops.length) return null;
+      const allowed = new Set(['session', 'new_item_id', 'subscription', 'upload_photo', 'create_item', 'get_item', 'update_item', 'resolve_labels']);
+      if (payload.ops.some(op => !plain(op) || !allowed.has(op.op))) return null;
+      for (const op of payload.ops) {
+        if (op.op === 'upload_photo' && (!plain(op.photo) || !/^[a-f0-9-]{1,64}$/i.test(op.photo.id || '') || !MIMES.has(op.photo.mime_type)
+            || Object.keys(op.photo).some(key => !['id', 'mime_type', 'extension'].includes(key)))) return null;
+        if (['get_item', 'update_item'].includes(op.op) && !/^[A-Za-z0-9]{20}$/.test(op.item_id || '')) return null;
+        if (op.op === 'update_item' && (!op.expected_update_time || !plain(op.updates)
+            || Object.keys(op.updates).some(path => !/^(generalDetails\.|listings\.[a-z]+\.(overrides|categorySpecifics|marketplaceSpecifics)\.|labels$)/.test(path)))) return null;
+      }
+      return value;
+    }
     if (PROMOTION_COMMANDS.has(value.type)) return promotion(value) ? value : null;
     if (Object.hasOwn(READS, value.type)) {
       if (value.type === 'marketplace.sales_history' && (!Object.hasOwn(payload, 'marketplace') || !Object.hasOwn(payload, 'settled'))) return null;

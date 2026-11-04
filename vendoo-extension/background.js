@@ -6,7 +6,7 @@ if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(STUDIO_URL)) throw new Error('Antero
 // than the exact build, so an older copy keeps working until a change needs
 // something new. Add a name here when the Bridge gains a command an older copy
 // could not run, and require it in Anteroom.
-const BRIDGE_CAPABILITIES = ['marketplace.actions', 'marketplace.sales_history', 'marketplace.promotions'];
+const BRIDGE_CAPABILITIES = ['marketplace.actions', 'marketplace.sales_history', 'marketplace.promotions', 'vendoo.drafts'];
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 8000;
 // A socket that stays up this long counts as a good connection, and only then
@@ -41,6 +41,7 @@ importScripts('background/poshmark-native.js');
 importScripts('background/sellwild-native.js');
 importScripts('background/vinted-native.js');
 importScripts('background/native-marketplaces.js');
+importScripts('background/vendoo-api.js');
 importScripts('background/marketplace-delete.js');
 importScripts('background/marketplace-promotions.js');
 importScripts('background/marketplace-likes.js');
@@ -320,6 +321,9 @@ async function handleStudioMessage(msg) {
       duplicateBridge = false;
       break;
 
+    case 'job.vendoo_api':
+      handleVendooApiMessage(msg);
+      break;
     case 'marketplace.execute':
     case 'marketplace.result': {
       await handleNativeMarketplaceMessage(msg);

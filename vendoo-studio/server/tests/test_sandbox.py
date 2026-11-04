@@ -43,6 +43,8 @@ def test_refuses_every_route_that_changes_a_live_listing(path):
         ("GET", "/api/updates"),
         ("POST", "/api/updates/apply"),
         ("POST", "/api/desktop/chrome/connect"),
+        ("POST", "/api/conversations/abc/vendoo-draft"),
+        ("POST", "/api/conversations/abc/vendoo-draft/check"),
         ("POST", "/api/settings/tailscale/enable"),
         ("POST", "/api/settings/chatgpt/login"),
         ("GET", "/api/settings/claude/terminal"),

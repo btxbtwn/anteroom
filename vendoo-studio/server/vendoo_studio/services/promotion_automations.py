@@ -421,6 +421,9 @@ def _pause(db: Session, row: PromotionAutomation, reason: str) -> str:
 
 async def tick(db: Session, *, now: datetime | None = None, sleep=asyncio.sleep) -> int:
     """Run every due automation, one at a time. A busy slot waits for the next tick."""
+    from vendoo_studio.services.listing_mode import read
+    if read(db) == "vendoo":
+        return 0
     moment = now or _now()
     ran = 0
     due = db.query(PromotionAutomation).filter(PromotionAutomation.enabled.is_(True), PromotionAutomation.next_run_at <= moment).order_by(
@@ -440,6 +443,9 @@ async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
     Only events after approval qualify. Re-reading the recent feed also catches
     late notifications; the send journal prevents replaying confirmed offers.
     """
+    from vendoo_studio.services.listing_mode import read
+    if read(db) == "vendoo":
+        return 0
     rows = db.query(PromotionAutomation).filter(
         PromotionAutomation.enabled.is_(True), PromotionAutomation.action == "offer",
         PromotionAutomation.marketplace.in_(("poshmark", "depop")),
