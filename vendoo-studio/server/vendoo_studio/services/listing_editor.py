@@ -33,7 +33,7 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     from vendoo_studio.services.chrome_catalog import keep_direct_categories
     from vendoo_studio.services.depop_category import align_depop_category
     from vendoo_studio.services.listing_generate import align_size_fields, sanitize_listing_sizes
-    from vendoo_studio.services.seller_overrides import lock_native_edits, prepare_user_listing, preserving_locks
+    from vendoo_studio.services.seller_overrides import fold_key, is_price_path, lock_native_edits, prepare_user_listing, preserving_locks
 
     updated = copy.deepcopy(listing)
     reject_corrupt_listing(updated)
@@ -42,6 +42,20 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     native_blocks = {market: copy.deepcopy(updated.get(f"{market}_specifics") or {})
                      for market in updated.get("_native_forms") or {}}
     prepare_user_listing(previous, updated, notes=notes)
+    general_changes = {fold_key(key) for key, value in listing.items()
+                       if not isinstance(value, (dict, list)) and value != previous.get(key)}
+    for market, original in native_blocks.items():
+        key = f"{market}_specifics"
+        prior = previous.get(key) or {}
+        reconciled = copy.deepcopy(updated.get(key) or {})
+        # Preserve the seller's actual native edits, not stale generated copies
+        # that reconciliation removed because General changed.
+        for field, value in original.items():
+            inherited_changed = ("price" in general_changes if is_price_path(f"{key}.{field}")
+                                 else fold_key(field) in general_changes)
+            if field not in prior or value != prior[field] or not inherited_changed:
+                reconciled[field] = value
+        native_blocks[market] = reconciled
     sanitize_listing_sizes(updated)
     previous_size = None if previous.get("size") is None else str(previous.get("size"))
 
