@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.727 — 2026-11-04
+
+- Choose Use Vendoo in Settings to send private drafts for review in Vendoo. Turning it off restores direct marketplace actions; the two workflows never run together.
+
 ## 0.1.726 — 2026-11-04
 
 - Etsy order recovery and the automatic Etsy order check now record paid, completed, cancelled and refunded Etsy orders. Before, every Etsy order was skipped, so missing Etsy sales never came back.

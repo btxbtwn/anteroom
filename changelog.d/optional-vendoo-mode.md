@@ -1,1 +1,0 @@
-- Choose Use Vendoo in Settings to send private drafts for review in Vendoo. Turning it off restores direct marketplace actions; the two workflows never run together.
