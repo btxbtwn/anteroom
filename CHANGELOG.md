@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.722 — 2026-11-04
+
+- Retry once when OpenRouter returns thinking without an answer during photo analysis or marketplace field filling.
+
 ## 0.1.721 — 2026-11-04
 
 - Draft generation reuses freshly loaded marketplace choices while filling fields, avoiding repeated form requests.
