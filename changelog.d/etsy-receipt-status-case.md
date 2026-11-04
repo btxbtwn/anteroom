@@ -1,0 +1,1 @@
+- Etsy order recovery and the automatic Etsy order check now record paid, completed, cancelled and refunded Etsy orders. Before, every Etsy order was skipped, so missing Etsy sales never came back.

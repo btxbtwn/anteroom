@@ -130,7 +130,7 @@ def _order(raw: dict) -> dict:
         "paid": paid, "shipped": shipped, "createdAt": _timestamp(raw.get("create_timestamp")),
         "total": _money(raw.get("grandtotal")),
         "needsShipping": (paid and raw.get("is_shipped") is False
-                          and status not in {"canceled", "fully refunded"}
+                          and status.lower() not in {"canceled", "fully refunded"}
                           and any(row.get("is_digital") is False for row in transactions)),
         "items": [{"id": _id(row.get("transaction_id")), "title": _text(row.get("title")),
                    "quantity": _count(row.get("quantity")), "sku": _text(row.get("sku"))}
