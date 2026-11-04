@@ -492,7 +492,7 @@ def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
 
 
 def test_sales_read_releases_its_connection_before_account_refresh(cloud, active_connections, signing_keys, monkeypatch):  # noqa: F811
-    from vendoo_studio.services import recent_ebay_orders
+    from vendoo_studio.services import recent_orders
 
     client, _ = cloud
     refreshed = []
@@ -503,7 +503,7 @@ def test_sales_read_releases_its_connection_before_account_refresh(cloud, active
         assert not active_connections
         refreshed.append(True)
 
-    monkeypatch.setattr(recent_ebay_orders, 'refresh', refresh)
+    monkeypatch.setattr(recent_orders, 'refresh', refresh)
     response = client.get('/api/marketplace-sales', headers=headers(signing_keys))
     assert response.status_code == 200
     assert response.json() == {'sales': []}
