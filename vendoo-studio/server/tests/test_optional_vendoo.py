@@ -66,6 +66,19 @@ def test_default_is_direct_and_disabled_vendoo_touches_no_browser(workspace, mon
     assert not tasks
 
 
+def test_bridge_checks_the_mode_before_dispatching_either_transport(workspace):
+    _db, client, _conv, _revision, _tasks = workspace
+    with pytest.raises(HTTPException) as disabled:
+        asyncio.run(vendoo_drafts.browser_bridge.request(SimpleNamespace(id='unstarted'),
+            'job.vendoo_api', {'listing_mode': 'vendoo', 'ops': [{'op': 'session'}]}))
+    assert disabled.value.status_code == 409
+    enable(client)
+    with pytest.raises(HTTPException) as disabled:
+        asyncio.run(vendoo_drafts.browser_bridge.request(SimpleNamespace(id='unstarted'),
+            'marketplace.execute', {'marketplace': 'poshmark', 'action': 'list', 'confirm': True}))
+    assert disabled.value.status_code == 409
+
+
 @pytest.mark.parametrize("market", ["ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"])
 def test_vendoo_mode_refuses_direct_list_on_every_marketplace(workspace, monkeypatch, market):
     _db, client, conv, revision, tasks = workspace
