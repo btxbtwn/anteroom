@@ -484,9 +484,9 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.3)
 
     def test_changed_categories_names_only_new_picks(self):
-        before = {"direct_category_ids": {"depop": "a", "ebay": "1"}, "sellwild_specifics": {"nativeCategoryId": "5"}}
-        after = {"direct_category_ids": {"depop": "b", "ebay": "1", "mercari": ""}, "sellwild_specifics": {"nativeCategoryId": "6"}}
-        self.assertEqual(native_field_fill.changed_categories(before, after), {"depop", "sellwild"})
+        before = {"direct_category_ids": {"depop": "a", "ebay": "1"}, "poshmark_specifics": {"nativeSizeId": "M"}}
+        after = {"direct_category_ids": {"depop": "b", "ebay": "1", "mercari": ""}, "poshmark_specifics": {"nativeSizeId": "L"}}
+        self.assertEqual(native_field_fill.changed_categories(before, after), {"depop"})
 
     async def test_a_new_category_fills_that_marketplace_only(self):
         self.save({"depop": "menswear_trousers"})

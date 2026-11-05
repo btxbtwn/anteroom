@@ -15,7 +15,7 @@ from typing import Any
 
 SELLER_FIELDS = "seller_fields"
 
-MARKETPLACES = ("ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild")
+MARKETPLACES = ("ebay", "poshmark", "mercari", "depop", "etsy")
 FORM_MARKETPLACES = MARKETPLACES
 
 
@@ -34,8 +34,6 @@ CANONICAL_PRICE = {
     "mercari": "mercari_specifics.price",
     "depop": "depop_specifics.price",
     "etsy": "etsy_specifics.price",
-    "vinted": "vinted_specifics.price",
-    "sellwild": "sellwild_specifics.price",
 }
 
 _PRICE_FOLDS = frozenset({
@@ -45,8 +43,6 @@ _PRICE_FOLDS = frozenset({
     "mercariprice",
     "depopprice",
     "etsyprice",
-    "vintedprice",
-    "sellwildprice",
     "listingprice",
     "buyitnowprice",
 })

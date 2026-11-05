@@ -12,10 +12,10 @@ from datetime import datetime
 
 from vendoo_studio.services.automation_schedule import WEEKDAYS, ScheduleError, normalize_schedule
 
-MARKETPLACES = ("ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted")
+MARKETPLACES = ("ebay", "poshmark", "mercari", "depop", "etsy")
 _MARKETPLACE_WORDS = {
     "ebay": "ebay", "e-bay": "ebay", "poshmark": "poshmark", "mercari": "mercari",
-    "depop": "depop", "etsy": "etsy", "sellwild": "sellwild", "vinted": "vinted",
+    "depop": "depop", "etsy": "etsy",
 }
 _MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,

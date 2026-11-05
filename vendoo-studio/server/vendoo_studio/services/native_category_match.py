@@ -219,7 +219,6 @@ def evidence(listing: dict) -> str:
 def native_rows() -> dict[str, list[dict]]:
     """Each direct form's own category options as {"id", "path"}, read from the files the forms read."""
     from vendoo_studio.services import depop_form, mercari_form, poshmark_form
-    from vendoo_studio.services.sellwild_listing import sellwild_catalog
 
     poshmark = next(row for row in poshmark_form.catalog()["fields"] if row["path"] == "direct_category_ids.poshmark")
     depop = depop_form.catalog()
@@ -230,5 +229,4 @@ def native_rows() -> dict[str, list[dict]]:
         "poshmark": [{"id": value, "path": label} for label, value in poshmark["option_values"].items()],
         "depop": [{"id": row["id"], "path": row["path"]} for row in depop["categories"] if row["id"] not in retired],
         "mercari": [dict(row) for row in mercari if row["path"] not in parents],
-        "sellwild": [{"id": str(row["id"]), "path": row["label"]} for row in sellwild_catalog()["categories"]],
     }

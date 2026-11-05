@@ -12,7 +12,7 @@ import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, Dia
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 
-const MARKETS = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "other"];
+const MARKETS = ["ebay", "etsy", "poshmark", "mercari", "depop", "other"];
 
 export function ledgerMoney(value: string | null | undefined, currency: string | undefined): string {
   return value == null || !currency ? "Not recorded" : `${currency} ${value}`;

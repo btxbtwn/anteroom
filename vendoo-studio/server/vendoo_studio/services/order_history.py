@@ -1,9 +1,9 @@
 """Sales from each Chrome marketplace's own order history, with its amounts.
 
-On Depop, Poshmark, Mercari, Sellwild and Vinted, Anteroom records a sale only
+On Depop, Poshmark and Mercari, Anteroom records a sale only
 from an order the marketplace reports: its ID, its lines and its money. A
 listing that merely reads sold is not a sale: sellers mark listings sold for
-sales made elsewhere, and Sellwild shows that the same way as a sale.
+sales made elsewhere.
 
 Each read stores new orders and updates open ones. An order the marketplace
 reports for a listing replaces what stood in for it before:
@@ -32,7 +32,7 @@ from vendoo_studio.models.marketplace_sale import ORDER_STATUSES, MarketplaceSal
 
 log = logging.getLogger("vendoo_studio.order_history")
 
-HISTORY_MARKETS = ("depop", "poshmark", "mercari", "sellwild", "vinted")
+HISTORY_MARKETS = ("depop", "poshmark", "mercari")
 CAPABILITY = "marketplace.sales_history"
 # Totals Anteroom keeps per line; item cost is the seller's, never the marketplace's.
 TOTALS = ("item_revenue", "shipping_credit", "refunds", "fees", "shipping_cost")
@@ -50,8 +50,6 @@ _LISTING_ID = {
     "poshmark": re.compile(r"^[a-f0-9]{24}$"),
     "mercari": re.compile(r"^m\d{6,}$"),
     "depop": re.compile(r"^[a-z0-9][a-z0-9-]{0,200}$"),
-    "sellwild": re.compile(r"^\d{1,15}$"),
-    "vinted": re.compile(r"^\d{1,15}$"),
 }
 
 

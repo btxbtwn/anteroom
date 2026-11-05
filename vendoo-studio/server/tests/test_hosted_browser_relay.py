@@ -114,6 +114,26 @@ async def _send(relay):
     return waiter
 
 
+
+def _answer(client, alice, reply, capabilities='marketplace.actions'):
+    """Act as the seller's Anteroom tab: take the next command for their Chrome and post the Bridge's reply."""
+    for _ in range(20):
+        command = client.get('/api/browser-relay/next?capabilities=' + capabilities, headers=alice)
+        if command.status_code == 200:
+            body = command.json()
+            assert client.post('/api/browser-relay/replies', headers=alice,
+                               json={'request_id': body['message_id'], 'payload': reply}).status_code == 200
+            return body
+    raise AssertionError('No command reached the tab')
+
+
+def _in_background(call):
+    result = {}
+    thread = threading.Thread(target=lambda: result.update(response=call()), daemon=True)
+    thread.start()
+    return thread, result
+
+
 def _bridge_accepts(command: dict) -> bool:
     """Whether Anteroom Bridge's own contract check takes this command as the page relays it."""
     import json

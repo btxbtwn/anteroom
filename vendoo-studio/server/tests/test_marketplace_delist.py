@@ -23,8 +23,6 @@ URLS = {
     "poshmark": "https://poshmark.com/listing/Vintage-Tee-6aae234280cb08338a8cb591",
     "mercari": "https://www.mercari.com/us/item/m70565754838",
     "depop": "https://www.depop.com/products/shop-classic-tee-136d/",
-    "sellwild": "https://sellwild.com/product/105190104/vintage-tee",
-    "vinted": "https://www.vinted.com/items/42-black-tee",
 }
 
 
@@ -54,7 +52,7 @@ class MarketplaceDelistTest(unittest.TestCase):
     def test_listing_ids_come_from_each_marketplace_link(self):
         self.assertEqual({m: listing_id(m, u) for m, u in URLS.items()}, {
             "ebay": "377507697747", "etsy": "4578284433", "poshmark": "6aae234280cb08338a8cb591",
-            "mercari": "m70565754838", "depop": "shop-classic-tee-136d", "sellwild": "105190104", "vinted": "42"})
+            "mercari": "m70565754838", "depop": "shop-classic-tee-136d"})
         self.assertIsNone(listing_id("ebay", "https://evil.example/itm/377507697747"))
         self.assertIsNone(listing_id("mercari", "https://www.mercari.com/us/item/m1/../x"))
 
@@ -199,7 +197,6 @@ class MarketplaceDelistTest(unittest.TestCase):
 
     def test_marking_not_listed_hides_the_link_until_a_different_listing_appears(self):
         self.assertNotIn("poshmark", self.client.post(f"{self.base}/poshmark/mark", json={"state": "not_listed"}).json())
-        self.assertNotIn("sellwild", self.client.post(f"{self.base}/sellwild/mark", json={"state": "not_listed"}).json())
         notes = parse_notes(self.conv.notes)
         self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {
             **notes["vendooListingUrls"], "poshmark": "https://poshmark.com/listing/Tee-7aae234280cb08338a8cb592"}})
@@ -278,19 +275,11 @@ class MarketplaceDelistTest(unittest.TestCase):
         JobRepo(self.db).create(self.conv.id, "r", {}, status="dispatched", current_step="vendoo_api_create")
         self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["ebay"], "confirm": True}).status_code, 409)
 
-    def test_vinted_is_deleted_through_chrome(self):
-        result = self.client.post(f"{self.base}/delist", json={"marketplaces": ["vinted"], "confirm": True})
-        self.assertEqual(result.status_code, 200, result.text)
-        self.assertEqual(result.json()["vinted"]["state"], "deleted")
-        self.assertEqual(self.bridge.call_args.args[1], "marketplace.delete")
-        self.assertEqual(self.bridge.call_args.args[2], {"marketplace": "vinted", "listing_id": "42", "confirm": True})
-        self.ebay.assert_not_called()
-        self.etsy.assert_not_called()
 
     def test_browser_marketplaces_need_chrome(self):
         with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
             self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["depop"], "confirm": True}).status_code, 409)
-            self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["vinted"], "confirm": True}).status_code, 409)
+            self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["facebook"], "confirm": True}).status_code, 400)
             self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["etsy"], "confirm": True}).status_code, 200)
 
 

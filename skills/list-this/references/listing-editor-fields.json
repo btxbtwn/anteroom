@@ -1,13 +1,17 @@
 {
-  "followed_general": ["title", "description", "brand", "size", "department"],
+  "followed_general": [
+    "title",
+    "description",
+    "brand",
+    "size",
+    "department"
+  ],
   "marketplace_price_keys": {
     "ebay": "ebay_specifics.price",
     "poshmark": "poshmark_specifics.poshmarkPrice",
     "mercari": "mercari_specifics.price",
     "depop": "depop_specifics.price",
-    "etsy": "etsy_specifics.price",
-    "vinted": "vinted_specifics.price",
-    "sellwild": "sellwild_specifics.price"
+    "etsy": "etsy_specifics.price"
   },
   "general": [
     {
@@ -138,42 +142,6 @@
     {
       "key": "package_dimensions_in",
       "label": "Package Dimensions (LxWxH in)"
-    }
-  ],
-  "vinted": [
-    {
-      "key": "price",
-      "label": "Price",
-      "type": "number"
-    },
-    {
-      "key": "vinted_specifics.category",
-      "label": "Category *",
-      "required": true
-    },
-    {
-      "key": "vinted_specifics.condition",
-      "label": "Condition"
-    },
-    {
-      "key": "vinted_specifics.brand",
-      "label": "Brand"
-    },
-    {
-      "key": "vinted_specifics.size",
-      "label": "Size"
-    },
-    {
-      "key": "vinted_specifics.color",
-      "label": "Color"
-    },
-    {
-      "key": "vinted_specifics.packageSize",
-      "label": "Package size"
-    },
-    {
-      "key": "vinted_specifics.material",
-      "label": "Material"
     }
   ],
   "etsy": [

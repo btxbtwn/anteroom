@@ -1,4 +1,4 @@
-"""Import from Poshmark, Mercari, Depop, Sellwild and Vinted through a fake Chrome bridge."""
+"""Import from Poshmark, Mercari, and Depop through a fake Chrome bridge."""
 import copy
 from io import BytesIO
 from types import SimpleNamespace
@@ -32,10 +32,6 @@ LISTINGS = {
                 "brand": None, "size": "M", "condition": "Like new", "category_path": "Women > Coats", "category_id": "111", "photos": []},
     "depop": {"id": "shop-denim-jacket-136d", "title": "Denim jacket", "description": "Denim jacket #levis", "price": 45, "currency": "USD",
               "quantity": 1, "condition": "used_excellent", "category_id": "womenswear_denim-jackets", "photos": ["https://cdn.example/d.jpg"]},
-    "sellwild": {"id": "812", "title": "Denim jacket", "description": "Classic fit", "price": 45, "currency": "USD", "quantity": 1,
-                 "condition": "4", "category_id": "61", "photos": ["https://cdn.example/s.jpg"]},
-    "vinted": {"id": "4401", "title": "Denim jacket", "description": "Classic fit", "price": 45, "currency": "USD", "quantity": 1,
-               "condition": "Very good", "category_path": "Women > Jackets", "category_id": "1904", "photos": ["https://cdn.example/v.jpg"]},
 }
 
 
@@ -108,8 +104,6 @@ def test_poshmark_import_saves_listing_photos_and_link(chrome):
 @pytest.mark.parametrize(("marketplace", "condition", "url"), [
     ("mercari", "Pre-Owned - Excellent", "https://www.mercari.com/us/item/m12345678901/"),
     ("depop", "Pre-Owned - Excellent", "https://www.depop.com/products/shop-denim-jacket-136d/"),
-    ("sellwild", "Pre-Owned - Excellent", "https://sellwild.com/product/812"),
-    ("vinted", "Pre-Owned - Excellent", "https://www.vinted.com/items/4401"),
 ])
 def test_each_chrome_marketplace_imports_with_its_public_link(chrome, marketplace, condition, url):
     response = post(chrome, marketplace, LISTINGS[marketplace]["id"])
@@ -121,16 +115,12 @@ def test_each_chrome_marketplace_imports_with_its_public_link(chrome, marketplac
     assert chrome.db.query(MarketplaceListing).one().listing_url == url
     if marketplace == "mercari":
         assert response.json()["warnings"] == ["The marketplace did not provide photos. Add photos before crosslisting."]
-    if marketplace == "sellwild":
-        assert snapshot["sellwild_specifics"] == {"nativeCategoryId": 61, "nativeConditionId": 4}
-        assert snapshot["category_path"] == "Home & Garden > Furniture"
-
 
 def test_repeat_import_keeps_local_edits_without_reading_chrome(chrome):
-    first = post(chrome, "vinted", "4401").json()
+    first = post(chrome, "depop", "shop-denim-jacket-136d").json()
     listing_persistence.save_revision(chrome.db, first["conversation_id"], {"title": "Edited", "price": 99}, "user")
     chrome.remote.calls.clear()
-    second = post(chrome, "vinted", "https://www.vinted.com/items/4401-denim-jacket").json()
+    second = post(chrome, "depop", "https://www.depop.com/products/shop-denim-jacket-136d/").json()
     assert second["reused"] and second["conversation_id"] == first["conversation_id"]
     assert chrome.remote.calls == []
     assert chrome.db.query(Conversation).count() == 1
@@ -159,8 +149,8 @@ def test_chrome_refusals_become_seller_errors(chrome):
     chrome.remote.reply = {"ok": False, "error": "This listing does not belong to the signed-in Mercari account.", "error_code": "rejected"}
     response = post(chrome, "mercari", "m12345678901")
     assert response.status_code == 409 and "does not belong" in response.json()["detail"]
-    chrome.remote.reply = {"ok": False, "error": "Sign in to Vinted in Chrome first.", "error_code": "signed_out"}
-    assert post(chrome, "vinted", "4401").status_code == 403
+    chrome.remote.reply = {"ok": False, "error": "Sign in to Depop in Chrome first.", "error_code": "signed_out"}
+    assert post(chrome, "depop", "shop-denim-jacket-136d").status_code == 403
     assert post(chrome, "ebay", "123456789012").status_code == 404
     assert post(chrome, "poshmark", "not-a-listing").status_code == 422
     assert chrome.db.query(Conversation).count() == 0
@@ -197,15 +187,15 @@ def test_preview_marks_owned_listings_and_suggests_a_match_for_review(chrome):
 def test_linking_a_reviewed_match_keeps_the_item_and_records_the_listing(chrome):
     conv = ConversationRepo(chrome.db).create(title="My jacket")
     listing_persistence.save_revision(chrome.db, conv.id, {"title": "My jacket", "price": 50}, "user")
-    response = post(chrome, "vinted", "4401", link_conversation_id=conv.id)
+    response = post(chrome, "mercari", "m12345678901", link_conversation_id=conv.id)
     assert response.status_code == 200, response.text
     assert response.json()["linked"] is True
-    assert listings(chrome.db, conv.id)["vinted"]["listing_id"] == "4401"
+    assert listings(chrome.db, conv.id)["mercari"]["listing_id"] == "m12345678901"
     assert ListingRepo(chrome.db).get_revisions(conv.id)[0].listing_json["title"] == "My jacket"
     assert chrome.db.query(Conversation).count() == 1 and chrome.remote.downloads == []
     # A second item cannot take the same listing.
     other = ConversationRepo(chrome.db).create(title="Other")
-    assert post(chrome, "vinted", "4401", link_conversation_id=other.id).status_code == 409
+    assert post(chrome, "mercari", "m12345678901", link_conversation_id=other.id).status_code == 409
     # Linking checks the listing with Chrome first: a refusal links nothing.
     chrome.remote.reply = {"ok": False, "error": "This Mercari listing is not on sale.", "error_code": "rejected"}
     assert post(chrome, "mercari", "m12345678901", link_conversation_id=other.id).status_code == 409

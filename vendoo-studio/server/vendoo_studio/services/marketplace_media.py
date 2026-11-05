@@ -11,7 +11,7 @@ from __future__ import annotations
 from vendoo_studio.services.listing_videos import VIDEO_MARKETPLACES, VIDEO_RULES
 
 # The most photos each marketplace's own listing form takes.
-PHOTO_LIMITS = {"ebay": 24, "etsy": 20, "poshmark": 16, "mercari": 12, "depop": 8, "vinted": 20, "sellwild": 20}
+PHOTO_LIMITS = {"ebay": 24, "etsy": 20, "poshmark": 16, "mercari": 12, "depop": 8}
 
 
 def rules() -> dict:

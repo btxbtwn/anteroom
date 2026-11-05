@@ -25,17 +25,16 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.services.listing_result import failure
 
-NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
+NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
 RULE_MODULES = ("vendoo_studio.services.ebay_listings", "vendoo_studio.services.etsy_listings",
-                "vendoo_studio.services.sellwild_listing", "vendoo_studio.services.chrome_listing",
-                "vendoo_studio.services.vinted_listing")
+                "vendoo_studio.services.chrome_listing")
 
 
 @dataclass
 class Context:
     """What a requirement may read besides the snapshot."""
     db: Session | None = None
-    # Choices made beside List rather than in the listing (Sellwild's category and condition).
+    # Choices made beside List rather than in the listing.
     choices: dict[str, Any] = field(default_factory=dict)
 
 
@@ -74,7 +73,7 @@ _GAP_FIXES = {
     "sku": "anteroom conversations fields --conv-id CONV --path sku --value NEW-SKU",
     "etsy_specifics.when_made": 'anteroom conversations fields --conv-id CONV --path etsy_specifics.when_made --value "Before 2007 (Vintage)"',
     **{f"marketplace_photos.{marketplace}": f'anteroom conversations fields --conv-id CONV --path marketplace_photos.{marketplace} --value ["PHOTO_ID"]'
-       for marketplace in ("ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild")},
+       for marketplace in ("ebay", "etsy", "poshmark", "mercari", "depop")},
     "price": "anteroom set-price --conversation CONV --price 29.99 --all-marketplaces",
 }
 
@@ -99,10 +98,6 @@ def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:
 
     apply_marketplace_overrides(snapshot, marketplace)
     snapshot = attach_form(snapshot, marketplace)
-    if marketplace == "vinted":
-        from vendoo_studio.services.vinted_listing import apply_vinted_listing
-
-        apply_vinted_listing(snapshot)
     return snapshot
 
 

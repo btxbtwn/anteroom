@@ -62,7 +62,7 @@ own schedule, errors and sale-detection settings; disconnected tabs and Bridges
 without `marketplace.sales_history` are skipped. The hosted reader uses the
 existing named Bridge 0.2.47 command, with no desktop socket envelope, and saves
 orders under the seller's row-secured context. Sign-in cookies and tokens stay
-in Chrome. Vinted retains the Mac's current limitation: unverified order
+in Chrome. retains the Mac's current limitation: unverified order
 responses are reported as unreadable rather than inferred from listing status.
 The combined marketplace-session workflow below exposes these checks in Settings.
 
@@ -76,7 +76,7 @@ unconfirmed sends pause their rule. No command lists, publishes or delists.
 The combined marketplace-session workflow below exposes these panels.
 
 On `feat/hosted-chrome-imports`, the Chrome inventory import reads Poshmark,
-Mercari, Depop, Sellwild and Vinted listings in the seller's own Chrome through
+Mercari, Depop listings in the seller's own Chrome through
 their Anteroom tab, with two named reads under the Bridge capability
 `marketplace.import` (Bridge 0.2.53). The hosted API mounts the desktop
 `chrome-import` routes in the seller's row-secured context; imported photos go
@@ -85,7 +85,7 @@ Etsy. The import is enabled with the combined `marketplace_sessions` workflow be
 
 All reads still require the seller's connected Chrome; sign-ins stay there.
 Imports only save the seller's inventory. Shares/offers require explicit manual
-confirmation or a seller-enabled rule and never publish or delist. Vinted
+confirmation or a seller-enabled rule and never publish or delist.
 retains the desktop order-response limitation described above. Facebook,
 Grailed and Vendoo stay excluded, and video remains desktop-only. No deployment
 or extension publication is implied by these PRs.
@@ -334,7 +334,7 @@ Etsy workspace handlers, eBay and Etsy imports, order recovery and sale alerts,
 all in the seller's row-secured context with their own tokens. eBay account
 changes keep the review-then-confirm steps. The eBay Offers tab stays hidden
 until automatic offers have a per-seller scheduler; the offer status read leaves
-out the Mac timer's last check. Poshmark, Mercari, Depop, Sellwild and Vinted
+out the Mac timer's last check. Poshmark, Mercari, Depop
 show their recorded sales; their Chrome imports need marketplace sessions.
 
 On `feat/hosted-ebay-offers`, the eBay Offers tab and the Automations offers
@@ -377,7 +377,7 @@ connected while a tab that declares `marketplace.actions` has asked in the last
 
 On `feat/hosted-chrome-actions`, Poshmark, Mercari and Depop List, Update, Save
 draft and Delist run from the web through the seller's connected Chrome tab and
-Bridge 0.2.40 (see `docs/cloud-extension.md`). Sellwild and Vinted follow with
+Bridge 0.2.40 (see `docs/cloud-extension.md`). follow with
 their forms.
 
 On `feat/hosted-sourcing`, the Sourcing view is on the web. Each seller's
@@ -394,21 +394,8 @@ is already running. A refresh only reads stores and marketplaces; it never buys
 or lists. The assistant's shop summary now reads the seller's own sourcing state
 on the web too.
 
-On `feat/hosted-vinted`, the Vinted tab, its Category and Brand pickers, and
-Vinted List, Update and Delist are on the web, as on the Mac. The Mac reads
-Vinted's categories and brands in its private account window; the web sends
-named, read-only commands (`marketplace.vinted_categories`,
-`marketplace.vinted_brands`) to the seller's Chrome over the same relay, under
-a new Bridge capability, `vinted.choices` (Bridge 0.2.42). Chrome sale checks are covered by the later marketplace-session layers below.
-
-On `feat/hosted-sellwild`, the Sellwild tab, its category and condition choices,
-and Sellwild List, Update and Delist are on the web, as on the Mac. The account
-choices the Mac reads in its private Sellwild window come from the seller's
-Chrome through one named read, `marketplace.sellwild_account`, under its own
-Bridge capability, `sellwild.account` (Bridge 0.2.43).
-
 On `feat/hosted-chrome-sessions`, Settings → Connections on the web lists
-Poshmark, Mercari, Depop, Sellwild and Vinted under eBay and Etsy, each
+Poshmark, Mercari, Depop under eBay and Etsy, each
 signed in, not signed in, or "Connect Chrome first", as on the Mac. The web reads
 them with `marketplace.sessions` and opens a marketplace's sign-in page in the
 seller's Chrome with `marketplace.connect` when they choose Sign in, both under

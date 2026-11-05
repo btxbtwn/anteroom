@@ -11,7 +11,7 @@ Create a purpose-built local web application that lets the user:
 5. Edit individual fields or raw JSON directly.
 6. Validate the listing.
 7. Click **List** on a marketplace and confirm.
-8. List directly: eBay and Etsy through their APIs; Poshmark, Mercari, Depop, Sellwild and Vinted through the extension, which writes through each marketplace's own signed-in web client.
+8. List directly: eBay and Etsy through their APIs; Poshmark, Mercari, Depop through the extension, which writes through each marketplace's own signed-in web client.
 9. Watch progress in the web app; Anteroom reads every write back from the marketplace.
 
 **List** and **Update** each name one marketplace and carry `confirm`. Save
@@ -43,7 +43,7 @@ marketplace.
 - `mimo-v2.5` for multimodal photo analysis.
 - `mimo-v2.5-pro` for listing synthesis, chat, and revisions.
 - macOS Keychain for API-key storage.
-- eBay and Etsy are listed through their APIs; Poshmark, Mercari, Depop, Sellwild and Vinted through the Chrome extension in the seller's signed-in Chrome.
+- eBay and Etsy are listed through their APIs; Poshmark, Mercari, Depop through the Chrome extension in the seller's signed-in Chrome.
 - Draft saving only; never publish automatically.
 - Publishing, updating and delisting happen only when the seller confirms that action: `POST /api/conversations/{id}/native-marketplaces/{marketplace}/list` or `.../update` (one marketplace, named in the path, body `confirm`), `POST /api/conversations/{id}/marketplace-listings/delist` (marketplaces named, body `confirm`), and eBay `POST /api/ebay/actions/confirm` (`confirm: true`). Nothing publishes everywhere by default, on a queue, on a retry, or as a side effect.
 - The extension runs without its own interface. Anteroom owns review, confirmed actions, progress, and diagnostics.
@@ -54,7 +54,7 @@ marketplace.
 The sidebar and mobile navigation have one **Marketplaces** entry. Inside it,
 eBay contains its seller workspace and a Marketing tab, because eBay's
 marketing has a real API behind it. Etsy contains its connected shop
-dashboard, orders, and listings. Poshmark, Depop, and Sellwild show a sales
+dashboard, orders, and listings. Poshmark, Depop, show a sales
 dashboard only. No marketplace other than eBay has a Marketing tab. The eBay
 sale calendar shows only eBay. Saving a local sale plan does not apply a
 marketplace promotion. Inventory-wide discount suggestions live in **Analytics**.
@@ -95,7 +95,7 @@ Anteroom (http://127.0.0.1:4318)
 └── Chrome extension (Bridge)
     ├── Reconnecting WebSocket client
     ├── Durable active-job state
-    ├── Marketplace workers (Poshmark, Mercari, Depop, Sellwild, Vinted)
+    ├── Marketplace workers (Poshmark, Mercari, Depop)
     └── Field results and read-back
 ```
 
@@ -274,8 +274,6 @@ Tabs:
 - Mercari
 - Depop
 - Etsy
-- Sellwild
-- Vinted
 - Raw JSON
 
 Requirements:
@@ -292,7 +290,7 @@ Requirements:
 
 Each marketplace's **List** is enabled only when:
 
-- The marketplace is connected (the extension for Poshmark, Mercari, Depop, Sellwild and Vinted; the API sign-in for eBay and Etsy).
+- The marketplace is connected (the extension for Poshmark, Mercari, Depop; the API sign-in for eBay and Etsy).
 - The listing passes validation and the marketplace's pre-flight.
 - Required photos are present.
 - No other action on that marketplace, delist or page inspection is running.
@@ -687,7 +685,7 @@ value to read back from the marketplace.
 ### `vendoo-extension/manifest.json`
 
 - Loopback host access for `http://127.0.0.1:4318/*` and the local WebSocket.
-- Host permissions for the marketplaces it lists on: Poshmark, Mercari, Depop, Sellwild, Vinted, and eBay pages it reads.
+- Host permissions for the marketplaces it lists on: Poshmark, Mercari, Depop, and eBay pages it reads.
 - Do not add `<all_urls>`.
 
 ### `vendoo-extension/background.js`
@@ -699,7 +697,7 @@ value to read back from the marketplace.
 
 ### Marketplace workers and content scripts
 
-- Poshmark, Mercari, Depop, Sellwild and Vinted listings are written through each marketplace's own signed-in web client, in the seller's Chrome. Authentication stays in Chrome; only listing data and results cross the bridge.
+- Poshmark, Mercari, Depop listings are written through each marketplace's own signed-in web client, in the seller's Chrome. Authentication stays in Chrome; only listing data and results cross the bridge.
 - Fetch authorized job photos from the backend and preserve their order.
 - Fill SKU only when explicitly supplied.
 - Return structured field results and read the saved listing back.
@@ -886,7 +884,7 @@ Direct listing smoke test (a private draft on a disposable item):
 
 ### Milestone 5: Direct Listing
 
-- Add List, Update and Save draft per marketplace: eBay and Etsy through their APIs; Poshmark, Mercari, Depop, Sellwild and Vinted through the extension.
+- Add List, Update and Save draft per marketplace: eBay and Etsy through their APIs; Poshmark, Mercari, Depop through the extension.
 - Verify each action reads the listing back and records its state, and a lost reply leaves the record `unknown` until Check reads it.
 
 ### Milestone 6: Recovery and Polish

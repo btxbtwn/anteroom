@@ -9,7 +9,6 @@ function worker(routes) {
   const c = loadWorker();
   Object.assign(c, { AbortSignal });
   c.chrome.declarativeNetRequest.updateSessionRules = async () => {};
-  // Vinted's hour-long access token, with time left on it.
   c.chrome.cookies = { get: async ({ name }) => (name === 'access_token_web'
     ? { value: `x.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.y` } : null) };
   const calls = [];
@@ -98,46 +97,11 @@ test('Depop fails the check when no listing names the shop', async () => {
   assert.equal((await read(c, 'depop', ['shop-gone-136d'])).ok, false);
 });
 
-test('Sellwild reports a known listing missing from the live shop when its status is 5', async () => {
-  const { c, calls } = worker({
-    '/api/listings/105101406': [200, { success: true, listing: { id: '105101406', status: 5, user: { id: '99', firstName: 'Pat' } } }],
-    '/api/listings/105232291': [200, { success: true, listing: { id: '105232291', status: 1, user: { id: '99' } } }],
-    '/api/search/listings': [200, { success: true, listings: [{ id: 105232291 }, { id: 105000001 }], hasMore: false }],
-  });
-  const result = await read(c, 'sellwild', ['105101406', '105232291', '105999999']);
-  assert.deepEqual(result, { ok: true, sales: [{ listing_id: '105101406' }] });
-  assert.equal(JSON.stringify(result).includes('Pat'), false);
-  assert.equal(calls.some(url => url.includes('/api/search/listings?userId=99&limit=200&page=1')), true);
-  assert.equal(calls.some(url => url.includes('/api/listings/105232291')), false);
-});
-
 test('a removed listing is not a sale, and a check that cannot read the shop fails', async () => {
   const { c } = worker({
     '/api/listings/105101406': [200, { success: true, listing: { id: '105101406', status: 1, user: { id: '99' } } }],
     '/api/search/listings': [200, { success: true, listings: [{ id: '105101406' }], hasMore: false }],
   });
-  assert.deepEqual(await read(c, 'sellwild', ['105101406', '105232291']), { ok: true, sales: [] });
-  assert.equal((await read(c, 'sellwild', ['105232291'])).ok, false);
-});
-
-test('Vinted reports a known listing missing from the live wardrobe when that listing is closed', async () => {
-  const { c, calls } = worker({
-    '/api/v2/users/current': [200, { user: { id: 7, login: 'seller', email: 'seller@example.com' } }],
-    '/api/v2/wardrobe/7/items': [200, { items: [
-      { id: 100, title: 'Live jacket', is_draft: false, is_closed: false, is_hidden: false },
-      { id: 204, title: 'Draft jacket', is_draft: true, is_closed: false },
-    ], pagination: { total_pages: 1 } }],
-    '/api/v2/items/200': [200, { item: { id: 200, title: 'Sold jacket', price: 12, is_closed: true, is_hidden: false, is_reserved: false, is_draft: false } }],
-    '/api/v2/items/202': [200, { item: { id: 202, is_closed: true, is_hidden: true, is_reserved: false, is_draft: false } }],
-    '/api/v2/items/203': [200, { item: { id: 203, is_closed: true, is_hidden: false, is_reserved: true, is_draft: false } }],
-    '/api/v2/items/204': [200, { item: { id: 204, is_closed: false, is_hidden: false, is_reserved: false, is_draft: true } }],
-  });
-  const result = await read(c, 'vinted', ['100', '200', '201', '202', '203', '204']);
-  assert.deepEqual(result, { ok: true, sales: [{ listing_id: '200' }] });
-  assert.equal(JSON.stringify(result).includes('Sold jacket'), false);
-  assert.equal(JSON.stringify(result).includes('seller@example.com'), false);
-  assert.equal(calls.some(url => url.includes('/api/v2/wardrobe/7/items?page=1&per_page=96&order=newest_first')), true);
-  assert.equal(calls.some(url => url.includes('/api/v2/items/100')), false);
 });
 
 test('a sale check waits while another marketplace action is running', async () => {

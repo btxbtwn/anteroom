@@ -178,8 +178,8 @@ describe("staleness", () => {
     const bulkRelisted = {
       ...tee,
       vendoo_listed_at: "2026-09-18T00:00:00Z",
-      vendoo_marketplaces: ["ebay", "sellwild"],
-      vendoo_listed_dates: { ebay: "2026-01-05T00:00:00Z", sellwild: "2026-09-18T00:00:00Z" },
+      vendoo_marketplaces: ["ebay"],
+      vendoo_listed_dates: { ebay: "2026-01-05T00:00:00Z", poshmark: "2026-09-18T00:00:00Z" },
     };
     expect(isStale(bulkRelisted, 90, now)).toBe(true);
     // A marketplace the item sold on is finished; only live copies age it.
@@ -305,7 +305,7 @@ describe("filter options", () => {
     expect(labelCounts(inventory)).toEqual({ a19: 1, "to list": 1, vintage: 1 });
     // The draft carries no marketplaces, so it is already one of the unlisted.
     expect(notListedCount([...inventory, { title: "Nothing yet" }])).toBe(2);
-    expect(notListedOnCounts(inventory, ["ebay", "depop", "vinted"])).toEqual({ ebay: 2, depop: 2, vinted: 3 });
+    expect(notListedOnCounts(inventory, ["ebay", "depop"])).toEqual({ ebay: 2, depop: 2 });
   });
 
   it("counts what each staleness cutoff would keep", () => {

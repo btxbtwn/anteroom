@@ -58,9 +58,7 @@ struct ListingsSettingsView: View {
                     })) {
                         HStack {
                             Text(item.label)
-                            if item.id == "vinted" {
-                                Badge("Direct")
-                            } else if !item.fillable {
+                            if !item.fillable {
                                 Badge("Not listed from here")
                             }
                         }

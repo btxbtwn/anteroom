@@ -907,7 +907,7 @@ def studio_window_kwargs() -> dict:
 def studio_start_kwargs() -> dict:
     icon = app_icon_path()
     # WebKit only keeps a marketplace sign-in between launches when the app is
-    # not private, which is what lets Vinted and Sellwild stay signed in. The
+    # not private, which is what lets marketplace sessions stay signed in. The
     # store belongs to the app's own WebKit data: no cookie reaches Python, the
     # database, a log or a response, and the everyday Chrome profile is untouched.
     kwargs: dict = {"menu": studio_app_menu(), "private_mode": False}
@@ -1351,16 +1351,10 @@ def run_window() -> None:
 
     enable_editable_context_menus()
     enable_webcontent_crash_recovery()
-    from vendoo_studio.services import sellwild_browser, vinted_browser
-
-    vinted_browser.install(webview.create_window)
-    sellwild_browser.install(webview.create_window)
     window = create_studio_window(webview)
     if window is None:
         raise RuntimeError("The desktop window could not be created")
     window.events.loaded += _remember_shown_workspace
-    window.events.closed += vinted_browser.shutdown
-    window.events.closed += sellwild_browser.shutdown
     webview.start(lambda: _boot_window(window), **studio_start_kwargs())
     stop_owned_server()
 

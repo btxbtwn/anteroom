@@ -16,10 +16,6 @@
 //   Depop     receipts list + one receipt per order (webapi presentation API).
 //   Poshmark  vm-rest sales list + each order page's initial state.
 //   Mercari   userItemsQuery (sold_out, trading) + OrderStatusConsolidated.
-//   Sellwild  /api/transactions/seller. A listing's status 5 is "marked sold",
-//             which the seller also sets for sales elsewhere, so it is never used.
-//   Vinted    /api/v2/my_orders. No sale has been seen yet, so an order is
-//             reported as unreadable rather than guessed at.
 
 const HISTORY_MAX_PAGES = 40;
 // Order details read per pass. The rest are read on the next pass.
@@ -310,64 +306,7 @@ async function mercariOrderHistory(settled) {
   return { orders, more, unreadable };
 }
 
-// ── Sellwild ─────────────────────────────────────────────────────────────
-
-// Transaction status: 0 interested, 1 buyer paid (not yet charged), 2 accepted,
-// 3 delivering, 4 delivered, 5 completed, 6 disputed, 7 cancelled.
-function sellwildHistoryOrder(transaction) {
-  const state = Number(transaction?.status);
-  if (![2, 3, 4, 5, 6, 7].includes(state)) return null;
-  const listingId = String(transaction?.listingId ?? '');
-  if (!SALE_LISTING_ID.sellwild.test(listingId)) return null;
-  const cancelled = state === 7;
-  const price = historyMoney(transaction?.price);
-  return historyOrder({
-    order_id: String(transaction?.id ?? ''),
-    status: cancelled ? 'cancelled' : 'paid',
-    final: state === 5 || cancelled,
-    sold_at: historyTime(transaction?.createdDate),
-    totals: cancelled
-      ? { item_revenue: '0.00', shipping_credit: '0.00', refunds: '0.00', fees: '0.00', shipping_cost: '0.00' }
-      // Shipping amounts are not confirmed against a real sale yet, so they stay unknown.
-      : { item_revenue: price, shipping_credit: null, refunds: '0.00', fees: historyMoney(transaction?.commissionAmount), shipping_cost: null },
-    lines: [{ line_id: listingId, listing_id: listingId, alt_ids: [], weight: price, item_revenue: null }],
-  });
-}
-
-async function sellwildOrderHistory(settled) {
-  await ensureMarketplaceRequestContext();
-  const orders = [];
-  let more = false;
-  let unreadable = 0;
-  for (let page = 1; page <= HISTORY_MAX_PAGES; page += 1) {
-    if (page > 1) await salePause(true);
-    const body = await historyJson('sellwild', `https://sellwild.com/api/transactions/seller?page=${page}&limit=200`, { credentials: 'include' });
-    if (body?.success !== true || !Array.isArray(body.transactions)) throw new Error('Sellwild sales missing');
-    body.transactions.filter(row => !settled.has(String(row?.id ?? ''))).forEach(row => {
-      const order = sellwildHistoryOrder(row);
-      if (order) orders.push(order);
-      else if ([2, 3, 4, 5, 6, 7].includes(Number(row?.status))) unreadable += 1;
-    });
-    more = body.hasMore === true;
-    if (body.hasMore !== true) break;
-  }
-  return { orders, more, unreadable };
-}
-
-// ── Vinted ───────────────────────────────────────────────────────────────
-
-async function vintedOrderHistory() {
-  await ensureMarketplaceRequestContext();
-  await vintedKeepSignedIn(Date.now() + 20000);
-  const body = await historyJson('vinted', 'https://www.vinted.com/api/v2/my_orders?type=sold&status=all&page=1&per_page=20', { credentials: 'include' });
-  if (!Array.isArray(body?.my_orders)) throw new Error('Vinted orders missing');
-  // No Vinted sale has been read yet, so its order format is unconfirmed.
-  // Report the orders as unreadable instead of guessing at their amounts.
-  return { orders: [], more: false, unreadable: Number(body.pagination?.total_entries) || body.my_orders.length };
-}
-
-const ORDER_HISTORY_READERS = { depop: depopOrderHistory, poshmark: poshmarkOrderHistory, mercari: mercariOrderHistory,
-  sellwild: sellwildOrderHistory, vinted: vintedOrderHistory };
+const ORDER_HISTORY_READERS = { depop: depopOrderHistory, poshmark: poshmarkOrderHistory, mercari: mercariOrderHistory };
 
 async function readMarketplaceOrderHistory(marketplace, settledIds) {
   if (nativeOperationsRunning()) return { ok: true, orders: [], skipped: true };

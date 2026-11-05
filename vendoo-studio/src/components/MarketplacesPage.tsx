@@ -10,7 +10,7 @@ import { EbayWorkspace } from "./ebay/EbayWorkspace";
 import { WorkspacePage } from "./WorkspacePage";
 import "./ebay/ebay.css";
 
-const MARKETPLACES = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"] as const;
+const MARKETPLACES = ["ebay", "etsy", "poshmark", "mercari", "depop"] as const;
 export type Marketplace = (typeof MARKETPLACES)[number];
 
 export function MarketplacesPage({ marketplace, onMarketplaceChange, onOpenListing }: {

@@ -4,7 +4,7 @@ from pydantic import ValidationError
 
 from vendoo_studio.services.hosted_fields import DraftFields
 
-MARKETS = frozenset({'ebay', 'poshmark', 'mercari', 'depop', 'etsy', 'sellwild', 'vinted'})
+MARKETS = frozenset({'ebay', 'poshmark', 'mercari', 'depop', 'etsy'})
 
 ROOTS = frozenset(DraftFields.model_fields) | {'title', 'originalPrice', 'tags', 'material', 'style', 'care', 'flaws', 'measurements', 'direct_category_ids', 'marketplace_photos'} | {f'{market}_specifics' for market in MARKETS}
 BLOCKED = frozenset({'userid', 'conversationid', 'revisionid', 'parentrevisionid', 'apikey', 'token', 'accesstoken', 'refreshtoken',

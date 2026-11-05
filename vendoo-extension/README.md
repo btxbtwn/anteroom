@@ -1,6 +1,6 @@
 # Anteroom Bridge
 
-The extension runs in the background and connects Chrome to Anteroom. It lets Anteroom save drafts, list, update and delist on Poshmark, Mercari, Depop, Sellwild and Vinted with the seller's own Chrome sign-ins, read sales and likes, and import existing listings. Review, approval and results live in Anteroom. The extension has no toolbar popup, on-page panel, or field highlighting. Hosted connections use a separate approval window.
+The extension runs in the background and connects Chrome to Anteroom. It lets Anteroom save drafts, list, update and delist on Poshmark, Mercari, Depop with the seller's own Chrome sign-ins, read sales and likes, and import existing listings. Review, approval and results live in Anteroom. The extension has no toolbar popup, on-page panel, or field highlighting. Hosted connections use a separate approval window.
 
 ## Installation
 
@@ -44,7 +44,7 @@ Every permission in `manifest.json` has a caller. Remove a permission when its l
 | `debugger` | Records a marketplace's own requests when the seller records a listing flow. |
 | `system.display` | Places a new Chrome window inside a real display work area. |
 
-Host permissions cover eBay, Poshmark, Mercari, Depop, Etsy, Sellwild, Vinted, Facebook, the Amazon S3 buckets their presigned photo uploads go to (`*.s3.amazonaws.com`, `*.s3-accelerate.amazonaws.com`), and Anteroom on `127.0.0.1:4318`. Direct marketplace requests go through `background/marketplace-fetch.js`, which bounds each request by the operation's deadline, retries only reads and photo uploads, and logs one `[POSHMARK]`/`[MERCARI]`/`[DEPOP]`/`[SELLWILD]`/`[VINTED]` line per step (status, error code, latency; never cookies, tokens or listing text). Vinted listing saves a draft and then publishes it from the extension background, with no Vinted tab, and only after the seller confirms List. A lost reply is read back and does not create the draft again. Vinted delist runs from the extension background, with no Vinted tab, and only after the seller confirms. eBay and Etsy listings go through their APIs from Anteroom, not through the extension. The Chrome sign-in check for Depop, Poshmark, Mercari, Sellwild, and Vinted reports only whether the session is present. Cookie values and tokens stay in Chrome.
+Host permissions cover eBay, Poshmark, Mercari, Depop, Etsy, Facebook, the Amazon S3 buckets their presigned photo uploads go to (`*.s3.amazonaws.com`, `*.s3-accelerate.amazonaws.com`), and Anteroom on `127.0.0.1:4318`. Direct marketplace requests go through `background/marketplace-fetch.js`, which bounds each request by the operation's deadline, retries only reads and photo uploads, and logs one `[POSHMARK]`/`[MERCARI]`/`[DEPOP]` line per step (status, error code, latency; never cookies, tokens or listing text). eBay and Etsy listings go through their APIs from Anteroom, not through the extension. The Chrome sign-in check for Depop, Poshmark, Mercari reports only whether the session is present. Cookie values and tokens stay in Chrome.
 
 ## Development
 

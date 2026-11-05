@@ -2,14 +2,13 @@
 
 Form defaults this seller expects on every listing (eBay Best Offer, Etsy's
 codes and tags, Poshmark Smart Sell, Mercari's Ground Advantage label,
-Facebook's shipping and offers, Vinted's package), the brand each form reads,
+Facebook's shipping and offers), the brand each form reads,
 and Depop's option codes.
 """
 
 from __future__ import annotations
 
 import math
-import re
 from typing import Any
 
 from vendoo_studio.services.etsy_fields import sanitize_etsy_tags
@@ -22,13 +21,11 @@ from vendoo_studio.models.mercari_shipping import (
 from vendoo_studio.models.schema import DEPOP_OPTION_CODES
 from vendoo_studio.services.vendoo_item_shape import (
     SPECIFICS_SOURCES,
-    _bucket,
     _clean,
     _norm,
     _num_str,
     _string_list,
 )
-from vendoo_studio.services.vendoo_specifics import specifics_key
 
 # Etsy form codes (display labels overwrite these and leave the dropdown blank).
 ETSY_WHO_CODES = {
@@ -446,68 +443,6 @@ def _apply_facebook_offers(known: dict[str, Any], price: Any) -> None:
         return
     if amount > 0:
         known["minimumPrice"] = str(math.ceil(amount / 2))
-
-
-# Vinted's Shoulder Width is the garment's width across, measured pit to pit.
-_PIT_TO_PIT_RE = re.compile(r"(?i)\bpit[\s-]*to[\s-]*pit\s*:\s*(\d+(?:\.\d+)?)")
-_LENGTH_RE = re.compile(r"(?i)\blength\s*:\s*(\d+(?:\.\d+)?)")
-VINTED_MEASUREMENT_KEYS = ("width", "length")
-
-
-def vinted_measurements(listing: dict[str, Any]) -> dict[str, str]:
-    """Shoulder Width and Length, in inches, from the description's Measurements line.
-
-    That line holds the seller's own tape-measure numbers, written there
-    verbatim. Nothing else is trusted for them, so a model's guess at a
-    measurement never reaches the form.
-    """
-    from vendoo_studio.services.listing_carryover import description_block
-
-    block = description_block(listing.get("description"), "measurements?")
-    out: dict[str, str] = {}
-    for key, pattern in (("width", _PIT_TO_PIT_RE), ("length", _LENGTH_RE)):
-        match = pattern.search(block)
-        if match:
-            out[key] = match.group(1)
-    return out
-
-
-def _apply_vinted_package(
-    section: dict[str, Any],
-    leaf_id: str,
-    listing: dict[str, Any],
-    weight: dict[str, Any] | None,
-    schema: dict[str, Any] | None,
-    unresolved: list[dict[str, str]] | None,
-) -> None:
-    """Vinted's measurements and Package Size, stored as ``{leaf}_<field>``.
-
-    Package Size is a Vinted id offered per category, so it is learned from the
-    seller's own Vinted forms against each package's weight: an item gets the
-    size the seller chose for the lightest package that weighed at least as
-    much. A heavier item than any seen is left for the seller to pick.
-    """
-    specifics = _bucket(section, "categorySpecifics")
-    measured = vinted_measurements(listing)
-    for key in VINTED_MEASUREMENT_KEYS:
-        if key in measured:
-            specifics[specifics_key(leaf_id, key)] = measured[key]
-        else:
-            specifics.pop(specifics_key(leaf_id, key), None)
-
-    weight = weight if isinstance(weight, dict) else {}
-    ounces = package_ounces(weight.get("pounds"), weight.get("ounces")) or DEFAULT_PACKAGE_OUNCES
-    sizes = _learned(schema, "vinted", "packageSize")
-    heavier = sorted(
-        (int(seen), size) for seen, size in sizes.items()
-        if str(seen).isdigit() and int(seen) >= ounces and size not in (None, "")
-    )
-    if heavier:
-        specifics[specifics_key(leaf_id, "packageSizeId")] = str(heavier[0][1])
-    elif unresolved is not None:
-        unresolved.append({"field": "vinted:Package Size", "value": ""})
-
-
 def _mercari_wants_no_brand(brand: str) -> bool:
     return _norm(brand) in _MERCARI_NO_BRAND_TOKENS
 

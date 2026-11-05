@@ -148,7 +148,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
             "Paths look like sku, price, mercari_specifics.brand, poshmark_specifics.size, "
             "ebay_specifics.inseam, ebay_specifics.bestOffer.minimumOfferPrice, depop_specifics.measurements, "
             "direct_category_ids.ebay, direct_category_ids.poshmark, direct_category_ids.depop, "
-            "direct_category_ids.mercari, or sellwild_specifics.nativeCategoryId. "
+            "or direct_category_ids.mercari. "
             "An empty value clears the field and it stays cleared. "
             "An empty mercari_specifics.brand, or the value \"No Brand/Not sure\", lists that item on Mercari "
             "with no brand and leaves the main brand unchanged. When Mercari has the same size in more than one "
@@ -178,7 +178,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
             "You can set one marketplace yourself when you know its id: "
             "direct_category_ids.ebay together with direct_category_ids.ebay_path, "
             "direct_category_ids.poshmark, direct_category_ids.depop, direct_category_ids.mercari, "
-            "or sellwild_specifics.nativeCategoryId. "
+            "or direct_category_ids.depop. "
             "Use that marketplace's own id. "
             "On Poshmark, None is the last step when you want a category that still has narrower choices.\n\n"
         )

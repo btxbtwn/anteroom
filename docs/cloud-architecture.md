@@ -68,7 +68,7 @@ same shape.
             └──────────────────────────────────┘                 ▲
                                                                   │ outbound only
                                                       Chrome extension on any computer
-                                                      (Poshmark, Mercari, Depop, Sellwild
+                                                      (Poshmark, Mercari, Depop
                                                       form fills); Mac worker for
                                                       Mac-only work
 ```
@@ -114,7 +114,7 @@ The design does not assume a Mac.
 | Seller has | What works |
 |---|---|
 | iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. |
-| Any computer with desktop Chrome | The above, plus Poshmark, Mercari, Depop and Sellwild form fills through the Bridge extension, which has the only path to those forms (they offer no public listing API). |
+| Any computer with desktop Chrome | The above, plus Poshmark, Mercari, Depop form fills through the Bridge extension, which has the only path to those forms (they offer no public listing API). |
 | The Mac app | The above, plus Mac-only work: Apple Vision background removal and local SDK sign-ins. |
 
 A phone-only seller cannot fill browser-only marketplace forms. Running a

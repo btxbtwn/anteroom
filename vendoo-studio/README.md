@@ -1,6 +1,6 @@
 # Anteroom
 
-Local Mac app for generating marketplace listings with ChatGPT or Xiaomi MiMo and listing them directly: eBay and Etsy through their APIs, Poshmark, Mercari, Depop, Sellwild and Vinted through the Anteroom Bridge extension in Chrome. It publishes, updates or delists only when you confirm that action.
+Local Mac app for generating marketplace listings with ChatGPT or Xiaomi MiMo and listing them directly: eBay and Etsy through their APIs, Poshmark, Mercari, Depop through the Anteroom Bridge extension in Chrome. It publishes, updates or delists only when you confirm that action.
 
 ## Share a Mac app
 
@@ -62,7 +62,7 @@ Then:
 1. Open **Settings**.
 2. Sign in with ChatGPT, or save a Xiaomi MiMo API key and test it.
 3. Click **Connect Chrome**, then load unpacked from the folder shown in Settings → Connections so Chrome stays on Anteroom's copy. The status bar shows **Extension connected**.
-4. Connect the marketplaces you sell on under Settings → Connections, and sign in to the browser-based ones (Poshmark, Mercari, Depop, Sellwild, Vinted) in that Chrome.
+4. Connect the marketplaces you sell on under Settings → Connections, and sign in to the browser-based ones (Poshmark, Mercari, Depop) in that Chrome.
 
 ## Command line
 
@@ -210,10 +210,10 @@ Existing linked items keep their edits and photos. Conflicting identities are
 reported, and missing photos are shown for follow-up. Importing reads Etsy and
 saves local inventory; it never changes a live listing.
 
-### Importing from Poshmark, Mercari, Depop, Sellwild and Vinted
+### Importing from Poshmark, Mercari, Depop
 
 Sign in to the marketplace in Chrome with the extension connected, then open
-**Marketplaces → Poshmark** (or Mercari, Depop, Sellwild, Vinted) and use
+**Marketplaces → Poshmark** (or Mercari, Depop) and use
 **Import from …**. The extension reads your own active listings in the
 background, with no tab, about one request a second. Each listing is checked
 against the signed-in account and must still be for sale; listings priced in

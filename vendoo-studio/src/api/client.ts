@@ -78,7 +78,7 @@ import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SalesCheck, SellerSale, SellerSaleResult } from "./marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
@@ -525,33 +525,18 @@ export const api = {
       request<SalesCheck>(`/conversations/${convId}/marketplace-listings/check-sales`, { method: "POST" }),
   },
   nativeMarketplaces: {
-    sellwildConnect: (convId: string) =>
-      request<OkResponse>(`/conversations/${convId}/native-marketplaces/sellwild/connect`, { method: "POST" }),
-    vintedConnect: (convId: string) =>
-      request<OkResponse>(`/conversations/${convId}/native-marketplaces/vinted/connect`, { method: "POST" }),
-    vintedCategories: (convId: string) =>
-      request<{ options: string[] }>(`/conversations/${convId}/native-marketplaces/vinted/categories`),
-    vintedBrands: (convId: string, q: string, category: string) =>
-      request<{ options: string[] }>(`/conversations/${convId}/native-marketplaces/vinted/brands?${new URLSearchParams({ q, category })}`),
     form: (convId: string, marketplace: string, revisionId?: string | null) =>
       request<MarketplaceForm>(`/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
-    preflight: (convId: string, sellwild?: { categoryId?: number; conditionId?: number }) => {
-      const params = new URLSearchParams();
-      if (sellwild?.categoryId) params.set("sellwild_category_id", String(sellwild.categoryId));
-      if (sellwild?.conditionId) params.set("sellwild_condition_id", String(sellwild.conditionId));
-      const query = params.toString();
-      return request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight${query ? `?${query}` : ""}`);
-    },
-    sellwildOptions: (convId: string) => request<SellwildOptions>(`/conversations/${convId}/native-marketplaces/sellwild/options`),
+    preflight: (convId: string) =>
+      request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight`),
     saveDraft: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/draft`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId }),
       }),
-    list: (convId: string, marketplace: NativeMarketplace, revisionId: string, sellwild?: SellwildChoice) =>
+    list: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/list`, {
-        method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true,
-          ...(sellwild ? { sellwild_category_id: sellwild.categoryId, sellwild_condition_id: sellwild.conditionId } : {}) }),
+        method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true }),
       }),
     update: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/update`, {

@@ -1,7 +1,6 @@
 """Current editor definitions for chat, including empty and optional fields."""
 from __future__ import annotations
 
-import asyncio
 import copy
 import json
 import re
@@ -10,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.config import skills_dir
 from vendoo_studio.repositories.queries import ListingRepo
-from vendoo_studio.services import native_contract, native_field_fill, vinted_browser
+from vendoo_studio.services import native_contract, native_field_fill
 from vendoo_studio.services.marketplaces import get_selected_marketplaces
 from vendoo_studio.services.seller_overrides import get_path
 
@@ -21,8 +20,7 @@ async def forms_prompt(db: Session, conv_id: str, option_catalog=None) -> str:
         return ""
     listing = copy.deepcopy(revisions[0].listing_json)
     definitions = json.loads((skills_dir() / "list-this/references/listing-editor-fields.json").read_text())
-    # Vinted is always a visible editor tab, regardless of Vendoo selections.
-    markets = set(get_selected_marketplaces()) | {"vinted"} | set(listing.get(native_contract.KEY) or {})
+    markets = set(get_selected_marketplaces()) | set(listing.get(native_contract.KEY) or {})
     db.commit()
     native = await native_field_fill.load_forms(db, conv_id, markets)
     forms: dict[str, dict] = {"general": {"fields": _values(definitions["general"], listing, "general")}}
@@ -40,8 +38,6 @@ async def forms_prompt(db: Session, conv_id: str, option_catalog=None) -> str:
             fields += copy.deepcopy(definitions["package"] + definitions["etsy"])
             fields += [{**row, "key": f"etsy_specifics.category_specifics.{row['key']}"}
                        for row in definitions["etsy_optionals"]]
-        elif market == "vinted":
-            fields = [row for row in fields if row["key"] != "category_path"] + copy.deepcopy(definitions["vinted"])
         fields += await _category_fields(listing, market)
         # Preserve access to existing free-text specifics as the editor does.
         specifics = listing.get(f"{market}_specifics") or {}
@@ -58,7 +54,6 @@ async def forms_prompt(db: Session, conv_id: str, option_catalog=None) -> str:
                 row["key"] = f"{market}_specifics.{key}"
         unique = {row["key"]: row for row in fields}
         forms[market] = {"fields": _values(list(unique.values()), listing, market)}
-    await _vinted_choices(forms["vinted"], listing)
     from vendoo_studio.services.option_lookup import project_row
 
     if option_catalog is not None:
@@ -134,28 +129,3 @@ async def _category_fields(listing: dict, market: str) -> list[dict]:
     return fields
 
 
-async def _vinted_choices(form: dict, listing: dict) -> None:
-    rows = {row["path"]: row for row in form["fields"]}
-    category = rows["vinted_specifics.category"]
-    category["selection_only"] = True
-    try:
-        catalog = await asyncio.to_thread(vinted_browser.category_rows)
-        category["options"] = vinted_browser.category_options(catalog)
-        if not category["options"]:
-            raise vinted_browser.VintedConnectionError("Vinted returned no category choices.")
-        category["options_source"] = "marketplace"
-    except vinted_browser.VintedConnectionError as exc:
-        category.pop("options", None)
-        category["options_source"] = "unavailable"
-        category["options_unavailable"] = str(exc)
-    brand = rows["vinted_specifics.brand"]
-    brand["selection_only"] = True
-    query = str(get_path(listing, "vinted_specifics.brand") or listing.get("brand") or "")
-    if query:
-        try:
-            brand["options"] = await asyncio.to_thread(vinted_browser.brands, query, category.get("value") or "")
-            brand["options_source"] = "marketplace"
-        except vinted_browser.VintedConnectionError as exc:
-            brand.pop("options", None)
-            brand["options_source"] = "unavailable"
-            brand["options_unavailable"] = str(exc)

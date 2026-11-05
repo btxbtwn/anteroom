@@ -120,7 +120,7 @@ class IndependentFormsTest(unittest.TestCase):
             self.assertNotIn(field, later["ebay_specifics"])
         self.assertEqual(marketplace_text(later, "ebay", "title"), "Newer")
         self.assertEqual(marketplace_text(later, "mercari", "brand"), "Adidas")
-        self.assertEqual(marketplace_text(later, "vinted", "department"), "Men")
+        self.assertEqual(marketplace_text(later, "ebay", "department"), "Men")
 
     def test_a_locked_override_stays_on_that_marketplace_when_general_changes(self):
         previous = {"title": "Coat", "description": "Warm", "brand": "Nike", "department": "Women"}
