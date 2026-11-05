@@ -61,19 +61,25 @@ class MarketplaceListingRepo:
         self.db.commit()
         return as_dict(row)
 
-    def live_marketplaces(self, conv_id: str | None = None) -> dict[str, list[str]]:
-        """Marketplaces each item is live on, from Anteroom's own listing records.
+    def summaries(self, conv_id: str | None = None) -> dict[str, dict[str, dict]]:
+        """Each item's direct listing per marketplace, as the inventory table shows it.
 
-        Vendoo can still say the item is a draft after a direct publish. The
-        inventory reads this so that row shows the listing anyway.
+        One small query over every record: its state, live link, whether the
+        last action failed, and how many fields the marketplace sent back.
         """
-        query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace).filter(
-            MarketplaceListing.state.in_(LIVE_STATES))
+        query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace,
+                              MarketplaceListing.state, MarketplaceListing.listing_url,
+                              MarketplaceListing.error, MarketplaceListing.error_fields)
         if conv_id:
             query = query.filter(MarketplaceListing.conversation_id == conv_id)
-        grouped: dict[str, list[str]] = {}
-        for conversation_id, marketplace in query.all():
-            grouped.setdefault(conversation_id, []).append(marketplace)
+        grouped: dict[str, dict[str, dict]] = {}
+        for conversation_id, marketplace, state, url, error, fields in query.all():
+            grouped.setdefault(conversation_id, {})[marketplace] = {
+                "state": state,
+                "listing_url": url,
+                "failed": bool(error),
+                "fields": len(fields) if isinstance(fields, list) else 0,
+            }
         return grouped
 
     def live_revisions(self, conv_id: str | None = None) -> dict[str, set[str]]:

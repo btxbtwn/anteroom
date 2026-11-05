@@ -8,6 +8,7 @@ export const pageLoaders = {
   marketplaces: () => import("../components/MarketplacesPage").then(m => ({ default: m.MarketplacesPage })),
   automations: () => import("../components/AutomationsPage").then(m => ({ default: m.AutomationsPage })),
   sourcing: () => import("../components/SourcingPage").then(m => ({ default: m.SourcingPage })),
+  inventory: () => import("../components/InventoryTablePage").then(m => ({ default: m.InventoryTablePage })),
 };
 
 export function preloadListingCode() {

@@ -24,14 +24,22 @@ struct InventoryView: View {
         @Bindable var model = model
         let counts = model.counts(search: search)
         let rows = model.rows(search: search)
+        let hints = Suggestion.hints(model.suggestions)
+        let stale = model.suggestions.filter { $0.kind == "stale_active" }.map(\.conversationID)
         NavigationStack(path: $path) {
             List(selection: $selected) {
-                if !selecting {
-                    SuggestionsSection(api: model.api, suggestions: model.suggestions) { bulk = .markdown($0) }
+                // Suggestions show on each listing's own row; only the batch markdown needs a place of its own.
+                if !selecting && !stale.isEmpty {
+                    Button(stale.count == 1 ? "Mark down 1 stale listing" : "Mark down \(stale.count) stale listings",
+                           systemImage: "tag") { bulk = .markdown(stale) }
+                        .font(.footnote)
+                        .accessibilityHint("Review a lower price for each stale listing. Saves in Anteroom only.")
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
                 ForEach(rows) { listing in
                     NavigationLink(value: listing) {
-                        ListingRow(api: model.api, listing: listing)
+                        ListingRow(api: model.api, listing: listing, hint: hints[listing.id])
                     }
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -330,10 +338,11 @@ private struct StatusTabs: View {
 struct ListingRow: View {
     let api: AnteroomAPI
     let listing: ListingSummary
+    var hint: String?
     @Environment(AppearanceModel.self) private var appearance
 
     var body: some View {
-        ListingRowContent(listing: listing, bySKU: appearance.listingNames == .sku) {
+        ListingRowContent(listing: listing, bySKU: appearance.listingNames == .sku, hint: hint) {
             if let cover = listing.coverPhotoID {
                 RemotePhoto(api: api, photoID: cover, maxPixels: 96)
             } else {
@@ -346,15 +355,18 @@ struct ListingRow: View {
     }
 }
 
-/// The desktop row: cover, name, colored lifecycle word, then where it is live.
+/// The desktop row: cover, name, colored lifecycle word, the suggested next
+/// step, then each marketplace's status as a compact badge.
 struct ListingRowContent<Thumbnail: View>: View {
     let listing: ListingSummary
     var bySKU = false
+    var hint: String?
     let thumbnail: Thumbnail
 
-    init(listing: ListingSummary, bySKU: Bool = false, @ViewBuilder thumbnail: () -> Thumbnail) {
+    init(listing: ListingSummary, bySKU: Bool = false, hint: String? = nil, @ViewBuilder thumbnail: () -> Thumbnail) {
         self.listing = listing
         self.bySKU = bySKU
+        self.hint = hint
         self.thumbnail = thumbnail()
     }
 
@@ -387,6 +399,9 @@ struct ListingRowContent<Thumbnail: View>: View {
                     }
                 }
                 .font(.caption)
+                if let hint {
+                    Text(hint).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
                 if listing.status == "sold", let missing = listing.missingSaleData, !missing.isEmpty {
                     Text("Missing sale data")
                         .font(.caption2.weight(.medium))
@@ -396,13 +411,9 @@ struct ListingRowContent<Thumbnail: View>: View {
                         .background(.orange.opacity(0.12), in: Capsule())
                         .accessibilityLabel("Missing sale data: \(missing.joined(separator: ", "))")
                 }
-                let live = listing.liveMarketplaces
-                if !live.isEmpty {
-                    Text(live.map(Marketplaces.name).joined(separator: " · "))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .accessibilityLabel("Listed on \(live.map(Marketplaces.name).joined(separator: ", "))")
+                let badges = listing.marketplaceBadges
+                if !badges.isEmpty {
+                    MarketplaceBadges(badges: badges)
                 }
             }
             Spacer(minLength: 0)
@@ -420,6 +431,44 @@ struct ListingRowContent<Thumbnail: View>: View {
         case "sold": WorkspaceStyle.accent
         case "failed": .red
         default: .secondary
+        }
+    }
+}
+
+/// "eBay Listed · Poshmark Needs 2 fields", wrapped to the row's width.
+private struct MarketplaceBadges: View {
+    let badges: [MarketplaceBadge]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) { chips }
+            VStack(alignment: .leading, spacing: 4) { chips }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(badges.map { "\(Marketplaces.name($0.marketplace)) \($0.label)" }.joined(separator: ", "))
+    }
+
+    private var chips: some View {
+        ForEach(badges, id: \.marketplace) { badge in
+            HStack(spacing: 3) {
+                Text(Marketplaces.name(badge.marketplace)).foregroundStyle(.secondary)
+                Text(badge.label).fontWeight(.medium).foregroundStyle(color(badge.tone))
+            }
+            .font(.caption2)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(WorkspaceStyle.surface, in: Capsule())
+            .overlay(Capsule().stroke(WorkspaceStyle.border, lineWidth: 1))
+        }
+    }
+
+    private func color(_ tone: MarketplaceBadge.Tone) -> Color {
+        switch tone {
+        case .good: .green
+        case .attention: .orange
+        case .problem: .red
+        case .neutral: .secondary
         }
     }
 }

@@ -2,10 +2,10 @@ import { useWorkspaceRuntime } from "../app/runtime";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { mergeRegenerateIds } from "../bulkRegenerate";
+import { IDLE_POLL_MS, pollMs } from "../api/polling";
 import type { SettingsSearchItem, SettingsSectionId } from "./settingsNav";
 import { ListingFilters } from "./ListingFilters";
-import { SuggestionsPanel } from "./SuggestionsPanel";
+import { suggestionHint } from "./SuggestionsPanel";
 import type { BulkRegenerate } from "./useBulkRegenerate";
 import { MobileNavButton } from "./MobileNav";
 import type { WorkspaceView } from "./workspaceCrumbs";
@@ -28,7 +28,7 @@ import {
   visibleInInventory,
   type ListingFilters as Filters,
 } from "./inventoryFilters";
-import { PlusIcon, SearchIcon, XIcon } from "lucide-react";
+import { PlusIcon, SearchIcon, Table2Icon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Kbd } from "./ui/kbd";
 import { SIDEBAR_ICON_BUTTON, SIDEBAR_ROW } from "./sidebar/sidebarStyles";
@@ -68,6 +68,8 @@ interface Props {
   onOpenAutomations: () => void;
   onOpenAssistant: () => void;
   onOpenSourcing: () => void;
+  /** Opens or closes the inventory table, the full-width view of these listings. */
+  onToggleInventoryTable: () => void;
   /** Phones: opens the page drawer from the sidebar header. */
   onOpenMobileNav?: () => void;
   onCloseSettings: () => void;
@@ -95,6 +97,7 @@ export function ListingSidebar({
   onOpenAutomations,
   onOpenAssistant,
   onOpenSourcing,
+  onToggleInventoryTable,
   onOpenMobileNav,
   onCloseSettings,
   onSettingsSectionChange,
@@ -146,24 +149,19 @@ export function ListingSidebar({
     queryKey: ["suggestions"],
     queryFn: api.suggestions.list,
     enabled: runtime.features.has("suggestions"),
+    refetchInterval: () => pollMs(IDLE_POLL_MS),
   });
   const suggestions = suggestionData?.suggestions ?? NO_SUGGESTIONS;
   const listingsById = useMemo(
     () => new Map((conversations || []).map((listing) => [listing.id, listing])),
     [conversations],
   );
-  const suggestionEligibleIds = useMemo(
-    () => suggestions.filter((suggestion) => {
-      const listing = listingsById.get(suggestion.conversation_id);
-      if (listing) return true;
-      return Boolean(suggestion.cover_photo_url);
-    }).map((suggestion) => suggestion.conversation_id),
-    [listingsById, suggestions],
+  // Each listing appears once: its suggestion is a hint on its own row.
+  const hints = useMemo(
+    () => new Map(suggestions.map((suggestion) => [suggestion.conversation_id, suggestionHint(suggestion)])),
+    [suggestions],
   );
-  const eligibleIds = useMemo(
-    () => mergeRegenerateIds(suggestionEligibleIds, listingEligibleIds),
-    [listingEligibleIds, suggestionEligibleIds],
-  );
+  const eligibleIds = listingEligibleIds;
   const selection = useListingSelection({ eligibleIds, listingsById, suggestions, bulk });
   const { selecting, setSelecting, selectedIds, exitSelecting, toggleSelect } = selection;
   const toggleListingSelect = useCallback(
@@ -242,6 +240,17 @@ export function ListingSidebar({
       <div className="sidebar-header pywebview-drag-region">
         {onOpenMobileNav ? <MobileNavButton onClick={onOpenMobileNav} /> : null}
         <h1 className="sidebar-mobile-title">{settingsMode ? "Settings" : "Inventory"}</h1>
+        {!settingsMode ? (
+          <button
+            type="button"
+            className="sidebar-icon-btn"
+            aria-label="Inventory table"
+            title="Inventory table"
+            onClick={onToggleInventoryTable}
+          >
+            <Table2Icon className="size-4.5" />
+          </button>
+        ) : null}
         {!settingsMode ? (
           <button
             type="button"
@@ -344,6 +353,17 @@ export function ListingSidebar({
             <button
               type="button"
               className={SIDEBAR_ICON_BUTTON}
+              title="Inventory table"
+              aria-label="Inventory table"
+              aria-pressed={activeView === "inventory"}
+              data-active={activeView === "inventory"}
+              onClick={onToggleInventoryTable}
+            >
+              <Table2Icon />
+            </button>
+            <button
+              type="button"
+              className={SIDEBAR_ICON_BUTTON}
               title="New listing"
               aria-label="New listing"
               disabled={creating}
@@ -352,17 +372,6 @@ export function ListingSidebar({
               <PlusIcon />
             </button>
           </div>
-
-          {runtime.features.has("suggestions") && <SuggestionsPanel
-            variant="sidebar"
-            selectedConvId={selectedConvId}
-            onSelect={onSelect}
-            selecting={selecting}
-            selectedIds={selectedIds}
-            selectLocked={false}
-            canSelect={(suggestion) => suggestionEligibleIds.includes(suggestion.conversation_id)}
-            onToggleSelect={(id, shift) => toggleSelect(id, shift, suggestionEligibleIds)}
-          />}
 
           <ListingFilters
             filters={filters}
@@ -386,6 +395,7 @@ export function ListingSidebar({
                 settled={false}
                 visibleMarketplaces={visibleMarketplaces}
                 nameBySku={nameBySku}
+                hint={hints.get(listing.id)}
                 selecting={selecting}
                 checked={selectedIds.has(listing.id)}
                 canSelect={true}

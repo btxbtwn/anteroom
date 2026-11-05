@@ -71,7 +71,48 @@ enum Marketplaces {
     }
 }
 
+/// One marketplace's status on an inventory row, as the desktop table's cell reads it.
+struct MarketplaceBadge: Hashable, Sendable {
+    enum Tone: Hashable, Sendable { case good, attention, problem, neutral }
+
+    let marketplace: String
+    let label: String
+    let tone: Tone
+    let url: URL?
+
+    /// Nil when the item is not listed there: the row only names marketplaces with something to say.
+    init?(marketplace: String, record: DirectRecord) {
+        self.marketplace = marketplace
+        switch record.state {
+        case "published", "pending_review":
+            label = record.state == "pending_review" ? "In review" : "Listed"
+            tone = .good
+            url = record.listingURL.flatMap(URL.init(string:))
+            return
+        case "saving", "publishing", "updating":
+            (label, tone) = ("Working", .neutral)
+        case _ where record.failed && record.fields > 0:
+            (label, tone) = ("Needs \(record.fields) field\(record.fields == 1 ? "" : "s")", .attention)
+        case _ where record.failed:
+            (label, tone) = ("Failed", .problem)
+        case "draft":
+            (label, tone) = ("Draft", .neutral)
+        case "unknown":
+            (label, tone) = ("Checking", .neutral)
+        default:
+            return nil
+        }
+        url = nil
+    }
+}
+
 extension ListingSummary {
+    /// Each marketplace Anteroom has a record for, in marketplace order.
+    var marketplaceBadges: [MarketplaceBadge] {
+        let records = directRecords ?? [:]
+        return Marketplaces.sorted(records.keys).compactMap { MarketplaceBadge(marketplace: $0, record: records[$0]!) }
+    }
+
     /// Where the listing is live. Hosted rows carry only Anteroom's own listings.
     var liveMarketplaces: [String] {
         var seen = Set<String>()
