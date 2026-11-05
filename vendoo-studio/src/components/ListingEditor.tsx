@@ -61,6 +61,9 @@ interface Props {
   onCleared?: () => void;
   reviewTab: ListingReviewTab;
   onReviewTabChange: (tab: ListingReviewTab) => void;
+  /** "general" or a marketplace id; App keeps it so other pages can open a tab. */
+  editTab: string;
+  onEditTabChange: (tab: string) => void;
   onBulkListingsCreated?: (listings: BulkListingUploadResult[], generate: boolean) => void;
   onEditInventoryLocation?: () => void;
   /** The listing's chat, beside the form or floated over its corner on desktop. */
@@ -128,6 +131,8 @@ export function ListingEditor({
   onCleared,
   reviewTab,
   onReviewTabChange,
+  editTab: requestedTab,
+  onEditTabChange: setEditTab,
   onBulkListingsCreated,
   onEditInventoryLocation,
   chat,
@@ -139,7 +144,6 @@ export function ListingEditor({
   const edits = React.useMemo(() => listingEdits(queryClient, convId), [queryClient, convId]);
   const editState = React.useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
   const unsaved = editState.saving || Boolean(editState.draft);
-  const [editTab, setEditTab] = React.useState("general");
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [fieldTarget, setFieldTarget] = React.useState<{ field: string; sequence: number } | null>(null);
   const editorRef = React.useRef<HTMLDivElement>(null);
@@ -168,9 +172,8 @@ export function ListingEditor({
   const Layout = vendoo ? VendooLayout : MarketplacesLayout;
   const tabs = React.useMemo(() => editorTabs(marketplaceSettings?.selected, runtime), [marketplaceSettings?.selected, runtime]);
 
-  React.useEffect(() => {
-    if (!tabs.includes(editTab)) setEditTab("general");
-  }, [editTab, tabs]);
+  // A marketplace the seller no longer lists to falls back to General.
+  const editTab = tabs.includes(requestedTab) ? requestedTab : "general";
 
   const openBlocker = (field: string, marketplace?: string) => {
     if (isEbayInventoryLocationEdit(field)) {
@@ -242,8 +245,6 @@ export function ListingEditor({
         </>}
         onSelect={(id) => {
           setFieldTarget(null);
-          if (id === "general") onReviewTabChange("input");
-          else onReviewTabChange("forms");
           setEditTab(id);
         }}>
         <>

@@ -57,6 +57,34 @@ struct InventoryTests {
         precondition(InventoryQuery.compactCount(999) == "999" && InventoryQuery.compactCount(1121) == "1.1k"
                      && InventoryQuery.compactCount(2000) == "2k" && InventoryQuery.compactCount(150_000) == "150k")
 
+        // Per-marketplace badges: what Anteroom's own records say, in marketplace order.
+        let tracked = try JSONDecoder().decode(ListingSummary.self, from: Data(#"""
+        {"id":"f","title":"Levi's","status":"active","direct_marketplaces":["ebay"],"direct_records":{
+          "poshmark":{"state":"not_saved","listing_url":null,"failed":true,"fields":2},
+          "ebay":{"state":"published","listing_url":"https://www.ebay.com/itm/1","failed":false,"fields":0},
+          "depop":{"state":"draft","failed":false,"fields":0},
+          "mercari":{"state":"publishing","failed":false,"fields":0},
+          "etsy":{"state":"not_saved","failed":false,"fields":0}}}
+        """#.utf8))
+        let badges = tracked.marketplaceBadges
+        precondition(badges.map(\.marketplace) == ["ebay", "poshmark", "mercari", "depop"], "Not listed stays off the row")
+        precondition(badges.map(\.label) == ["Listed", "Needs 2 fields", "Working", "Draft"])
+        precondition(badges.map(\.tone) == [.good, .attention, .neutral, .neutral])
+        precondition(badges[0].url?.absoluteString == "https://www.ebay.com/itm/1")
+        precondition(rows[0].marketplaceBadges.isEmpty, "Rows without records decode and show nothing")
+        precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "not_saved", failed: true, fields: 1))?.label == "Needs 1 field")
+        precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "not_saved", failed: true, fields: 0))?.tone == .problem)
+        precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "pending_review"))?.label == "In review")
+
+        // Suggestions read as a state on the listing's own row.
+        let suggestions = try JSONDecoder().decode([Suggestion].self, from: Data(#"""
+        [{"conversation_id":"a","kind":"ready_to_generate","title":"Blue shirt","reason":"Photos added"},
+         {"conversation_id":"b","kind":"ready_to_review","title":"Red bag","reason":"Generated"},
+         {"conversation_id":"c","kind":"stale_active","title":"Old coat","reason":"Listed 75 days ago","age_days":75,"similar_sold":3,"season_fit":"in"}]
+        """#.utf8))
+        precondition(suggestions.map(\.hint) == ["Ready to generate", "Needs review", "Stale 75 days · 3 like it sold · In season"])
+        precondition(Suggestion.hints(suggestions)["b"] == "Needs review")
+
         // Editing General fields writes only what changed; marketplace data is untouched.
         let document = try JSONDecoder().decode([String: JSONValue].self, from: Data(#"""
         {"title":"Blue shirt","price":12.5,"quantity":2,"labels":["Ready"],"size":38,

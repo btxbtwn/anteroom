@@ -27,6 +27,7 @@ export const ListingRow = memo(function ListingRow({
   settled,
   visibleMarketplaces,
   nameBySku = false,
+  hint,
   selecting = false,
   checked = false,
   canSelect = false,
@@ -40,6 +41,8 @@ export const ListingRow = memo(function ListingRow({
   settled: boolean;
   visibleMarketplaces?: Set<string>;
   nameBySku?: boolean;
+  /** What Anteroom suggests doing next, such as "Ready to generate". */
+  hint?: string;
   selecting?: boolean;
   checked?: boolean;
   canSelect?: boolean;
@@ -221,6 +224,7 @@ export const ListingRow = memo(function ListingRow({
               </ListingTag>
             ) : null}
             {partial ? <span className="truncate text-2xs text-sidebar-muted-foreground">{partial}</span> : null}
+            {hint ? <span className="min-w-0 truncate text-2xs text-sidebar-muted-foreground" title={hint}>· {hint}</span> : null}
             {settledAt ? <span className="text-2xs font-medium text-sidebar-muted-foreground">{settledAt}</span> : null}
           </div>
           {listedMarketplaces.length ? (

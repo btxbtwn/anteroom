@@ -61,6 +61,7 @@ const AssistantPage = lazy(pageLoaders.assistant);
 const MarketplacesPage = lazy(pageLoaders.marketplaces);
 const AutomationsPage = lazy(pageLoaders.automations);
 const SourcingPage = lazy(pageLoaders.sourcing);
+const InventoryTablePage = lazy(pageLoaders.inventory);
 // A page's code is fetched the first time it is opened. Fetching it once the
 // app has settled means a tap does not wait on the network for it.
 const PAGE_LOADERS = [...Object.values(pageLoaders), loadListingEditor, loadChatPanel];
@@ -269,6 +270,8 @@ export function App() {
         ? (assistantThreads.data?.find((thread) => thread.id === assistantThreadId)?.title || "Assistant")
       : activeView === "sourcing"
         ? "Sourcing"
+      : activeView === "inventory"
+        ? "Inventory"
         : String(selectedListing?.title || "Anteroom");
   const assistantThreadTitle = assistantThreads.data?.find((thread) => thread.id === assistantThreadId)?.title ?? null;
   const crumbs = workspaceCrumbs(
@@ -347,16 +350,24 @@ export function App() {
     closeMobileSidebar();
   };
   const openAutomations = () => togglePage("automations");
+  // The table is the inventory's other view; it returns to the list it came from.
+  const toggleInventoryTable = () => {
+    if (!runtime.views.has("listings")) return;
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
+    closeMobileSidebar();
+    if (activeView === "inventory") goListings();
+    else setActiveView("inventory");
+  };
   const openSourcing = () => togglePage("sourcing");
 
-  const openListing = useCallback((id: string) => {
+  const openListing = useCallback((id: string, tab?: string) => {
     preloadListingCode();
     void prefetchListingReads(queryClient, id);
-    setSelectedConvId(id);
+    dispatchOpenListing({ type: "open", id, tab });
     goListings();
     setMobilePane(runtime.hosted ? "editor" : "workspace");
     closeMobileSidebar();
-  }, [setSelectedConvId, goListings, closeMobileSidebar, queryClient, runtime.hosted]);
+  }, [goListings, closeMobileSidebar, queryClient, runtime.hosted]);
 
   const handleSettingsSectionChange = (section: SettingsSectionId) => {
     setSettingsSection(section);
@@ -434,6 +445,8 @@ export function App() {
     ? { label: "Inventory", onClick: () => setMobileSidebarOpen(true) }
     : activeView === "settings"
       ? { label: "Settings", onClick: () => setMobileSidebarOpen(true) }
+    : activeView === "inventory"
+      ? { label: "Inventory", onClick: () => { goListings(); setMobileSidebarOpen(true); } }
       : null;
 
   const handleListingSearch = (value: string) => {
@@ -583,6 +596,8 @@ export function App() {
         convId={listing.id}
         reviewTab={listing.reviewTab}
         onReviewTabChange={(value) => dispatchOpenListing({ type: "review", id: listing.id, value })}
+        editTab={listing.editTab}
+        onEditTabChange={(value) => dispatchOpenListing({ type: "tab", id: listing.id, value })}
         onAskChat={(text) => {
           dispatchOpenListing({ type: "message", id: listing.id, value: text });
           setMobilePane(runtime.hosted ? "editor" : "workspace");
@@ -648,6 +663,7 @@ export function App() {
             onOpenAutomations={openAutomations}
             onOpenAssistant={openAssistant}
             onOpenSourcing={openSourcing}
+            onToggleInventoryTable={toggleInventoryTable}
             onOpenMobileNav={() => setMobileNavOpen(true)}
             onCloseSettings={closeSettings}
             onSettingsSectionChange={handleSettingsSectionChange}
@@ -757,6 +773,15 @@ export function App() {
                 <Suspense fallback={pageLoading}>
                   <SourcingPage onOpenListing={openListing} />
                 </Suspense>
+              ) : activeView === "inventory" ? (
+                <Suspense fallback={pageLoading}>
+                  <InventoryTablePage
+                    conversations={conversations}
+                    query={listingQuery}
+                    onQueryChange={setListingQuery}
+                    onOpenListing={openListing}
+                  />
+                </Suspense>
               ) : selectedConvId ? null : needsSetup ? (
                 <SetupChecklist
                   providerConfigured={providerConfigured}
@@ -775,7 +800,6 @@ export function App() {
                   </EmptyHeader>
                   <EmptyContent className="max-w-md">
                     {runtime.features.has("suggestions") && <SuggestionsPanel
-                      variant="workspace"
                       selectedConvId={selectedConvId}
                       onSelect={openListing}
                     />}

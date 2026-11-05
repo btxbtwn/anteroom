@@ -26,10 +26,32 @@ struct NativePreflight: Decodable, Equatable {
     }
 }
 
-/// What Anteroom last did on a marketplace (`/native-marketplaces`).
+/// What Anteroom last did on a marketplace (`/native-marketplaces`, the web's `NativeDraft`).
 struct NativeDraftState: Decodable, Equatable {
+    struct Progress: Decodable, Equatable { let label: String }
+
     let state: String?
     let running: Bool?
+    // What List and delist shows beside the state.
+    var action: String? = nil
+    var draftURL: String? = nil
+    var listingURL: String? = nil
+    var revisionID: String? = nil
+    var error: String? = nil
+    var errorCode: String? = nil
+    var marketplaceMessage: String? = nil
+    var retryAfter: String? = nil
+    var progress: Progress? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case state, running, action, error, progress
+        case draftURL = "draft_url"
+        case listingURL = "listing_url"
+        case revisionID = "revision_id"
+        case errorCode = "error_code"
+        case marketplaceMessage = "marketplace_message"
+        case retryAfter = "retry_after"
+    }
 }
 
 /// A marketplace listing Anteroom knows about (`/marketplace-listings`).
@@ -37,11 +59,16 @@ struct MarketplaceLiveListing: Decodable, Equatable {
     let listingID: String?
     let soldHere: Bool?
     let state: String?
+    // What List and delist shows: the listing's page and a failed Delist's reason.
+    var url: String? = nil
+    var error: String? = nil
+    var marketplaceMessage: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case listingID = "listing_id"
         case soldHere = "sold_here"
-        case state
+        case state, url, error
+        case marketplaceMessage = "marketplace_message"
     }
 }
 

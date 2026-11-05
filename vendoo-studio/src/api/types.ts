@@ -27,6 +27,8 @@ export interface ConversationSummary {
   vendoo_marketplaces?: string[];
   /** Marketplaces Anteroom published directly. Vendoo may still call the item a draft. */
   direct_marketplaces?: string[];
+  /** Anteroom's own listing record per marketplace, for the inventory table. */
+  direct_records?: Record<string, DirectRecord>;
   /** Marketplaces Anteroom delisted directly. Vendoo may still call the item listed there. */
   removed_marketplaces?: string[];
   /** Units sold on Anteroom's sales ledger, and the most the item was offered with. */
@@ -56,6 +58,17 @@ export interface ConversationSummary {
   unsent_edits?: boolean;
   /** False for modern resale: Etsy removes it, so Send leaves Etsy empty. */
   etsy_eligible?: boolean;
+}
+
+/** One marketplace's direct listing record, as the inventory list carries it. */
+export interface DirectRecord {
+  /** not_saved, draft, saving, publishing, updating, unknown, published or pending_review. */
+  state: string;
+  listing_url?: string | null;
+  /** The last List, Update or Save draft failed. */
+  failed?: boolean;
+  /** Fields the marketplace rejected that the seller has not edited since. */
+  fields?: number;
 }
 
 export interface Conversation extends ConversationSummary {

@@ -16,6 +16,8 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
     var directMarketplaces: [String]?
     var coverPhotoURL: String?
     var missingSaleData: [String]?
+    /// Anteroom's own listing of the item, per marketplace.
+    var directRecords: [String: DirectRecord]?
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, sku, price, quantity
@@ -26,6 +28,7 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
         case directMarketplaces = "direct_marketplaces"
         case coverPhotoURL = "cover_photo_url"
         case missingSaleData = "missing_sale_data"
+        case directRecords = "direct_records"
     }
 
     var displayTitle: String {
@@ -39,6 +42,37 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
         let parts = components.path.split(separator: "/")
         guard parts.count >= 3, parts[parts.count - 3] == "photos", parts.last == "thumb" else { return nil }
         return String(parts[parts.count - 2])
+    }
+}
+
+/// One marketplace's direct listing record, as the inventory list carries it.
+struct DirectRecord: Codable, Hashable, Sendable {
+    /// not_saved, draft, saving, publishing, updating, unknown, published or pending_review.
+    var state: String
+    var listingURL: String?
+    /// The last List, Update or Save draft failed.
+    var failed = false
+    /// Fields the marketplace rejected that the seller has not edited since.
+    var fields = 0
+
+    enum CodingKeys: String, CodingKey {
+        case state, failed, fields
+        case listingURL = "listing_url"
+    }
+
+    init(state: String, listingURL: String? = nil, failed: Bool = false, fields: Int = 0) {
+        self.state = state
+        self.listingURL = listingURL
+        self.failed = failed
+        self.fields = fields
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        state = try container.decode(String.self, forKey: .state)
+        listingURL = try container.decodeIfPresent(String.self, forKey: .listingURL)
+        failed = try container.decodeIfPresent(Bool.self, forKey: .failed) ?? false
+        fields = try container.decodeIfPresent(Int.self, forKey: .fields) ?? 0
     }
 }
 

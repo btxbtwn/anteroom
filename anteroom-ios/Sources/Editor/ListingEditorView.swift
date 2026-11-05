@@ -10,6 +10,7 @@ struct ListingEditorView: View {
     @State private var showingHistory = false
     @State private var showingTemplates = false
     @State private var showingListEverywhere = false
+    @State private var showingMarketplaces = false
     @State private var tab = "general"
     private let onSaved: () -> Void
 
@@ -100,10 +101,11 @@ struct ListingEditorView: View {
                     Divider()
                     Button("List everywhere…", systemImage: "paperplane") { showingListEverywhere = true }
                         .disabled(!model.choices.contains(where: \.selectable))
+                    Button("Manage marketplaces…", systemImage: "storefront") { showingMarketplaces = true }
                 }
                 .frame(minWidth: 44, minHeight: 44)
                 .disabled(model.hasChanges || model.isLoading || model.isSaving || model.loadError != nil)
-                .accessibilityHint("Save changes first to open the assistant or listing history")
+                .accessibilityHint("Save changes first to open the assistant, listing history or marketplaces")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if model.isSaving {
@@ -151,6 +153,14 @@ struct ListingEditorView: View {
             }
         }) {
             ListingHistoryView(api: model.api, listingID: model.listingID)
+        }
+        .sheet(isPresented: $showingMarketplaces, onDismiss: {
+            // Listing, updating and delisting change the tabs' readiness and the inventory row.
+            Task { await model.loadReadiness() }
+            onSaved()
+        }) {
+            MarketplaceActionsView(api: model.api, listingID: model.listingID,
+                                   revisionID: model.revisionID, title: model.title)
         }
         .sheet(isPresented: $showingListEverywhere, onDismiss: onSaved) {
             ListEverywhereSheet(model: model)

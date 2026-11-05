@@ -116,6 +116,39 @@ final class AnteroomAPI: Sendable {
                                    json: Body(revision_id: revisionID, confirm: true)))
     }
 
+    /// Sends the saved revision to the live listing on one marketplace the seller named and confirmed.
+    func updateOnMarketplace(_ id: String, marketplace: String, revisionID: String) async throws {
+        struct Body: Encodable { let revision_id: String; let confirm: Bool }
+        _ = try await send(request("POST", "api/conversations/\(id)/native-marketplaces/\(marketplace)/update",
+                                   json: Body(revision_id: revisionID, confirm: true)))
+    }
+
+    /// Saves the revision as an unpublished draft on the marketplace; buyers cannot see it.
+    func saveMarketplaceDraft(_ id: String, marketplace: String, revisionID: String) async throws {
+        struct Body: Encodable { let revision_id: String }
+        _ = try await send(request("POST", "api/conversations/\(id)/native-marketplaces/\(marketplace)/draft",
+                                   json: Body(revision_id: revisionID)))
+    }
+
+    /// Asks the marketplace what an unconfirmed List or Update did. It never acts again.
+    func checkMarketplaceResult(_ id: String, marketplace: String) async throws {
+        _ = try await send(request("POST", "api/conversations/\(id)/native-marketplaces/\(marketplace)/check",
+                                   json: [String: String]()))
+    }
+
+    /// Stops a running List, Update or Save draft.
+    func cancelMarketplaceAction(_ id: String, marketplace: String) async throws {
+        _ = try await send(request("POST", "api/conversations/\(id)/native-marketplaces/\(marketplace)/cancel"))
+    }
+
+    /// Delists from the marketplaces the seller named and confirmed.
+    func delist(_ id: String, marketplaces: [String]) async throws -> [String: MarketplaceLiveListing] {
+        struct Body: Encodable { let marketplaces: [String]; let confirm: Bool }
+        let listings: [String: MarketplaceLiveListing?] = try await decode(request(
+            "POST", "api/conversations/\(id)/marketplace-listings/delist", json: Body(marketplaces: marketplaces, confirm: true)))
+        return listings.compactMapValues { $0 }
+    }
+
     /// A marketplace's synced category tree (eBay's is about 20,000 nodes).
     func catalogCategories(marketplace: String) async throws -> CatalogCategories {
         try await decode(request("GET", "api/catalog/categories", query: [URLQueryItem(name: "marketplace", value: marketplace)]))

@@ -15,6 +15,7 @@ from vendoo_studio.repositories.queries import (
     ListingRepo,
 )
 from vendoo_studio.models.conversation import utcnow
+from vendoo_studio.models.marketplace_listing import LIVE_STATES
 from vendoo_studio.services import boxes
 from vendoo_studio.services.listing_copy import CopyRequest
 from vendoo_studio.services.listing_delete import ListingBusy, delete_listing, wipe_contents
@@ -29,6 +30,19 @@ class ConversationCreate(BaseModel):
     title: str | None = None
     notes: str | None = None
     box_id: str | None = None
+
+
+class DirectRecord(BaseModel):
+    """Anteroom's own listing of the item on one marketplace."""
+
+    # A marketplace_listings state: not_saved, draft, saving, publishing,
+    # updating, unknown, published or pending_review.
+    state: str
+    listing_url: str | None = None
+    # The last List, Update or Save draft failed.
+    failed: bool = False
+    # Fields the marketplace rejected and the seller has not edited since.
+    fields: int = 0
 
 
 class ConversationSummary(BaseModel):
@@ -59,6 +73,8 @@ class ConversationSummary(BaseModel):
     vendoo_marketplaces: list[str] = []
     # Marketplaces Anteroom published directly.
     direct_marketplaces: list[str] = []
+    # Every direct listing record by marketplace, for the inventory table.
+    direct_records: dict[str, DirectRecord] = {}
     # Marketplaces Anteroom delisted directly, though imported history says listed.
     removed_marketplaces: list[str] = []
     # Units sold on Anteroom's sales ledger, and the most the item was offered
@@ -127,9 +143,7 @@ def list_conversations(db: Session = Depends(get_db)):
     unsent = _unsent_edits(db, conversations, revisions)
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 
-    records = MarketplaceListingRepo(db)
-    live = records.live_marketplaces()
-    links = records.listing_urls()
+    direct = MarketplaceListingRepo(db).summaries()
     from vendoo_studio.services.item_status import sold_units
 
     sold = sold_units(db, conversations)
@@ -139,7 +153,7 @@ def list_conversations(db: Session = Depends(get_db)):
     return [
         _conv_response(c, _extras(
             _cover_photo_url(covers.get(c.id)), facets.get(c.id), revisions.get(c.id), c.id in unsent,
-            live.get(c.id, []), links.get(c.id, {}), sold.get(c.id), missing.get(c.id, []),
+            direct.get(c.id, {}), sold.get(c.id), missing.get(c.id, []),
         ))
         for c in conversations
     ]
@@ -503,8 +517,7 @@ def _extras(
     facet: dict | None,
     revision_id: str | None = None,
     unsent_edits: bool = False,
-    direct_marketplaces: list[str] | None = None,
-    direct_listing_urls: dict[str, str] | None = None,
+    direct: dict[str, dict] | None = None,
     sold=None,
     missing_sale_data: list[str] | None = None,
 ) -> dict:
@@ -516,8 +529,10 @@ def _extras(
         "current_revision_id": revision_id,
         "unsent_edits": unsent_edits,
         "etsy_eligible": (facet or {}).get("etsy_eligible", True),
-        "direct_marketplaces": list(direct_marketplaces or []),
-        "direct_listing_urls": dict(direct_listing_urls or {}),
+        "direct_marketplaces": [market for market, record in (direct or {}).items() if record["state"] in LIVE_STATES],
+        "direct_listing_urls": {market: record["listing_url"] for market, record in (direct or {}).items()
+                                if record.get("listing_url")},
+        "direct_records": dict(direct or {}),
         "units_sold": sold.units_sold if sold else 0,
         "quantity": sold.quantity if sold else None,
         "sold_at": _iso(sold.sold_at) if sold else None,
@@ -532,7 +547,6 @@ def _extras_for(db: Session, conv_id: str) -> dict:
     unsent = _unsent_edits(db, [conv] if conv else [], {conv_id: revision_id} if revision_id else {})
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 
-    records = MarketplaceListingRepo(db)
     from vendoo_studio.services.item_status import sold_units
     from vendoo_studio.services.sales_records import missing_by_conversation
 
@@ -541,8 +555,7 @@ def _extras_for(db: Session, conv_id: str) -> dict:
         inventory_facets.listing_facet(repo.db, conv_id),
         revision_id,
         conv_id in unsent,
-        records.live_marketplaces(conv_id).get(conv_id, []),
-        records.listing_urls(conv_id).get(conv_id, {}),
+        MarketplaceListingRepo(db).summaries(conv_id).get(conv_id, {}),
         sold_units(db, [conv] if conv else []).get(conv_id),
         missing_by_conversation(db, conv_id).get(conv_id, []),
     )
@@ -670,6 +683,7 @@ def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
         vendoo_labels=raw_labels,
         vendoo_marketplaces=[str(m) for m in marketplaces] if isinstance(marketplaces, list) else [],
         direct_marketplaces=[str(m) for m in row.get("direct_marketplaces") or []],
+        direct_records=row.get("direct_records") or {},
         removed_marketplaces=removed_marketplaces(notes, row.get("direct_listing_urls") or {}),
         units_sold=int(row.get("units_sold") or 0),
         quantity=row.get("quantity"),
