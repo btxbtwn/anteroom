@@ -19,26 +19,30 @@ struct BulkRegenerateView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Text(started ? summary : "Rewrites each listing from its photos and item details. Photos, measurements, flaws, cost, labels and notes stay. Results are saved as drafts; nothing is listed or sent.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    if let problem {
-                        Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
+                Group {
+                    Section {
+                        Text(started ? summary : "Rewrites each listing from its photos and item details. Photos, measurements, flaws, cost, labels and notes stay. Results are saved as drafts; nothing is listed or sent.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if let problem {
+                            Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
+                        }
                     }
-                }
-                Section {
-                    ForEach(listings) { listing in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(listing.displayTitle).lineLimit(2)
-                                Text(caption(listing)).font(.caption).foregroundStyle(captionColor(listing))
+                    Section {
+                        ForEach(listings) { listing in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(listing.displayTitle).lineLimit(2)
+                                    Text(caption(listing)).font(.caption).foregroundStyle(captionColor(listing))
+                                }
+                                Spacer()
+                                if case .working = states[listing.id] { ProgressView() }
                             }
-                            Spacer()
-                            if case .working = states[listing.id] { ProgressView() }
                         }
                     }
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("Regenerate \(listings.count)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -14,71 +14,75 @@ struct ProvidersSettingsView: View {
 
     var body: some View {
         Form {
-            if loaded {
-                Section {
-                    Picker("Primary", selection: Binding(get: { order?.primary ?? "" }, set: { setOrder(primary: $0) })) {
-                        if !configured.contains(where: { $0.id == order?.primary }) {
-                            Text("Choose").tag(order?.primary ?? "")
+            Group {
+                if loaded {
+                    Section {
+                        Picker("Primary", selection: Binding(get: { order?.primary ?? "" }, set: { setOrder(primary: $0) })) {
+                            if !configured.contains(where: { $0.id == order?.primary }) {
+                                Text("Choose").tag(order?.primary ?? "")
+                            }
+                            ForEach(configured) { Text($0.label).tag($0.id) }
                         }
-                        ForEach(configured) { Text($0.label).tag($0.id) }
-                    }
-                    Picker("Fallback", selection: Binding(get: { order?.fallback ?? "none" }, set: { setOrder(fallback: $0) })) {
-                        Text("None").tag("none")
-                        ForEach(configured.filter { $0.id != order?.primary }) { Text($0.label).tag($0.id) }
-                        if let fallback = order?.fallback, fallback != "none", !configured.contains(where: { $0.id == fallback }) {
-                            Text(fallback).tag(fallback)
-                        }
-                    }
-                    Picker("Photos", selection: Binding(get: { order?.photoProvider ?? "same" }, set: { setPhotos($0) })) {
-                        Text("Same as listing").tag("same")
-                        ForEach(configured) { Text($0.label).tag($0.id) }
-                        if let photo = order?.photoProvider, photo != "same", !configured.contains(where: { $0.id == photo }) {
-                            Text(photo).tag(photo)
-                        }
-                    }
-                } header: {
-                    Text("Listing AI")
-                } footer: {
-                    Text(configured.isEmpty
-                         ? "Add an API key below, then choose it here to write listings in the web app and on this iPhone."
-                         : "The primary writes your listings; the fallback takes over if it fails. Photos can use a different provider.")
-                }
-                .disabled(saving)
-                Section {
-                    NavigationLink {
-                        MimoKeyView(api: api, maskedKey: order?.mimoMaskedKey) { Task { await load() } }
-                    } label: {
-                        HStack {
-                            Text("Xiaomi MiMo")
-                            Spacer()
-                            Text(order?.mimoConfigured == true ? "Key saved" : "Not set")
-                                .font(.footnote)
-                                .foregroundStyle(order?.mimoConfigured == true ? .green : .secondary)
-                        }
-                    }
-                    ForEach(providers) { provider in
-                        NavigationLink {
-                            ProviderKeyView(api: api, provider: provider) { Task { await load() } }
-                        } label: {
-                            HStack {
-                                Text(provider.label)
-                                Spacer()
-                                Text(provider.configured ? "Key saved" : "Not set")
-                                    .font(.footnote)
-                                    .foregroundStyle(provider.configured ? .green : .secondary)
+                        Picker("Fallback", selection: Binding(get: { order?.fallback ?? "none" }, set: { setOrder(fallback: $0) })) {
+                            Text("None").tag("none")
+                            ForEach(configured.filter { $0.id != order?.primary }) { Text($0.label).tag($0.id) }
+                            if let fallback = order?.fallback, fallback != "none", !configured.contains(where: { $0.id == fallback }) {
+                                Text(fallback).tag(fallback)
                             }
                         }
+                        Picker("Photos", selection: Binding(get: { order?.photoProvider ?? "same" }, set: { setPhotos($0) })) {
+                            Text("Same as listing").tag("same")
+                            ForEach(configured) { Text($0.label).tag($0.id) }
+                            if let photo = order?.photoProvider, photo != "same", !configured.contains(where: { $0.id == photo }) {
+                                Text(photo).tag(photo)
+                            }
+                        }
+                    } header: {
+                        Text("Listing AI")
+                    } footer: {
+                        Text(configured.isEmpty
+                             ? "Add an API key below, then choose it here to write listings in the web app and on this iPhone."
+                             : "The primary writes your listings; the fallback takes over if it fails. Photos can use a different provider.")
                     }
-                } header: {
-                    Text("API keys")
-                } footer: {
-                    Text("Encrypted in your private vault and billed to your own provider accounts; sign-in providers need a connected Mac.")
+                    .disabled(saving)
+                    Section {
+                        NavigationLink {
+                            MimoKeyView(api: api, maskedKey: order?.mimoMaskedKey) { Task { await load() } }
+                        } label: {
+                            HStack {
+                                Text("Xiaomi MiMo")
+                                Spacer()
+                                Text(order?.mimoConfigured == true ? "Key saved" : "Not set")
+                                    .font(.footnote)
+                                    .foregroundStyle(order?.mimoConfigured == true ? .green : .secondary)
+                            }
+                        }
+                        ForEach(providers) { provider in
+                            NavigationLink {
+                                ProviderKeyView(api: api, provider: provider) { Task { await load() } }
+                            } label: {
+                                HStack {
+                                    Text(provider.label)
+                                    Spacer()
+                                    Text(provider.configured ? "Key saved" : "Not set")
+                                        .font(.footnote)
+                                        .foregroundStyle(provider.configured ? .green : .secondary)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("API keys")
+                    } footer: {
+                        Text("Encrypted in your private vault and billed to your own provider accounts; sign-in providers need a connected Mac.")
+                    }
+                }
+                if let error {
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
                 }
             }
-            if let error {
-                Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-            }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .overlay { if !loaded && error == nil { ProgressView() } }
         .navigationTitle("Providers")
         .navigationBarTitleDisplayMode(.inline)
@@ -161,38 +165,42 @@ private struct ProviderKeyView: View {
 
     var body: some View {
         Form {
-            Section {
-                if configured {
-                    LabeledContent("Saved key", value: provider.maskedKey ?? "Saved")
-                }
-                SecureField(configured ? "Replace key" : (provider.keyHint ?? "API key"), text: $newKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                Button(configured ? "Replace key" : "Save key") { saveKey() }
-                    .disabled(newKey.trimmingCharacters(in: .whitespaces).isEmpty || working)
-                if let link = provider.keyURL.flatMap(URL.init(string:)) {
-                    Link("Get a \(provider.label) key", destination: link)
-                }
-            } header: {
-                Text("API key")
-            } footer: {
-                Text("Encrypted in your account's private vault and never shown again. Usage is billed by \(provider.label) to your account.")
-            }
-            if configured {
+            Group {
                 Section {
-                    Button("Test connection") { test() }.disabled(working)
-                    Button("Remove key", role: .destructive) { confirmRemove = true }.disabled(working)
+                    if configured {
+                        LabeledContent("Saved key", value: provider.maskedKey ?? "Saved")
+                    }
+                    SecureField(configured ? "Replace key" : (provider.keyHint ?? "API key"), text: $newKey)
+                        .textContentType(.password)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    Button(configured ? "Replace key" : "Save key") { saveKey() }
+                        .disabled(newKey.trimmingCharacters(in: .whitespaces).isEmpty || working)
+                    if let link = provider.keyURL.flatMap(URL.init(string:)) {
+                        Link("Get a \(provider.label) key", destination: link)
+                    }
+                } header: {
+                    Text("API key")
+                } footer: {
+                    Text("Encrypted in your account's private vault and never shown again. Usage is billed by \(provider.label) to your account.")
                 }
-                modelSection
+                if configured {
+                    Section {
+                        Button("Test connection") { test() }.disabled(working)
+                        Button("Remove key", role: .destructive) { confirmRemove = true }.disabled(working)
+                    }
+                    modelSection
+                }
+                if let message {
+                    Section { Label(message, systemImage: "checkmark.circle").foregroundStyle(.green) }
+                }
+                if let failure {
+                    Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                }
             }
-            if let message {
-                Section { Label(message, systemImage: "checkmark.circle").foregroundStyle(.green) }
-            }
-            if let failure {
-                Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-            }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .navigationTitle(provider.label)
         .navigationBarTitleDisplayMode(.inline)
         .overlay { if working { ProgressView() } }
@@ -307,26 +315,30 @@ private struct MimoKeyView: View {
 
     var body: some View {
         Form {
-            Section {
-                if configured { LabeledContent("Saved key", value: maskedKey ?? "Saved") }
-                SecureField(configured ? "Replace key" : "MiMo API key", text: $newKey)
-                    .textContentType(.password).autocorrectionDisabled().textInputAutocapitalization(.never)
-                Button(configured ? "Replace key" : "Save key") { save() }
-                    .disabled(newKey.trimmingCharacters(in: .whitespaces).isEmpty || working)
-            } header: {
-                Text("API key")
-            } footer: {
-                Text("Encrypted in your private vault and billed to your MiMo account, which uses mimo-v2.5 for photos and mimo-v2.5-pro for listings.")
-            }
-            if configured {
+            Group {
                 Section {
-                    Button("Test connection") { test() }.disabled(working)
-                    Button("Remove key", role: .destructive) { confirmRemove = true }.disabled(working)
+                    if configured { LabeledContent("Saved key", value: maskedKey ?? "Saved") }
+                    SecureField(configured ? "Replace key" : "MiMo API key", text: $newKey)
+                        .textContentType(.password).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Button(configured ? "Replace key" : "Save key") { save() }
+                        .disabled(newKey.trimmingCharacters(in: .whitespaces).isEmpty || working)
+                } header: {
+                    Text("API key")
+                } footer: {
+                    Text("Encrypted in your private vault and billed to your MiMo account, which uses mimo-v2.5 for photos and mimo-v2.5-pro for listings.")
                 }
+                if configured {
+                    Section {
+                        Button("Test connection") { test() }.disabled(working)
+                        Button("Remove key", role: .destructive) { confirmRemove = true }.disabled(working)
+                    }
+                }
+                if let message { Section { Label(message, systemImage: "checkmark.circle").foregroundStyle(.green) } }
+                if let failure { Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
             }
-            if let message { Section { Label(message, systemImage: "checkmark.circle").foregroundStyle(.green) } }
-            if let failure { Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .navigationTitle("Xiaomi MiMo")
         .navigationBarTitleDisplayMode(.inline)
         .overlay { if working { ProgressView() } }

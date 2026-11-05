@@ -13,23 +13,27 @@ struct ListingHistoryView: View {
     var body: some View {
         NavigationStack {
             List(revisions) { revision in
-                NavigationLink(value: revision) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(revision.title.isEmpty ? "Untitled listing" : revision.title)
-                            .font(.body)
-                        if let date = ServerDate.parse(revision.createdAt) {
-                            Text(date, format: .dateTime.month().day().year().hour().minute())
-                                .font(.footnote).foregroundStyle(.secondary)
+                Group {
+                    NavigationLink(value: revision) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(revision.title.isEmpty ? "Untitled listing" : revision.title)
+                                .font(.body)
+                            if let date = ServerDate.parse(revision.createdAt) {
+                                Text(date, format: .dateTime.month().day().year().hour().minute())
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                            if revision.id == currentID {
+                                Label("Current version", systemImage: "checkmark.circle")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
-                        if revision.id == currentID {
-                            Label("Current version", systemImage: "checkmark.circle")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+                        .padding(.vertical, 6)
+                        .accessibilityElement(children: .combine)
                     }
-                    .padding(.vertical, 6)
-                    .accessibilityElement(children: .combine)
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .overlay { loadState }
             .navigationTitle("Listing history")
             .navigationBarTitleDisplayMode(.inline)
@@ -99,49 +103,53 @@ private struct RevisionPreviewView: View {
 
     var body: some View {
         Form {
-            Section {
-                Text(revision.title.isEmpty ? "Untitled listing" : revision.title)
-                    .font(.headline).textSelection(.enabled)
-                if let date = ServerDate.parse(revision.createdAt) {
-                    Text(date, format: .dateTime.month().day().year().hour().minute())
-                        .foregroundStyle(.secondary)
+            Group {
+                Section {
+                    Text(revision.title.isEmpty ? "Untitled listing" : revision.title)
+                        .font(.headline).textSelection(.enabled)
+                    if let date = ServerDate.parse(revision.createdAt) {
+                        Text(date, format: .dateTime.month().day().year().hour().minute())
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
-            if loading {
-                ProgressView("Loading version…")
-            } else if let snapshot {
-                Section("Listing details") {
-                    ForEach(Self.previewFields, id: \.key) { field in
-                        if let text = snapshot.listing[field.key]?.displayText {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(field.label).font(.footnote).foregroundStyle(.secondary)
-                                Text(text).textSelection(.enabled)
+                if loading {
+                    ProgressView("Loading version…")
+                } else if let snapshot {
+                    Section("Listing details") {
+                        ForEach(Self.previewFields, id: \.key) { field in
+                            if let text = snapshot.listing[field.key]?.displayText {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(field.label).font(.footnote).foregroundStyle(.secondary)
+                                    Text(text).textSelection(.enabled)
+                                }
+                                .accessibilityElement(children: .combine)
                             }
-                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                    Section {
+                        Button(revision.id == currentID ? "Current version" : "Restore this version") {
+                            confirmRestore = true
+                        }
+                        .disabled(revision.id == currentID || restoring || currentID == nil || conflict)
+                        if restoring { ProgressView("Restoring…") }
+                    } footer: {
+                        Text("Restores the complete saved listing, including marketplace details. Photos and private notes are not restored. Nothing is published.")
+                    }
+                }
+                if let error {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                        if conflict {
+                            Text("Go back and pull to refresh history before choosing a version again.")
+                        } else if snapshot == nil {
+                            Button("Try again") { Task { await load() } }
                         }
                     }
                 }
-                Section {
-                    Button(revision.id == currentID ? "Current version" : "Restore this version") {
-                        confirmRestore = true
-                    }
-                    .disabled(revision.id == currentID || restoring || currentID == nil || conflict)
-                    if restoring { ProgressView("Restoring…") }
-                } footer: {
-                    Text("Restores the complete saved listing, including marketplace details. Photos and private notes are not restored. Nothing is published.")
-                }
             }
-            if let error {
-                Section {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                    if conflict {
-                        Text("Go back and pull to refresh history before choosing a version again.")
-                    } else if snapshot == nil {
-                        Button("Try again") { Task { await load() } }
-                    }
-                }
-            }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .navigationTitle("Saved version")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(restoring)

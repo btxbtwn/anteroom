@@ -71,14 +71,18 @@ struct OptionPickerSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                // A saved value outside the list stays visible, as on the desktop.
-                if !value.isEmpty, !options.contains(value), search.isEmpty {
-                    Section("Current") { row(value) }
+                Group {
+                    // A saved value outside the list stays visible, as on the desktop.
+                    if !value.isEmpty, !options.contains(value), search.isEmpty {
+                        Section("Current") { row(value) }
+                    }
+                    Section {
+                        ForEach(filtered, id: \.self) { row($0) }
+                    }
                 }
-                Section {
-                    ForEach(filtered, id: \.self) { row($0) }
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .overlay {
                 if filtered.isEmpty && !search.isEmpty { ContentUnavailableView.search(text: search) }
             }
