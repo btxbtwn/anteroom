@@ -84,7 +84,7 @@ describe("category tree menus", () => {
       options: ["Good"],
     })).toBeNull();
     expect(pathCategoryChoices({
-      key: "sellwild_specifics.nativeCategoryId",
+      key: "mercari_specifics.nativeCategoryId",
       label: "Category",
       options: ["Vehicles | Cars"],
       optionValues: { "Vehicles | Cars": "43" },

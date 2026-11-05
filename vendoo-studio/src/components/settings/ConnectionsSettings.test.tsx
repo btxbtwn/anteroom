@@ -20,8 +20,6 @@ beforeEach(() => {
         depop: { state: "signed_in", expires_at: null, label: "ada", expiring: false },
         poshmark: { state: "signed_out", expires_at: null, label: null, expiring: false },
         mercari: { state: "expired", expires_at: 10, label: null, expiring: false },
-        sellwild: { state: "unknown", expires_at: null, label: null, expiring: false },
-        vinted: { state: "signed_out", expires_at: null, label: null, expiring: false },
       } } };
     }
     if (queryKey[0] === "direct-connections") return { data: { accounts: {} } };
@@ -40,16 +38,15 @@ describe("Connections settings", () => {
     const section = html.slice(accounts, vendoo);
     expect(section).toContain(">Accounts<");
     let cursor = 0;
-    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop"]) {
       const at = section.indexOf(name, cursor);
       expect(at).toBeGreaterThanOrEqual(cursor);
       cursor = at + name.length;
     }
-    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop"]) {
       expect(section).toContain(`Sale detection for ${name}`);
     }
-    expect(section).toContain("Poshmark, Sellwild, and Vinted closets");
-    expect(section).not.toContain("Sales on Vinted are not detected");
+    expect(section).toContain("Poshmark closet");
     expect(section).toContain("Detect sales");
     expect(section).toContain("Where the sign-in lives");
     expect(html).toContain("Marketplaces → eBay → Offers");
@@ -77,7 +74,7 @@ describe("Connections settings", () => {
       <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
     );
     let cursor = 0;
-    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop"]) {
       const at = html.indexOf(name, cursor);
       expect(at).toBeGreaterThanOrEqual(cursor);
       cursor = at + name.length;

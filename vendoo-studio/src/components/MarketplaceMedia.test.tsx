@@ -8,7 +8,7 @@ const { MarketplaceMedia } = await import("./MarketplaceMedia");
 
 const photo = (id: string, marketplace: string | null = null) => ({ id, marketplace, url: `/api/photos/${id}`, original_filename: `${id}.jpg` });
 const RULES = {
-  photo_limits: { ebay: 24, depop: 8, mercari: 12, poshmark: 16, etsy: 20, vinted: 20, sellwild: 20 },
+  photo_limits: { ebay: 24, depop: 8, mercari: 12, poshmark: 16, etsy: 20 },
   video_rules: { poshmark: { name: "Poshmark", shorter_than: 15 }, ebay: { name: "eBay", size_label: "150 MB", mime_types: ["video/mp4", "video/quicktime"] } },
 };
 const VIDEOS = { videos: [

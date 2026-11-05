@@ -13,7 +13,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from vendoo_studio.models.mercari_shipping import package_ounces
 from vendoo_studio.services.vendoo_item_shape import (
     _CAMEL_BOUNDARY,
     GENERAL_KEY,
@@ -22,7 +21,6 @@ from vendoo_studio.services.vendoo_item_shape import (
     _label_of,
     _norm,
 )
-from vendoo_studio.services.vendoo_specifics import specifics_key
 
 
 def observe_item_schema(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -95,10 +93,8 @@ def _observe_shipping_choices(
     """Learn the shipping picks only the marketplace itself can offer.
 
     Facebook's carrier is ``"<service type>:<name>"`` from Facebook's own
-    answer for a weight tier; Vinted's Package Size is an id from Vinted's
-    list for the category. Neither is in Vendoo's schema, so both are read off
-    forms the seller filled in: the carrier per Package weight tier, the
-    package size against the package's weight in ounces.
+    answer for a weight tier. It is not in Vendoo's schema, so it is read off
+    forms the seller filled in: the carrier per Package weight tier.
     """
     if marketplace == "facebook":
         specifics = section.get("marketplaceSpecifics")
@@ -106,15 +102,6 @@ def _observe_shipping_choices(
         carrier, tier = specifics.get("carrier"), specifics.get("packageWeightLabel")
         if isinstance(carrier, str) and ":" in carrier and isinstance(tier, str) and tier:
             marketplaces.setdefault(marketplace, {}).setdefault("shippingCarrier", {})[tier] = carrier
-    elif marketplace == "vinted" and leaf_id:
-        specifics = section.get("categorySpecifics")
-        size = (specifics or {}).get(specifics_key(leaf_id, "packageSizeId")) if isinstance(specifics, dict) else None
-        weight = general.get("weight")
-        if not isinstance(weight, dict):
-            weight = {}
-        ounces = package_ounces(weight.get("pounds"), weight.get("ounces"))
-        if size not in (None, "") and ounces > 0:
-            marketplaces.setdefault(marketplace, {}).setdefault("packageSize", {})[str(ounces)] = str(size)
 
 
 def observe_listing_encodings(
@@ -210,28 +197,6 @@ _VENDOO_MARKETPLACE_CONDITIONS: dict[str, dict[str, str | int]] = {
         "v_preowned": "used_good",
         "v_preowned_fair": "used_good",
         "v_poor": "used_fair",
-    },
-    # Sellwild's own ids: 5 Brand New, 4 Almost New, 3 Gently Used, 2 Used,
-    # 1 Broken — Vendoo's mapping, which puts every pre-owned grade on Used.
-    "sellwild": {
-        "v_newWithTagsBox": "5",
-        "v_newWithOutTags": "4",
-        "v_newWithDefects": "3",
-        "v_preowned_excellent": "2",
-        "v_preowned": "2",
-        "v_preowned_fair": "2",
-        "v_poor": "1",
-    },
-    # Vinted's status ids: 6 new with tags, 1 new without, 2 very good,
-    # 3 good, 4 satisfactory.
-    "vinted": {
-        "v_newWithTagsBox": 6,
-        "v_newWithOutTags": 1,
-        "v_newWithDefects": 2,
-        "v_preowned_excellent": 3,
-        "v_preowned": 3,
-        "v_preowned_fair": 3,
-        "v_poor": 4,
     },
 }
 

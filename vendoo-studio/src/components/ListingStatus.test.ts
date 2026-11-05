@@ -52,8 +52,8 @@ describe("inventoryStatus", () => {
   it("reads a Vendoo active as draft once Anteroom delisted every marketplace", () => {
     const delisted = {
       status: "active",
-      vendoo_marketplaces: ["depop", "ebay", "mercari", "poshmark", "sellwild"],
-      removed_marketplaces: ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild"],
+      vendoo_marketplaces: ["depop", "ebay", "mercari", "poshmark"],
+      removed_marketplaces: ["ebay", "etsy", "poshmark", "mercari", "depop"],
     };
     expect(inventoryStatus(delisted)).toBe("draft");
     expect(inventoryStatus({ ...delisted, removed_marketplaces: ["ebay"] })).toBe("active");
@@ -82,10 +82,10 @@ describe("withDirectListings", () => {
         { id: "depop", label: "Depop", status: "NOT LISTED" },
         { id: "etsy", label: "Etsy", status: "NOT LISTED" },
       ],
-      ["depop", "poshmark", "mercari", "sellwild"],
+      ["depop", "poshmark", "mercari"],
     );
     expect(rows.filter((row) => row.status === "LISTED").map((row) => row.id)).toEqual([
-      "poshmark", "mercari", "depop", "sellwild",
+      "poshmark", "mercari", "depop",
     ]);
     expect(rows.find((row) => row.id === "etsy")?.status).toBe("NOT LISTED");
     expect(rows.find((row) => row.id === "ebay")?.status).toBe("DELISTED");

@@ -4,13 +4,13 @@ import { editorTabs } from "./editorTabs";
 const mac = { hosted: false, marketplaceForms: new Set<string>() };
 
 describe("editorTabs", () => {
-  it("leaves out a marketplace the seller turned off, Vinted included", () => {
-    expect(editorTabs(["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild"], mac))
-      .toEqual(["general", "ebay", "poshmark", "mercari", "depop", "etsy", "sellwild"]);
+  it("leaves out a marketplace the seller turned off", () => {
+    expect(editorTabs(["ebay", "poshmark", "mercari", "depop", "etsy"], mac))
+      .toEqual(["general", "ebay", "poshmark", "mercari", "depop", "etsy"]);
   });
 
-  it("shows Vinted when the seller lists there", () => {
-    expect(editorTabs(["ebay", "vinted"], mac)).toEqual(["general", "ebay", "vinted"]);
+  it("keeps only selected marketplaces that have forms", () => {
+    expect(editorTabs(["ebay"], mac)).toEqual(["general", "ebay"]);
   });
 
   it("on the web shows only forms the hosted app has", () => {

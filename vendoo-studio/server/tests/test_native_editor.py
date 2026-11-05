@@ -30,8 +30,7 @@ class NativeEditorTest(unittest.TestCase):
         snapshot = {**self.listing, "direct_category_ids": {"depop": "menswear_jeans"}}
         listing_persistence.save_revision(self.db, self.conv.id, snapshot, "category_analysis")
         before = len(JobRepo(self.db).list_by_conversation(self.conv.id))
-        with patch("vendoo_studio.services.chat_forms.get_selected_marketplaces", return_value=["poshmark", "depop"]), \
-             patch("vendoo_studio.services.chat_forms.vinted_browser.category_rows", return_value=[{"title": "Jeans"}]):
+        with patch("vendoo_studio.services.chat_forms.get_selected_marketplaces", return_value=["poshmark", "depop"]):
             data = json.loads(asyncio.run(forms_prompt(self.db, self.conv.id)).split('\n')[-1])
         posh = {row["path"]: row for row in data["poshmark"]["fields"]}
         depop = {row["path"]: row for row in data["depop"]["fields"]}
@@ -223,7 +222,6 @@ class NativeEditorTest(unittest.TestCase):
         self.enterContext(patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=True)))
         self.bridge = self.enterContext(patch("vendoo_studio.services.browser_bridge.request", new_callable=AsyncMock))
         self.bridge.return_value = {"ok": True, "form": {"marketplace": "poshmark", "native": True, "known": True, "fields": []}}
-        self.sellwild = self.enterContext(patch("vendoo_studio.services.sellwild_browser.account_choices", return_value={"ship_from": None, "coupons": [], "default_parcel": ""}))
         self.prepared = []
         prepare = native_editor.direct_preflight.prepare
 
@@ -253,7 +251,7 @@ class NativeEditorTest(unittest.TestCase):
         listen = lambda *args: queries.append(args[2])  # noqa: E731
         event.listen(self.engine, "before_cursor_execute", listen)
         try:
-            for market in ("poshmark", "mercari", "depop", "sellwild"):
+            for market in ("poshmark", "mercari", "depop"):
                 queries.clear()
                 asyncio.run(native_editor.editor_form(self.conv.id, market, rev.id, self.db))
                 # A handful of reads to build the snapshot, then the session is
@@ -319,7 +317,7 @@ class NativeEditorTest(unittest.TestCase):
     def test_forms_open_for_a_draft_with_no_listing_yet(self):
         conv = ConversationRepo(self.db).create(title="Filled in by hand")
         url = f"/api/conversations/{conv.id}/native-marketplaces"
-        for marketplace in ("poshmark", "depop", "mercari", "sellwild", "ebay"):
+        for marketplace in ("poshmark", "depop", "mercari", "ebay"):
             with self.subTest(marketplace=marketplace):
                 answer = self.client.get(f"{url}/{marketplace}/form")
                 self.assertEqual(answer.status_code, 200, answer.text)
@@ -384,153 +382,14 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(snapshot["depop_specifics"]["nativeSizeId"], "123")
         self.assertEqual(snapshot["mercari_specifics"]["nativeSizeId"], "168")
 
-    def test_sellwild_form_is_native_and_has_no_ignored_brand_or_quantity(self):
-        answer = self.client.get(f"{self.url}/sellwild/form")
-        self.assertEqual(answer.status_code, 200, answer.text)
-        form = answer.json()
-        self.assertTrue(form["native"])
-        fields = {row["path"]: row for row in form["fields"]}
-        self.assertNotIn("brand", fields)
-        self.assertNotIn("quantity", fields)
-        self.assertNotIn("locked", fields["sellwild_specifics.nativeCategoryId"])
-        self.assertTrue(fields["sellwild_specifics.nativeCategoryId"]["selection_only"])
-        self.assertIn("246", fields["sellwild_specifics.nativeCategoryId"]["option_values"].values())
-        self.assertFalse(fields["sellwild_specifics.description"]["required"])
-        self.assertEqual(fields["sellwild_specifics.title"]["value"], "Nike L Tee")
-        self.assertEqual(fields["sellwild_specifics.description"]["value"], "Details")
-        # Account metadata comes from Anteroom, even with Chrome connected.
-        self.sellwild.assert_called_once()
-        self.bridge.assert_not_called()
 
-    def test_sellwild_form_follows_the_sell_page_sections_and_order(self):
-        answer = self.client.get(f"{self.url}/sellwild/form")
-        self.assertEqual(answer.status_code, 200, answer.text)
-        rows = answer.json()["fields"]
-        self.assertEqual((rows[0]["input_type"], rows[0]["help"]), ("photos", "Please add Photos of your Listing. Max 20."))
-        self.assertEqual([(row.get("section"), row["label"]) for row in rows], [
-            ("", ""), ("Add a Title", "What are you selling? (Required)"), ("Name Your Price (USD)", "Price"),
-            ("Name Your Price (USD)", "Sellwild Fee"), ("Name Your Price (USD)", "You Earn"),
-            ("Name Your Price (USD)", "Sell it faster with a discount"),
-            ("Add Details", "Describe your item (Optional)"), ("Add Details", "Category"), ("Add Details", "Condition"),
-            ("Item Shipping", "Shipping From"),
-            ("Item Shipping", "Package"), ("Item Shipping", "Weight (lbs)"), ("Item Shipping", "Height (in)"),
-            ("Item Shipping", "Width (in)"), ("Item Shipping", "Depth (in)"),
-        ])
-        fields = {row["label"]: row for row in rows}
-        self.assertEqual(fields["Price"]["min_value"], 5)
-        category = fields["Category"]
-        # The picker's order: groups and their categories by Sellwild's sort order. Pets > Adoption is hidden.
-        self.assertEqual(category["options"][:3], ["Vehicles | Cars", "Vehicles | Electric Cars", "Vehicles | SUVs"])
-        self.assertNotIn("206", category["option_values"].values())
-        self.assertEqual(fields["Package"]["options"][:6], [
-            "Custom Package Dimensions", "Small Flat Rate Box", "Medium Flat Rate Box 1", "Medium Flat Rate Box 2",
-            "Large Flat Rate Box", "Flat Rate Envelope (12.5 × 9.5 × 0.75 in)"])
-        self.assertEqual(fields["Package"]["options"][-2:], ["Soft Pack (poly mailer)", "Irregular Parcel (4 × 4 × 4 in)"])
-        self.assertEqual(fields["Package"]["option_groups"]["Flat Rate Envelope (12.5 × 9.5 × 0.75 in)"], "Add other packaging")
-        self.assertNotIn("Small Flat Rate Box", fields["Package"]["option_groups"])
-        self.assertEqual(fields["Sell it faster with a discount"]["input_type"], "note")
-        self.assertEqual(fields["Sellwild Fee"]["help"], "$2.00. Sellwild fee is 10% of sold price.")
-        self.assertTrue(answer.json()["page_labels"])
 
-    def test_sellwild_sign_in_is_explicit_and_never_starts_a_listing_job(self):
-        with patch("vendoo_studio.services.sellwild_browser.connect", return_value={"ok": True}) as connect:
-            self.assertEqual(self.client.post(f"{self.url}/sellwild/connect").json(), {"ok": True})
-            connect.assert_called_once()
-            answer = self.client.post("/api/conversations/missing/native-marketplaces/sellwild/connect")
-            self.assertEqual(answer.status_code, 404)
-            connect.assert_called_once()
-        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
-        self.bridge.assert_not_called()
 
-    def test_sellwild_reloads_account_choices_instead_of_reusing_a_saved_form(self):
-        from vendoo_studio.services import native_contract
 
-        form = native_editor.sellwild_form(self.listing, self.conv.id, self.db, coupons=[])
-        snapshot = copy.deepcopy(self.listing)
-        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"sellwild": form}, ["sellwild"])
-        revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
-        self.sellwild.return_value = {"ship_from": "Seller address", "default_parcel": "USPS_SoftPack",
-                                     "coupons": [{"id": 117, "name": "25OFF", "discountType": "percentage", "discountValue": 25}]}
-        with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
-            answer = self.client.get(f"{self.url}/sellwild/form?revision_id={revision.id}")
-        fields = {row["label"]: row for row in answer.json()["fields"]}
-        self.assertEqual(fields["Shipping From"]["value"], "Seller address")
-        self.assertEqual(fields["Sell it faster with a discount"]["options"], ["25% 25OFF"])
-        self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
-        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
-        self.bridge.assert_not_called()
 
-    def test_sellwild_reports_account_connection_separately_from_missing_choices(self):
-        for unavailable, connected in [([], True), (["coupons"], True), (["address", "parcel", "coupons"], False)]:
-            with self.subTest(unavailable=unavailable):
-                self.sellwild.return_value = {"ship_from": None, "default_parcel": "", "coupons": [],
-                                             "unavailable": unavailable}
-                self.forget_saved_choices()
-                response = self.client.get(f"{self.url}/sellwild/form")
-                self.assertEqual(response.status_code, 200)
-                self.assertIs(response.json()["account_connected"], connected)
-                if connected:
-                    self.assertNotIn("Sign in", " ".join(response.json().get("notes", [])))
 
-    def test_sellwild_discount_and_profile_package_follow_the_sell_page(self):
-        self.sellwild.return_value = {"ship_from": "Pat Seller", "default_parcel": "USPS_SoftPack",
-                                    "coupons": [{"id": 117, "name": "25OFF", "discountType": "percentage", "discountValue": 25}]}
-        fields = {row["label"]: row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"]}
-        discount = fields["Sell it faster with a discount"]
-        self.assertEqual(discount["value"], [])
-        self.assertEqual(discount["options"], ["25% 25OFF"])
-        self.assertTrue(discount["multi"])
-        self.assertEqual(fields["Package"]["value"], "USPS_SoftPack")
-        saved = {**self.listing, "sellwild_specifics": {"parcelTemplate": "", "couponIds": ["117"]}}
-        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": saved}).status_code, 200)
-        fields = {row["label"]: row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"]}
-        self.assertEqual(fields["Package"]["value"], "")
-        self.assertEqual(fields["Sell it faster with a discount"]["value"], ["117"])
-        # Weight and the three sides share one row on the page.
-        self.assertEqual({fields[label].get("width") for label in ("Weight (lbs)", "Height (in)", "Width (in)", "Depth (in)")},
-                         {"quarter"})
 
-    def test_sellwild_shipping_from_shows_the_address_card_without_chrome(self):
-        card = "Pat Seller\n12 Example St\nSpringfield, IL, 62701\nUnited States of America"
-        self.sellwild.return_value = {"ship_from": card, "coupons": [], "default_parcel": ""}
-        row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
-        self.assertEqual((row["value"], row["locked"], row["section"], row.get("help")), (card, True, "Item Shipping", None))
-        self.sellwild.return_value = {"ship_from": "", "coupons": [], "default_parcel": ""}
-        self.forget_saved_choices()
-        row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
-        self.assertEqual((row["value"], row["help"]), ("", "Add a Shipping From address in Sellwild's Address Book."))
-        self.sellwild.return_value = {"ship_from": None, "coupons": [], "default_parcel": ""}
-        self.forget_saved_choices()
-        with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
-            row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
-        self.assertEqual(row["help"], "Sign in to Sellwild in Anteroom, then reload choices to show your address.")
 
-    def test_sellwild_weight_and_sides_are_typed_on_the_sellwild_tab(self):
-        from vendoo_studio.services.sellwild_listing import package_pounds, package_sides
-
-        submitted = {**self.listing, "weight_lb": 1, "weight_oz": 8, "package_dimensions_in": "10x8x4",
-                     "sellwild_specifics": {"nativeCategoryId": "1", "parcelTemplate": ""}}
-        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": submitted}).status_code, 200)
-        fields = {row["label"]: row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"]}
-        # They start from Item Details and can be changed here, as on Sellwild's page.
-        self.assertEqual([fields[label]["value"] for label in ("Weight (lbs)", "Height (in)", "Width (in)", "Depth (in)")],
-                         [1.5, 4.0, 8.0, 10.0])
-        self.assertFalse(any(fields[label].get("locked") for label in ("Weight (lbs)", "Depth (in)")))
-        own = {**submitted, "sellwild_specifics": {"parcelTemplate": "", "package": {"weight": 2.25, "depth": 12, "width": 9, "height": 5}}}
-        self.assertEqual(package_pounds(own), 2.25)
-        self.assertEqual(package_sides(own), [12.0, 9.0, 5.0])
-        # An incomplete box on the tab falls back to Item Details.
-        partial = {**submitted, "sellwild_specifics": {"parcelTemplate": "", "package": {"depth": 12}}}
-        self.assertEqual(package_sides(partial), [10.0, 8.0, 4.0])
-
-    def test_sellwild_vehicle_form_has_vehicle_information_and_no_package(self):
-        submitted = {**self.listing, "sellwild_specifics": {"nativeCategoryId": "43", "vin": "1HGCM82633A004352"}}
-        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": submitted}).status_code, 200)
-        rows = self.client.get(f"{self.url}/sellwild/form").json()["fields"]
-        self.assertEqual([(row.get("section"), row["label"]) for row in rows][-3:], [
-            ("Vehicle Information", "Vehicle Identification Number"), ("Vehicle Information", "Mileage"),
-            ("Vehicle Shipping", "Shipping From")])
-        self.assertNotIn("Package", [row["label"] for row in rows])
 
     def test_direct_depop_attribute_edits_survive_generated_style_padding(self):
         self.bridge.return_value = {"ok": True, "form": {"marketplace": "depop", "native": True, "fields": []}}

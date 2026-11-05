@@ -5,7 +5,7 @@ field, choose a value the marketplace currently accepts, clear optional values,
 and have the saved result match the form. A successful request alone does not
 prove parity. Publishing remains a separate, explicitly confirmed action.
 
-This audit covers eBay, Poshmark, Mercari, Depop and Sellwild. **Full parity is
+This audit covers eBay, Poshmark, Mercari, and Depop. **Full parity is
 not yet verified.** Category catalogs do not by themselves establish that every
 listing control is present.
 
@@ -24,13 +24,12 @@ serialization and saved result have been checked; displaying it is insufficient.
 | Depop | Native category attributes, category sizes, brands, conditions, colors, age, source, style and parcel choices. Private draft photo count, SKU, quantity, style edits and clears were checked. Worldwide shipping saved $15.25, saved free shipping as $0.00, then omitted the fee when switched off; the item stayed $12. | Remaining category-specific behavior, and installed-release verification of worldwide shipping. Video is not offered by Depop's web client (see Listing videos). |
 | eBay | Native category aspects, option IDs, dependent choices and conditions. Offer amounts and explicit offer disablement are carried by the direct API path. The form exposes the offer switch and editable condition description; clearing offer thresholds no longer restores calculated amounts. Trading revise sends DeletedField for cleared offer thresholds and sends or clears condition notes. Format, duration and auctions (0.1.413): Fixed price (Good 'Til Cancelled) or Auction, with auction lengths, starting bid, optional reserve and Buy It Now; the auction choice and lengths come from eBay's listing-type policy for the leaf category. Auctions omit `availableQuantity` and Best Offer and require quantity 1. Save Draft writes the inventory item and an unpublished offer, never publishes, and reads the offer back; List publishes that same offer. Installed 0.1.417 on the private test item: the form read the category's real auction lengths (3, 5, 7 and 10 days), hid offers for an auction, and the pre-flight blocked a missing starting bid. Save Draft saved an unpublished Auction offer (5 days, $8 starting bid, $12 Buy It Now, no reserve, quantity 1), and eBay's offer read back the same; switching to Fixed price saved a separate unpublished Fixed price, Good 'Til Cancelled offer with quantity 2, as eBay keeps one offer per SKU and format. Check confirmed each without writing; neither has a listing ID. (0.1.414 failed after writing by recording a field the listing record does not store; fixed in 0.1.417.) Variations (0.1.420): an item's eBay form lists the aspects eBay enables for variations in its leaf (Size, Color…) and one row per variation with its own quantity, optional SKU and optional price, plus up to 12 photos for each value of one aspect. Save Draft writes one inventory item per variation, the inventory item group and one unpublished fixed-price offer per variation, never publishes, and reads the group and every offer back; List publishes that group once (one listing ID). Update replaces the items, group and offers of the live listing; Delist withdraws the whole group; Sync reads stock per variation. These have request-level tests with an eBay fake. | List of an auction (publication) is unverified, since nothing may be published. Real private Save Draft of a listing with variations; its List, Update and Delist are unverified. Adding a variation to a live listing (refused for now) and importing an existing variation listing from eBay (still refused). Policy and store-category selectors, optional merchandising fields and any conditional controls. The listing video (0.1.422) has request-level tests only; it needs a real private Save Draft. Trading changes have request-level tests; their saved results need a safe real validation path. |
 | Etsy | Listing video (0.1.422): upload, clear, re-attach and read-back have request-level tests only. | Real private Save Draft with a video, then clearing it. |
-| Sellwild | Native category/condition IDs, vehicle VIN/mileage branch, package validation and explicit activation boundary. Its form exposes category, condition, optional description and the 12 native USPS packaging presets. Preset dimensions and request serialization have tests. | Remaining visible sell-page controls and installed UI verification. Sellwild has no remote draft operation; local editing must not activate a listing. |
 
 Photo selection/order and the marketplace's media limits also need to be checked
 per marketplace. A shared General field or account setting must be identified
 as such; it must not silently override an explicit marketplace selection.
 
-## Live Update on Mercari, Vinted and Sellwild
+## Live Update on Mercari
 
 Added in 0.1.432. Each site's own edit request was read from its public web
 bundle on 2026-10-26, so Update edits the live listing in place and keeps its
@@ -48,20 +47,8 @@ only; none has run against a real listing yet.
   `photoIds` (the item's image URLs), and changes only the fields the revision
   differs on. If Mercari has rotated the hash, the request fails before anything
   is written and is reported as a changed site.
-- **Vinted.** The item-upload module in Vinted's item-page bundle saves an edit
-  with `PUT /api/v2/item_upload/items/{id}` and the body
-  `{item, push_up, parcel, upload_session_id}`. The extension reads
-  `GET /api/v2/item_upload/items/{id}` for the item's photos and current values,
-  keeps brand, colour and package size unless the revision names them in
-  `vinted_specifics`, and never sends `push_up`.
-- **Sellwild.** The listing page (`/account/my-listings/[id]`, build
-  `TfctsWXpff2fKS`) sends `PUT /api/listings/{id}/edit`. The schema requires
-  `title`, `price` and `categoryId`. The extension sends those plus only the
-  changed fields, and never `photo`, so the photos stay. When Sellwild answers
-  `underReview`, the listing is recorded as in review.
 
 Still to check on a real listing the seller picks: that Mercari accepts the
-`editListing` hash, that Vinted keeps brand, colour and package size and Sellwild
 reads weight and dimensions back under the names used, and that likes and views
 survive on all three.
 
@@ -81,8 +68,6 @@ Each form's own photos are described in `services/marketplace_media.py`.
 | Etsy | Supported (0.1.422) | One video of 3 to 15 seconds, MP4/MOV/FLV/AVI/3GP/MPEG, at most 95 MB | `uploadListingVideo` (multipart through the relay), `deleteListingVideo`, `getListingVideos` read-back. |
 | Depop | Not offered on the web | — | Videos are added in Depop's app. |
 | Mercari | Not offered on the web | — | — |
-| Vinted | Not offered on the web | — | — |
-| Sellwild | Not offered | — | — |
 
 Recovery never repeats a write. eBay: the journal keeps the video ID per file
 checksum. A retry reuses it and uploads only while eBay still reports
@@ -133,10 +118,7 @@ Sources:
   upload only through `uploadDraftItemImageMutation`. "Video" appears only in
   Open Graph metadata. Confirm in the signed-in sell form that no video control
   has appeared since.
-- Vinted web client (www.vinted.com, 2026-10-26): of 384 `item_upload.*`
   strings, none is a listing video; the only video strings are the video-game
-  rating and Vinted's own item-verification service.
-- Sellwild web client (build `TfctsWXpff2fKS`, 2026-10-26): both sell pages
   accept `image/*` only and activate through `confirm-photos`; "video" there is
   the camera used to take photos.
 
@@ -230,8 +212,6 @@ extension's journal. Nothing here is scheduled, and nothing lists or delists.
 | Depop | Refresh / bump | Not supported by Depop | Depop's help centre has no free bump; it recommends refreshing photos, description and price, and sells [Boosted Listings](https://depophelp.zendesk.com/hc/en-gb/articles/10110299060753-Boosted-Listings) (paid, fee on the sale). [Repop](https://depophelp.zendesk.com/hc/en-gb/articles/12803766422289-Repop) relists a sold item. Re-saving a listing to fake a bump is not added. |
 | Depop | Send offer to likers | Implemented (0.1.445), not yet verified on a real account | [Send Offer](https://depophelp.zendesk.com/hc/en-gb/articles/15495796917777-Send-Offer): to eligible likers in the seller's country, one active offer per buyer, not for multi-size listings, shipping not included. Anteroom previews eligible likers, creates one send-all job and waits for `SUCCESS`, following Depop's public web client. It never loops over buyers or resubmits an uncertain job. The captured single-buyer request is not used for bulk offers; see [Mercari and Depop offer requests](#mercari-and-depop-offer-requests). |
 | Etsy | Offers to favoriters | Not available through Etsy's API | Set in Shop Manager → Marketing → Sales and discounts ([help](https://help.etsy.com/hc/en-us/articles/115014260108-How-to-Set-Up-Sales-and-Discounts-for-Your-Shop)); Etsy sends them automatically. The Open API v3 spec (`/openapi/generated/oas/3.0.0.json`, read 2026-10-26) has no offer, coupon or manual renew endpoint, only `should_auto_renew` on a listing. |
-| Vinted | Bump | Paid, not added | [What is an item Bump?](https://www.vinted.com/help/340-what-is-item-bump) and [Buying a Bump](https://www.vinted.com/help/450-buying-a-bump): a paid 3 or 7 day boost bought at checkout. Anteroom does not make purchases. |
-| Sellwild | Share, bump, offers to likers | None found | Sellwild's seller guides list [discounts](https://sellwild.com/guides/seller/my-discounts) (timed price drops with a floor), [coupons](https://sellwild.com/guides/seller/coupons) and BOGO, not sharing or bumping. |
 | eBay | Offers to interested buyers | Implemented earlier (Offers tab) | `services/ebay_offers.py`, eBay Negotiation API. |
 
 ### Mercari and Depop offer requests

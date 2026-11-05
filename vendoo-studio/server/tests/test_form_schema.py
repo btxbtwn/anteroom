@@ -23,7 +23,7 @@ LISTING = {
     "size": "32",
     "marketplace_category_ids": {
         "ebay": "11483", "poshmark": "jeans-men", "mercari": "1931", "depop": "jeans",
-        "etsy": "12", "sellwild": "246", "vinted": "9",
+        "etsy": "12",
     },
     "ebay_specifics": {"inseam": "30", "Fabric Weight": "Lightweight"},
     "poshmark_specifics": {"size": "Waist 32"},
@@ -51,10 +51,6 @@ def _specs(marketplace: str) -> dict[str, FieldSpec]:
         specs["source"] = FieldSpec("source", display="Source", selection_only=True, options={"preloved": "Preloved"})
     elif marketplace == "etsy":
         specs["occasion"] = FieldSpec("occasion", display="Occasion", selection_only=True, options={"casual": "Casual"})
-    elif marketplace == "sellwild":
-        specs["material"] = FieldSpec("material", display="Material", selection_only=True, options={"denim": "Denim"})
-    elif marketplace == "vinted":
-        specs["color"] = FieldSpec("color", display="Color", selection_only=True, options={"blue": "Blue"})
     return specs
 
 
@@ -163,8 +159,7 @@ class FormSchemaTest(unittest.TestCase):
         self.assertNotIn("Women's Size", text)
         self.assertIn("poshmark", text)
         self.assertIn("- Color — Blue, Red", text)
-        for marketplace in ("mercari", "depop", "etsy", "sellwild", "vinted"):
+        for marketplace in ("mercari", "depop", "etsy"):
             self.assertIn(marketplace, text)
-        self.assertIn("- Material — Denim", text)
         self.assertIn("- Source — Preloved", text)
         self.assertIn("- Occasion — Casual", text)

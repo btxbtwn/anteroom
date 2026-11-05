@@ -2,7 +2,7 @@
 
 The form reads one id per marketplace, and only one of its own options counts:
 a Poshmark feature or None, a Depop product type, an eBay leaf, a Mercari
-category with no children, or a Sellwild category. The options come from the
+category with no children. The options come from the
 same lists the forms show (see ``native_category_match``), never Vendoo's tree.
 When the general category changes, a marketplace no option matches is cleared
 and the seller is asked to pick, rather than keeping the old item's category.
@@ -23,18 +23,16 @@ from vendoo_studio.services.seller_overrides import is_locked
 
 log = logging.getLogger("vendoo_studio.agent_categories")
 
-MARKETS = ("ebay", "poshmark", "mercari", "depop", "sellwild")
+MARKETS = ("ebay", "poshmark", "mercari", "depop")
 _DIRECT = ("ebay", "poshmark", "mercari", "depop")
-# Etsy and Vinted follow a general category change only; their lists are read live.
-_ALL = (*MARKETS, "etsy", "vinted")
+# Etsy follows a general category change only; its list is read live.
+_ALL = (*MARKETS, "etsy")
 _LABELS = {
     "ebay": "eBay",
     "poshmark": "Poshmark",
     "mercari": "Mercari",
     "depop": "Depop",
-    "sellwild": "Sellwild",
     "etsy": "Etsy",
-    "vinted": "Vinted",
 }
 _SPLIT = re.compile(r"\s*(?:>|›)\s*")
 _NUMERIC = re.compile(r"[1-9]\d{0,14}")
@@ -57,9 +55,7 @@ _FIELD = {
     "poshmark": "direct_category_ids.poshmark",
     "mercari": "direct_category_ids.mercari",
     "depop": "direct_category_ids.depop",
-    "sellwild": "sellwild_specifics.nativeCategoryId",
     "etsy": "direct_category_ids.etsy",
-    "vinted": "vinted_specifics.category",
 }
 
 
@@ -172,10 +168,6 @@ def _choose(rows: list[dict], listing: dict, requested: dict, market: str, *, ex
 
 
 def _stored_category(listing: dict, market: str) -> str:
-    if market == "sellwild":
-        return _text(_mapping(listing.get("sellwild_specifics")).get("nativeCategoryId"))
-    if market == "vinted":
-        return _text(_mapping(listing.get("vinted_specifics")).get("category"))
     return _text(_direct(listing).get(market))
 
 
@@ -183,17 +175,6 @@ def _store(listing: dict, market: str, choice: dict | None) -> bool:
     """Write this market's category, or clear it when there is none. True when it changed."""
     value = _text((choice or {}).get("id"))
     before = _stored_category(listing, market)
-    if market == "sellwild":
-        block = dict(_mapping(listing.get("sellwild_specifics")))
-        if value:
-            block["nativeCategoryId"] = value
-        else:
-            block.pop("nativeCategoryId", None)
-        if block:
-            listing["sellwild_specifics"] = block
-        else:
-            listing.pop("sellwild_specifics", None)
-        return value != before
     changed = value != before
     _set_direct(listing, market, value)
     if market == "ebay":
@@ -263,9 +244,7 @@ def _take_choice(requested: dict, path: str, value: Any) -> None:
         if key == f"direct_category_ids.{market}":
             requested["ids"][market] = text
             return
-    if key in {"sellwild_specifics.nativecategoryid"}:
-        requested["ids"]["sellwild"] = text
-    elif key == "depop_specifics.categoryid":
+    if key == "depop_specifics.categoryid":
         requested["ids"]["depop"] = text
     elif key == "ebay_specifics.categoryid" and _NUMERIC.fullmatch(text):
         requested["ids"]["ebay"] = text
@@ -297,7 +276,6 @@ def requested_choices(operations: list[dict] | None, source_text: str = "") -> d
     for market in _DIRECT:
         _take_choice(requested, f"direct_category_ids.{market}", _mapping(parsed.get("direct_category_ids")).get(market))
     _take_choice(requested, "direct_category_ids.ebay_path", _mapping(parsed.get("direct_category_ids")).get("ebay_path"))
-    _take_choice(requested, "sellwild_specifics.nativeCategoryId", _mapping(parsed.get("sellwild_specifics")).get("nativeCategoryId"))
     _take_choice(requested, "depop_specifics.categoryId", _mapping(parsed.get("depop_specifics")).get("categoryId"))
     return requested
 
@@ -348,14 +326,6 @@ def markets_for_choice(previous: dict | None, current: dict | None, requested: d
             ids = requested.setdefault("ids", {})
             if isinstance(ids, dict):
                 ids.setdefault(market, current_id)
-    previous_sellwild = _text(_mapping(previous.get("sellwild_specifics")).get("nativeCategoryId"))
-    current_sellwild = _text(_mapping(current.get("sellwild_specifics")).get("nativeCategoryId"))
-    if current_sellwild and current_sellwild != previous_sellwild:
-        markets.add("sellwild")
-        explicit.add("sellwild")
-        ids = requested.setdefault("ids", {})
-        if isinstance(ids, dict):
-            ids.setdefault("sellwild", current_sellwild)
     return markets, explicit
 
 
@@ -393,10 +363,6 @@ def ebay_tree_leaves(db) -> list[dict]:
 
 
 def _changed_market(field: str) -> str:
-    if field == "sellwild_specifics.nativeCategoryId":
-        return "sellwild"
-    if field == "vinted_specifics.category":
-        return "vinted"
     return field.rsplit(".", 1)[-1]
 
 
@@ -436,29 +402,6 @@ async def _fill_etsy(listing: dict, path: str) -> bool:
     return (_text(_direct(listing).get("etsy")), _text(_direct(listing).get("etsy_path"))) != before
 
 
-def _fill_vinted(listing: dict) -> bool:
-    """Vinted's breadcrumb for a new general category, or none so the seller picks it."""
-    if is_locked(listing, _FIELD["vinted"]):
-        return False
-    from vendoo_studio.services.vinted_listing import map_vinted_category_path
-
-    specifics = listing.get("vinted_specifics")
-    if not isinstance(specifics, dict):
-        specifics = {}
-    before = _text(specifics.get("category"))
-    path = map_vinted_category_path(listing)
-    if path == before:
-        return False
-    if path:
-        specifics["category"] = path
-    else:
-        specifics.pop("category", None)
-    if specifics:
-        listing["vinted_specifics"] = specifics
-    else:
-        listing.pop("vinted_specifics", None)
-    return True
-
 
 def _catalogs(db) -> dict[str, list[dict]]:
     return {**native_rows(), "ebay": ebay_tree_leaves(db)}
@@ -484,8 +427,6 @@ async def apply_native_categories(
     if general:
         if await _fill_etsy(listing, general):
             written.append(_FIELD["etsy"])
-        if _fill_vinted(listing):
-            written.append(_FIELD["vinted"])
     return written
 
 

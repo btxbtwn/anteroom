@@ -28,7 +28,7 @@ test("hosted Chrome imports, saved-off rules and sale switches are available", a
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible();
   await navigate(page, "Marketplaces", phone);
-  for (const name of ["Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
+  for (const name of ["Poshmark", "Mercari", "Depop"]) {
     await page.getByRole("tablist", { name: "Marketplaces" }).getByRole("tab").filter({ hasText: name }).click();
     await expect(page.getByRole("heading", { name: `Import from ${name}`, exact: true })).toBeVisible();
     await expect(page.getByText(/connect Chrome first/).first()).toBeVisible();
@@ -56,7 +56,7 @@ test("hosted Chrome imports, saved-off rules and sale switches are available", a
   await openConnections(page, phone);
   const initialDetection = await (await loaded).json();
   await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toBeVisible();
-  for (const name of ["Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
+  for (const name of ["Poshmark", "Mercari", "Depop"]) {
     await expect(page.getByRole("switch", { name: `Sale detection for ${name}`, exact: true })).toBeVisible();
   }
   const detection = page.getByRole("switch", { name: "Sale detection for Poshmark", exact: true });

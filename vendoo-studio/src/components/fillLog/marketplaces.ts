@@ -1,5 +1,5 @@
 const DEFAULT_SELECTED_MARKETPLACES = ["ebay", "etsy", "poshmark", "mercari", "depop"];
-export const MARKETPLACE_ORDER = ["general", "ebay", "etsy", "poshmark", "mercari", "depop", "facebook", "shopify", "vinted", "whatnot", "sellwild"];
+export const MARKETPLACE_ORDER = ["general", "ebay", "etsy", "poshmark", "mercari", "depop", "facebook", "shopify", "whatnot"];
 const MARKETPLACE_LABELS: Record<string, string> = {
   general: "General",
   ebay: "eBay",
@@ -9,9 +9,7 @@ const MARKETPLACE_LABELS: Record<string, string> = {
   depop: "Depop",
   facebook: "Facebook",
   shopify: "Shopify",
-  vinted: "Vinted",
   whatnot: "Whatnot",
-  sellwild: "Sellwild",
   vestiaire: "Vestiaire",
   kidizen: "Kidizen",
 };

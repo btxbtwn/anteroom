@@ -1,4 +1,4 @@
-// Update of a live Mercari, Vinted or Sellwild listing: one seller-confirmed
+// Update of a live Mercari listing: one seller-confirmed
 // write onto the listing already up, keeping its photos, confirmed by reading
 // it back. Each fake holds the live listing and changes it only on the edit.
 const test = require('node:test');
@@ -117,194 +117,10 @@ test('a lost Mercari update reply is answered by reading the item, never by edit
   assert.ok(![...done.ops(), ...missing.ops()].includes('editListing'));
 });
 
-// ---- Vinted ----
-
-const VINTED_PAGE = '<html><script>"CSRF_TOKEN":"csrf-secret"</script></html>';
-const VINTED_USER = { user: { id: 7, login: 'seller', currency: 'USD' } };
-const VINTED_CATALOGS = { catalogs: [{ id: 1, title: 'Women', catalogs: [{ id: 1904, title: 'Straight jeans' }] }] };
-const VINTED_ATTRIBUTES = { attributes: [{ code: 'condition', configuration: { options: [{ id: 3, title: 'Good' }] } },
-  { code: 'size', configuration: { options: [] } }] };
-const vintedItem = () => ({
-  id: 42, title: 'Test jeans', description: 'Private description', price: { amount: '20.0', currency_code: 'USD' },
-  catalog_id: 1904, status_id: 3, brand_id: 88, brand: 'Levi’s', color_ids: [1], package_size_id: 1,
-  photos: [{ id: 11, orientation: 0 }, { id: 12, orientation: 90 }],
-  item_attributes: [{ code: 'condition', ids: [3] }, { code: 'material', ids: [44] }],
-  is_draft: false, is_closed: false, is_hidden: false, is_reserved: false, user: { id: 7 },
-});
-const vintedListing = { title: 'Test jeans', description: 'Private description', price: 24,
-  vinted_specifics: { category: 'Women > Straight jeans', condition: 'Good' } };
-
-function vinted({ item = vintedItem(), keep = true } = {}) {
-  const c = loadWorker();
-  journaled(c);
-  // Vinted's hour-long access token, with time left on it.
-  c.chrome.cookies = { get: async ({ name }) => (name === 'access_token_web'
-    ? { value: `x.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.y` } : null) };
-  const requests = [];
-  let live = item;
-  c.fetch = async (url, options = {}) => {
-    const method = options.method || 'GET';
-    const { pathname } = new URL(url);
-    requests.push({ method, pathname, headers: options.headers, body: options.body });
-    if (pathname === '/items/new') return reply(200, VINTED_PAGE);
-    if (pathname === '/api/v2/users/current') return reply(200, VINTED_USER);
-    if (pathname === '/api/v2/item_upload/catalogs') return reply(200, VINTED_CATALOGS);
-    if (pathname === '/api/v2/item_upload/attributes') return reply(200, VINTED_ATTRIBUTES);
-    if (pathname === '/api/v2/item_upload/size_groups') return reply(200, { size_groups: [] });
-    if (pathname.endsWith('/package_sizes')) return reply(200, { package_sizes: [{ id: 2, title: 'Medium' }, { id: 1, title: 'Small' }] });
-    if (method === 'PUT' && pathname === '/api/v2/item_upload/items/42') {
-      const sent = JSON.parse(options.body).item;
-      if (keep) live = { ...live, title: sent.title, description: sent.description, price: { amount: String(sent.price) } };
-      return reply(200, { item: { id: 42 } });
-    }
-    if (method === 'GET' && (pathname === '/api/v2/item_upload/items/42' || pathname === '/api/v2/items/42')) return reply(200, { item: live });
-    return reply(404, { message: 'missing' });
-  };
-  const sent = (method, path) => requests.filter(request => request.method === method && request.pathname === path);
-  return { c, requests, sent };
-}
-
-const vintedUpdate = extra => ({ job_id: 'job-1', payload: { marketplace: 'vinted', action: 'update', confirm: true,
-  operation_id: 'op-1', listing_id: '42', listing: vintedListing, photos: [{ id: 'p1', mime_type: 'image/jpeg' }], ...extra } });
-
-test('a Vinted update saves the live item once with its own photos and kept values, and reads it back', async () => {
-  const { c, sent } = vinted();
-  const result = plain(await c.runVintedNative(vintedUpdate()));
-  assert.deepEqual(result, { ok: true, state: 'published', listing_url: 'https://www.vinted.com/items/42' });
-  assert.equal(sent('POST', '/api/v2/photos').length, 0);
-  assert.equal(sent('POST', '/api/v2/item_upload/drafts').length, 0);
-  const puts = sent('PUT', '/api/v2/item_upload/items/42');
-  assert.equal(puts.length, 1);
-  assert.equal(puts[0].headers['x-csrf-token'], 'csrf-secret');
-  const body = JSON.parse(puts[0].body);
-  assert.equal(body.push_up, false);
-  assert.equal(body.parcel, null);
-  assert.equal(body.upload_session_id, body.item.temp_uuid);
-  const { temp_uuid: _session, ...item } = body.item;
-  assert.deepEqual(item, {
-    id: 42, currency: 'USD', title: 'Test jeans', description: 'Private description', brand_id: 88, brand: 'Levi’s', size_id: null,
-    catalog_id: 1904, isbn: null, is_unisex: false, status_id: 3, price: 24, package_size_id: 1,
-    shipment_prices: { domestic: null, international: null }, color_ids: [1],
-    assigned_photos: [{ id: 11, orientation: 0 }, { id: 12, orientation: 90 }],
-    item_attributes: [{ code: 'material', ids: [44] }, { code: 'condition', ids: [3] }],
-    manufacturer: null, manufacturer_labelling: null,
-  });
-});
-
-test('a Vinted listing that already matches is not written, and one that is not the seller’s or not live is refused', async () => {
-  const same = vinted({ item: { ...vintedItem(), price: { amount: '24.0' } } });
-  assert.equal(plain(await same.c.runVintedNative(vintedUpdate())).ok, true);
-  assert.equal(same.sent('PUT', '/api/v2/item_upload/items/42').length, 0);
-  for (const item of [{ ...vintedItem(), user: { id: 8 } }, { ...vintedItem(), is_closed: true }]) {
-    const { c, sent } = vinted({ item });
-    const result = plain(await c.runVintedNative(vintedUpdate()));
-    assert.equal(result.ok, false);
-    assert.equal(result.safe_to_retry, true);
-    assert.equal(sent('PUT', '/api/v2/item_upload/items/42').length, 0);
-  }
-});
-
-test('an unconfirmed Vinted update sends nothing; a read-back that disagrees is unknown', async () => {
-  const unconfirmed = vinted();
-  assert.equal(plain(await unconfirmed.c.runVintedNative(vintedUpdate({ confirm: false }))).safe_to_retry, true);
-  assert.equal(unconfirmed.requests.length, 0);
-  const lost = vinted({ keep: false });
-  const result = plain(await lost.c.runVintedNative(vintedUpdate()));
-  assert.equal(result.error_code, 'uncertain');
-  assert.equal(result.safe_to_retry, false);
-  assert.equal(lost.sent('PUT', '/api/v2/item_upload/items/42').length, 1);
-});
-
-test('a lost Vinted update reply only reads the item', async () => {
-  const { c, requests } = vinted({ item: { ...vintedItem(), price: { amount: '24.0' } } });
-  assert.equal(plain(await c.runVintedNative(vintedUpdate({ confirm: undefined }), true)).ok, true);
-  assert.ok(requests.every(request => request.method === 'GET'));
-});
-
-// ---- Sellwild ----
-
-const sellwildItem = () => ({ id: 4512, title: 'Test jacket', text: 'Private description', price: '20.00', categoryId: 272,
-  itemCondition: 2, shippable: true, weight: 1.25, depth: 13, width: 10, height: 3, parcelTemplate: '', status: 1, user: { id: 1 },
-  photos: ['https://cdn.sellwild.com/a.jpg'] });
-const sellwildListing = { title: 'Test jacket', description: 'Private description', price: 24, weight_lb: 1, weight_oz: 4,
-  package_dimensions_in: '13x10x3' };
-
-function sellwild({ item = sellwildItem(), keep = true, underReview = false, edit } = {}) {
-  const c = loadWorker();
-  journaled(c);
-  const requests = [];
-  let live = item;
-  c.fetch = async (url, options = {}) => {
-    const route = `${options.method || 'GET'} ${new URL(url).pathname}`;
-    const body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
-    requests.push({ route, body, credentials: options.credentials });
-    if (route === 'GET /api/auth/session') return reply(200, { user: { id: 1 } });
-    if (route === 'GET /api/listings/4512') return reply(200, { success: true, listing: live });
-    if (route === 'PUT /api/listings/4512/edit') {
-      if (edit) return edit(body);
-      if (keep) live = { ...live, ...body, price: String(body.price) };
-      return reply(200, { success: true, underReview, listing: { id: 4512, title: body.title, price: String(body.price) } });
-    }
-    return reply(404, { success: false, error: 'missing' });
-  };
-  const routes = () => requests.map(request => request.route);
-  return { c, requests, routes };
-}
-
-const sellwildUpdate = extra => ({ job_id: 'job-1', payload: { marketplace: 'sellwild', action: 'update', confirm: true,
-  operation_id: 'op-1', listing_id: '4512', listing: sellwildListing, sellwild: { category_id: 272, condition_id: 2 },
-  photos: [{ id: 'p1', mime_type: 'image/jpeg' }], ...extra } });
-
-test('a Sellwild update sends the required fields and only the changed ones, without photos, and reads it back', async () => {
-  const { c, requests, routes } = sellwild();
-  const result = plain(await c.runSellwildNative(sellwildUpdate()));
-  assert.deepEqual(result, { ok: true, state: 'published', listing_url: 'https://sellwild.com/product/4512/test-jacket' });
-  assert.deepEqual(routes(), ['GET /api/auth/session', 'GET /api/listings/4512', 'PUT /api/listings/4512/edit', 'GET /api/listings/4512']);
-  assert.deepEqual(requests[2].body, { title: 'Test jacket', price: 24, categoryId: 272 });
-  assert.ok(requests.every(request => request.credentials === 'include'));
-});
-
-test('a Sellwild listing that already matches is not written', async () => {
-  const { c, routes } = sellwild({ item: { ...sellwildItem(), price: '24.00' } });
-  assert.equal(plain(await c.runSellwildNative(sellwildUpdate())).ok, true);
-  assert.ok(!routes().includes('PUT /api/listings/4512/edit'));
-});
-
-test('a Sellwild edit held for review reports pending review', async () => {
-  const { c } = sellwild({ underReview: true });
-  assert.equal(plain(await c.runSellwildNative(sellwildUpdate())).state, 'pending_review');
-});
-
-test('a Sellwild update refuses another account, a listing that is not live, or no confirmation, before writing', async () => {
-  for (const [item, extra] of [[{ ...sellwildItem(), user: { id: 2 } }, {}], [{ ...sellwildItem(), status: 3 }, {}], [sellwildItem(), { confirm: false }]]) {
-    const { c, routes } = sellwild({ item });
-    const result = plain(await c.runSellwildNative(sellwildUpdate(extra)));
-    assert.equal(result.ok, false);
-    assert.equal(result.safe_to_retry, true);
-    assert.ok(!routes().includes('PUT /api/listings/4512/edit'));
-  }
-});
-
-test('Sellwild refusing the edit is safe to retry; a read-back that disagrees is unknown', async () => {
-  const refused = sellwild({ edit: () => reply(400, { success: false, error: 'Price is too high' }) });
-  const first = plain(await refused.c.runSellwildNative(sellwildUpdate()));
-  assert.equal(first.safe_to_retry, true);
-  const lost = sellwild({ keep: false });
-  const second = plain(await lost.c.runSellwildNative(sellwildUpdate()));
-  assert.equal(second.error_code, 'uncertain');
-  assert.equal(second.safe_to_retry, false);
-});
-
-test('a lost Sellwild update reply only reads the listing', async () => {
-  const { c, routes } = sellwild({ item: { ...sellwildItem(), price: '24.00' } });
-  assert.equal(plain(await c.runSellwildNative(sellwildUpdate({ confirm: undefined, sellwild: undefined }), true)).ok, true);
-  assert.deepEqual(routes(), ['GET /api/listings/4512']);
-});
-
 // ---- dispatch ----
 
 test('Update needs confirmation and each marketplace’s own listing id before any request', async () => {
-  for (const [marketplace, listingId, confirm] of [['mercari', '123', true], ['vinted', 'abc', true], ['sellwild', '0', true],
+  for (const [marketplace, listingId, confirm] of [['mercari', '123', true],
     ['mercari', 'm12345678', false]]) {
     const c = loadWorker();
     journaled(c);
@@ -312,6 +128,6 @@ test('Update needs confirmation and each marketplace’s own listing id before a
     const result = plain(await c.runNativeMarketplace({ payload: { marketplace, action: 'update', confirm, listing_id: listingId } }));
     assert.equal(result.ok, false);
     assert.equal(result.safe_to_retry, true);
-    assert.match(result.error, /Confirm updating the live (Mercari|Vinted|Sellwild) listing/);
+    assert.match(result.error, /Confirm updating the live Mercari listing/);
   }
 });

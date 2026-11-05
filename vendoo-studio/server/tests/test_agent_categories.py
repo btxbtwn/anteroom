@@ -37,8 +37,7 @@ POSHMARK = [
 DEPOP = [{"id": "menswear_tshirts", "path": "Men > Tops > T-shirts"}, {"id": "menswear_sneakers", "path": "Men > Footwear > Sneakers"}]
 EBAY = [{"id": "15687", "path": GENERAL_TEE}, {"id": "15709", "path": "Clothing, Shoes & Accessories > Men > Men's Shoes > Athletic Shoes"}]
 MERCARI = [{"id": "303", "path": "Men > Tops > T-shirts"}, {"id": "1911", "path": "Women > Tops & blouses > Tees"}]
-SELLWILD = [{"id": "270", "path": "Fashion > Tops & Shirts"}, {"id": "69", "path": "Fashion > Shoes"}]
-CATALOGS = {"poshmark": POSHMARK, "depop": DEPOP, "ebay": EBAY, "mercari": MERCARI, "sellwild": SELLWILD}
+CATALOGS = {"poshmark": POSHMARK, "depop": DEPOP, "ebay": EBAY, "mercari": MERCARI}
 
 
 def choose(listing, *, requested=None, markets=None, explicit=None, catalogs=None):
@@ -60,9 +59,7 @@ class AgentCategoryChoiceTest(unittest.TestCase):
         self.assertEqual(listing["direct_category_ids"]["mercari"], "303")
         self.assertEqual(listing["direct_category_ids"]["ebay"], "15687")
         self.assertEqual(listing["direct_category_ids"]["ebay_path"], GENERAL_TEE)
-        self.assertEqual(listing["sellwild_specifics"]["nativeCategoryId"], "270")
         self.assertIn("direct_category_ids.poshmark", written)
-        self.assertIn("sellwild_specifics.nativeCategoryId", written)
 
     def test_the_listings_own_words_choose_between_qualified_options(self):
         listing = {"title": "Nike Graphic Tee", "ebay_specifics": {"sleeveLength": "Short Sleeve"}}
@@ -73,11 +70,9 @@ class AgentCategoryChoiceTest(unittest.TestCase):
         listing = {
             "direct_category_ids": {"poshmark": SHORT, "depop": "menswear_tshirts"},
             "poshmark_specifics": {"subcategory": "Tees", "nativeSizeId": "M"},
-            "sellwild_specifics": {"nativeCategoryId": "270"},
         }
         written = choose(listing, requested={"category_path": GENERAL_GAMES})
         self.assertNotIn("direct_category_ids", listing)
-        self.assertNotIn("sellwild_specifics", listing)
         self.assertNotIn("subcategory", listing["poshmark_specifics"])
         self.assertIn("direct_category_ids.poshmark", written)
 
@@ -152,7 +147,6 @@ class AgentCategoryChoiceTest(unittest.TestCase):
         source = inspect.getsource(build_chat_messages) + inspect.getsource(current_listing_prompt)
         self.assertIn("Men > Shirts > Tees", source)
         self.assertIn("direct_category_ids.poshmark", source)
-        self.assertIn("sellwild_specifics.nativeCategoryId", source)
 
 
 def _database():
@@ -208,10 +202,8 @@ class AgentCategorySaveTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["direct_category_ids"]["mercari"], "303")
         self.assertEqual(saved["direct_category_ids"]["ebay"], "15687")
         self.assertEqual(saved["direct_category_ids"]["etsy"], "482")
-        self.assertEqual(saved["sellwild_specifics"]["nativeCategoryId"], "270")
-        self.assertEqual(saved["vinted_specifics"]["category"], "Men > Clothing > Tops & t-shirts > T-shirts")
         self.assertNotIn("subcategory", saved["poshmark_specifics"])
-        self.assertTrue(any(text.startswith("Saved the category for eBay, Poshmark, Mercari, Depop, Sellwild, Etsy, and Vinted")
+        self.assertTrue(any(text.startswith("Saved the category for eBay, Poshmark, Mercari, Depop, and Etsy")
                             for text in self._messages()), self._messages())
 
     async def test_a_market_without_a_match_is_cleared_and_named(self):
@@ -273,7 +265,6 @@ class GeneralCategoryMapTest(unittest.TestCase):
                          "01008c10d97b4e1245005764/07008c10d97b4e1245005764/33009813d97b4e3995005764")
         self.assertEqual(listing["direct_category_ids"]["depop"], "menswear_tshirts")
         self.assertEqual(listing["direct_category_ids"]["ebay"], "15687")
-        self.assertEqual(listing["sellwild_specifics"]["nativeCategoryId"], "270")
         self.assertNotIn("subcategory", listing["poshmark_specifics"])
 
     def test_it_also_maps_when_called_inside_a_running_loop(self):

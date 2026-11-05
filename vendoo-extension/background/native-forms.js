@@ -553,10 +553,6 @@ async function handleNativeMarketplaceForm(msg) {
       const prepared = mercariShippingListing(listing, await mercariShippingClasses(listing, deadline));
       reply({ ok: true, form: mercariEditorForm(prepared, master) });
     }
-    else if (marketplace === 'sellwild') {
-      // Sellwild's form is built in Anteroom; the session supplies the account's choices.
-      reply({ ok: true, ...await sellwildAccountChoices(deadline) });
-    }
     else reply({ ok: false, error: 'This marketplace has no Chrome form reader.' });
   } catch (error) {
     reply({ ok: false, error: error.message || 'The marketplace catalog could not be read.' });

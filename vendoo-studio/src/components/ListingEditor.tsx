@@ -3,18 +3,15 @@ import { useWorkspaceRuntime } from "../app/runtime";
 import { editorTabs } from "./editorTabs";
 import { GENERAL_LISTING_FIELDS } from "../generalListingFields";
 import editorFields from "../../../skills/list-this/references/listing-editor-fields.json";
-import { SellwildAccountChoices } from "./SellwildAccountChoices";
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { listingEdits } from "../api/listingEdits";
-import { DIRECT_FORM_MARKETS, nativeFormOptions, prefetchListingForm, prefetchVintedChoices } from "../api/listingForms";
+import { DIRECT_FORM_MARKETS, nativeFormOptions, prefetchListingForm } from "../api/listingForms";
 import { PhotoTray } from "./PhotoTray";
 import { useListingSessionActive } from "./listingSession";
-import { VintedBrandSelect } from "./VintedBrandSelect";
-import { VintedCategorySelect } from "./VintedCategorySelect";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
 import { EbayVariationsEditor, normalizeVariations, variationTotal } from "./EbayVariationsEditor";
 import { MarketplaceMedia } from "./MarketplaceMedia";
@@ -235,7 +232,6 @@ export function ListingEditor({
         disabled={generating || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
           if (vendoo) return;
-          if (tab === "vinted") void prefetchVintedChoices(queryClient, convId);
           if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
         }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
@@ -792,15 +788,6 @@ export function StructuredEditor({
         </RadioGroup>
       );
     }
-    if (tab === "vinted" && f.key === "vinted_specifics.category") {
-      return <VintedCategorySelect convId={convId} id={id} fieldKey={f.key} value={text} disabled={locked}
-        onChange={(value) => commitField(f.key, value)} />;
-    }
-    if (tab === "vinted" && f.key === "vinted_specifics.brand") {
-      return <VintedBrandSelect convId={convId} category={formFieldText(local["vinted_specifics.category"])}
-        id={id} fieldKey={f.key} value={text} disabled={locked}
-        onChange={(value) => commitField(f.key, value)} />;
-    }
     if (tab === "general" && f.key === "category_path") {
       return <GeneralCategorySelect id={id} fieldKey={f.key} value={text} disabled={locked}
         onChange={(path) => commitField(f.key, path)}
@@ -882,7 +869,6 @@ export function StructuredEditor({
     <fieldset ref={formRef} key={tab} disabled={disabled} aria-busy={disabled || undefined}
       aria-label={`${marketplaceName(tab)} listing fields`} className="@container flex min-w-0 flex-col border-0 p-0">
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
-      {tab === "sellwild" && <SellwildAccountChoices convId={convId} disabled={disabled} connected={categoryForm?.account_connected === true} />}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {formNotes.length > 0 && onAskChat && <div className="pb-2">
         <Button size="xs" variant="outline" disabled={disabled}
@@ -978,7 +964,7 @@ export function StructuredEditor({
             {revealButtons(section.title, section.fields, (name) => !name.startsWith("See "))}
           </>
         );
-        // A part of the page with no heading (Mercari's and Sellwild's photos) has none here either.
+        // A part of the page with no heading (Mercari's photos) has none here either.
         if (!section.title) return <section key={section.id} className="min-w-0 border-b py-4 first:pt-1 last:border-b-0">{rows}</section>;
         return (
           <InspectorSection
@@ -1197,9 +1183,6 @@ const CATEGORY_FORM_LABELS: Record<string, string[]> = {
     "Age", "Style", "Parcel Size"],
   etsy: ["Title", "Description", "Price", "Etsy price", "Quantity", "Who Made It?", "What Is It?",
     "When Was It Made?", "Etsy category"],
-  sellwild: ["Title", "Description", "Price", "Sellwild price", "Category", "Condition"],
-  vinted: ["Title", "Description", "Price", "Vinted price", "Category", "Condition", "Brand", "Size",
-    "Color", "Package size", "Material"],
 
 };
 
@@ -1278,11 +1261,7 @@ export function fieldsForMarketplaceForm(
   const own = getFieldsForTab(listing, tab);
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
   if (tab === "general") return withoutObjects(own);
-  // Sellwild's category and condition are the direct picks beside List. Its other
-  // category attributes still come from the same schema the other marketplaces use.
-  const schema = (schemaFieldsForTab(forms, tab) ?? []).filter((field) => (
-    tab !== "sellwild" || !["category", "condition"].includes(field.label.replace(/\s*\*$/, "").toLowerCase())
-  ));
+  const schema = schemaFieldsForTab(forms, tab) ?? [];
   let shared = PACKAGE_MARKETPLACES.has(tab)
     ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS]
     : SHARED_FORM_FIELDS;
@@ -1435,8 +1414,6 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
           })),
         ],
       );
-    case "vinted":
-      return editorFields.vinted;
     default:
       return [];
   }

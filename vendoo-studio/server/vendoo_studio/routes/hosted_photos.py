@@ -82,7 +82,7 @@ def upload(db, draft_id, token, data, marketplace=None):
 
 
 @router.post('', response_model=PhotoResponse, status_code=201)
-async def upload_photo(draft_id: str, request: Request, marketplace: Literal['poshmark', 'mercari', 'depop', 'ebay', 'etsy', 'vinted', 'sellwild'] | None = None, db=Depends(get_seller_db)):
+async def upload_photo(draft_id: str, request: Request, marketplace: Literal['poshmark', 'mercari', 'depop', 'ebay', 'etsy'] | None = None, db=Depends(get_seller_db)):
     # Check ownership before reading bytes. Read a raw body, avoiding an unbounded
     # multipart spool before the handler has an opportunity to enforce the limit.
     await run_in_threadpool(require_draft, db, draft_id)

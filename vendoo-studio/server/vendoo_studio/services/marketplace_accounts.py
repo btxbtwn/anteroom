@@ -37,8 +37,6 @@ NAMES = {
     "depop": "Depop",
     "poshmark": "Poshmark",
     "mercari": "Mercari",
-    "sellwild": "Sellwild",
-    "vinted": "Vinted",
 }
 SIGN_IN_TIMEOUT_S = 10 * 60
 POLL_INTERVAL_S = 2

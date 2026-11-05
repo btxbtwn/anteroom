@@ -2,7 +2,7 @@
 // timeouts bounded by the operation deadline, cancellation, retries of safe
 // requests, and turning a marketplace's answer into the result contract's
 // error codes. Creates and publishes are sent once and never retried here.
-const MARKETPLACE_LABELS = { poshmark: 'Poshmark', mercari: 'Mercari', depop: 'Depop', sellwild: 'Sellwild', vinted: 'Vinted' };
+const MARKETPLACE_LABELS = { poshmark: 'Poshmark', mercari: 'Mercari', depop: 'Depop' };
 const MARKETPLACE_RETRY_DELAYS_MS = [400, 1200, 3000];
 const MARKETPLACE_MAX_RETRY_AFTER_S = 20;
 // Cloudflare, PerimeterX, DataDome and similar bot checks.
@@ -58,10 +58,7 @@ function marketplaceBodyMessage(body, marketplace) {
       if (typeof entry === 'string') add(entry);
       else if (entry && typeof entry === 'object') {
         const field = entry.field || entry.param || entry.extensions?.field;
-        // Vinted calls its validation explanation "value". Only read that
-        // documented error shape; other responses may use value for input data.
-        const message = entry.message || (marketplace === 'vinted' && body.message_code === 'validation_error' && field
-          ? entry.value : null);
+        const message = entry.message;
         add(field && typeof message === 'string' ? `${field}: ${message}` : message);
       }
     }

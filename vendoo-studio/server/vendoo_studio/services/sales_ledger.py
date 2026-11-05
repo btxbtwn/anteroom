@@ -18,7 +18,7 @@ from vendoo_studio.models.marketplace_sale import OTHER_MARKETPLACE, Marketplace
 from vendoo_studio.services.api_job_lock import start_gate
 
 AMOUNTS = ("item_revenue", "shipping_credit", "refunds", "fees", "shipping_cost", "item_cost")
-MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
+MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop")
 # Where a sale can be recorded: the marketplaces, plus anywhere else (in person, Instagram).
 SALE_MARKETPLACES = (*MARKETPLACES, OTHER_MARKETPLACE)
 PAGE_SIZE = 50

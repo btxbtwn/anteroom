@@ -8,7 +8,7 @@ import type { PreflightGap } from "../api/nativeMarketplaces";
  * marketplace's ``photos`` answer is about its own photo area.
  */
 const ROW_ALIASES: Record<string, Record<string, string>> = Object.fromEntries(
-  ["ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"].map((marketplace) => [marketplace, { photos: `marketplace_photos.${marketplace}` }]),
+  ["ebay", "etsy", "poshmark", "mercari", "depop"].map((marketplace) => [marketplace, { photos: `marketplace_photos.${marketplace}` }]),
 ) as Record<string, Record<string, string>>;
 
 Object.assign(ROW_ALIASES.ebay, {

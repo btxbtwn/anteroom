@@ -25,7 +25,7 @@ function approvedPhotos(command: RelayedCommand): { id: string; mime_type: strin
 }
 
 /** What a Bridge may declare it runs for the hosted API: marketplace actions, and each named read. */
-export const RELAY_CAPABILITIES = ["marketplace.actions", "vinted.choices", "sellwild.account", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts"] as const;
+export const RELAY_CAPABILITIES = ["marketplace.actions", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts"] as const;
 
 async function nextCommand(capabilities: readonly string[]): Promise<RelayedCommand | null> {
   const declared = RELAY_CAPABILITIES.filter((capability) => capabilities.includes(capability));

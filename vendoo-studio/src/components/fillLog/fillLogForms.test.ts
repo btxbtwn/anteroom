@@ -79,7 +79,6 @@ describe("mergeDraftItem", () => {
 describe("labels", () => {
   it("names known and unknown marketplaces", () => {
     expect(marketplaceLabel("ebay")).toBe("eBay");
-    expect(marketplaceLabel("vinted")).toBe("Vinted");
   });
 
   it("maps live Vendoo statuses to chip classes", () => {
@@ -104,7 +103,7 @@ describe("labels", () => {
 
   it("keeps a live listing when the nav still says not listed, including a direct listing", () => {
     const item = {
-      statuses: { ebay: "NOT LISTED", poshmark: "NOT LISTED", mercari: "NOT LISTED", sellwild: "NOT LISTED", etsy: "LIVE" },
+      statuses: { ebay: "NOT LISTED", poshmark: "NOT LISTED", mercari: "NOT LISTED", depop: "NOT LISTED", etsy: "LIVE" },
       listings: {
         ebay: { status: { notListed: true } },
         mercari: { status: { listed: true } },
@@ -112,13 +111,13 @@ describe("labels", () => {
       },
       externalListings: {
         poshmark: { status: { listed: true } },
-        sellwild: { status: { listed: true } },
+        depop: { status: { listed: true } },
       },
     };
     expect(liveStatusForMarketplace("ebay", item)).toBe("NOT LISTED");
     expect(liveStatusForMarketplace("poshmark", item)).toBe("LISTED");
     expect(liveStatusForMarketplace("mercari", item)).toBe("LISTED");
-    expect(liveStatusForMarketplace("sellwild", item)).toBe("LISTED");
+    expect(liveStatusForMarketplace("depop", item)).toBe("LISTED");
     expect(liveStatusForMarketplace("etsy", item)).toBe("LIVE");
     expect(statusIsListed("LIVE")).toBe(true);
     expect(statusIsListed("NOT LISTED")).toBe(false);

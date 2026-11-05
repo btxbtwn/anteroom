@@ -1,7 +1,6 @@
 """A seller's marketplace account choices, kept so a form opens without waiting.
 
-eBay's business policies and item locations, Sellwild's address, discounts and
-package, and Vinted's categories come from the marketplace or the seller's
+eBay's business policies and item locations come from the marketplace or the seller's
 Chrome. A form shows the saved copy at once and, once it is a few minutes old,
 reads a fresh one in the background. The Mac keeps a file; the web keeps the
 seller's own preferences row, as sourcing does (``box_scout``). Only a

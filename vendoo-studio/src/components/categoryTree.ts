@@ -19,7 +19,7 @@ export interface CategoryMenu {
 
 const SEPARATOR = /\s*(?:>|›|\|)\s*/;
 
-/** Split a stored path on any separator the catalogs use (Sellwild writes "Group | Category"). */
+/** Split a stored path on any separator the catalogs use. */
 export function categorySegments(label: string): string[] {
   return label.split(SEPARATOR).map((part) => part.trim()).filter(Boolean);
 }

@@ -56,7 +56,7 @@ const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }
   },
 ];
 
-const CHROME_MARKET_ORDER: ExtensionSessionMarket[] = ["poshmark", "mercari", "depop", "sellwild", "vinted"];
+const CHROME_MARKET_ORDER: ExtensionSessionMarket[] = ["poshmark", "mercari", "depop"];
 
 function MarketplaceSalesSwitch({
   name,
@@ -333,8 +333,6 @@ const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
   depop: "Lists on Depop with the account signed in to Chrome.",
   poshmark: "Lists on Poshmark with the account signed in to Chrome.",
   mercari: "Saves the Mercari sign-in in Anteroom Bridge so listing keeps working after Chrome restarts.",
-  sellwild: "Lists on Sellwild with the account signed in to Chrome.",
-  vinted: "Lists on Vinted with the account signed in to Chrome. List saves a draft, then publishes it only after you confirm.",
 };
 
 function ChromeSessionRow({
@@ -425,7 +423,7 @@ function HostedChromeSessions({ salesSwitch, checks }: {
       ))}
       <SettingsRow
         title="Where the sign-in lives"
-        description="Depop, Poshmark, Mercari, Sellwild, and Vinted stay signed in through the Chrome where Anteroom Bridge runs. Anteroom reads only whether each is signed in, never the cookies or tokens. Sales are checked while your browser is connected."
+        description="Depop, Poshmark, and Mercari stay signed in through the Chrome where Anteroom Bridge runs. Anteroom reads only whether each is signed in, never the cookies or tokens. Sales are checked while your browser is connected."
       >
         {sessions.isError ? <SettingsNote>{sessions.error.message}</SettingsNote> : null}
       </SettingsRow>
@@ -519,12 +517,12 @@ function MarketplaceSection() {
       ))}
       <SettingsRow
         title="Where the sign-in lives"
-        description="Depop, Poshmark, Sellwild, and Vinted stay signed in through Chrome's cookies. Mercari's listing sign-in is saved in the extension on this Mac. Anteroom never stores those cookies or tokens. When one expires, Anteroom asks you to sign in again."
+        description="Depop and Poshmark stay signed in through Chrome's cookies. Mercari's listing sign-in is saved in the extension on this Mac. Anteroom never stores those cookies or tokens. When one expires, Anteroom asks you to sign in again."
       />
       <SettingsRow
         id="sale-detection"
         title="Sale detection"
-        description="Turn Detect sales on for a marketplace to hear when something sells there. Nothing is taken down unless Delist the other marketplaces is on. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark, Sellwild, and Vinted closets with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. Opening an item also checks its own listings right away, once a minute per shop, so a sale shows while you look at it. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
+        description="Turn Detect sales on for a marketplace to hear when something sells there. Nothing is taken down unless Delist the other marketplaces is on. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark closet with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. Opening an item also checks its own listings right away, once a minute per shop, so a sale shows while you look at it. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
         status={
           listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

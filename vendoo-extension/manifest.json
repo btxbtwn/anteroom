@@ -33,10 +33,6 @@
     "https://*.s3.amazonaws.com/*",
     "https://*.s3-accelerate.amazonaws.com/*",
     "https://www.etsy.com/*",
-    "https://sellwild.com/*",
-    "https://www.vinted.com/*",
-    "https://vinted.com/*",
-    "https://api.www.vinted.com/*",
     "http://127.0.0.1:4318/*",
     "ws://127.0.0.1:4318/*"
   ],

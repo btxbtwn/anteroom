@@ -58,8 +58,8 @@ describe("MarketplacesPage", () => {
     const html = renderToStaticMarkup(<MarketplacesPage marketplace="ebay" onMarketplaceChange={vi.fn()} onOpenListing={vi.fn()} />);
     expect(html).toContain(">Marketplaces</h1>");
     expect(html).toContain('aria-label="Marketplaces"');
-    expect(html.match(/role="tab"/g)).toHaveLength(7);
-    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
+    expect(html.match(/role="tab"/g)).toHaveLength(5);
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop"]) {
       expect(html).toContain(`${name}</button>`);
     }
     expect(html).not.toContain(">Marketing</h1>");
@@ -75,12 +75,12 @@ describe("MarketplacesPage", () => {
     expect(html).not.toContain("Schedule store email");
   });
 
-  it("shows Poshmark, Depop, and Sellwild as a sales dashboard with no marketing tab", () => {
+  it("shows Poshmark and Depop as a sales dashboard with no marketing tab", () => {
     setup({ ...data, marketplaces: [
       { id: "depop", label: "depop", count: 3, revenue: 120, profit: 70, profit_known: 2, fees_known: 2, revenue_known: 3,
         days_known: 3, average_price: 40, median_days: 12, margin: 58 },
     ] });
-    for (const id of ["poshmark", "depop", "sellwild"] as const) {
+    for (const id of ["poshmark", "depop"] as const) {
       const html = renderToStaticMarkup(<MarketplacePanel marketplace={id} onOpenListing={vi.fn()} />);
       expect(html).toContain('class="ebay-workspace"');
       expect(html).toContain("ebay-page-heading");
@@ -94,6 +94,7 @@ describe("MarketplacesPage", () => {
     expect(depop).toContain("2 of 3 sales have a recorded cost");
     expect(depop).toContain("Typical time to sell: 12 days");
   });
+
 });
 
 describe("marketplace sale calendar", () => {

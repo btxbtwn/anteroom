@@ -30,7 +30,6 @@ URLS = {"mercari": "https://www.mercari.com/sell/draft/testNativeDraft/",
         "depop": "https://www.depop.com/sellinghub/drafts/edit/123456/"}
 LIVE = {"mercari": "https://www.mercari.com/us/item/m123456789/", "depop": None}
 POSH_URL = "https://poshmark.com/listing/6adc371572e62463d992ffef"
-SELLWILD_URL = "https://sellwild.com/product/123/test"
 LISTING = {"title": "ANTEROOM DRAFT CHECK - DO NOT PUBLISH", "description": "Private test draft.", "price": 12,
            "size": "M",
            "weight_oz": 8, "package_dimensions_in": "12x9x2",
@@ -40,7 +39,6 @@ LISTING = {"title": "ANTEROOM DRAFT CHECK - DO NOT PUBLISH", "description": "Pri
            "mercari_specifics": {"shipsFrom": "70125", "shippingClassId": "2550",
                                 "package": {"fitsShoebox": "no", "pounds": 1}},
            "depop_specifics": {"parcelSize": "Medium"}}
-SELLWILD = {"sellwild_category_id": 272, "sellwild_condition_id": 2}
 
 
 class NativeMarketplacesTest(unittest.TestCase):
@@ -324,9 +322,9 @@ class NativeMarketplacesTest(unittest.TestCase):
     def test_draft_route_refuses_publish_parameters_unsupported_markets_and_live_items(self):
         response = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(response.status_code, 422)
-        for market in ["sellwild", "vinted"]:
+        for market in ["facebook", "unknown_market"]:
             response = self.client.post(f"{self.base}/{market}/draft", json={"revision_id": self.rev.id})
-            self.assertEqual(response.status_code, 400, response.text)
+            self.assertEqual(response.status_code, 422, response.text)
         MarketplaceListingRepo(self.db).save(self.conv.id, "mercari", {"state": "published", "listing_id": "m123456789",
                                                                      "listing_url": LIVE["mercari"]})
         response = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id})
@@ -508,32 +506,12 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.run_jobs()
         return self.record(platform)
 
-    def test_mercari_vinted_and_sellwild_update_the_live_listing_in_place(self):
-        cases = [("mercari", "m123456789", LIVE["mercari"], {"photo_ids": ["kept"]}),
-                 ("vinted", "4567890123", "https://www.vinted.com/items/4567890123", {}),
-                 ("sellwild", "123", SELLWILD_URL, {"photo_ids": ["photos-from-an-earlier-list"], **SELLWILD})]
-        for platform, listing_id, url, record in cases:
-            with self.subTest(platform=platform):
-                self.live_on(platform, listing_id, url, **record)
-                self.bridge.reset_mock()
-                self.bridge.return_value = {"ok": True, "state": "published", "listing_url": url}
-                updated = self.update(platform)
-                self.assertEqual(self.actions(), ["update"])
-                payload = self.bridge.call_args.args[2]
-                self.assertEqual((payload["action"], payload["listing_id"], payload["confirm"]), ("update", listing_id, True))
-                self.assertEqual((updated["state"], updated["listing_id"], updated["revision_id"]), ("published", listing_id, self.rev.id))
-                if platform == "mercari":
-                    self.assertEqual(updated["photo_ids"], ["kept"])
 
-    def test_a_sellwild_edit_held_for_review_settles_as_pending_review(self):
-        self.live_on("sellwild", "123", SELLWILD_URL, **SELLWILD)
-        self.bridge.return_value = {"ok": True, "state": "pending_review", "listing_url": SELLWILD_URL}
-        self.assertEqual(self.update("sellwild")["state"], "pending_review")
 
     def test_a_live_update_answer_naming_another_listing_is_not_trusted(self):
-        self.live_on("vinted", "4567890123", "https://www.vinted.com/items/4567890123")
-        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": "https://www.vinted.com/items/999"}
-        updated = self.update("vinted")
+        self.live_on("mercari", "m123456789", LIVE["mercari"])
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": "https://www.mercari.com/us/item/m999999999/"}
+        updated = self.update("mercari")
         self.assertNotEqual(updated["state"], "published")
         self.assertEqual(self.actions(), ["update"])
 
@@ -543,52 +521,9 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
         self.assertEqual(self.list("poshmark")["state"], "published")
 
-    def test_sellwild_records_the_choice_then_lists_once(self):
-        self.bridge.return_value = {"ok": True, "state": "pending_review", "listing_url": SELLWILD_URL}
-        record = self.list("sellwild", **SELLWILD)
-        self.assertEqual(record["state"], "pending_review")
-        payload = self.bridge.call_args.args[2]
-        self.assertEqual((payload["action"], payload["confirm"]), ("publish", True))
-        self.assertEqual(payload["sellwild"], {"category_id": 272, "condition_id": 2, "parcel_template": "", "coupon_ids": [],
-                                               "fixed_package": False, "package_dimensions": {"depth": 12.0, "width": 9.0, "height": 2.0}})
-        self.assertTrue(payload["local_draft_id"])
-        self.assertEqual(self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **SELLWILD}).status_code, 409)
-        self.assertEqual(self.bridge.call_count, 1)
 
-    def test_sellwild_requires_a_saved_category_instead_of_matching_one_at_list_time(self):
-        mens = {**LISTING, "condition": "Pre-Owned - Good", "category_path": "Clothing, Shoes & Accessories > Men > Coats & Jackets"}
-        mens.pop("marketplace_category_ids")
-        rev = listing_persistence.save_revision(self.db, self.conv.id, mens, "model")
-        native.save_local_sellwild_draft(self.conv.id, native.ListRequest(revision_id=rev.id, sellwild_condition_id=2), self.db)
-        native.save_local_sellwild_draft(self.conv.id, native.ListRequest(
-            revision_id=rev.id, sellwild_category_id=272, sellwild_condition_id=2), self.db)
-        record = self.record("sellwild")
-        self.assertEqual(record["sellwild_category_id"], 272)
-        self.assertEqual(record["sellwild_condition_id"], 2)
-        payload = native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, mens, [], "job")["sellwild"]
-        self.assertEqual((payload["category_id"], payload["condition_id"]), (272, 2))
-        boys = {**mens, "category_path": "", "department": "Boys", "title": "Columbia windbreaker jacket",
-                "marketplace_category_objects": {"sellwild": {"displayPath": ["Fashion", "Mens Clothing"]}}}
-        payload = native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, boys, [], "job")["sellwild"]
-        self.assertEqual((payload["category_id"], payload["condition_id"]), (272, 2))
 
-    def test_sellwild_submits_unknown_categories_and_conditions(self):
-        for extra in ({"sellwild_category_id": 183, "sellwild_condition_id": 2}, {"sellwild_category_id": 272, "sellwild_condition_id": 9}):
-            response = self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **extra})
-            self.assertEqual(response.status_code, 200, response.text)
-            body = response.json()
-            self.assertTrue(body["running"])
-            self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error_code": "rejected", "error": "Rejected", "marketplace_message": "Invalid category or condition."}
-            self.run_jobs()
-            self.assertEqual(self.record("sellwild")["marketplace_message"], "Invalid category or condition.")
-        self.assertEqual(self.bridge.await_count, 2)
 
-    def test_sellwild_match_prefers_marketplace_categories_and_ignores_sleeve_words(self):
-        tee = {"title": "Graphic tee", "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts",
-               "marketplace_category_objects": {"poshmark": {"displayPath": ["Men", "Shirts", "Tees - Short Sleeve"]}}}
-        self.assertEqual(native.suggest_sellwild(tee)["category_id"], 270)
-        self.assertEqual(native.suggest_sellwild({"title": "Kids hoodie", "category_path": "Clothing, Shoes & Accessories > Kids > Boys"})["category_id"], 246)
-        self.assertEqual(native.suggest_sellwild({"title": "Jacket", "sellwild_specifics": {"nativeCategoryId": 269}})["category_id"], 269)
 
     def test_etsy_uses_the_listing_package(self):
         self.assertEqual(native.listing_package({"weight_lb": 1, "weight_oz": 4, "package_dimensions_in": "13x10x3"}),
@@ -596,46 +531,8 @@ class NativeMarketplacesTest(unittest.TestCase):
                           "item_weight_unit": "oz", "item_dimensions_unit": "in"})
         self.assertIsNone(native.listing_package({"weight_oz": 0, "package_dimensions_in": "13x10x3"}))
 
-    def test_sellwild_form_choices_override_old_picks_and_clears_do_not_restore_them(self):
-        from vendoo_studio.services import sellwild_listing
-        from vendoo_studio.services.direct_preflight import Context
 
-        listing = {**LISTING, "description": "", "sellwild_specifics": {"nativeCategoryId": "246", "nativeConditionId": "3"}}
-        old = {"sellwild_category_id": 272, "sellwild_condition_id": 2}
-        self.assertEqual(sellwild_listing.chosen(listing, old), {"category_id": 246, "condition_id": 3})
-        self.assertNotIn("description", [row["field"] for row in sellwild_listing.requirements(listing, Context(choices=old))])
-        listing["sellwild_specifics"]["nativeCategoryId"] = ""
-        self.assertIsNone(sellwild_listing.chosen(listing, old)["category_id"])
-        self.assertIn("sellwild_specifics.nativeCategoryId", [row["field"] for row in sellwild_listing.requirements(listing, Context(choices=old))])
 
-    def test_sellwild_native_packaging_uses_the_template_sides_in_the_create_payload(self):
-        from vendoo_studio.services import sellwild_listing
-        from vendoo_studio.services.direct_preflight import Context
-
-        listing = {**LISTING, "weight_oz": 0, "package_dimensions_in": "", "sellwild_specifics": {
-            "nativeCategoryId": 246, "nativeConditionId": 3, "parcelTemplate": "USPS_FlatRatePaddedEnvelope"}}
-        self.assertEqual(sellwild_listing.package_sides(listing), [13, 10, 1])
-        self.assertEqual(sellwild_listing.requirements(listing, Context()), [])
-        payload = native._execute_payload("sellwild", "publish", {"operation_id": "test"}, listing, [], "job")["sellwild"]
-        self.assertEqual(payload["parcel_template"], "USPS_FlatRatePaddedEnvelope")
-        self.assertTrue(payload["fixed_package"])
-        self.assertEqual(payload["package_dimensions"], {"depth": 13, "width": 10, "height": 1})
-        # Irregular Parcel has sides but is not flat rate, so Sellwild still asks for a weight.
-        listing["sellwild_specifics"]["parcelTemplate"] = "USPS_IrregularParcel"
-        listing["weight_lb"] = 0
-        self.assertFalse(native._execute_payload("sellwild", "publish", {"operation_id": "test"}, listing, [], "job")["sellwild"]["fixed_package"])
-        self.assertIn("weight_oz", [row["field"] for row in sellwild_listing.requirements(listing, Context())])
-        listing["sellwild_specifics"]["parcelTemplate"] = "invented"
-        self.assertIn("sellwild_specifics.parcelTemplate", [row["field"] for row in sellwild_listing.requirements(listing, Context())])
-
-    def test_sellwild_options_suggest_from_the_listing(self):
-        listing = {**LISTING, "title": "Vintage Patagonia fleece jacket", "condition": "Pre-Owned - Good",
-                   "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Coats, Jackets & Vests"}
-        listing.pop("depop_specifics", None)
-        listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
-        result = self.client.get(f"{self.base}/sellwild/options").json()
-        self.assertEqual(result["suggested"], {"category_id": 272, "condition_id": 3})
-        self.assertEqual(len(result["conditions"]), 5)
 
     def test_a_listed_poshmark_post_keeps_the_extensions_warning(self):
         outcome = native._outcome("poshmark", "list", {}, {
@@ -822,96 +719,8 @@ class NativeMarketplacesTest(unittest.TestCase):
         jobs = self.client.get(f"/api/jobs?conversation_id={self.conv.id}").json()
         self.assertTrue(all(job["mode"] == "native_marketplace" for job in jobs))
 
-    def test_vinted_list_saves_a_draft_then_publishes_it(self):
-        listing = {**LISTING, "vinted_specifics": {
-            "category": "Women > Clothing > Jeans > Straight jeans", "condition": "Good",
-        }}
-        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
-        draft = "https://www.vinted.com/items/42/edit"
-        live = "https://www.vinted.com/items/42"
-        self.assertEqual(native.draft_url("vinted", draft + "/"), draft)
-        self.assertEqual(native.draft_url("vinted", draft), draft)
-        with self.assertRaises(native.NativeMarketplaceError):
-            native.draft_url("vinted", draft + "?draft_id=1")
-        with self.assertRaises(native.NativeMarketplaceError):
-            native.draft_url("vinted", live)
-        self.assertEqual(native._plan("vinted", "list", {}, revision.id), ["save_draft", "publish"])
-        self.assertEqual(native._plan("vinted", "list", {"state": "draft", "revision_id": revision.id, "draft_url": draft}, revision.id), ["publish"])
-        self.assertEqual(native._plan("sellwild", "list", {}, revision.id), ["publish"])
-        replaced = native._outcome("vinted", "save_draft", {"state": "draft", "draft_url": draft, "revision_id": revision.id}, {
-            "ok": True, "state": "draft", "draft_url": "https://www.vinted.com/items/43/edit", "draft_replaced": True,
-        })
-        self.assertEqual(replaced["draft_url"], "https://www.vinted.com/items/43/edit")
-        gone = native._outcome("vinted", "publish", {"state": "draft", "draft_url": draft}, {
-            "ok": False, "safe_to_retry": True, "error": "Could not find draft on Vinted. List again.",
-            "marketplace_message": "Could not find draft", "error_code": "rejected",
-        })
-        self.assertIsNone(gone["draft_url"])
-        self.assertEqual(gone["state"], "not_saved")
 
-        async def bridge(job, kind, payload, timeout=None):
-            return ({"ok": True, "state": "draft", "draft_url": draft} if payload["action"] == "save_draft"
-                    else {"ok": True, "state": "published", "draft_url": draft, "listing_url": live})
 
-        self.bridge.side_effect = bridge
-        response = self.client.post(f"{self.base}/vinted/list", json={"revision_id": revision.id, "confirm": True})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.run_jobs()
-        record = self.status()["vinted"]
-        self.assertEqual(record["state"], "published", record)
-        self.assertEqual(record["draft_url"], draft)
-        self.assertEqual(record["listing_url"], live)
-        self.assertEqual(self.actions(), ["save_draft", "publish"])
-        calls = self.bridge.call_args_list
-        self.assertFalse(calls[0].args[2]["confirm"])
-        self.assertTrue(calls[1].args[2]["confirm"])
-        self.assertEqual(calls[1].args[2]["draft_url"], draft)
-        self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
-
-    def test_a_deleted_vinted_draft_is_saved_again_in_the_same_list(self):
-        from vendoo_studio.services import approved_photos
-
-        listing = {**LISTING, "vinted_specifics": {"category": "Women > Clothing", "condition": "Good"}}
-        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
-        old = "https://www.vinted.com/items/42/edit"
-        new = "https://www.vinted.com/items/43/edit"
-        snapshot = {**listing, approved_photos.KEY: approved_photos.capture(ConversationRepo(self.db).get_photos(self.conv.id))}
-        saved = JobRepo(self.db).create(self.conv.id, revision.id, snapshot, status="completed")
-        MarketplaceListingRepo(self.db).save(self.conv.id, "vinted", {
-            "state": "draft", "draft_url": old, "revision_id": revision.id, "job_id": saved.id,
-        })
-        self.bridge.side_effect = [
-            {"ok": False, "safe_to_retry": True, "error": "Could not find draft on Vinted. List again.",
-             "marketplace_message": "Could not find draft", "error_code": "rejected"},
-            {"ok": True, "state": "draft", "draft_url": new},
-            {"ok": True, "state": "published", "draft_url": new, "listing_url": "https://www.vinted.com/items/43"},
-        ]
-        response = self.client.post(f"{self.base}/vinted/list", json={"revision_id": revision.id, "confirm": True})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.run_jobs()
-        record = self.status()["vinted"]
-        self.assertEqual(record["state"], "published", record)
-        self.assertEqual(record["draft_url"], new)
-        self.assertEqual(self.actions(), ["publish", "save_draft", "publish"])
-        self.assertIsNone(self.bridge.call_args_list[1].args[2]["draft_url"])
-
-    def test_a_pasted_vinted_draft_link_is_checked_without_writing(self):
-        listing = {**LISTING, "vinted_specifics": {"category": "Women > Clothing", "condition": "Good"}}
-        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
-        draft = "https://www.vinted.com/items/42/edit"
-        self.bridge.side_effect = BrowserBridgeError("lost")
-        with patch.object(native, "SETTLE_DEADLINE_S", 0):
-            response = self.client.post(f"{self.base}/vinted/list", json={"revision_id": revision.id, "confirm": True})
-            self.assertEqual(response.status_code, 200, response.text)
-            self.run_jobs()
-        self.assertEqual(self.status()["vinted"]["state"], "unknown")
-        self.bridge.side_effect = None
-        self.bridge.return_value = {"finished": True, "result": {"ok": True, "state": "draft", "draft_url": draft}}
-        result = self.client.post(f"{self.base}/vinted/check", json={"draft_url": draft}).json()
-        self.assertEqual(result["state"], "draft", result)
-        self.assertEqual(result["draft_url"], draft)
-        self.assertEqual(self.bridge.call_args.args[1], "marketplace.result")
-        self.assertEqual(self.bridge.call_args.args[2]["context"]["draft_url"], draft)
 
     def test_a_pasted_draft_link_is_checked_without_repeating_the_write(self):
         self.bridge.side_effect = BrowserBridgeError("lost")
@@ -1197,8 +1006,7 @@ class MigrationFromNotesTest(unittest.TestCase):
                      "ebay_image_urls": ["https://i.ebayimg.com/a.jpg"], "listing_url": "https://www.ebay.com/itm/123456789012"},
             "etsy": {"state": "draft", "transport": "etsy_api", "etsy_image_ids": {"p1": "100"}, "etsy_photo_ids": ["p1"],
                      "etsy_photos_complete": True, "draft_url": "https://www.etsy.com/your/shops/me/listing-editor/edit/1"},
-            "sellwild": {"state": "draft", "storage": "local", "sellwild_category_id": 272, "local_draft_id": "abc"},
-            "mercari": {"state": "unknown", "job_id": "j2", "error": "lost"}, "vinted": {"state": "draft"}}})
+            "mercari": {"state": "unknown", "job_id": "j2", "error": "lost"}}})
         other.notes = merge_notes(None, {"brand": "Lee"})
         db.commit()
         with engine.begin() as connection:
@@ -1212,13 +1020,12 @@ class MigrationFromNotesTest(unittest.TestCase):
         table = Table("marketplace_listings", MetaData(), autoload_with=engine, resolve_fks=False)
         records = {row["marketplace"]: dict(row) for row in db.execute(
             select(table).where(table.c.conversation_id == conv.id)).mappings()}
-        self.assertEqual(set(records), {"ebay", "etsy", "sellwild", "mercari"})
+        self.assertEqual(set(records), {"ebay", "etsy", "mercari"})
         self.assertEqual(records["ebay"]["ebay_images"], [{"photo_id": None, "checksum": None, "url": "https://i.ebayimg.com/a.jpg"}])
         self.assertTrue(records["ebay"]["ebay_inventory_written"])
         self.assertEqual(records["ebay"]["operation_id"], "j1")
         self.assertEqual(records["etsy"]["etsy_image_ids"], {"p1": "100"})
         self.assertNotIn("transport", records["etsy"])
-        self.assertEqual(records["sellwild"]["sellwild_category_id"], 272)
         self.assertEqual((records["mercari"]["state"], records["mercari"]["error_code"]), ("unknown", "uncertain"))
         self.assertEqual(parse_notes(ConversationRepo(db).get(conv.id).notes), {"brand": "Levi"})
         self.assertEqual(parse_notes(ConversationRepo(db).get(other.id).notes), {"brand": "Lee"})

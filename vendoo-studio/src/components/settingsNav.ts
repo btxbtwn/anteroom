@@ -93,7 +93,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     title: "Where you list",
     section: "listings",
     targetId: "where-you-list",
-    searchTerms: ["marketplaces", "list to", "ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "direct", "crosslist"],
+    searchTerms: ["marketplaces", "list to", "ebay", "poshmark", "mercari", "depop", "etsy", "direct", "crosslist"],
   },
   {
     id: "package-dimensions",
@@ -233,7 +233,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     title: "Marketplace accounts",
     section: "connections",
     targetId: "accounts",
-    searchTerms: ["marketplaces", "accounts", "depop", "poshmark", "mercari", "sellwild", "vinted", "ebay", "etsy", "detect sales", "sale detection", "cookie", "sign in"],
+    searchTerms: ["marketplaces", "accounts", "depop", "poshmark", "mercari", "ebay", "etsy", "detect sales", "sale detection", "cookie", "sign in"],
   },
   {
     id: "direct-ebay",

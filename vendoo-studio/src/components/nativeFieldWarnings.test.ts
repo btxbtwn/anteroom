@@ -43,7 +43,7 @@ describe("direct List gaps on the form", () => {
     expect([...gapsByField("mercari", [gap], [rows[0]])]).toEqual([]);
     expect(rowForField("mercari", "photos", rows)).toBe("marketplace_photos.mercari");
   });
-  it.each(["ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"])(
+  it.each(["ebay", "etsy", "poshmark", "mercari", "depop"])(
     "%s displays field and photo messages without command metadata",
     (marketplace) => {
       const field = `${marketplace}_specifics.title`;

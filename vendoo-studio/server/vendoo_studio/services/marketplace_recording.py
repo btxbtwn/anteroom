@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from vendoo_studio.config import DATA_DIR
 from vendoo_studio.services import browser_bridge
 
-RECORDABLE = {"draft": {"mercari", "sellwild"}, "offers": {"mercari", "depop"}}
+RECORDABLE = {"draft": {"mercari"}, "offers": {"mercari", "depop"}}
 RECORDINGS_DIR = Path(DATA_DIR) / "recordings"
 _tasks: dict[tuple[str, str], asyncio.Task] = {}
 

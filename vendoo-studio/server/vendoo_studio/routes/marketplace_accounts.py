@@ -153,7 +153,7 @@ class ReconcileResponse(BaseModel):
 
 @router.post("/api/marketplace-sales/reconcile", response_model=ReconcileResponse)
 def reconcile_sales(
-    marketplace: Literal["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"] | None = None,
+    marketplace: Literal["ebay", "etsy", "poshmark", "mercari", "depop"] | None = None,
     db: Session = Depends(get_db),
 ):
     """Match new sale alerts against saved listing links. No marketplace calls."""
