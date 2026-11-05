@@ -207,6 +207,24 @@ def _record(db: Session, conv_id: str, marketplace: str, value: dict) -> None:
     _store(db, conv_id, "marketplaceDelists", marketplace, value)
 
 
+def _forget_deleted_listing(db: Session, conv_id: str, marketplace: str) -> None:
+    """A confirmed delete leaves nothing live, so the listing record rests as Mark as not listed leaves it.
+
+    Without this the record still reads published and List refuses the item
+    as already listed. The marketplace IDs stay, so a new List reuses them.
+    """
+    records = MarketplaceListingRepo(db)
+    record = records.get(conv_id, marketplace)
+    if record.get("state") not in {"published", "pending_review"}:
+        return
+    from vendoo_studio.services.native_marketplaces import _resting_state
+
+    records.save(conv_id, marketplace, {"error": None, "error_code": None, "error_fields": None, "marketplace_message": None,
+                                        "retry_after": None, "etsy_pending_write": None,
+                                        "state": _resting_state(marketplace, record), "listing_url": None,
+                                        "listing_id": None, "revision_id": None})
+
+
 MARKS = ("listed", "sold", "not_listed")
 
 
@@ -382,6 +400,7 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
                     }, timeout=90)
                 if result.get("ok") is True and result.get("state") == "deleted":
                     _record(db, conv_id, name, {**base, "state": "deleted", "error": None, "at": _now()})
+                    _forget_deleted_listing(db, conv_id, name)
                 else:
                     failed = True
                     _record(db, conv_id, name, {**base, "state": "failed", "at": _now(),

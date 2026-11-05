@@ -271,6 +271,17 @@ describe("marketplaces section", () => {
     expect(deleted).not.toContain("Fill or fix those fields");
   });
 
+  it("offers List again on a marketplace the seller delisted, without Update or Delist", () => {
+    const deleted = { ...live, state: "deleted" } as const;
+    // Items delisted before the record was reset still read published.
+    for (const drafts of [{}, { mercari: { state: "published", revision_id: "current", listing_url: live.url } }] as NativeDrafts[]) {
+      const html = render(drafts, { mercari: deleted }, { selected: "mercari" });
+      expect(row(html, "Mercari")).toContain("Deleted");
+      expect(enabledButton(html, "List…")).toBe(true);
+      expect(html).not.toContain(">Update…</button>");
+    }
+  });
+
   it("shows Update on a live listing only once the listing has changed", () => {
     const sent = (revision_id: string) => ({ mercari: { state: "published", revision_id, listing_url: live.url } }) as NativeDrafts;
     const current = render(sent("current"), { mercari: live }, { selected: "mercari" });

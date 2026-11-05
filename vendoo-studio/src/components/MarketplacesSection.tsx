@@ -436,7 +436,9 @@ export function MarketplacesLayout({
   };
   function listable(marketplace: Marketplace, status: Status): boolean {
     if (!canAct(marketplace) || unconfirmed(marketplace)) return false;
-    if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || listings[marketplace]?.listing_id) return false;
+    // A delisted listing keeps its ID, but nothing is live there: it can be listed again.
+    const entry = listings[marketplace];
+    if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || (entry?.listing_id && entry.state !== "deleted")) return false;
     // A sold item is not listed anywhere else.
     return !soldSomewhere;
   }

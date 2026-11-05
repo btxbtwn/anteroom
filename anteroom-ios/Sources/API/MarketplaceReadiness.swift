@@ -96,8 +96,9 @@ struct ListChoice: Equatable, Identifiable {
         let state = draft?.state ?? ""
         if draft?.running == true || ["saving", "publishing", "updating"].contains(state) { return choice("Working…", .muted) }
         if state == "unknown" { return choice("Unconfirmed", .muted) }
-        if state == "published" { return choice("Listed", .listed) }
-        if state == "pending_review" { return choice("In review", .muted) }
+        // After a delist the record may still read published; the delete wins.
+        if state == "published" && !removed { return choice("Listed", .listed) }
+        if state == "pending_review" && !removed { return choice("In review", .muted) }
         if !canAct { return choice("Not available here", .muted) }
         if soldSomewhere { return choice("Not listed", .muted) }
         if let check {

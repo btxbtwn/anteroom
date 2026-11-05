@@ -400,6 +400,8 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         raise NativeMarketplaceError(400, f"Saving a private {name} draft is not supported.")
     if kind != "save_draft" and body.confirm is not True:
         raise NativeMarketplaceError(400, f"Confirm updating the live {name} listing." if kind == "update" else f"Confirm listing on {name}.")
+    # The seller deleted the listing this record last published, so nothing is live there.
+    deleted_here = False
     if kind in {"list", "save_draft"}:
         from vendoo_studio.services.marketplace_delist import listings as live_listings
 
@@ -410,6 +412,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         existing = listings.get(marketplace) or {}
         if existing.get("listing_id") and existing.get("state") != "deleted":
             raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
+        deleted_here = existing.get("state") == "deleted"
     snapshot, photos = await _preflight(db, conv_id, marketplace, body)
     from vendoo_studio.services.chrome_catalog import apply_direct_ids, live_preview, remember_direct_categories
 
@@ -452,7 +455,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
                 if live.get("sold_here") or live.get("state") != "live" or not live.get("listing_id"):
                     raise NativeMarketplaceError(409, f"This item is not live on {name}.")
                 extra.update(listing_id=live["listing_id"], listing_url=live.get("url"))
-            elif record.get("state") in {"published", "pending_review"}:
+            elif record.get("state") in {"published", "pending_review"} and not deleted_here:
                 raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
             steps = _plan(marketplace, kind, record, body.revision_id)
             repo = JobRepo(db)
