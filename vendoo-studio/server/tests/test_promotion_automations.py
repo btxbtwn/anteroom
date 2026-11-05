@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, update
+from sqlalchemy import create_engine, text, update
 from sqlalchemy.sql.dml import Update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -102,6 +102,26 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.db.expire_all()
         self.assertEqual(self.check_likes(), 0)
         self.assertEqual(len(self.promoted()), 1)
+
+    def test_draft_deleted_while_reading_like_feed_is_skipped(self):
+        kept, gone = self.items[0], self.items[1]
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [kept[0].id, gone[0].id]})
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        at = _now() - timedelta(seconds=10)
+        row.like_events_since = at - timedelta(seconds=10)
+        self.db.commit()
+        feed = [{"listing_id": post, "at": at.isoformat() + "Z"} for _conv, post in (kept, gone)]
+
+        async def answer(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.like_events":
+                # The seller deletes a draft in another request while Chrome reads the feed.
+                self.db.connection().execute(text("DELETE FROM conversations WHERE id = :id"), {"id": gone[0].id})
+                return {"ok": True, "events": feed}
+            return await self.answer(job, message_type, payload, timeout)
+        self.bridge.side_effect = answer
+        self.assertEqual(self.check_likes(), 1)
+        self.assertEqual([sent["listing_id"] for sent in self.promoted()], [kept[1]])
 
     def test_verified_new_like_can_follow_previous_offer_with_same_total_likes(self):
         saved = self.create(OFFER)

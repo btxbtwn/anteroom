@@ -100,3 +100,20 @@ test('a late native form is not posted into a different signed-in account', asyn
   assert.equal(JSON.stringify(s.replies).includes('PRIVATE title'), false);
   assert.equal(s.replies.at(-1)[0].error_code, 'account_changed');
 });
+
+test('a relayed command the Bridge will not take is refused at once instead of left unanswered', async () => {
+  const s = setup();
+  s.emit({});
+  await new Promise(resolve => setImmediate(resolve));
+  const command = { type: 'marketplace.execute', job_id: 'job-1', message_id: 'a'.repeat(32),
+    payload: { request_id: 'a'.repeat(32), marketplace: 'poshmark', listing: { blob: 'x'.repeat(2_100_000) } } };
+  const relay = { source: 'anteroom-cloud', version: 1, requestId: '44444444-4444-4444-8444-444444444444',
+    action: 'marketplace_command', accountId: ACCOUNT, command, photos: [] };
+  s.emit({ data: relay });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(s.sent.length, 1);
+  const [reply] = s.replies.at(-1);
+  assert.equal(reply.requestId, relay.requestId);
+  assert.equal(reply.ok, false);
+  assert.equal(reply.error_code, 'invalid_input');
+});
