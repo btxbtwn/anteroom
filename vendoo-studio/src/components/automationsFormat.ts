@@ -2,8 +2,10 @@ import type {
   AutomationAction,
   AutomationBody,
   AutomationDraft,
+  AutomationFilters,
   AutomationSchedule,
 } from "../api/automations";
+import { marketplaceName } from "./marketplaceNames";
 
 export const AUTOMATION_MARKETPLACES = [
   "ebay", "poshmark", "mercari", "depop", "etsy",
@@ -168,6 +170,61 @@ export function describeSchedule(schedule: AutomationSchedule | null | undefined
   if (schedule.kind === "daily") return `Daily at ${clock} (${timezone})`;
   const days = (schedule.weekdays || []).map((day) => WEEKDAY_LABELS[day] || String(day));
   return `Weekly on ${days.join(", ") || "no days"} at ${clock} (${timezone})`;
+}
+
+/** "18:30" as "6:30 PM". */
+function clockLabel(time: string | undefined): string {
+  const [hours, minutes] = (time || "09:00").split(":").map(Number);
+  const hour = Number.isFinite(hours) ? hours : 9;
+  const minute = Number.isFinite(minutes) ? minutes : 0;
+  return `${hour % 12 || 12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"}`;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+function whenLabel(schedule: AutomationSchedule | null | undefined): string {
+  if (!schedule?.kind) return "No schedule yet";
+  if (schedule.kind === "once") {
+    const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?/.exec(schedule.at || "");
+    if (!match) return "Once";
+    return `Once ${MONTHS[Number(match[2]) - 1]} ${Number(match[3])}${match[4] ? `, ${clockLabel(match[4])}` : ""}`;
+  }
+  if (schedule.kind === "daily") return `Every day ${clockLabel(schedule.time)}`;
+  const days = (schedule.weekdays || []).map((day) => WEEKDAY_LABELS[day] || String(day));
+  return `Every ${days.join(", ") || "week"} ${clockLabel(schedule.time)}`;
+}
+
+/** One line for a saved automation: when it runs, which items and where. */
+export function describeTrigger(task: {
+  schedule: AutomationSchedule | null | undefined;
+  filters: AutomationFilters | null | undefined;
+  marketplaces: readonly string[];
+}): string {
+  const filters = task.filters ?? {};
+  const picks = [filters.department, filters.category, filters.brand, filters.status].filter(Boolean) as string[];
+  if (filters.min_age_days) picks.push(`listed ${filters.min_age_days}+ days`);
+  if (filters.conversation_ids?.length) {
+    picks.push(`${filters.conversation_ids.length} item${filters.conversation_ids.length === 1 ? "" : "s"}`);
+  }
+  const where = task.marketplaces.length ? `on ${task.marketplaces.map(marketplaceName).join(", ")}` : "";
+  const which = [picks.join(", "), where].filter(Boolean).join(" ");
+  return [whenLabel(task.schedule), which].filter(Boolean).join(" · ");
+}
+
+/** A server time as "Nov 5, 9:00 AM" in the automation's timezone. */
+export function formatRunTime(iso: string | null | undefined, timezone: string): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+  let text: string;
+  try {
+    text = date.toLocaleString("en-US", { ...options, timeZone: timezone });
+  } catch {
+    text = date.toLocaleString("en-US", options);
+  }
+  // Newer ICU puts a narrow no-break space before AM/PM.
+  return text.replace(/\u202f/g, " ");
 }
 
 export function describeActions(actions: AutomationAction[]): string {
