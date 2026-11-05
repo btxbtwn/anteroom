@@ -98,15 +98,10 @@ export function EbayOffersSettings() {
   return (
     <SettingsSection id="ebay-offers" title="eBay offers" hideTitle>
       <SettingsRow title={<span className="sr-only">Offers to interested buyers</span>}
-        description="Choose selected listings or cover all current and future eBay listings in Anteroom. Offers go to every buyer eBay marks eligible. Shipping and tax are separate."
+        description="Every 15 minutes while Anteroom runs, at most one offer per listing a day; US fixed-price listings only."
         control={<Button size="xs" variant="outline" disabled={connect.isPending || busy} onClick={() => connect.mutate()}>
           {connect.isPending ? <Spinner /> : null}{data?.connected ? "Reconnect eBay" : "Connect eBay"}
         </Button>}>
-        <SettingsNote>
-          Automatic offers check every 15 minutes while Anteroom is running, with at most one send per listing every 24 hours.
-          Counteroffers are off. This supports US fixed-price listings without variations.
-          Existing connections need to reconnect once to grant offer permissions.
-        </SettingsNote>
         {data?.lastCheck ? <p className="text-xs text-muted-foreground">Last automatic check: {new Date(data.lastCheck).toLocaleString()}</p> : null}
         {data?.lastError ? <SettingsNote tone="error">{data.lastError}</SettingsNote> : null}
         {status.isPending ? <Spinner /> : null}

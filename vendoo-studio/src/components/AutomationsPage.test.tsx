@@ -2,16 +2,21 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Automation, AutomationApproval } from "../api/automations";
+import type { PromotionAutomation } from "../api/promotions";
 import { AutomationsPage } from "./AutomationsPage";
 import { WorkspaceRuntimeProvider } from "../app/runtime";
 
-const data: { automations: Automation[]; approvals: AutomationApproval[] } = { automations: [], approvals: [] };
+const data: { automations: Automation[]; approvals: AutomationApproval[]; promotions: PromotionAutomation[]; ebayConnected: boolean } = {
+  automations: [], approvals: [], promotions: [], ebayConnected: true,
+};
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
     data: queryKey[0] === "ebay-offers"
-      ? { connected: true, listings: [], history: [], lastCheck: null, lastError: null,
+      ? { connected: data.ebayConnected, listings: [], history: [], lastCheck: null, lastError: null, checkIntervalMinutes: 15,
         allListings: { enabled: false, discountPercent: 10, minimumPrice: "" } }
+      : queryKey[0] === "promotion-automations"
+        ? { automations: data.promotions, supported: {}, awaiting_capture: {}, speeds: [], orders: [], max_daily_cap: 6000, shipping_labels: [] }
       : queryKey[0] === "automations" ? data.automations
         : queryKey[0] === "automation-approvals" ? data.approvals
           : [],
@@ -43,26 +48,49 @@ const task = (overrides: Partial<Automation>): Automation => ({
 
 const render = () => renderToStaticMarkup(<AutomationsPage onOpenListing={vi.fn()} />);
 
+const hosted = (features: string[]) => renderToStaticMarkup(
+  <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(features as never[]), views: new Set(["automations"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
+    <AutomationsPage onOpenListing={vi.fn()} />
+  </WorkspaceRuntimeProvider>,
+);
+
+const share = (overrides: Partial<PromotionAutomation>): PromotionAutomation => ({
+  id: "s", marketplace: "poshmark", action: "share", name: "Closet sharing", scope: "all", conversation_ids: [], excluded_ids: [],
+  min_days_listed: 0, share_order: "newest", speed: "normal", daily_cap: 300, times: ["09:00"], timezone: "UTC", discount_percent: 10,
+  min_likes: 1, shipping_label: null, minimum_price: null, enabled: false, available: true, paused_reason: null, next_run_at: null,
+  last_run: null, ...overrides,
+});
+
 describe("AutomationsPage", () => {
   beforeEach(() => {
     data.automations = [];
     data.approvals = [];
+    data.promotions = [];
+    data.ebayConnected = true;
   });
 
-  it("opens on the list, with the form behind New automation", () => {
+  it("opens on one list, with the forms behind New automation", () => {
     const html = render();
     expect(html).toContain("Automations");
     expect(html).toContain("nothing lists or delists until you approve each item");
     expect(html).toContain("New automation");
-    expect(html).toContain("No automations yet.");
-    // The form lives in the side panel, closed until the seller asks for it.
+    // eBay offers is a row in the same list, not a block of settings.
+    expect(html).toContain("eBay offers");
+    expect(html).toContain("Every 15 minutes · No listings yet");
+    expect(html).toContain('aria-label="Turn on eBay offers"');
+    expect(html).not.toContain("Automatic offers check every 15 minutes");
+    expect(html).not.toContain("Sharing and offers to likers");
+    // The forms live in the side panel, closed until the seller asks for them.
     expect(html).not.toContain("Draft from prompt");
     expect(html).not.toContain("Save and confirm");
+    expect(html).not.toContain("New sharing schedule");
     // Nothing is waiting, so the approval section stays out of the way.
     expect(html).not.toContain("Waiting for approval");
     expect(html).not.toContain("Require approval before publishing");
-    expect(html).toContain('aria-label="eBay offers"');
-    expect(html).toContain("Automatic offers check every 15 minutes");
+  });
+
+  it("says when nothing is set up yet", () => {
+    expect(hosted(["inventory"])).toContain("No automations yet.");
   });
 
   it("lists saved automations with their trigger, runs, a switch and a menu", () => {
@@ -93,14 +121,34 @@ describe("AutomationsPage", () => {
   });
 
   it("on the web, shows eBay offers only while the offer timer runs", () => {
-    const page = (features: string[]) => renderToStaticMarkup(
-      <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(features as never[]), views: new Set(["automations"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
-        <AutomationsPage onOpenListing={vi.fn()} />
-      </WorkspaceRuntimeProvider>,
-    );
-    const html = page(["inventory"]);
+    const html = hosted(["inventory"]);
     expect(html).toContain("New automation");
-    expect(html).not.toContain('aria-label="eBay offers"');
-    expect(page(["inventory", "ebay_offers"])).toContain('aria-label="eBay offers"');
+    expect(html).not.toContain("eBay offers");
+    expect(hosted(["inventory", "ebay_offers"])).toContain("eBay offers");
+  });
+
+  it("offers Connect eBay on the eBay row while eBay is not connected", () => {
+    data.ebayConnected = false;
+    const html = render();
+    expect(html).toContain("Connect eBay");
+    expect(html).not.toContain('aria-label="Turn on eBay offers"');
+  });
+
+  it("lists sharing and offers to likers in the same list, off with why", () => {
+    data.promotions = [
+      share({ paused_reason: "Paused: Poshmark is limiting shares." }),
+      share({ id: "m", marketplace: "mercari", action: "offer", name: "Mercari likers", available: false }),
+    ];
+    const html = render();
+    expect(html).toContain("Poshmark sharing");
+    expect(html).toContain("Offers to likers");
+    expect(html).toContain("Paused: Poshmark is limiting shares.");
+    expect(html).toContain("Mercari offers are not available in Anteroom yet");
+    // Each is off; one that isn't available yet can't be switched on.
+    const sharing = html.match(/<[^>]*aria-label="Turn on Closet sharing"[^>]*>/)?.[0] ?? "";
+    const likers = html.match(/<[^>]*aria-label="Turn on Mercari likers"[^>]*>/)?.[0] ?? "";
+    expect(sharing).toContain('role="switch"');
+    expect(sharing).not.toContain('data-disabled=""');
+    expect(likers).toContain('data-disabled=""');
   });
 });

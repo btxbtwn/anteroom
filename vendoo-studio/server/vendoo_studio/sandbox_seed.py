@@ -89,12 +89,31 @@ AUTOMATIONS = (
         "marketplaces": ["mercari"],
         "activate": False,
     },
+    {
+        "name": "Refresh old drafts",
+        "timezone": "America/Chicago",
+        "schedule": {"kind": "weekly", "time": "08:00", "weekdays": [0]},
+        "filters": {"status": "draft", "min_age_days": 30},
+        "actions": [{"type": "regenerate"}],
+        "marketplaces": [],
+        "activate": True,
+    },
+)
+
+# Sharing and offers to likers are always saved off; only the seller turns them on.
+PROMOTION_AUTOMATIONS = (
+    {"marketplace": "poshmark", "action": "share", "name": "Evening closet share", "scope": "all",
+     "times": ["09:00", "20:00"], "timezone": "America/Chicago", "daily_cap": 300},
+    {"marketplace": "poshmark", "action": "offer", "name": "Likers get 10% off", "scope": "all",
+     "discount_percent": 10, "min_likes": 1},
 )
 
 
 def _seed_automations(client: httpx.Client) -> None:
     for sample in AUTOMATIONS:
         client.post("/api/automations", json=sample).raise_for_status()
+    for sample in PROMOTION_AUTOMATIONS:
+        client.post("/api/promotion-automations", json=sample).raise_for_status()
 
 
 def _photo(label: str, color: tuple[int, int, int], index: int) -> bytes:

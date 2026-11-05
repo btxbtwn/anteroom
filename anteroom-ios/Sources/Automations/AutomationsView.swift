@@ -1,14 +1,25 @@
 import SwiftUI
 
-/// The Automations destination (AutomationsPage.tsx).
+/// The Automations destination (AutomationsPage.tsx): every automation in one
+/// list. Scheduled tasks are created and edited here; eBay offers, sharing and
+/// offers to likers show read-only with their on/off state and are set up and
+/// turned on from the web or Mac.
 struct AutomationsView: View {
     let api: AnteroomAPI
     /// Approving runs a marketplace action, which needs the seller's marketplace sessions.
     let canApprove: Bool
+    /// The workspace runs the eBay offer timer (`ebay_offers`).
+    var showsEbayOffers = false
+    /// The workspace runs sharing and offers to likers (`marketplace_sessions`).
+    var showsPromotions = false
 
     @State private var automations: [Automation]?
     @State private var approvals: [AutomationApproval] = []
     @State private var gaps: [RelistGap] = []
+    @State private var ebayOffers: EbayOffersSummary?
+    @State private var promotions: [PromotionAutomationSummary] = []
+    @State private var picking = false
+    @State private var startNew = false
     @State private var editing: EditTarget?
     @State private var history: HistoryTarget?
     @State private var deleting: Automation?
@@ -59,25 +70,29 @@ struct AutomationsView: View {
                 }
                 Section {
                     if let automations {
-                        if automations.isEmpty {
+                        if automations.isEmpty && ebayOffers == nil && promotions.isEmpty {
                             ContentUnavailableView("No automations yet", systemImage: "calendar.badge.clock",
                                                    description: Text("Tap New to schedule a price drop or relist."))
                         }
                         ForEach(automations) { task in row(task) }
+                        if let ebayOffers { readOnlyRow(AutomationRowModel(ebay: ebayOffers)) }
+                        ForEach(promotions) { rule in readOnlyRow(AutomationRowModel(promotion: rule, name: Marketplaces.name)) }
                     } else if error == nil {
                         ProgressView("Reading automations…")
                     }
                 } header: {
-                    Text("Scheduled")
+                    Text("Your automations")
                 } footer: {
-                    Text("Schedule price drops, relists and draft prep; nothing lists or delists until you approve each item.")
+                    Text(ebayOffers != nil || !promotions.isEmpty
+                         ? "Nothing lists or delists until you approve each item. Offers and sharing are set up and turned on from Anteroom on the web or Mac."
+                         : "Nothing lists or delists until you approve each item.")
                 }
             }
             .navigationTitle("Automations")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("New", systemImage: "plus") { editing = EditTarget(automation: nil) }
+                    Button("New", systemImage: "plus") { picking = true }
                         .labelStyle(.titleAndIcon)
                 }
             }
@@ -88,6 +103,16 @@ struct AutomationsView: View {
             }
             .sheet(item: $editing) { target in
                 AutomationEditorView(api: api, automation: target.automation) { Task { await load() } }
+            }
+            .sheet(isPresented: $picking, onDismiss: {
+                // Open the form once the picker has gone, so the two sheets don't collide.
+                if startNew { startNew = false; editing = EditTarget(automation: nil) }
+            }) {
+                AutomationTypePicker(kinds: kinds) {
+                    startNew = true
+                    picking = false
+                }
+                .presentationDetents([.medium, .large])
             }
             .sheet(item: $history) { target in
                 AutomationHistoryView(api: api, automation: target.automation, runs: target.runs)
@@ -107,9 +132,11 @@ struct AutomationsView: View {
             Button { editing = EditTarget(automation: task) } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(task.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                    Text(AutomationFormat.trigger(task.schedule, filters: task.filters, marketplaces: task.marketplaces, name: Marketplaces.name))
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text(AutomationFormat.actions(task.actions)).font(.caption).foregroundStyle(.secondary)
+                    let view = AutomationRowModel(automation: task, name: Marketplaces.name)
+                    Text("\(view.type) · \(view.when)").font(.caption).foregroundStyle(.secondary)
+                    if task.actions.contains(where: { $0.type == "price" }) {
+                        Text(AutomationFormat.actions(task.actions)).font(.caption).foregroundStyle(.secondary)
+                    }
                     Text(runs(task)).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -145,6 +172,34 @@ struct AutomationsView: View {
         }
     }
 
+    /// The kinds New offers here: the ones this workspace runs.
+    private var kinds: [(kind: String, label: String, description: String)] {
+        AutomationRowModel.kinds.filter { item in
+            switch item.kind {
+            case "ebay_offers": showsEbayOffers
+            case "share", "offer": showsPromotions
+            default: true
+            }
+        }
+    }
+
+    /// eBay offers, sharing and offers to likers: the same row, with their state instead of a switch.
+    private func readOnlyRow(_ view: AutomationRowModel) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(view.name).font(.subheadline.weight(.medium))
+                Text(view.type == view.name ? view.when : "\(view.type) · \(view.when)").font(.caption).foregroundStyle(.secondary)
+                if !view.note.isEmpty { Text(view.note).font(.caption).foregroundStyle(.secondary) }
+                Text("Last run \(view.lastRun) · Next \(view.nextRun)").font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(view.on.map { $0 ? "On" : "Off" } ?? view.state)
+                .font(.caption).foregroundStyle(view.on == true ? WorkspaceStyle.accent : .secondary)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+
     private func runs(_ task: Automation) -> String {
         let next = task.status == "active" ? AutomationFormat.runTime(task.nextRunAt, timezone: task.timezone) : "—"
         return "Last run \(AutomationFormat.runTime(task.lastRunAt, timezone: task.timezone)) · Next \(next)"
@@ -170,9 +225,13 @@ struct AutomationsView: View {
             async let list = api.automations()
             async let waiting = api.automationApprovals()
             async let down = api.relistGaps()
+            async let offers = showsEbayOffers ? (try? api.ebayOffers()) : nil
+            async let rules = showsPromotions ? (try? api.promotionAutomations()) : nil
             automations = try await list
             approvals = (try? await waiting) ?? []
             gaps = (try? await down) ?? []
+            ebayOffers = await offers
+            promotions = await rules ?? []
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -223,6 +282,37 @@ struct AutomationsView: View {
         let automation: Automation
         let runs: [AutomationRun]
         var id: String { automation.id }
+    }
+}
+
+/// New: which kind of automation. Scheduled tasks are set up here; the rest on the web or Mac.
+private struct AutomationTypePicker: View {
+    let kinds: [(kind: String, label: String, description: String)]
+    let onScheduled: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(kinds, id: \.kind) { item in
+                    Button { if item.kind == "scheduled" { onScheduled() } } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.label).foregroundStyle(item.kind == "scheduled" ? .primary : .secondary)
+                                Text(item.kind == "scheduled" ? item.description : "\(item.description) Set it up on the web or Mac.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if item.kind == "scheduled" { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary) }
+                        }
+                    }
+                    .disabled(item.kind != "scheduled")
+                }
+            }
+            .navigationTitle("New automation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
     }
 }
 

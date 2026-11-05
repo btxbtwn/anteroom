@@ -66,6 +66,34 @@ struct AutomationTests {
         precondition(AutomationFormat.trigger(nil, filters: nil, marketplaces: [], name: name) == "No schedule yet")
         precondition(AutomationFormat.runTime("2026-11-05T15:00:00+00:00", timezone: "America/Chicago") == "Nov 5, 9:00 AM")
         precondition(AutomationFormat.runTime(nil, timezone: "UTC") == "—")
+
+        // One list: every automation reads the same way, whichever backend owns it.
+        precondition(AutomationRowModel.type([AutomationAction(type: "price"), AutomationAction(type: "relist"), AutomationAction(type: "price")])
+                     == "Price drop, Relist")
+        precondition(AutomationRowModel.kinds.map(\.label) == ["Price drop, relist or regenerate", "eBay offers", "Poshmark sharing", "Offers to likers"])
+        let ebay = try JSONDecoder().decode(EbayOffersSummary.self, from: Data(#"""
+        {"connected":true,"allListings":{"enabled":true,"discountPercent":15,"minimumPrice":"20"},"listings":[],"history":[],
+         "checkIntervalMinutes":15,"lastCheck":null,"lastError":null}
+        """#.utf8))
+        precondition(AutomationRowModel(ebay: ebay).when == "Every 15 minutes · All listings, 15% off, minimum $20")
+        precondition(AutomationRowModel(ebay: ebay).on == true)
+        let offline = try JSONDecoder().decode(EbayOffersSummary.self, from: Data(#"""
+        {"connected":false,"allListings":{"enabled":false,"discountPercent":10,"minimumPrice":""},"listings":[{"enabled":false}]}
+        """#.utf8))
+        precondition(AutomationRowModel(ebay: offline).on == nil && AutomationRowModel(ebay: offline).state == "Not connected")
+        let promotions = try JSONDecoder().decode(PromotionAutomationList.self, from: Data(#"""
+        {"automations":[
+          {"id":"s","name":"Closet","marketplace":"poshmark","action":"share","scope":"all","conversation_ids":[],"excluded_ids":[],
+           "times":["09:00","20:30"],"timezone":"UTC","enabled":false,"available":true,"paused_reason":null,"next_run_at":null,"last_run":null},
+          {"id":"m","name":"Likers","marketplace":"mercari","action":"offer","scope":"items","conversation_ids":["a"],"excluded_ids":[],
+           "times":[],"timezone":null,"discount_percent":10,"enabled":false,"available":false,"paused_reason":null,"next_run_at":null,"last_run":null}
+        ],"supported":{},"awaiting_capture":{},"speeds":[],"orders":[],"max_daily_cap":6000,"shipping_labels":[]}
+        """#.utf8))
+        let share = AutomationRowModel(promotion: promotions.automations[0], name: name)
+        precondition(share.type == "Poshmark sharing" && share.when == "Every day 9:00 AM, 8:30 PM · all live listings" && share.on == false)
+        let likers = AutomationRowModel(promotion: promotions.automations[1], name: name)
+        precondition(likers.type == "Offers to likers" && likers.when == "New likers on Mercari · 10% off 1 chosen listing")
+        precondition(likers.note == "Mercari offers are not available in Anteroom yet")
         print("Automation tests passed")
     }
 }

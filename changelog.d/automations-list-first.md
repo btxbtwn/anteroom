@@ -1,4 +1,0 @@
-- Automations opens on your saved automations as a list: name, when it runs, last and next run, an on/off switch and a menu to edit, run or delete.
-- New automation (and Edit) opens a side panel that starts with "Describe it"; the full form is under "Set it up manually".
-- "Waiting for approval" only appears when something is waiting, and every item still needs your approval per marketplace.
-- The iPhone app's Automations screen has the same list, with New in the toolbar.
