@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import unittest
 from datetime import timedelta
@@ -794,6 +795,23 @@ class NativeMarketplacesTest(unittest.TestCase):
             self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True})
             self.run_jobs()
         self.assertEqual(held, [False, False])
+
+    def test_chrome_gets_the_listing_without_the_saved_form_contracts_and_each_check_names_its_marketplace(self):
+        # Saved form contracts reach megabytes; the Bridge refuses a command over 2 MB.
+        listing = {**LISTING, "_native_forms": {"mercari": {"fields": ["x" * 3_000_000]}}}
+        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
+        self.bridge.side_effect = [BrowserBridgeError("lost"), {"finished": True, "result": {"ok": True, "state": "published", "listing_url": POSH_URL}}]
+        response = self.client.post(f"{self.base}/poshmark/list", json={"revision_id": revision.id, "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.run_jobs()
+        (_, kind, execute), _ = self.bridge.call_args_list[0]
+        (_, check_kind, check), _ = self.bridge.call_args_list[1]
+        self.assertEqual((kind, check_kind), ("marketplace.execute", "marketplace.result"))
+        self.assertFalse("_native_forms" in execute["listing"])
+        self.assertFalse("_native_forms" in check["context"]["listing"])
+        self.assertLess(len(json.dumps(execute)), 2_000_000)
+        self.assertEqual(check["marketplace"], "poshmark")
+        self.assertEqual(self.record("poshmark")["state"], "published")
 
     def test_an_ebay_list_whose_reply_was_lost_is_checked_before_the_job_lets_go(self):
         from vendoo_studio.services import ebay_listings
