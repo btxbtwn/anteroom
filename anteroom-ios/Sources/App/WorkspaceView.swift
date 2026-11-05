@@ -50,7 +50,9 @@ struct WorkspaceView: View {
             AnalyticsDestination(api: api)
                 .tabItem { Label("Analytics", systemImage: "chart.bar.fill") }
             if views.contains("automations") {
-                AutomationsView(api: api, canApprove: features.contains("marketplace_actions"))
+                AutomationsView(api: api, canApprove: features.contains("marketplace_actions"),
+                                showsEbayOffers: features.contains("ebay_offers"),
+                                showsPromotions: features.contains("marketplace_sessions"))
                     .tabItem { Label("Automations", systemImage: "calendar.badge.clock") }
             }
             SettingsRootView(api: api)

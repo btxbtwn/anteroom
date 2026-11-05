@@ -401,6 +401,17 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/automations/approvals"))
     }
 
+    /// eBay offers, read-only on iPhone: set up and turned on from the web or Mac.
+    func ebayOffers() async throws -> EbayOffersSummary {
+        try await decode(request("GET", "api/ebay-offers"))
+    }
+
+    /// Sharing schedules and offers to likers, read-only on iPhone.
+    func promotionAutomations() async throws -> [PromotionAutomationSummary] {
+        let list: PromotionAutomationList = try await decode(request("GET", "api/promotion-automations"))
+        return list.automations
+    }
+
     func relistGaps() async throws -> [RelistGap] {
         try await decode(request("GET", "api/errors"))
     }

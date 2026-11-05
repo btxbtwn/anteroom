@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { AutomationDraft } from "../api/automations";
-import { bodyFromForm, describeActions, describeSchedule, emptyForm, formFromDraft } from "./automationsFormat";
+import {
+  bodyFromForm, describeActions, describeSchedule, describeTrigger, emptyForm, formFromDraft, formatRunTime,
+} from "./automationsFormat";
 
 const draft: AutomationDraft = {
   name: "Relist after 60 days",
@@ -65,5 +67,30 @@ describe("automations form", () => {
     expect(body.price_repeat).toBe("once");
     expect(body).not.toHaveProperty("require_approval");
     expect(body.actions?.some((action) => action.type === "regenerate")).toBe(true);
+  });
+});
+
+describe("automation rows", () => {
+  it("says when an automation runs and what it picks, in plain words", () => {
+    expect(describeTrigger(draft)).toBe("Every day 9:00 AM · listed 60+ days on eBay, Poshmark");
+    expect(describeTrigger({
+      schedule: { kind: "weekly", time: "18:30", weekdays: [0, 5] },
+      filters: { department: "Men", brand: "Levi's" },
+      marketplaces: [],
+    })).toBe("Every Mon, Sat 6:30 PM · Men, Levi's");
+    expect(describeTrigger({
+      schedule: { kind: "once", at: "2026-11-03T00:05" },
+      filters: { conversation_ids: ["a", "b"] },
+      marketplaces: ["mercari"],
+    })).toBe("Once Nov 3, 12:05 AM · 2 items on Mercari");
+    expect(describeTrigger({ schedule: { kind: "daily" }, filters: {}, marketplaces: ["ebay"] }))
+      .toBe("Every day 9:00 AM · on eBay");
+    expect(describeTrigger({ schedule: null, filters: {}, marketplaces: [] })).toBe("No schedule yet");
+  });
+
+  it("shows run times in the automation's own timezone", () => {
+    expect(formatRunTime("2026-11-05T15:00:00+00:00", "America/Chicago")).toBe("Nov 5, 9:00 AM");
+    expect(formatRunTime(null, "UTC")).toBe("—");
+    expect(formatRunTime("2026-11-05T15:00:00+00:00", "Not/AZone")).not.toBe("—");
   });
 });
