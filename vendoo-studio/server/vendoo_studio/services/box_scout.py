@@ -971,6 +971,18 @@ def refresh_if_due() -> bool:
         lock.release()
 
 
+def timed_refresh() -> None:
+    """One turn of the timer. It waits while this Mac's window shows the seller's account."""
+    from vendoo_studio.services.mac_workspace import account_shown
+
+    if account_shown() or not refresh_is_due():
+        return
+    try:
+        refresh()
+    except Exception:
+        log.exception("Sourcing refresh failed")
+
+
 def start_sourcing_timer() -> threading.Thread | None:
     """Refresh on startup when one is due, then every REFRESH_INTERVAL."""
     global _timer
@@ -979,11 +991,7 @@ def start_sourcing_timer() -> threading.Thread | None:
 
     def _run() -> None:
         while True:
-            if refresh_is_due():
-                try:
-                    refresh()
-                except Exception:
-                    log.exception("Sourcing refresh failed")
+            timed_refresh()
             if _timer_stop.wait(TIMER_INTERVAL.total_seconds()):
                 return
 

@@ -518,6 +518,11 @@ async def _timer() -> None:
     while True:
         # Never send as a side effect of startup: the first check waits a full tick.
         await asyncio.sleep(TICK_S)
+        from vendoo_studio.services.mac_workspace import account_shown
+
+        # The account runs them while this Mac's window shows it.
+        if account_shown():
+            continue
         try:
             with SessionLocal() as db:
                 await check_new_likes(db)

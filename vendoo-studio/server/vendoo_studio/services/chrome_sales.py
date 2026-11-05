@@ -185,7 +185,15 @@ def _line_ids(session_factory, conv_id: str) -> set[str]:
 
 
 async def check_due() -> None:
-    """Check one shop. The others wait for their own turn, on uneven gaps."""
+    """Check one shop. The others wait for their own turn, on uneven gaps.
+
+    Nothing is checked while this Mac's window shows the seller's account,
+    which checks the same shops itself.
+    """
+    from vendoo_studio.services.mac_workspace import account_shown
+
+    if account_shown():
+        return
     now = time.time()
     for marketplace in CHROME_MARKETS:
         if not sale_detection_enabled(marketplace):

@@ -101,10 +101,14 @@ def stop_automation_scheduler() -> None:
 
 
 async def _loop() -> None:
+    from vendoo_studio.services.mac_workspace import account_shown
+
     while True:
         db = SessionLocal()
         try:
-            await tick(db)
+            # The account runs them while this Mac's window shows it.
+            if not account_shown():
+                await tick(db)
         except asyncio.CancelledError:
             raise
         except Exception:
