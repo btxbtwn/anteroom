@@ -2,10 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AnalyticsPage } from "./AnalyticsPage";
 import { ledgerMoney, SalesLedger, SalesLedgerSummary } from "./SalesLedger";
-import { salesLedgerParams, type SalesLedgerPage } from "../api/salesLedger";
+import { salesLedgerParams, type SalesLedgerPage, type SalesOverview } from "../api/salesLedger";
 
 const { useQuery } = vi.hoisted(() => ({ useQuery: vi.fn() }));
-vi.mock("@tanstack/react-query", () => ({ useQuery, useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
+vi.mock("@tanstack/react-query", () => ({ useQuery, keepPreviousData: (value: unknown) => value, useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
 const data: SalesLedgerPage = {
   rows: [{ id: "sale", marketplace: "ebay", order_id: "order", line_id: "line", listing_id: "123456789012", quantity: 2,
     order_status: "partially_refunded", alert_state: "dismissed", conversation_id: "coat", title: "Wool coat", sold_at: null,
@@ -15,7 +15,19 @@ const data: SalesLedgerPage = {
     currencies: [{ currency: "EUR", lines: 1, net_known: 1, profit_known: 1, net_revenue: "10.0001", profit: "7.0001" },
       { currency: "USD", lines: 1, net_known: 0, profit_known: 0, net_revenue: null, profit: null }] },
 };
-beforeEach(() => { useQuery.mockReset(); useQuery.mockReturnValue({ data, isPending: false, isFetching: false }); });
+const figures = { count: 3, revenue: 120, revenue_known: 3, profit: null, profit_known: 0, fees_known: 0, average_days: 9.5, days_known: 3, sell_through: 30 };
+const overview: SalesOverview = {
+  start: "2026-10-06", end: "2026-11-04", undated_sales: 0, current: figures,
+  previous: { ...figures, count: 1, revenue: 40, revenue_known: 1, start: "2026-09-06", end: "2026-10-05" },
+  weeks: [{ start: "2026-10-26", count: 2, revenue: 80, revenue_known: 2 }, { start: "2026-11-02", count: 1, revenue: 40, revenue_known: 1 }],
+  weeks_truncated: false, marketplaces: [{ id: "poshmark", count: 2, revenue: 90, revenue_known: 2 }, { id: "ebay", count: 1, revenue: 30, revenue_known: 1 }],
+};
+beforeEach(() => {
+  useQuery.mockReset();
+  useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => ({
+    data: queryKey[0] === "analytics" ? overview : data, isPending: false, isFetching: false,
+  }));
+});
 
 describe("local sales records", () => {
   it("opens Analytics on the local ledger without fetching Vendoo analytics", () => {
@@ -25,7 +37,18 @@ describe("local sales records", () => {
     expect(html).not.toContain("Resync Vendoo data");
     const keys = useQuery.mock.calls.map((call) => call[0].queryKey[0]);
     expect(keys).toContain("sales-ledger");
-    expect(keys).not.toContain("analytics");
+    expect(useQuery.mock.calls.map((call) => call[0].queryKey).filter((key) => key[0] === "analytics").every((key) => key[1] === "overview")).toBe(true);
+  });
+  it("leads with the period's figures and charts, and says what it can't work out", () => {
+    const html = renderToStaticMarkup(<SalesLedger onOpenListing={vi.fn()} />);
+    const text = html.replace(/<[^>]+>/g, " ");
+    expect(text).toContain("Revenue");
+    expect(text).toContain("$120");
+    expect(text).toContain("Up $80 (200%)");
+    expect(text).toContain("Not enough data");
+    expect(text).toContain("Items sold per week");
+    expect(text).toContain("Poshmark");
+    expect(html.indexOf("Sales overview")).toBeLessThan(html.indexOf("Sales records"));
   });
   it("shows changed orders, quantity and unknown profit with local export links", () => {
     const html = renderToStaticMarkup(<SalesLedger onOpenListing={vi.fn()} />);
@@ -40,7 +63,8 @@ describe("local sales records", () => {
   it("keeps currency coverage separate and never rounds recorded decimals", () => {
     const html = renderToStaticMarkup(<SalesLedgerSummary summary={data.summary} />);
     expect(html).toContain("EUR 7.0001");
-    expect(html).toContain("known on 0 of 1 lines");
+    expect(html).toContain("known on 1 of 1 lines");
+    expect(html).not.toContain("USD");
     expect(html).toContain("1 without recorded amounts");
     expect(ledgerMoney("0", "USD")).toBe("USD 0");
     expect(ledgerMoney(null, "USD")).toBe("Not recorded");

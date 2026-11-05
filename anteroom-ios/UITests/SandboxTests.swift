@@ -230,6 +230,34 @@ final class DestinationSandboxTests: XCTestCase {
     }
 }
 
+/// Sales records lead with the period's figures and sales per week. The
+/// sandbox seeds sales, so both have data.
+@MainActor
+final class AnalyticsSandboxTests: XCTestCase {
+    func testSalesRecordsShowFiguresAndWeeklyChart() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        let analytics = app.tabBars.buttons["Analytics"]
+        XCTAssertTrue(analytics.waitForExistence(timeout: 30))
+        analytics.tap()
+        XCTAssertTrue(app.staticTexts["Revenue"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["Items sold"].exists)
+        keep(app, "Analytics figures")
+        app.swipeUp()
+        XCTAssertTrue(app.staticTexts["Items sold per week"].waitForExistence(timeout: 10))
+        keep(app, "Analytics weekly chart")
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
 /// The business assistant answers a starter question on the sandbox's fake
 /// provider, streams it in, and keeps the conversation in Chats.
 @MainActor

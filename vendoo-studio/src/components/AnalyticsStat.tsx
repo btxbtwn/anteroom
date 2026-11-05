@@ -10,7 +10,8 @@ export function Stat({
   negative = false,
 }: {
   label: string;
-  value: string;
+  /** null when it can't be worked out from what was recorded. */
+  value: string | null;
   hint?: string;
   change?: string;
   negative?: boolean;
@@ -21,11 +22,11 @@ export function Stat({
       <div
         className={cn(
           "tabular-nums",
-          value === "—" ? "text-sm text-muted-foreground" : "text-2xl font-semibold tracking-tight text-foreground",
+          value == null || value === "—" ? "text-sm text-muted-foreground" : "text-2xl font-semibold tracking-tight text-foreground",
           negative && "text-destructive-foreground",
         )}
       >
-        {value}
+        {value ?? "Not enough data"}
       </div>
       {hint ? <div className="text-xs leading-relaxed text-muted-foreground">{hint}</div> : null}
       {change ? <div className="mt-auto pt-1 text-xs font-medium text-foreground/80">{change}</div> : null}

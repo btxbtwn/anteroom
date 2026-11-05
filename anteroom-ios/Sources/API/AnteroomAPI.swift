@@ -402,6 +402,13 @@ final class AnteroomAPI: Sendable {
         return try await decode(request("GET", "api/sales-ledger", query: query))
     }
 
+    /// Figures, sales per week and sales by marketplace for Sales records' dates (whole UTC days).
+    func salesOverview(start: String, end: String, marketplace: String?) async throws -> SalesOverview {
+        var query = [URLQueryItem(name: "start", value: start), URLQueryItem(name: "end", value: end)]
+        if let marketplace { query.append(URLQueryItem(name: "marketplace", value: marketplace)) }
+        return try await decode(request("GET", "api/analytics/overview", query: query))
+    }
+
     func salesRecord(_ id: String) async throws -> SalesLedgerRow {
         try await decode(request("GET", "api/sales-ledger/\(id)"))
     }

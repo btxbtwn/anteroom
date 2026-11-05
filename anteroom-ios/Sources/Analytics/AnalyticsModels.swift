@@ -190,3 +190,119 @@ enum AnalyticsFormat {
         return "After recorded cost, fees and shipping\(scope). Fees recorded on \(sales.feesKnown) of \(sales.profitKnown)"
     }
 }
+
+/// `GET /api/analytics/overview` (SalesOverview in api/salesLedger.ts): the figures
+/// and weekly chart above Sales records, for its dates and marketplace.
+struct SalesOverview: Decodable, Sendable {
+    struct Figures: Decodable, Sendable {
+        let count, revenueKnown, profitKnown, feesKnown, daysKnown: Int
+        let revenue: Double
+        let profit, averageDays, sellThrough: Double?
+        enum CodingKeys: String, CodingKey {
+            case count, revenue, profit
+            case revenueKnown = "revenue_known", profitKnown = "profit_known", feesKnown = "fees_known"
+            case daysKnown = "days_known", averageDays = "average_days", sellThrough = "sell_through"
+        }
+    }
+
+    struct Previous: Decodable, Sendable {
+        let start, end: String
+        let figures: Figures
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            start = try container.decode(String.self, forKey: .start)
+            end = try container.decode(String.self, forKey: .end)
+            figures = try Figures(from: decoder)
+        }
+        enum CodingKeys: String, CodingKey { case start, end }
+    }
+
+    struct Week: Decodable, Identifiable, Sendable {
+        let start: String
+        let count, revenueKnown: Int
+        let revenue: Double
+        var id: String { start }
+        enum CodingKeys: String, CodingKey {
+            case start, count, revenue
+            case revenueKnown = "revenue_known"
+        }
+    }
+
+    struct Marketplace: Decodable, Identifiable, Sendable {
+        let id: String
+        let count, revenueKnown: Int
+        let revenue: Double
+        enum CodingKeys: String, CodingKey {
+            case id, count, revenue
+            case revenueKnown = "revenue_known"
+        }
+    }
+
+    let current: Figures
+    let previous: Previous?
+    let weeks: [Week]
+    let weeksTruncated: Bool
+    let undatedSales: Int
+    let marketplaces: [Marketplace]
+
+    enum CodingKeys: String, CodingKey {
+        case current, previous, weeks, marketplaces
+        case weeksTruncated = "weeks_truncated", undatedSales = "undated_sales"
+    }
+}
+
+/// One card in the figures grid. A nil value can't be worked out from what was recorded.
+struct OverviewFigure: Identifiable, Sendable {
+    let label: String
+    let value: String?
+    var hint: String?
+    var change: String?
+    var negative = false
+    var id: String { label }
+}
+
+extension AnalyticsFormat {
+    /// The figures row (overviewFigures in analyticsFormat.ts).
+    static func overviewFigures(_ current: SalesOverview.Figures, _ previous: SalesOverview.Figures?,
+                                marketplaceChosen: Bool) -> [OverviewFigure] {
+        let none = current.count == 0
+        func pricesComplete(_ figures: SalesOverview.Figures) -> Bool { figures.revenueKnown == figures.count }
+        func costsComplete(_ figures: SalesOverview.Figures) -> Bool {
+            figures.profitKnown == figures.count && figures.feesKnown == figures.count
+        }
+        func compare(_ complete: Bool, _ missing: String, _ now: Double?, _ before: Double?, _ format: (Double) -> String) -> String? {
+            guard previous != nil else { return nil }
+            return complete ? change(now, before, format) : "No comparison: \(missing)"
+        }
+        let revenueHint: String? = none ? nil : current.revenueKnown == 0 ? "Record sale prices to see revenue"
+            : current.revenueKnown < current.count ? "Recorded on \(current.revenueKnown) of \(current.count) sales" : nil
+        let profitHint = none || (current.profit != nil && costsComplete(current)) ? "After fees, shipping and cost"
+            : current.profit == nil ? "Record sale prices and costs to see profit"
+            : "Cost recorded on \(current.profitKnown) of \(current.count) sales"
+        let previousProfit = previous.flatMap { $0.count == 0 ? 0 : $0.profit }
+        return [
+            OverviewFigure(label: "Revenue",
+                           value: none ? money(0) : current.revenueKnown == 0 ? nil : money(current.revenue),
+                           hint: revenueHint,
+                           change: compare(previous.map { pricesComplete(current) && pricesComplete($0) } ?? false,
+                                           "missing prices", current.revenue, previous?.revenue, money)),
+            OverviewFigure(label: "Profit",
+                           value: none ? money(0) : current.profit.map(money),
+                           hint: profitHint,
+                           change: compare(previous.map { costsComplete(current) && costsComplete($0) } ?? false,
+                                           "missing costs or fees", none ? 0 : current.profit, previousProfit, money),
+                           negative: (current.profit ?? 0) < 0),
+            OverviewFigure(label: "Items sold", value: String(current.count),
+                           change: compare(true, "", Double(current.count), previous.map { Double($0.count) }) { String(Int($0.rounded())) }),
+            OverviewFigure(label: "Average days to sell",
+                           value: current.averageDays.map { days(Int($0.rounded())) },
+                           hint: current.averageDays != nil && current.daysKnown < current.count
+                               ? "Based on \(current.daysKnown) of \(current.count) sales" : nil,
+                           change: previous?.averageDays != nil && current.averageDays != nil
+                               ? change(current.averageDays, previous?.averageDays) { days(Int($0.rounded())) } : nil),
+            OverviewFigure(label: "Sell-through",
+                           value: current.sellThrough.map { "\($0.formatted(.number.precision(.fractionLength(0...1))))%" },
+                           hint: marketplaceChosen ? "Shown for all marketplaces only" : "Sold ÷ (sold + still listed)"),
+        ]
+    }
+}
