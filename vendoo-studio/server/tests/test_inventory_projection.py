@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from test_seller_ownership import migration_config, migration_engine  # noqa: F401
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.listing import Listing, ListingRevision
+from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.routes.hosted_workspace import inventory_response
 from vendoo_studio.services import schema_migrations
 from vendoo_studio.services.account_import import _row
@@ -26,6 +27,10 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
         }))
         db.flush()
         db.add(Listing(conversation_id="item", current_revision_id="revision"))
+        db.add(MarketplaceListing(conversation_id="item", marketplace="ebay", state="published",
+                                  listing_url="https://www.ebay.com/itm/1"))
+        db.add(MarketplaceListing(conversation_id="item", marketplace="mercari", state="not_saved",
+                                  error="Rejected", error_fields=[{"field": "size", "message": "Required"}]))
         db.commit()
         reads = []
 
@@ -43,6 +48,11 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
         assert suggestion[3:] == ("Example", ["Men", "Coats"], ["Winter"], "Wool coat", "Coat", ["Wool"])
         assert analytics.price == 42 and analytics.cost == 5
         assert summary["sku"] == "coat-1" and summary["price"] == 42 and summary["quantity"] == 2
+        assert summary["direct_marketplaces"] == ["ebay"]
+        assert summary["direct_records"] == {
+            "ebay": {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0},
+            "mercari": {"state": "not_saved", "listing_url": None, "failed": True, "fields": 1},
+        }
         assert reads
         assert not any("listing_json" in query for query in reads)
 

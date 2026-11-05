@@ -1,3 +1,5 @@
+import type { DirectRecord } from "../../api/types";
+
 export type Listing = {
   id: string;
   title?: string | null;
@@ -16,6 +18,8 @@ export type Listing = {
   sold_at?: string | null;
   vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
+  direct_records?: Record<string, DirectRecord>;
+  vendoo_listing_urls?: Record<string, string>;
   removed_marketplaces?: string[];
   units_sold?: number;
   missing_sale_data?: string[];

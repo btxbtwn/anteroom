@@ -3,7 +3,7 @@ import {
   SUGGESTION_KIND_LABELS,
   markDownStaleLabel,
   staleAgeLabel,
-  suggestionCaption,
+  suggestionHint,
   suggestionKindLabel,
 } from "./SuggestionsPanel";
 
@@ -27,31 +27,21 @@ describe("suggestionKindLabel", () => {
   });
 });
 
-describe("suggestionCaption", () => {
-  it("puts listed age first on compact stale rows", () => {
+describe("suggestionHint", () => {
+  it("states each kind on the listing's own row", () => {
+    expect(suggestionHint({ kind: "ready_to_generate", age_days: null })).toBe("Ready to generate");
+    expect(suggestionHint({ kind: "ready_to_review", age_days: null })).toBe("Needs review");
+    expect(suggestionHint({ kind: "fix_validation", age_days: null })).toBe("Fields to fix");
+    expect(suggestionHint({ kind: "failed", age_days: null })).toBe("Last send failed");
+    expect(suggestionHint({ kind: "stale_active", age_days: null })).toBe("Stale");
+  });
+
+  it("puts a stale row's listed age first, then why it ranks high", () => {
     expect(staleAgeLabel(1)).toBe("1 day");
     expect(staleAgeLabel(47)).toBe("47 days");
-    expect(suggestionCaption({ kind: "stale_active", age_days: 47 }, true)).toBe(
-      "47 days · Refresh or consider price drop",
-    );
-    expect(suggestionCaption({ kind: "stale_active", age_days: 47 }, false)).toBe(
-      "Refresh or consider price drop",
-    );
-  });
-
-  it("shows why a compact stale row ranks high in place of the action", () => {
-    expect(
-      suggestionCaption({ kind: "stale_active", age_days: 75, similar_sold: 3, season_fit: "in" }, true),
-    ).toBe("75 days · 3 like it sold · In season");
-    expect(suggestionCaption({ kind: "stale_active", age_days: 75, season_fit: "off" }, true)).toBe(
-      "75 days · Refresh or consider price drop",
-    );
-  });
-
-  it("leaves other compact kinds unchanged", () => {
-    expect(suggestionCaption({ kind: "fix_validation", age_days: null }, true)).toBe(
-      "Fix listing fields",
-    );
+    expect(suggestionHint({ kind: "stale_active", age_days: 47 })).toBe("Stale 47 days");
+    expect(suggestionHint({ kind: "stale_active", age_days: 75, similar_sold: 3, season_fit: "in" }))
+      .toBe("Stale 75 days · 3 like it sold · In season");
   });
 });
 

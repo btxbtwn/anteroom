@@ -98,11 +98,32 @@ class ListingFacetsTest(unittest.TestCase):
         records.save(conv.id, "depop", {"state": "published"})
         records.save(conv.id, "etsy", {"state": "not_saved"})
         records.save(conv.id, "mercari", {"state": "pending_review"})
-        live = records.live_marketplaces()
-        response = _conv_response(conv, _extras(None, None, None, False, live[conv.id]))
+        direct = records.summaries()
+        response = _conv_response(conv, _extras(None, None, None, False, direct[conv.id]))
         self.assertEqual(sorted(response.direct_marketplaces), ["depop", "mercari"])
         self.assertEqual(response.vendoo_marketplaces, [])
         self.assertEqual(response.status, "draft")
+
+    def test_response_carries_each_marketplace_record_for_the_inventory_table(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="Levi's 501")
+        other = self.convs.create(title="Untouched")
+        records = MarketplaceListingRepo(self.db)
+        records.save(conv.id, "ebay", {"state": "published", "listing_url": "https://www.ebay.com/itm/1"})
+        records.save(conv.id, "poshmark", {"state": "not_saved", "error": "Fix 2 fields", "error_fields": [
+            {"field": "size", "message": "Required"}, {"field": "brand", "message": "Required"}]})
+        records.save(conv.id, "depop", {"state": "draft", "draft_url": "https://www.depop.com/drafts/1"})
+        direct = records.summaries()
+        self.assertNotIn(other.id, direct)
+        self.assertEqual(records.summaries(conv.id), {conv.id: direct[conv.id]})
+        response = _conv_response(conv, _extras(None, None, None, False, direct[conv.id]))
+        self.assertEqual(response.direct_records["ebay"].model_dump(),
+                         {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0})
+        self.assertEqual(response.direct_records["poshmark"].model_dump(),
+                         {"state": "not_saved", "listing_url": None, "failed": True, "fields": 2})
+        self.assertEqual(response.direct_records["depop"].state, "draft")
+        self.assertEqual(response.direct_marketplaces, ["ebay"])
 
     def test_response_names_marketplaces_anteroom_delisted(self):
         from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
@@ -130,7 +151,7 @@ class ListingFacetsTest(unittest.TestCase):
         # Anteroom republished on Depop after the delete.
         records.save(conv.id, "depop", {"state": "published",
                                         "listing_url": "https://www.depop.com/products/seller-columbia-jacket-2/"})
-        response = _conv_response(conv, _extras(None, None, None, False, ["depop"], records.listing_urls()[conv.id]))
+        response = _conv_response(conv, _extras(None, None, None, False, records.summaries()[conv.id]))
         self.assertEqual(response.removed_marketplaces, ["ebay", "poshmark"])
         self.assertEqual(response.status, "active")
 

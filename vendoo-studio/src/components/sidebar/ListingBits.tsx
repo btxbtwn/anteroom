@@ -1,6 +1,6 @@
 import { StudioImage } from "../StudioImage";
 import { useState, type ReactNode } from "react";
-import { CheckIcon, ChevronDownIcon, ImageIcon } from "lucide-react";
+import { CheckIcon, ImageIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 /** Square cover thumbnail shared by sidebar rows, suggestions and bulk dialogs. */
@@ -90,22 +90,6 @@ export function ListingStatusLabel({ status, title }: { status: string; title?: 
     >
       {status.replace(/_/g, " ")}
     </span>
-  );
-}
-
-/** Collapsible group heading in the sidebar (Suggestions, Settled). */
-export function ShelfHeader({ label, expanded, onToggle }: { label: string; expanded: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      aria-expanded={expanded}
-      onClick={onToggle}
-      className="mt-1.5 mb-0.5 flex h-8 max-[900px]:h-11 max-[900px]:my-0 w-full shrink-0 cursor-pointer items-center gap-2 rounded-[var(--control-radius)] px-2 text-left text-xs font-medium text-sidebar-muted-foreground/70 outline-none hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-    >
-      <span className="shrink-0">{label}</span>
-      <span className="h-px min-w-2 flex-1 bg-sidebar-border" aria-hidden="true" />
-      <ChevronDownIcon className={cn("size-3 shrink-0 transition-transform", expanded && "rotate-180")} />
-    </button>
   );
 }
 

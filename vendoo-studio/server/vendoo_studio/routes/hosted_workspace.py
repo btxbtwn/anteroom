@@ -17,7 +17,7 @@ from vendoo_studio.database import json_value
 from vendoo_studio.models.conversation import Conversation, Message, Photo
 from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
 from vendoo_studio.models.listing import Listing, ListingRevision
-from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceListing
+from vendoo_studio.models.marketplace_listing import LIVE_STATES
 from vendoo_studio.services.validation import etsy_eligible, validate_listing
 from vendoo_studio.repositories import hosted_drafts
 from vendoo_studio.routes.hosted_direct_listing import ACTION_MARKETPLACES
@@ -56,7 +56,9 @@ def conversation_response(row, listing=None, direct=None, *, include_notes=True,
             'box_id': row.box_id, 'settled_at': row.settled_at, 'unsettled_at': row.unsettled_at,
             'created_at': row.created_at, 'updated_at': row.updated_at,
             'sku': (listing or {}).get('sku'), 'price': (listing or {}).get('price'),
-            'quantity': (listing or {}).get('quantity'), 'direct_marketplaces': direct or [],
+            'quantity': (listing or {}).get('quantity'),
+            'direct_marketplaces': [market for market, record in (direct or {}).items() if record['state'] in LIVE_STATES],
+            'direct_records': direct or {},
             'missing_sale_data': missing_sale_data or []}
     if include_notes:
         result['notes'] = row.notes
@@ -160,10 +162,9 @@ def inventory_response(db):
             & (ListingRevision.user_id == Listing.user_id))):
         current[identity] = {'sku': sku, 'price': float(price) if price is not None else None,
                              'quantity': int(quantity) if quantity is not None else None}
-    direct = {}
-    for identity, market in db.execute(select(MarketplaceListing.conversation_id, MarketplaceListing.marketplace)
-                                      .where(MarketplaceListing.state.in_(LIVE_STATES))):
-        direct.setdefault(identity, []).append(market)
+    from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+    direct = MarketplaceListingRepo(db).summaries()
     from vendoo_studio.services.sales_records import read_sale_lines, records_from_lines, missing_from_records
 
     sales = read_sale_lines(db)

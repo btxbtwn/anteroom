@@ -14,7 +14,7 @@ describe("open listing", () => {
     let state = initialOpenListing("a");
     state = openListingReducer(state, { type: "message", id: "a", value: "Fix price" });
     state = openListingReducer(state, { type: "open", id: "b" });
-    expect(state).toEqual({ id: "b", reviewTab: "input", nonce: 0, queuedMessage: null });
+    expect(state).toEqual({ id: "b", reviewTab: "input", editTab: "general", nonce: 0, queuedMessage: null });
   });
   it("ignores actions for a listing that is no longer open", () => {
     const state = openListingReducer(initialOpenListing("a"), { type: "open", id: "b" });
@@ -27,7 +27,25 @@ describe("open listing", () => {
   it("closes and clears the open listing", () => {
     let state = initialOpenListing("a");
     state = openListingReducer(state, { type: "review", id: "a", value: "forms" });
-    expect(openListingReducer(state, { type: "clear", id: "a" })).toMatchObject({ nonce: 1, reviewTab: "input" });
+    state = openListingReducer(state, { type: "tab", id: "a", value: "depop" });
+    expect(openListingReducer(state, { type: "clear", id: "a" })).toMatchObject({ nonce: 1, reviewTab: "input", editTab: "general" });
     expect(openListingReducer(state, { type: "close", id: "a" })).toBeNull();
+  });
+  it("opens a listing on a marketplace's tab", () => {
+    expect(openListingReducer(null, { type: "open", id: "a", tab: "poshmark" }))
+      .toMatchObject({ id: "a", reviewTab: "forms", editTab: "poshmark" });
+  });
+  it("moves an open listing to the tab asked for, keeping its chat", () => {
+    let state = initialOpenListing("a");
+    state = openListingReducer(state, { type: "message", id: "a", value: "Fix price" });
+    state = openListingReducer(state, { type: "open", id: "a", tab: "ebay" });
+    expect(state).toMatchObject({ reviewTab: "forms", editTab: "ebay", queuedMessage: "Fix price", nonce: 0 });
+    expect(openListingReducer(state, { type: "open", id: "a", tab: "general" })).toMatchObject({ reviewTab: "input", editTab: "general" });
+  });
+  it("switches tabs from the editor", () => {
+    let state = openListingReducer(initialOpenListing("a"), { type: "tab", id: "a", value: "mercari" });
+    expect(state).toMatchObject({ reviewTab: "forms", editTab: "mercari" });
+    state = openListingReducer(state, { type: "tab", id: "a", value: "general" });
+    expect(state).toMatchObject({ reviewTab: "input", editTab: "general" });
   });
 });
