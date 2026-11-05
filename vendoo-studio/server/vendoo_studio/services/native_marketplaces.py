@@ -535,6 +535,14 @@ def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:
             and _record(db, conv_id, marketplace).get("job_id") == job_id)
 
 
+def _for_chrome(snapshot: dict) -> dict:
+    """The listing as Chrome receives it. The marketplaces' saved form contracts stay on the
+    server: Chrome never reads them, and they can be megabytes, past what the Bridge accepts."""
+    from vendoo_studio.services.native_contract import KEY
+
+    return {key: value for key, value in snapshot.items() if key != KEY}
+
+
 def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, photos: list, warning: str) -> dict:
     extra: dict = {}
     if marketplace == "depop" and warning:
@@ -542,7 +550,7 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
     return {
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
-        "listing": snapshot, "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
+        "listing": _for_chrome(snapshot), "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
         **({"video": snapshot.get("_native_video")} if marketplace == "poshmark" else {}),
         "photos": [{"id": p.id, "mime_type": p.mime_type} for p in photos],
         **extra,
@@ -557,7 +565,7 @@ def _result_context(db: Session, conv_id: str, marketplace: str, record: dict, s
             "expected_photo_count": (len(snapshot["_approved_photos"]) if "_approved_photos" in snapshot
                                      else len(record["photo_ids"]) if record.get("photo_ids") is not None
                                      else len(_photos(db, conv_id, snapshot, marketplace)[0]) if first_save or marketplace == "poshmark" else None),
-            "listing": snapshot}
+            "listing": _for_chrome(snapshot)}
 
 
 async def _send_cancel(operation_id: str) -> None:
@@ -621,7 +629,7 @@ async def _wait_for_chrome(db: Session, job, conv_id: str, marketplace: str, rec
             _release(db)
             try:
                 reply = await _unless_cancelled(job.id, browser_bridge.request(
-                    job, "marketplace.result", {"operation_id": operation_id, "context": context}, timeout=65))
+                    job, "marketplace.result", {"marketplace": marketplace, "operation_id": operation_id, "context": context}, timeout=65))
                 if reply.get("finished") and isinstance(reply.get("result"), dict):
                     return reply["result"]
             except browser_bridge.BrowserBridgeError:
@@ -799,7 +807,7 @@ async def _read_result(db: Session, conv_id: str, marketplace: str, record: dict
         return await ebay_listings.check(record, snapshot, remember)
     try:
         reply = await browser_bridge.request(job, "marketplace.result", {
-            "operation_id": record.get("operation_id"),
+            "marketplace": marketplace, "operation_id": record.get("operation_id"),
             "context": _result_context(db, conv_id, marketplace, record, snapshot, candidate),
         }, timeout=65)
     except browser_bridge.BrowserBridgeError as exc:
