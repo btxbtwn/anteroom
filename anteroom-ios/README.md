@@ -8,7 +8,8 @@ password reset by email link, which reopens the app through `anteroom://`), draf
 draft's title, notes and General fields, and adding photos from the camera or
 library. The listing assistant connects native generation and text chat to the
 hosted durable-task API when the server advertises generation and has a provider.
-Marketplace tabs and publishing are not implemented on iPhone.
+List everywhere, and List, Update, Save draft and Delist per marketplace, work
+from a listing's actions menu; see "Listing and delisting" below.
 
 ## Interface
 
@@ -136,6 +137,37 @@ data. It does not replace the signed-in app or test API behavior. The sample
 photo illustrations are placeholders, not uploaded product photos. Review
 light/dark appearance and larger text sizes; live cover-photo loading, uploads
 and edits still need configured-account verification.
+
+## Listing and delisting
+
+Listing actions → List everywhere… lists on several marketplaces at once.
+Listing actions → Manage marketplaces… shows each marketplace the server can act
+on (`action_marketplaces` from `/api/runtime`), with the web's statuses: Listed
+with a link, Not listed, Listing… with its current step, Unconfirmed, Sold
+here, Delisting…, Ended or Deleted. Rules and wording come from the web's
+Marketplaces pane (`MarketplacesSection.tsx`), ported in
+`Sources/API/MarketplaceActionModels.swift`.
+
+- List… sends the saved revision with `confirm` after a confirmation that
+  names the marketplace. A sold item offers no List; a live one offers
+  Update and Delist instead.
+- Update… sends the saved revision to a live listing after a confirmation; it
+  is highlighted when the live listing is behind the saved version.
+- Save draft saves an unpublished draft on the marketplace wherever List is
+  offered. Buyers cannot see it, so it asks no confirmation, as on the web.
+- Delist… names each marketplace and what happens there (eBay ends the
+  listing, the others delete it) and sends `confirm`.
+- eBay and Etsy list through their APIs. Poshmark, Mercari and Depop go
+  through the seller's signed-in Anteroom tab in Chrome on their computer
+  (`services/hosted_browser_relay.py`); without it the server refuses and the
+  row shows why.
+- A running job is followed every 1.5 seconds until it ends; Cancel stops it.
+  An outcome Anteroom could not confirm offers Check result, never a retry.
+
+Nothing lists, updates or delists without the seller's tap and confirmation, and the
+phone never retries either. `Tests/MarketplaceActionsTests.swift` covers the
+rows and confirmations; the hosted sandbox refuses List, Update and Delist, which the
+sheet shows under the marketplace.
 
 ## Seller inputs and measurements
 
