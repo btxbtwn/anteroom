@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.735 — 2026-11-05
+
+- Starting a listing from the web no longer freezes Anteroom while it copies the photos, and the copies are made several at a time. Chrome also gets longer to finish a listing step before Anteroom stops waiting, so a slow Depop or Poshmark upload is no longer cancelled partway.
+
 ## 0.1.734 — 2026-11-05
 
 - The page buttons at the bottom of the sidebar now show their names when the sidebar is wide enough, and a tooltip names each one when it is narrow.
