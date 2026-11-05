@@ -67,6 +67,10 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
       const result = await send("marketplace_command", undefined, { command, photos });
       const reply = result.reply;
       if (result.ok && reply && typeof reply === "object" && !Array.isArray(reply)) return reply as Record<string, unknown>;
+      // The Bridge refused the command before running it: nothing reached the marketplace.
+      if (["invalid_input", "not_connected", "account_changed"].includes(String(result.error_code))) {
+        return { ok: false, safe_to_retry: true, error: "Chrome refused this action before starting it. Reload Anteroom and try again.", error_code: "rejected" };
+      }
       return { ok: false, error: "Chrome did not finish this action.", error_code: "uncertain" };
     },
     readPoshmarkForm: async (listing: Record<string, string | number | null>): Promise<MarketplaceForm> => {
