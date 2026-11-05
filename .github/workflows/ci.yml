@@ -14,19 +14,17 @@ permissions:
   contents: read
 
 jobs:
-  repo-checks:
-    name: Repo checks
+  changelog:
+    name: Changelog
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Include the tested merge's parents for the changelog comparison.
+          # Include the tested merge's parents for the PR comparison.
           fetch-depth: 0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - name: Version sync
-        run: python vendoo-studio/scripts/check-version-sync.py
       - name: Require a changelog entry for the version being shipped
         run: |
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
@@ -36,6 +34,17 @@ jobs:
           else
             python vendoo-studio/scripts/check-changelog.py
           fi
+
+  repo-checks:
+    name: Repo checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Version sync
+        run: python vendoo-studio/scripts/check-version-sync.py
       - name: Reject case-insensitive path and module collisions
         run: |
           python - <<'PY'
@@ -316,6 +325,7 @@ jobs:
     name: CI
     if: always()
     needs:
+      - changelog
       - repo-checks
       - studio-frontend
       - studio-browser
