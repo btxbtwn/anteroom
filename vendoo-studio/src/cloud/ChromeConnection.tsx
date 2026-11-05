@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cloudExtension, type BrowserAccount, type CloudConnection } from "../api/cloudExtension";
 import { Popover, PopoverPopup } from "../components/ui/popover";
 import { chromeNotice } from "./chromeNotice";
-import { startChromeRelay } from "./chromeRelay";
+import { relayAfterCheck, startChromeRelay } from "./chromeRelay";
 
 export function ChromeConnection({ account }: { account: BrowserAccount }) {
   const [bridge] = useState(() => cloudExtension(account));
@@ -11,29 +11,36 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
   const [expanded, setExpanded] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
+  // The capabilities the relay carries; empty while it is stopped.
+  const [relayed, setRelayed] = useState("");
+  const relay = useRef({ relayed: "", missed: 0 });
+  const apply = useCallback((status: CloudConnection) => {
+    setConnection(status);
+    relay.current = relayAfterCheck(status, relay.current.relayed, relay.current.missed);
+    setRelayed(relay.current.relayed);
+  }, []);
   useEffect(() => {
     let active = true;
-    const check = () => { void bridge.status().then(status => { if (active) setConnection(status); }); };
+    const check = () => { void bridge.status().then(status => { if (active) apply(status); }); };
     check();
     window.addEventListener("focus", check);
     return () => { active = false; window.removeEventListener("focus", check); };
-  }, [bridge]);
+  }, [bridge, apply]);
   useEffect(() => {
     let active = true;
-    const interval = window.setInterval(() => { void bridge.status().then(status => { if (active) setConnection(status); }); }, connection?.state === "pending" ? 1500 : 15000);
+    const interval = window.setInterval(() => { void bridge.status().then(status => { if (active) apply(status); }); }, connection?.state === "pending" ? 1500 : 15000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [bridge, connection?.state]);
+  }, [bridge, apply, connection?.state]);
   const connectedNow = connection?.ok === true && connection.state === "connected";
-  const capabilities = (connection?.supportedActions ?? []).join(",");
   // While this tab is connected, it carries the seller's approved marketplace commands and reads to Chrome.
-  useEffect(() => connectedNow ? startChromeRelay(bridge, capabilities.split(",")) : undefined, [bridge, connectedNow, capabilities]);
+  useEffect(() => relayed ? startChromeRelay(bridge, relayed.split(",")) : undefined, [bridge, relayed]);
   async function connect() {
     setBusy(true); setAttempted(true); setExpanded(true);
-    try { setConnection(await bridge.connect()); } finally { setBusy(false); }
+    try { apply(await bridge.connect()); } finally { setBusy(false); }
   }
   async function disconnect() {
     setBusy(true);
-    try { setConnection(await bridge.disconnect()); } finally { setBusy(false); }
+    try { apply(await bridge.disconnect()); } finally { setBusy(false); }
   }
   const pending = connection?.ok && connection.state === "pending";
   const notice = chromeNotice(connection, attempted);

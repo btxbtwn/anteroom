@@ -60,8 +60,9 @@ COMMANDS = {"job.vendoo_api": "vendoo.drafts", "marketplace.execute": MARKETPLAC
             "marketplace.promotion_result": MARKETPLACE_PROMOTIONS, "marketplace.like_events": MARKETPLACE_PROMOTIONS}
 # A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
 CONTRACT = ("type", "job_id", "message_id", "payload")
-# The page asks again as soon as it answers, and at least this often while idle.
-SEEN_FOR_S = 30.0
+# How long a tab stays connected after it last asked or beat. A background tab's
+# timers can run as rarely as once a minute in Chrome, so this outlasts that.
+SEEN_FOR_S = 90.0
 
 
 class BrowserRelay(ReplyWaits):

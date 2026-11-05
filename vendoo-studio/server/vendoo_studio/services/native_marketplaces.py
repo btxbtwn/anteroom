@@ -68,6 +68,16 @@ STEP_STATE = {"save_draft": "saving", "publish": "publishing", "list": "publishi
 STEP_LABEL = {"save_draft": "Saving the listing", "publish": "Publishing", "list": "Listing", "update": "Updating the live listing",
               "waiting": "Waiting for Chrome to confirm", "checking": "Checking the result"}
 PROGRESS_EVENT = "native_progress"
+# How often a waiting step looks for the seller's Cancel.
+CANCEL_POLL_S = 1.0
+
+
+def step_label(current_step: str) -> str | None:
+    """A direct job's step as the seller reads it, e.g. "Poshmark: Listing…"; None for other jobs."""
+    if not current_step.startswith("native_"):
+        return None
+    _, marketplace, step = (current_step.split("_", 2) + ["", ""])[:3]
+    return f"{NAMES.get(marketplace, marketplace)}: {STEP_LABEL.get(step, 'Working')}…"
 
 
 class EtsyPackage(BaseModel):
@@ -609,21 +619,63 @@ CHROME_SILENT = ("Chrome has not said whether this {name} action finished. Look 
                  "use Mark as listed; if not, choose “I checked it myself” and List again.")
 
 
+class _Cancelled(Exception):
+    pass
+
+
+class _JobRef:
+    """A job's id without its database row, for the calls made while the job waits on Chrome."""
+
+    def __init__(self, job_id: str):
+        self.id = job_id
+
+
+def _release(db: Session) -> None:
+    """End the job's transaction before it waits on Chrome, so the wait does not hold a pooled
+    connection. Each running marketplace would otherwise pin one for minutes, and a few at
+    once leave none for the seller's own page requests."""
+    db.commit()
+
+
+async def _unless_cancelled(job_id: str, awaitable):
+    """Await a Chrome call, giving up as soon as the seller presses Cancel."""
+    task = asyncio.ensure_future(awaitable)
+    while not task.done():
+        if job_id in _cancel_requested:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 - the call is abandoned
+                pass
+            raise _Cancelled
+        await asyncio.wait({task}, timeout=CANCEL_POLL_S)
+    return task.result()
+
+
 async def _wait_for_chrome(db: Session, job, conv_id: str, marketplace: str, record: dict, snapshot: dict) -> dict:
     """Chrome's reply was lost or late. Stop the action, then hold the slot until Chrome reports what it did."""
     operation_id = record["operation_id"]
+    # Only the id is used while waiting: reading the job row again would reopen a transaction.
+    job = _JobRef(job.id)
     await _send_cancel(operation_id)
     deadline = time.monotonic() + SETTLE_DEADLINE_S
     context = _result_context(db, conv_id, marketplace, record, snapshot, record.get("draft_url"))
-    while time.monotonic() < deadline:
-        _progress(db, job.id, marketplace, "waiting")
-        try:
-            reply = await browser_bridge.request(job, "marketplace.result", {"operation_id": operation_id, "context": context}, timeout=65)
-            if reply.get("finished") and isinstance(reply.get("result"), dict):
-                return reply["result"]
-        except browser_bridge.BrowserBridgeError:
-            pass
-        await asyncio.sleep(SETTLE_POLL_S)
+    try:
+        while time.monotonic() < deadline:
+            _progress(db, job.id, marketplace, "waiting")
+            _release(db)
+            try:
+                reply = await _unless_cancelled(job.id, browser_bridge.request(
+                    job, "marketplace.result", {"operation_id": operation_id, "context": context}, timeout=65))
+                if reply.get("finished") and isinstance(reply.get("result"), dict):
+                    return reply["result"]
+            except browser_bridge.BrowserBridgeError:
+                pass
+            _release(db)
+            await _unless_cancelled(job.id, asyncio.sleep(SETTLE_POLL_S))
+    except _Cancelled:
+        # The seller stopped waiting. Chrome may still have finished, so the result stays uncertain.
+        pass
     return failure(CHROME_SILENT.format(name=NAMES[marketplace]), "uncertain", safe=False)
 
 
@@ -660,11 +712,13 @@ async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: 
             if checked is not None:
                 stored = _apply_result(db, conv_id, marketplace, job.id, step, checked)
         return stored
+    payload = _execute_payload(marketplace, step, binding, snapshot, photos, warning)
+    job = _JobRef(job.id)
+    _release(db)
     try:
-        result = await browser_bridge.request(job, "marketplace.execute",
-                                              _execute_payload(marketplace, step, binding, snapshot, photos, warning),
-                                              timeout=EXECUTE_TIMEOUT_S)
-    except browser_bridge.BrowserBridgeError:
+        result = await _unless_cancelled(job.id, browser_bridge.request(
+            job, "marketplace.execute", payload, timeout=EXECUTE_TIMEOUT_S))
+    except (browser_bridge.BrowserBridgeError, _Cancelled):
         result = await _wait_for_chrome(db, job, conv_id, marketplace, binding, snapshot)
     return _apply_result(db, conv_id, marketplace, job.id, step, result)
 
