@@ -82,6 +82,10 @@ jobs:
         run: |
           xcrun swiftc Sources/Session/SignInMessages.swift Tests/SignInMessagesTests.swift -o "$RUNNER_TEMP/sign-in-tests"
           "$RUNNER_TEMP/sign-in-tests"
+      - name: Test marketplace readiness and List everywhere choices
+        run: |
+          xcrun swiftc Sources/API/MarketplaceReadiness.swift Tests/MarketplaceReadinessTests.swift -o "$RUNNER_TEMP/readiness-tests"
+          "$RUNNER_TEMP/readiness-tests"
       - name: Build
         run: |
           set -o pipefail
