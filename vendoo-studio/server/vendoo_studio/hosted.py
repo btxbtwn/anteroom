@@ -229,6 +229,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(internal_router)
     from vendoo_studio.routes.hosted_workspace import router as workspace_router
     app.include_router(workspace_router)
+    from vendoo_studio.routes.vendoo_drafts import router as vendoo_drafts_router
+    app.include_router(vendoo_drafts_router)
     from vendoo_studio.routes.hosted_photos import router as photo_router
     app.include_router(photo_router)
     from vendoo_studio.routes.hosted_settings import router as settings_router, keys_router

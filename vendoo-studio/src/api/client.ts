@@ -1,4 +1,5 @@
 import { listingScreenRead } from "./listingScreen";
+import type { VendooDraft } from "./vendooDraft";
 import { studioFetch, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -199,6 +200,11 @@ async function followAssistant(
 }
 
 export const api = {
+  vendooDraft: {
+    check: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft/check`, { method: "POST" }),
+    status: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft`),
+    send: (id: string, revisionId: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft`, { method: "POST", body: JSON.stringify({ revision_id: revisionId }) }),
+  },
   marketplaceMedia: {
     rules: () => request<MarketplaceMediaRules>("/marketplace-media"),
   },
@@ -1089,6 +1095,7 @@ export const api = {
         settled_shelf_expanded: boolean;
         hidden_vendoo_labels: string[];
         theme: "dark" | "light" | "system";
+        listing_mode: "direct" | "vendoo";
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
         stale_listing_days: number;
@@ -1098,6 +1105,7 @@ export const api = {
       recent_vendoo_labels?: string[];
       settled_shelf_expanded?: boolean;
       theme?: "dark" | "light" | "system";
+      listing_mode?: "direct" | "vendoo";
       listing_names?: ListingNames;
       remember_labels?: string | string[];
       restore_labels?: string[];
@@ -1112,6 +1120,7 @@ export const api = {
         settled_shelf_expanded: boolean;
         hidden_vendoo_labels: string[];
         theme: "dark" | "light" | "system";
+        listing_mode: "direct" | "vendoo";
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
         stale_listing_days: number;

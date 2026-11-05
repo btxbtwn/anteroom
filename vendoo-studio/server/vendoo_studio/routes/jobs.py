@@ -279,11 +279,13 @@ def serve_job_photo(job_id: str, photo_id: str, db: Session = Depends(get_db)):
         photo = next((row for row in job.listing_snapshot[approved_photos.KEY] if row["id"] == photo_id), None)
         if photo is None:
             raise HTTPException(404, "Photo not approved for this job")
+        filename, mime_type = photo["stored_filename"], photo["mime_type"]
+        db.commit()
         try:
-            filepath = photo_store().local_path(photo["stored_filename"])
+            filepath = photo_store().local_path(filename)
         except FileNotFoundError:
             raise HTTPException(404, "Approved photo file not found") from None
-        return FileResponse(str(filepath), media_type=photo["mime_type"])
+        return FileResponse(str(filepath), media_type=mime_type)
 
     photo = db.query(Photo).filter(
         Photo.id == photo_id,
@@ -292,9 +294,11 @@ def serve_job_photo(job_id: str, photo_id: str, db: Session = Depends(get_db)):
     if not photo:
         raise HTTPException(404, "Photo not found for this job")
 
+    filename, mime_type = photo.stored_filename, photo.mime_type
+    db.commit()
     try:
-        filepath = photo_store().local_path(photo.stored_filename)
+        filepath = photo_store().local_path(filename)
     except FileNotFoundError:
         raise HTTPException(404, "Photo file not found") from None
 
-    return FileResponse(str(filepath), media_type=photo.mime_type)
+    return FileResponse(str(filepath), media_type=mime_type)

@@ -339,6 +339,9 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
     """Delete the named listings. Runs as a job holding the automation slot, so no Send starts into Chrome meanwhile."""
     from vendoo_studio.services.extension_connection import current_extension
 
+    from vendoo_studio.services import listing_mode
+
+    listing_mode.require("direct", db)
     names = list(dict.fromkeys(str(m).strip().lower() for m in marketplaces if str(m or "").strip()))
     if confirm is not True:
         raise DelistError(400, "Confirm the delist before anything is deleted.")
@@ -355,7 +358,7 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         raise DelistError(409, "Connect Chrome first.")
     repo = JobRepo(db)
     listing = ListingRepo(db).get_current(conv_id)
-    with start_gate():
+    with listing_mode.guard(db, "direct"):
         if repo.get_active():
             raise DelistError(409, "Another automation job is queued or running. Wait for it to finish.")
         job = repo.create(conv_id, listing.current_revision_id if listing else "", {"delist": names},

@@ -52,7 +52,8 @@ async function runCloudMarketplaceCommand(command, photos) {
   let result = null;
   const reply = value => { result = value; };
   try {
-    if (command.type === 'marketplace.delete') await handleMarketplaceDelete(command, reply);
+    if (command.type === 'job.vendoo_api') await handleVendooApiMessage(command, reply);
+    else if (command.type === 'marketplace.delete') await handleMarketplaceDelete(command, reply);
     else await handleNativeMarketplaceMessage(command, reply);
   } finally {
     relayedPhotos.delete(jobId);

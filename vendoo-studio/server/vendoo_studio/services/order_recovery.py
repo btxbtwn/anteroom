@@ -72,7 +72,8 @@ def _quantity(value) -> int | None:
 
 
 def _etsy_lines(receipt: dict) -> list[OrderLine]:
-    status = receipt.get("status")
+    # Etsy sends title-case statuses ("Paid", "Fully Refunded").
+    status = str(receipt.get("status") or "").lower()
     states = {"canceled": "cancelled", "fully refunded": "refunded", "partially refunded": "partially_refunded"}
     if status in states:
         state = states[status]

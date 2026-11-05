@@ -3,17 +3,29 @@ import asyncio
 import threading
 import time
 from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
 
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
-from vendoo_studio.services import browser_bridge, hosted_browser_relay
+from vendoo_studio.services import browser_bridge, hosted_browser_relay, listing_mode
 from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, current_extension, extension_manager
 from vendoo_studio.services.hosted_context import for_seller
 from vendoo_studio.services.service_context import use
 
 
-def test_relay_is_per_seller_and_refuses_other_commands():
+@pytest.fixture
+def direct_mode(monkeypatch):
+    # Transport-only tests have no Postgres fixture. Mode persistence and
+    # ownership are exercised through the real hosted routes in test_hosted_vendoo_mode.
+    check = Mock()
+    monkeypatch.setattr(listing_mode, 'require', check)
+    return check
+
+
+def test_relay_is_per_seller_and_refuses_other_commands(direct_mode):
     hosted_browser_relay._relays.clear()
 
     async def scenario():
@@ -39,6 +51,7 @@ def test_relay_is_per_seller_and_refuses_other_commands():
         assert await request == {'ok': True, 'state': 'draft'}
 
     asyncio.run(scenario())
+    direct_mode.assert_called_once_with('direct')
 
 
 def test_heartbeat_keeps_a_busy_reader_connected_and_expires_after_tab_loss(monkeypatch):
@@ -112,7 +125,7 @@ def _bridge_accepts(command: dict) -> bool:
     return json.loads(subprocess.run(['node', '-e', script], check=True, capture_output=True, text=True).stdout)
 
 
-def test_relayed_commands_are_ones_the_bridge_accepts():
+def test_relayed_commands_are_ones_the_bridge_accepts(direct_mode):
     from vendoo_studio.services import native_marketplaces
 
     hosted_browser_relay._relays.clear()
@@ -136,6 +149,7 @@ def test_relayed_commands_are_ones_the_bridge_accepts():
     assert _bridge_accepts(execute)
     assert cancel['type'] == 'job.cancel' and cancel['payload']['job_id'] == 'op-1'
     assert _bridge_accepts(cancel)
+    direct_mode.assert_called_once_with('direct')
 
 
 def test_sales_history_uses_only_the_connected_sellers_capable_bridge():

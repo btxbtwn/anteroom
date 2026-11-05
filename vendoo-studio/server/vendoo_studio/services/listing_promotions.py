@@ -26,8 +26,8 @@ from vendoo_studio.models.conversation import Conversation, new_id
 from vendoo_studio.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
 from vendoo_studio.models.promotion_automation import PromotionAutomation
 from vendoo_studio.repositories.queries import JobRepo, ListingRepo
-from vendoo_studio.services import browser_bridge
-from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job, start_gate
+from vendoo_studio.services import browser_bridge, listing_mode
+from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_result import scrub
 
@@ -337,7 +337,7 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
     require_chrome()
     repo = JobRepo(db)
     listing = ListingRepo(db).get_current(conv.id)
-    with start_gate():
+    with listing_mode.guard(db, "direct"):
         if repo.get_active():
             raise PromotionError(409, "Another automation job is queued or running. Wait for it to finish.", "busy")
         job = repo.create(conv.id, listing.current_revision_id if listing else "",

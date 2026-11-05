@@ -26,6 +26,10 @@ def _manager():
 
 
 async def request(job, message_type: str, payload: dict[str, Any] | None = None, *, timeout: float = READ_TIMEOUT_SEC) -> dict:
+    if message_type in {"job.vendoo_api", "marketplace.execute", "marketplace.delete", "marketplace.promote"}:
+        from vendoo_studio.services import listing_mode
+
+        listing_mode.require("vendoo" if message_type == "job.vendoo_api" else "direct")
     manager = _manager()
     if not manager.connected:
         raise BrowserBridgeError("Connect Chrome first.")

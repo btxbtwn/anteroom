@@ -291,6 +291,9 @@ async def etsy_api(method: str, path: str, **kwargs: Any):
     A 401 from Etsy means the call was refused before it ran, so it is sent once
     more with a refreshed token.
     """
+    if method.upper() not in {"GET", "HEAD"}:
+        from vendoo_studio.services.listing_mode import require
+        require("direct")
     async def send(token: str):
         for upload in (kwargs.get("files") or {}).values():
             handle = upload[1] if isinstance(upload, tuple) else None

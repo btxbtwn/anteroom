@@ -811,6 +811,7 @@ def get_ui_prefs() -> dict:
         THEME_KEY: normalize_theme(ui.get(THEME_KEY)),
         # The sidebar names each listing by its title, or by its SKU where it has one.
         LISTING_NAMES_KEY: names if names in LISTING_NAME_CHOICES else "title",
+        "listing_mode": "vendoo" if ui.get("listing_mode") == "vendoo" else "direct",
         MODEL_FAVORITES_KEY: _clean_model_favorites(ui.get(MODEL_FAVORITES_KEY)),
         STALE_DAYS_KEY: _clean_stale_days(ui.get(STALE_DAYS_KEY)),
         LABEL_COLORS_KEY: _clean_label_colors(ui.get(LABEL_COLORS_KEY)),
@@ -826,6 +827,7 @@ def set_ui_prefs(
     model_favorites: object | None = None,
     stale_listing_days: object | None = None,
     label_colors: object | None = None,
+    listing_mode: object | None = None,
 ) -> dict:
     if (
         recent_vendoo_labels is None
@@ -835,6 +837,7 @@ def set_ui_prefs(
         and model_favorites is None
         and stale_listing_days is None
         and label_colors is None
+        and listing_mode is None
     ):
         return get_ui_prefs()
     favorites = _clean_model_favorites(model_favorites, strict=True) if model_favorites is not None else None
@@ -844,6 +847,10 @@ def set_ui_prefs(
 
     def mutator(payload: dict) -> None:
         ui = dict(_ui_prefs(payload))
+        if listing_mode is not None:
+            if listing_mode not in {"direct", "vendoo"}:
+                raise ValueError("listing_mode must be direct or vendoo")
+            ui["listing_mode"] = listing_mode
         if recent_vendoo_labels is not None:
             ui[RECENT_LABELS_KEY] = _clean_recent_labels(recent_vendoo_labels)
         if settled_shelf_expanded is not None:
