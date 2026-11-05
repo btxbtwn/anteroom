@@ -306,31 +306,37 @@ private struct StatusTabs: View {
     @Binding var selection: StatusTab
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(tabs) { tab in
-                    let count = counts[tab] ?? 0
-                    Button {
-                        selection = tab
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(tab.label).fontWeight(.medium)
-                            Text(InventoryQuery.compactCount(count)).foregroundStyle(.secondary).monospacedDigit()
-                        }
-                        .font(.subheadline)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 36)
-                        .background(selection == tab ? WorkspaceStyle.surface : .clear, in: Capsule())
-                        .overlay(Capsule().stroke(selection == tab ? WorkspaceStyle.border : .clear, lineWidth: 1))
+        // The web's status tabs (ListingFilters.tsx): one bordered track
+        // with the selected tab raised inside it.
+        HStack(spacing: 2) {
+            ForEach(tabs) { tab in
+                let count = counts[tab] ?? 0
+                let isSelected = selection == tab
+                Button {
+                    selection = tab
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(tab.label).lineLimit(1)
+                        Text(InventoryQuery.compactCount(count)).foregroundStyle(WorkspaceStyle.mutedText).monospacedDigit()
                     }
-                    .buttonStyle(.plain)
-                    .frame(minHeight: 44)
-                    .accessibilityLabel("\(tab.label), \(count) listings")
-                    .accessibilityAddTraits(selection == tab ? .isSelected : [])
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(isSelected ? Color.primary : WorkspaceStyle.mutedText)
+                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .background(isSelected ? WorkspaceStyle.selected : .clear,
+                                in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius - 2, style: .continuous))
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .frame(minHeight: 44)
+                .accessibilityLabel("\(tab.label), \(count) listings")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
-            .padding(.horizontal, 16)
         }
+        .padding(2)
+        .background(WorkspaceStyle.groupedBackground, in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius, style: .continuous).stroke(WorkspaceStyle.border, lineWidth: 1))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
         .background(WorkspaceStyle.sidebar)
     }
 }
@@ -405,10 +411,10 @@ struct ListingRowContent<Thumbnail: View>: View {
                 if listing.status == "sold", let missing = listing.missingSaleData, !missing.isEmpty {
                     Text("Missing sale data")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(WorkspaceStyle.warning)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(.orange.opacity(0.12), in: Capsule())
+                        .background(WorkspaceStyle.warning.opacity(0.14), in: Capsule())
                         .accessibilityLabel("Missing sale data: \(missing.joined(separator: ", "))")
                 }
                 let badges = listing.marketplaceBadges
@@ -422,15 +428,15 @@ struct ListingRowContent<Thumbnail: View>: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// The web's status tones (ListingBits.tsx): a draft stays muted.
     private var statusColor: Color {
         switch listing.inventoryStatus {
-        case "draft": .orange
-        case "in_progress": .teal
-        case "listing": .purple
-        case "active": .green
+        case "draft": WorkspaceStyle.mutedText
+        case "in_progress", "listing": WorkspaceStyle.info
+        case "active": WorkspaceStyle.success
         case "sold": WorkspaceStyle.accent
-        case "failed": .red
-        default: .secondary
+        case "failed": WorkspaceStyle.destructive
+        default: WorkspaceStyle.mutedText
         }
     }
 }

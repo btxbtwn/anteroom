@@ -25,10 +25,10 @@ const FOOTER_PADDING_PX = 8;
 const SIDEBAR_BORDER_PX = 1;
 
 /**
- * The footer buttons in seller-workflow order: home first, then the day's work
- * (sourcing), marketplace tools, then insight (analytics),
- * then settings and the updater last, the way T3 Code ends its sidebar footer
- * with settings. The listings above are the inventory; Vendoo sync lives in
+ * The footer pages in seller-workflow order: home first, then the day's work
+ * (sourcing), marketplace tools, then insight (analytics), then settings, the
+ * way T3 Code ends its sidebar footer with settings. The updater sits after
+ * them. The listings above are the inventory; Vendoo sync lives in
  * Settings → Data and on Analytics.
  */
 export const SIDEBAR_FOOTER_BUTTONS = [
@@ -38,32 +38,34 @@ export const SIDEBAR_FOOTER_BUTTONS = [
   "marketplaces",
   "automations",
   "settings",
-  "update",
 ] as const;
 
 type FooterButtonId = (typeof SIDEBAR_FOOTER_BUTTONS)[number];
 
-/** The narrowest sidebar that shows every footer button on one row. */
+/** The narrowest sidebar that shows every page button and the updater on one row. */
 export const SIDEBAR_FOOTER_WIDTH =
-  SIDEBAR_FOOTER_BUTTONS.length * FOOTER_BUTTON_PX +
-  (SIDEBAR_FOOTER_BUTTONS.length - 1) * FOOTER_GAP_PX +
+  (SIDEBAR_FOOTER_BUTTONS.length + 1) * FOOTER_BUTTON_PX +
+  SIDEBAR_FOOTER_BUTTONS.length * FOOTER_GAP_PX +
   2 * FOOTER_PADDING_PX +
   SIDEBAR_BORDER_PX;
 
+/**
+ * Icon-only on a narrow sidebar, icon and name once the sidebar has room
+ * (the footer is a size container; see LABELED below), the way Linear keeps
+ * its page links named. The tooltip carries the name either way.
+ */
 function FooterButton({
   label,
   page,
   icon: Icon,
   active,
   onClick,
-  children,
 }: {
   label: string;
   page?: keyof typeof pageLoaders;
   icon: ComponentType<{ className?: string }>;
   active?: boolean;
   onClick: () => void;
-  children?: ReactNode;
 }) {
   const runtime = useWorkspaceRuntime();
   const disabled = Boolean(page && !runtime.views.has(page));
@@ -76,9 +78,9 @@ function FooterButton({
         render={
           <button
             type="button"
-            className={SIDEBAR_ICON_BUTTON}
+            className={cn(SIDEBAR_ICON_BUTTON, LABELED_BUTTON)}
             aria-label={label}
-            aria-pressed={active === undefined ? undefined : active}
+            aria-current={active ? "page" : undefined}
             data-active={active}
             onClick={onClick}
             disabled={disabled}
@@ -87,12 +89,19 @@ function FooterButton({
         }
       >
         <Icon />
-        {children}
+        <span className="hidden truncate @min-[18rem]/footer:inline">{label}</span>
       </TooltipTrigger>
       <TooltipPopup side="top">{label}</TooltipPopup>
     </Tooltip>
   );
 }
+
+/**
+ * From 18rem (the default sidebar is wider) the six pages sit in two named
+ * columns; below that they collapse to a row of icons.
+ */
+const LABELED_BUTTON =
+  "@min-[18rem]/footer:w-full @min-[18rem]/footer:justify-start @min-[18rem]/footer:gap-2 @min-[18rem]/footer:px-2 @min-[18rem]/footer:text-xs @min-[18rem]/footer:font-medium";
 
 /** The page buttons along the bottom of the sidebar, or Back while in settings. */
 export function SidebarFooter({
@@ -128,24 +137,26 @@ export function SidebarFooter({
     marketplaces: <FooterButton page="marketplaces" label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} onClick={onOpenMarketplaces} />,
     automations: <FooterButton page="automations" label="Automations" icon={CalendarClockIcon} active={activeView === "automations"} onClick={onOpenAutomations} />,
     settings: <FooterButton page="settings" label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
-    update: runtime.hosted ? null : <UpdateButton />,
   };
 
   return (
-    <div className="flex shrink-0 items-center p-(--sidebar-content-inset) max-[900px]:hidden">
-      <div className="flex w-full flex-wrap items-center gap-0.5">
-        {settingsMode ? (
-          <>
-            <button type="button" className={cn(SIDEBAR_ROW, "w-auto text-xs")} aria-label="Back" onClick={onCloseSettings}>
-              <ArrowLeftIcon />
-              <span>Back</span>
-            </button>
-            {!runtime.hosted && <UpdateButton />}
-          </>
-        ) : (
-          SIDEBAR_FOOTER_BUTTONS.map((id) => <Fragment key={id}>{buttons[id]}</Fragment>)
-        )}
-      </div>
+    <div className="@container/footer flex shrink-0 items-center p-(--sidebar-content-inset) max-[900px]:hidden">
+      {settingsMode ? (
+        <div className="flex w-full items-center gap-0.5">
+          <button type="button" className={cn(SIDEBAR_ROW, "w-auto text-xs")} aria-label="Back" onClick={onCloseSettings}>
+            <ArrowLeftIcon />
+            <span>Back</span>
+          </button>
+          {!runtime.hosted && <UpdateButton />}
+        </div>
+      ) : (
+        <div className="flex w-full items-end gap-0.5">
+          <nav aria-label="Pages" className="flex min-w-0 flex-1 items-center gap-0.5 @min-[18rem]/footer:grid @min-[18rem]/footer:grid-cols-2">
+            {SIDEBAR_FOOTER_BUTTONS.map((id) => <Fragment key={id}>{buttons[id]}</Fragment>)}
+          </nav>
+          {runtime.hosted ? null : <UpdateButton />}
+        </div>
+      )}
     </div>
   );
 }

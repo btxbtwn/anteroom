@@ -18,58 +18,62 @@ struct AutomationsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Text("Manage automatic offers, sharing, draft preparation and price edits. Listing, delisting and relisting wait for your review of each item and named marketplace.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                Section {
-                    if approvals.isEmpty {
-                        Text("Nothing is waiting for approval.").foregroundStyle(.secondary)
+                Group {
+                    Section {
+                        Text("Manage automatic offers, sharing, draft preparation and price edits. Listing, delisting and relisting wait for your review of each item and named marketplace.")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
-                    ForEach(approvals) { row in
-                        VStack(alignment: .leading, spacing: 4) {
-                            NavigationLink(value: ListingSummary(id: row.conversationID, title: row.title)) {
-                                Text(row.title ?? row.conversationID)
-                            }
-                            Text(([row.action == "publish" ? "list" : row.action, row.state] + row.marketplaces.map(Marketplaces.name))
-                                .joined(separator: " · "))
-                                .font(.caption).foregroundStyle(.secondary)
-                            if !canApprove {
-                                Text("Marketplace actions are not available on iPhone yet. This approval stays waiting.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
+                    Section {
+                        if approvals.isEmpty {
+                            Text("Nothing is waiting for approval.").foregroundStyle(.secondary)
                         }
-                    }
-                } header: {
-                    Text("Waiting for approval")
-                } footer: {
-                    Text("Review each item, action and marketplace before approving one attempt. Scheduling never publishes or delists on its own.")
-                }
-                if !gaps.isEmpty {
-                    Section("Down, needs relist") {
-                        ForEach(gaps) { gap in
-                            NavigationLink(value: ListingSummary(id: gap.conversationID, title: gap.title)) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(gap.title ?? gap.conversationID)
-                                    Text(([Marketplaces.name(gap.marketplace), gap.state] + (gap.error.map { [$0] } ?? [])).joined(separator: " · "))
+                        ForEach(approvals) { row in
+                            VStack(alignment: .leading, spacing: 4) {
+                                NavigationLink(value: ListingSummary(id: row.conversationID, title: row.title)) {
+                                    Text(row.title ?? row.conversationID)
+                                }
+                                Text(([row.action == "publish" ? "list" : row.action, row.state] + row.marketplaces.map(Marketplaces.name))
+                                    .joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                if !canApprove {
+                                    Text("Marketplace actions are not available on iPhone yet. This approval stays waiting.")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                         }
+                    } header: {
+                        Text("Waiting for approval")
+                    } footer: {
+                        Text("Review each item, action and marketplace before approving one attempt. Scheduling never publishes or delists on its own.")
+                    }
+                    if !gaps.isEmpty {
+                        Section("Down, needs relist") {
+                            ForEach(gaps) { gap in
+                                NavigationLink(value: ListingSummary(id: gap.conversationID, title: gap.title)) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(gap.title ?? gap.conversationID)
+                                        Text(([Marketplaces.name(gap.marketplace), gap.state] + (gap.error.map { [$0] } ?? [])).joined(separator: " · "))
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Section("Automations") {
+                        if let automations {
+                            if automations.isEmpty { Text("No automations yet.").foregroundStyle(.secondary) }
+                            ForEach(automations) { task in row(task) }
+                        } else if error == nil {
+                            ProgressView("Reading automations…")
+                        }
+                    }
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
                     }
                 }
-                Section("Automations") {
-                    if let automations {
-                        if automations.isEmpty { Text("No automations yet.").foregroundStyle(.secondary) }
-                        ForEach(automations) { task in row(task) }
-                    } else if error == nil {
-                        ProgressView("Reading automations…")
-                    }
-                }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("Automations")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -208,25 +212,29 @@ private struct AutomationHistoryView: View {
     var body: some View {
         NavigationStack {
             List {
-                if runs.isEmpty { Text("No runs yet.").foregroundStyle(.secondary) }
-                ForEach(runs) { run in
-                    Section {
-                        ForEach(Array(run.items.enumerated()), id: \.offset) { _, item in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title ?? item.conversationID)
-                                let detail = [item.state ?? (item.ok ? nil : (item.error ?? "failed")),
-                                              item.down.flatMap { $0.isEmpty ? nil : $0.joined(separator: ", ") },
-                                              item.nextPrice.map { "\(AutomationFormat.money(item.price)) → \(AutomationFormat.money($0))" }]
-                                    .compactMap { $0 }.joined(separator: " · ")
-                                if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(item.ok ? .secondary : Color.red) }
+                Group {
+                    if runs.isEmpty { Text("No runs yet.").foregroundStyle(.secondary) }
+                    ForEach(runs) { run in
+                        Section {
+                            ForEach(Array(run.items.enumerated()), id: \.offset) { _, item in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title ?? item.conversationID)
+                                    let detail = [item.state ?? (item.ok ? nil : (item.error ?? "failed")),
+                                                  item.down.flatMap { $0.isEmpty ? nil : $0.joined(separator: ", ") },
+                                                  item.nextPrice.map { "\(AutomationFormat.money(item.price)) → \(AutomationFormat.money($0))" }]
+                                        .compactMap { $0 }.joined(separator: " · ")
+                                    if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(item.ok ? .secondary : Color.red) }
+                                }
                             }
+                        } header: {
+                            Text(([run.startedAt ?? run.scheduledFor ?? "", run.origin, run.status] + (run.dryRun ? ["dry run"] : [])
+                                  + (run.error.map { [$0] } ?? [])).filter { !$0.isEmpty }.joined(separator: " · "))
                         }
-                    } header: {
-                        Text(([run.startedAt ?? run.scheduledFor ?? "", run.origin, run.status] + (run.dryRun ? ["dry run"] : [])
-                              + (run.error.map { [$0] } ?? [])).filter { !$0.isEmpty }.joined(separator: " · "))
                     }
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle(automation.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -253,97 +261,101 @@ private struct AutomationEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField("When an item reaches 60 days listed on eBay and Poshmark, delist and relist it and drop the price by 10%. Don't go below $15.",
-                              text: $form.prompt, axis: .vertical)
-                        .lineLimit(3...8)
-                    Button(working == "draft" ? "Reading…" : "Draft from prompt") { draftFromPrompt() }
-                        .disabled(form.prompt.trimmingCharacters(in: .whitespaces).isEmpty || working != nil)
-                } header: {
-                    Text("Describe it")
-                }
-                Section("Schedule") {
-                    TextField("Name", text: $form.name)
-                    LabeledContent("Timezone") { TextField("UTC", text: $form.timezone).multilineTextAlignment(.trailing) }
-                    Picker("When", selection: Binding(get: { form.kind }, set: { kind in
-                        form.kind = kind
-                        form.priceRepeat = kind == "once" ? "once" : "step"
-                    })) {
-                        Text("One time").tag("once")
-                        Text("Every day").tag("daily")
-                        Text("Every week").tag("weekly")
+                Group {
+                    Section {
+                        TextField("When an item reaches 60 days listed on eBay and Poshmark, delist and relist it and drop the price by 10%. Don't go below $15.",
+                                  text: $form.prompt, axis: .vertical)
+                            .lineLimit(3...8)
+                        Button(working == "draft" ? "Reading…" : "Draft from prompt") { draftFromPrompt() }
+                            .disabled(form.prompt.trimmingCharacters(in: .whitespaces).isEmpty || working != nil)
+                    } header: {
+                        Text("Describe it")
                     }
-                    if form.kind == "once" {
-                        DatePicker("Date and time", selection: $onceDate)
-                    } else {
-                        DatePicker("Time", selection: $dailyTime, displayedComponents: .hourAndMinute)
-                    }
-                    if form.kind == "weekly" {
-                        HStack(spacing: 4) {
-                            ForEach(AutomationForm.weekdays.indices, id: \.self) { index in
-                                let on = form.weekdays.contains(index)
-                                Button(AutomationForm.weekdays[index]) {
-                                    if on { form.weekdays.removeAll { $0 == index } } else { form.weekdays = (form.weekdays + [index]).sorted() }
+                    Section("Schedule") {
+                        TextField("Name", text: $form.name)
+                        LabeledContent("Timezone") { TextField("UTC", text: $form.timezone).multilineTextAlignment(.trailing) }
+                        Picker("When", selection: Binding(get: { form.kind }, set: { kind in
+                            form.kind = kind
+                            form.priceRepeat = kind == "once" ? "once" : "step"
+                        })) {
+                            Text("One time").tag("once")
+                            Text("Every day").tag("daily")
+                            Text("Every week").tag("weekly")
+                        }
+                        if form.kind == "once" {
+                            DatePicker("Date and time", selection: $onceDate)
+                        } else {
+                            DatePicker("Time", selection: $dailyTime, displayedComponents: .hourAndMinute)
+                        }
+                        if form.kind == "weekly" {
+                            HStack(spacing: 4) {
+                                ForEach(AutomationForm.weekdays.indices, id: \.self) { index in
+                                    let on = form.weekdays.contains(index)
+                                    Button(AutomationForm.weekdays[index]) {
+                                        if on { form.weekdays.removeAll { $0 == index } } else { form.weekdays = (form.weekdays + [index]).sorted() }
+                                    }
+                                    .font(.caption)
+                                    .buttonStyle(.bordered)
+                                    .tint(on ? WorkspaceStyle.accent : .secondary)
+                                    .accessibilityAddTraits(on ? .isSelected : [])
                                 }
-                                .font(.caption)
-                                .buttonStyle(.bordered)
-                                .tint(on ? WorkspaceStyle.accent : .secondary)
-                                .accessibilityAddTraits(on ? .isSelected : [])
                             }
                         }
                     }
-                }
-                Section("Which items") {
-                    TextField("Department (men)", text: $form.department)
-                    TextField("Category (t-shirt)", text: $form.category)
-                    TextField("Brand", text: $form.brand)
-                    TextField("Listed at least (days)", text: $form.minAge).keyboardType(.numberPad)
-                    TextField("Status (active)", text: $form.status)
-                    TextField("Item ids (optional)", text: $form.itemIDs)
-                }
-                Section("What it does") {
-                    Toggle("Regenerate", isOn: $form.regenerate)
-                    Toggle("Delist", isOn: $form.delist)
-                    Toggle("Relist", isOn: $form.relist)
-                    Toggle("Drop the price", isOn: $form.priceOn)
-                    if form.priceOn {
-                        Picker("Drop by", selection: $form.priceMode) {
-                            Text("Percent of the original price").tag("percent")
-                            Text("Dollars off the original price").tag("amount")
-                        }
-                        TextField(form.priceMode == "amount" ? "Amount ($)" : "Percent", text: $form.priceValue).keyboardType(.decimalPad)
-                        TextField("Floor ($)", text: $form.floor).keyboardType(.decimalPad)
-                        Picker("How often", selection: $form.priceRepeat) {
-                            Text("Each cycle, off the original price").tag("step")
-                            Text("One-time drop").tag("once")
+                    Section("Which items") {
+                        TextField("Department (men)", text: $form.department)
+                        TextField("Category (t-shirt)", text: $form.category)
+                        TextField("Brand", text: $form.brand)
+                        TextField("Listed at least (days)", text: $form.minAge).keyboardType(.numberPad)
+                        TextField("Status (active)", text: $form.status)
+                        TextField("Item ids (optional)", text: $form.itemIDs)
+                    }
+                    Section("What it does") {
+                        Toggle("Regenerate", isOn: $form.regenerate)
+                        Toggle("Delist", isOn: $form.delist)
+                        Toggle("Relist", isOn: $form.relist)
+                        Toggle("Drop the price", isOn: $form.priceOn)
+                        if form.priceOn {
+                            Picker("Drop by", selection: $form.priceMode) {
+                                Text("Percent of the original price").tag("percent")
+                                Text("Dollars off the original price").tag("amount")
+                            }
+                            TextField(form.priceMode == "amount" ? "Amount ($)" : "Percent", text: $form.priceValue).keyboardType(.decimalPad)
+                            TextField("Floor ($)", text: $form.floor).keyboardType(.decimalPad)
+                            Picker("How often", selection: $form.priceRepeat) {
+                                Text("Each cycle, off the original price").tag("step")
+                                Text("One-time drop").tag("once")
+                            }
                         }
                     }
-                }
-                Section {
-                    ForEach(AutomationForm.marketplaces, id: \.self) { market in
-                        Toggle(Marketplaces.name(market), isOn: Binding(get: { form.marketplaces.contains(market) }, set: { on in
-                            if on { form.marketplaces.append(market) } else { form.marketplaces.removeAll { $0 == market } }
-                        }))
+                    Section {
+                        ForEach(AutomationForm.marketplaces, id: \.self) { market in
+                            Toggle(Marketplaces.name(market), isOn: Binding(get: { form.marketplaces.contains(market) }, set: { on in
+                                if on { form.marketplaces.append(market) } else { form.marketplaces.removeAll { $0 == market } }
+                            }))
+                        }
+                    } header: {
+                        Text("Marketplaces")
+                    } footer: {
+                        Text("Delisting and relisting on these wait for your approval of each item.")
                     }
-                } header: {
-                    Text("Marketplaces")
-                } footer: {
-                    Text("Delisting and relisting on these wait for your approval of each item.")
+                    if !issues.isEmpty {
+                        Section("Needs attention") { ForEach(issues, id: \.self) { Text($0).font(.footnote) } }
+                    }
+                    if let preview { previewSection(preview) }
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    }
+                    Section {
+                        Button(working == "preview" ? "Checking…" : "Preview") { showPreview() }.disabled(working != nil)
+                        Button("Save draft") { save(activate: false) }.disabled(working != nil)
+                        Button(working == "save" ? "Saving…" : "Save and confirm") { save(activate: true) }
+                            .fontWeight(.semibold).disabled(working != nil)
+                    }
                 }
-                if !issues.isEmpty {
-                    Section("Needs attention") { ForEach(issues, id: \.self) { Text($0).font(.footnote) } }
-                }
-                if let preview { previewSection(preview) }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
-                Section {
-                    Button(working == "preview" ? "Checking…" : "Preview") { showPreview() }.disabled(working != nil)
-                    Button("Save draft") { save(activate: false) }.disabled(working != nil)
-                    Button(working == "save" ? "Saving…" : "Save and confirm") { save(activate: true) }
-                        .fontWeight(.semibold).disabled(working != nil)
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle(automation == nil ? "New automation" : "Edit automation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working == "save") } }

@@ -124,19 +124,23 @@ struct CategoryTreeSheet: View {
         let known = Set(local.map(\.id))
         let rows = local + remote.filter { !known.contains($0.id) }
         return List {
-            ForEach(rows) { leaf in
-                Button { pick(leaf) } label: {
-                    Text(CategoryBrowse.breadcrumb(leaf.path)).foregroundStyle(.primary)
+            Group {
+                ForEach(rows) { leaf in
+                    Button { pick(leaf) } label: {
+                        Text(CategoryBrowse.breadcrumb(leaf.path)).foregroundStyle(.primary)
+                    }
+                }
+                if searchesEbay && tree.needsSearch {
+                    Section { Text(remoteStatus).font(.footnote).foregroundStyle(.secondary) } header: {
+                        if !tree.leaves.isEmpty { Text("Search if the category is not in the list yet.") }
+                    }
+                } else if rows.isEmpty {
+                    Text("No matching categories").foregroundStyle(.secondary)
                 }
             }
-            if searchesEbay && tree.needsSearch {
-                Section { Text(remoteStatus).font(.footnote).foregroundStyle(.secondary) } header: {
-                    if !tree.leaves.isEmpty { Text("Search if the category is not in the list yet.") }
-                }
-            } else if rows.isEmpty {
-                Text("No matching categories").foregroundStyle(.secondary)
-            }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
     }
 
     /// Only eBay has a live search behind its synced tree.
@@ -183,20 +187,24 @@ private struct CategoryLevel: View {
     var body: some View {
         let selected = current.components(separatedBy: " › ")
         List(CategoryBrowse.children(of: prefix, in: leaves), id: \.label) { child in
-            if let leaf = child.leaf {
-                Button { pick(leaf) } label: {
-                    HStack {
-                        Text(child.label).foregroundStyle(.primary)
-                        Spacer()
-                        if selected == prefix + [child.label] {
-                            Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
+            Group {
+                if let leaf = child.leaf {
+                    Button { pick(leaf) } label: {
+                        HStack {
+                            Text(child.label).foregroundStyle(.primary)
+                            Spacer()
+                            if selected == prefix + [child.label] {
+                                Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
+                            }
                         }
                     }
+                } else {
+                    NavigationLink(child.label, value: CategoryPrefix(parts: prefix + [child.label]))
                 }
-            } else {
-                NavigationLink(child.label, value: CategoryPrefix(parts: prefix + [child.label]))
             }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .navigationTitle(prefix.last ?? "Categories")
         .toolbar {
             if let close {

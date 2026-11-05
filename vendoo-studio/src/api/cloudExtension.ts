@@ -16,7 +16,7 @@ const COMMAND_TIMEOUT_MS: Record<string, number> = {
   "job.vendoo_api": 250_000,
   "marketplace.promotion_check": 100_000, "marketplace.promote": 160_000, "marketplace.promotion_result": 30_000, "marketplace.like_events": 55_000,
   "marketplace.sales_history": 1_210_000,
-  "marketplace.execute": 200_000, "marketplace.result": 75_000, "marketplace.delete": 100_000, "job.cancel": 10_000,
+  "marketplace.execute": 290_000, "marketplace.result": 75_000, "marketplace.delete": 100_000, "job.cancel": 10_000,
   "marketplace.sessions": 30_000, "marketplace.connect": 50_000,
   "marketplace.import.page": 130_000, "marketplace.import.listing": 130_000,
 };
@@ -67,6 +67,10 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
       const result = await send("marketplace_command", undefined, { command, photos });
       const reply = result.reply;
       if (result.ok && reply && typeof reply === "object" && !Array.isArray(reply)) return reply as Record<string, unknown>;
+      // The Bridge refused the command before running it: nothing reached the marketplace.
+      if (["invalid_input", "not_connected", "account_changed"].includes(String(result.error_code))) {
+        return { ok: false, safe_to_retry: true, error: "Chrome refused this action before starting it. Reload Anteroom and try again.", error_code: "rejected" };
+      }
       return { ok: false, error: "Chrome did not finish this action.", error_code: "uncertain" };
     },
     readPoshmarkForm: async (listing: Record<string, string | number | null>): Promise<MarketplaceForm> => {
