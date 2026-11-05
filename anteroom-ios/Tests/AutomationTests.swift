@@ -51,6 +51,21 @@ struct AutomationTests {
         precondition(AutomationFormat.actions([AutomationAction(type: "price", mode: "amount", value: 5, floor: 15, repeatMode: "once"),
                                                AutomationAction(type: "relist")]) == "drop $5 once, floor $15, relist")
         precondition(AutomationFormat.money(12) == "$12" && AutomationFormat.money(12.5) == "$12.50" && AutomationFormat.money(nil) == "—")
+
+        // Rows say when an automation runs and what it picks, like the web list.
+        let name = { (id: String) in ["ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari"][id] ?? id }
+        precondition(AutomationFormat.trigger(AutomationSchedule(kind: "daily", time: "09:00"), filters: AutomationFilters(minAgeDays: 60),
+                                              marketplaces: ["ebay", "poshmark"], name: name)
+                     == "Every day 9:00 AM · listed 60+ days on eBay, Poshmark")
+        precondition(AutomationFormat.trigger(AutomationSchedule(kind: "weekly", time: "18:30", weekdays: [0, 5]),
+                                              filters: AutomationFilters(department: "Men", brand: "Levi's"), marketplaces: [], name: name)
+                     == "Every Mon, Sat 6:30 PM · Men, Levi's")
+        precondition(AutomationFormat.trigger(AutomationSchedule(kind: "once", at: "2026-11-03T00:05"),
+                                              filters: AutomationFilters(conversationIDs: ["a", "b"]), marketplaces: ["mercari"], name: name)
+                     == "Once Nov 3, 12:05 AM · 2 items on Mercari")
+        precondition(AutomationFormat.trigger(nil, filters: nil, marketplaces: [], name: name) == "No schedule yet")
+        precondition(AutomationFormat.runTime("2026-11-05T15:00:00+00:00", timezone: "America/Chicago") == "Nov 5, 9:00 AM")
+        precondition(AutomationFormat.runTime(nil, timezone: "UTC") == "—")
         print("Automation tests passed")
     }
 }

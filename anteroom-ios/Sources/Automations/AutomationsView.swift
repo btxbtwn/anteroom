@@ -12,38 +12,34 @@ struct AutomationsView: View {
     @State private var editing: EditTarget?
     @State private var history: HistoryTarget?
     @State private var deleting: Automation?
-    @State private var pausing: Automation?
+    @State private var busy: String?
     @State private var error: String?
 
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Text("Manage automatic offers, sharing, draft preparation and price edits. Listing, delisting and relisting wait for your review of each item and named marketplace.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                Section {
-                    if approvals.isEmpty {
-                        Text("Nothing is waiting for approval.").foregroundStyle(.secondary)
-                    }
-                    ForEach(approvals) { row in
-                        VStack(alignment: .leading, spacing: 4) {
-                            NavigationLink(value: ListingSummary(id: row.conversationID, title: row.title)) {
-                                Text(row.title ?? row.conversationID)
-                            }
-                            Text(([row.action == "publish" ? "list" : row.action, row.state] + row.marketplaces.map(Marketplaces.name))
-                                .joined(separator: " · "))
-                                .font(.caption).foregroundStyle(.secondary)
-                            if !canApprove {
-                                Text("Marketplace actions are not available on iPhone yet. This approval stays waiting.")
+                if !approvals.isEmpty {
+                    Section {
+                        ForEach(approvals) { row in
+                            VStack(alignment: .leading, spacing: 4) {
+                                NavigationLink(value: ListingSummary(id: row.conversationID, title: row.title)) {
+                                    Text(row.title ?? row.conversationID)
+                                }
+                                Text(([row.action == "publish" ? "List" : row.action == "delist" ? "Delist" : "Relist",
+                                       row.marketplaces.map(Marketplaces.name).joined(separator: ", "), row.state])
+                                    .filter { !$0.isEmpty }.joined(separator: " · "))
                                     .font(.caption).foregroundStyle(.secondary)
+                                if !canApprove {
+                                    Text("Marketplace actions are not available on iPhone yet. This approval stays waiting.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
+                    } header: {
+                        Text("Waiting for approval")
+                    } footer: {
+                        Text("Review each item, action and marketplace before approving one attempt.")
                     }
-                } header: {
-                    Text("Waiting for approval")
-                } footer: {
-                    Text("Review each item, action and marketplace before approving one attempt. Scheduling never publishes or delists on its own.")
                 }
                 if !gaps.isEmpty {
                     Section("Down, needs relist") {
@@ -58,23 +54,31 @@ struct AutomationsView: View {
                         }
                     }
                 }
-                Section("Automations") {
+                if let error {
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                }
+                Section {
                     if let automations {
-                        if automations.isEmpty { Text("No automations yet.").foregroundStyle(.secondary) }
+                        if automations.isEmpty {
+                            ContentUnavailableView("No automations yet", systemImage: "calendar.badge.clock",
+                                                   description: Text("Tap New to schedule a price drop or relist."))
+                        }
                         ForEach(automations) { task in row(task) }
                     } else if error == nil {
                         ProgressView("Reading automations…")
                     }
-                }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                } header: {
+                    Text("Scheduled")
+                } footer: {
+                    Text("Schedule price drops, relists and draft prep; nothing lists or delists until you approve each item.")
                 }
             }
             .navigationTitle("Automations")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("New automation", systemImage: "plus") { editing = EditTarget(automation: nil) }
+                    Button("New", systemImage: "plus") { editing = EditTarget(automation: nil) }
+                        .labelStyle(.titleAndIcon)
                 }
             }
             .refreshable { await load() }
@@ -88,12 +92,6 @@ struct AutomationsView: View {
             .sheet(item: $history) { target in
                 AutomationHistoryView(api: api, automation: target.automation, runs: target.runs)
             }
-            .confirmationDialog("Pause \"\(pausing?.name ?? "")\"?", isPresented: Binding(get: { pausing != nil }, set: { if !$0 { pausing = nil } }),
-                                titleVisibility: .visible) {
-                Button("Pause") { if let task = pausing { run { try await api.pauseAutomation(task.id) } } }
-            } message: {
-                Text("It will not start a new run.")
-            }
             .confirmationDialog("Delete \"\(deleting?.name ?? "")\"?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                                 titleVisibility: .visible) {
                 Button("Delete", role: .destructive) { if let task = deleting { run { try await api.deleteAutomation(task.id) } } }
@@ -103,38 +101,68 @@ struct AutomationsView: View {
         }
     }
 
+    /// Name, plain-language trigger, last and next run, an on/off switch and a menu (AutomationsPage.tsx AutomationRow).
     private func row(_ task: Automation) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(task.name).font(.subheadline.weight(.medium))
-                Spacer()
-                Text(task.status.uppercased()).font(.caption2).foregroundStyle(.secondary)
-            }
-            Text(([task.summary.flatMap { $0.isEmpty ? nil : $0 } ?? AutomationFormat.schedule(task.schedule, timezone: task.timezone),
-                   AutomationFormat.actions(task.actions), "marketplace writes require item approval"]
-                  + (task.marketplaces.isEmpty ? [] : [task.marketplaces.map(Marketplaces.name).joined(separator: ", ")]))
-                .joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary)
-            if let next = task.nextRunAt {
-                Text("Next run \(ServerDate.parse(next).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? next)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            HStack {
-                Menu("Actions") {
-                    Button("Edit", systemImage: "pencil") { editing = EditTarget(automation: task) }
-                    if task.status == "active" { Button("Pause", systemImage: "pause") { pausing = task } }
-                    if task.status == "paused" { Button("Resume", systemImage: "play") { run { try await api.resumeAutomation(task.id) } } }
-                    if task.status != "draft" {
-                        Button("Dry run", systemImage: "eye") { start(task, dryRun: true) }
-                        Button("Run now", systemImage: "bolt") { start(task, dryRun: false) }
-                    }
-                    Button("History", systemImage: "clock") { showHistory(task) }
-                    Button("Delete", systemImage: "trash", role: .destructive) { deleting = task }
+        HStack(alignment: .center, spacing: 12) {
+            Button { editing = EditTarget(automation: task) } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(task.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                    Text(AutomationFormat.trigger(task.schedule, filters: task.filters, marketplaces: task.marketplaces, name: Marketplaces.name))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(AutomationFormat.actions(task.actions)).font(.caption).foregroundStyle(.secondary)
+                    Text(runs(task)).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
                 }
-                .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            if task.status == "active" || task.status == "paused" {
+                Toggle(task.status == "active" ? "Pause \(task.name)" : "Turn on \(task.name)",
+                       isOn: Binding(get: { task.status == "active" }, set: { on in setActive(task, on: on) }))
+                    .labelsHidden()
+                    .disabled(busy == task.id)
+            } else {
+                Text(task.status == "draft" ? "Draft" : "Done").font(.caption).foregroundStyle(.secondary)
+            }
+            Menu {
+                Button("Edit", systemImage: "pencil") { editing = EditTarget(automation: task) }
+                if task.status != "draft" {
+                    Button("Dry run", systemImage: "eye") { start(task, dryRun: true) }
+                    Button("Run now", systemImage: "bolt") { start(task, dryRun: false) }
+                }
+                Button("History", systemImage: "clock") { showHistory(task) }
+                Divider()
+                Button("Delete", systemImage: "trash", role: .destructive) { deleting = task }
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("More for \(task.name)")
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
+        .swipeActions {
+            Button("Delete", systemImage: "trash", role: .destructive) { deleting = task }
+        }
+    }
+
+    private func runs(_ task: Automation) -> String {
+        let next = task.status == "active" ? AutomationFormat.runTime(task.nextRunAt, timezone: task.timezone) : "—"
+        return "Last run \(AutomationFormat.runTime(task.lastRunAt, timezone: task.timezone)) · Next \(next)"
+    }
+
+    /// On resumes a paused automation, off pauses it. Neither runs anything now.
+    private func setActive(_ task: Automation, on: Bool) {
+        busy = task.id
+        error = nil
+        Task {
+            do {
+                if on { try await api.resumeAutomation(task.id) } else { try await api.pauseAutomation(task.id) }
+                await load()
+            } catch {
+                self.error = error.localizedDescription
+            }
+            busy = nil
+        }
     }
 
     private func load() async {
@@ -243,6 +271,7 @@ private struct AutomationEditorView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var form = AutomationForm()
+    @State private var manual = false
     @State private var issues: [String] = []
     @State private var preview: AutomationPreview?
     @State private var working: String?
@@ -259,77 +288,17 @@ private struct AutomationEditorView: View {
                         .lineLimit(3...8)
                     Button(working == "draft" ? "Reading…" : "Draft from prompt") { draftFromPrompt() }
                         .disabled(form.prompt.trimmingCharacters(in: .whitespaces).isEmpty || working != nil)
+                    Button {
+                        withAnimation { manual.toggle() }
+                    } label: {
+                        Label("Set it up manually", systemImage: manual ? "chevron.up" : "chevron.down")
+                    }
                 } header: {
                     Text("Describe it")
-                }
-                Section("Schedule") {
-                    TextField("Name", text: $form.name)
-                    LabeledContent("Timezone") { TextField("UTC", text: $form.timezone).multilineTextAlignment(.trailing) }
-                    Picker("When", selection: Binding(get: { form.kind }, set: { kind in
-                        form.kind = kind
-                        form.priceRepeat = kind == "once" ? "once" : "step"
-                    })) {
-                        Text("One time").tag("once")
-                        Text("Every day").tag("daily")
-                        Text("Every week").tag("weekly")
-                    }
-                    if form.kind == "once" {
-                        DatePicker("Date and time", selection: $onceDate)
-                    } else {
-                        DatePicker("Time", selection: $dailyTime, displayedComponents: .hourAndMinute)
-                    }
-                    if form.kind == "weekly" {
-                        HStack(spacing: 4) {
-                            ForEach(AutomationForm.weekdays.indices, id: \.self) { index in
-                                let on = form.weekdays.contains(index)
-                                Button(AutomationForm.weekdays[index]) {
-                                    if on { form.weekdays.removeAll { $0 == index } } else { form.weekdays = (form.weekdays + [index]).sorted() }
-                                }
-                                .font(.caption)
-                                .buttonStyle(.bordered)
-                                .tint(on ? WorkspaceStyle.accent : .secondary)
-                                .accessibilityAddTraits(on ? .isSelected : [])
-                            }
-                        }
-                    }
-                }
-                Section("Which items") {
-                    TextField("Department (men)", text: $form.department)
-                    TextField("Category (t-shirt)", text: $form.category)
-                    TextField("Brand", text: $form.brand)
-                    TextField("Listed at least (days)", text: $form.minAge).keyboardType(.numberPad)
-                    TextField("Status (active)", text: $form.status)
-                    TextField("Item ids (optional)", text: $form.itemIDs)
-                }
-                Section("What it does") {
-                    Toggle("Regenerate", isOn: $form.regenerate)
-                    Toggle("Delist", isOn: $form.delist)
-                    Toggle("Relist", isOn: $form.relist)
-                    Toggle("Drop the price", isOn: $form.priceOn)
-                    if form.priceOn {
-                        Picker("Drop by", selection: $form.priceMode) {
-                            Text("Percent of the original price").tag("percent")
-                            Text("Dollars off the original price").tag("amount")
-                        }
-                        TextField(form.priceMode == "amount" ? "Amount ($)" : "Percent", text: $form.priceValue).keyboardType(.decimalPad)
-                        TextField("Floor ($)", text: $form.floor).keyboardType(.decimalPad)
-                        Picker("How often", selection: $form.priceRepeat) {
-                            Text("Each cycle, off the original price").tag("step")
-                            Text("One-time drop").tag("once")
-                        }
-                    }
-                }
-                Section {
-                    ForEach(AutomationForm.marketplaces, id: \.self) { market in
-                        Toggle(Marketplaces.name(market), isOn: Binding(get: { form.marketplaces.contains(market) }, set: { on in
-                            if on { form.marketplaces.append(market) } else { form.marketplaces.removeAll { $0 == market } }
-                        }))
-                    }
-                } header: {
-                    Text("Marketplaces")
                 } footer: {
-                    Text("Delisting and relisting on these wait for your approval of each item.")
+                    Text("Scheduling never publishes or delists on its own. Each item and marketplace waits for your approval.")
                 }
+                if manual { manualSections }
                 if !issues.isEmpty {
                     Section("Needs attention") { ForEach(issues, id: \.self) { Text($0).font(.footnote) } }
                 }
@@ -347,9 +316,81 @@ private struct AutomationEditorView: View {
             .navigationTitle(automation == nil ? "New automation" : "Edit automation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working == "save") } }
-            .onAppear { if let automation { apply(AutomationForm(automation: automation)) } }
+            .onAppear { if let automation { apply(AutomationForm(automation: automation)); manual = true } }
         }
         .interactiveDismissDisabled(working == "save")
+    }
+
+    /// The boxes behind "Set it up manually"; open when editing or after a prompt is drafted.
+    @ViewBuilder private var manualSections: some View {
+        Section("Schedule") {
+            TextField("Name", text: $form.name)
+            LabeledContent("Timezone") { TextField("UTC", text: $form.timezone).multilineTextAlignment(.trailing) }
+            Picker("When", selection: Binding(get: { form.kind }, set: { kind in
+                form.kind = kind
+                form.priceRepeat = kind == "once" ? "once" : "step"
+            })) {
+                Text("One time").tag("once")
+                Text("Every day").tag("daily")
+                Text("Every week").tag("weekly")
+            }
+            if form.kind == "once" {
+                DatePicker("Date and time", selection: $onceDate)
+            } else {
+                DatePicker("Time", selection: $dailyTime, displayedComponents: .hourAndMinute)
+            }
+            if form.kind == "weekly" {
+                HStack(spacing: 4) {
+                    ForEach(AutomationForm.weekdays.indices, id: \.self) { index in
+                        let on = form.weekdays.contains(index)
+                        Button(AutomationForm.weekdays[index]) {
+                            if on { form.weekdays.removeAll { $0 == index } } else { form.weekdays = (form.weekdays + [index]).sorted() }
+                        }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .tint(on ? WorkspaceStyle.accent : .secondary)
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                }
+            }
+        }
+        Section("Which items") {
+            TextField("Department (men)", text: $form.department)
+            TextField("Category (t-shirt)", text: $form.category)
+            TextField("Brand", text: $form.brand)
+            TextField("Listed at least (days)", text: $form.minAge).keyboardType(.numberPad)
+            TextField("Status (active)", text: $form.status)
+            TextField("Item ids (optional)", text: $form.itemIDs)
+        }
+        Section("What it does") {
+            Toggle("Regenerate", isOn: $form.regenerate)
+            Toggle("Delist", isOn: $form.delist)
+            Toggle("Relist", isOn: $form.relist)
+            Toggle("Drop the price", isOn: $form.priceOn)
+            if form.priceOn {
+                Picker("Drop by", selection: $form.priceMode) {
+                    Text("Percent of the original price").tag("percent")
+                    Text("Dollars off the original price").tag("amount")
+                }
+                TextField(form.priceMode == "amount" ? "Amount ($)" : "Percent", text: $form.priceValue).keyboardType(.decimalPad)
+                TextField("Floor ($)", text: $form.floor).keyboardType(.decimalPad)
+                Picker("How often", selection: $form.priceRepeat) {
+                    Text("Each cycle, off the original price").tag("step")
+                    Text("One-time drop").tag("once")
+                }
+            }
+        }
+        Section {
+            ForEach(AutomationForm.marketplaces, id: \.self) { market in
+                Toggle(Marketplaces.name(market), isOn: Binding(get: { form.marketplaces.contains(market) }, set: { on in
+                    if on { form.marketplaces.append(market) } else { form.marketplaces.removeAll { $0 == market } }
+                }))
+            }
+        } header: {
+            Text("Marketplaces")
+        } footer: {
+            Text("Delisting and relisting on these wait for your approval of each item.")
+        }
     }
 
     private func previewSection(_ preview: AutomationPreview) -> some View {
@@ -405,6 +446,7 @@ private struct AutomationEditorView: View {
             do {
                 let draft = try await api.draftAutomation(prompt: form.prompt, timezone: form.timezone)
                 apply(AutomationForm(draft: draft))
+                manual = true
                 issues = draft.issues ?? []
                 preview = nil
             } catch {

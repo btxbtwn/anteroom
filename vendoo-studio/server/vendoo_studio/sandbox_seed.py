@@ -68,6 +68,34 @@ SAMPLES = (
     },
 )
 
+# Sample automations, so the Automations page opens on a populated list. Saving
+# one only schedules it; delists and relists still wait for approval per item.
+AUTOMATIONS = (
+    {
+        "name": "Refresh stale listings",
+        "timezone": "America/Chicago",
+        "schedule": {"kind": "daily", "time": "09:00"},
+        "filters": {"min_age_days": 60},
+        "actions": [{"type": "price", "mode": "percent", "value": 10, "floor": 15, "repeat": "step"}, {"type": "relist"}],
+        "marketplaces": ["ebay", "poshmark"],
+        "activate": True,
+    },
+    {
+        "name": "Weekend dress markdown",
+        "timezone": "America/Chicago",
+        "schedule": {"kind": "weekly", "time": "18:00", "weekdays": [4]},
+        "filters": {"category": "Dresses"},
+        "actions": [{"type": "price", "mode": "amount", "value": 5, "floor": 30, "repeat": "once"}],
+        "marketplaces": ["mercari"],
+        "activate": False,
+    },
+)
+
+
+def _seed_automations(client: httpx.Client) -> None:
+    for sample in AUTOMATIONS:
+        client.post("/api/automations", json=sample).raise_for_status()
+
 
 def _photo(label: str, color: tuple[int, int, int], index: int) -> bytes:
     image = Image.new("RGB", (800, 1000), color)
@@ -98,6 +126,7 @@ def seed(base_url: str) -> list[str]:
                     json={"listing": sample["listing"], "expected_revision_id": ""},
                 ).raise_for_status()
             created.append(conv["id"])
+        _seed_automations(client)
         return created
 
 
@@ -124,6 +153,7 @@ def seed_hosted(base_url: str) -> list[str]:
                     'fields': {key: value for key, value in listing.items() if key != 'title'},
                 }).raise_for_status()
             created.append(draft['id'])
+        _seed_automations(client)
         return created
 
 

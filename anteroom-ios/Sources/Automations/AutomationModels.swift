@@ -52,10 +52,11 @@ struct Automation: Decodable, Identifiable, Sendable {
     let priceRepeat: String?
     let summary: String?
     let nextRunAt: String?
+    let lastRunAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, prompt, status, timezone, schedule, filters, actions, marketplaces, summary
-        case priceRepeat = "price_repeat", nextRunAt = "next_run_at"
+        case priceRepeat = "price_repeat", nextRunAt = "next_run_at", lastRunAt = "last_run_at"
     }
 }
 
@@ -311,6 +312,56 @@ enum AutomationFormat {
         if schedule.kind == "daily" { return "Daily at \(clock) (\(timezone))" }
         let days = (schedule.weekdays ?? []).map { AutomationForm.weekdays.indices.contains($0) ? AutomationForm.weekdays[$0] : String($0) }
         return "Weekly on \(days.isEmpty ? "no days" : days.joined(separator: ", ")) at \(clock) (\(timezone))"
+    }
+
+    /// "18:30" as "6:30 PM".
+    private static func clock(_ time: String?) -> String {
+        let parts = (time ?? "09:00").split(separator: ":").compactMap { Int($0) }
+        let hour = parts.first ?? 9
+        let minute = parts.count > 1 ? parts[1] : 0
+        return "\(hour % 12 == 0 ? 12 : hour % 12):\(String(format: "%02d", minute)) \(hour < 12 ? "AM" : "PM")"
+    }
+
+    private static let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    private static func when(_ schedule: AutomationSchedule?) -> String {
+        guard let schedule else { return "No schedule yet" }
+        switch schedule.kind {
+        case "once":
+            let at = schedule.at ?? ""
+            let date = at.prefix(10).split(separator: "-").compactMap { Int($0) }
+            guard date.count == 3, months.indices.contains(date[1] - 1) else { return "Once" }
+            let time = at.count >= 16 ? ", \(clock(String(at.dropFirst(11).prefix(5))))" : ""
+            return "Once \(months[date[1] - 1]) \(date[2])\(time)"
+        case "daily":
+            return "Every day \(clock(schedule.time))"
+        default:
+            let days = (schedule.weekdays ?? []).map { AutomationForm.weekdays.indices.contains($0) ? AutomationForm.weekdays[$0] : String($0) }
+            return "Every \(days.isEmpty ? "week" : days.joined(separator: ", ")) \(clock(schedule.time))"
+        }
+    }
+
+    /// One line for a saved automation: when it runs, which items and where (automationsFormat.ts describeTrigger).
+    static func trigger(_ schedule: AutomationSchedule?, filters: AutomationFilters?, marketplaces: [String],
+                        name: (String) -> String) -> String {
+        var picks = [filters?.department, filters?.category, filters?.brand, filters?.status]
+            .compactMap { $0 }.filter { !$0.isEmpty }
+        if let age = filters?.minAgeDays, age > 0 { picks.append("listed \(age)+ days") }
+        if let ids = filters?.conversationIDs, !ids.isEmpty { picks.append("\(ids.count) item\(ids.count == 1 ? "" : "s")") }
+        let place = marketplaces.isEmpty ? "" : "on \(marketplaces.map(name).joined(separator: ", "))"
+        let which = [picks.joined(separator: ", "), place].filter { !$0.isEmpty }.joined(separator: " ")
+        return [when(schedule), which].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// A server time as "Nov 5, 9:00 AM" in the automation's timezone.
+    static func runTime(_ raw: String?, timezone: String) -> String {
+        guard let raw else { return "—" }
+        guard let date = ServerDate.parse(raw) else { return raw }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, h:mm a"
+        formatter.timeZone = TimeZone(identifier: timezone) ?? .current
+        return formatter.string(from: date)
     }
 
     static func actions(_ actions: [AutomationAction]) -> String {
