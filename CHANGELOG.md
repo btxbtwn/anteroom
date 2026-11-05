@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.738 — 2026-11-05
+
+- See your whole inventory as a table: one row per listing and one column per marketplace, showing whether it is listed, a draft, sold, failed or needs fields fixed, with a link to the live listing. Click a cell to open that marketplace's form.
+- Each listing now appears once in the sidebar; its suggestion ("Ready to generate", "Needs review") shows on its own row.
+- On iPhone, each inventory row shows its status on every marketplace, and suggestions show on the listing's own row.
+
 ## 0.1.737 — 2026-11-05
 
 - When the window is wide enough, the listing chat is its own column beside the form, and you can drag its edge to resize it. On narrower windows it floats in the corner, where you can make it larger or minimize it. Anteroom remembers your choice.
