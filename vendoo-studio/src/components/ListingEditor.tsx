@@ -66,7 +66,7 @@ interface Props {
   onEditTabChange: (tab: string) => void;
   onBulkListingsCreated?: (listings: BulkListingUploadResult[], generate: boolean) => void;
   onEditInventoryLocation?: () => void;
-  /** The listing's chat, floated over the form's corner on desktop. */
+  /** The listing's chat, beside the form or floated over its corner on desktop. */
   chat?: React.ReactNode;
 }
 

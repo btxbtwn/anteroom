@@ -39,11 +39,11 @@ struct PhotoStrip: View {
                 .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(WorkspaceStyle.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 8)], spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
                     ForEach(showAll ? photos : Array(photos.prefix(6))) { photo in
                         Button { viewing = photo.id } label: {
-                            RemotePhoto(api: api, photoID: photo.id, maxPixels: 300, version: photo.version)
-                                .frame(height: 104)
+                            RemotePhoto(api: api, photoID: photo.id, maxPixels: 400, version: photo.version)
+                                .frame(height: 136)
                                 .clipped()
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
@@ -58,7 +58,7 @@ struct PhotoStrip: View {
                             }
                     }
                     ForEach(0..<uploading, id: \.self) { _ in
-                        ProgressView().frame(maxWidth: .infinity, minHeight: 104)
+                        ProgressView().frame(maxWidth: .infinity, minHeight: 136)
                             .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
