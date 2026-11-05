@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.728 — 2026-11-05
+
+- While the Mac app shows your account, this Mac's own listings stop checking sales, delisting after a sale, and running price drops, promotions, eBay offers and sourcing on their own, so nothing happens twice. Switching back to This Mac's Listings turns them on again.
+
 ## 0.1.727 — 2026-11-04
 
 - Choose Use Vendoo in Settings to send private drafts for review in Vendoo. Turning it off restores direct marketplace actions; the two workflows never run together.
