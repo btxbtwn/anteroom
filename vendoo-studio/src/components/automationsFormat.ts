@@ -6,7 +6,7 @@ import type {
 } from "../api/automations";
 
 export const AUTOMATION_MARKETPLACES = [
-  "ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted",
+  "ebay", "poshmark", "mercari", "depop", "etsy",
 ] as const;
 
 export const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;

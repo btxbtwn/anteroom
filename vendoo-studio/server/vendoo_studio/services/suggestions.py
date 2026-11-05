@@ -83,11 +83,9 @@ MARKETPLACE_LABELS = {
     "mercari": "Mercari",
     "depop": "Depop",
     "shopify": "Shopify",
-    "vinted": "Vinted",
     "whatnot": "Whatnot",
     "vestiaire": "Vestiaire Collective",
     "vestiaireApi": "Vestiaire Collective",
-    "sellwild": "Sellwild",
 }
 
 

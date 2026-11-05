@@ -4,7 +4,7 @@ import { resolvedEditorValue } from "./nativeFormStability";
 import { setListingEditorValue } from "../listingPaths";
 import type { ListingData } from "../api/types";
 
-it.each(["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild"])(
+it.each(["ebay", "poshmark", "mercari", "depop", "etsy"])(
   "%s keeps cleared and replaced choices through a stale form refresh", (marketplace) => {
     for (const nested of [false, true]) {
       for (const multi of [false, true]) {

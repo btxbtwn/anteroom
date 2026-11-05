@@ -16,7 +16,7 @@ from vendoo_studio.services.seller_overrides import CANONICAL_PRICE, get_path, i
 
 KEY = "_native_forms"
 EVIDENCE_KEY = "_native_field_evidence"
-MARKETS = ("ebay", "poshmark", "mercari", "depop", "sellwild")
+MARKETS = ("ebay", "poshmark", "mercari", "depop")
 SALE_FIELDS = re.compile(
     r"price|ship|parcel|package|quantity|sku|categor|worldwide|offer|format|duration|store|inventor"
     r"|variation|zip|location|condition|title|description|brand|hashtag|tags|charity|donation"
@@ -72,8 +72,6 @@ def _input_paths(market: str, fields: list[dict]) -> set[str]:
         paths.update(("poshmark_specifics.smartSell.enabled", "poshmark_specifics.availability"))
     if market == "depop":
         paths.add("depop_specifics.worldwideShipping.enabled")
-    if market == "sellwild":
-        paths.add("sellwild_specifics.nativeCategoryId")
     return paths
 
 
@@ -239,7 +237,7 @@ def prompt(contracts: dict) -> str:
     # Presentation metadata belongs to the editor, not the generation context.
     def schema(row, contract):
         definition = {key: value for key, value in row.items() if key in _SCHEMA_KEYS}
-        if (path_of(row).startswith("direct_category_ids.") or path_of(row) == "sellwild_specifics.nativeCategoryId") and contract.get("category_id"):
+        if (path_of(row).startswith("direct_category_ids.") ) and contract.get("category_id"):
             # Category selection already ran against the complete catalog.
             # Copy generation needs its chosen leaf, not thousands of siblings.
             category_id = str(contract["category_id"])
@@ -385,7 +383,7 @@ def _market_of(path: str, rows: dict[str, dict]) -> str:
     head = str(path).split(".", 1)[0]
     if head.endswith("_specifics"):
         return head[: -len("_specifics")]
-    for candidate in ("ebay", "poshmark", "mercari", "depop", "sellwild", "vinted", "etsy"):
+    for candidate in ("ebay", "poshmark", "mercari", "depop", "etsy"):
         if any(str(row).startswith(f"{candidate}_specifics.") for row in rows):
             return candidate
     return ""

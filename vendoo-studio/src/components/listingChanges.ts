@@ -39,7 +39,7 @@ export function isEbayInventoryLocationEdit(field: string): boolean {
 }
 
 /** Marketplaces whose form has its own category control. */
-const FORM_CATEGORY_MARKETS = new Set(["ebay", "poshmark", "mercari", "depop", "sellwild"]);
+const FORM_CATEGORY_MARKETS = new Set(["ebay", "poshmark", "mercari", "depop"]);
 
 function formCategoryMarket(field: string): string | undefined {
   const marketplace = field.match(/^(?:direct|marketplace)_category_ids\.([a-z]+)$/)?.[1];

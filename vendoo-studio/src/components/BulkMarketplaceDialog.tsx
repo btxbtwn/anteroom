@@ -11,7 +11,7 @@ import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Radio, RadioGroup } from "./ui/radio-group";
 
-export const BULK_MARKETPLACES: DelistMarketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"];
+export const BULK_MARKETPLACES: DelistMarketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop"];
 const ACTIONS: { value: BulkMarketplaceAction; label: string; note: string }[] = [
   { value: "list", label: "List", note: "Publishes each item’s saved listing. An item already live on a marketplace is skipped there; choose Relist for that." },
   { value: "delist", label: "Delist", note: "Removes each live listing from the marketplace; eBay ends it. A marketplace where the item sold is never touched." },

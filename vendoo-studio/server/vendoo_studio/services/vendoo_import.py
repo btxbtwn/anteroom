@@ -138,7 +138,7 @@ def _as_iso(raw: Any) -> str:
 def oldest_live_listed_at(notes: dict[str, Any]) -> str:
     """When the longest-standing live listing went up, as an ISO string.
 
-    An item is only as fresh as its stalest live listing: a new Sellwild
+    An item is only as fresh as its stalest live listing: a new
     listing says nothing about the copy that has sat on eBay for 90 days. A
     sold marketplace is finished and a delisted one has no copy to age, so
     neither counts. An item with no per-marketplace dates falls back to the

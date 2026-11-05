@@ -21,7 +21,7 @@ describe("marketplace choice controls", () => {
 
   it.each([
     { fieldKey: "condition", value: "Pre-Owned - Good", options: ["Pre-owned"] },
-    { fieldKey: "vinted_specifics.size", value: "M", options: ["S / 8", "M / 10", "L / 12"] },
+    { fieldKey: "depop_specifics.size", value: "M", options: ["S / 8", "M / 10", "L / 12"] },
   ])("preserves $fieldKey without a warning when a reference list omits its saved value", ({ fieldKey, value, options }) => {
     const html = renderToStaticMarkup(<SearchableSelect id={fieldKey} fieldKey={fieldKey}
       value={value} options={options} choicesVerified={false} onChange={() => { throw new Error("Rendering must not save"); }} />);
@@ -89,13 +89,13 @@ describe("category tree dropdown", () => {
   });
 
   it("asks for a category when none is chosen yet", () => {
-    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="sellwild_specifics.nativeCategoryId"
+    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="mercari_specifics.nativeCategoryId"
       value="" choices={[
         { label: "Shoes", id: "69" },
         { label: "Furniture", id: "61" },
       ]} onChange={ignore} />);
     expect(html).toContain("Choose a category");
-    expect(html).toContain('data-listing-field="sellwild_specifics.nativeCategoryId"');
+    expect(html).toContain('data-listing-field="mercari_specifics.nativeCategoryId"');
   });
 
   it("keeps a saved category that is outside the list and asks the seller to replace it", () => {

@@ -23,7 +23,7 @@ describe("bulk marketplace dialog", () => {
     expect(html).toContain(">Update<");
     expect(html).toContain("Mark as not listed");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Review items<\/button>/);
-    expect(html.match(/role="checkbox"[^>]*aria-checked="(?:true|false)"/g)).toHaveLength(7);
+    expect(html.match(/role="checkbox"[^>]*aria-checked="(?:true|false)"/g)).toHaveLength(5);
     expect(html).not.toMatch(/role="checkbox"[^>]*aria-checked="true"/);
     expect(perform).not.toHaveBeenCalled();
     expect(preview).not.toHaveBeenCalled();

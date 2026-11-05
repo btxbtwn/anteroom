@@ -4,7 +4,7 @@ import { createContext } from "react";
 export const MarketplaceMessagesContext = createContext<readonly string[]>([]);
 
 export function uniqueMarketplaceMessages(messages: readonly (string | null | undefined)[], shown: readonly string[] = []): string[] {
-  const key = (message: string) => message.trim().replace(/\s+/g, " ").replace(/^(?:eBay|Etsy|Poshmark|Mercari|Depop|Sellwild|Vinted) said:\s*/i, "");
+  const key = (message: string) => message.trim().replace(/\s+/g, " ").replace(/^(?:eBay|Etsy|Poshmark|Mercari|Depop) said:\s*/i, "");
   const seen = new Set(shown.map(key));
   return messages.filter((message): message is string => {
     if (!message?.trim() || seen.has(key(message))) return false;

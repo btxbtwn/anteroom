@@ -27,9 +27,9 @@ from vendoo_studio.services import native_contract
 
 log = logging.getLogger("vendoo_studio.native_field_fill")
 
-MARKETS = ("ebay", "poshmark", "mercari", "depop", "sellwild")
-NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild"}
-CATEGORY_PATHS = {f"direct_category_ids.{market}" for market in MARKETS} | {"sellwild_specifics.nativeCategoryId"}
+MARKETS = ("ebay", "poshmark", "mercari", "depop")
+NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
+CATEGORY_PATHS = {f"direct_category_ids.{market}" for market in MARKETS}
 
 FILL_RULES = (
     "You fill a resale listing's marketplace form fields. For selection-only fields, choose values only "
@@ -481,9 +481,6 @@ def start_category_fills() -> None:
 def _category(listing: dict, market: str) -> str:
     if not isinstance(listing, dict):
         return ""
-    if market == "sellwild":
-        specifics = listing.get("sellwild_specifics")
-        return str((specifics if isinstance(specifics, dict) else {}).get("nativeCategoryId") or "").strip()
     ids = listing.get("direct_category_ids")
     return str((ids if isinstance(ids, dict) else {}).get(market) or "").strip()
 

@@ -1,8 +1,8 @@
-"""Seller-confirmed direct listings on eBay, Etsy, Poshmark, Mercari, Depop, Sellwild and Vinted.
+"""Seller-confirmed direct listings on eBay, Etsy, Poshmark, Mercari and Depop.
 
 List is one seller-confirmed step. It runs as one background job that holds
 its marketplace's slot from the first write to the last answer: saving the
-marketplace's own draft (Mercari, Depop, Etsy, Vinted) and publishing it are steps of
+marketplace's own draft (Mercari, Depop, Etsy) and publishing it are steps of
 the same job, so no other action on that marketplace can start between them,
 and a job whose Chrome reply is late keeps the slot until Chrome reports what it did.
 
@@ -11,11 +11,6 @@ marketplace). Nothing here retries a write on its own. A reply that never came
 leaves the record ``unknown``; Check reads the marketplace (never writes) and
 runs by itself after a lost reply, on startup and when Chrome reconnects.
 Reset is the seller saying they looked themselves.
-
-Vinted saves a draft and then publishes it, the same as Mercari and Depop.
-Both steps run in the extension background with no Vinted tab, and only after
-the seller confirms List. A lost reply is read back and never creates a second
-draft. Delist deletes the live listing through the signed-in Chrome session.
 
 Update writes the saved revision onto the listing already live, on every
 marketplace here, after one seller confirmation. It never publishes a draft,
@@ -42,8 +37,6 @@ from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, Listin
 from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, marketplace_media
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
-from vendoo_studio.services.sellwild_listing import chosen, sellwild_catalog, suggest_sellwild
-
 log = logging.getLogger("vendoo_studio.native_marketplaces")
 
 
@@ -53,11 +46,11 @@ class NativeMarketplaceError(RuntimeError):
         self.status_code = status_code
 
 
-Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted"]
-InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
+Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy"]
+InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy"]
 API_MARKETPLACES = frozenset({"ebay", "etsy"})
 DRAFT_MARKETPLACES = frozenset({"ebay", "mercari", "depop", "etsy", "poshmark"})
-NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
+NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
 UNKNOWN = "Anteroom could not confirm what happened. Check the result before trying again."
 # How long Chrome has to answer one step, and how long a job then keeps the
 # slot waiting for Chrome to report what it did before giving up as unknown.
@@ -86,8 +79,6 @@ class ListRequest(BaseModel):
     readiness_state_id: str | None = None
     return_policy_id: str | None = None
     etsy_package: EtsyPackage | None = None
-    sellwild_category_id: int | None = None
-    sellwild_condition_id: int | None = None
 
 
 class CheckRequest(BaseModel):
@@ -182,15 +173,13 @@ def draft_url(marketplace: str, value: str) -> str:
     pattern, host = (
         (r"/your/shops/me/listing-editor/edit/\d+/?", "www.etsy.com") if marketplace == "etsy"
         else (r"/sellinghub/drafts/edit/[A-Za-z0-9_-]{1,80}/?", "www.depop.com") if marketplace == "depop"
-        else (r"/items/[1-9]\d{0,14}/edit/?", "www.vinted.com") if marketplace == "vinted"
         else (r"/edit-listing/[a-f0-9]{24}", "poshmark.com") if marketplace == "poshmark"
         else (r"/sell/draft/[A-Za-z0-9_-]+/", "www.mercari.com")
     )
     if (parsed.scheme != "https" or parsed.netloc != host or not re.fullmatch(pattern, parsed.path)
-            or (marketplace in {"vinted", "poshmark"} and (parsed.query or parsed.fragment))):
+            or (marketplace == "poshmark" and (parsed.query or parsed.fragment))):
         raise NativeMarketplaceError(502, "Chrome did not return a valid saved draft link.")
-    path = parsed.path.rstrip("/") if marketplace == "vinted" else parsed.path
-    return f"https://{host}{path}"
+    return f"https://{host}{parsed.path}"
 
 
 def listing_url(marketplace: str, value: str) -> str:
@@ -231,7 +220,7 @@ def _contract(result: dict) -> dict:
 
 
 def _draft_gone(result: dict) -> bool:
-    """Depop or Vinted saying the saved draft was deleted."""
+    """Depop saying the saved draft was deleted."""
     text = f"{result.get('error') or ''} {result.get('marketplace_message') or ''}"
     return "could not find draft" in text.lower()
 
@@ -242,14 +231,14 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
     if result.get("ok") is True:
         url = None
         # eBay's saved draft is an unpublished offer, which has no page to link.
-        if marketplace not in {"sellwild", "ebay"} and action in {"save_draft", "publish"}:
+        if marketplace != "ebay" and action in {"save_draft", "publish"}:
             url = draft_url(marketplace, str(result.get("draft_url") or ""))
-            replaced = marketplace in {"depop", "vinted"} and result.get("draft_replaced") is True
+            replaced = marketplace == "depop" and result.get("draft_replaced") is True
             if record.get("draft_url") and url != record["draft_url"] and not replaced:
                 raise NativeMarketplaceError(502, "Chrome answered for a different draft. Check the native listing.")
         expected = "draft" if action == "save_draft" else "published"
         state = result.get("state")
-        if not (state == expected or (marketplace == "sellwild" and action in {"publish", "update"} and state == "pending_review")):
+        if state != expected:
             return {"state": "unknown", **_CLEARED_ERROR, "error": UNKNOWN, "error_code": "uncertain"}
         values = {"state": state, **_CLEARED_ERROR}
         # Listed, but a setting did not stick (Poshmark's Smart Pricing). Shown on the live row.
@@ -286,11 +275,11 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
             # A refused update leaves the live listing in place. Another Update is the seller's choice.
             return {"state": "published", **contract, "error": reason or "Could not update the live listing."}
         values = {**contract, "error": reason or "Could not finish."}
-        if marketplace in {"depop", "vinted"} and _draft_gone(result):
+        if marketplace == "depop" and _draft_gone(result):
             values["draft_url"] = None
-        elif marketplace in {"depop", "etsy", "vinted"} and result.get("draft_url"):
+        elif marketplace in {"depop", "etsy"} and result.get("draft_url"):
             candidate = draft_url(marketplace, result["draft_url"])
-            replaced = marketplace in {"depop", "vinted"} and result.get("draft_replaced") is True
+            replaced = marketplace == "depop" and result.get("draft_replaced") is True
             # A refusal that names some other draft stays on the draft already linked
             # to this listing. The refusal is known, so List can run again.
             if replaced or not record.get("draft_url") or candidate == record["draft_url"]:
@@ -338,8 +327,6 @@ def _plan(marketplace: str, kind: str, record: dict, revision_id: str) -> list[s
         return ["update"]
     if marketplace in {"ebay", "poshmark"}:
         return ["list"]
-    if marketplace == "sellwild":
-        return ["publish"]
     current = record.get("state") == "draft" and record.get("revision_id") == revision_id and record.get("draft_url")
     return ["publish"] if current else ["save_draft", "publish"]
 
@@ -421,8 +408,6 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         remember_direct_categories(db, ListingRepo(db).get_revision(body.revision_id), snapshot.get("direct_category_ids") or {})
     # Local field checks are advisory. The seller-confirmed attempt goes to
     # the marketplace, whose response is recorded for correction and retry.
-    if marketplace == "sellwild" and kind == "list":
-        save_local_sellwild_draft(conv_id, body, db)
     options = {}
     if marketplace == "etsy":
         from vendoo_studio.services import user_settings
@@ -449,13 +434,6 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
             extra.update(listing_id=live["listing_id"], listing_url=live.get("url"))
         elif record.get("state") in {"published", "pending_review"}:
             raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
-        if marketplace == "sellwild":
-            # An update keeps the photos already on the live listing.
-            if kind == "list" and record.get("photo_ids") != [p.id for p in photos]:
-                raise NativeMarketplaceError(409, "The photos changed. List on Sellwild again.")
-            choice = chosen(snapshot, record)
-            if not choice["category_id"] or not choice["condition_id"]:
-                raise NativeMarketplaceError(409, "Choose a Sellwild category and condition first.")
         steps = _plan(marketplace, kind, record, body.revision_id)
         repo = JobRepo(db)
         if (busy := blocking_job(repo, marketplace)) is not None:
@@ -466,7 +444,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
             snapshot[approved_photos.KEY] = approved_photos.capture(photos)
         except (OSError, ValueError) as exc:
             raise NativeMarketplaceError(409, "Could not preserve the approved photos. Review them and try again.") from exc
-        if steps == ["publish"] and marketplace != "sellwild":
+        if steps == ["publish"]:
             previous_job_id = record.get("job_id")
             previous_job = repo.get(previous_job_id) if previous_job_id else None
             previous_photos = (previous_job.listing_snapshot or {}).get(approved_photos.KEY, []) if previous_job else []
@@ -491,16 +469,10 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
 
 
 def _context(db: Session, conv_id: str, marketplace: str, body: ListRequest | None = None) -> direct_preflight.Context:
-    choices = {}
-    if marketplace == "sellwild":
-        record = _record(db, conv_id, "sellwild")
-        choices = {"sellwild_category_id": (body and body.sellwild_category_id) or record.get("sellwild_category_id"),
-                   "sellwild_condition_id": (body and body.sellwild_condition_id) or record.get("sellwild_condition_id")}
-    return direct_preflight.Context(db=db, choices=choices)
+    return direct_preflight.Context(db=db)
 
 
-def preflight(conv_id: str, db: Session, sellwild_category_id: int | None = None,
-              sellwild_condition_id: int | None = None) -> dict:
+def preflight(conv_id: str, db: Session) -> dict:
     """Read saved listing requirements locally, without Chrome or category changes.
 
     Synchronous database and form work: routes call it from the threadpool.
@@ -514,8 +486,7 @@ def preflight(conv_id: str, db: Session, sellwild_category_id: int | None = None
     from vendoo_studio.services.native_form import attach_form
 
     prepared = prepare_listing_snapshot(db, conv, revision.listing_json)
-    body = ListRequest(revision_id=revision.id, sellwild_category_id=sellwild_category_id,
-                       sellwild_condition_id=sellwild_condition_id)
+    body = ListRequest(revision_id=revision.id)
     photos = ConversationRepo(db).get_all_photos(conv_id)
     out = {}
     for marketplace in NAMES:
@@ -558,22 +529,6 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
     extra: dict = {}
     if marketplace == "depop" and warning:
         extra["photo_warning"] = warning
-    if marketplace == "sellwild":
-        from vendoo_studio.services.sellwild_listing import package_sides, sellwild_catalog
-
-        details = snapshot.get("sellwild_specifics")
-        if not isinstance(details, dict):
-            details = {}
-        template = str(details.get("parcelTemplate") or "")
-        preset = next((row for row in sellwild_catalog()["parcel_templates"] if row["id"] == template), None)
-        sides = package_sides(snapshot)
-        picked = details.get("couponIds")
-        coupon_ids = [int(coupon_id) for coupon_id in (picked if isinstance(picked, list) else [])
-                      if str(coupon_id).isdigit() and int(coupon_id) > 0]
-        extra["sellwild"] = {**chosen(snapshot, record), "parcel_template": template, "coupon_ids": coupon_ids,
-                             # A flat-rate package has no Weight field on Sellwild's page; every other package asks for one.
-                             "fixed_package": bool(preset and preset.get("flat_rate")),
-                             "package_dimensions": dict(zip(("depth", "width", "height"), sides, strict=True)) if sides else None}
     return {
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
@@ -724,7 +679,7 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
                     _store(db, conv_id, marketplace, {"error": "Listed on Depop without Boost: Depop did not return the "
                                                                "listing link. Turn Boost on with Update."})
             # A confirmed List found the saved draft deleted. Save a new one, then list that, in this same job.
-            if (marketplace in {"depop", "vinted"} and step == "publish" and "save_draft" not in steps
+            if (marketplace == "depop" and step == "publish" and "save_draft" not in steps
                     and _draft_gone(record)):
                 steps.extend(["save_draft", "publish"])
     except NativeMarketplaceError:
@@ -945,44 +900,7 @@ def listing_package(snapshot: dict) -> dict | None:
             "item_weight_unit": "oz", "item_dimensions_unit": "in"}
 
 
-def sellwild_options(conv_id: str, db: Session) -> dict:
-    _conversation(db, conv_id)
-    listing = ListingRepo(db).get_current(conv_id)
-    revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None
-    snapshot = revision.listing_json if revision and isinstance(revision.listing_json, dict) else {}
-    catalog = sellwild_catalog()
-    return {"categories": catalog["categories"], "conditions": catalog["conditions"], "suggested": suggest_sellwild(snapshot)}
-
 
 POSHMARK_CONDITIONS = ["New With Tags (NWT)", "Like New", "Good", "Fair"]
 
 
-def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> dict:
-    """Record the seller's Sellwild category and condition in Anteroom; Sellwild has no draft of its own.
-
-    Category must already be saved on the form or supplied in this request.
-    Condition may still use Anteroom's match when it has not been set.
-    """
-    import uuid
-
-    _conversation(db, conv_id)
-    listing = ListingRepo(db).get_current(conv_id)
-    if not listing or listing.current_revision_id != body.revision_id:
-        raise NativeMarketplaceError(409, "The listing changed. Refresh it before continuing.")
-    revision = ListingRepo(db).get_revision(body.revision_id)
-    if revision is None:
-        raise NativeMarketplaceError(409, "The listing changed. Refresh it before continuing.")
-    snapshot = revision.listing_json
-    if not isinstance(snapshot, dict):
-        raise NativeMarketplaceError(400, "The saved listing could not be read.")
-    picked = {"sellwild_category_id": body.sellwild_category_id, "sellwild_condition_id": body.sellwild_condition_id}
-    with start_gate():
-        previous = _record(db, conv_id, "sellwild")
-        if previous.get("state") in {*UNSETTLED_STATES, "published", "pending_review"}:
-            raise NativeMarketplaceError(409, "Check the previous Sellwild action before listing again.")
-        return _store(db, conv_id, "sellwild", {
-            **_CLEARED_ERROR, "storage": "local", "state": "draft", "revision_id": body.revision_id,
-            "photo_ids": [p.id for p in _photos(db, conv_id, snapshot, "sellwild")[0]],
-            "local_draft_id": previous.get("local_draft_id") or uuid.uuid4().hex,
-            **picked,
-        })

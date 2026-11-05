@@ -11,9 +11,7 @@ List, Update or Save draft (``marketplace.execute``), reading what one did
 (``marketplace.result``), a confirmed Delist (``marketplace.delete``), and
 cancelling one (``job.cancel``). Besides those, a few named commands do what
 the Mac does outside its listing actions: reads that fill the seller's editor
-with their account's own choices (Vinted's categories and brands, Sellwild's
-address, discounts and package, which the Mac reads in its private account
-windows), the sign-in status and Sign in of Settings → Connections, and the Chrome
+the sign-in status and Sign in of Settings → Connections, and the Chrome
 inventory import's reads of the seller's own active listings. Each is a fixed
 command with fixed inputs; none takes a URL or a
 script. A command waits in the relay only while the tab is answering; when no
@@ -32,8 +30,6 @@ from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, Rep
 
 # Each named read has its own Bridge capability, so a later read never changes
 # what an existing name promises (docs/cloud-extension.md).
-VINTED_CHOICES = "vinted.choices"
-SELLWILD_ACCOUNT = "sellwild.account"
 # Checking which marketplaces Chrome is signed in to, and opening one's sign-in page there.
 MARKETPLACE_SESSIONS = "marketplace.sessions"
 # Reading the seller's own active listings to import them.
@@ -41,8 +37,7 @@ MARKETPLACE_IMPORT = "marketplace.import"
 SALES_HISTORY = "marketplace.sales_history"
 MARKETPLACE_PROMOTIONS = "marketplace.promotions"
 # The Bridge version that first declares each capability, and what it lets the web do.
-NEEDS = {"vendoo.drafts": ("0.2.55", "save Vendoo drafts"), MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"), VINTED_CHOICES: ("0.2.42", "read Vinted's choices"),
-         SELLWILD_ACCOUNT: ("0.2.43", "read your Sellwild account's choices"),
+NEEDS = {"vendoo.drafts": ("0.2.55", "save Vendoo drafts"), MARKETPLACE_ACTIONS: ("0.2.40", "list on this marketplace"),
          MARKETPLACE_SESSIONS: ("0.2.44", "check marketplace sign-in"),
          MARKETPLACE_IMPORT: ("0.2.53", "import your listings"),
          SALES_HISTORY: ("0.2.47", "read marketplace orders"),
@@ -51,8 +46,6 @@ NEEDS = {"vendoo.drafts": ("0.2.55", "save Vendoo drafts"), MARKETPLACE_ACTIONS:
 # Each command, and the capability the Bridge must declare to receive it.
 COMMANDS = {"job.vendoo_api": "vendoo.drafts", "marketplace.execute": MARKETPLACE_ACTIONS, "marketplace.result": MARKETPLACE_ACTIONS,
             "marketplace.delete": MARKETPLACE_ACTIONS, "job.cancel": MARKETPLACE_ACTIONS,
-            "marketplace.vinted_categories": VINTED_CHOICES, "marketplace.vinted_brands": VINTED_CHOICES,
-            "marketplace.sellwild_account": SELLWILD_ACCOUNT,
             "marketplace.sessions": MARKETPLACE_SESSIONS, "marketplace.connect": MARKETPLACE_SESSIONS,
             "marketplace.import.page": MARKETPLACE_IMPORT, "marketplace.import.listing": MARKETPLACE_IMPORT,
             "marketplace.sales_history": SALES_HISTORY,

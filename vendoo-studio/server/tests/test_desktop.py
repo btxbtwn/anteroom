@@ -65,7 +65,7 @@ class StudioWindowChromeTest(unittest.TestCase):
         self.assertEqual(icon.name, "AppIcon.png")
         self.assertEqual(kwargs["menu"], ["menu"])
         # Private mode wipes WebKit's website data at every window, which is what
-        # used to sign Vinted and Sellwild out on each launch.
+        # used to sign marketplaces out on each launch.
         self.assertFalse(kwargs["private_mode"])
 
     def test_studio_app_menu_includes_update_actions(self):

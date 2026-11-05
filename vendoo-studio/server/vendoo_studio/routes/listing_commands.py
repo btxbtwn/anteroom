@@ -14,7 +14,7 @@ from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 
 router = APIRouter(tags=["conversations"])
 
-_PUSHABLE = ("ebay", "poshmark", "etsy", "depop", "mercari", "vinted", "sellwild")
+_PUSHABLE = ("ebay", "poshmark", "etsy", "depop", "mercari")
 
 
 class SetPriceBody(BaseModel):

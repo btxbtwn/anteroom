@@ -19,7 +19,7 @@ Each marketplace has its own vocabulary. Filling the general `condition` into ma
 | **Poshmark** | New With Tags (NWT) · Like New · Good · Fair |
 | **Mercari** | New (New with tags) · Like new (New without tags) · Good (Gently used) · Fair (Used) · Poor (Major flaws) |
 | **Depop** | Brand new · Like new · Used - Excellent · Used - Good · Used - Fair |
-| Etsy / Facebook / Shopify / Vinted / Whatnot | No condition dropdown in this scrape |
+| Etsy / Facebook / Shopify / Whatnot | No condition dropdown in this scrape |
 
 Poshmark help text: NWT = tags/packaging; Like New = new without tags; Good = gently used; Fair = visible wear.
 
@@ -132,5 +132,4 @@ Material, occasion, and body fit appear after **Show Optional Fields**.
 |---|---|
 | **Facebook** | Delivery method: Shipping only. Shipping option: Use a prepaid shipping label |
 | **Shopify** | No condition dropdown. Location and Collections are account-specific |
-| **Vinted** | Direct listing uses `vinted_specifics.category` (Vinted's breadcrumb), not the general category |
 | **Whatnot** | Hazmat: No Hazardous Materials, Contains Hazardous Materials, Contains Lithium Batteries. Sales format: Buy It Now, Anytime Auction |

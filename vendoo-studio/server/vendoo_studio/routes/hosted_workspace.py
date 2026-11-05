@@ -92,7 +92,7 @@ def runtime(request: Request, db=Depends(get_seller_db, scope="function")):
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else [])
             + (['ebay_offers'] if offers is not None and not offers.done() else []),
-            'views': ['listings', 'analytics', 'settings', 'automations', 'assistant', 'marketplaces', 'sourcing'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy', 'vinted', 'sellwild'],
+            'views': ['listings', 'analytics', 'settings', 'automations', 'assistant', 'marketplaces', 'sourcing'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
             # eBay and Etsy list through their APIs, the rest through the seller's Chrome; a restart's held slot needs the job watchdog.
             'action_marketplaces': list(ACTION_MARKETPLACES) if watchdog is not None and not watchdog.done() else []}
 
@@ -549,37 +549,23 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
-async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'sellwild'],
+async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay'],
                               revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     from starlette.concurrency import run_in_threadpool
     from vendoo_studio.services.choice_lists import share
-    from vendoo_studio.services.native_editor import editor_form, web_sellwild_account
+    from vendoo_studio.services.native_editor import editor_form
     from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
-
-    # Sellwild's account choices come from the seller's own Chrome, read here on
-    # the event loop the relay runs on, before any query, so no transaction waits
-    # on Chrome. The builder then runs in a worker thread and checks the listing.
-    if marketplace == 'sellwild':
-        from vendoo_studio.services import saved_choices
-        from vendoo_studio.services.native_editor import sellwild_account_complete
-
-        # The saved copy answers at once; the refresh stays on this loop with the relay.
-        account = await saved_choices.kept('sellwild-account', '', web_sellwild_account,
-                                           usable=sellwild_account_complete, background=saved_choices.on_this_loop)
-    else:
-        account = None
 
     def load():
         # These canonical builders read verified catalogs and the owned
         # snapshot. Mercari also reads anonymous public shipping quotes, and
         # eBay reads its category schema and the seller's own policies with
-        # their connected account. Sellwild uses the account choices read above.
-        # No marketplace write runs.
+        # their connected account. No marketplace write runs.
         try:
             current = db.get(Listing, identity)
             if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
                 raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
-            return share(asyncio.run(editor_form(identity, marketplace, revision_id, db, sellwild_account=account)))
+            return share(asyncio.run(editor_form(identity, marketplace, revision_id, db)))
         except NativeMarketplaceError as error:
             raise HTTPException(error.status_code, str(error)) from None
     return await run_in_threadpool(load)

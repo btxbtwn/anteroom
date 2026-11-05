@@ -9,9 +9,7 @@ export const MARKETPLACE_NAMES: Record<string, string> = {
   depop: "Depop",
   facebook: "Facebook",
   shopify: "Shopify",
-  vinted: "Vinted",
   whatnot: "Whatnot",
-  sellwild: "Sellwild",
   vestiaire: "Vestiaire Collective",
   other: "Other / in person",
 };

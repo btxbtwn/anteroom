@@ -1,4 +1,4 @@
-const FORM_ORDER = ["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild"];
+const FORM_ORDER = ["ebay", "poshmark", "mercari", "depop", "etsy"];
 const DEFAULT_SELECTED = ["ebay", "etsy", "poshmark", "mercari", "depop"];
 
 /** The editor's tabs: General, then each marketplace the seller lists to that this app has a form for. */

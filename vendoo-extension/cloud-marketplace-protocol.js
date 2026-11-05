@@ -39,16 +39,13 @@
   // Marketplace commands the hosted API relays, already approved and confirmed there.
   const COMMANDS = new Set(['marketplace.execute', 'marketplace.result', 'marketplace.delete', 'job.cancel']);
   // The marketplaces the web reaches only through the seller's Chrome.
-  const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop', 'sellwild', 'vinted']);
+  const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop']);
   // Named commands other than marketplace actions, each with exactly the inputs it takes:
   // a maximum string length, the set of values allowed, or the pattern a value must match.
   const READS = {
-    'marketplace.sales_history': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted']), settled: 'order_ids' },
-    'marketplace.vinted_categories': {},
-    'marketplace.vinted_brands': { query: 100, category: 1000 },
-    'marketplace.sellwild_account': {},
+    'marketplace.sales_history': { marketplace: new Set(['depop', 'poshmark', 'mercari']), settled: 'order_ids' },
     'marketplace.sessions': {},
-    'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari', 'sellwild', 'vinted']) },
+    'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari']) },
     // Inventory import: a page of the seller's own active listings, or one of them.
     'marketplace.import.page': { marketplace: MARKETPLACES, cursor: 300 },
     'marketplace.import.listing': { marketplace: MARKETPLACES, listing_id: /^[a-z0-9][a-z0-9-]{0,200}$/ },

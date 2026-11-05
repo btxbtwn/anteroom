@@ -5,7 +5,6 @@ const MARKETPLACE_INSPECTION_PAGES = {
   mercari: 'https://www.mercari.com/mypage/listings/draft/action-required/',
   depop: 'https://www.depop.com/sellinghub/drafts/',
   etsy: 'https://www.etsy.com/your/shops/me/tools/listings',
-  sellwild: 'https://sellwild.com/sell',
 };
 
 async function inspectMarketplaceDocument(origin, requestedScript) {
@@ -16,7 +15,7 @@ async function inspectMarketplaceDocument(origin, requestedScript) {
   const publicScript = raw => {
     const url = new URL(raw);
     return url.protocol === 'https:' && /\.m?js$/.test(url.pathname) && (url.origin === origin
-      || ['.depop.com', '.mercari.com', '.mercdn.net', '.etsystatic.com', '.sellwild.com'].some(suffix => url.hostname.endsWith(suffix))
+      || ['.depop.com', '.mercari.com', '.mercdn.net', '.etsystatic.com'].some(suffix => url.hostname.endsWith(suffix))
       || (origin === 'https://poshmark.com' && url.hostname === 'd2gjrq7hs8he14.cloudfront.net'));
   };
   const sanitized = raw => { const url = new URL(raw); return `${url.origin}${url.pathname}`; };
@@ -46,14 +45,6 @@ async function inspectMarketplaceDocument(origin, requestedScript) {
   let authenticated = null;
   let apiStatus = null;
   let draftSchema = null;
-  if (origin === 'https://sellwild.com') {
-    try {
-      const response = await fetch('/api/auth/session', { credentials: 'include', signal: AbortSignal.timeout(8000) });
-      apiStatus = response.status;
-      const session = await response.json();
-      authenticated = Boolean(session.user);
-    } catch { /* Missing session evidence stays unknown. */ }
-  }
   if (origin === 'https://www.depop.com') {
     const cookie = String(document.cookie || '').split(';').map(value => value.trim()).find(value => value.startsWith('access_token='));
     if (!cookie) authenticated = false;
@@ -140,10 +131,6 @@ async function handleMarketplaceInspection(msg) {
       if (msg.payload.marketplace === 'depop') session = await depopApiAction('session', {
         listing: {}, deadline: Date.now() + 25000,
       });
-      if (msg.payload.marketplace === 'sellwild') {
-        const response = await fetch('https://sellwild.com/api/auth/session', { credentials: 'include', signal: AbortSignal.timeout(10000) });
-        session = { authenticated: response.ok && Boolean((await response.json()).user), status: response.status };
-      }
       if (msg.payload.marketplace === 'poshmark') {
         const jwt = cookies.find(cookie => cookie.name === 'jwt')?.value || '';
         let claims = {};

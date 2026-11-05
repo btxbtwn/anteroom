@@ -1,7 +1,7 @@
 """Notice sales on marketplaces that sign in through Chrome.
 
-eBay and Etsy push a sale through the relay. Depop, Poshmark, Mercari,
-Sellwild and Vinted are read from their own order history, with the amounts
+eBay and Etsy push a sale through the relay. Depop, Poshmark and Mercari
+are read from their own order history, with the amounts
 each reports (see ``order_history``): a listing that only looks sold is never
 a sale. Shops take turns, and the gap before the next check is between four
 and twelve minutes. Delisting the other marketplaces happens only when the
@@ -22,7 +22,7 @@ from vendoo_studio.services.user_settings import sale_detection_enabled
 
 log = logging.getLogger("vendoo_studio.chrome_sales")
 
-CHROME_MARKETS = ("poshmark", "mercari", "depop", "sellwild", "vinted")
+CHROME_MARKETS = ("poshmark", "mercari", "depop")
 POLL_INTERVAL_S = 30
 MIN_GAP_S = 4 * 60
 MAX_GAP_S = 12 * 60
@@ -32,8 +32,6 @@ _LISTING_ID = {
     "poshmark": re.compile(r"^[a-f0-9]{24}$"),
     "mercari": re.compile(r"^m\d{6,}$"),
     "depop": re.compile(r"^[a-z0-9][a-z0-9-]{0,200}$"),
-    "sellwild": re.compile(r"^\d{1,15}$"),
-    "vinted": re.compile(r"^\d{1,15}$"),
 }
 
 # An item opened in Anteroom reads its own listings at most this often per

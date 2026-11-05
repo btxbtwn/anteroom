@@ -222,34 +222,3 @@ test('Mercari reports an order whose amounts do not add up as unreadable', async
   const result = await read(c, 'mercari');
   assert.deepEqual([result.orders.length, result.unreadable], [0, 1]);
 });
-
-test('Sellwild records only charged transactions, never a listing marked sold', async () => {
-  const { c, calls } = worker({
-    '/api/transactions/seller': [200, { success: true, hasMore: false, transactions: [
-      { id: 9, listingId: 105190171, status: 5, price: '20', commissionAmount: 2, createdDate: '2026-10-01T00:00:00Z', buyer: { email: 'b@x.co' } },
-      { id: 10, listingId: 105190172, status: 1, price: '15' },
-    ] }],
-  });
-  const result = await read(c, 'sellwild');
-  assert.deepEqual(result.orders.map(order => [order.order_id, order.status, order.final, order.totals.item_revenue, order.totals.fees]),
-    [['9', 'paid', true, '20.00', '2.00']]);
-  assert.equal(JSON.stringify(result).includes('b@x.co'), false);
-  assert.equal(calls.some(call => /\/api\/listings\/\d+/.test(call.url)), false);
-});
-
-test('Vinted reports orders as unreadable until their format is confirmed', async () => {
-  const exp = Math.floor(Date.now() / 1000) + 3600;
-  const token = `x.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.y`;
-  const { c } = worker({ '/api/v2/my_orders': [200, { my_orders: [{ id: 1 }], pagination: { total_entries: 1 } }] },
-    { access_token_web: token });
-  assert.deepEqual(await read(c, 'vinted'), { ok: true, orders: [], more: false, unreadable: 1 });
-});
-
-test('Vinted with no sales returns an empty history successfully', async () => {
-  const exp = Math.floor(Date.now() / 1000) + 3600;
-  const token = `x.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.y`;
-  const { c, calls } = worker({ '/api/v2/my_orders': [200, { my_orders: [], pagination: { total_entries: 0 }, order_details_enabled: false }] },
-    { access_token_web: token });
-  assert.deepEqual(await read(c, 'vinted'), { ok: true, orders: [], more: false, unreadable: 0 });
-  assert.equal(calls.at(-1).options.headers.Accept, 'application/json');
-});

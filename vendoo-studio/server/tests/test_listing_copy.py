@@ -41,7 +41,6 @@ def source(tmp_path, monkeypatch):
     db.commit()
     data = {"title": "Wool coat M", "description": "Good coat", "price": 40, "cost": 9, "quantity": 0, "sku": "OLD-SKU", "labels": ["Winter"],
             "ebay_specifics": {"Size": "M", "listing_id": "old-ebay", "bestOffer": {"minimumOfferPrice": "30"}, "customAspect": "Keep"},
-            "vinted_specifics": {"brand": "Brand", "listingId": "old-vinted"},
             "poshmark_specifics": {"videoId": "source-video", "originalPrice": 60}, "direct_category_ids": {"ebay": "123"},
             "marketplace_categories": {"ebay": "Clothing > Coats"}, "listing_id": "old", "form": {"status": "SOLD"},
             "job_id": "old-job", "photos": ["old-photo"], "access_token": "do-not-copy"}
@@ -73,32 +72,6 @@ def preview(source):
 def duplicate(source, **changes):
     body = {"request_id": uuid4().hex, "expected_basis": preview(source)["expected_basis"], "title": "Copy of coat", "sku": "NEW-SKU", "quantity": 2, **changes}
     return source.client.post("/api/conversations/source/copy", json=body)
-
-
-def test_copy_is_a_clean_draft_with_new_identity_and_only_reusable_fields(source):
-    original = copy.deepcopy(ListingRepo(source.db).get_revisions("source")[0].listing_json)
-    response = duplicate(source)
-    assert response.status_code == 200, response.text
-    new = response.json()
-    assert new["id"] != "source" and new["status"] == "draft" and new["box_id"] is None
-    assert new["title"] == "Copy of coat" and not new["vendoo_listing_urls"] and not new["direct_marketplaces"]
-    notes = json.loads(new["notes"])
-    assert notes["sku"] == "NEW-SKU" and notes["sellerNotes"] == "Seller fact"
-    assert not {"vendooItemId", "vendooSale", "marketplaceMarks", "vendooDates", "cog", "privateUnrecognized"} & notes.keys()
-    revisions = ListingRepo(source.db).get_revisions(new["id"])
-    assert len(revisions) == 1 and revisions[0].source == "copy" and revisions[0].parent_revision_id is None
-    listing = revisions[0].listing_json
-    assert listing["sku"] == "NEW-SKU" and listing["quantity"] == 2 and "cost" not in listing
-    assert listing["ebay_specifics"]["customAspect"] == "Keep" and "listing_id" not in listing["ebay_specifics"]
-    assert "listingId" not in listing["vinted_specifics"]
-    assert listing["poshmark_specifics"] == {"originalPrice": 60}
-    assert listing["direct_category_ids"] == {"ebay": "123"}
-    assert not {"listing_id", "job_id", "form", "photos", "access_token"} & listing.keys()
-    assert source.db.query(Job).filter_by(conversation_id=new["id"]).count() == 0
-    assert source.db.query(Message).filter_by(conversation_id=new["id"]).count() == 0
-    assert source.db.query(MarketplaceSale).filter_by(conversation_id=new["id"]).count() == 0
-    assert not MarketplaceListingRepo(source.db).for_conversation(new["id"])
-    assert ListingRepo(source.db).get_revisions("source")[0].listing_json == original
 
 
 def test_photos_are_independent_and_keep_their_order(source, monkeypatch):

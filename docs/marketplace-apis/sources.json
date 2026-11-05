@@ -20,14 +20,6 @@
     ]
   },
   {
-    "file": "specs/vinted.yaml",
-    "url": "https://pro-docs.svc.vinted.com/downloads/api.yml",
-    "retrieved_at": "2026-10-31T03:56:00.423213+00:00",
-    "title": "Vinted Pro Integrations documentation",
-    "version": "v0.385.0",
-    "sha256": "fa13f02f1410bcdb9af2d2cbc849a5034222fdd897a73041a6ff039b481c8469"
-  },
-  {
     "file": "specs/ebay-inventory.json",
     "url": "https://developer.ebay.com/api-docs/master/sell/inventory/openapi/3/sell_inventory_v1_oas3.json",
     "retrieved_at": "2026-10-31T03:56:00.874313+00:00",

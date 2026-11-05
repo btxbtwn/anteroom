@@ -42,8 +42,7 @@ function nativeDraftUrl(platform, raw) {
     const url = new URL(raw);
     const valid = platform === 'mercari' ? url.origin === 'https://www.mercari.com' && /^\/sell\/draft\/[A-Za-z0-9_-]+\/$/.test(url.pathname)
       : platform === 'depop' ? url.origin === 'https://www.depop.com' && /^\/sellinghub\/drafts\/edit\/[A-Za-z0-9_-]{1,80}\/?$/.test(url.pathname)
-      : platform === 'poshmark' ? url.origin === 'https://poshmark.com' && /^\/edit-listing\/[a-f0-9]{24}$/.test(url.pathname) && !url.search && !url.hash
-      : platform === 'vinted' && url.origin === 'https://www.vinted.com' && /^\/items\/[1-9]\d{0,14}\/edit\/?$/.test(url.pathname);
+      : platform === 'poshmark' && url.origin === 'https://poshmark.com' && /^\/edit-listing\/[a-f0-9]{24}$/.test(url.pathname) && !url.search && !url.hash;
     return valid ? `${url.origin}${url.pathname}` : '';
   } catch { return ''; }
 }
@@ -105,8 +104,6 @@ function nativeRefusal(error) {
 }
 
 async function recoverNativeMarketplace(context) {
-  if (context.marketplace === 'vinted') return await runVintedNative({ payload: context }, true);
-  if (context.marketplace === 'sellwild') return await runSellwildNative({ payload: context }, true);
   if (context.marketplace === 'depop') return await runDepopNative({ payload: context }, true);
   if (context.marketplace === 'poshmark') return await runPoshmarkApi({ payload: context }, true);
   if (context.marketplace === 'mercari') return await runMercariNative({ payload: context }, true);
@@ -118,14 +115,12 @@ const NATIVE_UPDATE_LISTING = {
   poshmark: ['Poshmark', /^[a-f0-9]{24}$/],
   depop: ['Depop', /^[a-z0-9][a-z0-9-]{0,200}$/i],
   mercari: ['Mercari', /^m\d{6,}$/],
-  vinted: ['Vinted', /^[1-9]\d{0,14}$/],
-  sellwild: ['Sellwild', /^[1-9]\d{0,14}$/],
 };
 
 async function runNativeMarketplace(msg) {
   const p = msg.payload || {};
-  if (!['poshmark', 'mercari', 'depop', 'sellwild', 'vinted'].includes(p.marketplace)
-      || !({ sellwild: ['publish', 'update'], poshmark: ['list', 'update', 'save_draft'] }[p.marketplace] || ['save_draft', 'publish', 'update']).includes(p.action)) {
+  if (!['poshmark', 'mercari', 'depop'].includes(p.marketplace)
+      || !({ poshmark: ['list', 'update', 'save_draft'] }[p.marketplace] || ['save_draft', 'publish', 'update']).includes(p.action)) {
     return nativeRefusal('Unsupported marketplace action.');
   }
   if (p.action === 'list' && p.confirm !== true) return nativeRefusal('Confirm listing on this marketplace.');
@@ -133,12 +128,10 @@ async function runNativeMarketplace(msg) {
     const [name, pattern] = NATIVE_UPDATE_LISTING[p.marketplace];
     if (p.confirm !== true || !pattern.test(String(p.listing_id || ''))) return nativeRefusal(`Confirm updating the live ${name} listing.`);
   }
-  if (p.action === 'publish' && (p.confirm !== true || (p.marketplace !== 'sellwild' && !nativeDraftUrl(p.marketplace, p.draft_url)))) {
+  if (p.action === 'publish' && (p.confirm !== true || !nativeDraftUrl(p.marketplace, p.draft_url))) {
     return nativeRefusal('Confirm publishing an existing native draft.');
   }
   if (p.draft_url && !nativeDraftUrl(p.marketplace, p.draft_url)) return nativeRefusal('Invalid native draft link.');
-  if (p.marketplace === 'vinted') return await runVintedNative(msg);
-  if (p.marketplace === 'sellwild') return await runSellwildNative(msg);
   if (p.marketplace === 'depop') return await runDepopNative(msg);
   if (p.marketplace === 'poshmark') return await runPoshmarkApi(msg);
   return await runMercariNative(msg);

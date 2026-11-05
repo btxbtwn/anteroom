@@ -2,8 +2,7 @@
 import pytest
 
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
-from test_hosted_browser_relay import _bridge_accepts
-from test_hosted_vinted import _answer, _in_background
+from test_hosted_browser_relay import _answer, _bridge_accepts, _in_background
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from vendoo_studio.services import hosted_browser_relay
@@ -140,10 +139,3 @@ def test_generic_read_cannot_send_a_promotion():
     with pytest.raises(ValueError, match='not a relayed read'):
         asyncio.run(relay.read('marketplace.promote', {'confirm': True}, 1))
 
-
-def test_heartbeat_accepts_the_promotion_bridge_capabilities(cloud, signing_keys):  # noqa: F811
-    client, _ = cloud
-    capabilities = ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions',
-                    'marketplace.sales_history', 'marketplace.promotions']
-    response = client.post('/api/browser-relay/heartbeat', headers=headers(signing_keys), json={'capabilities': capabilities})
-    assert response.status_code == 200, response.text

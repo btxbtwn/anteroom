@@ -162,7 +162,7 @@ describe("marketplace form fields", () => {
   });
 
   it("never substitutes a Vendoo or reference form for a direct marketplace", () => {
-    for (const tab of ["ebay", "poshmark", "mercari", "depop", "sellwild"]) {
+    for (const tab of ["ebay", "poshmark", "mercari", "depop"]) {
       expect(fieldsForMarketplaceForm(listing, tab, undefined)).toEqual([]);
       expect(fieldsForMarketplaceForm(listing, tab, [{ marketplace: tab, known: true, category_id: "1", fields: [] }])).toEqual([]);
     }
@@ -232,27 +232,13 @@ describe("marketplace form fields", () => {
     const pants = { ...listing, title: "Anne Klein 8 Pants", department: "Women", size: "8", category_path: "Clothing > Women > Pants" };
     expect(fieldsForMarketplaceForm(pants, "etsy", [formFor("etsy", [["size", "Size"]])])
       .find((field) => field.key === "etsy_specifics.size")?.options).toEqual(expect.arrayContaining(["0", "8", "24"]));
-    expect(fieldsForMarketplaceForm(pants, "vinted", [formFor("vinted", [["size", "Size"]])])
-      .find((field) => field.key === "vinted_specifics.size")?.options)
-      .toEqual(expect.arrayContaining(["S / 8", "XXL / 24", "XXS / 0"]));
     // A direct marketplace's own form is shown as it came: no reference choices, no extra rows.
-    for (const tab of ["ebay", "poshmark", "mercari", "depop", "sellwild"]) {
+    for (const tab of ["ebay", "poshmark", "mercari", "depop"]) {
       const fields = fieldsForMarketplaceForm(pants, tab, [formFor(tab, [["size", "Size"]], true)]);
       expect(fields.map((field) => [field.key, field.options])).toEqual([[`${tab}_specifics.size`, []]]);
     }
   });
 
-  it("keeps Vinted's own category row instead of the shared category path", () => {
-    const item = {
-      ...listing,
-      category_path: "Clothing, Shoes & Accessories > Women > Women's Clothing > Pants",
-      vinted_specifics: { category: "Women > Clothing > Trousers & leggings > Wide-leg trousers" },
-    };
-    const fields = fieldsForMarketplaceForm(item, "vinted", undefined);
-    const category = fields.filter((field) => field.label.replace(/\s*\*$/, "") === "Category");
-    expect(category).toHaveLength(1);
-    expect(category[0].key).toBe("vinted_specifics.category");
-  });
 
   it("shows a marketplace's own controls until its category schema arrives", () => {
     const etsy = fieldsForMarketplaceForm({
@@ -275,10 +261,8 @@ describe("marketplace form fields", () => {
       mercari_specifics: { holiday: "Christmas" },
       depop_specifics: { holiday: "Christmas" },
       etsy_specifics: { holiday: "Christmas" },
-      sellwild_specifics: { holiday: "Christmas" },
-      vinted_specifics: { holiday: "Christmas" },
     };
-    for (const tab of ["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted"]) {
+    for (const tab of ["ebay", "poshmark", "mercari", "depop", "etsy"]) {
       const forms: MarketplaceForm[] = [{
         marketplace: tab,
         category_id: "11483",
@@ -296,7 +280,7 @@ describe("marketplace form fields", () => {
       expect(labels, tab).toContain("Material");
       expect(labels, tab).not.toContain("Holiday");
       expect(labels, tab).not.toContain("SKU");
-      if (tab === "ebay" || tab === "etsy" || tab === "poshmark" || tab === "mercari" || tab === "sellwild") {
+      if (tab === "ebay" || tab === "etsy" || tab === "poshmark" || tab === "mercari") {
         expect(labels, tab).not.toContain("Package Weight (oz)");
       }
       const material = fields.find((field) => field.label.startsWith("Material"));

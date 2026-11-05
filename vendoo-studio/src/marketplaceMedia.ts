@@ -7,7 +7,7 @@ import type { ListingVideoRules } from "./api/listingVideos";
 import { cloneListing } from "./listingPaths";
 
 /** The marketplaces with a direct form and photos of their own. */
-export const MEDIA_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"]);
+export const MEDIA_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari", "depop"]);
 
 export interface FormPhotos {
   /** What the marketplace is sent, in order, before its limit. */

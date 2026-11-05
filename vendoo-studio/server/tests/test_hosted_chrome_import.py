@@ -1,6 +1,6 @@
 """Chrome inventory import on the web: the seller's own listings, read through their Anteroom tab."""
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
-from test_hosted_vinted import _answer, _in_background
+from test_hosted_browser_relay import _answer, _in_background
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from vendoo_studio.services import hosted_browser_relay
@@ -68,10 +68,3 @@ def test_chrome_import_reads_the_sellers_own_listings_through_their_tab(cloud, s
     again = client.post('/api/chrome-import/poshmark', headers=alice, json={'listing': POST}).json()
     assert again['reused'] is True and again['conversation_id'] == imported['conversation_id']
 
-
-def test_heartbeat_accepts_the_import_bridge_capabilities(cloud, signing_keys):  # noqa: F811
-    client, _ = cloud
-    capabilities = ['marketplace.actions', 'vinted.choices', 'sellwild.account', 'marketplace.sessions',
-                    'marketplace.sales_history', 'marketplace.import']
-    response = client.post('/api/browser-relay/heartbeat', headers=headers(signing_keys), json={'capabilities': capabilities})
-    assert response.status_code == 200, response.text

@@ -30,9 +30,8 @@ from vendoo_studio.services.api_job_lock import start_gate
 
 MAX_ITEMS = 100
 Action = Literal["list", "delist", "relist", "update", "not_listed"]
-Name = Literal["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"]
-NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop",
-         "sellwild": "Sellwild", "vinted": "Vinted"}
+Name = Literal["ebay", "etsy", "poshmark", "mercari", "depop"]
+NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
 # Items with a bulk action in flight. List and Update run several items at
 # once and take turns on each marketplace; any other action holds "*" alone.
 SIDE_BY_SIDE_ACTIONS = frozenset({"list", "update"})

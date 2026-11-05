@@ -429,15 +429,7 @@ Before outputting ANY listing, verify:
 - Condition is required and uses Mercari labels (see `vendoo-dropdown-options.md`)
 - shippingLabel must be `USPS Ground Advantage`
 
-**Sellwild:**
-- Fields come from the marketplace form Anteroom supplies; put answers in `sellwild_specifics`
 
-- Condition follows the general condition; do not set it per marketplace
-
-**Vinted (direct listing):**
-- Put Vinted's own catalog breadcrumb in `vinted_specifics.category`, such as `Women > Clothing > Jeans > Straight jeans`. Do not copy that breadcrumb into `marketplace_categories.vinted`.
-- Condition, brand, size, color, package size, and material go in `vinted_specifics` when the photos or seller notes support them
-- Listing on Vinted saves a draft, then publishes only after the seller confirms List. Do not publish or delist
 
 ## Examples
 

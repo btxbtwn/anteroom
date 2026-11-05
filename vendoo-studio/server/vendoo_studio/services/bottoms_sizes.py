@@ -2,8 +2,7 @@
 
 The general size for men's bottoms stays the waist. The inseam and the size
 each marketplace actually accepts live on that marketplace's form. A
-marketplace whose form has no size or size type field (Sellwild has neither,
-Vinted has no size type) gets none.
+marketplace whose form has no size or size type field gets none.
 """
 
 from __future__ import annotations
@@ -49,13 +48,6 @@ DEPOP_MEN = [str(n) for n in range(26, 45)] + ["Other"]
 DEPOP_GROUPING = ["Petite", "Plus size", "Tall", "Maternity"]
 ETSY_WAISTS = [str(n) for n in range(26, 51)]
 ETSY_COMBINED = [f"{waist}x{inseam}" for waist in range(28, 45) for inseam in (28, 30, 32, 34)]
-# Vinted's US women's buttons read "S / 8". Men's jeans buttons are the waist.
-VINTED_WOMEN = {
-    "00": "XXXS", "0": "XXS / 0", "2": "XS / 2", "4": "XS / 4", "6": "S / 6", "8": "S / 8",
-    "10": "M / 10", "12": "M / 12", "14": "L / 14", "16": "L / 16", "18": "XL / 18",
-    "20": "XL / 20", "22": "XXL / 22", "24": "XXL / 24",
-}
-VINTED_MEN = [str(n) for n in range(26, 51)] + [f"W{n}" for n in range(26, 51)]
 
 _FIT = {
     "p": "Petite", "petite": "Petite", "petites": "Petites",
@@ -233,10 +225,6 @@ def _targets(listing: dict, parsed: dict[str, str]) -> dict[str, str]:
     etsy = parsed["numeric"] if kind == "women" and parsed["numeric"] else parsed["waist"]
     if etsy:
         targets["etsy_specifics.size"] = etsy
-    if kind == "women" and parsed["numeric"] in VINTED_WOMEN:
-        targets["vinted_specifics.size"] = VINTED_WOMEN[parsed["numeric"]]
-    elif parsed["waist"]:
-        targets["vinted_specifics.size"] = parsed["waist"]
     return {path: value for path, value in targets.items() if value}
 
 

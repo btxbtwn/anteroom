@@ -18,17 +18,8 @@ from vendoo_studio.services.chrome_listing import (
 from vendoo_studio.services.direct_preflight import Context
 from vendoo_studio.services.ebay_listings import requirements as ebay_requirements
 from vendoo_studio.services.etsy_listings import requirements as etsy_requirements
-from vendoo_studio.services.sellwild_listing import suggest_sellwild
 
 
-class SellwildConditionTest(unittest.TestCase):
-    def test_excellent_is_like_new_and_good_is_good(self):
-        self.assertEqual(suggest_sellwild({"condition": "Pre-Owned - Excellent"})["condition_id"], 4)
-        self.assertEqual(suggest_sellwild({"condition": "Pre-Owned - Good"})["condition_id"], 3)
-        self.assertEqual(suggest_sellwild({"condition": "Pre-Owned"})["condition_id"], 2)
-        self.assertEqual(suggest_sellwild({
-            "condition": "Pre-Owned - Excellent", "sellwild_specifics": {"nativeConditionId": "2"},
-        })["condition_id"], 2)
 
 
 class ChromePreflightTest(unittest.TestCase):
@@ -38,7 +29,7 @@ class ChromePreflightTest(unittest.TestCase):
         listing = {"title": "Vintage dress pants", "description": "Vintage dress pants", "price": 20,
                    "etsy_specifics": {"who_made": "Someone else", "what_is": "A finished product",
                                       "when_made": "Before 2007 (Vintage)"}}
-        for market in ("ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"):
+        for market in ("ebay", "etsy", "poshmark", "mercari", "depop"):
             with self.subTest(market=market):
                 found = blocking(gaps(listing, market, Context()))
                 self.assertTrue(any("categor" in item["field"].lower() for item in found), found)

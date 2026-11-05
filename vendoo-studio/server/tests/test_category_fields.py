@@ -415,13 +415,13 @@ class ListingFieldsRouteTest(unittest.TestCase):
     def test_a_category_with_no_cached_schema_is_marked_unknown(self):
         from vendoo_studio.services import category_fields as cf
 
-        with mock.patch.object(cf, "listing_category_ids", return_value={"vinted": "9"}), \
+        with mock.patch.object(cf, "listing_category_ids", return_value={"depop": "menswear_tshirts"}), \
                 mock.patch.object(cf, "load_fields", return_value=None), \
                 mock.patch("vendoo_studio.repositories.queries.ConversationRepo.get", return_value=object()), \
                 mock.patch("vendoo_studio.repositories.queries.ListingRepo.latest_revision", return_value=None):
             body = TestClient(app).get("/api/conversations/c1/vendoo-api/fields").json()
         self.assertEqual(body["forms"][0]["known"], False)
-        self.assertEqual(body["forms"][0]["fields"], [])
+        self.assertEqual(body["forms"][0]["marketplace"], "depop")
 
     def test_vendoo_fields_do_not_inject_a_direct_mercari_size_catalog(self):
         from vendoo_studio.services import category_fields as cf

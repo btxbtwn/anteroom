@@ -42,7 +42,6 @@ function textOf(value: unknown): string {
  * Price, brand, condition and the other saved values are not part of it.
  */
 export function nativeFormCategoryKey(listing: ListingData | undefined, marketplace: string): string {
-  if (marketplace === "sellwild") return textOf(asRecord(listing?.sellwild_specifics).nativeCategoryId);
   // The tab's own category only. Imported category ids are historical values.
   return textOf(asRecord(listing?.direct_category_ids)[marketplace]);
 }
@@ -75,7 +74,7 @@ export function categorySpecificFieldsStale(
   return String(loadedCategoryId || "") !== categoryKey;
 }
 
-const CATEGORY_MARKETS = ["ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild"];
+const CATEGORY_MARKETS = ["ebay", "poshmark", "mercari", "depop", "etsy"];
 
 
 /** Every saved category id. A price or brand edit does not change it. */
@@ -89,7 +88,6 @@ export function listingCategorySignature(listing: ListingData | undefined): stri
     textOf(paths[market]),
     market === "depop" ? textOf(asRecord(listing?.depop_specifics).categoryId) : "",
     market === "ebay" ? textOf(asRecord(listing?.ebay_specifics).categoryId) : "",
-    market === "sellwild" ? textOf(asRecord(listing?.sellwild_specifics).nativeCategoryId) : "",
   ].join(":")).join("\n");
 }
 
@@ -135,8 +133,6 @@ function shownChoice(
   return field?.optionValues?.[shown] ?? shown;
 }
 
-/** Sellwild's packages that are not flat rate, so its page still asks for a weight. */
-const SELLWILD_WEIGHED_PACKAGES = new Set(["USPS_SoftPack", "USPS_IrregularParcel"]);
 
 const EBAY_AUCTION_PRICE_KEYS = new Set([
   "ebay_specifics.auctionStartPrice",
@@ -175,13 +171,6 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
   if (context.categoryStale && field.categorySpecific) return false;
   if (field.key === "depop_specifics.worldwideShipping.price") {
     return shownChoice(context.fields, context.local, context.listing, "depop_specifics.worldwideShipping.enabled") === "true";
-  }
-  if (field.key.startsWith("sellwild_specifics.package.")) {
-    // Sellwild's page: Custom Package Dimensions asks for weight and all three sides,
-    // a package that is not flat rate asks for weight only, a flat-rate one for neither.
-    const template = shownChoice(context.fields, context.local, context.listing, "sellwild_specifics.parcelTemplate");
-    if (!template) return true;
-    return field.key === "sellwild_specifics.package.weight" && SELLWILD_WEIGHED_PACKAGES.has(template);
   }
   // Mercari shows the label, its package questions and the free-shipping choice only with Prepaid label.
   // It asks for the sides, or lets you skip them, only once the item does not fit in a shoebox,

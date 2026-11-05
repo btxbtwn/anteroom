@@ -2,11 +2,8 @@ const MARKETPLACE_SIGN_IN = {
   depop: 'https://www.depop.com/sellinghub/drafts/',
   poshmark: 'https://poshmark.com/feed',
   mercari: 'https://www.mercari.com/mypage/',
-  sellwild: 'https://sellwild.com/',
-  // Unsigned visitors are sent to Vinted's sign-in and returned to orders.
-  vinted: 'https://www.vinted.com/my_orders',
 };
-const EXTENSION_SESSION_MARKETS = ['depop', 'poshmark', 'mercari', 'sellwild', 'vinted'];
+const EXTENSION_SESSION_MARKETS = ['depop', 'poshmark', 'mercari'];
 const SESSION_EXPIRING_MS = 24 * 60 * 60 * 1000;
 
 // Cookie and token values stay in Chrome. Callers receive only this summary.
@@ -78,80 +75,12 @@ async function readMercariSession(now = Date.now()) {
   return publicExtensionSession(true, soonestExpiry(null, session.accessToken), { name: session.user.name }, now);
 }
 
-async function readSellwildSession(now = Date.now()) {
-  let response;
-  try {
-    response = await fetch('https://sellwild.com/api/auth/session', {
-      credentials: 'include', signal: AbortSignal.timeout(10000),
-    });
-  } catch {
-    return unknownExtensionSession();
-  }
-  if (response.status === 401 || response.status === 403) return publicExtensionSession(false, null, null, now);
-  if (!response.ok) return unknownExtensionSession();
-  let body = {};
-  try { body = await response.json(); } catch { return unknownExtensionSession(); }
-  const user = body?.user || null;
-  let expiresAt = null;
-  try {
-    const cookies = await chrome.cookies.getAll({ url: 'https://sellwild.com/' });
-    const expirations = (Array.isArray(cookies) ? cookies : [])
-      .filter(cookie => /session|auth/i.test(cookie.name || '') && !cookie.session && Number.isFinite(cookie.expirationDate))
-      .map(cookie => Math.floor(cookie.expirationDate));
-    if (expirations.length) expiresAt = Math.min(...expirations);
-  } catch { /* expiry is optional; the session response decides signed-in */ }
-  return publicExtensionSession(Boolean(user), expiresAt, user, now);
-}
-
-// A positive account id with a public login. Anonymous browsing also holds
-// access_token_web, and that response has neither.
-function vintedLogin(user) {
-  const login = typeof user?.login === 'string' ? user.login.trim() : '';
-  if (!login || login.length > 80 || /[\u0000-\u001f]/.test(login)) return '';
-  const id = user?.id;
-  const account = typeof id === 'number' ? id : typeof id === 'string' && /^[1-9]\d*$/.test(id) ? Number(id) : 0;
-  return account > 0 ? login : '';
-}
-
-// Vinted's access token is an hour and its refresh token a week. Renew the
-// hour before reporting, then show the week the sign-in really lasts.
-async function readVintedSession(now = Date.now()) {
-  const currentUser = async () => {
-    const response = await fetch('https://www.vinted.com/api/v2/users/current', {
-      credentials: 'include', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000),
-    });
-    if (response.status === 401 || response.status === 403) return { signedOut: true };
-    if (!response.ok) return { unknown: true };
-    try { return { body: await response.json() }; } catch { return { unknown: true }; }
-  };
-  let renewalTried = true;  // a refused renewal counts: it was already tried
-  try { renewalTried = await vintedKeepSignedIn(now + 15000); } catch { /* the current-user answer decides */ }
-  let answer;
-  try { answer = await currentUser(); } catch { return unknownExtensionSession(); }
-  if (answer.signedOut) {
-    if (renewalTried) return publicExtensionSession(false, null, null, now);
-    try { await vintedKeepSignedIn(now + 15000, { force: true }); } catch { return publicExtensionSession(false, null, null, now); }
-    try { answer = await currentUser(); } catch { return unknownExtensionSession(); }
-    if (answer.signedOut) return publicExtensionSession(false, null, null, now);
-  }
-  if (answer.unknown || !answer.body) return unknownExtensionSession();
-  const login = vintedLogin(answer.body?.user);
-  let expiresAt = null;
-  if (login) {
-    const refresh = await vintedTokenCookie('refresh_token_web');
-    const until = Number(refresh.cookie?.expirationDate);
-    expiresAt = Number.isFinite(until) ? Math.floor(until) : null;
-  }
-  return publicExtensionSession(Boolean(login), expiresAt, login ? { username: login } : null, now);
-}
 
 async function readExtensionSession(marketplace, now = Date.now()) {
   try {
     if (marketplace === 'depop') return await cookieSession('https://www.depop.com/', 'access_token');
     if (marketplace === 'poshmark') return await cookieSession('https://poshmark.com/', 'jwt');
     if (marketplace === 'mercari') return await readMercariSession(now);
-    if (marketplace === 'sellwild') return await readSellwildSession(now);
-    if (marketplace === 'vinted') return await readVintedSession(now);
   } catch { /* one marketplace failing must not blank the others */ }
   return unknownExtensionSession();
 }
@@ -221,7 +150,6 @@ async function handleMarketplaceConnect(msg, reply = result => sendBrowserResult
 // because the likers list is fetched rather than posted.
 const MARKETPLACE_RECORD_START = {
   mercari: 'https://www.mercari.com/sell/',
-  sellwild: 'https://sellwild.com/sell',
 };
 const MARKETPLACE_OFFER_RECORD_START = {
   mercari: 'https://www.mercari.com/mypage/listings/active/',

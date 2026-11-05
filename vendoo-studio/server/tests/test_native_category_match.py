@@ -6,7 +6,6 @@ import unittest
 
 from vendoo_studio.services import depop_form, mercari_form, poshmark_form
 from vendoo_studio.services.native_category_match import match_row, native_rows
-from vendoo_studio.services.sellwild_listing import sellwild_catalog
 
 C = "Clothing, Shoes & Accessories"
 # General category -> the option each form should show. None means no option
@@ -14,74 +13,74 @@ C = "Clothing, Shoes & Accessories"
 EXPECTED = {
     f"{C} > Men > Men's Clothing > Shirts > T-Shirts": {
         "poshmark": "Men > Shirts > None", "depop": "Men > Tops > T-shirts",
-        "mercari": "Men > Tops > T-shirts", "sellwild": "Fashion > Tops & Shirts",
+        "mercari": "Men > Tops > T-shirts",
     },
     f"{C} > Women > Women's Clothing > Dresses": {
         "poshmark": "Women > Dresses > None", "depop": "women > dresses > Dresses",
-        "mercari": "Women > Dresses > Other", "sellwild": "Fashion > Dresses",
+        "mercari": "Women > Dresses > Other",
     },
     f"{C} > Women > Women's Clothing > Tops": {
         "poshmark": "Women > Tops > None", "depop": "Women > Tops > Other",
-        "mercari": "Women > Tops & blouses > Other", "sellwild": "Fashion > Tops & Shirts",
+        "mercari": "Women > Tops & blouses > Other",
     },
     f"{C} > Men > Men's Clothing > Jeans": {
         "poshmark": "Men > Jeans > None", "depop": "men > bottoms > Jeans",
-        "mercari": "Men > Jeans > Other", "sellwild": "Fashion > Pants & Jeans",
+        "mercari": "Men > Jeans > Other",
     },
     f"{C} > Men > Men's Shoes > Athletic Shoes": {
         "poshmark": "Men > Shoes > Athletic Shoes", "depop": "men > footwear > Sneakers",
-        "mercari": "Men > Shoes > Fashion sneakers", "sellwild": "Fashion > Sneakers",
+        "mercari": "Men > Shoes > Fashion sneakers",
     },
     f"{C} > Women > Women's Shoes > Heels": {
         "poshmark": "Women > Shoes > Heels", "depop": None,
-        "mercari": "Women > Shoes > Heels", "sellwild": "Fashion > Heels",
+        "mercari": "Women > Shoes > Heels",
     },
     f"{C} > Women > Women's Bags & Handbags": {
         "poshmark": "Women > Bags > None", "depop": "women > accessories > Bags",
-        "mercari": "Women > Women's handbags > Other", "sellwild": "Fashion > Handbags & Purses",
+        "mercari": "Women > Women's handbags > Other",
     },
     f"{C} > Men > Men's Clothing > Coats, Jackets & Vests": {
         "poshmark": "Men > Jackets & Coats > None", "depop": "men > coats and jackets > Other",
-        "mercari": "Men > Coats & jackets > Other", "sellwild": "Fashion > Coats & Jackets",
+        "mercari": "Men > Coats & jackets > Other",
     },
     f"{C} > Women > Women's Clothing > Sweaters": {
         "poshmark": "Women > Sweaters > None", "depop": "Women > Tops > Sweaters",
-        "mercari": "Women > Sweaters > Other", "sellwild": "Fashion > Sweaters & Hoodies",
+        "mercari": "Women > Sweaters > Other",
     },
     f"{C} > Women > Women's Clothing > Skirts": {
         "poshmark": "Women > Skirts > None", "depop": "women > bottoms > Skirts",
-        "mercari": "Women > Skirts > Other", "sellwild": "Fashion > Skirts",
+        "mercari": "Women > Skirts > Other",
     },
     f"{C} > Women > Women's Clothing > Jumpsuits & Rompers": {
         "poshmark": "Women > Pants & Jumpsuits > Jumpsuits & Rompers", "depop": "women > jumpsuits and rompers > Other",
-        "mercari": "Women > Dresses > Jumpsuits & Rompers", "sellwild": None,
+        "mercari": "Women > Dresses > Jumpsuits & Rompers",
     },
     f"{C} > Men > Men's Clothing > Shirts > Casual Button-Down Shirts": {
         "poshmark": "Men > Shirts > Casual Button Down Shirts", "depop": "Men > Tops > Shirts",
-        "mercari": "Men > Tops > Button-front", "sellwild": "Fashion > Tops & Shirts",
+        "mercari": "Men > Tops > Button-front",
     },
     f"{C} > Men > Men's Accessories > Hats": {
         "poshmark": "Men > Accessories > Hats", "depop": "men > accessories > Hats and caps",
-        "mercari": "Men > Men's accessories > Hats", "sellwild": "Fashion > Hats",
+        "mercari": "Men > Men's accessories > Hats",
     },
     f"{C} > Kids > Girls > Girls' Clothing (Sizes 4 & Up) > Dresses": {
         "poshmark": "Kids > Dresses > None", "depop": "kids > dresses > Dresses",
-        "mercari": "Kids > Girls dresses > Girls (4+)", "sellwild": "Fashion > Dresses",
+        "mercari": "Kids > Girls dresses > Girls (4+)",
     },
     f"{C} > Kids > Boys > Boys' Clothing (Sizes 4 & Up) > Tops, Shirts & T-Shirts": {
         "poshmark": "Kids > Shirts & Tops > None", "depop": None,
-        "mercari": "Kids > Boys tops & t-shirts > Boys (4+)", "sellwild": "Fashion > Tops & Shirts",
+        "mercari": "Kids > Boys tops & t-shirts > Boys (4+)",
     },
     "Video Games & Consoles > Video Games": {
         "poshmark": "Electronics > Video Games & Consoles > Video Games", "depop": None,
-        "mercari": "Electronics > Video games & consoles > Games", "sellwild": "Electronics > Video Games",
+        "mercari": "Electronics > Video games & consoles > Games",
     },
     "Cameras & Photo > Film Photography > Film Cameras": {
         "poshmark": "Electronics > Cameras, Photo & Video > None",
         "mercari": "Electronics > Cameras & photography > Film & Polaroid Cameras",
     },
     f"{C} > Specialty > Vintage > Men's Vintage Clothing > T-Shirts": {
-        "poshmark": None, "depop": "Men > Tops > T-shirts", "mercari": "Men > Tops > T-shirts", "sellwild": None,
+        "poshmark": None, "depop": "Men > Tops > T-shirts", "mercari": "Men > Tops > T-shirts",
     },
 }
 
@@ -93,7 +92,6 @@ def dropdown_options() -> dict[str, set[str]]:
         "poshmark": set(poshmark["option_values"].values()),
         "depop": {row["id"] for row in depop_form.catalog()["categories"]},
         "mercari": {row["id"] for row in mercari_form.categories()},
-        "sellwild": {str(row["id"]) for row in sellwild_catalog()["categories"]},
     }
 
 

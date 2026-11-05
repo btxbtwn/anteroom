@@ -97,7 +97,6 @@ Bridge 0.2.39 adds a strictly bounded read-only General-field payload and native
 form response for Poshmark previews. The original connection protocol remains
 unchanged; no cloud credential is added. See [form previews](cloud-marketplace-forms.md).
 
-
 ## Which Bridge may run marketplace actions
 
 The Bridge reports what it can run when it connects, both to the Mac app
@@ -147,10 +146,7 @@ update message.
 ## Marketplace reads from the web (Bridge 0.2.42)
 
 Some marketplace forms need choices only the seller's own account can read.
-The Mac reads Vinted's categories and brands in its private account window; the
 web reads them in the seller's Chrome. The hosted API queues a named read
-(`marketplace.vinted_categories`, `marketplace.vinted_brands`) on the same
-relay, with its own capability, `vinted.choices`, so an older Bridge is
 asked to update instead of being sent a command it cannot run. Each later read
 gets its own capability name (`NEEDS` in `hosted_browser_relay.py`). A read carries
 no job and only the inputs listed for it in `docs/json-contract.md`; the
@@ -159,8 +155,6 @@ answers with the choices or one fixed error code, never the marketplace's own
 response, headers or cookies. Reads are GETs on the marketplace's own sell-page
 endpoints and do not claim the listing-action lock.
 
-Bridge 0.2.43 adds `marketplace.sellwild_account` under `sellwild.account`: the
-three GETs Sellwild's sell page makes for the Shipping From card, the seller's
 discounts and the profile's package, returned as those three values only.
 
 Bridge 0.2.44 adds `marketplace.sessions` and `marketplace.connect` under the
@@ -176,8 +170,6 @@ Bridge 0.2.46 removes Facebook: the `marketplace.listing_state` command and the
 reused.
 
 Bridge 0.2.47 adds `marketplace.sales_history`. The seller's connected tab can
-read Depop, Poshmark, Mercari and Sellwild order histories and available amounts.
-Vinted orders remain unreadable until their response format is verified. The
 command accepts one supported marketplace and at most 2,000 settled order IDs;
 it returns normalized order lines without buyer details or credentials.
 Reads preserve seller corrections and frozen Vendoo history. A partial or
@@ -187,7 +179,6 @@ Bridge 0.2.53 adds `marketplace.import.page` and `marketplace.import.listing`
 under `marketplace.import`, for the Chrome inventory import on a marketplace's
 page on the web. They are the reads the Mac's import makes: a page of the
 seller's own active listings, or one listing checked against the signed-in
-account. Each takes one of Poshmark, Mercari, Depop, Sellwild or Vinted, and
 only a cursor or a listing id. A refusal carries the Bridge's own sentence and
 code, as the Mac shows it, never the marketplace's response. Nothing on the
 marketplace changes.

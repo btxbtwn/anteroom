@@ -13,14 +13,12 @@ import "../ebay/ebay.css";
 import { useWorkspaceRuntime } from "../../app/runtime";
 
 /** Marketplaces Studio reaches through the seller's signed-in Chrome rather than a direct API connection. */
-export type ChannelMarketplace = "poshmark" | "mercari" | "depop" | "sellwild" | "vinted";
+export type ChannelMarketplace = "poshmark" | "mercari" | "depop";
 
 const CHANNEL_URLS: Record<ChannelMarketplace, string> = {
   poshmark: "https://poshmark.com",
   mercari: "https://www.mercari.com",
   depop: "https://www.depop.com",
-  sellwild: "https://sellwild.com",
-  vinted: "https://www.vinted.com",
 };
 
 /** One marketplace's workspace, laid out like eBay's: a channel heading, its sales dashboard, then import. */

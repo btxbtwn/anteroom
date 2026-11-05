@@ -154,7 +154,7 @@ describe("marketplaces section", () => {
   it("shows one row per marketplace in a fixed order with a status", () => {
     const html = render({});
     const names = [...html.matchAll(/<li aria-label="([^"]+)"/g)].map((match) => match[1]);
-    expect(names).toEqual(["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]);
+    expect(names).toEqual(["eBay", "Etsy", "Poshmark", "Mercari", "Depop"]);
     expect(html).not.toContain("Facebook");
     expect(row(html, "eBay")).toContain("Not listed");
     // Ordinary "not listed" stays in the row for assistive tech, not as a second line on every marketplace.
@@ -193,27 +193,8 @@ describe("marketplaces section", () => {
     expect(row(html, "Mercari")).toContain('role="status"');
     expect(html).toContain("Check result");
     expect(html).not.toContain("Publish…");
-    const vinted = render({ vinted: { state: "unknown", revision_id: "current", error: "Check before trying again." } }, {}, { selected: "vinted" });
-    expect(row(vinted, "Vinted")).toContain("Unconfirmed");
-    expect(vinted).toContain("Check result");
-    expect(vinted).toContain("Paste the link if one was created");
-    expect(vinted).toContain("Check link");
-    expect(vinted).not.toContain("does not save a draft");
-    expect(vinted).not.toContain("Save draft");
-    expect(vinted).not.toContain("Publish…");
-    expect(enabledButton(render({}, {}, { selected: "vinted" }), "List…")).toBe(true);
   });
 
-  it("uses the Sellwild form selections and allows listing when its category is missing", () => {
-    const html = render({}, {}, { selected: "sellwild" });
-    expect(html).not.toContain(">Change</button>");
-    expect(html).not.toContain('aria-label="Sellwild category"');
-    expect(enabledButton(html, "List…")).toBe(true);
-    const unmatched = render({}, {}, { selected: "sellwild", preflight: { marketplaces: { sellwild: { ready: false,
-      gaps: [{ field: "sellwild_specifics.nativeCategoryId", message: "Choose a Sellwild category.", blocking: true }] } } } });
-    expect(enabledButton(unmatched, "List…")).toBe(true);
-    expect(unmatched).toContain("Choose a Sellwild category.");
-  });
 
   it("asks for Etsy's shop defaults in Settings instead of per listing", () => {
     const html = render({}, {}, { selected: "etsy" });
@@ -230,12 +211,6 @@ describe("marketplaces section", () => {
     expect(html).not.toContain("Ask chat");
   });
 
-  it("shows Vinted's field-specific rejection alongside the failed action", () => {
-    const html = render({ vinted: { state: "unknown", error: "Vinted refused the request (HTTP 400).",
-      marketplace_message: "title: Title contains too many capital letters, try using lowercase letters. Sorry, there are some errors" } },
-    {}, { selected: "vinted" });
-    expect(html).toContain("Vinted said: title: Title contains too many capital letters, try using lowercase letters.");
-  });
 
   it("shows progress and Cancel while a List runs, and offers Check or Reset once it is unconfirmed", () => {
     const running = render({ mercari: { state: "publishing", running: true, progress: { step: "publish", label: "Publishing", index: 1, total: 2 } } },
@@ -275,11 +250,11 @@ describe("marketplaces section", () => {
   });
 
   it("says what a reconnect found instead of leaving the last refusal as the answer", () => {
-    expect(reconnectText("Vinted", { ok: true, signed_in: true, state: "signed_in", label: "betwixtandbetween" }))
-      .toBe("Vinted is connected as betwixtandbetween. Press List… again to list this item.");
-    expect(reconnectText("Vinted", { ok: true, signed_in: false, state: "signed_out" }))
-      .toContain("Vinted still needs a sign-in");
-    expect(reconnectText("Vinted", undefined)).toBeNull();
+    expect(reconnectText("Mercari", { ok: true, signed_in: true, state: "signed_in", label: "betwixtandbetween" }))
+      .toBe("Mercari is connected as betwixtandbetween. Press List… again to list this item.");
+    expect(reconnectText("Mercari", { ok: true, signed_in: false, state: "signed_out" }))
+      .toContain("Mercari still needs a sign-in");
+    expect(reconnectText("Mercari", undefined)).toBeNull();
   });
 
   it("asks chat to fix the named fields, not to list", () => {
@@ -312,8 +287,7 @@ describe("marketplaces section", () => {
       ["etsy", listing("https://www.etsy.com/listing/123456", "123456")],
       ["poshmark", listing("https://poshmark.com/listing/6adc371572e62463d992ffef", "6adc371572e62463d992ffef")],
       ["mercari", live],
-      ["vinted", listing("https://www.vinted.com/items/4567890123", "4567890123")],
-      ["sellwild", listing("https://sellwild.com/product/123/test", "123")],
+      ["depop", listing("https://www.depop.com/products/x/", "x")],
     ] as const) {
       const html = render({ [selected]: { state: "published", revision_id: "older" } } as NativeDrafts, { [selected]: entry }, { selected });
       expect(enabledButton(html, "Update…")).toBe(true);
@@ -355,7 +329,7 @@ describe("marketplaces section", () => {
     const html = render({}, { mercari: live, ebay: { ...live, url: "https://www.ebay.com/itm/1", listing_id: "1", sold_here: true } });
     expect(row(html, "Mercari")).toContain("Listed");
     expect(row(html, "eBay")).toContain("Sold here");
-    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) expect(row(html, name)).toContain(`aria-label="${name} actions"`);
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop"]) expect(row(html, name)).toContain(`aria-label="${name} actions"`);
     expect(html).not.toContain("Delist everywhere…");
     expect(render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).toContain("Delist everywhere…");
   });
@@ -363,9 +337,9 @@ describe("marketplaces section", () => {
   it("offers List everywhere for the marketplaces that are ready, and names them", () => {
     const html = render({}, { mercari: live }, { etsyReady: true });
     expect(html).toContain("List everywhere…");
-    expect(html).toContain('title="List on eBay, Etsy, Poshmark, Depop, Sellwild, Vinted"');
+    expect(html).toContain('title="List on eBay, Etsy, Poshmark, Depop"');
     const blocked = render({}, {}, { preflight: { marketplaces: { ebay: { ready: false, gaps: [{ field: "price", message: "eBay needs a price.", blocking: true }] } } } });
-    expect(blocked).toContain('title="List on eBay, Etsy, Poshmark, Mercari, Depop, Sellwild, Vinted"');
+    expect(blocked).toContain('title="List on eBay, Etsy, Poshmark, Mercari, Depop"');
     const sold = { poshmark: { ...live, url: "https://poshmark.com/listing/x", listing_id: "x", sold_here: true } };
     expect(render({}, sold)).not.toContain("List everywhere…");
   });
@@ -382,7 +356,7 @@ describe("marketplaces section", () => {
   it("offers no new listings once the item sold somewhere", () => {
     const sold = { poshmark: { ...live, url: "https://poshmark.com/listing/x", listing_id: "x", sold_here: true } };
     expect(render({}, sold, { selected: "mercari" })).not.toContain("List…");
-    expect(render({}, sold, { selected: "sellwild" })).not.toContain("List…");
+    expect(render({}, sold, { selected: "depop" })).not.toContain("List…");
   });
 
   it("shows a failed delist with its reason", () => {
@@ -407,11 +381,10 @@ describe("marketplaces section", () => {
 
   it("derives removal wording per marketplace", () => {
     expect(rowStatus("ebay", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Ended");
-    expect(rowStatus("sellwild", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Delisted");
-    expect(rowStatus("vinted", { ...live, state: "deleted", url: "https://www.vinted.com/items/42", listing_id: "42" }, undefined, "current", true).label).toBe("Deleted");
-    const vinted = { ...live, url: "https://www.vinted.com/items/42-tee", listing_id: "42" };
-    expect(render({}, { vinted })).not.toContain("Delist everywhere…");
-    expect(render({}, { mercari: live, vinted })).toContain("Delist everywhere…");
+    expect(rowStatus("mercari", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Deleted");
+    expect(rowStatus("depop", { ...live, state: "deleted", url: "https://www.depop.com/products/x/", listing_id: "x" }, undefined, "current", true).label).toBe("Deleted");
+    expect(render({}, { depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).not.toContain("Delist everywhere…");
+    expect(render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/y/", listing_id: "y" } })).toContain("Delist everywhere…");
     expect(deletable({ ...live, state: "failed" })).toBe(true);
     expect(deletable({ ...live, sold_here: true })).toBe(false);
   });
