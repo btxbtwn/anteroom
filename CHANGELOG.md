@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.734 — 2026-11-05
+
+- The page buttons at the bottom of the sidebar now show their names when the sidebar is wide enough, and a tooltip names each one when it is narrow.
+- Sourcing, Settings and Automations now share one readable page width; Marketplaces and Analytics use a wider one for their tables and calendars.
+- Shorter help text on Sourcing, Marketplaces, the sale calendar and Settings, on the web and on iPhone.
+
 ## 0.1.733 — 2026-11-05
 
 - Fixed a background error when a draft was deleted while Anteroom was checking for new likes.
