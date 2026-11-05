@@ -18,7 +18,8 @@
     if (data.action === 'poshmark_form' && !listing) return;
     const command = relay ? CloudMarketplaceProtocol.command(data.command) : null;
     const photos = relay ? CloudMarketplaceProtocol.photos(data.photos) : null;
-    if (relay && (!command || !photos)) return;
+    // A command the Bridge will not take is refused out loud, so the hosted API stops waiting at once.
+    if (relay && (!command || !photos)) { respond({ ok: false, error_code: 'invalid_input' }); return; }
     if (data.action === 'disconnect') {
       if (accountId === data.accountId) accountId = null;
     } else if (data.action !== 'poshmark_form' && !relay) accountId = data.accountId;

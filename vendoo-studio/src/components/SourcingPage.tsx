@@ -56,7 +56,7 @@ export function SourcingPage({ onOpenListing }: Props) {
     setTab(next);
   };
   return (
-    <WorkspacePage width="wide">
+    <WorkspacePage>
       <WorkspaceTabs
         label="Sourcing"
         main
@@ -119,7 +119,7 @@ function BoxSourcing({ onOpenListing }: Props) {
       <PageHeader
         title="Source with sales evidence"
         description={<>
-          Wholesale boxes ranked by recent sales, competition and your costs. A mixed box’s contents are never certain.
+          Wholesale boxes ranked by recent sales, competition and your costs; a mixed box’s contents are never certain.
         </>}
         actions={data ? (
           <UpdateStatus
@@ -335,7 +335,7 @@ function Settings({
             </SourcingCheck>
           </div>
         </div>
-        <PageNote>Cost per piece is what you spend to prepare, pack and ship each piece that sells. It is charged on the pieces planned to sell, in the plan and in the lower-sales test. Purchase tax is extra.</PageNote>
+        <PageNote>Cost per piece covers preparing, packing and shipping each piece that sells; purchase tax is extra.</PageNote>
       </SourcingDetails>
     </Panel>
   );
@@ -346,13 +346,13 @@ function SeasonalContext({ snapshot }: { snapshot: SourcingSnapshot }) {
   const date = (value: string) => new Date(`${value}T12:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
   return <Panel divided={false} className="flex flex-col gap-2 p-4" aria-label="Seasonal sourcing context">
     <strong className="text-sm font-medium text-foreground">Buying now for {date(window.start_date)} – {date(window.end_date)}</strong>
-    <PageNote>Research targets this selling window. Matching themes get priority among qualifying boxes; seasonality does not raise estimated prices or sales.</PageNote>
+    <PageNote>Matching themes rank higher among qualifying boxes but never raise estimated prices or sales.</PageNote>
     {history.groups.length ? <SourcingDetails summary={`Your sales in the same calendar windows: ${history.groups.length} category ${history.groups.length === 1 ? "group" : "groups"}`}>
-      <PageNote>Looking back up to three years. These are recorded sales, not a measure of demand or your chance of selling a box. Prices below are historical; box estimates use recent sold evidence.</PageNote>
+      <PageNote>Historical prices from up to three years back; box estimates use recent sold prices.</PageNote>
       {history.groups.map((group) => <PageNote key={`${group.category_path}:${group.item_type}`}>
         {group.category_path}{group.item_type ? ` · ${group.item_type}` : ""}: {group.count} sales · historical median {formatMoney(group.historical_median_price)}
       </PageNote>)}
-    </SourcingDetails> : <PageNote>{history.matching_window_sales} recorded sales in the same calendar windows over the previous three years. No category/type group has the {history.minimum_group_sales} sales needed for personal context yet. Anteroom can still research seasonal themes.</PageNote>}
+    </SourcingDetails> : <PageNote>{history.matching_window_sales} recorded sales in these windows over three years; personal context needs {history.minimum_group_sales} in one category.</PageNote>}
   </Panel>;
 }
 
@@ -367,8 +367,8 @@ function Choices({ snapshot, choice, onChoose }: {
       aria-label="Compare sourcing options"
       title={hasRecommendations ? "Choose a buy list" : "Browse by supplier"}
       description={hasRecommendations
-        ? `Each option uses the same ${formatMoney(snapshot.buy_list.budget)} budget including estimated shipping. Choose one; these are alternatives. Tax is extra.`
-        : "Choose all boxes or a supplier to browse what Anteroom checked. Recommendations appear when the evidence and cost checks pass."}
+        ? `Pick one: each spends the same ${formatMoney(snapshot.buy_list.budget)} budget with shipping, before tax.`
+        : "Recommendations appear once a box passes the evidence and cost checks."}
     >
       {Object.entries(snapshot.calibration ?? {}).map(([store, calibration]) => {
         const note = calibrationNote(storeName(store), calibration);
@@ -603,7 +603,7 @@ function SupplierPicks({ snapshot, onOpenListing }: { snapshot: SourcingSnapshot
           key={store}
           aria-label={`Top boxes at ${storeName(store)}`}
           title={`Top ${picks.length} at ${storeName(store)}`}
-          description="The supplier’s best boxes, each judged as if bought on its own: those that pass every check first, then the closest misses. They don’t share the budget the way a buy list does."
+          description="Each box judged as if bought on its own, outside the buy list’s budget."
         >
           <SourcingList>
             {picks.map((pick) => (
@@ -623,7 +623,7 @@ function AvailableBoxes({ snapshot, onOpenListing }: { snapshot: SourcingSnapsho
     <PageSection
       aria-label="Available boxes"
       title={`${snapshot.buy_list.carts.length ? "Other available boxes" : "Available boxes"} · ${boxCount(lots.length)}`}
-      description="Every other box the suppliers have in stock, best first. Each row shows why it isn’t in the recommended buy list; you can still open the supplier’s listing."
+      description="Each row says why it isn’t in the buy list."
     >
       <SourcingList>
         {lots.map((lot) => (
@@ -702,7 +702,7 @@ function ResearchCoverage({ snapshot, ebayConnected }: { snapshot: SourcingSnaps
   const priced = snapshot.lots.filter((lot) => lot.resale_per_pc != null).length;
   return <div className="flex flex-col gap-1 text-xs text-muted-foreground" role="status">
     <strong className="text-sm font-medium text-foreground">{boxCount(snapshot.lots.length)} in this check · {priced} with enough recent sold evidence.</strong>
-    <span>At least 3 distinct sales within 30 days: your own sales first, then eBay sold listings, then Poshmark. Prices are checked weekly. Sales evidence supports an estimate; it does not measure the chance your box will sell.</span>
+    <span>Enough evidence means 3 distinct sales in 30 days, from your own sales, then eBay, then Poshmark, checked weekly.</span>
     {ebayConnected ? null : <span className="text-warning-foreground">Chrome isn’t connected, so eBay sold listings can’t be read. Connect Chrome and update to add them.</span>}
   </div>;
 }
@@ -713,7 +713,7 @@ function Trending({ trend }: { trend: SourcingState["trend"] }) {
     <PageSection
       aria-label="Selling-window research"
       title="Themes to research"
-      description={`Seasonal reports and your selling window guide research and prioritize qualifying boxes. A theme match cannot qualify a box or increase its projected sales. ${trend.updated_at ? `Researched ${clockTime(trend.updated_at)}.` : ""}`}
+      description={`A theme match ranks a qualifying box higher but never qualifies it or raises its sales.${trend.updated_at ? ` Researched ${clockTime(trend.updated_at)}.` : ""}`}
     >
       <div className="flex flex-wrap gap-1.5">
         {trend.terms.map((term) => <Badge key={term} variant="outline" size="lg" className="font-normal">{term}</Badge>)}

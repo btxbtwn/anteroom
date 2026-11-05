@@ -56,6 +56,8 @@ CONTRACT = ("type", "job_id", "message_id", "payload")
 # How long a tab stays connected after it last asked or beat. A background tab's
 # timers can run as rarely as once a minute in Chrome, so this outlasts that.
 SEEN_FOR_S = 90.0
+# Commands whose timing is kept until their reply; older ones are dropped.
+SENT_KEPT = 200
 
 
 class BrowserRelay(ReplyWaits):
@@ -67,6 +69,8 @@ class BrowserRelay(ReplyWaits):
         self._seen_at = 0.0
         self._capabilities: frozenset[str] = frozenset()
         self._loop: asyncio.AbstractEventLoop | None = None
+        # When each job's command was queued and handed to the page, by message id.
+        self._sent: dict[str, dict] = {}
 
     def _can(self, capability: str) -> bool:
         return capability in self._capabilities and time.monotonic() - self._seen_at < SEEN_FOR_S
@@ -126,8 +130,23 @@ class BrowserRelay(ReplyWaits):
             request_id = uuid.uuid4().hex
             command.update(message_id=request_id, payload={**(command["payload"] or {}), "request_id": request_id})
         self._outbox.append(command)
+        if command["job_id"] and command["message_id"]:
+            while len(self._sent) >= SENT_KEPT:
+                self._sent.pop(next(iter(self._sent)))
+            self._sent[command["message_id"]] = {"job_id": command["job_id"], "type": command["type"],
+                                                  "queued": time.monotonic()}
         self._ready.set()
         return True
+
+    def timing(self, request_id: str) -> dict | None:
+        """How long a job's command waited for the page and for Chrome's reply, in ms. Once per command."""
+        sent = self._sent.pop(request_id, None)
+        if sent is None:
+            return None
+        now = time.monotonic()
+        delivered = sent.get("delivered", now)
+        return {"job_id": sent["job_id"], "type": sent["type"], "queued_ms": round((delivered - sent["queued"]) * 1000),
+                "total_ms": round((now - sent["queued"]) * 1000)}
 
     async def send_message(self, message: dict) -> bool:
         if await self.deliver_local(message):
@@ -162,7 +181,10 @@ class BrowserRelay(ReplyWaits):
                 return None
             finally:
                 self._seen_at = time.monotonic()
-        return self._outbox.popleft()
+        command = self._outbox.popleft()
+        if (sent := self._sent.get(str(command.get("message_id")))) is not None:
+            sent["delivered"] = time.monotonic()
+        return command
 
     async def read_local(self, command: str, payload: dict, timeout: float) -> dict:
         """One named command other than a marketplace action, run in the seller's Chrome,

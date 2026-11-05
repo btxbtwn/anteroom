@@ -54,7 +54,7 @@ NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mer
 UNKNOWN = "Anteroom could not confirm what happened. Check the result before trying again."
 # How long Chrome has to answer one step, and how long a job then keeps the
 # slot waiting for Chrome to report what it did before giving up as unknown.
-EXECUTE_TIMEOUT_S = 180
+EXECUTE_TIMEOUT_S = 270
 SETTLE_DEADLINE_S = 8 * 60
 SETTLE_POLL_S = 10.0
 STEP_STATE = {"save_draft": "saving", "publish": "publishing", "list": "publishing", "update": "updating"}
@@ -427,51 +427,56 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
                    "readiness_state_id": body.readiness_state_id or defaults.get("readiness_state_id"),
                    "return_policy_id": body.return_policy_id or defaults.get("return_policy_id"),
                    "package": body.etsy_package.model_dump() if body.etsy_package else listing_package(snapshot)}
-    with listing_mode.guard(db, "direct"):
-        record = _record(db, conv_id, marketplace)
-        if record.get("state") in UNSETTLED_STATES:
-            raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")
-        extra: dict = {}
-        # A Mercari update keeps the photos already on the live item.
-        if marketplace in {"poshmark", "depop"} or (marketplace == "mercari" and kind != "update"):
-            extra["photo_ids"] = [photo.id for photo in photos]
-        if kind == "update":
-            from vendoo_studio.services.marketplace_delist import listings as live_listings
+    from vendoo_studio.services import approved_photos
 
-            live = live_listings(db, conv_id).get(marketplace) or {}
-            if live.get("sold_here") or live.get("state") != "live" or not live.get("listing_id"):
-                raise NativeMarketplaceError(409, f"This item is not live on {name}.")
-            extra.update(listing_id=live["listing_id"], listing_url=live.get("url"))
-        elif record.get("state") in {"published", "pending_review"}:
-            raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
-        steps = _plan(marketplace, kind, record, body.revision_id)
-        repo = JobRepo(db)
-        if (busy := blocking_job(repo, marketplace)) is not None:
-            raise NativeMarketplaceError(409, _busy_message(busy, marketplace))
-        from vendoo_studio.services import approved_photos
+    # The copies are made before the start gate, off the event loop: on the web each photo is a
+    # Storage download and upload, and neither the gate nor the server should wait on them.
+    try:
+        snapshot[approved_photos.KEY] = await asyncio.to_thread(approved_photos.capture, photos)
+    except (OSError, ValueError) as exc:
+        raise NativeMarketplaceError(409, "Could not preserve the approved photos. Review them and try again.") from exc
+    job = None
+    try:
+        with listing_mode.guard(db, "direct"):
+            record = _record(db, conv_id, marketplace)
+            if record.get("state") in UNSETTLED_STATES:
+                raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")
+            extra: dict = {}
+            # A Mercari update keeps the photos already on the live item.
+            if marketplace in {"poshmark", "depop"} or (marketplace == "mercari" and kind != "update"):
+                extra["photo_ids"] = [photo.id for photo in photos]
+            if kind == "update":
+                from vendoo_studio.services.marketplace_delist import listings as live_listings
 
-        try:
-            snapshot[approved_photos.KEY] = approved_photos.capture(photos)
-        except (OSError, ValueError) as exc:
-            raise NativeMarketplaceError(409, "Could not preserve the approved photos. Review them and try again.") from exc
-        if steps == ["publish"]:
-            previous_job_id = record.get("job_id")
-            previous_job = repo.get(previous_job_id) if previous_job_id else None
-            previous_photos = (previous_job.listing_snapshot or {}).get(approved_photos.KEY, []) if previous_job else []
-            previous_versions = [(row["id"], row["checksum"]) for row in previous_photos]
-            current_versions = [(row["id"], row["checksum"]) for row in snapshot[approved_photos.KEY]]
-            if previous_versions != current_versions:
-                steps = ["save_draft", "publish"]
-        try:
+                live = live_listings(db, conv_id).get(marketplace) or {}
+                if live.get("sold_here") or live.get("state") != "live" or not live.get("listing_id"):
+                    raise NativeMarketplaceError(409, f"This item is not live on {name}.")
+                extra.update(listing_id=live["listing_id"], listing_url=live.get("url"))
+            elif record.get("state") in {"published", "pending_review"}:
+                raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
+            steps = _plan(marketplace, kind, record, body.revision_id)
+            repo = JobRepo(db)
+            if (busy := blocking_job(repo, marketplace)) is not None:
+                raise NativeMarketplaceError(409, _busy_message(busy, marketplace))
+            if steps == ["publish"]:
+                previous_job_id = record.get("job_id")
+                previous_job = repo.get(previous_job_id) if previous_job_id else None
+                previous_photos = (previous_job.listing_snapshot or {}).get(approved_photos.KEY, []) if previous_job else []
+                previous_versions = [(row["id"], row["checksum"]) for row in previous_photos]
+                current_versions = [(row["id"], row["checksum"]) for row in snapshot[approved_photos.KEY]]
+                if previous_versions != current_versions:
+                    steps = ["save_draft", "publish"]
             job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched", current_step=f"native_{marketplace}_{steps[0]}")
-        except BaseException:
+            claim_api_job(job.id)
+            record = _store(db, conv_id, marketplace, {
+                **extra, **_CLEARED_ERROR, "state": STEP_STATE[steps[0]], "action": steps[0], "job_id": job.id,
+                "operation_id": job.id, "previous_revision_id": record.get("revision_id"), "revision_id": body.revision_id,
+            })
+    except BaseException:
+        if job is None:
+            # Refused or failed before the job existed: nothing owns the copies.
             approved_photos.release(snapshot)
-            raise
-        claim_api_job(job.id)
-        record = _store(db, conv_id, marketplace, {
-            **extra, **_CLEARED_ERROR, "state": STEP_STATE[steps[0]], "action": steps[0], "job_id": job.id,
-            "operation_id": job.id, "previous_revision_id": record.get("revision_id"), "revision_id": body.revision_id,
-        })
+        raise
     _progress(db, job.id, marketplace, steps[0], 0, len(steps))
     _launch(run_job(job.id, conv_id, marketplace, steps, options))
     record["running"] = True
@@ -535,6 +540,14 @@ def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:
             and _record(db, conv_id, marketplace).get("job_id") == job_id)
 
 
+def _for_chrome(snapshot: dict) -> dict:
+    """The listing as Chrome receives it. The marketplaces' saved form contracts stay on the
+    server: Chrome never reads them, and they can be megabytes, past what the Bridge accepts."""
+    from vendoo_studio.services.native_contract import KEY
+
+    return {key: value for key, value in snapshot.items() if key != KEY}
+
+
 def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, photos: list, warning: str) -> dict:
     extra: dict = {}
     if marketplace == "depop" and warning:
@@ -542,7 +555,7 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
     return {
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
-        "listing": snapshot, "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
+        "listing": _for_chrome(snapshot), "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
         **({"video": snapshot.get("_native_video")} if marketplace == "poshmark" else {}),
         "photos": [{"id": p.id, "mime_type": p.mime_type} for p in photos],
         **extra,
@@ -557,7 +570,7 @@ def _result_context(db: Session, conv_id: str, marketplace: str, record: dict, s
             "expected_photo_count": (len(snapshot["_approved_photos"]) if "_approved_photos" in snapshot
                                      else len(record["photo_ids"]) if record.get("photo_ids") is not None
                                      else len(_photos(db, conv_id, snapshot, marketplace)[0]) if first_save or marketplace == "poshmark" else None),
-            "listing": snapshot}
+            "listing": _for_chrome(snapshot)}
 
 
 async def _send_cancel(operation_id: str) -> None:
@@ -621,7 +634,7 @@ async def _wait_for_chrome(db: Session, job, conv_id: str, marketplace: str, rec
             _release(db)
             try:
                 reply = await _unless_cancelled(job.id, browser_bridge.request(
-                    job, "marketplace.result", {"operation_id": operation_id, "context": context}, timeout=65))
+                    job, "marketplace.result", {"marketplace": marketplace, "operation_id": operation_id, "context": context}, timeout=65))
                 if reply.get("finished") and isinstance(reply.get("result"), dict):
                     return reply["result"]
             except browser_bridge.BrowserBridgeError:
@@ -639,7 +652,7 @@ async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: 
 
     snapshot = job.listing_snapshot if isinstance(job.listing_snapshot, dict) else {}
     try:
-        photos = approved_photos.load(snapshot)
+        photos = await asyncio.to_thread(approved_photos.load, snapshot)
     except ValueError as exc:
         raise NativeMarketplaceError(409, str(exc)) from exc
     warning = snapshot.get("_approved_photo_warning") or ""
@@ -799,7 +812,7 @@ async def _read_result(db: Session, conv_id: str, marketplace: str, record: dict
         return await ebay_listings.check(record, snapshot, remember)
     try:
         reply = await browser_bridge.request(job, "marketplace.result", {
-            "operation_id": record.get("operation_id"),
+            "marketplace": marketplace, "operation_id": record.get("operation_id"),
             "context": _result_context(db, conv_id, marketplace, record, snapshot, candidate),
         }, timeout=65)
     except browser_bridge.BrowserBridgeError as exc:

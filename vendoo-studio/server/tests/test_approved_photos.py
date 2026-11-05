@@ -51,3 +51,29 @@ def test_explicitly_approved_empty_photos_can_reach_marketplace_validation(store
     assert approved_photos.load({approved_photos.KEY: approved_photos.capture([])}) == []
     with pytest.raises(ValueError):
         approved_photos.load({})
+
+
+def test_photos_are_copied_side_by_side(store, monkeypatch):
+    # On the web each copy is a Storage download and upload; one after another, seven took most of a minute.
+    import threading
+    import time
+
+    names = [f"p{index}.jpg" for index in range(4)]
+    for name in names:
+        store.put(name, name.encode())
+    read, running, peak = store.read, [0], [0]
+    lock = threading.Lock()
+
+    def slow_read(key):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        time.sleep(0.2)
+        with lock:
+            running[0] -= 1
+        return read(key)
+
+    monkeypatch.setattr(store, "read", slow_read)
+    rows = approved_photos.capture([photo(name, name.encode()) for name in names])
+    assert [row["id"] for row in rows] == names
+    assert peak[0] > 1

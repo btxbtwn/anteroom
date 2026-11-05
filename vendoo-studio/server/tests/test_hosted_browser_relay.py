@@ -106,6 +106,49 @@ def test_page_relays_commands_and_replies_for_its_own_seller(cloud, signing_keys
     assert client.get('/api/browser-relay/jobs/missing/photos/p1', headers=alice).status_code == 404
 
 
+def test_a_replys_timing_is_kept_on_its_job(cloud, signing_keys):  # noqa: F811
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from vendoo_studio.models.job import Job
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Tee'}).json()['id']
+    with Session(engine) as db:
+        db.add(Job(id='job-timed', conversation_id=identity, approved_revision_id='rev', user_id=USER_ID,
+                   listing_snapshot={}, status='dispatched', current_step='native_poshmark_list'))
+        db.commit()
+    hosted_browser_relay._relays.clear()
+    relay = hosted_browser_relay.relay_for(USER_ID)
+    relay._seen_at, relay._capabilities = time.monotonic(), frozenset({MARKETPLACE_ACTIONS})
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        async def send():
+            waiter = relay.register_wait('b' * 32, 'job-timed')
+            assert await relay.send_message({'type': 'marketplace.delete', 'job_id': 'job-timed', 'message_id': 'b' * 32,
+                                             'payload': {'marketplace': 'poshmark', 'listing_id': 'x', 'confirm': True}})
+            return waiter
+
+        waiter = asyncio.run_coroutine_threadsafe(send(), loop).result(5)
+        command = client.get('/api/browser-relay/next?capabilities=marketplace.actions', headers=alice).json()
+        timing = {'photos_ms': 1200, 'photo_bytes': 9_000_000, 'chrome_ms': 45000}
+        assert client.post('/api/browser-relay/replies', headers=alice, json={
+            'request_id': command['message_id'], 'payload': {'ok': True, 'state': 'deleted'}, 'timing': timing}).status_code == 200
+        asyncio.run_coroutine_threadsafe(asyncio.wait_for(waiter, 5), loop).result(6)
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(5)
+    with engine.connect() as connection:
+        rows = connection.execute(text("SELECT event_type, step, payload FROM job_events WHERE job_id = 'job-timed'")).all()
+    assert [(row.event_type, row.step) for row in rows] == [('relay_timing', 'marketplace.delete')]
+    recorded = rows[0].payload
+    assert {key: recorded[key] for key in timing} == timing
+    assert recorded['queued_ms'] >= 0 and recorded['total_ms'] >= recorded['queued_ms']
+
+
 async def _send(relay):
     request_id = 'a' * 32
     waiter = relay.register_wait(request_id, 'job1')
