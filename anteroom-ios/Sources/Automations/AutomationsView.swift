@@ -298,9 +298,9 @@ private struct AutomationTypePicker: View {
                     Button { if item.kind == "scheduled" { onScheduled() } } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(item.label).foregroundStyle(item.kind == "scheduled" ? .primary : .secondary)
+                                Text(item.label).foregroundStyle(item.kind == "scheduled" ? Color.primary : Color.secondary)
                                 Text(item.kind == "scheduled" ? item.description : "\(item.description) Set it up on the web or Mac.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption).foregroundStyle(Color.secondary)
                             }
                             Spacer()
                             if item.kind == "scheduled" { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary) }
