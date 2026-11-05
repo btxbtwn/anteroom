@@ -1,7 +1,9 @@
 """Immutable photo files owned by one approved direct marketplace job."""
 from __future__ import annotations
 
+import contextvars
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, wait
 from types import SimpleNamespace
 
 from vendoo_studio.services.photo_store import photo_store
@@ -9,24 +11,33 @@ from vendoo_studio.services.photo_store import photo_store
 KEY = "_approved_photos"
 
 
+# Photos copied at once. Each is a download and an upload on the web.
+COPY_WORKERS = 4
+
+
+def _copy(photo) -> dict:
+    contents = photo_store().read(photo.stored_filename)
+    checksum = hashlib.sha256(contents).hexdigest()
+    if photo.checksum and checksum != photo.checksum:
+        raise ValueError("A photo changed while it was being approved. Review the photos again.")
+    # A new key beside the source, so it lives in the seller's own Storage folder on the web.
+    key = photo_store().edited_key(photo.stored_filename)
+    photo_store().put(key, contents)
+    return {"id": photo.id, "stored_filename": key, "mime_type": photo.mime_type,
+            "checksum": checksum, "size_bytes": len(contents)}
+
+
 def capture(photos: list) -> list[dict]:
     """Copy the selected bytes before dispatch; later edits keep their own files."""
-    captured: list[dict] = []
-    try:
-        for photo in photos:
-            contents = photo_store().read(photo.stored_filename)
-            checksum = hashlib.sha256(contents).hexdigest()
-            if photo.checksum and checksum != photo.checksum:
-                raise ValueError("A photo changed while it was being approved. Review the photos again.")
-            # A new key beside the source, so it lives in the seller's own Storage folder on the web.
-            key = photo_store().edited_key(photo.stored_filename)
-            row = {"id": photo.id, "stored_filename": key, "mime_type": photo.mime_type,
-                   "checksum": checksum, "size_bytes": len(contents)}
-            captured.append(row)
-            photo_store().put(key, contents)
-    except BaseException:
+    with ThreadPoolExecutor(max_workers=COPY_WORKERS) as pool:
+        # Each copy runs in the seller's context, which picks their Storage folder.
+        futures = [pool.submit(contextvars.copy_context().run, _copy, photo) for photo in photos]
+        wait(futures)
+    captured = [future.result() for future in futures if future.exception() is None]
+    errors = [error for future in futures if (error := future.exception()) is not None]
+    if errors:
         release({KEY: captured})
-        raise
+        raise errors[0]
     return captured
 
 

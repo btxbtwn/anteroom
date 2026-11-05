@@ -1,0 +1,1 @@
+- Starting a listing from the web no longer freezes Anteroom while it copies the photos, and the copies are made several at a time. Chrome also gets longer to finish a listing step before Anteroom stops waiting, so a slow Depop or Poshmark upload is no longer cancelled partway.

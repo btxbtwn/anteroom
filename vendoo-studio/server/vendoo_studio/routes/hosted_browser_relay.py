@@ -66,10 +66,31 @@ async def heartbeat(body: Heartbeat):
     return {'ok': True}
 
 
+class PageTiming(BaseModel):
+    """What the page measured for one command: reading its photos, and Chrome running it."""
+    model_config = ConfigDict(extra='forbid')
+    photos_ms: int = Field(ge=0, le=3_600_000)
+    photo_bytes: int = Field(ge=0, le=500_000_000)
+    chrome_ms: int = Field(ge=0, le=3_600_000)
+
+
 class Reply(BaseModel):
     model_config = ConfigDict(extra='forbid')
     request_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     payload: dict
+    timing: PageTiming | None = None
+
+
+def _record_timing(timing: dict) -> None:
+    """Keep where a marketplace command's time went on its job, so a slow listing can be read later."""
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.repositories.queries import JobRepo
+
+    db = SessionLocal()
+    try:
+        JobRepo(db).add_event(timing.pop('job_id'), 'relay_timing', timing['type'], timing)
+    finally:
+        db.close()
 
 
 @router.post('/replies')
@@ -81,6 +102,13 @@ async def post_reply(body: Reply):
     relay = _relay()
     if not relay.is_waiting(body.request_id):
         raise HTTPException(404, 'Nothing is waiting for this reply.')
+    if (timing := relay.timing(body.request_id)) is not None:
+        if body.timing is not None:
+            timing.update(body.timing.model_dump())
+        try:
+            await asyncio.to_thread(_record_timing, timing)
+        except SQLAlchemyError:
+            pass  # Timing is diagnostic; the reply still goes through.
     relay.resolve_wait(body.request_id, body.payload)
     return {'ok': True}
 
