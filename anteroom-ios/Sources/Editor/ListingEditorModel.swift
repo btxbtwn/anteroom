@@ -36,6 +36,8 @@ final class ListingEditorModel {
     private(set) var loadError: String?
     var saveError: String?
     var hasConflict = false
+    /// Each marketplace tab's state for the saved listing: ready, fields missing, listed or sold.
+    private(set) var choices: [ListChoice] = []
 
     init(api: AnteroomAPI, listing: ListingSummary) {
         self.api = api
@@ -78,9 +80,58 @@ final class ListingEditorModel {
             form = next
             saved = next
             loadError = nil
+            Task { await loadReadiness() }
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    // MARK: Readiness and List everywhere
+
+    static let listMarketplaces = ["ebay", "etsy", "poshmark", "mercari", "depop"]
+
+    func choice(_ marketplace: String) -> ListChoice? {
+        choices.first { $0.marketplace == marketplace }
+    }
+
+    /// Reads the saved listing's field check and marketplace states. A failed read
+    /// leaves the tabs without a readiness mark rather than a wrong one.
+    func loadReadiness() async {
+        let shown = marketplaceTabs.filter(Self.listMarketplaces.contains)
+        guard !shown.isEmpty else { return choices = [] }
+        async let acting = try? api.actionMarketplaces()
+        async let check = try? api.marketplacePreflight(listingID)
+        async let states = try? api.nativeMarketplaceStates(listingID)
+        async let live = try? api.marketplaceLiveListings(listingID)
+        let (canAct, preflight, drafts, listings) = await (Set(acting ?? []), check, states ?? [:], live ?? [:])
+        let soldSomewhere = listings.values.contains { $0.soldHere == true }
+        // A check for an older revision would describe fields since changed.
+        let current = preflight?.revisionID == revisionID ? preflight : nil
+        choices = shown.map { marketplace in
+            ListChoice.make(marketplace, canAct: canAct.contains(marketplace), check: current?.marketplaces[marketplace],
+                            draft: drafts[marketplace], live: listings[marketplace], soldSomewhere: soldSomewhere)
+        }
+    }
+
+    /// Starts List on each marketplace the seller picked and confirmed. Returns what failed, if anything.
+    func list(on marketplaces: [String]) async -> String? {
+        guard let revisionID else { return "Save the listing first." }
+        var failures: [String] = []
+        await withTaskGroup(of: String?.self) { group in
+            for marketplace in marketplaces {
+                group.addTask { [api, listingID] in
+                    do {
+                        try await api.listOnMarketplace(listingID, marketplace: marketplace, revisionID: revisionID)
+                        return nil
+                    } catch {
+                        return "\(Marketplaces.name(marketplace)): \(error.localizedDescription)"
+                    }
+                }
+            }
+            for await failure in group { if let failure { failures.append(failure) } }
+        }
+        await loadReadiness()
+        return failures.isEmpty ? nil : failures.joined(separator: "\n")
     }
 
     /// Saves the listing, then the seller's notes. Returns true when both saved.
@@ -133,6 +184,7 @@ final class ListingEditorModel {
                 return false
             }
         }
+        Task { await loadReadiness() }
         if form.sellerInputs != saved.sellerInputs {
             do {
                 try await api.saveNotes(listingID, notes: notes)

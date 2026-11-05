@@ -87,6 +87,35 @@ final class AnteroomAPI: Sendable {
         return payload.marketplace_forms ?? []
     }
 
+    /// Marketplaces this workspace can list on now (`/api/runtime`); empty while it cannot.
+    func actionMarketplaces() async throws -> [String] {
+        struct Payload: Decodable { let action_marketplaces: [String]? }
+        let payload: Payload = try await decode(request("GET", "api/runtime"))
+        return payload.action_marketplaces ?? []
+    }
+
+    /// Which required fields each marketplace still needs, for the saved listing.
+    func marketplacePreflight(_ id: String) async throws -> NativePreflight {
+        try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/preflight"))
+    }
+
+    func nativeMarketplaceStates(_ id: String) async throws -> [String: NativeDraftState] {
+        let states: [String: NativeDraftState?] = try await decode(request("GET", "api/conversations/\(id)/native-marketplaces"))
+        return states.compactMapValues { $0 }
+    }
+
+    func marketplaceLiveListings(_ id: String) async throws -> [String: MarketplaceLiveListing] {
+        let listings: [String: MarketplaceLiveListing?] = try await decode(request("GET", "api/conversations/\(id)/marketplace-listings"))
+        return listings.compactMapValues { $0 }
+    }
+
+    /// Lists the saved revision on one marketplace the seller named and confirmed.
+    func listOnMarketplace(_ id: String, marketplace: String, revisionID: String) async throws {
+        struct Body: Encodable { let revision_id: String; let confirm: Bool }
+        _ = try await send(request("POST", "api/conversations/\(id)/native-marketplaces/\(marketplace)/list",
+                                   json: Body(revision_id: revisionID, confirm: true)))
+    }
+
     /// A marketplace's synced category tree (eBay's is about 20,000 nodes).
     func catalogCategories(marketplace: String) async throws -> CatalogCategories {
         try await decode(request("GET", "api/catalog/categories", query: [URLQueryItem(name: "marketplace", value: marketplace)]))
