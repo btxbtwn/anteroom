@@ -1,1 +1,0 @@
-- Listing on several marketplaces at once from the web no longer hangs on "Waiting for Chrome to confirm": Chrome now runs each marketplace's action side by side instead of one after another.
