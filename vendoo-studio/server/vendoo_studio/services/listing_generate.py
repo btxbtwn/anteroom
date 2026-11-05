@@ -1421,9 +1421,6 @@ def persist_generated_listing(
     elif str(listing.get("zipCode") or "") == "70125":
         listing.pop("zipCode", None)
     apply_send_readiness_fixes(listing)
-    from vendoo_studio.services.vinted_listing import apply_vinted_listing
-
-    apply_vinted_listing(listing)
     if revisions:
         selected = revisions[0].listing_json
         if selected.get("marketplace_categories"):

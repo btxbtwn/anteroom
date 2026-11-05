@@ -72,87 +72,6 @@ test('Mercari is signed out when initialize has no user, and unknown when it can
   assert.equal((await offline.c.readExtensionSession('mercari')).state, 'unknown');
 });
 
-test('Sellwild uses the session response and hides the account payload', async () => {
-  const { c } = worker({
-    cookies: { 'https://sellwild.com/': [{ name: 'authjs.session-token', expirationDate: Math.floor(Date.now() / 1000) + 3600 }] },
-    fetch: async () => reply(200, { user: { username: 'wild', email: 'secret@example.com', id: 'user-secret' } }),
-  });
-  const summary = await c.readExtensionSession('sellwild');
-  assert.equal(summary.state, 'signed_in');
-  assert.equal(summary.label, 'wild');
-  assert.equal(summary.expiring, true);
-  const text = JSON.stringify(summary);
-  assert.equal(text.includes('secret@example.com'), false);
-  assert.equal(text.includes('user-secret'), false);
-});
-
-test('Vinted sign-in is the current user login, and the week it lasts, never the hour', async () => {
-  const token = jwt({ exp: Math.floor(Date.now() / 1000) + 3600, sub: '42' });
-  const week = Math.floor(Date.now() / 1000) + 86400 * 7;
-  const { c } = worker({
-    cookies: {
-      'https://www.vinted.com/ access_token_web': { value: token, expirationDate: week },
-      'https://www.vinted.com/ refresh_token_web': { value: jwt({ exp: week }), expirationDate: week },
-    },
-    fetch: async url => (url === 'https://www.vinted.com/api/v2/users/current'
-      ? reply(200, { user: { id: 42, login: 'ada', email: 'secret@example.com', real_name: 'Ada Lovelace' } })
-      : reply(404, {})),
-  });
-  const summary = await c.readExtensionSession('vinted');
-  assert.equal(summary.state, 'signed_in');
-  assert.equal(summary.label, 'ada');
-  // The access token lasts an hour; the hour is renewed, so that is not the sign-in.
-  assert.equal(summary.expires_at, week);
-  assert.equal(summary.expiring, false);
-  const text = JSON.stringify(summary);
-  assert.equal(text.includes(token), false);
-  assert.equal(text.includes('secret@example.com'), false);
-  assert.equal(text.includes('Ada Lovelace'), false);
-});
-
-test('a Vinted hour that ran out is renewed instead of reporting a sign-out', async () => {
-  const week = Math.floor(Date.now() / 1000) + 86400 * 7;
-  const calls = [];
-  const { c } = worker({
-    cookies: {
-      'https://www.vinted.com/ access_token_web': { value: jwt({ exp: Math.floor(Date.now() / 1000) - 60 }), expirationDate: week },
-      'https://www.vinted.com/ refresh_token_web': { value: jwt({ exp: week }), expirationDate: week },
-    },
-    fetch: async (url, options = {}) => {
-      calls.push(`${options.method || 'GET'} ${url}`);
-      if (url === 'https://www.vinted.com/web/api/auth/refresh') return reply(200, { access_token: jwt({ exp: Math.floor(Date.now() / 1000) + 3600 }) });
-      if (url === 'https://www.vinted.com/api/v2/users/current') return reply(200, { user: { id: 42, login: 'ada' } });
-      return reply(404, {});
-    },
-  });
-  const summary = await c.readExtensionSession('vinted');
-  assert.equal(summary.state, 'signed_in');
-  assert.equal(summary.label, 'ada');
-  assert.deepEqual(calls, ['POST https://www.vinted.com/web/api/auth/refresh', 'GET https://www.vinted.com/api/v2/users/current']);
-});
-
-test('an anonymous Vinted token is signed out, and a failed check is unknown', async () => {
-  const anonymous = worker({
-    fetch: async () => reply(200, { user: { id: null, login: null, anon_id: 'anon-secret', email: 'secret@example.com' } }),
-  });
-  const signedOut = await anonymous.c.readExtensionSession('vinted');
-  assert.equal(signedOut.state, 'signed_out');
-  assert.equal(JSON.stringify(signedOut).includes('anon-secret'), false);
-  const rejected = worker({
-    fetch: async (url, options = {}) => ((options.method || 'GET') === 'POST'
-      ? reply(401, { message_code: 'invalid_authentication_token' })
-      : reply(401, { message_code: 'invalid_authentication_token', access_token_web: 'secret-token' })),
-  });
-  assert.equal((await rejected.c.readExtensionSession('vinted')).state, 'signed_out');
-  const offline = worker({ fetch: async () => { throw new Error('offline'); } });
-  assert.deepEqual(JSON.parse(JSON.stringify(await offline.c.readExtensionSession('vinted'))), { state: 'unknown', expires_at: null, label: null, expiring: false });
-});
-
-test('Sellwild is unknown when the check cannot reach the site', async () => {
-  const { c } = worker({ fetch: async () => { throw new Error('offline'); } });
-  assert.deepEqual(JSON.parse(JSON.stringify(await c.readExtensionSession('sellwild'))), { state: 'unknown', expires_at: null, label: null, expiring: false });
-});
-
 // Settings → Connections on the web asks through the seller's connected Anteroom tab.
 test('relayed sign-in checks report every marketplace without cookie values, and a sign-in opens only its page', async () => {
   const secret = 'depop-access-token-secret';
@@ -164,7 +83,7 @@ test('relayed sign-in checks report every marketplace without cookie values, and
   const id = 'd'.repeat(32);
   const result = await c.runCloudMarketplaceCommand({ type: 'marketplace.sessions', job_id: null, message_id: id, payload: { request_id: id } }, []);
   assert.equal(result.ok, true);
-  assert.deepEqual(Object.keys(result.sessions).sort(), ['depop', 'mercari', 'poshmark', 'sellwild', 'vinted']);
+  assert.deepEqual(Object.keys(result.sessions).sort(), ['depop', 'mercari', 'poshmark']);
   assert.equal(result.sessions.depop.state, 'signed_in');
   assert.equal(JSON.stringify(result).includes(secret), false);
 
@@ -172,6 +91,6 @@ test('relayed sign-in checks report every marketplace without cookie values, and
   c.nativeOperationsRunning = () => true;
   c.chrome.tabs = { query: () => { throw new Error('read tabs'); }, create: () => { throw new Error('opened a tab'); } };
   const busy = await c.runCloudMarketplaceCommand({ type: 'marketplace.connect', job_id: null, message_id: id,
-    payload: { request_id: id, marketplace: 'vinted' } }, []);
+    payload: { request_id: id, marketplace: 'depop' } }, []);
   assert.deepEqual(JSON.parse(JSON.stringify(busy)), { ok: false, error: 'Wait for the current listing action to finish.' });
 });

@@ -84,7 +84,7 @@ _META_RE = re.compile(
 )
 _HEADING_RE = re.compile(r"(?m)^#{1,3}\s+.+$")
 _FILL_FN_RE = re.compile(
-    r"(?m)^(?:async\s+)?function\s+(fill\w*|select\w*|set\w*Field\w*|choose\w*|(?:ebay|etsy|poshmark|mercari|depop|sellwild|vinted)\w*)\s*\("
+    r"(?m)^(?:async\s+)?function\s+(fill\w*|select\w*|set\w*Field\w*|choose\w*|(?:ebay|etsy|poshmark|mercari|depop)\w*)\s*\("
     r"|^(?:const|let|var)\s+(fill\w*|select\w*|set\w*Field\w*)\s*=\s*(?:async\s*)?(?:function|\()"
 )
 _FORM_MARKETPLACE = {

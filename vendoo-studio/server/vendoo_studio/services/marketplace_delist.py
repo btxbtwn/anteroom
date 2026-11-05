@@ -1,7 +1,7 @@
 """Seller-confirmed delisting: delete an item's live listings on named marketplaces.
 
 Delist means the listing is removed from the marketplace. eBay has no delete,
-so its listing is ended; Sellwild gives sellers only its own delist. The
+so its listing is ended. The
 marketplace where the item sold is never touched. Nothing here runs on a
 timer, a queue, or a retry: each call names its marketplaces and carries the
 seller's confirmation. Deleting is safe to repeat, because every marketplace
@@ -30,8 +30,8 @@ from vendoo_studio.services.listing_result import scrub
 from vendoo_studio.services.marketplace_identity import listing_id, listing_reference
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
-MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
-BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop", "sellwild", "vinted"}
+MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop")
+BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop"}
 
 
 class DelistError(RuntimeError):

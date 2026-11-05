@@ -14,11 +14,9 @@ snapshots, not runtime dependencies. Upstream documentation can change after ret
 | Poshmark | [Poshmark](poshmark.md) | No public seller contract located | Signed-in web endpoints |
 | Etsy | [Etsy](etsy.md) | Open API v3 | Official Open API through the relay |
 | Mercari | [Mercari](mercari.md) | No US consumer seller contract located | Signed-in US web endpoints |
-| Vinted | [Vinted](vinted.md) | Pro Integrations | Signed-in consumer web endpoints |
-| Sellwild | [Sellwild](sellwild.md) | No public listing contract located | Signed-in web endpoints |
 
 The private endpoint notes describe this repository's implementation. They are not
-marketplace guarantees. Depop partner access and Vinted Pro access do not imply that
+marketplace guarantees. Depop partner access does not imply that
 this seller or app has been approved. Mercari Shops Japan is a separate product from
 Mercari US. No providers or authentication flows are changed by storing these docs.
 

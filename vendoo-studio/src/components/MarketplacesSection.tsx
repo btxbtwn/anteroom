@@ -18,12 +18,11 @@ import { Spinner } from "./ui/spinner";
 import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
 
 type Marketplace = DelistMarketplace;
-const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"];
+const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop"];
 const REMOTE_DRAFT = new Set<Marketplace>(["ebay", "mercari", "depop", "etsy", "poshmark"]);
-// What Delist does on each marketplace: eBay has no delete; Sellwild offers only its own delist.
-// Vinted is deleted through the signed-in Chrome session, the same as Depop, Poshmark and Mercari.
+// What Delist does on each marketplace: eBay has no delete.
 const REMOVED: Record<Marketplace, string> = {
-  ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted", sellwild: "Delisted", vinted: "Deleted",
+  ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted",
 };
 
 type Tone = "live" | "sold" | "neutral" | "busy" | "attention" | "failed" | "idle";
@@ -365,17 +364,12 @@ export function MarketplacesLayout({
 
   async function updateNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
-    const extra = marketplace === "sellwild" ? " Sellwild may hold the edit for review." : "";
-    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.${extra}`,
+    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.`,
       { confirmLabel: `Update on ${name}` })) action.mutate({ marketplace, kind: "update" });
   }
   async function listNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
-    const extra = marketplace === "sellwild" ? " Sellwild may hold it for review."
-      : marketplace === "ebay" ? " This uses your eBay shipping, payment, and return policies, set in Settings → Connections → eBay when you have more than one."
-      : marketplace === "etsy" && !etsyEligible ? " Etsy may still reject it if the item is not vintage, handmade, or a supply."
-      : "";
-    if (await confirmDialog(`List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.${extra}`,
+    if (await confirmDialog(`List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.`,
       { confirmLabel: `List on ${name}` })) action.mutate({ marketplace, kind: "list" });
   }
   /** Starts List on each marketplace named, after one confirmation that names them all. */
@@ -731,7 +725,7 @@ export function MarketplacesLayout({
             {(() => {
               const draft = drafts[selectedMarketplace];
               const name = railLabel(selectedMarketplace);
-              if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "sellwild" || selectedMarketplace === "ebay") return null;
+              if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "ebay") return null;
               return (
                 <div className="flex items-center gap-2">
                   <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the link if one was created"

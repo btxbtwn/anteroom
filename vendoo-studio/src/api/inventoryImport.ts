@@ -1,5 +1,5 @@
 export type DirectImportMarketplace = "ebay" | "etsy";
-export type ChromeImportMarketplace = "poshmark" | "mercari" | "depop" | "sellwild" | "vinted";
+export type ChromeImportMarketplace = "poshmark" | "mercari" | "depop";
 export type ImportMarketplace = DirectImportMarketplace | ChromeImportMarketplace;
 
 export interface MarketplaceImportMatch {

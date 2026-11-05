@@ -94,15 +94,15 @@ describe("Chrome marketplace inventory import", () => {
     const submit = vi.spyOn(api.chromeImport, "importListing").mockResolvedValue({
       conversation_id: "local-jacket", listing_id: "4401", reused: true, linked: true, photo_count: 3, warnings: [] });
     const etsy = vi.spyOn(api.etsy, "importListing");
-    renderToStaticMarkup(<InventoryImport marketplace="vinted" accountKey="vinted" onOpenListing={vi.fn()} />);
+    renderToStaticMarkup(<InventoryImport marketplace="mercari" accountKey="mercari" onOpenListing={vi.fn()} />);
     const options = useQuery.mock.calls[useQuery.mock.calls.length - 1][0];
-    expect(options.queryKey).toEqual(["inventory-import", "vinted", "vinted", 1, null]);
+    expect(options.queryKey).toEqual(["inventory-import", "mercari", "mercari", 1, null]);
     await options.queryFn();
-    expect(candidates).toHaveBeenCalledWith("vinted", null);
+    expect(candidates).toHaveBeenCalledWith("mercari", null);
     const mutation = useMutation.mock.calls[useMutation.mock.calls.length - 1][0];
     await mutation.mutationFn([{ id: "4401", link: "local-jacket" }, { id: "4402" }]);
-    expect(submit).toHaveBeenNthCalledWith(1, "vinted", "4401", "local-jacket");
-    expect(submit).toHaveBeenNthCalledWith(2, "vinted", "4402", undefined);
+    expect(submit).toHaveBeenNthCalledWith(1, "mercari", "4401", "local-jacket");
+    expect(submit).toHaveBeenNthCalledWith(2, "mercari", "4402", undefined);
     expect(etsy).not.toHaveBeenCalled();
     candidates.mockRestore();
     submit.mockRestore();

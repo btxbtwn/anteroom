@@ -996,7 +996,7 @@ def set_listing_formulas(*, title: object = None, description: object = None) ->
 
 
 SALE_DETECTION_KEY = "sale_detection"
-SALE_DETECTION_MARKETS = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
+SALE_DETECTION_MARKETS = ("ebay", "etsy", "poshmark", "mercari", "depop")
 
 
 def get_sale_detection() -> dict[str, bool]:

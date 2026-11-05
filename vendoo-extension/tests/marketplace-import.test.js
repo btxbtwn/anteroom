@@ -227,70 +227,13 @@ test('Depop refuses another shop, several sizes and other currencies', async () 
   assert.match((await listing(depop({ ...DEPOP_PRODUCT, price_currency: 'GBP' }).c, 'depop', DEPOP_PRODUCT.slug)).error, /USD/);
 });
 
-const SELLWILD_LISTING = { id: 812, title: 'Denim jacket', text: 'Classic fit', price: 45, status: 1, user: { id: 31 },
-  categoryId: 120, itemCondition: 4, photos: [{ url: 'https://images.sellwild.com/812/1.jpg', '640x640Url': 'https://images.sellwild.com/812/1-640.jpg' }] };
-
-function sellwild(listingBody = SELLWILD_LISTING, search = { success: true, listings: [], hasMore: false }) {
-  return worker({
-    'sellwild.com/api/auth/session': [200, { user: { id: 31, name: 'seller' } }],
-    'sellwild.com/api/search/listings': [200, search],
-    'sellwild.com/api/listings/812': [200, { listing: listingBody }],
-  });
-}
-
-test('Sellwild lists the seller listings by page and reads one listing', async () => {
-  const { c, requests } = sellwild(SELLWILD_LISTING, { success: true, hasMore: true,
-    listings: [{ id: 812, title: 'Denim jacket', price: 45, status: 1 }, { id: 813, title: 'Gone', price: 9, status: 5 }] });
-  assert.deepEqual(await page(c, 'sellwild', '2'), { ok: true, next_cursor: '3', rows: [
-    { id: '812', url: 'https://sellwild.com/product/812', title: 'Denim jacket', price: 45, quantity: 1 }] });
-  assert.match(requests.find(request => request.pathname === '/api/search/listings').url, /userId=31&limit=48&page=2/);
-  const result = await listing(c, 'sellwild', '812');
-  assert.deepEqual(result.listing, { id: '812', url: 'https://sellwild.com/product/812', title: 'Denim jacket', description: 'Classic fit',
-    price: 45, currency: 'USD', quantity: 1, brand: null, size: null, condition: '4', category_path: null, category_id: '120',
-    sku: null, colors: [], photos: ['https://images.sellwild.com/812/1.jpg'] });
-  readOnly(requests);
-  assert.match((await listing(sellwild({ ...SELLWILD_LISTING, status: 5 }).c, 'sellwild', '812')).error, /not live/);
-  assert.match((await listing(sellwild({ ...SELLWILD_LISTING, user: { id: 32 } }).c, 'sellwild', '812')).error, /does not belong/);
-});
-
-const VINTED_ITEM = { id: 4401, title: 'Denim jacket', description: 'Classic fit', price: { amount: '45.0', currency_code: 'USD' },
-  brand_title: 'Levi\'s', size_title: 'M', status: 'Very good', catalog_id: 1904, user: { id: 7 },
-  is_draft: false, is_closed: false, is_hidden: false, is_reserved: false,
-  photos: [{ full_size_url: 'https://images1.vinted.net/t/1/f800/1.jpeg' }] };
-const VINTED_CATALOGS = { catalogs: [{ id: 1, title: 'Women', catalogs: [{ id: 1904, title: 'Jackets' }] }] };
-
-function vinted(item = VINTED_ITEM, wardrobe = { items: [], pagination: { total_pages: 1 } }) {
-  return worker({
-    'www.vinted.com/api/v2/users/current': [200, { user: { id: 7, login: 'seller' } }],
-    'www.vinted.com/api/v2/wardrobe/7/items': [200, wardrobe],
-    'www.vinted.com/api/v2/items/4401': [200, { item }],
-    'www.vinted.com/api/v2/item_upload/catalogs': [200, VINTED_CATALOGS],
-  }, { cookies: { access_token_web: jwt({ exp: Math.floor(Date.now() / 1000) + 3600 }) } });
-}
-
-test('Vinted reads live wardrobe items and one item for the signed-in member', async () => {
-  const { c, requests } = vinted(VINTED_ITEM, { pagination: { total_pages: 3 }, items: [
-    { id: 4401, title: 'Denim jacket', price: { amount: '45.0', currency_code: 'USD' }, is_draft: false },
-    { id: 4402, title: 'Reserved', is_reserved: true }, { id: 4403, title: 'Draft', is_draft: true }] });
-  assert.deepEqual(await page(c, 'vinted'), { ok: true, next_cursor: '2', rows: [
-    { id: '4401', url: 'https://www.vinted.com/items/4401', title: 'Denim jacket', price: 45, quantity: 1 }] });
-  const result = await listing(c, 'vinted', '4401');
-  assert.deepEqual(result.listing, { id: '4401', url: 'https://www.vinted.com/items/4401', title: 'Denim jacket', description: 'Classic fit',
-    price: 45, currency: 'USD', quantity: 1, brand: 'Levi\'s', size: 'M', condition: 'Very good', category_path: 'Women > Jackets',
-    category_id: '1904', sku: null, colors: [], photos: ['https://images1.vinted.net/t/1/f800/1.jpeg'] });
-  readOnly(requests);
-  assert.match((await listing(vinted({ ...VINTED_ITEM, user: { id: 8 } }).c, 'vinted', '4401')).error, /does not belong/);
-  assert.match((await listing(vinted({ ...VINTED_ITEM, price: { amount: '45.0', currency_code: 'EUR' } }).c, 'vinted', '4401')).error, /USD/);
-  assert.match((await listing(vinted({ ...VINTED_ITEM, is_closed: true }).c, 'vinted', '4401')).error, /not live/);
-});
-
 test('import reads wait for a running listing action and reject malformed IDs without a request', async () => {
-  const { c, requests } = vinted();
-  assert.equal((await listing(c, 'vinted', '../4401')).ok, false);
+  const { c, requests } = depop();
+  assert.equal((await listing(c, 'depop', '../slug')).ok, false);
   assert.equal((await listing(c, 'ebay', '123')).ok, false);
   require('node:vm').runInContext('claimNativeOperation("*", "op")', c);
-  assert.equal((await page(c, 'vinted')).error_code, 'busy');
-  assert.equal((await listing(c, 'vinted', '4401')).error_code, 'busy');
+  assert.equal((await page(c, 'depop')).error_code, 'busy');
+  assert.equal((await listing(c, 'depop', DEPOP_PRODUCT.slug)).error_code, 'busy');
   assert.equal(requests.length, 0);
 });
 

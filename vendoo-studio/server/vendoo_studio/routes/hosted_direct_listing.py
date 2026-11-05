@@ -1,18 +1,16 @@
 """List, update and delist from the web: eBay and Etsy through their APIs, and
-Poshmark, Mercari, Depop, Vinted and Sellwild through the seller's own Chrome.
+Poshmark, Mercari and Depop through the seller's own Chrome.
 
 These are the desktop handlers, run in the signed-in seller's context with
 their own tokens. Every action is one the seller starts: List and Update carry
 ``confirm``, Delist names its marketplaces and carries ``confirm``, and nothing
 here runs on a timer or a retry. Chrome actions go through the seller's
-signed-in Anteroom tab (``services/hosted_browser_relay.py``), and so do the
-reads of Vinted's own categories and brands and of the seller's Sellwild
-account choices.
+signed-in Anteroom tab (``services/hosted_browser_relay.py``).
 """
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -23,8 +21,8 @@ from vendoo_studio.routes.vendoo_api import leaf_form
 from vendoo_studio.services.native_marketplaces import CheckRequest, ListRequest
 
 # The rail's actions, as on the Mac.
-ACTION_MARKETPLACES = ('ebay', 'etsy', 'poshmark', 'mercari', 'depop', 'vinted', 'sellwild')
-Direct = Literal['ebay', 'etsy', 'poshmark', 'mercari', 'depop', 'vinted', 'sellwild']
+ACTION_MARKETPLACES = ('ebay', 'etsy', 'poshmark', 'mercari', 'depop')
+Direct = Literal['ebay', 'etsy', 'poshmark', 'mercari', 'depop']
 PREFIX = '/api/conversations/{conv_id}'
 
 router = APIRouter()
@@ -34,17 +32,13 @@ for path, handler, methods in (
     ('/marketplace-listings/{marketplace}/mark', marketplace_listings.mark, ['POST']),
     ('/marketplace-listings/sold', marketplace_listings.record_sale, ['POST']),
     ('/marketplace-listings/check-sales', marketplace_listings.check_sales, ['POST']),
-    ('/native-marketplaces/vinted/categories', native_marketplaces.vinted_categories, ['GET']),
-    ('/native-marketplaces/vinted/brands', native_marketplaces.vinted_brands, ['GET']),
-    ('/native-marketplaces/sellwild/options', native_marketplaces.sellwild_options, ['GET']),
 ):
     router.add_api_route(PREFIX + path, handler, methods=methods)
 
 
 @router.get(PREFIX + '/native-marketplaces/preflight')
-def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
-              sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db, scope="function")):
-    return native_marketplaces.preflight(conv_id, sellwild_category_id, sellwild_condition_id, db)
+def preflight(conv_id: str, db: Session = Depends(get_db, scope="function")):
+    return native_marketplaces.preflight(conv_id, db)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/list')

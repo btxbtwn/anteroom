@@ -21,7 +21,7 @@ CURRENT_ITEM_VERSION = 10
 
 # Every marketplace Vendoo's new-item factory seeds a listings section for.
 ALL_MARKETPLACES = (
-    "ebay", "etsy", "poshmark", "mercari", "depop", "facebook", "vinted", "sellwild",
+    "ebay", "etsy", "poshmark", "mercari", "depop", "facebook",
 )
 
 # generalDetails fields Vendoo stores as a coded object with a display label.
@@ -37,7 +37,7 @@ MERCARI_GROUND_ADVANTAGE_LABEL = DEFAULT_SHIPPING_LABEL
 
 SPECIFICS_SOURCES = {
     mp: f"{mp}_specifics"
-    for mp in ("ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "facebook", "sellwild")
+    for mp in ("ebay", "poshmark", "mercari", "depop", "etsy", "facebook")
 }
 
 # Studio names its listing fields in camelCase; Vendoo names the same fields
@@ -146,15 +146,15 @@ def default_listing_section(marketplace: str) -> dict[str, Any]:
         "dateLastModified": "",
         "type": "listing",
         "status": {"notListed": True},
-        "overrides": _weight_dims_overrides() if marketplace in ("ebay", "etsy", "poshmark", "mercari", "sellwild") else (
-            {"quantity": "1"} if marketplace in ("depop", "vinted", "facebook") else {}
+        "overrides": _weight_dims_overrides() if marketplace in ("ebay", "etsy", "poshmark", "mercari") else (
+            {"quantity": "1"} if marketplace in ("depop", "facebook") else {}
         ),
         "categorySpecifics": {},
         "listingAttemptMessages": [],
         "marketplaceSpecifics": _marketplace_specific_defaults(marketplace),
         "sales": [],
     }
-    if marketplace in ("shopify", "sellhound", "sellwild", "whatnot", "vinted", "facebook"):
+    if marketplace in ("shopify", "sellhound", "whatnot", "facebook"):
         section["listedID"] = ""
         section["listingURL"] = ""
     return section

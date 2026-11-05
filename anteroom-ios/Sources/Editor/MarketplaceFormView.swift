@@ -379,7 +379,7 @@ private struct MarketplacePhotoPicker: View {
     @State private var uploading = false
     @State private var uploadError: String?
 
-    private static let limits = ["ebay": 24, "etsy": 20, "poshmark": 16, "mercari": 12, "depop": 8, "vinted": 20, "sellwild": 20]
+    private static let limits = ["ebay": 24, "etsy": 20, "poshmark": 16, "mercari": 12, "depop": 8]
     private var limit: Int { Self.limits[marketplace] ?? 20 }
 
     var body: some View {

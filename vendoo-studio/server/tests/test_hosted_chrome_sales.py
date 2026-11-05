@@ -3,8 +3,7 @@ import asyncio
 from unittest.mock import AsyncMock
 
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
-from test_hosted_browser_relay import _bridge_accepts
-from test_hosted_vinted import _answer, _in_background
+from test_hosted_browser_relay import _answer, _bridge_accepts, _in_background
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 from vendoo_studio.services import chrome_sales, hosted_browser_relay, order_history

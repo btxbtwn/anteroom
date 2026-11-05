@@ -41,28 +41,28 @@ class SavedChoicesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.reads, 1)
 
     async def test_an_old_copy_shows_at_once_and_is_replaced_in_the_background(self):
-        await saved_choices.kept("sellwild-account", "", lambda: self.read({"ship_from": "Old St"}))
+        await saved_choices.kept("account-choices", "", lambda: self.read({"ship_from": "Old St"}))
         with mock.patch.object(saved_choices, "REFRESH_AFTER_S", 0):
-            shown = await saved_choices.kept("sellwild-account", "", lambda: self.read({"ship_from": "New St"}),
+            shown = await saved_choices.kept("account-choices", "", lambda: self.read({"ship_from": "New St"}),
                                              background=saved_choices.on_this_loop)
             self.assertEqual(shown, {"ship_from": "Old St"})
             for _ in range(100):
-                if self.reads == 2 and saved_choices.saved("sellwild-account", "") == {"ship_from": "New St"}:
+                if self.reads == 2 and saved_choices.saved("account-choices", "") == {"ship_from": "New St"}:
                     break
                 await asyncio.sleep(0.02)
-        self.assertEqual(saved_choices.saved("sellwild-account", ""), {"ship_from": "New St"})
+        self.assertEqual(saved_choices.saved("account-choices", ""), {"ship_from": "New St"})
 
     async def test_a_failed_read_is_never_saved(self):
         async def fails():
             raise OSError("Chrome is closed")
 
         with self.assertRaises(OSError):
-            await saved_choices.kept("vinted-categories", "", fails)
-        self.assertIsNone(saved_choices.saved("vinted-categories", ""))
-        unusable = await saved_choices.kept("sellwild-account", "", lambda: self.read({"unavailable": ["address"]}),
+            await saved_choices.kept("category-choices", "", fails)
+        self.assertIsNone(saved_choices.saved("category-choices", ""))
+        unusable = await saved_choices.kept("account-choices", "", lambda: self.read({"unavailable": ["address"]}),
                                             usable=lambda value: not value["unavailable"])
         self.assertEqual(unusable, {"unavailable": ["address"]})
-        self.assertIsNone(saved_choices.saved("sellwild-account", ""))
+        self.assertIsNone(saved_choices.saved("account-choices", ""))
 
     async def test_another_account_never_sees_these_choices(self):
         await saved_choices.kept("ebay-policies", "acct-1", lambda: self.read({"payment": ["p1"]}))
@@ -71,10 +71,10 @@ class SavedChoicesTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(saved_choices.saved("ebay-policies", "acct-1"))
 
     async def test_forget_drops_the_saved_copy_so_the_next_open_reads_again(self):
-        await saved_choices.kept("vinted-categories", "", lambda: self.read(["Jeans"]))
-        saved_choices.forget("vinted-categories")
-        self.assertIsNone(saved_choices.saved("vinted-categories", ""))
-        again = await saved_choices.kept("vinted-categories", "", lambda: self.read(["Coats"]))
+        await saved_choices.kept("category-choices", "", lambda: self.read(["Jeans"]))
+        saved_choices.forget("category-choices")
+        self.assertIsNone(saved_choices.saved("category-choices", ""))
+        again = await saved_choices.kept("category-choices", "", lambda: self.read(["Coats"]))
         self.assertEqual(again, ["Coats"])
         self.assertEqual(self.reads, 2)
 

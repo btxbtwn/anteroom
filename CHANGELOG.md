@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.730 — 2026-11-05
+
+- Sellwild and Vinted are gone from Anteroom: no tabs, settings, List/Update/Delist, import, or sales checks for either. Existing listings stay in your inventory; only eBay, Etsy, Poshmark, Mercari and Depop remain as direct marketplaces.
+
 ## 0.1.729 — 2026-11-05
 
 - Listing from the web no longer breaks when several marketplaces run at once: a listing waiting on Chrome no longer holds a database connection, which caused "Request failed: 500". Cancel now stops a listing that is waiting on Chrome right away, Chrome stays connected while the Anteroom tab is in the background, and the chat button shows "Poshmark: Listing…" instead of an internal step name.

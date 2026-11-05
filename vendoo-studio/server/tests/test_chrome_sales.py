@@ -102,18 +102,18 @@ class SaleDetectionRouteTest(unittest.TestCase):
         history.assert_awaited_once_with("depop")
 
     def tearDown(self):
-        user_settings.set_sale_detection("sellwild", True)
+        user_settings.set_sale_detection("depop", True)
         user_settings.set_autodelist(False)
 
     def test_sale_detection_can_be_turned_off(self):
         client = TestClient(app)
         body = client.get("/api/settings/sale-detection").json()
-        self.assertTrue(body["enabled"]["sellwild"])
-        self.assertTrue(body["enabled"]["vinted"])
+        self.assertTrue(body["enabled"]["depop"])
+        self.assertTrue(body["enabled"]["mercari"])
         self.assertTrue(body["enabled"]["ebay"])
         self.assertFalse(body["autodelist"])
-        saved = client.put("/api/settings/sale-detection", json={"marketplace": "sellwild", "enabled": False}).json()
-        self.assertFalse(saved["enabled"]["sellwild"])
+        saved = client.put("/api/settings/sale-detection", json={"marketplace": "depop", "enabled": False}).json()
+        self.assertFalse(saved["enabled"]["depop"])
         self.assertFalse(saved["autodelist"])
         self.assertEqual(client.put("/api/settings/sale-detection", json={"marketplace": "grailed", "enabled": True}).status_code, 400)
 

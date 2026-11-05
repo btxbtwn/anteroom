@@ -136,8 +136,7 @@ function listingKidsGender(listing) {
 // The listing's fit, as Poshmark names its size sets.
 function listingSizeFit(listing) {
   const sources = [listing?.sizeType, listing?.ebay_specifics?.sizeType, listing?.poshmark_specifics?.sizeType,
-    listing?.mercari_specifics?.sizeType, listing?.depop_specifics?.sizeType, listing?.etsy_specifics?.sizeType,
-    listing?.vinted_specifics?.sizeType, listing?.sellwild_specifics?.sizeType];
+    listing?.mercari_specifics?.sizeType, listing?.depop_specifics?.sizeType, listing?.etsy_specifics?.sizeType];
   const texts = sources.map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
   const text = texts.find(value => !/^(?:regular|standard|normal)$/.test(value)) || texts[0] || '';
   if (!text || /^(?:regular|standard|normal)$/.test(text)) return null;

@@ -94,6 +94,7 @@ class MarketplaceListing(SellerOwned, Base):
     storage: Mapped[str | None] = mapped_column(String, nullable=True)
     local_draft_id: Mapped[str | None] = mapped_column(String, nullable=True)
     photo_ids: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Unused since Sellwild was removed; columns kept so existing DBs stay readable without a migration.
     sellwild_category_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sellwild_condition_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

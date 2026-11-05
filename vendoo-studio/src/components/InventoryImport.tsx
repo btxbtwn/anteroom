@@ -30,8 +30,6 @@ const SUPPORT: Record<ImportMarketplace, string> = {
   poshmark: "Reads your Poshmark closet through Chrome while you are signed in. Supports available listings in USD with one size.",
   mercari: "Reads your Mercari listings through Chrome while you are signed in. Supports items on sale in USD.",
   depop: "Reads your Depop shop through Chrome while you are signed in. Supports items for sale in USD with one size.",
-  sellwild: "Reads your Sellwild listings through Chrome while you are signed in. Supports live listings.",
-  vinted: "Reads your Vinted wardrobe through Chrome while you are signed in. Supports live listings in USD.",
 };
 
 interface ImportRequest { id: string; link?: string }

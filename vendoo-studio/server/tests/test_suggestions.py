@@ -126,12 +126,12 @@ class SuggestionsTest(unittest.TestCase):
     def test_stale_follows_the_oldest_live_marketplace(self):
         conv = self.convs.create(title="Bulk relisted")
         conv.notes = json.dumps({
-            "vendooMarketplaces": ["ebay", "sellwild"],
+            "vendooMarketplaces": ["ebay", "poshmark"],
             "vendooDates": {
                 "listed": "2026-08-22T00:00:00Z",
                 "listedByMarketplace": {
                     "ebay": "2026-06-22T00:00:00Z",
-                    "sellwild": "2026-08-22T00:00:00Z",
+                    "poshmark": "2026-08-22T00:00:00Z",
                 },
             },
         })

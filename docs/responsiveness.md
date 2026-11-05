@@ -132,7 +132,7 @@ still required before calling concurrent drafting fast enough.
 ## Marketplace form loading
 
 On 2026-11-03 the seller measured 12 s to open eBay's form, 8 s for Poshmark,
-Mercari and Depop and 9 s for Sellwild on the web. Every form ran about 60
+Mercari and Depop on the web. Every form ran about 60
 database queries before answering, one field-registry lookup per saved
 marketplace detail. With about 70 ms per reused hosted connection (above), that
 alone is several seconds. A form now reads the field registry once (at most six

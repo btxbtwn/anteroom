@@ -79,7 +79,7 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual((job.current_step, job.status), ("native_promote", "completed"))
 
     def test_only_named_supported_marketplaces_and_actions(self):
-        for body in ({"marketplace": "vinted", "action": "share"}, {"marketplace": "poshmark", "action": "refresh"}, {"action": "share"}):
+        for body in ({"marketplace": "facebook", "action": "share"}, {"marketplace": "poshmark", "action": "refresh"}, {"action": "share"}):
             response = self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], **body})
             self.assertEqual(response.status_code, 422, body)
         self.assertEqual(self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], "marketplace": "mercari",

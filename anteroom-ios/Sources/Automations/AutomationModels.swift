@@ -184,7 +184,7 @@ struct AutomationBody: Encodable, Sendable {
 
 /// The desktop form (automationsFormat.ts), field for field.
 struct AutomationForm: Equatable, Sendable {
-    static let marketplaces = ["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted"]
+    static let marketplaces = ["ebay", "poshmark", "mercari", "depop", "etsy"]
     static let weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
     var name = ""

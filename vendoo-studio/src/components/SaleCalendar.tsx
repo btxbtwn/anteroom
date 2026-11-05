@@ -24,7 +24,6 @@ const CHIP_TONE: Record<string, string> = {
   ebay: "bg-[color-mix(in_srgb,var(--color-ebay)_16%,transparent)]",
   depop: "bg-[color-mix(in_srgb,var(--color-depop)_16%,transparent)]",
   etsy: "bg-[color-mix(in_srgb,var(--color-etsy)_16%,transparent)]",
-  sellwild: "bg-success/16",
 };
 
 function chipClass(marketplace: string, className?: string): string {

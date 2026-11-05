@@ -44,8 +44,6 @@ JEANS = {
     "mercari_specifics": {},
     "depop_specifics": {"source": "Preloved", "age": "90s", "style": ["Casual"], "parcelSize": "Medium"},
     "etsy_specifics": {"who_made": "Another company or person", "what_is": "A finished product", "when_made": "1990s"},
-    "vinted_specifics": {},
-    "sellwild_specifics": {},
 }
 
 
@@ -62,9 +60,6 @@ class BottomsSizeTest(unittest.TestCase):
         self.assertEqual(listing["depop_specifics"]["size"], "32")
         self.assertEqual(listing["etsy_specifics"]["size"], "32")
         self.assertEqual(listing["etsy_specifics"]["inseam"], "30")
-        self.assertEqual(listing["vinted_specifics"]["size"], "32")
-        # Sellwild's sell form has no size field.
-        self.assertEqual(listing["sellwild_specifics"], {})
         # A second pass keeps the marketplace spelling. It does not collapse Waist 32.
         again = copy.deepcopy(listing)
         align_size_fields(again)
@@ -100,9 +95,6 @@ class BottomsSizeTest(unittest.TestCase):
         self.assertEqual(listing["depop_specifics"]["size"], "8")
         self.assertEqual(listing["depop_specifics"]["sizeGrouping"], "Petite")
         self.assertEqual(listing["etsy_specifics"]["size"], "8")
-        self.assertEqual(listing["vinted_specifics"], {"size": "S / 8"})
-        # Neither Sellwild's nor Vinted's form has a size type field.
-        self.assertNotIn("sellwild_specifics", listing)
 
     def test_a_seller_size_is_not_replaced(self):
         listing = copy.deepcopy(JEANS)

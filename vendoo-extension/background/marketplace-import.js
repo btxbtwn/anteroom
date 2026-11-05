@@ -10,16 +10,12 @@
 //             sellFetchItemsDetails, the query its edit page uses; masterQuery names the ids
 //   Depop     GET /api/v1/shop/{id}/products/ and /presentation/api/v1/products/by-slug/{slug}/,
 //             with the public attributes list for brand, category and size names
-//   Sellwild  GET /api/search/listings?userId= and /api/listings/{id}
-//   Vinted    GET /api/v2/wardrobe/{id}/items and /api/v2/items/{id}
 
-const IMPORT_MARKETS = ['poshmark', 'mercari', 'depop', 'sellwild', 'vinted'];
+const IMPORT_MARKETS = ['poshmark', 'mercari', 'depop'];
 const IMPORT_LISTING_ID = {
   poshmark: /^[a-f0-9]{24}$/,
   mercari: /^m\d{6,}$/,
   depop: /^[a-z0-9][a-z0-9-]{0,200}$/,
-  sellwild: /^\d{1,15}$/,
-  vinted: /^\d{1,15}$/,
 };
 const IMPORT_PAGE_SIZE = 48;
 const IMPORT_MAX_PHOTOS = 20;
@@ -329,122 +325,11 @@ async function depopImportListing(slug, deadline) {
   };
 }
 
-// ---- Sellwild ----
-
-async function sellwildImportAccount(deadline) {
-  const session = await importGet('sellwild', `${SELLWILD}/api/auth/session`, deadline);
-  const id = String(session?.user?.id ?? '');
-  if (!/^\d{1,15}$/.test(id)) throw marketplaceError('Sign in to Sellwild in Chrome first.', { code: 'signed_out' });
-  return id;
-}
-
-function sellwildImportPrice(listing) {
-  return importMoney(listing?.price);
-}
-
-async function sellwildImportPage(cursor, deadline) {
-  const account = await sellwildImportAccount(deadline);
-  const page = Number.isInteger(Number(cursor)) && Number(cursor) > 1 ? Number(cursor) : 1;
-  const body = await importGet('sellwild', `${SELLWILD}/api/search/listings?userId=${account}&limit=${IMPORT_PAGE_SIZE}&page=${page}`, deadline);
-  if (body?.success !== true || !Array.isArray(body.listings)) throw marketplaceError('Sellwild answered in a way Anteroom does not recognise.', { code: 'schema_drift' });
-  const rows = body.listings.filter(listing => IMPORT_LISTING_ID.sellwild.test(String(listing?.id ?? ''))
-      && (listing.status == null || Number(listing.status) === 1))
-    .map(listing => ({ id: String(listing.id), url: `${SELLWILD}/product/${listing.id}`, title: importText(listing.title, 255) || String(listing.id),
-      price: sellwildImportPrice(listing), quantity: 1 }));
-  return { rows, next_cursor: body.hasMore === true ? String(page + 1) : null };
-}
-
-async function sellwildImportListing(id, deadline) {
-  const account = await sellwildImportAccount(deadline);
-  const body = await importGet('sellwild', `${SELLWILD}/api/listings/${id}`, deadline);
-  const listing = body?.listing;
-  if (String(listing?.id ?? '') !== id) throw importError('Sellwild did not return this listing.');
-  if (!importSame(listing.user?.id ?? listing.userId, account)) throw importError('This listing does not belong to the signed-in Sellwild account.');
-  if (Number(listing.status) !== 1) throw importError('This Sellwild listing is not live.');
-  return {
-    id, url: `${SELLWILD}/product/${id}`, title: importText(listing.title, 255), description: importText(listing.text ?? listing.description),
-    price: sellwildImportPrice(listing), currency: 'USD', quantity: 1, brand: importText(listing.brand, 120) || null, size: null,
-    condition: listing.itemCondition != null ? String(listing.itemCondition) : null,
-    category_path: importText(listing.categoryName ?? listing.category?.name, 200) || null,
-    category_id: listing.categoryId != null ? String(listing.categoryId) : listing.category?.id != null ? String(listing.category.id) : null,
-    sku: null, colors: [],
-    photos: importPhotos((Array.isArray(listing.photos) ? listing.photos : []).map(photo => (typeof photo === 'string' ? photo
-      : photo?.url || photo?.['640x640Url'] || photo?.['320x320Url']))),
-  };
-}
-
-// ---- Vinted ----
-
-async function vintedImportAccount(deadline) {
-  await vintedKeepSignedIn(deadline);
-  const id = vintedAccountId(await importGet('vinted', `${VINTED_ORIGIN}/api/v2/users/current`, deadline));
-  if (!id) throw marketplaceError('Sign in to Vinted in Chrome first.', { code: 'signed_out' });
-  return id;
-}
-
-function vintedImportPrice(item) {
-  const currency = String(item?.price?.currency_code ?? item?.currency ?? 'USD').toUpperCase();
-  return currency === 'USD' ? importMoney(vintedAmount(item?.price ?? item?.price_numeric)) : null;
-}
-
-async function vintedImportPage(cursor, deadline) {
-  const account = await vintedImportAccount(deadline);
-  const page = Number.isInteger(Number(cursor)) && Number(cursor) > 1 ? Number(cursor) : 1;
-  const body = await importGet('vinted', `${VINTED_ORIGIN}/api/v2/wardrobe/${account}/items?page=${page}&per_page=${IMPORT_PAGE_SIZE}&order=newest_first`, deadline);
-  if (!Array.isArray(body?.items)) throw marketplaceError('Vinted answered in a way Anteroom does not recognise.', { code: 'schema_drift' });
-  const rows = body.items.filter(item => IMPORT_LISTING_ID.vinted.test(String(item?.id ?? '')) && item.is_draft !== true
-      && item.is_closed !== true && item.is_hidden !== true && item.is_reserved !== true)
-    .map(item => ({ id: String(item.id), url: vintedPublicUrl(item.id), title: importText(item.title, 200) || String(item.id),
-      price: vintedImportPrice(item), quantity: 1 }));
-  const total = Number(body.pagination?.total_pages) || page;
-  return { rows, next_cursor: page < total && body.items.length ? String(page + 1) : null };
-}
-
-function vintedCatalogPath(nodes, id, trail = []) {
-  for (const node of Array.isArray(nodes) ? nodes : []) {
-    const path = [...trail, importText(node?.title, 120)];
-    if (String(node?.id) === String(id)) return path.filter(Boolean).join(' > ');
-    const found = vintedCatalogPath(node?.catalogs || node?.children, id, path);
-    if (found) return found;
-  }
-  return '';
-}
-
-async function vintedImportListing(id, deadline) {
-  const account = await vintedImportAccount(deadline);
-  const body = await importGet('vinted', `${VINTED_ORIGIN}/api/v2/items/${id}`, deadline);
-  const item = body?.item || body;
-  if (String(item?.id ?? '') !== id) throw importError('Vinted did not return this listing.');
-  if (!importSame(vintedOwnerId(item), account)) throw importError('This listing does not belong to the signed-in Vinted account.');
-  if (item.is_draft === true || item.is_closed === true || item.is_hidden === true || item.is_reserved === true) {
-    throw importError('This Vinted listing is not live.');
-  }
-  if (vintedImportPrice(item) == null) throw importError('This import supports listings priced in USD.');
-  let path = '';
-  if (item.catalog_id != null) {
-    try {
-      const catalogs = await importGet('vinted', `${VINTED_ORIGIN}/api/v2/item_upload/catalogs`, deadline);
-      path = vintedCatalogPath(catalogs?.catalogs || catalogs, item.catalog_id);
-    } catch { /* The category id is kept without its names. */ }
-  }
-  return {
-    id, url: vintedPublicUrl(id), title: importText(item.title, 200), description: importText(item.description),
-    price: vintedImportPrice(item), currency: 'USD', quantity: 1,
-    brand: importText(item.brand_title ?? item.brand_dto?.title ?? item.brand?.title, 120) || null,
-    size: importText(item.size_title ?? item.size?.title, 80) || null,
-    condition: importText(typeof item.status === 'string' ? item.status : item.status?.title, 40) || null,
-    category_path: path || null, category_id: item.catalog_id != null ? String(item.catalog_id) : null,
-    sku: null, colors: [item.color1, item.color2].map(color => importText(color?.title ?? color, 40)).filter(Boolean),
-    photos: importPhotos((Array.isArray(item.photos) ? item.photos : []).map(photo => photo?.full_size_url || photo?.url)),
-  };
-}
 
 const IMPORT_READERS = {
   poshmark: { page: poshmarkImportPage, listing: poshmarkImportListing },
   mercari: { page: mercariImportPage, listing: mercariImportListing },
   depop: { page: depopImportPage, listing: depopImportListing },
-  sellwild: { page: sellwildImportPage, listing: sellwildImportListing },
-  vinted: { page: vintedImportPage, listing: vintedImportListing },
 };
 
 function importFailure(error) {

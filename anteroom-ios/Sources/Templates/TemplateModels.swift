@@ -49,8 +49,7 @@ enum TemplateFields {
     private static let categoryFields = ["marketplace_categories", "marketplace_category_ids", "marketplace_category_objects", "direct_category_ids"]
     private static let labels = [
         "ebay_specifics": "eBay form", "etsy_specifics": "Etsy form", "poshmark_specifics": "Poshmark form",
-        "mercari_specifics": "Mercari form", "depop_specifics": "Depop form", "vinted_specifics": "Vinted form",
-        "sellwild_specifics": "Sellwild form", "title": "Title", "description": "Description", "price": "Asking price",
+        "mercari_specifics": "Mercari form", "depop_specifics": "Depop form", "title": "Title", "description": "Description", "price": "Asking price",
         "cost": "Cost", "quantity": "Quantity", "brand": "Brand", "condition": "Condition", "primaryColor": "Primary color",
         "secondaryColor": "Secondary color", "category_path": "General category", "size": "Size", "sizeType": "Size type",
         "size_us": "US size", "department": "Department", "tags": "Tags", "labels": "Labels", "weight_lb": "Package pounds",

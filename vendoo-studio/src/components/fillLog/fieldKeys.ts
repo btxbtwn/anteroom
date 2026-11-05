@@ -121,7 +121,7 @@ export function normalizeLookupKey(value: string): string {
     "return payed by": "return paid by",
   };
   const key = String(value || "")
-    .replace(/^(ebay|etsy|poshmark|mercari|depop|vinted|facebook|sellwild)\s+/i, "")
+    .replace(/^(ebay|etsy|poshmark|mercari|depop|facebook)\s+/i, "")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/[_*?-]+/g, " ")
     .replace(/[^\w\s]+/g, " ")
@@ -185,7 +185,7 @@ const FIELD_NAME_ALIASES: Record<string, string> = {
 
 export function normalizeFieldName(value: string): string {
   const key = String(value || "")
-    .replace(/^(ebay|etsy|poshmark|mercari|depop|vinted|facebook|sellwild|vendoo)\s+/i, "")
+    .replace(/^(ebay|etsy|poshmark|mercari|depop|facebook|vendoo)\s+/i, "")
     .replace(/[*?]+/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[_.-]+/g, " ")

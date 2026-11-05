@@ -25,14 +25,6 @@ const ETSY_WAISTS = MERCARI_WAISTS;
 const ETSY_COMBINED = ETSY_WAISTS.filter((waist) => Number(waist) >= 28 && Number(waist) <= 44)
   .flatMap((waist) => [28, 30, 32, 34].map((inseam) => `${waist}x${inseam}`));
 
-const VINTED_WOMEN = [
-  "XXXS", "XXS / 0", "XS / 2", "XS / 4", "S / 6", "S / 8", "M / 10", "M / 12",
-  "L / 14", "L / 16", "XL / 18", "XL / 20", "XXL / 22", "XXL / 24",
-];
-const VINTED_MEN = [
-  ...Array.from({ length: 25 }, (_, index) => String(26 + index)),
-  ...Array.from({ length: 25 }, (_, index) => `W${26 + index}`),
-];
 
 const BOTTOMS_RE = /\b(jeans|pants|trousers|chinos|slacks|shorts|joggers|sweatpants|cargos|corduroys|leggings|skirts|culottes|capris|khakis|dungarees)\b/i;
 const WOMEN_RE = /\b(women|ladies|female|womenswear)\b/i;
@@ -95,18 +87,6 @@ export function bottomsOptions(listing: ListingLike, marketplace: string): Recor
       size: [...(women ? WOMENS_NUMERIC : []), ...(men ? ETSY_WAISTS : []), ...(men ? ETSY_COMBINED : [])],
       inseam: EBAY_INSEAMS,
       sizeType: ["Regular", "Petite", "Plus", "Tall"],
-    };
-  }
-  if (marketplace === "vinted") {
-    return {
-      size: [...(women ? VINTED_WOMEN : []), ...(men ? VINTED_MEN : [])],
-      sizeType: ["Regular", "Petite", "Plus", "Tall"],
-    };
-  }
-  if (marketplace === "sellwild") {
-    return {
-      size: [...(women ? WOMENS_NUMERIC : []), ...(men ? ETSY_WAISTS : []), ...(men ? ETSY_COMBINED : [])],
-      sizeType: ["Regular", "Petite", "Plus", "Tall", "Big & Tall"],
     };
   }
   return {};

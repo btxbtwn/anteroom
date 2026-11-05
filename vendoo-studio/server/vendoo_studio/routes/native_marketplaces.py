@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -45,11 +45,10 @@ def status(conv_id: str, db: Session = Depends(get_db, scope="function")):
 
 
 @router.get("/preflight")
-def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
-              sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db, scope="function")):
+def preflight(conv_id: str, db: Session = Depends(get_db, scope="function")):
     """What each marketplace still needs before List. A plain function, so FastAPI runs
     its database work in the threadpool instead of on the event loop."""
-    return _sync(native.preflight, conv_id, db, sellwild_category_id, sellwild_condition_id)
+    return _sync(native.preflight, conv_id, db)
 
 
 @router.post("/{marketplace}/inspect")
@@ -78,7 +77,7 @@ async def cancel(conv_id: str, marketplace: Marketplace, db: Session = Depends(g
 
 
 @router.get("/{marketplace}/form")
-async def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "sellwild"],
+async def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop"],
                       revision_id: str | None = None, db: Session = Depends(get_db, scope="function")):
     import asyncio
 
@@ -97,11 +96,6 @@ async def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "me
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
-@router.get("/sellwild/options")
-def sellwild_options(conv_id: str, db: Session = Depends(get_db, scope="function")):
-    return _sync(native.sellwild_options, conv_id, db)
-
-
 @router.post("/{marketplace}/check")
 async def check_result(conv_id: str, marketplace: Marketplace, body: CheckRequest | None = None, db: Session = Depends(get_db, scope="function")):
     return await _reply(native.check_result(conv_id, marketplace, db, body))
@@ -114,32 +108,3 @@ def reset(conv_id: str, marketplace: Marketplace, body: ResetRequest, db: Sessio
     return _sync(native.reset, conv_id, marketplace, db)
 
 
-@router.post("/{marketplace}/connect")
-async def connect_account(conv_id: str, marketplace: Literal["vinted", "sellwild"], db: Session = Depends(get_db, scope="function")):
-    import asyncio
-    from vendoo_studio.repositories.queries import ConversationRepo
-    from vendoo_studio.services import sellwild_browser, vinted_browser
-    from vendoo_studio.services.account_browser import AccountConnectionError
-
-    if not ConversationRepo(db).get(conv_id):
-        raise HTTPException(404, "Conversation not found")
-    reader = vinted_browser if marketplace == "vinted" else sellwild_browser
-    try:
-        return await asyncio.to_thread(reader.connect)
-    except AccountConnectionError as exc:
-        raise HTTPException(409, str(exc)) from exc
-
-
-@router.get("/vinted/categories")
-async def vinted_categories(conv_id: str, db: Session = Depends(get_db, scope="function")):
-    from vendoo_studio.services.native_editor import vinted_categories as read
-
-    return await _reply(read(conv_id, db))
-
-
-@router.get("/vinted/brands")
-async def vinted_brands(conv_id: str, q: str = Query(default="", max_length=100),
-                        category: str = Query(default="", max_length=1000), db: Session = Depends(get_db, scope="function")):
-    from vendoo_studio.services.native_editor import vinted_brands as search
-
-    return await _reply(search(conv_id, q, category, db))

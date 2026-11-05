@@ -1,4 +1,4 @@
-"""Import active Poshmark, Mercari, Depop, Sellwild and Vinted listings through Chrome.
+"""Import active Poshmark, Mercari and Depop listings through Chrome.
 
 The extension reads the seller's own listings with the seller's signed-in
 sessions and checks each one belongs to that account. On the web the seller's
@@ -23,10 +23,10 @@ from vendoo_studio.services import browser_bridge, inventory_import
 from vendoo_studio.services.chrome_sales import _LISTING_ID
 from vendoo_studio.services.marketplace_identity import listing_reference, public_listing_url
 
-MARKETPLACES = ("poshmark", "mercari", "depop", "sellwild", "vinted")
+MARKETPLACES = ("poshmark", "mercari", "depop")
 MATCH_THRESHOLD = 0.72
 MAX_ROWS = 100
-_NAMES = {"poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
+_NAMES = {"poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
 
 # Each marketplace's own condition, in Anteroom's words.
 _CONDITIONS = {
@@ -36,11 +36,6 @@ _CONDITIONS = {
                 "fair": "Pre-Owned - Fair", "poor": "Poor (Major flaws)"},
     "depop": {"brand_new": "New With Tags/Box", "used_like_new": "Pre-Owned - Excellent", "used_excellent": "Pre-Owned - Excellent",
               "used_good": "Pre-Owned - Good", "used_fair": "Pre-Owned - Fair"},
-    # Sellwild's scale: 5 Brand New, 4 Like New, 3 Good, 2 Gently Used, 1 Quite Used.
-    "sellwild": {"5": "New With Tags/Box", "4": "Pre-Owned - Excellent", "3": "Pre-Owned - Good", "2": "Pre-Owned - Good",
-                 "1": "Pre-Owned - Fair"},
-    "vinted": {"new with tags": "New With Tags/Box", "new without tags": "New Without Tags/Box", "very good": "Pre-Owned - Excellent",
-               "good": "Pre-Owned - Good", "satisfactory": "Pre-Owned - Fair"},
 }
 
 
@@ -56,7 +51,7 @@ def _name(marketplace: str) -> str:
 
 def _check(marketplace: str) -> None:
     if marketplace not in MARKETPLACES:
-        raise ChromeImportError(404, "Import through Chrome supports Poshmark, Mercari, Depop, Sellwild and Vinted.")
+        raise ChromeImportError(404, "Import through Chrome supports Poshmark, Mercari and Depop.")
 
 
 def listing_id_from(marketplace: str, value: str) -> str:
@@ -236,20 +231,6 @@ def snapshot(marketplace: str, listing: dict) -> tuple[dict, list[str]]:
         # The marketplace's own category is the one its tab shows.
         if marketplace in {"poshmark", "depop", "mercari"}:
             out["direct_category_ids"] = {marketplace: category_id}
-    if marketplace == "vinted" and category:
-        out["vinted_specifics"] = {"category": category}
-    if marketplace == "sellwild":
-        specifics = {key: int(str(value)) for key, value in (("nativeCategoryId", category_id), ("nativeConditionId", listing.get("condition")))
-                     if str(value or "").isdigit()}
-        if specifics:
-            out["sellwild_specifics"] = specifics
-        if not category and specifics.get("nativeCategoryId"):
-            from vendoo_studio.services.sellwild_listing import sellwild_catalog
-
-            label = next((option["label"] for option in sellwild_catalog()["categories"] if option["id"] == specifics["nativeCategoryId"]), "")
-            if label:
-                out["category_path"] = label
-                out["marketplace_categories"] = {"sellwild": label}
     photos = [url for url in listing.get("photos") or [] if isinstance(url, str) and url.startswith("https://")]
     return out, photos
 

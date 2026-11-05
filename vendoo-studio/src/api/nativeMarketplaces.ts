@@ -1,4 +1,4 @@
-export type NativeMarketplace = "ebay" | "poshmark" | "mercari" | "depop" | "etsy" | "sellwild" | "vinted";
+export type NativeMarketplace = "ebay" | "poshmark" | "mercari" | "depop" | "etsy";
 /** What the marketplace's refusal was, so the section can offer the one action that fixes it. */
 export type NativeErrorCode = "signed_out" | "challenge" | "rate_limited" | "missing_fields" | "rejected" | "schema_drift" | "network" | "uncertain";
 export interface NativeErrorField { field: string; message: string }
@@ -7,8 +7,6 @@ export interface NativeDraft {
   state: "not_saved" | "saving" | "publishing" | "updating" | "unknown" | "draft" | "published" | "pending_review";
   action?: "save_draft" | "publish" | "list" | "update";
   storage?: "local";
-  sellwild_category_id?: number;
-  sellwild_condition_id?: number;
   draft_url?: string;
   listing_url?: string;
   revision_id?: string | null;
@@ -29,11 +27,4 @@ export interface PreflightGap { field: string; message: string; blocking: boolea
 export interface NativePreflight {
   revision_id: string | null;
   marketplaces: Partial<Record<NativeMarketplace, { ready: boolean; gaps: PreflightGap[] }>>;
-}
-/** The seller's own Sellwild picks. A value left out is matched from the listing on every List. */
-export interface SellwildChoice { categoryId?: number; conditionId?: number }
-export interface SellwildOptions {
-  categories: { id: number; label: string }[];
-  conditions: { id: number; label: string }[];
-  suggested: { category_id: number | null; condition_id: number | null };
 }

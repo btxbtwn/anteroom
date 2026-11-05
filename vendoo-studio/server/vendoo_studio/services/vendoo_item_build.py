@@ -45,7 +45,6 @@ from vendoo_studio.services.vendoo_marketplace_fields import (
     _apply_mercari_smart_pricing,
     _apply_poshmark_original_price,
     _apply_poshmark_smart_sell,
-    _apply_vinted_package,
 )
 from vendoo_studio.services.vendoo_specifics import (
     FieldSpec,
@@ -529,9 +528,6 @@ def _listing_section(
                 )
             if candidate_conditions:
                 _set_learned_condition(section, schema, marketplace, leaf_id, candidate_conditions, reports)
-        if marketplace == "vinted":
-            _apply_vinted_package(section, leaf_id, listing, general.get("weight"), schema, unresolved)
-
     for key, value in specifics.items():
         if value in (None, "", []):
             continue

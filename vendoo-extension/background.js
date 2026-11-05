@@ -38,8 +38,6 @@ importScripts('background/marketplace-catalog.js');
 importScripts('background/mercari-native.js');
 importScripts('background/marketplace-network.js');
 importScripts('background/poshmark-native.js');
-importScripts('background/sellwild-native.js');
-importScripts('background/vinted-native.js');
 importScripts('background/native-marketplaces.js');
 importScripts('background/vendoo-api.js');
 importScripts('background/marketplace-delete.js');
@@ -350,16 +348,6 @@ async function handleStudioMessage(msg) {
       break;
     }
 
-    case 'marketplace.vinted_categories': {
-      try { sendBrowserResult(msg, { ok: true, options: await vintedCategoryOptions() }); }
-      catch (error) { sendBrowserResult(msg, { ok: false, error: error.message }); }
-      break;
-    }
-    case 'marketplace.vinted_brands': {
-      try { sendBrowserResult(msg, { ok: true, options: await vintedBrandOptions(msg.payload || {}) }); }
-      catch (error) { sendBrowserResult(msg, { ok: false, error: error.message }); }
-      break;
-    }
     case 'marketplace.form': {
       await handleNativeMarketplaceForm(msg);
       break;

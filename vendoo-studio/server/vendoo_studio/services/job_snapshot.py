@@ -122,6 +122,3 @@ def ensure_listing_defaults(listing_snapshot: dict) -> None:
         normalize_listing_dropdowns(listing)
 
     preserving_locks(listing_snapshot, _normalize)
-    from vendoo_studio.services.vinted_listing import apply_vinted_listing
-
-    apply_vinted_listing(listing_snapshot)

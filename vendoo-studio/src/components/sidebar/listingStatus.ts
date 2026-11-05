@@ -20,10 +20,8 @@ const MARKETPLACE_STATUS_ORDER = [
   "depop",
   "facebook",
   "shopify",
-  "vinted",
   "whatnot",
   "vestiaire",
-  "sellwild",
 ];
 // Vendoo keys Vestiaire's API integration separately; Settings treats it as one marketplace.
 const MARKETPLACE_ID_ALIASES: Record<string, string> = { vestiaireApi: "vestiaire" };

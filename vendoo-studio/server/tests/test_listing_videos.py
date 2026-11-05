@@ -141,7 +141,7 @@ class VideoRulesTest(unittest.TestCase):
         self.assertIn("3 to 15 seconds", problem(self.row(duration_seconds=2.9), "etsy"))
         self.assertIn("3 to 15 seconds", problem(self.row(duration_seconds=15.1), "etsy"))
         self.assertIn("95 MB", problem(self.row(size_bytes=95_000_001), "etsy"))
-        for marketplace in ("depop", "mercari", "vinted", "sellwild"):
+        for marketplace in ("depop", "mercari"):
             self.assertIn("does not take listing videos", problem(self.row(), marketplace))
 
     def test_video_ids_are_never_category_fields_or_vendoo_fields(self):
