@@ -1,0 +1,5 @@
+- When the window is wide enough, the listing chat is its own column beside the form, and you can drag its edge to resize it. On narrower windows it floats in the corner, where you can make it larger or minimize it. Anteroom remembers your choice.
+- Every marketplace tab now shows a check when the listing is ready for that marketplace, or how many required fields it still needs.
+- Listing photos are larger in the editor, on the web and on iPhone.
+- List everywhere now opens a picker: each marketplace shows whether it is ready, needs fields, is listed or sold. Pick the ones you want or use Select all ready, then press List. Nothing is picked for you.
+- On iPhone, the form picker shows each marketplace's readiness, and List everywhere is in the listing's actions menu with the same picker.

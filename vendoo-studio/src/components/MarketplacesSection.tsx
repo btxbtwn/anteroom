@@ -1,6 +1,6 @@
 import { useWorkspaceRuntime } from "../app/runtime";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
@@ -8,6 +8,7 @@ import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from 
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
+import { ListEverywhereDialog, type ListChoice } from "./ListEverywhereDialog";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { MarkSoldForm } from "./MarkSoldForm";
 import { marketplaceName } from "./marketplaceNames";
@@ -130,6 +131,35 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
 export function saidBesideList(gaps: readonly PreflightGap[], shownOnForm: readonly string[]): PreflightGap[] {
   const onForm = new Set(shownOnForm);
   return gaps.filter((gap) => !onForm.has(gap.field));
+}
+
+/** Required fields a marketplace still needs, each counted once. */
+export function missingRequired(gaps: readonly PreflightGap[]): number {
+  return new Set(gaps.filter((gap) => gap.blocking).map((gap) => gap.field)).size;
+}
+
+function fieldsText(count: number): string {
+  return `Needs ${count} ${count === 1 ? "field" : "fields"}`;
+}
+
+/** A marketplace's card in List everywhere's picker. */
+export function listChoice(marketplace: NativeMarketplace, { status, canAct, listable, retryIn, soldSomewhere, check }: {
+  status: Status; canAct: boolean; listable: boolean; retryIn: number; soldSomewhere: boolean;
+  /** The saved listing's field check, or null while it is unknown. */
+  check: { ready: boolean; gaps: PreflightGap[] } | null;
+}): ListChoice {
+  const choice = (label: string, tone: ListChoice["tone"], selectable = false): ListChoice => ({ marketplace, label, tone, selectable });
+  if (status.tone === "sold") return choice("Sold", "sold");
+  if (status.tone === "live" && status.label === "Listed") return choice("Listed", "listed");
+  if (!canAct) return choice("Not available here", "muted");
+  if (soldSomewhere) return choice("Not listed", "muted");
+  if (!listable || status.tone === "busy") return choice(status.label, "muted");
+  if (retryIn > 0) return choice(`Retry in ${retryIn}s`, "muted");
+  // Missing fields are advice, as on List…: the seller may still try.
+  const missing = check ? missingRequired(check.gaps) : 0;
+  if (missing) return choice(fieldsText(missing), "needs", true);
+  if (marketplace === "etsy" && status.tone === "attention") return choice(status.label, "needs", true);
+  return check?.ready ? choice("Ready", "ready", true) : choice("Not checked", "muted", true);
 }
 
 function railLabel(id: string): string {
@@ -372,14 +402,8 @@ export function MarketplacesLayout({
     if (await confirmDialog(`List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.`,
       { confirmLabel: `List on ${name}` })) action.mutate({ marketplace, kind: "list" });
   }
-  /** Starts List on each marketplace named, after one confirmation that names them all. */
-  async function listEverywhere(marketplaces: NativeMarketplace[], skipped: Marketplace[]) {
-    const lines = marketplaces.map((marketplace) => `• ${marketplaceName(marketplace)}`).join("\n");
-    const left = skipped.length ? `\nNot on ${skipped.map(marketplaceName).join(", ")}: list those from their own page once they're ready.` : "";
-    if (!(await confirmDialog(`List “${title}” on ${marketplaces.length} marketplaces?\n${lines}\nEach one gets a live listing from the listing saved in Anteroom.${left}`,
-      { confirmLabel: `List on ${marketplaces.length}` }))) return;
-    for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" });
-  }
+  // List everywhere's picker; List starts only on the marketplaces the seller picks there.
+  const [picking, setPicking] = useState(false);
   async function runDelist(marketplaces: Marketplace[], lead?: string) {
     const names = marketplaces.map(marketplaceName);
     const lines = marketplaces.map((marketplace) => `• ${marketplaceName(marketplace)}: ${REMOVED[marketplace].toLowerCase()}`).join("\n");
@@ -416,9 +440,13 @@ export function MarketplacesLayout({
     // A sold item is not listed anywhere else.
     return !soldSomewhere;
   }
+  /** This revision's field check for a marketplace, or null while it is unknown. */
+  function preflightCheck(marketplace: Marketplace): { ready: boolean; gaps: PreflightGap[] } | null {
+    if (preflight.isPlaceholderData || preflight.isError) return null;
+    return preflight.data?.marketplaces?.[marketplace as NativeMarketplace] ?? null;
+  }
   function preflightGaps(marketplace: Marketplace): PreflightGap[] {
-    if (preflight.isPlaceholderData || preflight.isError) return [];
-    return preflight.data?.marketplaces?.[marketplace as NativeMarketplace]?.gaps ?? [];
+    return preflightCheck(marketplace)?.gaps ?? [];
   }
   function listBlocked(marketplace: Marketplace): boolean {
     return retryIn(marketplace) > 0;
@@ -600,7 +628,11 @@ export function MarketplacesLayout({
   const unlisted = ORDER.filter((marketplace) => ids.includes(marketplace) && !running(marketplace) && !startingOn(marketplace)
     && listable(marketplace, statusById.get(marketplace)!));
   const readyToList = unlisted.filter((marketplace) => !listBlocked(marketplace)) as NativeMarketplace[];
-  const notReady = unlisted.filter((marketplace) => listBlocked(marketplace));
+  const choices = ORDER.filter((marketplace) => ids.includes(marketplace)).map((marketplace) => listChoice(marketplace, {
+    status: statusById.get(marketplace)!, canAct: canAct(marketplace), retryIn: retryIn(marketplace), soldSomewhere,
+    listable: listable(marketplace, statusById.get(marketplace)!) && !running(marketplace) && !startingOn(marketplace),
+    check: preflightCheck(marketplace),
+  }));
   const selectedMarketplace = MANAGED.has(selected) ? selected as Marketplace : null;
   const selectedStatus = selectedMarketplace ? statusById.get(selectedMarketplace) : undefined;
   const paneError = mark.error?.message || actionError || (delist.error || native.error || live.error)?.message;
@@ -626,11 +658,14 @@ export function MarketplacesLayout({
             const name = railLabel(id);
             const current = selected === id;
             // "Not listed" is the ordinary state. Saying it on every row hides
-            // the few that actually need a look (unconfirmed, ineligible, live).
+            // the few that actually need a look (unconfirmed, ineligible, live);
+            // a row not listed yet says whether its required fields are filled.
             const quiet = status?.tone === "idle";
+            const check = marketplace && quiet ? preflightCheck(marketplace) : null;
+            const missing = check ? missingRequired(check.gaps) : 0;
             return (
               <li key={id} aria-label={name} className="group relative flex items-start">
-                <button type="button" aria-selected={current} title={status?.label} onClick={() => onSelect(id)}
+                <button type="button" aria-selected={current} title={check ? (missing ? fieldsText(missing) : "Ready to list") : status?.label} onClick={() => onSelect(id)}
                   onPointerEnter={() => onPrepare?.(id)} onFocus={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
                   className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent",
                     current && "bg-accent text-foreground")}>
@@ -645,7 +680,16 @@ export function MarketplacesLayout({
                         <span className="truncate">{status.label}</span>
                       </span>
                     )}
-                    {status && quiet && <span className="sr-only">{status.label}</span>}
+                    {status && quiet && !check && <span className="sr-only">{status.label}</span>}
+                    {check && (
+                      <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground tabular-nums",
+                        missing > 0 && "text-warning-foreground")}>
+                        {missing > 0
+                          ? <AlertTriangleIcon aria-hidden className="size-3.5 text-warning" />
+                          : <CheckIcon aria-hidden className="size-3.5 text-success" />}
+                        <span className="truncate">{missing > 0 ? `${missing} to fill` : "Ready"}</span>
+                      </span>
+                    )}
                   </span>
                 </button>
                 {marketplace && status ? (
@@ -666,7 +710,7 @@ export function MarketplacesLayout({
           {railActions}
           {readyToList.length > 1 && (
             <Button size="xs" variant="ghost" disabled={busy} title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
-              onClick={() => void listEverywhere(readyToList, notReady)}><SendIcon />List everywhere…</Button>
+              onClick={() => setPicking(true)}><SendIcon />List everywhere…</Button>
           )}
           <Button size="xs" variant="ghost-muted" disabled={busy} title="A sale in person or anywhere off these marketplaces"
             onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>
@@ -678,6 +722,8 @@ export function MarketplacesLayout({
           {railStatus && <div className="mt-1 flex min-h-6 items-center gap-1.5 border-t ps-2 pt-1">{railStatus}</div>}
         </div>
       </nav>
+      {picking && <ListEverywhereDialog title={title} choices={choices} onClose={() => setPicking(false)}
+        onConfirm={(marketplaces) => { for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" }); }} />}
       {/* Content stops at a readable line length; the pane still scrolls edge to edge. */}
       <div ref={paneRef} onScroll={event => scrollPositions.current.set(selected, event.currentTarget.scrollTop)}
         className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">

@@ -9,6 +9,7 @@ struct ListingEditorView: View {
     @State private var showingAssistant = false
     @State private var showingHistory = false
     @State private var showingTemplates = false
+    @State private var showingListEverywhere = false
     @State private var tab = "general"
     private let onSaved: () -> Void
 
@@ -31,11 +32,24 @@ struct ListingEditorView: View {
                     Menu {
                         Picker("Form", selection: $tab) {
                             Label("General", systemImage: "square.and.pencil").tag("general")
-                            ForEach(model.marketplaceTabs, id: \.self) { Text(Marketplaces.name($0)).tag($0) }
+                            ForEach(model.marketplaceTabs, id: \.self) { marketplace in
+                                if let choice = model.choice(marketplace) {
+                                    Label {
+                                        Text(Marketplaces.name(marketplace))
+                                        Text(choice.label)
+                                    } icon: {
+                                        Image(systemName: choice.symbol)
+                                    }
+                                    .tag(marketplace)
+                                } else {
+                                    Text(Marketplaces.name(marketplace)).tag(marketplace)
+                                }
+                            }
                         }
                     } label: {
                         HStack(spacing: 6) {
                             Text(tab == "general" ? "General" : Marketplaces.name(tab)).fontWeight(.semibold)
+                            if let choice = model.choice(tab) { ReadinessChip(choice: choice) }
                             Image(systemName: "chevron.down").font(.caption)
                         }
                         .padding(.horizontal, 12).frame(minHeight: 44)
@@ -43,7 +57,7 @@ struct ListingEditorView: View {
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
                     }
                     .disabled(model.marketplaceTabs.isEmpty)
-                    .accessibilityLabel("Form, \(tab == "general" ? "General" : Marketplaces.name(tab))")
+                    .accessibilityLabel("Form, \(tab == "general" ? "General" : Marketplaces.name(tab))\(model.choice(tab).map { ", \($0.label)" } ?? "")")
                     Spacer()
                     Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved")
                         .font(.caption).foregroundStyle(.secondary)
@@ -83,6 +97,9 @@ struct ListingEditorView: View {
                     Button("Listing assistant", systemImage: "sparkles") { showingAssistant = true }
                     Button("Listing history", systemImage: "clock.arrow.circlepath") { showingHistory = true }
                     Button("Listing templates", systemImage: "rectangle.stack") { showingTemplates = true }
+                    Divider()
+                    Button("List everywhere…", systemImage: "paperplane") { showingListEverywhere = true }
+                        .disabled(!model.choices.contains(where: \.selectable))
                 }
                 .frame(minWidth: 44, minHeight: 44)
                 .disabled(model.hasChanges || model.isLoading || model.isSaving || model.loadError != nil)
@@ -134,6 +151,9 @@ struct ListingEditorView: View {
             }
         }) {
             ListingHistoryView(api: model.api, listingID: model.listingID)
+        }
+        .sheet(isPresented: $showingListEverywhere, onDismiss: onSaved) {
+            ListEverywhereSheet(model: model)
         }
         .sheet(isPresented: $showingTemplates) {
             ListingTemplatesSheet(api: model.api, listingID: model.listingID) {

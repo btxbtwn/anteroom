@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { ListingData } from "../api/types";
 import type { NativeDraft, NativeDrafts } from "../api/nativeMarketplaces";
-import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, listChoice, missingRequired, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+import { readyMarketplaces } from "./ListEverywhereDialog";
 
 import { StructuredEditor } from "./ListingEditor";
 
@@ -342,6 +343,54 @@ describe("marketplaces section", () => {
     expect(blocked).toContain('title="List on eBay, Etsy, Poshmark, Mercari, Depop"');
     const sold = { poshmark: { ...live, url: "https://poshmark.com/listing/x", listing_id: "x", sold_here: true } };
     expect(render({}, sold)).not.toContain("List everywhere…");
+  });
+
+  it("says on every tab not listed yet whether it is ready, or how many required fields it needs", () => {
+    const html = render({}, { mercari: live }, { preflight: { marketplaces: {
+      ebay: { ready: false, gaps: [
+        { field: "price", message: "eBay needs a price.", blocking: true },
+        { field: "price", message: "Price must be a number.", blocking: true },
+        { field: "ebay_specifics.category_specifics.Color", message: "Color is required.", blocking: true },
+        { field: "marketplace_photos.ebay", message: "One photo is left off.", blocking: false },
+      ] },
+      poshmark: { ready: true, gaps: [{ field: "marketplace_photos.poshmark", message: "One photo is left off.", blocking: false }] },
+      depop: { ready: true, gaps: [] },
+    } } });
+    expect(row(html, "eBay")).toContain("2 to fill");
+    expect(row(html, "eBay")).toContain('title="Needs 2 fields"');
+    expect(row(html, "Poshmark")).toContain("Ready");
+    expect(row(html, "Depop")).toContain("Ready");
+    // A live listing keeps its own state; an unchecked one says nothing new.
+    expect(row(html, "Mercari")).toContain("Listed");
+    expect(row(html, "Mercari")).not.toContain("Ready");
+    expect(render({}, {}, { preflightPlaceholder: true, preflight: { marketplaces: { depop: { ready: true, gaps: [] } } } })).not.toContain("Ready");
+  });
+
+  it("counts each missing required field once", () => {
+    expect(missingRequired([
+      { field: "price", message: "a", blocking: true }, { field: "price", message: "b", blocking: true },
+      { field: "size", message: "c", blocking: false },
+    ])).toBe(1);
+    expect(missingRequired([])).toBe(0);
+  });
+
+  it("describes each marketplace in List everywhere's picker, and only ready ones are picked by Select all ready", () => {
+    const idle = rowStatus("ebay", undefined, undefined, "current", true);
+    const base = { status: idle, canAct: true, listable: true, retryIn: 0, soldSomewhere: false, check: { ready: true, gaps: [] } };
+    const ready = listChoice("ebay", base);
+    const needs = listChoice("depop", { ...base, check: { ready: false, gaps: [{ field: "size", message: "Size", blocking: true }] } });
+    const listed = listChoice("mercari", { ...base, status: rowStatus("mercari", live, undefined, "current", true), listable: false });
+    const sold = listChoice("poshmark", { ...base, status: rowStatus("poshmark", { ...live, sold_here: true }, undefined, "current", true), listable: false });
+    const waiting = listChoice("etsy", { ...base, retryIn: 12 });
+    expect(ready).toMatchObject({ label: "Ready", tone: "ready", selectable: true });
+    expect(needs).toMatchObject({ label: "Needs 1 field", tone: "needs", selectable: true });
+    expect(listed).toMatchObject({ label: "Listed", selectable: false });
+    expect(sold).toMatchObject({ label: "Sold", selectable: false });
+    expect(waiting).toMatchObject({ label: "Retry in 12s", selectable: false });
+    expect(listChoice("ebay", { ...base, canAct: false }).selectable).toBe(false);
+    expect(listChoice("ebay", { ...base, soldSomewhere: true }).selectable).toBe(false);
+    expect(listChoice("ebay", { ...base, check: null })).toMatchObject({ label: "Not checked", selectable: true });
+    expect(readyMarketplaces([ready, needs, listed, sold, waiting])).toEqual(["ebay"]);
   });
 
   it("sets the marketplace where the item sold apart in its own color", () => {

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { MessageSquareIcon, MinusIcon } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Maximize2Icon, MessageSquareIcon, Minimize2Icon, MinusIcon } from "lucide-react";
 import { isMacPlatform } from "./chat/ModelPickerContent";
+import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "./PanelResizeHandle";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
 import { Spinner } from "./ui/spinner";
@@ -24,9 +25,22 @@ export function isChatToggleShortcut(event: Pick<KeyboardEvent, "key" | "metaKey
   return mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "j";
 }
 
+/** The marketplace rail (160px) plus the narrowest comfortable form (440px). */
+export const FORM_ROOM = 160 + 440;
+export const CHAT_COLUMN_WIDTH: PanelWidthLimits & { default: number } = { min: 300, max: 560, maxVw: 40, default: 340 };
+
 /**
- * The listing's chat as a pop-up over the form's corner, like Intercom or
- * Gmail's compose window, so the form keeps the whole workspace. The chat stays
+ * Wide enough for the form and the chat side by side, the chat is its own
+ * column. Narrower, it floats over the form's corner so the form keeps the width.
+ */
+export function chatLayout(areaWidth: number, chatWidth: number | null): "column" | "float" {
+  return areaWidth > 0 && areaWidth >= FORM_ROOM + (chatWidth ?? CHAT_COLUMN_WIDTH.default) ? "column" : "float";
+}
+
+/**
+ * The listing's chat. With room it is a column beside the form; without it, a
+ * pop-up over the form's corner, like Intercom or
+ * Gmail's compose window, that the seller can enlarge or minimize. The chat stays
  * mounted while minimized, so a stream, a draft message and the scroll survive.
  */
 export function ListingChatPopup({
@@ -62,24 +76,71 @@ export function ListingChatPopup({
   const busy = Boolean(current?.busy);
   const label = current?.label ?? "";
 
+  const rootRef = useRef<HTMLDivElement>(null);
+  const areaRef = useRef<HTMLElement | null>(null);
+  const [width, setWidth] = usePanelWidth("listing-chat");
+  const [expanded, setExpanded] = usePanelCollapsed("listing-chat-expanded");
+  const [areaWidth, setAreaWidth] = useState(0);
+  // The chat sits inside the form area, so the area's width decides its layout.
+  useLayoutEffect(() => {
+    const area = rootRef.current?.parentElement;
+    if (!area) return;
+    areaRef.current = area;
+    setAreaWidth(area.getBoundingClientRect().width);
+    const observer = new ResizeObserver(([entry]) => setAreaWidth(entry.contentRect.width));
+    observer.observe(area);
+    return () => observer.disconnect();
+  }, []);
+  const layout = chatLayout(areaWidth, width);
+  const columnWidth = width ?? CHAT_COLUMN_WIDTH.default;
+
   return (
-    <div className="listing-chat" data-open={open || undefined}>
+    <div ref={rootRef} className="listing-chat" data-open={open || undefined} data-layout={layout}
+      data-expanded={(layout === "float" && expanded) || undefined}
+      style={{ "--listing-chat-width": `${columnWidth}px` } as CSSProperties}>
+      {open && layout === "column" ? (
+        <PanelResizeHandle
+          label="Resize chat"
+          panel="after"
+          width={width}
+          onResize={setWidth}
+          absorberRef={areaRef}
+          absorberMin={FORM_ROOM + columnWidth}
+          min={CHAT_COLUMN_WIDTH.min}
+          max={CHAT_COLUMN_WIDTH.max}
+          maxVw={CHAT_COLUMN_WIDTH.maxVw}
+        />
+      ) : null}
       <section
         id="listing-chat"
         aria-label="Listing chat"
         hidden={!open}
-        className="listing-chat-window flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-background shadow-xl"
+        className={cn("listing-chat-window flex min-h-0 flex-col overflow-hidden bg-background",
+          layout === "float" && "rounded-2xl border shadow-xl")}
       >
         <header className="flex shrink-0 items-center gap-2 border-b py-1.5 ps-3 pe-1.5">
           <span className="font-medium text-foreground text-sm">Chat</span>
           {busy && label ? (
             <span className="min-w-0 truncate text-muted-foreground text-xs">{label}</span>
           ) : null}
+          {layout === "float" ? (
+            <Button
+              type="button"
+              variant="ghost-muted"
+              size="icon-xs"
+              className="ms-auto"
+              aria-label={expanded ? "Make chat smaller" : "Make chat larger"}
+              title={expanded ? "Make chat smaller" : "Make chat larger"}
+              onClick={() => setExpanded(!expanded)}
+            >
+              {expanded ? <Minimize2Icon /> : <Maximize2Icon />}
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="ghost-muted"
             size="icon-xs"
-            className="ms-auto"
+            className={layout === "float" ? undefined : "ms-auto"}
             aria-label="Minimize chat"
             title={`Minimize chat (${shortcut})`}
             onClick={() => onOpenChange(false)}
