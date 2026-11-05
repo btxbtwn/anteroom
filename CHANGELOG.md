@@ -6,6 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.736 — 2026-11-05
+
+- Automations is now one list: scheduled price drops, relists and regenerates, eBay offers, Poshmark sharing and offers to likers each get a row with their type, when they run, last and next run, an on/off switch and a menu.
+- New automation asks which kind first, then shows that kind's form in the same side panel; Edit opens the same panel filled in.
+- eBay offers is a row instead of a block of settings, with Connect eBay right on the row when eBay isn't connected.
+- Each kind's explanation is down to one line.
+- Sharing and offers to likers still save off, turn on only when you switch them on, and turn off again after any edit. Every listing, relist or delist still waits for your approval per item and marketplace.
+- The iPhone app shows the same single list, including eBay offers, sharing and offers to likers with their on/off state, and New asks which kind first.
+
 ## 0.1.735 — 2026-11-05
 
 - Starting a listing from the web no longer freezes Anteroom while it copies the photos, and the copies are made several at a time. Chrome also gets longer to finish a listing step before Anteroom stops waiting, so a slow Depop or Poshmark upload is no longer cancelled partway.
