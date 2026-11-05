@@ -9,6 +9,39 @@ This deploys `vendoo_studio.hosted:app`, not the desktop API. The cloud UI provi
 require a verified seller session. Job and marketplace routes are not exposed. Chrome, Keychain
 and desktop timers do not run in this container.
 
+## Automatic deploys
+
+`.github/workflows/deploy-hosted.yml` deploys every push to `main` once CI
+passes on it. A merge that still has notes in `changelog.d/` is skipped; the
+`Release Anteroom` commit the Version workflow pushes next deploys instead.
+In order, it:
+
+1. applies pending Alembic revisions with the migration login
+   (`alembic upgrade head`, `sslmode=verify-full` against the bundled CA);
+2. re-imports the shared category trees when
+   `vendoo-studio/data/category-trees-seed.json.gz` changed since the last
+   successful deploy;
+3. runs `flyctl deploy` with the image label `v<version>-<commit>`;
+4. waits for `https://myanteroom.com/api/health` to report the new version.
+
+A failed migration stops the run before Fly is touched. Run it by hand from
+the Actions tab (**Deploy hosted → Run workflow**) to redeploy `main`.
+
+It uses the `production` GitHub environment, which only `main` may deploy
+from:
+
+| Name | Kind | Value |
+| --- | --- | --- |
+| `FLY_API_TOKEN` | environment secret | Fly deploy token scoped to this app (`fly tokens create deploy`) |
+| `ANTEROOM_MIGRATION_DATABASE_URL` | environment secret | Migration login, session pooler (port 5432) URI |
+| `SUPABASE_PUBLISHABLE_KEY` | repository variable | Public publishable key baked into the web build |
+
+The migration URI stays in GitHub; Fly never receives it. Revisions that need
+a drained database (see `docs/hosted-production.md`, section 4) still apply
+automatically, so check for active work before merging one.
+
+## Manual deploy
+
 From the repository root, after signing in to Fly:
 
 ```sh
