@@ -16,7 +16,7 @@ const COMMAND_TIMEOUT_MS: Record<string, number> = {
   "job.vendoo_api": 250_000,
   "marketplace.promotion_check": 100_000, "marketplace.promote": 160_000, "marketplace.promotion_result": 30_000, "marketplace.like_events": 55_000,
   "marketplace.sales_history": 1_210_000,
-  "marketplace.execute": 200_000, "marketplace.result": 75_000, "marketplace.delete": 100_000, "job.cancel": 10_000,
+  "marketplace.execute": 290_000, "marketplace.result": 75_000, "marketplace.delete": 100_000, "job.cancel": 10_000,
   "marketplace.sessions": 30_000, "marketplace.connect": 50_000,
   "marketplace.import.page": 130_000, "marketplace.import.listing": 130_000,
 };

@@ -38,16 +38,23 @@ async function nextCommand(capabilities: readonly string[]): Promise<RelayedComm
 
 async function answer(bridge: RelayBridge, command: RelayedCommand): Promise<void> {
   let reply: Record<string, unknown>;
+  // Where a command's time went in this tab, kept on the job so a slow listing can be read later.
+  const timing = { photos_ms: 0, photo_bytes: 0, chrome_ms: 0 };
   try {
+    const started = performance.now();
     const photos = await Promise.all(approvedPhotos(command).map((photo) => photoData(String(command.job_id), photo)));
+    timing.photos_ms = Math.round(performance.now() - started);
+    timing.photo_bytes = photos.reduce((total, photo) => total + photo.base64.length, 0);
+    const running = performance.now();
     reply = await bridge.runMarketplaceCommand(command, photos);
+    timing.chrome_ms = Math.round(performance.now() - running);
   } catch {
     // Nothing reached the marketplace: the photos never got to Chrome.
     reply = { ok: false, safe_to_retry: true, error: "Could not read the listing photos. Try again." };
   }
   await studioFetch("/api/browser-relay/replies", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ request_id: command.message_id, payload: reply }),
+    body: JSON.stringify({ request_id: command.message_id, payload: reply, timing }),
   });
 }
 
