@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.729 — 2026-11-05
+
+- Listing from the web no longer breaks when several marketplaces run at once: a listing waiting on Chrome no longer holds a database connection, which caused "Request failed: 500". Cancel now stops a listing that is waiting on Chrome right away, Chrome stays connected while the Anteroom tab is in the background, and the chat button shows "Poshmark: Listing…" instead of an internal step name.
+
 ## 0.1.728 — 2026-11-05
 
 - While the Mac app shows your account, this Mac's own listings stop checking sales, delisting after a sale, and running price drops, promotions, eBay offers and sourcing on their own, so nothing happens twice. Switching back to This Mac's Listings turns them on again.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import unittest
 from datetime import timedelta
 from types import SimpleNamespace
@@ -749,6 +750,50 @@ class NativeMarketplacesTest(unittest.TestCase):
         sent = self.manager.send_message.call_args.args[0]
         self.assertEqual((sent["type"], sent["job_id"]), ("job.cancel", response["job_id"]))
         self.assertEqual(self.client.post(f"{self.base}/mercari/cancel").status_code, 409)
+
+    def test_cancel_ends_a_list_chrome_never_answers_without_waiting_out_the_deadline(self):
+        calls = []
+
+        async def bridge(job, kind, payload, timeout=None):
+            calls.append(kind)
+            if kind == "marketplace.execute":
+                # Chrome went quiet; the seller presses Cancel while Anteroom waits.
+                self.assertEqual(self.client.post(f"{self.base}/poshmark/cancel").status_code, 200)
+            await asyncio.sleep(3600)
+
+        self.bridge.side_effect = bridge
+        with patch.object(native, "CANCEL_POLL_S", 0.01):
+            response = self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True}).json()
+            started = time.monotonic()
+            self.run_jobs()
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(calls, ["marketplace.execute"])
+        record = self.record("poshmark")
+        # Chrome may still have listed it, so the seller is asked to look before listing again.
+        self.assertEqual((record["state"], record["error_code"]), ("unknown", "uncertain"))
+        self.assertEqual(JobRepo(self.db).get(response["job_id"]).status, "cancelled")
+
+    def test_a_job_waiting_on_chrome_holds_no_database_connection(self):
+        opened = []
+
+        def session():
+            opened.append(self.sessions())
+            return opened[-1]
+
+        held = []
+
+        async def bridge(job, kind, payload, timeout=None):
+            # The job's own session is the one opened for it.
+            held.append(opened[-1].in_transaction())
+            if kind == "marketplace.execute":
+                raise BrowserBridgeError("lost")
+            return {"finished": True, "result": {"ok": True, "state": "published", "listing_url": POSH_URL}}
+
+        self.bridge.side_effect = bridge
+        with patch("vendoo_studio.database.SessionLocal", session):
+            self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True})
+            self.run_jobs()
+        self.assertEqual(held, [False, False])
 
     def test_an_ebay_list_whose_reply_was_lost_is_checked_before_the_job_lets_go(self):
         from vendoo_studio.services import ebay_listings

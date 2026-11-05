@@ -1,5 +1,5 @@
 /** Relays the seller's approved marketplace commands from the hosted API to Anteroom Bridge in this Chrome. */
-import type { RelayedCommand, RelayedPhoto } from "../api/cloudExtension";
+import type { CloudConnection, RelayedCommand, RelayedPhoto } from "../api/cloudExtension";
 import { studioFetch } from "../api/transport";
 
 export interface RelayBridge {
@@ -70,4 +70,18 @@ export function startChromeRelay(bridge: RelayBridge, capabilities: readonly str
     }
   })();
   return () => { active = false; window.clearInterval(interval); };
+}
+
+/** Status checks in a row that may fail before the relay stops. */
+export const MISSES_BEFORE_STOP = 2;
+
+/**
+ * What the relay carries after one status check: the capabilities to relay (empty to stop)
+ * and the failed checks in a row. A check that times out while Chrome is busy filling a
+ * form keeps the relay, so a running marketplace action is not cut off.
+ */
+export function relayAfterCheck(status: CloudConnection, relayed: string, missed: number): { relayed: string; missed: number } {
+  if (status.ok && status.state === "connected") return { relayed: (status.supportedActions ?? []).join(","), missed: 0 };
+  if (status.state !== "unavailable") return { relayed: "", missed: 0 };
+  return missed + 1 < MISSES_BEFORE_STOP ? { relayed, missed: missed + 1 } : { relayed: "", missed: missed + 1 };
 }

@@ -289,12 +289,9 @@ class ActivityResponse(BaseModel):
 
 
 def _job_activity_label(job) -> str:
-    if str(job.current_step or "").startswith("native_"):
-        from vendoo_studio.services.native_marketplaces import NAMES, STEP_LABEL
+    from vendoo_studio.services.native_marketplaces import step_label
 
-        _, marketplace, step = str(job.current_step).split("_", 2)
-        return f"{NAMES.get(marketplace, marketplace)}: {STEP_LABEL.get(step, 'Working')}…"
-    return "Working in Chrome…"
+    return step_label(str(job.current_step or "")) or "Working in Chrome…"
 
 
 @router.get("/{conv_id}/activity", response_model=ActivityResponse)
