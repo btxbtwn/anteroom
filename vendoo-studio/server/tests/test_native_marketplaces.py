@@ -450,6 +450,33 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertFalse(self.launched)
         self.assertFalse(JobRepo(self.db).list_by_conversation(self.conv.id))
 
+    def test_list_again_after_a_confirmed_delist(self):
+        self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]}, self.published("mercari")]
+        self.assertEqual(self.list("mercari")["state"], "published")
+        # The seller delisted it; Delist records the delete beside the listing.
+        self.conv.notes = merge_notes(self.conv.notes, {"marketplaceDelists": {"mercari": {
+            "state": "deleted", "listing_id": "m123456789", "url": LIVE["mercari"], "at": "2026-11-05T10:00:00+00:00"}}})
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]},
+                                   {**self.published("mercari"), "listing_url": "https://www.mercari.com/us/item/m987654321/"}]
+        self.assertEqual(self.list("mercari")["state"], "published")
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
+
+    def test_a_confirmed_delist_leaves_the_record_ready_to_list_again(self):
+        self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]}, self.published("mercari")]
+        self.assertEqual(self.list("mercari")["state"], "published")
+        self.bridge.reset_mock()
+        self.bridge.side_effect = [{"ok": True, "state": "deleted"}]
+        response = self.client.post(f"/api/conversations/{self.conv.id}/marketplace-listings/delist",
+                                    json={"marketplaces": ["mercari"], "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["mercari"]["state"], "deleted")
+        record = self.record("mercari")
+        self.assertNotIn(record["state"], {"published", "pending_review"})
+        self.assertIsNone(record.get("listing_url"))
+        self.assertEqual(self.status()["mercari"]["state"], record["state"])
+
     def test_list_refuses_an_item_sold_on_another_marketplace(self):
         self.conv.notes = merge_notes(self.conv.notes, {"marketplaceMarks": {"depop": {"state": "sold"}}})
         self.db.commit()

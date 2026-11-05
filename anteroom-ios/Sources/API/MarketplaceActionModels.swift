@@ -82,7 +82,8 @@ enum MarketplaceActions {
             // A sold item is not listed anywhere else; a live one is updated, not listed again.
             row.canList = !row.running && !row.unconfirmed && !soldSomewhere
                 && row.tone != .live && row.label != "Sold here" && row.label != "In review"
-                && live[marketplace]?.listingID == nil
+                // A delisted listing keeps its ID, but nothing is live there.
+                && (live[marketplace]?.listingID == nil || live[marketplace]?.state == "deleted")
             return row
         }
     }

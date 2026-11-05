@@ -35,6 +35,10 @@ struct MarketplaceReadinessTests {
         precondition(!make("ebay", sold: true).selectable)
         precondition(make("ebay", draft: NativeDraftState(state: "draft", running: true)).label == "Working…")
         precondition(make("ebay", live: MarketplaceLiveListing(listingID: "e1", soldHere: false, state: "deleted")).label == "Ready")
+        // Delisted with the record still reading published: List everywhere can pick it again.
+        let relist = make("ebay", draft: NativeDraftState(state: "published", running: false),
+                          live: MarketplaceLiveListing(listingID: "e1", soldHere: false, state: "deleted"))
+        precondition(relist.label == "Ready" && relist.selectable)
 
         // Nothing is picked for the seller except by Select all ready, and only ready ones.
         precondition(ListChoice.ready([ready, needs, listed, sold, unchecked]) == ["ebay"])
