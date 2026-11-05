@@ -66,7 +66,7 @@ struct GeneralSettingsSections: View {
                 .accessibilityIdentifier("appearance-picker")
                 .accessibilityValue(appearance.theme.label)
                 .disabled(!appearance.hasLoaded || appearance.isLoading || appearance.isSaving)
-                Text("Dark matches the Anteroom workbench. Light inverts the same shell. System follows this iPhone.")
+                Text("System follows this iPhone’s appearance.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Picker("Listing names", selection: Binding(
                     get: { appearance.listingNames },

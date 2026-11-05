@@ -43,7 +43,7 @@ export function AgentSettings() {
       <SettingsSection id="agent-cli" title="Connect an agent">
         <SettingsRow
           title="anteroom command"
-          description="An agent on this Mac uses this command to do what the app already allows. It does not publish or delete unless you confirm it."
+          description="Lets an agent on this Mac do what the app allows; it never publishes or deletes without your confirmation."
           status={
             isPending
               ? "Looking up the command…"
@@ -91,7 +91,7 @@ export function AgentSettings() {
         <SettingsRow
           id="agent-address"
           title="Address"
-          description="An agent on this Mac uses the local address. Another machine on your tailnet uses the Tailscale address when Tailscale HTTPS is on in Connections."
+          description="Use the local address on this Mac, or the Tailscale address from another machine once Tailscale HTTPS is on."
         >
           {data?.base_url ? (
             <div className="flex items-start gap-2">

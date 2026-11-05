@@ -1,0 +1,3 @@
+- The page buttons at the bottom of the sidebar now show their names when the sidebar is wide enough, and a tooltip names each one when it is narrow.
+- Sourcing, Settings and Automations now share one readable page width; Marketplaces and Analytics use a wider one for their tables and calendars.
+- Shorter help text on Sourcing, Marketplaces, the sale calendar and Settings, on the web and on iPhone.

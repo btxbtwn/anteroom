@@ -53,7 +53,7 @@ function MarketplacesSection() {
     <SettingsSection id="where-you-list" title="Where you list">
       <SettingsRow
         title="List to"
-        description="The marketplaces you list on. The thread status popup and sidebar logos show only the ones you check. Anteroom lists on the ones it supports when you confirm it."
+        description="Only the marketplaces you check appear in status popups and sidebar logos."
         control={
           <>
             <Button
@@ -162,7 +162,7 @@ function PackageDimensionsSection() {
     <SettingsSection id="package-dimensions" title="Shipping defaults">
       <SettingsRow
         title="Package dimensions"
-        description="Used as the L × W × H default on every generated listing. Packaged weight is inferred separately for each item from its evidence."
+        description="The default L × W × H on generated listings; weight is estimated per item."
       >
         {isPending ? (
           <LoadingNote>Loading package dimensions</LoadingNote>
@@ -220,7 +220,7 @@ function ShipsFromZipRow() {
   return (
     <SettingsRow
       title="Ships from ZIP"
-      description="Mercari and Depop use it as the ships-from address when Anteroom lists there directly. eBay’s inventory location is under Settings → Connections."
+      description="Mercari and Depop ship from here; eBay’s location is under Connections."
     >
       {isPending ? (
         <LoadingNote>Loading ZIP</LoadingNote>
@@ -347,7 +347,7 @@ function ListingFormulasSection() {
     <SettingsSection id="listing-formulas" title="Listing formulas">
       <SettingsRow
         title="Title and description"
-        description="Anteroom pins these formulas into every listing generation. Leave them as the defaults, or edit the placeholders for your shop. Clearing a field and saving restores the built-in formula."
+        description="Every generated listing follows these; clear a field and save to restore the default."
       >
         {isPending ? (
           <LoadingNote>Loading formulas</LoadingNote>
@@ -420,7 +420,7 @@ export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string
         <SettingsRow
           id="similar-items"
           title="Similar items"
-          description="Find items that look like the same thing listed twice, then keep one and merge the other into it, or mark them as different. Nothing is deleted or delisted."
+          description="Merge items listed twice or mark them as different; nothing is deleted or delisted."
           control={<SimilarItemsButton onSelect={onOpenListing} />}
         />
       </SettingsSection>

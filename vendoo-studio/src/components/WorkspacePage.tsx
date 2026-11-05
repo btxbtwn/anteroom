@@ -1,6 +1,6 @@
 /*
- * Page layout for Studio's full-width pages (Marketplaces, Analytics,
- * Sourcing). The container, section header and grouped panel follow T3 Code's
+ * Page layout for Studio's workspace pages (Marketplaces, Analytics,
+ * Sourcing, Automations). The container, section header and grouped panel follow T3 Code's
  * WorkspacePageContainer, SettingsSection and SettingsGroup
  * (https://github.com/pingdotgg/t3code, MIT License, (c) 2026 T3 Tools Inc.).
  */
@@ -11,18 +11,22 @@ import { cn } from "../lib/utils";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Skeleton } from "./ui/skeleton";
 
-const WIDTH_CLASS = {
+/**
+ * The two page widths. `readable` is for forms, settings and lists you read
+ * top to bottom (Sourcing, Settings, Automations); `expanded` is for pages
+ * built around tables, calendars or charts (Marketplaces, Analytics).
+ */
+export const PAGE_WIDTH = {
   readable: "max-w-4xl",
-  wide: "max-w-5xl",
-  expanded: "max-w-6xl",
+  expanded: "max-w-7xl",
 } as const;
 
 export function WorkspacePage({
-  width = "wide",
+  width = "readable",
   className,
   children,
 }: {
-  width?: keyof typeof WIDTH_CLASS;
+  width?: keyof typeof PAGE_WIDTH;
   className?: string;
   children: ReactNode;
 }) {
@@ -31,7 +35,7 @@ export function WorkspacePage({
       <div
         className={cn(
           "mx-auto flex w-full flex-col gap-8 px-5 pt-6 pb-12 sm:px-6",
-          WIDTH_CLASS[width],
+          PAGE_WIDTH[width],
           className,
         )}
       >
