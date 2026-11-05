@@ -26,7 +26,8 @@ final class ListingEditorModel {
     private var saved = Form()
     /// The full listing as loaded; edits are written into it, never rebuilt.
     private var document: [String: JSONValue] = [:]
-    private var revisionID: String?
+    /// The saved version, which List, Update and Save draft send.
+    private(set) var revisionID: String?
     /// Marketplace tab edits by listing path, written into the listing on Save.
     private(set) var pending: [String: JSONValue] = [:]
     private(set) var forms: [String: NativeForm] = [:]

@@ -78,6 +78,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"
           "$RUNNER_TEMP/appearance-tests"
+      - name: Test List, Update, Save draft and Delist rows and confirmations
+        run: |
+          xcrun swiftc Sources/API/Models.swift Sources/Inventory/InventoryFilters.swift Sources/API/MarketplaceReadiness.swift Sources/API/MarketplaceActionModels.swift Tests/MarketplaceActionsTests.swift -o "$RUNNER_TEMP/marketplace-action-tests"
+          "$RUNNER_TEMP/marketplace-action-tests"
       - name: Test sign-in messages
         run: |
           xcrun swiftc Sources/Session/SignInMessages.swift Tests/SignInMessagesTests.swift -o "$RUNNER_TEMP/sign-in-tests"
