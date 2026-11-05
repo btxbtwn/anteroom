@@ -27,12 +27,16 @@ function approvedPhotos(command: RelayedCommand): { id: string; mime_type: strin
 /** What a Bridge may declare it runs for the hosted API: marketplace actions, and each named read. */
 export const RELAY_CAPABILITIES = ["marketplace.actions", "vinted.choices", "sellwild.account", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts"] as const;
 
-/** One relay turn: wait for the next command, run it in Chrome, post the reply. False when nothing came. */
-export async function relayOnce(bridge: RelayBridge, capabilities: readonly string[]): Promise<boolean> {
+async function nextCommand(capabilities: readonly string[]): Promise<RelayedCommand | null> {
   const declared = RELAY_CAPABILITIES.filter((capability) => capabilities.includes(capability));
   const next = await studioFetch(`/api/browser-relay/next?capabilities=${declared.join(",")}`);
-  if (next.status === 204 || !next.ok) return false;
-  const command = await next.json() as RelayedCommand;
+  // 204: the server waited and nothing came. Any other failure waits before asking again.
+  if (next.status === 204) return null;
+  if (!next.ok) throw new Error(`The relay answered ${next.status}.`);
+  return await next.json() as RelayedCommand;
+}
+
+async function answer(bridge: RelayBridge, command: RelayedCommand): Promise<void> {
   let reply: Record<string, unknown>;
   try {
     const photos = await Promise.all(approvedPhotos(command).map((photo) => photoData(String(command.job_id), photo)));
@@ -45,8 +49,18 @@ export async function relayOnce(bridge: RelayBridge, capabilities: readonly stri
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ request_id: command.message_id, payload: reply }),
   });
+}
+
+/** One relay turn: wait for the next command, run it in Chrome, post the reply. False when nothing came. */
+export async function relayOnce(bridge: RelayBridge, capabilities: readonly string[]): Promise<boolean> {
+  const command = await nextCommand(capabilities).catch(() => null);
+  if (command === null) return false;
+  await answer(bridge, command);
   return true;
 }
+
+/** Commands Chrome may run at once. Listings on different marketplaces run side by side, as on the server. */
+export const MAX_RUNNING_COMMANDS = 8;
 
 /** Relay until stopped. A failed request waits a few seconds before asking again. */
 export function startChromeRelay(bridge: RelayBridge, capabilities: readonly string[]): () => void {
@@ -63,10 +77,18 @@ export function startChromeRelay(bridge: RelayBridge, capabilities: readonly str
   };
   void heartbeat();
   const interval = window.setInterval(() => { void heartbeat(); }, 10000);
+  // Each command runs while the relay asks for the next, so one long listing never holds up
+  // another marketplace's command, a result check or a Cancel past the server's wait.
+  const running = new Set<Promise<void>>();
   void (async () => {
     while (active) {
-      try { await relayOnce(bridge, capabilities); }
-      catch { await new Promise((resolve) => window.setTimeout(resolve, 3000)); }
+      if (running.size >= MAX_RUNNING_COMMANDS) { await Promise.race(running); continue; }
+      try {
+        const command = await nextCommand(capabilities);
+        if (command === null || !active) continue;
+        const work: Promise<void> = answer(bridge, command).catch(() => undefined).finally(() => { running.delete(work); });
+        running.add(work);
+      } catch { await new Promise((resolve) => window.setTimeout(resolve, 3000)); }
     }
   })();
   return () => { active = false; window.clearInterval(interval); };
