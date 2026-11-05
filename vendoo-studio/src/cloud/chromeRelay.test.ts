@@ -27,7 +27,12 @@ describe("Chrome relay", () => {
     const bridge = { runMarketplaceCommand: vi.fn(() => new Promise<Record<string, unknown>>(resolve => { finish = resolve; })) };
     fetch.mockImplementation(async url => {
       calls.push(String(url));
-      return Response.json(String(url).includes("/next?") ? read : { ok: true });
+      if (String(url).includes("/next?")) {
+        if (calls.filter(called => called.includes("/next?")).length === 1) return Response.json(read);
+        await new Promise(resolve => setTimeout(resolve, 20000));
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({ ok: true });
     });
     let stop: (() => void) | undefined;
     try {
@@ -105,6 +110,45 @@ describe("Chrome relay", () => {
     expect(JSON.parse(String(fetches[2].options?.body)).payload).toMatchObject({ ok: false, safe_to_retry: true });
   });
 
+});
+
+describe("Chrome relay with several marketplaces", () => {
+  it("runs a second command while the first is still running in Chrome", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", { setInterval, clearInterval, setTimeout });
+    const fetch = vi.mocked(studioFetch);
+    const previous = fetch.getMockImplementation();
+    const commands = [
+      { type: "marketplace.result", job_id: "job-p", message_id: "e".repeat(32), payload: {} },
+      { type: "marketplace.result", job_id: "job-d", message_id: "f".repeat(32), payload: {} },
+    ];
+    const replies: string[] = [];
+    fetch.mockImplementation(async (url, options) => {
+      if (String(url).includes("/next?")) {
+        const next = commands.shift();
+        if (next) return Response.json(next);
+        await new Promise(resolve => setTimeout(resolve, 20000));
+        return new Response(null, { status: 204 });
+      }
+      if (String(url).endsWith("/replies")) replies.push(JSON.parse(String(options?.body)).request_id);
+      return Response.json({ ok: true });
+    });
+    // Poshmark's command takes minutes; Depop's answers at once.
+    const bridge = { runMarketplaceCommand: vi.fn((command: { job_id: string | null }) =>
+      command.job_id === "job-p" ? new Promise<Record<string, unknown>>(() => {}) : Promise.resolve({ finished: false })) };
+    let stop: (() => void) | undefined;
+    try {
+      stop = startChromeRelay(bridge, ["marketplace.actions"]);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(bridge.runMarketplaceCommand).toHaveBeenCalledTimes(2);
+      expect(replies).toEqual(["f".repeat(32)]);
+    } finally {
+      stop?.();
+      fetch.mockImplementation(previous!);
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("relayAfterCheck", () => {

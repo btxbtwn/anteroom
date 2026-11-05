@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.731 — 2026-11-05
+
+- Listing on several marketplaces at once from the web no longer hangs on "Waiting for Chrome to confirm": Chrome now runs each marketplace's action side by side instead of one after another.
+
 ## 0.1.730 — 2026-11-05
 
 - Sellwild and Vinted are gone from Anteroom: no tabs, settings, List/Update/Delist, import, or sales checks for either. Existing listings stay in your inventory; only eBay, Etsy, Poshmark, Mercari and Depop remain as direct marketplaces.
