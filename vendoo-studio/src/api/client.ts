@@ -9,7 +9,7 @@ import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "
 import type { BulkDeleteResult, BulkDeleteRow } from "./bulkDelete";
 import type { LabelColor } from "../labelColors";
 import type { BulkMarketplaceAction, BulkMarketplacePerform, BulkMarketplacePreview, BulkMarketplaceResult } from "./bulkMarketplace";
-import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
+import { salesLedgerParams, salesOverviewParams, type FinancialSave, type SalesOverview, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
 import type {
   Promotion, PromotionActivity, PromotionAutomation, PromotionAutomationBody, PromotionAutomations, PromotionCoverage, PromotionFloor,
@@ -287,6 +287,9 @@ export const api = {
       }
       return request<InventoryAnalytics>(`/analytics?${params}`);
     },
+    /** Sales figures, weekly sales and sales by marketplace for the Sales records filters. */
+    overview: (filters: { start: string | null; end: string; marketplace?: string }) =>
+      request<SalesOverview>(`/analytics/overview?${salesOverviewParams(filters)}`),
   },
   measurements: {
     /** Suggest measurements from an item's yardstick photos. Nothing is saved. */

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -164,6 +164,69 @@ def get_analytics(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Unknown analytics range, or a custom range without a start on or before its end.") from exc
     return AnalyticsResponse.model_validate(payload)
+
+
+class OverviewFigures(BaseModel):
+    count: int
+    revenue: float
+    revenue_known: int
+    profit: float | None
+    profit_known: int
+    fees_known: int
+    average_days: float | None
+    days_known: int
+    sell_through: float | None
+
+
+class OverviewPrevious(OverviewFigures):
+    start: str
+    end: str
+
+
+class OverviewWeek(BaseModel):
+    start: str
+    count: int
+    revenue: float
+    revenue_known: int
+
+
+class OverviewMarketplace(BaseModel):
+    id: str
+    count: int
+    revenue: float
+    revenue_known: int
+
+
+class OverviewResponse(BaseModel):
+    start: str | None
+    end: str
+    undated_sales: int
+    current: OverviewFigures
+    previous: OverviewPrevious | None
+    weeks: list[OverviewWeek]
+    weeks_truncated: bool
+    marketplaces: list[OverviewMarketplace]
+
+
+@router.get("/overview", response_model=OverviewResponse)
+def get_overview(
+    end: date,
+    response: Response,
+    start: date | None = None,
+    marketplace: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Sales figures for whole UTC days from ``start`` (all time when absent) through ``end``."""
+    from vendoo_studio.services.inventory_analytics import load_rows
+    from vendoo_studio.services.sales_ledger import SALE_MARKETPLACES
+    from vendoo_studio.services.sales_overview import sales_overview
+
+    if marketplace is not None and marketplace not in SALE_MARKETPLACES:
+        raise HTTPException(status_code=400, detail="Choose a supported marketplace.")
+    if start is not None and start > end:
+        raise HTTPException(status_code=400, detail="Choose a start on or before the end.")
+    response.headers["Cache-Control"] = "no-store"
+    return OverviewResponse.model_validate(sales_overview(load_rows(db), start=start, end=end, marketplace=marketplace))
 
 
 @router.get("/generation-timings")

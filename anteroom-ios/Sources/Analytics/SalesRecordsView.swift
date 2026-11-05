@@ -12,6 +12,7 @@ struct SalesRecordsView: View {
     @State private var marketplace = "all"
     @State private var page = 1
     @State private var data: SalesLedgerPage?
+    @State private var overview: SalesOverview?
     @State private var loading = false
     @State private var error: String?
     @State private var editing: SalesLedgerRow?
@@ -32,16 +33,25 @@ struct SalesRecordsView: View {
                         Button("Export sales CSV") { exportCSV(inventory: false) }
                     }
                 } footer: {
-                    Text("Record sale prices, shipping and fees in Anteroom. Export your inventory and sales from here.")
+                    Text("How your sales are doing, and every sale with its price, fees and profit.")
+                }
+
+                if let overview {
+                    Section {
+                        SalesOverviewSection(overview: overview, marketplaceChosen: marketplace != "all")
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    }
                 }
 
                 if let data {
                     Section {
-                        Text("\(data.summary.lines) order lines · \(data.summary.unrecorded) without recorded amounts · \(data.summary.needsReview) need review · \(data.summary.unmatched) need an inventory link. Totals cover the full filtered period; currencies stay separate.")
+                        Text("\(data.summary.lines) sale records · \(data.summary.unrecorded) without recorded amounts · \(data.summary.needsReview) need review · \(data.summary.unmatched) need an inventory link.")
                             .font(.footnote).foregroundStyle(.secondary)
-                        ForEach(data.summary.currencies) { group in
+                        // Dollar totals are in the figures above; other currencies keep their own.
+                        ForEach(data.summary.currencies.filter { $0.currency != "USD" }) { group in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(group.currency).font(.subheadline.weight(.medium))
+                                Text("Sales in \(group.currency)").font(.subheadline.weight(.medium))
                                 Text("Net revenue: \(SalesLedgerFormat.money(group.netRevenue, group.currency)) · known on \(group.netKnown) of \(group.lines) lines")
                                 Text("Recorded profit: \(SalesLedgerFormat.money(group.profit, group.currency)) · known on \(group.profitKnown) of \(group.lines) lines")
                             }
@@ -67,7 +77,7 @@ struct SalesRecordsView: View {
                     } header: {
                         Text("Sales records")
                     } footer: {
-                        Text("One record per marketplace order line, including dismissed alerts and cancellation/refund updates. Record line totals after discounts. Blank amounts stay unknown; enter zero when confirmed.")
+                        Text("Record totals after discounts; leave an amount blank if unknown.")
                     }
                 } else if loading {
                     ProgressView("Loading sales records…")
@@ -127,8 +137,10 @@ struct SalesRecordsView: View {
         loading = true
         defer { loading = false }
         do {
-            data = try await api.salesLedger(start: Self.day(start), end: Self.day(end),
-                                             marketplace: marketplace == "all" ? nil : marketplace, page: page)
+            let market = marketplace == "all" ? nil : marketplace
+            async let figures = api.salesOverview(start: Self.day(start), end: Self.day(end), marketplace: market)
+            data = try await api.salesLedger(start: Self.day(start), end: Self.day(end), marketplace: market, page: page)
+            overview = try await figures
             error = nil
         } catch is CancellationError {
         } catch let failure as URLError where failure.code == .cancelled {

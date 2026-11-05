@@ -299,7 +299,8 @@ struct StatGrid<Content: View>: View {
 
 struct Stat: View {
     let label: String
-    let value: String
+    /// nil when it can't be worked out from what was recorded.
+    let value: String?
     var hint: String?
     var change: String?
     var negative = false
@@ -307,9 +308,13 @@ struct Stat: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title3.weight(.semibold)).monospacedDigit()
-                .foregroundStyle(negative ? .red : .primary)
-                .lineLimit(1).minimumScaleFactor(0.7)
+            if let value {
+                Text(value).font(.title3.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(negative ? .red : .primary)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            } else {
+                Text("Not enough data").font(.subheadline).foregroundStyle(.secondary)
+            }
             if let change { Text(change).font(.caption2).foregroundStyle(.secondary) }
             if let hint { Text(hint).font(.caption2).foregroundStyle(.secondary) }
         }

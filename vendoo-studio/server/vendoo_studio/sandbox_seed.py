@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import io
 import sys
+import uuid
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from PIL import Image, ImageDraw
@@ -116,6 +118,33 @@ def _seed_automations(client: httpx.Client) -> None:
         client.post("/api/promotion-automations", json=sample).raise_for_status()
 
 
+# Items that already sold, so Analytics has figures and charts to show:
+# (title, color, marketplace, days ago, sale price, fees, cost of goods).
+SOLD = (
+    ("Patagonia L Gray Fleece Jacket", (110, 110, 120), "ebay", 2, "68", "8.84", "12"),
+    ("Coach Brown Leather Crossbody Bag", (120, 80, 50), "poshmark", 4, "95", "19", "20"),
+    ("Nike 10 White Air Force 1 Sneakers", (220, 220, 220), "mercari", 9, "72", "7.2", "25"),
+    ("J.Crew M Navy Wool Sweater", (30, 40, 90), "ebay", 12, "34", "4.42", "6"),
+    ("Lululemon 6 Black Align Leggings", (20, 20, 20), "poshmark", 16, "48", "9.6", "10"),
+    ("Carhartt L Brown Canvas Work Jacket", (140, 100, 40), "depop", 19, "85", "8.5", "18"),
+    ("Anthropologie S Green Linen Dress", (70, 120, 80), "poshmark", 23, "42", "8.4", "8"),
+    ("Ray-Ban Black Wayfarer Sunglasses", (40, 40, 40), "ebay", 27, "58", "7.54", None),
+    ("Levi's 32 Blue 501 Jeans", (50, 80, 140), "mercari", 33, "39", "3.9", "7"),
+    ("Madewell M Cream Cable Knit Cardigan", (230, 220, 200), "ebay", 38, "44", "5.72", "9"),
+    ("Free People S Blue Peasant Top", (90, 130, 190), "depop", 45, "29", "2.9", "5"),
+    ("Columbia XL Red Rain Jacket", (170, 40, 40), "ebay", 52, "36", "4.68", "8"),
+)
+
+
+def _sold_sale(marketplace: str, days_ago: int, price: str, fees: str, cost: str | None) -> dict:
+    return {
+        "marketplace": marketplace, "currency": "USD", "item_revenue": price, "fees": fees,
+        "shipping_credit": None, "shipping_cost": None, "item_cost": cost,
+        "sold_on": (datetime.now(UTC).date() - timedelta(days=days_ago)).isoformat(),
+        "request_id": uuid.uuid4().hex,
+    }
+
+
 def _photo(label: str, color: tuple[int, int, int], index: int) -> bytes:
     image = Image.new("RGB", (800, 1000), color)
     draw = ImageDraw.Draw(image)
@@ -145,6 +174,16 @@ def seed(base_url: str) -> list[str]:
                     json={"listing": sample["listing"], "expected_revision_id": ""},
                 ).raise_for_status()
             created.append(conv["id"])
+        for title, color, marketplace, days_ago, price, fees, cost in SOLD:
+            conv = client.post("/api/conversations", json={"title": title}).raise_for_status().json()
+            client.post(f"/api/conversations/{conv['id']}/photos",
+                        files=[("files", ("photo-1.jpg", _photo(title, color, 1), "image/jpeg"))]).raise_for_status()
+            client.put(f"/api/conversations/{conv['id']}/listing", json={
+                "listing": {"title": title, "price": float(price), "quantity": 1}, "expected_revision_id": "",
+            }).raise_for_status()
+            client.post(f"/api/conversations/{conv['id']}/marketplace-listings/sold",
+                        json=_sold_sale(marketplace, days_ago, price, fees, cost)).raise_for_status()
+            created.append(conv["id"])
         _seed_automations(client)
         return created
 
@@ -171,6 +210,13 @@ def seed_hosted(base_url: str) -> list[str]:
                     'title': listing['title'], 'notes': '', 'expected_updated_at': draft['updated_at'],
                     'fields': {key: value for key, value in listing.items() if key != 'title'},
                 }).raise_for_status()
+            created.append(draft['id'])
+        for title, color, marketplace, days_ago, price, fees, cost in SOLD:
+            draft = client.post('/api/drafts', json={'title': title}).raise_for_status().json()
+            client.post(f"/api/drafts/{draft['id']}/photos", content=_photo(title, color, 1),
+                        headers={'Content-Type': 'image/jpeg'}).raise_for_status()
+            client.post(f"/api/conversations/{draft['id']}/marketplace-listings/sold",
+                        json=_sold_sale(marketplace, days_ago, price, fees, cost)).raise_for_status()
             created.append(draft['id'])
         _seed_automations(client)
         return created

@@ -1,11 +1,13 @@
 import { cn } from "../lib/utils";
 import { useDeferredValue, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RefreshCwIcon } from "lucide-react";
 import { api } from "../api/client";
 import { DownloadLink } from "./DownloadLink";
 import { SALE_FORM_FIELDS, type SaleFormField, type SalesLedgerPage, type SalesLedgerRow } from "../api/salesLedger";
 import { pollMs } from "../api/polling";
 import { marketplaceName } from "./marketplaceNames";
+import { SalesOverview } from "./SalesOverview";
 import { EmptyRow, PageError, PageHeader, PageNote, PageSection, PageSkeleton, Panel } from "./WorkspacePage";
 import { Button, buttonVariants } from "./ui/button";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "./ui/dialog";
@@ -19,18 +21,19 @@ export function ledgerMoney(value: string | null | undefined, currency: string |
 }
 
 export function SalesLedgerSummary({ summary }: { summary: SalesLedgerPage["summary"] }) {
+  // Dollar totals are in the figures above; other currencies keep their own.
+  const other = summary.currencies.filter((group) => group.currency !== "USD");
   return <>
     <PageNote>{summary.lines} sale records · {summary.unrecorded} without recorded amounts · {summary.needs_review} need review · {summary.unmatched} need an inventory link.</PageNote>
-    {summary.currencies.length ? <div className="grid gap-3">
-      {summary.currencies.map((group) => <Panel key={group.currency} className="space-y-2 p-3" divided={false}>
-        <p className="text-sm font-medium">{group.currency}</p>
+    {other.length ? <div className="grid gap-3">
+      {other.map((group) => <Panel key={group.currency} className="space-y-2 p-3" divided={false}>
+        <p className="text-sm font-medium">Sales in {group.currency}</p>
         <dl className="grid grid-cols-2 gap-4 tabular-nums">
           <div><dt className="text-xs text-muted-foreground">Net revenue</dt><dd className={cn("mt-1", group.net_revenue == null ? "text-sm text-muted-foreground" : "text-xl font-semibold")}>{ledgerMoney(group.net_revenue, group.currency)}</dd><dd className="mt-1 text-xs text-muted-foreground">known on {group.net_known} of {group.lines} lines</dd></div>
           <div><dt className="text-xs text-muted-foreground">Recorded profit</dt><dd className={cn("mt-1", group.profit == null ? "text-sm text-muted-foreground" : "text-xl font-semibold")}>{ledgerMoney(group.profit, group.currency)}</dd><dd className="mt-1 text-xs text-muted-foreground">known on {group.profit_known} of {group.lines} lines</dd></div>
         </dl>
       </Panel>)}
     </div> : null}
-    {summary.currencies.length ? <PageNote>Totals reflect all matching records, with currencies kept separate. Profit includes only records with complete financial amounts.</PageNote> : null}
   </>;
 }
 
@@ -55,44 +58,60 @@ export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenList
   const query = useQuery({ queryKey: ["sales-ledger", filters, page], queryFn: () => api.salesLedger.list(filters, page),
     enabled: valid, retry: false, refetchInterval: () => pollMs(15000) });
   const data = valid ? query.data : undefined;
+  const allTime = period === "all";
+  const overview = useQuery({
+    queryKey: ["analytics", "overview", allTime ? null : start, end, marketplace],
+    queryFn: () => api.analytics.overview({ start: allTime ? null : start, end, ...(marketplace !== "all" ? { marketplace } : {}) }),
+    enabled: valid, placeholderData: keepPreviousData, refetchInterval: () => pollMs(15000),
+  });
+  const filtered = search || attention !== "all" || marketplace !== "all" || sort !== "newest" || period !== "30";
+  const clearFilters = () => { setSearch(""); setAttention("all"); setMarketplace("all"); setSort("newest"); setPeriod("30"); setEnd(today); setStart(new Date(Date.parse(today) - 29 * 86400000).toISOString().slice(0, 10)); setPage(1); };
+  const refreshing = query.isFetching || overview.isFetching;
   return <>
-    <PageHeader title="Analytics" description="Record sale prices, shipping and fees in Anteroom. Export your inventory and sales from here." actions={<div className="flex flex-wrap gap-2">
+    <PageHeader title="Analytics" description="How your sales are doing, and every sale with its price, fees and profit." actions={<div className="flex flex-wrap gap-2">
       <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.inventoryCsv()} filename="anteroom-inventory.csv">Export inventory CSV</DownloadLink>
       {valid ? <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.salesCsv(filters)} filename="anteroom-sales.csv">Export sales CSV</DownloadLink> : <Button size="sm" variant="outline" disabled>Export sales CSV</Button>}
     </div>}>
-      <div className="grid grid-cols-2 items-end gap-3 text-xs lg:grid-cols-4">
-        <label className="col-span-2 block space-y-1">Search sales<Input type="search" placeholder="Item title or order number" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} /></label>
-        <label className="block space-y-1">Period<Select value={period} onValueChange={value => {
+      <div className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap">
+        <div className="col-span-2 flex items-center gap-2 sm:contents">
+          <Input type="search" aria-label="Search sales" placeholder="Search item title or order number" className="min-w-0 flex-1 sm:min-w-56" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} />
+          <Button size="icon-sm" variant="ghost" aria-label="Refresh sales" title="Refresh sales" disabled={!valid || refreshing} className="shrink-0 sm:order-last"
+            onClick={() => { void query.refetch(); void overview.refetch(); }}>
+            <RefreshCwIcon aria-hidden className={cn(refreshing && "animate-spin")} />
+          </Button>
+        </div>
+        <Select value={period} onValueChange={value => {
           if (!value) return;
           setPeriod(value); setPage(1);
           if (value !== "custom") { setEnd(today); setStart(value === "all" ? "1970-01-01" : new Date(Date.parse(today) - (Number(value) - 1) * 86400000).toISOString().slice(0, 10)); }
-        }}><SelectTrigger aria-label="Sales period" className="w-full"><SelectValue>{({ "30": "Last 30 days", "90": "Last 90 days", "365": "Last year", all: "All time", custom: "Custom dates" } as Record<string, string>)[period]}</SelectValue></SelectTrigger><SelectPopup>
+        }}><SelectTrigger aria-label="Sales period" className="w-full sm:w-40"><SelectValue>{({ "30": "Last 30 days", "90": "Last 90 days", "365": "Last year", all: "All time", custom: "Custom dates" } as Record<string, string>)[period]}</SelectValue></SelectTrigger><SelectPopup>
           <SelectItem value="30">Last 30 days</SelectItem><SelectItem value="90">Last 90 days</SelectItem><SelectItem value="365">Last year</SelectItem><SelectItem value="all">All time</SelectItem><SelectItem value="custom">Custom dates</SelectItem>
-        </SelectPopup></Select></label>
-        {period === "custom" ? <><label className="block space-y-1">Sales from (UTC)<Input type="date" min="1970-01-01" max={end || today} value={start} onChange={(event) => { setStart(event.target.value); setPage(1); }} /></label>
-        <label className="block space-y-1">Through (UTC)<Input type="date" min={start || "1970-01-01"} max={today} value={end} onChange={(event) => { setEnd(event.target.value); setPage(1); }} /></label></> : null}
-        <label className="block space-y-1">Marketplace
+        </SelectPopup></Select>
         <Select value={marketplace} onValueChange={(value) => { if (value) setMarketplace(value); setPage(1); }}>
-          <SelectTrigger aria-label="Sales marketplace" className="w-full"><SelectValue>{marketplace === "all" ? "All marketplaces" : marketplaceName(marketplace)}</SelectValue></SelectTrigger>
+          <SelectTrigger aria-label="Sales marketplace" className="w-full sm:w-44"><SelectValue>{marketplace === "all" ? "All marketplaces" : marketplaceName(marketplace)}</SelectValue></SelectTrigger>
           <SelectPopup><SelectItem value="all">All marketplaces</SelectItem>{MARKETS.map((market) => <SelectItem key={market} value={market}>{marketplaceName(market)}</SelectItem>)}</SelectPopup>
         </Select>
-        </label>
-        <label className="block space-y-1">Show<Select value={attention} onValueChange={value => { if (value) setAttention(value); setPage(1); }}>
-          <SelectTrigger aria-label="Sales completeness" className="w-full"><SelectValue>{({ all: "All records", missing: "Missing sale data", review: "Needs review", loss: "Losses" } as Record<string, string>)[attention]}</SelectValue></SelectTrigger><SelectPopup>
+        <Select value={attention} onValueChange={value => { if (value) setAttention(value); setPage(1); }}>
+          <SelectTrigger aria-label="Sales completeness" className="w-full sm:w-44"><SelectValue>{({ all: "All records", missing: "Missing sale data", review: "Needs review", loss: "Losses" } as Record<string, string>)[attention]}</SelectValue></SelectTrigger><SelectPopup>
             <SelectItem value="all">All records</SelectItem><SelectItem value="missing">Missing sale data</SelectItem><SelectItem value="review">Needs review</SelectItem><SelectItem value="loss">Losses</SelectItem>
-          </SelectPopup></Select></label>
-        <label className="block space-y-1">Sort<Select value={sort} onValueChange={value => { if (value) setSort(value); setPage(1); }}>
-          <SelectTrigger aria-label="Sort sales" className="w-full"><SelectValue>{({ newest: "Newest first", oldest: "Oldest first", title: "Item title" } as Record<string, string>)[sort]}</SelectValue></SelectTrigger><SelectPopup><SelectItem value="newest">Newest first</SelectItem><SelectItem value="oldest">Oldest first</SelectItem><SelectItem value="title">Item title</SelectItem></SelectPopup>
-        </Select></label>
-        {search || attention !== "all" || marketplace !== "all" || sort !== "newest" || period !== "30" ? <Button size="sm" variant="ghost" onClick={() => { setSearch(""); setAttention("all"); setMarketplace("all"); setSort("newest"); setPeriod("30"); setEnd(today); setStart(new Date(Date.parse(today) - 29 * 86400000).toISOString().slice(0, 10)); setPage(1); }}>Clear filters</Button> : null}
-        <Button size="sm" variant="ghost" disabled={!valid || query.isFetching} onClick={() => void query.refetch()}>Refresh records</Button>
+          </SelectPopup></Select>
+        <Select value={sort} onValueChange={value => { if (value) setSort(value); setPage(1); }}>
+          <SelectTrigger aria-label="Sort sales" className="w-full sm:w-40"><SelectValue>{({ newest: "Newest first", oldest: "Oldest first", title: "Item title" } as Record<string, string>)[sort]}</SelectValue></SelectTrigger><SelectPopup><SelectItem value="newest">Newest first</SelectItem><SelectItem value="oldest">Oldest first</SelectItem><SelectItem value="title">Item title</SelectItem></SelectPopup>
+        </Select>
+        {filtered ? <Button size="sm" variant="ghost" className="col-span-2 justify-self-end" onClick={clearFilters}>Clear filters</Button> : null}
       </div>
+      {period === "custom" ? <div className="flex flex-wrap items-end gap-3 text-xs">
+        <label className="block space-y-1">Sales from (UTC)<Input type="date" min="1970-01-01" max={end || today} value={start} onChange={(event) => { setStart(event.target.value); setPage(1); }} /></label>
+        <label className="block space-y-1">Through (UTC)<Input type="date" min={start || "1970-01-01"} max={today} value={end} onChange={(event) => { setEnd(event.target.value); setPage(1); }} /></label>
+      </div> : null}
     </PageHeader>
+    {valid && overview.data ? <SalesOverview data={overview.data} marketplaceChosen={marketplace !== "all"} /> : null}
+    {valid && overview.error ? <PageError message={overview.error.message} /> : null}
     {!valid ? <PageNote>Choose a valid UTC date range through today.</PageNote> : query.isPending ? <PageSkeleton label="Loading sales records…" /> : null}
     {query.error ? <PageError message={query.error.message} /> : null}
     {data ? <>
       <SalesLedgerSummary summary={data.summary} />
-      <PageSection title="Sales records" description="Imported sales and marketplace order lines, including cancellations and refunds. Record totals after discounts; leave an amount blank if unknown and enter 0 once confirmed.">
+      <PageSection title="Sales records" description="Record totals after discounts; leave an amount blank if unknown.">
         {data.rows.length ? <ul className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/60 bg-card/40">{data.rows.map((row) => <li key={row.id} className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 text-sm">
           <div className="flex min-w-0 flex-1 basis-48 flex-col gap-0.5 break-words"><p className="font-medium">{row.title || `${marketplaceName(row.marketplace)} order ${row.order_id}`}</p>
             <p className="text-xs text-muted-foreground">{row.sold_at ? row.sold_at.slice(0, 10) : "Sale date missing"} · {marketplaceName(row.marketplace)} · {row.order_status.replace(/_/g, " ")} · quantity {row.quantity ?? "unknown"}</p>

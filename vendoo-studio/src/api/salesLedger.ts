@@ -52,3 +52,31 @@ export function salesLedgerParams(filters: SalesLedgerFilters, page?: number): s
   if (page != null) params.set("page", String(page));
   return params.toString();
 }
+export interface SalesOverviewFigures {
+  count: number;
+  revenue: number;
+  revenue_known: number;
+  profit: number | null;
+  profit_known: number;
+  fees_known: number;
+  average_days: number | null;
+  days_known: number;
+  sell_through: number | null;
+}
+/** Figures and charts for one period (whole UTC days; no start means all time) and marketplace. */
+export interface SalesOverview {
+  start: string | null;
+  end: string;
+  undated_sales: number;
+  current: SalesOverviewFigures;
+  previous: (SalesOverviewFigures & { start: string; end: string }) | null;
+  weeks: { start: string; count: number; revenue: number; revenue_known: number }[];
+  weeks_truncated: boolean;
+  marketplaces: { id: string; count: number; revenue: number; revenue_known: number }[];
+}
+export function salesOverviewParams(filters: { start: string | null; end: string; marketplace?: string }): string {
+  const params = new URLSearchParams({ end: filters.end });
+  if (filters.start) params.set("start", filters.start);
+  if (filters.marketplace) params.set("marketplace", filters.marketplace);
+  return params.toString();
+}

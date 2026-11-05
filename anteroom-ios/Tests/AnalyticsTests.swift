@@ -23,6 +23,24 @@ struct AnalyticsTests {
         precondition(AnalyticsFormat.change(nil, 5, AnalyticsFormat.money) == "No comparison data")
         precondition(AnalyticsFormat.days(1) == "1 day" && AnalyticsFormat.saleCount(2) == "2 sales")
         precondition(AnalyticsFormat.profitHint(data.sales) == "Record sale prices and costs to see profit")
+
+        let overview = try JSONDecoder().decode(SalesOverview.self, from: Data(#"""
+{"start": "2026-10-06", "end": "2026-11-04", "undated_sales": 0, "weeks_truncated": false,
+ "current": {"count": 4, "revenue": 200, "revenue_known": 4, "profit": null, "profit_known": 0, "fees_known": 0, "average_days": null, "days_known": 0, "sell_through": 25},
+ "previous": {"start": "2026-09-06", "end": "2026-10-05", "count": 2, "revenue": 100, "revenue_known": 2, "profit": 60, "profit_known": 2, "fees_known": 2, "average_days": 20, "days_known": 2, "sell_through": null},
+ "weeks": [{"start": "2026-10-26", "count": 3, "revenue": 150, "revenue_known": 3}],
+ "marketplaces": [{"id": "ebay", "count": 4, "revenue": 200, "revenue_known": 4}]}
+"""#.utf8))
+        precondition(overview.previous?.start == "2026-09-06" && overview.previous?.figures.count == 2)
+        precondition(overview.weeks[0].count == 3 && overview.marketplaces[0].id == "ebay")
+        let cards = Dictionary(uniqueKeysWithValues: AnalyticsFormat.overviewFigures(
+            overview.current, overview.previous?.figures, marketplaceChosen: false).map { ($0.label, $0) })
+        precondition(cards["Revenue"]?.value == "$200" && cards["Revenue"]?.change == "Up $100 (100%)")
+        precondition(cards["Profit"]?.value == nil && cards["Profit"]?.change == "No comparison: missing costs or fees")
+        precondition(cards["Items sold"]?.change == "Up 2 (100%)")
+        precondition(cards["Average days to sell"]?.value == nil && cards["Sell-through"]?.value == "25%")
+        let filtered = AnalyticsFormat.overviewFigures(overview.current, nil, marketplaceChosen: true)
+        precondition(filtered[4].hint == "Shown for all marketplaces only" && filtered[0].change == nil)
         print("Analytics tests passed")
     }
 }
