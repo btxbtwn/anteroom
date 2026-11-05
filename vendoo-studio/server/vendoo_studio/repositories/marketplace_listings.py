@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import cast
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.marketplace_listing import (
@@ -67,13 +68,13 @@ class MarketplaceListingRepo:
         One small query over every record: its state, live link, whether the
         last action failed, and how many fields the marketplace sent back.
         """
-        query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace,
-                              MarketplaceListing.state, MarketplaceListing.listing_url,
-                              MarketplaceListing.error, MarketplaceListing.error_fields)
+        query = select(MarketplaceListing.conversation_id, MarketplaceListing.marketplace,
+                       MarketplaceListing.state, MarketplaceListing.listing_url,
+                       MarketplaceListing.error, MarketplaceListing.error_fields)
         if conv_id:
-            query = query.filter(MarketplaceListing.conversation_id == conv_id)
+            query = query.where(MarketplaceListing.conversation_id == conv_id)
         grouped: dict[str, dict[str, dict]] = {}
-        for conversation_id, marketplace, state, url, error, fields in query.all():
+        for conversation_id, marketplace, state, url, error, fields in self.db.execute(query):
             grouped.setdefault(conversation_id, {})[marketplace] = {
                 "state": state,
                 "listing_url": url,
