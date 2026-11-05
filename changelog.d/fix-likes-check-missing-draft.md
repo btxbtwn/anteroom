@@ -1,0 +1,1 @@
+- Fixed a background error when a draft was deleted while Anteroom was checking for new likes.
