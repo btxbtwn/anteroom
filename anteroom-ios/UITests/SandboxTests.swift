@@ -239,9 +239,13 @@ final class AnalyticsSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
+        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'All,'")).firstMatch
+        XCTAssertTrue(allTab.waitForExistence(timeout: 30), "Inventory has loaded")
         let analytics = app.tabBars.buttons["Analytics"]
-        XCTAssertTrue(analytics.waitForExistence(timeout: 30))
         analytics.tap()
+        // The first tap on the floating tab bar after launch can land before it accepts touches.
+        if !app.buttons["Sales records"].waitForExistence(timeout: 5) { analytics.tap() }
+        XCTAssertTrue(app.buttons["Sales records"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Revenue"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.staticTexts["Items sold"].exists)
         keep(app, "Analytics figures")

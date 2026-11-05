@@ -45,11 +45,12 @@ struct SalesRecordsView: View {
 
             if let data {
                 Section {
-                    Text("\(data.summary.lines) order lines · \(data.summary.unrecorded) without recorded amounts · \(data.summary.needsReview) need review · \(data.summary.unmatched) need an inventory link. Totals cover the full filtered period; currencies stay separate.")
+                    Text("\(data.summary.lines) sale records · \(data.summary.unrecorded) without recorded amounts · \(data.summary.needsReview) need review · \(data.summary.unmatched) need an inventory link.")
                         .font(.footnote).foregroundStyle(.secondary)
-                    ForEach(data.summary.currencies) { group in
+                    // Dollar totals are in the figures above; other currencies keep their own.
+                    ForEach(data.summary.currencies.filter { $0.currency != "USD" }) { group in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(group.currency).font(.subheadline.weight(.medium))
+                            Text("Sales in \(group.currency)").font(.subheadline.weight(.medium))
                             Text("Net revenue: \(SalesLedgerFormat.money(group.netRevenue, group.currency)) · known on \(group.netKnown) of \(group.lines) lines")
                             Text("Recorded profit: \(SalesLedgerFormat.money(group.profit, group.currency)) · known on \(group.profitKnown) of \(group.lines) lines")
                         }

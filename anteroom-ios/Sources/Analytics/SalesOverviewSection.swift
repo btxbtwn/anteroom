@@ -41,7 +41,7 @@ struct SalesOverviewSection: View {
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
                 Chart(overview.weeks) { week in
-                    BarMark(x: .value("Week", Self.date(week.start) ?? Date(), unit: .weekOfYear),
+                    BarMark(x: .value("Week", Self.day(week.start)),
                             y: .value(metric == "count" ? "Items sold" : "Revenue", metric == "count" ? Double(week.count) : week.revenue),
                             width: .ratio(0.6))
                         .foregroundStyle(WorkspaceStyle.accent.opacity(0.8))
@@ -51,18 +51,17 @@ struct SalesOverviewSection: View {
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
-                        AxisGridLine()
-                        AxisValueLabel {
-                            if let amount = value.as(Double.self) {
+                        // Counts are whole: skip the half steps the automatic ticks add.
+                        if let amount = value.as(Double.self), metric != "count" || amount == amount.rounded() {
+                            AxisGridLine()
+                            AxisValueLabel {
                                 Text(metric == "count" ? String(Int(amount)) : AnalyticsFormat.money(amount))
                             }
                         }
                     }
                 }
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 5)) { _ in
-                        AxisValueLabel(format: .dateTime.month(.abbreviated).day(), centered: true)
-                    }
+                    AxisMarks(values: labelledWeeks) { _ in AxisValueLabel(centered: true) }
                 }
                 .frame(height: 180)
             }
@@ -87,6 +86,14 @@ struct SalesOverviewSection: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(WorkspaceStyle.border, lineWidth: 1))
     }
 
+    /// About five labels along the axis, always including the latest week.
+    private var labelledWeeks: [String] {
+        let every = max(1, Int((Double(overview.weeks.count) / 5).rounded(.up)))
+        return overview.weeks.enumerated()
+            .filter { (overview.weeks.count - 1 - $0.offset) % every == 0 }
+            .map { Self.day($0.element.start) }
+    }
+
     private static func date(_ day: String) -> Date? {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
@@ -95,7 +102,11 @@ struct SalesOverviewSection: View {
         return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12))
     }
 
+    /// "Oct 26" for the week starting Monday 2026-10-26, read as a UTC day like the web.
     private static func day(_ iso: String) -> String {
-        date(iso)?.formatted(.dateTime.month(.abbreviated).day()) ?? iso
+        guard let date = date(iso) else { return iso }
+        var style = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        style.timeZone = TimeZone(identifier: "UTC") ?? .current
+        return date.formatted(style)
     }
 }
