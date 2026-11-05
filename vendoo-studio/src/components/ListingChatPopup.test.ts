@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isChatToggleShortcut } from "./ListingChatPopup";
+import { CHAT_COLUMN_WIDTH, chatLayout, FORM_ROOM, isChatToggleShortcut } from "./ListingChatPopup";
 
 const key = (overrides: Partial<Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">>) => ({
   key: "j", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...overrides,
@@ -20,5 +20,22 @@ describe("isChatToggleShortcut", () => {
     expect(isChatToggleShortcut(key({ metaKey: true, key: "k" }), true)).toBe(false);
     expect(isChatToggleShortcut(key({ metaKey: true, shiftKey: true }), true)).toBe(false);
     expect(isChatToggleShortcut(key({}), true)).toBe(false);
+  });
+});
+
+describe("chatLayout", () => {
+  it("gives the chat its own column only when the form keeps a comfortable width", () => {
+    expect(FORM_ROOM).toBeGreaterThanOrEqual(160 + 560);
+    expect(chatLayout(FORM_ROOM + CHAT_COLUMN_WIDTH.default, null)).toBe("column");
+    expect(chatLayout(FORM_ROOM + CHAT_COLUMN_WIDTH.default - 1, null)).toBe("float");
+  });
+
+  it("counts the width the seller dragged the column to", () => {
+    expect(chatLayout(FORM_ROOM + 400, 400)).toBe("column");
+    expect(chatLayout(FORM_ROOM + 400, 420)).toBe("float");
+  });
+
+  it("floats before the area has been measured", () => {
+    expect(chatLayout(0, null)).toBe("float");
   });
 });

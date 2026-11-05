@@ -126,7 +126,7 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = usePanelWidth("sidebar");
   const [threadsWidth, setThreadsWidth] = usePanelWidth("threads");
   const [sidebarCollapsed, setSidebarCollapsed] = usePanelCollapsed("sidebar");
-  // On desktop the listing's chat is a pop-up over the form; minimized, it is a pill.
+  // On desktop the listing's chat is a column beside the form, or a pop-up over it when narrow; minimized, it is a pill.
   const [chatMinimized, setChatMinimized] = usePanelCollapsed("listing-chat");
   const [chatStatus, setChatStatus] = useState<ListingChatStatus | null>(null);
   const setChatOpen = useCallback((open: boolean) => setChatMinimized(!open), [setChatMinimized]);

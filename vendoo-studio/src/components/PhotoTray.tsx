@@ -288,10 +288,11 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     >
       {uploadError && <div className="text-destructive-foreground text-xs">{uploadError}</div>}
       {photos && photos.length > 0 && (
-        <PhotoStrip>
+        <PhotoStrip className="gap-2">
           {photos.map((p, i) => (
             <PhotoThumb
               key={p.id}
+              className="size-30 sm:size-34"
               url={photoThumbUrl(p)}
               index={i}
               reorderable={canReorder}

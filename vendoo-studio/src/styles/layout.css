@@ -614,20 +614,8 @@
   padding-bottom: 4.5rem;
 }
 
-/* With the chat open and room for both, the form steps aside instead of
-   running under the chat. Minimized, the form gets the whole width back. On
-   narrower windows the open chat still floats over the form. */
-.listing-form-area.has-chat {
-  container: listing-form / inline-size;
-}
-
-@container listing-form (min-width: 60rem) {
-  .listing-form-area.has-chat:has(> .listing-chat[data-open]) .marketplace-pane {
-    /* !important: the pane's px-3 utility sits in a later cascade layer. */
-    padding-right: calc(26rem + 2rem) !important;
-  }
-}
-
+/* Floating: the chat sits over the form's bottom-right corner, like Linear's
+   assistant. Large, it takes the area's full height and more of its width. */
 .listing-chat {
   position: absolute;
   right: 1rem;
@@ -648,10 +636,44 @@
   pointer-events: auto;
 }
 
-.listing-chat-window {
+.listing-chat[data-layout="float"] .listing-chat-window {
   width: min(26rem, calc(100vw - 2rem));
   height: 100%;
   max-height: 40rem;
+}
+
+.listing-chat[data-layout="float"][data-expanded] .listing-chat-window {
+  width: min(44rem, calc(100% - 2rem), calc(100vw - 2rem));
+  max-height: none;
+}
+
+.listing-chat[data-layout="float"][data-expanded] {
+  left: 1rem;
+}
+
+/* A column: with room for both, the open chat sits beside the form at full
+   height, and the form keeps the rest. Minimized, the form gets it all back. */
+.listing-form-area.has-chat:has(> .listing-chat[data-layout="column"][data-open]) {
+  flex-direction: row;
+}
+
+.listing-chat[data-layout="column"][data-open] {
+  position: relative;
+  inset: auto;
+  flex-direction: row;
+  align-items: stretch;
+  flex-shrink: 0;
+  width: var(--listing-chat-width);
+  border-left: 1px solid var(--color-border);
+}
+
+.listing-chat[data-layout="column"] .listing-chat-window {
+  flex: 1;
+  min-width: 0;
+}
+
+.listing-form-area.has-chat:has(> .listing-chat[data-layout="column"][data-open]) .marketplace-pane {
+  padding-bottom: 0.75rem;
 }
 
 .detail-panel > * {
