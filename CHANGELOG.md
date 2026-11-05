@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.733 — 2026-11-05
+
+- Fixed a background error when a draft was deleted while Anteroom was checking for new likes.
+
+## 0.1.732 — 2026-11-05
+
+- Listing on Poshmark, Mercari and Depop from the web now reaches Chrome. Before, the listing sent to Chrome carried every marketplace's saved form, which made it too large for the Bridge, so Chrome never started and Anteroom waited until it gave up. Checking whether Chrome finished a listing now works from the web too, and a command Chrome refuses fails right away instead of hanging.
+
 ## 0.1.731 — 2026-11-05
 
 - Listing on several marketplaces at once from the web no longer hangs on "Waiting for Chrome to confirm": Chrome now runs each marketplace's action side by side instead of one after another.
