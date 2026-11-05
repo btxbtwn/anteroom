@@ -25,9 +25,9 @@ export function isChatToggleShortcut(event: Pick<KeyboardEvent, "key" | "metaKey
   return mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "j";
 }
 
-/** The marketplace rail (160px) plus the narrowest comfortable form (560px). */
-export const FORM_ROOM = 160 + 560;
-export const CHAT_COLUMN_WIDTH: PanelWidthLimits & { default: number } = { min: 300, max: 560, maxVw: 40, default: 360 };
+/** The marketplace rail (160px) plus the narrowest comfortable form (440px). */
+export const FORM_ROOM = 160 + 440;
+export const CHAT_COLUMN_WIDTH: PanelWidthLimits & { default: number } = { min: 300, max: 560, maxVw: 40, default: 340 };
 
 /**
  * Wide enough for the form and the chat side by side, the chat is its own

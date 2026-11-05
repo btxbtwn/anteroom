@@ -637,9 +637,9 @@
 }
 
 .listing-chat[data-layout="float"] .listing-chat-window {
-  width: min(26rem, calc(100vw - 2rem));
+  width: min(22rem, calc(100vw - 2rem));
   height: 100%;
-  max-height: 40rem;
+  max-height: 30rem;
 }
 
 .listing-chat[data-layout="float"][data-expanded] .listing-chat-window {

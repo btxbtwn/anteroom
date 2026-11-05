@@ -25,9 +25,15 @@ describe("isChatToggleShortcut", () => {
 
 describe("chatLayout", () => {
   it("gives the chat its own column only when the form keeps a comfortable width", () => {
-    expect(FORM_ROOM).toBeGreaterThanOrEqual(160 + 560);
+    expect(FORM_ROOM).toBeGreaterThanOrEqual(160 + 440);
     expect(chatLayout(FORM_ROOM + CHAT_COLUMN_WIDTH.default, null)).toBe("column");
     expect(chatLayout(FORM_ROOM + CHAT_COLUMN_WIDTH.default - 1, null)).toBe("float");
+  });
+
+  it("keeps the chat a column on a 1280px window beside the default sidebar", () => {
+    // 1280 window minus the 340px listing sidebar leaves a 940px form area.
+    expect(chatLayout(1280 - 340, null)).toBe("column");
+    expect(chatLayout(1100 - 340, null)).toBe("float");
   });
 
   it("counts the width the seller dragged the column to", () => {
