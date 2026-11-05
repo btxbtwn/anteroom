@@ -97,10 +97,10 @@ class ListingFacetsTest(unittest.TestCase):
         records = MarketplaceListingRepo(self.db)
         records.save(conv.id, "depop", {"state": "published"})
         records.save(conv.id, "etsy", {"state": "not_saved"})
-        records.save(conv.id, {"state": "pending_review"})
+        records.save(conv.id, "mercari", {"state": "pending_review"})
         live = records.live_marketplaces()
         response = _conv_response(conv, _extras(None, None, None, False, live[conv.id]))
-        self.assertEqual(sorted(response.direct_marketplaces), ["depop"])
+        self.assertEqual(sorted(response.direct_marketplaces), ["depop", "mercari"])
         self.assertEqual(response.vendoo_marketplaces, [])
         self.assertEqual(response.status, "draft")
 
