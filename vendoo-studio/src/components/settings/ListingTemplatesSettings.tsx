@@ -18,7 +18,7 @@ export function ListingTemplatesSettings({onOpenListing}:{onOpenListing:(id:stri
   const remove=useMutation({mutationFn:(row:ListingTemplate)=>api.templates.remove(row.id,row.revision),retry:false,
     onSuccess:()=>void client.invalidateQueries({queryKey:["listing-templates"]})});
   return <SettingsSection id="listing-templates" title="Saved templates">
-    <SettingsRow title="Reusable listing fields" description="Save selected fields from an inventory item’s Templates action. To change a template’s fields, save from an item again and choose that template. Templates never include SKU, private notes, photos or marketplace links."
+    <SettingsRow title="Reusable listing fields" description="Save fields from an item’s Templates action, never including SKU, private notes, photos or marketplace links."
       control={<Button size="sm" variant="outline" disabled={query.isFetching} onClick={()=>void query.refetch()}>Reload templates</Button>} />
     {query.isPending?<SettingsNote>Loading templates…</SettingsNote>:null}
     {query.data&&!query.data.templates.length?<SettingsNote>No saved templates yet.</SettingsNote>:null}

@@ -58,7 +58,7 @@ export function InventorySettings() {
           onKeyDown={(event) => { if (event.key === "Enter") commitDays(); }} />}
       />
       {error ? <SettingsNote className="text-destructive-foreground">{error}</SettingsNote> : null}
-      <SettingsRow id="label-colors" title="Labels" description="Manage saved suggestions and label colors. Deleting a suggestion keeps labels already assigned to items.">
+      <SettingsRow id="label-colors" title="Labels" description="Deleting a suggestion keeps labels already on items.">
         <form className="mb-3 flex gap-2" onSubmit={(event) => {
           event.preventDefault();
           const label = newLabel.trim();

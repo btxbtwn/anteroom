@@ -39,15 +39,19 @@ struct BulkEditView: View {
     var body: some View {
         NavigationStack {
             Form {
-                switch stage {
-                case .choose: chooseSections
-                case .review: reviewSections
-                case .done: doneSections
+                Group {
+                    switch stage {
+                    case .choose: chooseSections
+                    case .review: reviewSections
+                    case .done: doneSections
+                    }
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    }
                 }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle(stage == .done ? "Edit fields" : "Edit \(ids.count) listings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }

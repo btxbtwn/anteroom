@@ -6,6 +6,24 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.735 — 2026-11-05
+
+- Starting a listing from the web no longer freezes Anteroom while it copies the photos, and the copies are made several at a time. Chrome also gets longer to finish a listing step before Anteroom stops waiting, so a slow Depop or Poshmark upload is no longer cancelled partway.
+
+## 0.1.734 — 2026-11-05
+
+- The page buttons at the bottom of the sidebar now show their names when the sidebar is wide enough, and a tooltip names each one when it is narrow.
+- Sourcing, Settings and Automations now share one readable page width; Marketplaces and Analytics use a wider one for their tables and calendars.
+- Shorter help text on Sourcing, Marketplaces, the sale calendar and Settings, on the web and on iPhone.
+
+## 0.1.733 — 2026-11-05
+
+- Fixed a background error when a draft was deleted while Anteroom was checking for new likes.
+
+## 0.1.732 — 2026-11-05
+
+- Listing on Poshmark, Mercari and Depop from the web now reaches Chrome. Before, the listing sent to Chrome carried every marketplace's saved form, which made it too large for the Bridge, so Chrome never started and Anteroom waited until it gave up. Checking whether Chrome finished a listing now works from the web too, and a command Chrome refuses fails right away instead of hanging.
+
 ## 0.1.731 — 2026-11-05
 
 - Listing on several marketplaces at once from the web no longer hangs on "Waiting for Chrome to confirm": Chrome now runs each marketplace's action side by side instead of one after another.

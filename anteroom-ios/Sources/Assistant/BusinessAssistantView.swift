@@ -191,36 +191,45 @@ struct BusinessAssistantView: View {
                     }
                 }
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                if attachmentsAvailable {
-                    PhotosPicker(selection: $picked, maxSelectionCount: max(1, 6 - model.attachments.count), matching: .images) {
-                        Image(systemName: "paperclip")
-                    }
-                    .frame(minWidth: 44, minHeight: 44)
-                    .disabled(model.attachments.count >= 6)
-                    .accessibilityLabel("Attach images, \(model.attachments.count) of 6")
-                }
+            // The web's composer: the message on top, its tools along the bottom.
+            VStack(alignment: .leading, spacing: 0) {
                 TextField("Ask anything about the shop…", text: $model.text, axis: .vertical)
                     .lineLimit(1...6)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
                     .accessibilityIdentifier("assistant-input")
-                if model.live != nil {
-                    Button("Stop answering", systemImage: "stop.circle.fill") { Task { await model.stop() } }
-                        .labelStyle(.iconOnly).font(.title2)
+                HStack(spacing: 4) {
+                    if attachmentsAvailable {
+                        PhotosPicker(selection: $picked, maxSelectionCount: max(1, 6 - model.attachments.count), matching: .images) {
+                            Image(systemName: "paperclip").foregroundStyle(WorkspaceStyle.mutedText)
+                        }
                         .frame(minWidth: 44, minHeight: 44)
+                        .disabled(model.attachments.count >= 6)
+                        .accessibilityLabel("Attach images, \(model.attachments.count) of 6")
+                    }
+                    Spacer()
+                    if model.live != nil {
+                        Button("Stop answering", systemImage: "stop.circle.fill") { Task { await model.stop() } }
+                            .labelStyle(.iconOnly).font(.title2)
+                            .foregroundStyle(WorkspaceStyle.mutedText)
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    ComposerSendButton(
+                        label: model.busy ? "Send when this answer is finished" : "Send",
+                        disabled: model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty
+                    ) { model.ask() }
+                    .accessibilityIdentifier("assistant-send")
                 }
-                Button(model.busy ? "Send when this answer is finished" : "Send", systemImage: "arrow.up.circle.fill") {
-                    model.ask()
-                }
-                .labelStyle(.iconOnly).font(.title2)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityIdentifier("assistant-send")
-                .disabled(model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty)
+                .padding(.horizontal, 6)
+                .padding(.bottom, 4)
             }
+            .workspacePanel(radius: WorkspaceStyle.composerRadius)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.regularMaterial)
+        .background(WorkspaceStyle.background)
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []
@@ -397,35 +406,39 @@ private struct AssistantChatsSheet: View {
         let shown = model.threads.filter { needle.isEmpty || $0.title.lowercased().contains(needle) }
         NavigationStack {
             List {
-                Button("New chat", systemImage: "plus") {
-                    Task { await model.open(nil) }
-                    dismiss()
-                }
-                Section {
-                    if !model.threadsLoaded {
-                        ProgressView()
-                    } else if shown.isEmpty {
-                        Text(model.threads.isEmpty ? "No chats yet" : "No matching chats").foregroundStyle(.secondary)
+                Group {
+                    Button("New chat", systemImage: "plus") {
+                        Task { await model.open(nil) }
+                        dismiss()
                     }
-                    ForEach(shown) { thread in
-                        Button {
-                            Task { await model.open(thread.id) }
-                            dismiss()
-                        } label: {
-                            HStack {
-                                Text(thread.title).foregroundStyle(.primary).lineLimit(2)
-                                Spacer()
-                                if thread.id == model.threadID {
-                                    Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
+                    Section {
+                        if !model.threadsLoaded {
+                            ProgressView()
+                        } else if shown.isEmpty {
+                            Text(model.threads.isEmpty ? "No chats yet" : "No matching chats").foregroundStyle(.secondary)
+                        }
+                        ForEach(shown) { thread in
+                            Button {
+                                Task { await model.open(thread.id) }
+                                dismiss()
+                            } label: {
+                                HStack {
+                                    Text(thread.title).foregroundStyle(.primary).lineLimit(2)
+                                    Spacer()
+                                    if thread.id == model.threadID {
+                                        Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
+                                    }
                                 }
                             }
-                        }
-                        .swipeActions {
-                            Button("Delete", role: .destructive) { deleting = thread }
+                            .swipeActions {
+                                Button("Delete", role: .destructive) { deleting = thread }
+                            }
                         }
                     }
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .searchable(text: $query, prompt: "Search chats")
             .navigationTitle("Chats")
             .navigationBarTitleDisplayMode(.inline)

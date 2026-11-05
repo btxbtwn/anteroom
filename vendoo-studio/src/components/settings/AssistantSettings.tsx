@@ -28,7 +28,7 @@ function BusinessNoteSection() {
       <SettingsRow
         id="business-note"
         title="What the assistant keeps in mind"
-        description="Your goals, the margin you want, how much time you have, what you will not source, where you ship from. The assistant reads this on every question."
+        description="Your goals, margin, time, what you won’t source and where you ship from; the assistant reads it on every question."
       >
         <form
           className="flex flex-col gap-2"
@@ -78,7 +78,7 @@ function MemorySection() {
       <SettingsRow
         id="assistant-memory"
         title="Facts from your chats"
-        description="They stay when you start a new chat, and the assistant rewrites one when you correct it. Remove a fact if it is wrong."
+        description="They carry into new chats and update when you correct the assistant; remove any that are wrong."
         status={
           remembered.isError
             ? <SettingsNote tone="error">Could not load what it remembers.</SettingsNote>

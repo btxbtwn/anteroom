@@ -20,35 +20,39 @@ struct BulkMarkdownView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if let result {
-                    Section {
-                        Label("\(result.applied.count) prices saved", systemImage: "checkmark.circle")
-                        ForEach(result.applied, id: \.conversationID) { applied in
-                            LabeledContent(rows.first { $0.id == applied.conversationID }?.title ?? "Listing",
-                                           value: applied.price, format: .currency(code: "USD"))
+                Group {
+                    if let result {
+                        Section {
+                            Label("\(result.applied.count) prices saved", systemImage: "checkmark.circle")
+                            ForEach(result.applied, id: \.conversationID) { applied in
+                                LabeledContent(rows.first { $0.id == applied.conversationID }?.title ?? "Listing",
+                                               value: applied.price, format: .currency(code: "USD"))
+                            }
                         }
-                    }
-                    if !result.skipped.isEmpty {
-                        Section("Not changed") {
-                            ForEach(result.skipped, id: \.conversationID) { skipped in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(rows.first { $0.id == skipped.conversationID }?.title ?? "Listing")
-                                    Text(skipped.reason).font(.caption).foregroundStyle(.secondary)
+                        if !result.skipped.isEmpty {
+                            Section("Not changed") {
+                                ForEach(result.skipped, id: \.conversationID) { skipped in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(rows.first { $0.id == skipped.conversationID }?.title ?? "Listing")
+                                        Text(skipped.reason).font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
+                    } else if loaded {
+                        Section {
+                            Text("Suggested from your own sales. Prices save in Anteroom; nothing is sent to a marketplace.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        ForEach(rows) { row in markdownSection(row) }
                     }
-                } else if loaded {
-                    Section {
-                        Text("Suggested from your own sales. Prices save in Anteroom; nothing is sent to a marketplace.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
                     }
-                    ForEach(rows) { row in markdownSection(row) }
                 }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .overlay { if !loaded && error == nil { ProgressView() } }
             .navigationTitle(result == nil ? "Mark down prices" : "Markdowns")
             .navigationBarTitleDisplayMode(.inline)

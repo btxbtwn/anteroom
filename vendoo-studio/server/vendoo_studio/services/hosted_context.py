@@ -138,14 +138,21 @@ class HostedPhotoStore:
         self._path(key)
         return key
 
+    def _write(self, path, data):
+        # Network calls stay outside the lock, so photos load in parallel; each file appears whole.
+        with self._lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            part = path.with_name(f'{path.name}.{uuid.uuid4().hex}.part')
+            part.write_bytes(data)
+            part.replace(path)
+
     def local_path(self, key):
         with self._lock:
             path = self._path(key)
-            if not path.is_file():
-                data = self._call('GET', key)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(data)
-            return path
+            if path.is_file():
+                return path
+        self._write(path, self._call('GET', key))
+        return path
 
     def local_paths(self, keys):
         # A missing/foreign object fails the operation; it cannot quietly make
@@ -167,9 +174,8 @@ class HostedPhotoStore:
     def put(self, key, data):
         with self._lock:
             path = self._path(key)
-            self._call('POST', key, data)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
+        self._call('POST', key, data)
+        self._write(path, data)
 
     def delete(self, key):
         with self._lock:

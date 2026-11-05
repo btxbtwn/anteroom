@@ -98,7 +98,7 @@ export function EbayOffersSettings() {
   return (
     <SettingsSection id="ebay-offers" title="eBay offers" hideTitle>
       <SettingsRow title={<span className="sr-only">Offers to interested buyers</span>}
-        description="Choose selected listings or cover all current and future eBay listings in Anteroom. Offers go to every buyer eBay marks eligible. Shipping and tax are separate."
+        description="Offers go to every buyer eBay marks eligible, on selected listings or all of them; shipping and tax are separate."
         control={<Button size="xs" variant="outline" disabled={connect.isPending || busy} onClick={() => connect.mutate()}>
           {connect.isPending ? <Spinner /> : null}{data?.connected ? "Reconnect eBay" : "Connect eBay"}
         </Button>}>

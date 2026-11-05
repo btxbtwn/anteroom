@@ -65,7 +65,7 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
       </div>
     </WorkspaceTabs> : <div className="ebay-data-panel space-y-4">
       <h2>{connection.isPending ? "Checking your connection…" : "Connect your eBay account"}</h2>
-      <p className="text-muted-foreground">Choose the tools you need and authorize them through eBay. You review account changes before confirming them.</p>
+      <p className="text-muted-foreground">Pick the tools to authorize on eBay; you confirm every account change.</p>
       {!connection.isPending ? <Button onClick={() => setPermissionsOpen(true)}>Connect eBay</Button> : null}
     </div>}
     {!account?.connected ? <SaleCalendar marketplace="ebay" onOpenListing={onOpenListing} /> : null}
