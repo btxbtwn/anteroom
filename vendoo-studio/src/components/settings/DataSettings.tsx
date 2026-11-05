@@ -57,7 +57,7 @@ function BackupsSection() {
       <SettingsRow
         id="backup-status"
         title="Snapshots"
-        description="Anteroom copies the database when it starts, every six hours, and before any update or schema change. Each copy is checked before it is kept. Old copies are dropped once they fill the retention budget."
+        description="Checked copies are made at launch, every six hours and before updates, and the oldest drop once the budget is full."
         status={
           isLoading ? (
             <span className="inline-flex items-center gap-1.5">
@@ -89,7 +89,7 @@ function BackupsSection() {
       <SettingsRow
         id="backup-folder"
         title="Backup folder"
-        description="Somewhere that is not this Mac: an external drive, a synced folder, or a network share. Every snapshot and every photo is copied there. Without one, the only copies are on this disk."
+        description="An external drive, synced folder or network share that gets every snapshot and photo; without one, the only copies are on this disk."
         status={
           folderError ? (
             <span className="text-destructive-foreground">{folderError}</span>
@@ -155,7 +155,7 @@ function DatabaseMaintenanceRow() {
     <SettingsRow
       id="database-maintenance"
       title="Database"
-      description="Listings and job history live here. Prune drops leftover job events; free space returns to the disk the next time you quit Anteroom."
+      description="Prune drops leftover job events; the space returns to the disk the next time you quit Anteroom."
       status={error ? <span className="text-destructive-foreground">{status}</span> : status}
       control={
         <Button size="xs" variant="outline" onClick={() => prune.mutate()} disabled={prune.isPending || isLoading}>
@@ -204,7 +204,7 @@ function DataFolderRow() {
     <SettingsRow
       id="data-folder"
       title="Data folder"
-      description="Listings, photos, drafts, hidden fields, fill logs, settings, and logs stay here when you reinstall the app. API keys remain in macOS Keychain on this Mac."
+      description="Everything except API keys (kept in macOS Keychain) lives here and survives a reinstall."
     >
       {isLoading ? (
         <SettingsNote className="flex items-center gap-1.5">

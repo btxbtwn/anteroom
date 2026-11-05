@@ -147,32 +147,43 @@ struct ListingAssistantView: View {
                     }
                 }
             }
-            TextField("Ask about this listing", text: $model.text, axis: .vertical)
-                .lineLimit(1...6)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Message to listing assistant")
-                .disabled(model.isWorking)
-            HStack {
-                if model.attachmentsAvailable {
-                    PhotosPicker(selection: $picked, maxSelectionCount: max(1, 6 - model.attachments.count), matching: .images) {
-                        Image(systemName: "paperclip")
+            // The web's composer: the message on top, its tools along the bottom.
+            VStack(alignment: .leading, spacing: 0) {
+                TextField("Ask about this listing", text: $model.text, axis: .vertical)
+                    .lineLimit(1...6)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
+                    .accessibilityLabel("Message to listing assistant")
+                    .disabled(model.isWorking)
+                HStack(spacing: 4) {
+                    if model.attachmentsAvailable {
+                        PhotosPicker(selection: $picked, maxSelectionCount: max(1, 6 - model.attachments.count), matching: .images) {
+                            Image(systemName: "paperclip").foregroundStyle(WorkspaceStyle.mutedText)
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .disabled(model.isWorking || model.attachments.count >= 6)
+                        .accessibilityLabel("Attach images, \(model.attachments.count) of 6")
                     }
-                    .frame(minWidth: 44, minHeight: 44)
-                    .disabled(model.isWorking || model.attachments.count >= 6)
-                    .accessibilityLabel("Attach images, \(model.attachments.count) of 6")
+                    Spacer()
+                    ComposerSendButton(
+                        label: "Send",
+                        disabled: !model.canStart || (model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty)
+                    ) {
+                        let text = model.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.isEmpty || !model.attachments.isEmpty else { return }
+                        start(.message(text, model.attachments))
+                    }
                 }
-                Spacer()
-                Button("Send", systemImage: "arrow.up.circle.fill") {
-                    let text = model.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty || !model.attachments.isEmpty else { return }
-                    start(.message(text, model.attachments))
-                }
-                .frame(minHeight: 44)
-                .disabled(!model.canStart || (model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
+                .padding(.horizontal, 6)
+                .padding(.bottom, 4)
             }
+            .workspacePanel(radius: WorkspaceStyle.composerRadius)
         }
-        .padding(16)
-        .background(.regularMaterial)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(WorkspaceStyle.background)
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []

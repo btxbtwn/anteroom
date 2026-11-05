@@ -29,65 +29,69 @@ struct AutomationsView: View {
     var body: some View {
         NavigationStack {
             List {
-                if !approvals.isEmpty {
-                    Section {
-                        ForEach(approvals) { row in
-                            VStack(alignment: .leading, spacing: 4) {
-                                NavigationLink(value: ListingSummary(id: row.conversationID, title: row.title)) {
-                                    Text(row.title ?? row.conversationID)
-                                }
-                                Text(([row.action == "publish" ? "List" : row.action == "delist" ? "Delist" : "Relist",
-                                       row.marketplaces.map(Marketplaces.name).joined(separator: ", "), row.state])
-                                    .filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(.caption).foregroundStyle(.secondary)
-                                if !canApprove {
-                                    Text("Marketplace actions are not available on iPhone yet. This approval stays waiting.")
+                Group {
+                    if !approvals.isEmpty {
+                        Section {
+                            ForEach(approvals) { row in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    NavigationLink(value: ListingSummary(id: row.conversationID, title: row.title)) {
+                                        Text(row.title ?? row.conversationID)
+                                    }
+                                    Text(([row.action == "publish" ? "List" : row.action == "delist" ? "Delist" : "Relist",
+                                           row.marketplaces.map(Marketplaces.name).joined(separator: ", "), row.state])
+                                        .filter { !$0.isEmpty }.joined(separator: " · "))
                                         .font(.caption).foregroundStyle(.secondary)
+                                    if !canApprove {
+                                        Text("Marketplace actions are not available on iPhone yet. This approval stays waiting.")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
+                        } header: {
+                            Text("Waiting for approval")
+                        } footer: {
+                            Text("Review each item, action and marketplace before approving one attempt.")
+                        }
+                    }
+                    if !gaps.isEmpty {
+                        Section("Down, needs relist") {
+                            ForEach(gaps) { gap in
+                                NavigationLink(value: ListingSummary(id: gap.conversationID, title: gap.title)) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(gap.title ?? gap.conversationID)
+                                        Text(([Marketplaces.name(gap.marketplace), gap.state] + (gap.error.map { [$0] } ?? [])).joined(separator: " · "))
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    }
+                    Section {
+                        if let automations {
+                            if automations.isEmpty && ebayOffers == nil && promotions.isEmpty {
+                                ContentUnavailableView("No automations yet", systemImage: "calendar.badge.clock",
+                                                       description: Text("Tap New to schedule a price drop or relist."))
+                            }
+                            ForEach(automations) { task in row(task) }
+                            if let ebayOffers { readOnlyRow(AutomationRowModel(ebay: ebayOffers)) }
+                            ForEach(promotions) { rule in readOnlyRow(AutomationRowModel(promotion: rule, name: Marketplaces.name)) }
+                        } else if error == nil {
+                            ProgressView("Reading automations…")
                         }
                     } header: {
-                        Text("Waiting for approval")
+                        Text("Your automations")
                     } footer: {
-                        Text("Review each item, action and marketplace before approving one attempt.")
+                        Text(ebayOffers != nil || !promotions.isEmpty
+                             ? "Nothing lists or delists until you approve each item. Offers and sharing are set up and turned on from Anteroom on the web or Mac."
+                             : "Nothing lists or delists until you approve each item.")
                     }
                 }
-                if !gaps.isEmpty {
-                    Section("Down, needs relist") {
-                        ForEach(gaps) { gap in
-                            NavigationLink(value: ListingSummary(id: gap.conversationID, title: gap.title)) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(gap.title ?? gap.conversationID)
-                                    Text(([Marketplaces.name(gap.marketplace), gap.state] + (gap.error.map { [$0] } ?? [])).joined(separator: " · "))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
-                Section {
-                    if let automations {
-                        if automations.isEmpty && ebayOffers == nil && promotions.isEmpty {
-                            ContentUnavailableView("No automations yet", systemImage: "calendar.badge.clock",
-                                                   description: Text("Tap New to schedule a price drop or relist."))
-                        }
-                        ForEach(automations) { task in row(task) }
-                        if let ebayOffers { readOnlyRow(AutomationRowModel(ebay: ebayOffers)) }
-                        ForEach(promotions) { rule in readOnlyRow(AutomationRowModel(promotion: rule, name: Marketplaces.name)) }
-                    } else if error == nil {
-                        ProgressView("Reading automations…")
-                    }
-                } header: {
-                    Text("Your automations")
-                } footer: {
-                    Text(ebayOffers != nil || !promotions.isEmpty
-                         ? "Nothing lists or delists until you approve each item. Offers and sharing are set up and turned on from Anteroom on the web or Mac."
-                         : "Nothing lists or delists until you approve each item.")
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("Automations")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -294,21 +298,25 @@ private struct AutomationTypePicker: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(kinds, id: \.kind) { item in
-                    Button { if item.kind == "scheduled" { onScheduled() } } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.label).foregroundStyle(item.kind == "scheduled" ? Color.primary : Color.secondary)
-                                Text(item.kind == "scheduled" ? item.description : "\(item.description) Set it up on the web or Mac.")
-                                    .font(.caption).foregroundStyle(Color.secondary)
+                Group {
+                    ForEach(kinds, id: \.kind) { item in
+                        Button { if item.kind == "scheduled" { onScheduled() } } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.label).foregroundStyle(item.kind == "scheduled" ? Color.primary : Color.secondary)
+                                    Text(item.kind == "scheduled" ? item.description : "\(item.description) Set it up on the web or Mac.")
+                                        .font(.caption).foregroundStyle(Color.secondary)
+                                }
+                                Spacer()
+                                if item.kind == "scheduled" { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary) }
                             }
-                            Spacer()
-                            if item.kind == "scheduled" { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary) }
                         }
+                        .disabled(item.kind != "scheduled")
                     }
-                    .disabled(item.kind != "scheduled")
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("New automation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
@@ -326,25 +334,29 @@ private struct AutomationHistoryView: View {
     var body: some View {
         NavigationStack {
             List {
-                if runs.isEmpty { Text("No runs yet.").foregroundStyle(.secondary) }
-                ForEach(runs) { run in
-                    Section {
-                        ForEach(Array(run.items.enumerated()), id: \.offset) { _, item in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title ?? item.conversationID)
-                                let detail = [item.state ?? (item.ok ? nil : (item.error ?? "failed")),
-                                              item.down.flatMap { $0.isEmpty ? nil : $0.joined(separator: ", ") },
-                                              item.nextPrice.map { "\(AutomationFormat.money(item.price)) → \(AutomationFormat.money($0))" }]
-                                    .compactMap { $0 }.joined(separator: " · ")
-                                if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(item.ok ? .secondary : Color.red) }
+                Group {
+                    if runs.isEmpty { Text("No runs yet.").foregroundStyle(.secondary) }
+                    ForEach(runs) { run in
+                        Section {
+                            ForEach(Array(run.items.enumerated()), id: \.offset) { _, item in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title ?? item.conversationID)
+                                    let detail = [item.state ?? (item.ok ? nil : (item.error ?? "failed")),
+                                                  item.down.flatMap { $0.isEmpty ? nil : $0.joined(separator: ", ") },
+                                                  item.nextPrice.map { "\(AutomationFormat.money(item.price)) → \(AutomationFormat.money($0))" }]
+                                        .compactMap { $0 }.joined(separator: " · ")
+                                    if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(item.ok ? .secondary : Color.red) }
+                                }
                             }
+                        } header: {
+                            Text(([run.startedAt ?? run.scheduledFor ?? "", run.origin, run.status] + (run.dryRun ? ["dry run"] : [])
+                                  + (run.error.map { [$0] } ?? [])).filter { !$0.isEmpty }.joined(separator: " · "))
                         }
-                    } header: {
-                        Text(([run.startedAt ?? run.scheduledFor ?? "", run.origin, run.status] + (run.dryRun ? ["dry run"] : [])
-                              + (run.error.map { [$0] } ?? [])).filter { !$0.isEmpty }.joined(separator: " · "))
                     }
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle(automation.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -372,37 +384,41 @@ private struct AutomationEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField("When an item reaches 60 days listed on eBay and Poshmark, delist and relist it and drop the price by 10%. Don't go below $15.",
-                              text: $form.prompt, axis: .vertical)
-                        .lineLimit(3...8)
-                    Button(working == "draft" ? "Reading…" : "Draft from prompt") { draftFromPrompt() }
-                        .disabled(form.prompt.trimmingCharacters(in: .whitespaces).isEmpty || working != nil)
-                    Button {
-                        withAnimation { manual.toggle() }
-                    } label: {
-                        Label("Set it up manually", systemImage: manual ? "chevron.up" : "chevron.down")
+                Group {
+                    Section {
+                        TextField("When an item reaches 60 days listed on eBay and Poshmark, delist and relist it and drop the price by 10%. Don't go below $15.",
+                                  text: $form.prompt, axis: .vertical)
+                            .lineLimit(3...8)
+                        Button(working == "draft" ? "Reading…" : "Draft from prompt") { draftFromPrompt() }
+                            .disabled(form.prompt.trimmingCharacters(in: .whitespaces).isEmpty || working != nil)
+                        Button {
+                            withAnimation { manual.toggle() }
+                        } label: {
+                            Label("Set it up manually", systemImage: manual ? "chevron.up" : "chevron.down")
+                        }
+                    } header: {
+                        Text("Describe it")
+                    } footer: {
+                        Text("Scheduling never publishes or delists on its own. Each item and marketplace waits for your approval.")
                     }
-                } header: {
-                    Text("Describe it")
-                } footer: {
-                    Text("Scheduling never publishes or delists on its own. Each item and marketplace waits for your approval.")
+                    if manual { manualSections }
+                    if !issues.isEmpty {
+                        Section("Needs attention") { ForEach(issues, id: \.self) { Text($0).font(.footnote) } }
+                    }
+                    if let preview { previewSection(preview) }
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    }
+                    Section {
+                        Button(working == "preview" ? "Checking…" : "Preview") { showPreview() }.disabled(working != nil)
+                        Button("Save draft") { save(activate: false) }.disabled(working != nil)
+                        Button(working == "save" ? "Saving…" : "Save and confirm") { save(activate: true) }
+                            .fontWeight(.semibold).disabled(working != nil)
+                    }
                 }
-                if manual { manualSections }
-                if !issues.isEmpty {
-                    Section("Needs attention") { ForEach(issues, id: \.self) { Text($0).font(.footnote) } }
-                }
-                if let preview { previewSection(preview) }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
-                Section {
-                    Button(working == "preview" ? "Checking…" : "Preview") { showPreview() }.disabled(working != nil)
-                    Button("Save draft") { save(activate: false) }.disabled(working != nil)
-                    Button(working == "save" ? "Saving…" : "Save and confirm") { save(activate: true) }
-                        .fontWeight(.semibold).disabled(working != nil)
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle(automation == nil ? "New automation" : "Edit automation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working == "save") } }

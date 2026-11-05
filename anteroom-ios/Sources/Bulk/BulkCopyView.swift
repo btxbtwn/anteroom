@@ -37,19 +37,23 @@ struct BulkCopyView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if let tasks {
-                    resultSections(tasks)
-                } else if loaded {
-                    Section {
-                        Text("Each item becomes a separate local draft. Photos are independent copies; cost is optional. Marketplace links, sales history and boxes stay with the originals. Copying sends nothing to a marketplace.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                Group {
+                    if let tasks {
+                        resultSections(tasks)
+                    } else if loaded {
+                        Section {
+                            Text("Each item becomes a separate local draft. Photos are independent copies; cost is optional. Marketplace links, sales history and boxes stay with the originals. Copying sends nothing to a marketplace.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        ForEach(rows) { row in copySection(row) }
                     }
-                    ForEach(rows) { row in copySection(row) }
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    }
                 }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .overlay { if !loaded && error == nil { ProgressView() } }
             .navigationTitle(tasks == nil ? "Copy items" : "Copy results")
             .navigationBarTitleDisplayMode(.inline)

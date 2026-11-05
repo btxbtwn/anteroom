@@ -423,7 +423,7 @@ function HostedChromeSessions({ salesSwitch, checks }: {
       ))}
       <SettingsRow
         title="Where the sign-in lives"
-        description="Depop, Poshmark, and Mercari stay signed in through the Chrome where Anteroom Bridge runs. Anteroom reads only whether each is signed in, never the cookies or tokens. Sales are checked while your browser is connected."
+        description="Depop, Poshmark and Mercari stay signed in through Bridge’s Chrome; Anteroom only checks whether each is signed in."
       >
         {sessions.isError ? <SettingsNote>{sessions.error.message}</SettingsNote> : null}
       </SettingsRow>
@@ -489,7 +489,7 @@ function MarketplaceSection() {
         ))}
         <HostedChromeSessions salesSwitch={sessionWorkflows ? salesSwitch : undefined} checks={detection.data?.checks} />
         {sessionWorkflows ? <SettingsRow id="sale-detection" title="Sale detection"
-          description="Chrome checks your marketplace sales while this browser is connected. If orders cannot be read, saved sales are kept.">
+          description="Chrome checks for sales while this browser is connected, and saved sales stay if orders can’t be read.">
           {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
         </SettingsRow> : null}
       </SettingsSection>
@@ -517,12 +517,12 @@ function MarketplaceSection() {
       ))}
       <SettingsRow
         title="Where the sign-in lives"
-        description="Depop and Poshmark stay signed in through Chrome's cookies. Mercari's listing sign-in is saved in the extension on this Mac. Anteroom never stores those cookies or tokens. When one expires, Anteroom asks you to sign in again."
+        description="These sign-ins live in Chrome and the extension, never in Anteroom, which asks you to sign in again when one expires."
       />
       <SettingsRow
         id="sale-detection"
         title="Sale detection"
-        description="Turn Detect sales on for a marketplace to hear when something sells there. Nothing is taken down unless Delist the other marketplaces is on. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark closet with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. Opening an item also checks its own listings right away, once a minute per shop, so a sale shows while you look at it. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
+        description="Detect sales checks a few times an hour (Poshmark by comparing your Poshmark closet) and tells you when a listed item sells; nothing comes down unless Delist the other marketplaces is on."
         status={
           listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -539,7 +539,7 @@ function MarketplaceSection() {
       <SettingsRow
         id="sale-autodelist"
         title="Delist the other marketplaces"
-        description="When something sells, take it off the other marketplaces where Anteroom still has it listed. The place it sold stays as it is. This stays off until you turn it on. If a delist can't finish, the sale notice says so and you can delist from the item."
+        description="When something sells, take it off the other marketplaces it’s still listed on; the sale notice says if a delist can’t finish."
         control={
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Switch
@@ -574,7 +574,7 @@ export function ConnectionsSettings() {
         <SettingsRow
           id="extension-folder"
           title="Listing extension folder"
-          description="Copy this path. In chrome://extensions turn on Developer mode, click Load unpacked, press Control-Shift-G (⌘⇧G) to search for the folder, paste the path, then Open. Anteroom overwrites this folder on launch so Chrome and Anteroom stay on the same files."
+          description="In chrome://extensions, turn on Developer mode, click Load unpacked, press ⌘⇧G, paste this path and choose Open."
         >
           <ExtensionLoadPath compact hideHint />
         </SettingsRow>
@@ -659,7 +659,7 @@ function TailscaleHttpsRow() {
     <SettingsRow
       id="tailscale-https"
       title="Tailscale HTTPS"
-      description="Share this Mac's Anteroom with your phone over your private Tailnet. Anteroom stays on 127.0.0.1; Tailscale proxies HTTPS. Funnel stays off."
+      description="Reach this Mac’s Anteroom from your phone over your private tailnet; Funnel stays off."
       control={control}
     >
       {isError ? (

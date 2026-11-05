@@ -19,31 +19,35 @@ struct BulkDeleteView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let result {
-                    Section {
-                        Label("\(result.deleted.count) items deleted", systemImage: "checkmark.circle")
-                    }
-                    if !result.skipped.isEmpty {
-                        Section("Not deleted") {
-                            ForEach(result.skipped, id: \.conversationID) { skipped in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(title(skipped.conversationID))
-                                    Text(skipped.reason).font(.caption).foregroundStyle(.secondary)
+                Group {
+                    if let result {
+                        Section {
+                            Label("\(result.deleted.count) items deleted", systemImage: "checkmark.circle")
+                        }
+                        if !result.skipped.isEmpty {
+                            Section("Not deleted") {
+                                ForEach(result.skipped, id: \.conversationID) { skipped in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(title(skipped.conversationID))
+                                        Text(skipped.reason).font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
+                    } else if loaded {
+                        Section {
+                            ForEach(rows) { row in reviewRow(row) }
+                        } footer: {
+                            Text("Deleting removes items and their photos from Anteroom only. Nothing is delisted from any marketplace.")
+                        }
                     }
-                } else if loaded {
-                    Section {
-                        ForEach(rows) { row in reviewRow(row) }
-                    } footer: {
-                        Text("Deleting removes items and their photos from Anteroom only. Nothing is delisted from any marketplace.")
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
                     }
                 }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .overlay { if !loaded && error == nil { ProgressView() } }
             .navigationTitle(result == nil ? "Delete \(ids.count) items" : "Delete")
             .navigationBarTitleDisplayMode(.inline)

@@ -16,63 +16,67 @@ struct LabelsSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                HStack {
-                    TextField("New label", text: $newLabel)
-                        .onSubmit(add)
-                    Button("Add label", action: add)
-                        .disabled(newLabel.trimmingCharacters(in: .whitespaces).isEmpty || saving)
-                }
-            } footer: {
-                Text("Manage saved suggestions and label colors. Deleting a suggestion keeps labels already assigned to items.")
-            }
-            if let prefs {
-                Section("Labels") {
-                    if prefs.labels.isEmpty {
-                        Text("Labels you add to items appear here.").foregroundStyle(.secondary)
+            Group {
+                Section {
+                    HStack {
+                        TextField("New label", text: $newLabel)
+                            .onSubmit(add)
+                        Button("Add label", action: add)
+                            .disabled(newLabel.trimmingCharacters(in: .whitespaces).isEmpty || saving)
                     }
-                    ForEach(prefs.labels, id: \.self) { label in
-                        HStack {
-                            Circle().fill(prefs.color(of: label).flatMap { Self.swatches[$0] } ?? .clear)
-                                .overlay(Circle().stroke(WorkspaceStyle.border, lineWidth: 1))
-                                .frame(width: 12, height: 12)
-                                .accessibilityHidden(true)
-                            Text(label)
-                            Spacer()
-                            Menu(prefs.color(of: label)?.capitalized ?? "No color") {
-                                Button("No color") { setColor(label, nil) }
-                                ForEach(Self.colors, id: \.self) { color in
-                                    Button(color.capitalized) { setColor(label, color) }
-                                }
-                            }
-                            .accessibilityLabel("Color for \(label)")
-                        }
-                        .swipeActions {
-                            Button("Delete", role: .destructive) { save(["forget_label": .string(label)]) }
-                        }
-                    }
+                } footer: {
+                    Text("Deleting a suggestion keeps labels already on items.")
                 }
-                if !prefs.hidden.isEmpty {
-                    Section("Deleted suggestions") {
-                        ForEach(prefs.hidden, id: \.self) { label in
+                if let prefs {
+                    Section("Labels") {
+                        if prefs.labels.isEmpty {
+                            Text("Labels you add to items appear here.").foregroundStyle(.secondary)
+                        }
+                        ForEach(prefs.labels, id: \.self) { label in
                             HStack {
+                                Circle().fill(prefs.color(of: label).flatMap { Self.swatches[$0] } ?? .clear)
+                                    .overlay(Circle().stroke(WorkspaceStyle.border, lineWidth: 1))
+                                    .frame(width: 12, height: 12)
+                                    .accessibilityHidden(true)
                                 Text(label)
                                 Spacer()
-                                Button("Restore") {
-                                    save(["remember_labels": .array([.string(label)]), "restore_labels": .array([.string(label)])])
+                                Menu(prefs.color(of: label)?.capitalized ?? "No color") {
+                                    Button("No color") { setColor(label, nil) }
+                                    ForEach(Self.colors, id: \.self) { color in
+                                        Button(color.capitalized) { setColor(label, color) }
+                                    }
                                 }
-                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Color for \(label)")
+                            }
+                            .swipeActions {
+                                Button("Delete", role: .destructive) { save(["forget_label": .string(label)]) }
                             }
                         }
                     }
+                    if !prefs.hidden.isEmpty {
+                        Section("Deleted suggestions") {
+                            ForEach(prefs.hidden, id: \.self) { label in
+                                HStack {
+                                    Text(label)
+                                    Spacer()
+                                    Button("Restore") {
+                                        save(["remember_labels": .array([.string(label)]), "restore_labels": .array([.string(label)])])
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                    }
+                } else if error == nil {
+                    ProgressView()
                 }
-            } else if error == nil {
-                ProgressView()
+                if let error {
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                }
             }
-            if let error {
-                Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-            }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .disabled(saving)
         .navigationTitle("Labels")
         .navigationBarTitleDisplayMode(.inline)

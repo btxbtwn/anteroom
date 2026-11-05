@@ -27,7 +27,7 @@ screen in the same PR or note it for a follow-up.
 
 | Need | Use |
 |---|---|
-| Full-width page | `WorkspacePage` (`src/components/WorkspacePage.tsx`) |
+| Workspace page | `WorkspacePage` (`src/components/WorkspacePage.tsx`) |
 | Page title, one-line description, actions on the right | `PageHeader` |
 | Section with a title and optional actions | `PageSection` |
 | Grouped surface with hairline dividers | `Panel`, `RowList`, `ListRow` |
@@ -98,6 +98,16 @@ container's.
 right with at most one primary button. The breadcrumb already names the page;
 do not repeat it in a second large heading below. If a page has no visible
 title, keep an `sr-only` `<h1>`.
+
+**Page width.** Every page uses one of two widths from `PAGE_WIDTH` in
+`WorkspacePage.tsx`. `readable` (896px, the default) is for forms, settings
+and lists read top to bottom: Sourcing, Settings, Automations. `expanded`
+(1280px) is only for pages built around a table, calendar or chart:
+Marketplaces, Analytics. Do not add a third width or a page-local `max-w-*`.
+
+**Navigation.** Every page link has a visible name or, where space forces an
+icon, a tooltip with its name. The sidebar footer shows names once the sidebar
+is wider than 18rem and falls back to icons below that.
 
 **Tabs.** Page tabs are muted labels with a 2px foreground underline on the
 active one (`.ebay-navigation`). No brand-colored or tinted tabs, no bordered

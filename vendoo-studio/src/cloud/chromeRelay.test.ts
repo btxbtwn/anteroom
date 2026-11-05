@@ -78,7 +78,7 @@ describe("Chrome relay", () => {
 
     expect(fetches[0].url).toBe("/api/browser-relay/next?capabilities=marketplace.actions,marketplace.sales_history");
     expect(fetches).toHaveLength(2);
-    expect(JSON.parse(String(fetches[1].options?.body))).toEqual({ request_id: read.message_id,
+    expect(JSON.parse(String(fetches[1].options?.body))).toMatchObject({ request_id: read.message_id,
       payload: { ok: true, orders: [], more: false } });
     expect(listeners.size).toBe(0);
   });
@@ -91,7 +91,11 @@ describe("Chrome relay", () => {
     expect(fetches[1].url).toBe("/api/browser-relay/jobs/job-1/photos/0f1e");
     expect(bridge.runMarketplaceCommand).toHaveBeenCalledWith(command, [{ id: "0f1e", mime_type: "image/jpeg", base64: "AQID" }]);
     expect(fetches[2].url).toBe("/api/browser-relay/replies");
-    expect(JSON.parse(String(fetches[2].options?.body))).toEqual({ request_id: "a".repeat(32), payload: { ok: true, state: "published" } });
+    const posted = JSON.parse(String(fetches[2].options?.body));
+    expect(posted).toMatchObject({ request_id: "a".repeat(32), payload: { ok: true, state: "published" } });
+    // What this tab measured goes with the reply: the photo bytes it read and the time each part took.
+    expect(posted.timing).toMatchObject({ photo_bytes: 4 });
+    expect(Object.keys(posted.timing).sort()).toEqual(["chrome_ms", "photo_bytes", "photos_ms"]);
   });
 
   it("does nothing when no command is waiting", async () => {

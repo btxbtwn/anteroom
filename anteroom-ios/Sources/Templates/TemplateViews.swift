@@ -12,20 +12,24 @@ struct ListingTemplatesSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    NavigationLink("Save fields as a template") {
-                        SaveTemplateView(api: api, listingID: listingID) { dismiss() }
-                    }
-                    NavigationLink("Apply a saved template") {
-                        ApplyTemplateView(api: api, listingID: listingID) {
-                            onApplied()
-                            dismiss()
+                Group {
+                    Section {
+                        NavigationLink("Save fields as a template") {
+                            SaveTemplateView(api: api, listingID: listingID) { dismiss() }
                         }
+                        NavigationLink("Apply a saved template") {
+                            ApplyTemplateView(api: api, listingID: listingID) {
+                                onApplied()
+                                dismiss()
+                            }
+                        }
+                    } footer: {
+                        Text("Save selected reusable fields or review a saved template against this item. Manage templates and create new drafts from Settings → Listings → Saved templates.")
                     }
-                } footer: {
-                    Text("Save selected reusable fields or review a saved template against this item. Manage templates and create new drafts from Settings → Listings → Saved templates.")
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("Listing templates")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
@@ -48,44 +52,48 @@ private struct SaveTemplateView: View {
 
     var body: some View {
         Form {
-            if let source {
-                Section {
-                    Picker("Save as", selection: Binding(get: { replacing?.id ?? "new" }, set: { choose($0) })) {
-                        Text("New template").tag("new")
-                        ForEach(templates) { Text($0.name).tag($0.id) }
-                    }
-                    TextField("Template name", text: $name)
-                } footer: {
-                    if replacing != nil {
-                        Text("Replacing saves only the checked fields below; other fields in this template are removed.")
-                    }
-                }
-                Section {
-                    ForEach(TemplateFields.groups(source.fields)) { group in
-                        Toggle(isOn: Binding(get: { checked.contains(group.key) }, set: { on in
-                            if on { checked.insert(group.key) } else { checked.remove(group.key) }
-                        })) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(group.name)
-                                Text(TemplateFields.value(group.value)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
+            Group {
+                if let source {
+                    Section {
+                        Picker("Save as", selection: Binding(get: { replacing?.id ?? "new" }, set: { choose($0) })) {
+                            Text("New template").tag("new")
+                            ForEach(templates) { Text($0.name).tag($0.id) }
+                        }
+                        TextField("Template name", text: $name)
+                    } footer: {
+                        if replacing != nil {
+                            Text("Replacing saves only the checked fields below; other fields in this template are removed.")
                         }
                     }
-                } header: {
-                    Text("Fields from \(source.sourceTitle)")
-                } footer: {
-                    Text("Templates never include SKU, private notes, photos or marketplace links.")
+                    Section {
+                        ForEach(TemplateFields.groups(source.fields)) { group in
+                            Toggle(isOn: Binding(get: { checked.contains(group.key) }, set: { on in
+                                if on { checked.insert(group.key) } else { checked.remove(group.key) }
+                            })) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(group.name)
+                                    Text(TemplateFields.value(group.value)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Fields from \(source.sourceTitle)")
+                    } footer: {
+                        Text("Templates never include SKU, private notes, photos or marketplace links.")
+                    }
+                } else if error == nil {
+                    ProgressView("Loading saved fields…")
                 }
-            } else if error == nil {
-                ProgressView("Loading saved fields…")
-            }
-            if let error {
-                Section {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                    Button("Reload item and templates") { Task { await load() } }
+                if let error {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                        Button("Reload item and templates") { Task { await load() } }
+                    }
                 }
             }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .navigationTitle("Save listing template")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -155,56 +163,60 @@ private struct ApplyTemplateView: View {
 
     var body: some View {
         Form {
-            if let review {
-                Section {
-                    if review.changes.isEmpty {
-                        Text("Nothing would change.").foregroundStyle(.secondary)
+            Group {
+                if let review {
+                    Section {
+                        if review.changes.isEmpty {
+                            Text("Nothing would change.").foregroundStyle(.secondary)
+                        }
+                        ForEach(Array(review.changes.enumerated()), id: \.offset) { _, change in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(TemplateFields.name(change.field)).font(.caption).foregroundStyle(.secondary)
+                                Text("\(change.old?.reviewText ?? "—") → \(change.new?.reviewText ?? "—")")
+                            }
+                        }
+                    } header: {
+                        Text("Changes to \(review.title)")
                     }
-                    ForEach(Array(review.changes.enumerated()), id: \.offset) { _, change in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(TemplateFields.name(change.field)).font(.caption).foregroundStyle(.secondary)
-                            Text("\(change.old?.reviewText ?? "—") → \(change.new?.reviewText ?? "—")")
+                } else if let templates {
+                    Section {
+                        if templates.isEmpty {
+                            Text("No saved templates yet. Save selected fields from an inventory item first.").foregroundStyle(.secondary)
+                        } else {
+                            Picker("Template", selection: Binding(get: { selected?.id ?? "" }, set: { id in
+                                selected = templates.first { $0.id == id }
+                            })) {
+                                Text("Choose template").tag("")
+                                ForEach(templates) { Text($0.name).tag($0.id) }
+                            }
+                            Picker("Mode", selection: $mode) {
+                                Text("Fill blanks only").tag("fill_blank")
+                                Text("Replace selected fields").tag("replace")
+                            }
+                        }
+                    } footer: {
+                        Text("Fill blanks keeps known values, including zero. Replace overwrites the selected fields; a selected form replaces its saved answer object. Unselected fields stay as they are. Related size and title fields may also align; they appear in the review.")
+                    }
+                    if let selected {
+                        Section("Fields in \(selected.name)") {
+                            ForEach(TemplateFields.groups(selected.fields)) { group in
+                                LabeledContent(group.name, value: TemplateFields.value(group.value))
+                            }
                         }
                     }
-                } header: {
-                    Text("Changes to \(review.title)")
+                } else if error == nil {
+                    ProgressView("Loading templates…")
                 }
-            } else if let templates {
-                Section {
-                    if templates.isEmpty {
-                        Text("No saved templates yet. Save selected fields from an inventory item first.").foregroundStyle(.secondary)
-                    } else {
-                        Picker("Template", selection: Binding(get: { selected?.id ?? "" }, set: { id in
-                            selected = templates.first { $0.id == id }
-                        })) {
-                            Text("Choose template").tag("")
-                            ForEach(templates) { Text($0.name).tag($0.id) }
-                        }
-                        Picker("Mode", selection: $mode) {
-                            Text("Fill blanks only").tag("fill_blank")
-                            Text("Replace selected fields").tag("replace")
-                        }
-                    }
-                } footer: {
-                    Text("Fill blanks keeps known values, including zero. Replace overwrites the selected fields; a selected form replaces its saved answer object. Unselected fields stay as they are. Related size and title fields may also align; they appear in the review.")
-                }
-                if let selected {
-                    Section("Fields in \(selected.name)") {
-                        ForEach(TemplateFields.groups(selected.fields)) { group in
-                            LabeledContent(group.name, value: TemplateFields.value(group.value))
-                        }
+                if let error {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                        Button("Reload templates") { Task { await load() } }
                     }
                 }
-            } else if error == nil {
-                ProgressView("Loading templates…")
             }
-            if let error {
-                Section {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                    Button("Reload templates") { Task { await load() } }
-                }
-            }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .navigationTitle("Apply template")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -275,40 +287,44 @@ struct SavedTemplatesView: View {
 
     var body: some View {
         List {
-            Section {
-                if let templates {
-                    if templates.isEmpty {
-                        Text("No saved templates yet.").foregroundStyle(.secondary)
-                    }
-                    ForEach(templates) { template in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(template.name)
-                            Text(TemplateFields.groups(template.fields).map(\.name).joined(separator: ", "))
-                                .font(.caption).foregroundStyle(.secondary)
-                            HStack {
-                                Button("Create draft") { drafting = template }
-                                Spacer()
-                                Button("Rename") {
-                                    newName = template.name
-                                    renaming = template
-                                }
-                                Button("Delete", role: .destructive) { deleting = template }
-                            }
-                            .buttonStyle(.borderless)
-                            .font(.footnote)
+            Group {
+                Section {
+                    if let templates {
+                        if templates.isEmpty {
+                            Text("No saved templates yet.").foregroundStyle(.secondary)
                         }
-                        .padding(.vertical, 4)
+                        ForEach(templates) { template in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(template.name)
+                                Text(TemplateFields.groups(template.fields).map(\.name).joined(separator: ", "))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                HStack {
+                                    Button("Create draft") { drafting = template }
+                                    Spacer()
+                                    Button("Rename") {
+                                        newName = template.name
+                                        renaming = template
+                                    }
+                                    Button("Delete", role: .destructive) { deleting = template }
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.footnote)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    } else if error == nil {
+                        ProgressView("Loading templates…")
                     }
-                } else if error == nil {
-                    ProgressView("Loading templates…")
+                } footer: {
+                    Text("Save fields from a listing’s Templates action, never including SKU, private notes, photos or marketplace links.")
                 }
-            } footer: {
-                Text("Save selected fields from a listing's Templates action. To change a template's fields, save from a listing again and choose that template. Templates never include SKU, private notes, photos or marketplace links.")
+                if let error {
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                }
             }
-            if let error {
-                Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-            }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .navigationTitle("Saved templates")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
@@ -380,25 +396,29 @@ private struct TemplateDraftSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField("Title", text: $title)
-                    TextField("SKU (optional)", text: $sku)
-                    TextField("Quantity", text: $quantity).keyboardType(.numberPad)
-                } footer: {
-                    Text("The draft has no photos, marketplace links, sales history or sourcing-box assignment. Saved cost and labels are used only when they are part of this template.")
-                }
-                Section("Fields") {
-                    ForEach(TemplateFields.groups(template.fields)) { group in
-                        LabeledContent(group.name, value: TemplateFields.value(group.value))
-                    }
-                }
-                if let error {
+                Group {
                     Section {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                        if failed { Button("Check draft result") { check() }.disabled(working) }
+                        TextField("Title", text: $title)
+                        TextField("SKU (optional)", text: $sku)
+                        TextField("Quantity", text: $quantity).keyboardType(.numberPad)
+                    } footer: {
+                        Text("The draft has no photos, marketplace links, sales history or sourcing-box assignment. Saved cost and labels are used only when they are part of this template.")
+                    }
+                    Section("Fields") {
+                        ForEach(TemplateFields.groups(template.fields)) { group in
+                            LabeledContent(group.name, value: TemplateFields.value(group.value))
+                        }
+                    }
+                    if let error {
+                        Section {
+                            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                            if failed { Button("Check draft result") { check() }.disabled(working) }
+                        }
                     }
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("Create draft")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
