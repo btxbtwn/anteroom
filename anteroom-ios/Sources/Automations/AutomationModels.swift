@@ -52,10 +52,11 @@ struct Automation: Decodable, Identifiable, Sendable {
     let priceRepeat: String?
     let summary: String?
     let nextRunAt: String?
+    let lastRunAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, prompt, status, timezone, schedule, filters, actions, marketplaces, summary
-        case priceRepeat = "price_repeat", nextRunAt = "next_run_at"
+        case priceRepeat = "price_repeat", nextRunAt = "next_run_at", lastRunAt = "last_run_at"
     }
 }
 
@@ -313,6 +314,58 @@ enum AutomationFormat {
         return "Weekly on \(days.isEmpty ? "no days" : days.joined(separator: ", ")) at \(clock) (\(timezone))"
     }
 
+    /// "18:30" as "6:30 PM".
+    static func clockLabel(_ time: String) -> String { clock(time) }
+
+    private static func clock(_ time: String?) -> String {
+        let parts = (time ?? "09:00").split(separator: ":").compactMap { Int($0) }
+        let hour = parts.first ?? 9
+        let minute = parts.count > 1 ? parts[1] : 0
+        return "\(hour % 12 == 0 ? 12 : hour % 12):\(String(format: "%02d", minute)) \(hour < 12 ? "AM" : "PM")"
+    }
+
+    private static let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    private static func when(_ schedule: AutomationSchedule?) -> String {
+        guard let schedule else { return "No schedule yet" }
+        switch schedule.kind {
+        case "once":
+            let at = schedule.at ?? ""
+            let date = at.prefix(10).split(separator: "-").compactMap { Int($0) }
+            guard date.count == 3, months.indices.contains(date[1] - 1) else { return "Once" }
+            let time = at.count >= 16 ? ", \(clock(String(at.dropFirst(11).prefix(5))))" : ""
+            return "Once \(months[date[1] - 1]) \(date[2])\(time)"
+        case "daily":
+            return "Every day \(clock(schedule.time))"
+        default:
+            let days = (schedule.weekdays ?? []).map { AutomationForm.weekdays.indices.contains($0) ? AutomationForm.weekdays[$0] : String($0) }
+            return "Every \(days.isEmpty ? "week" : days.joined(separator: ", ")) \(clock(schedule.time))"
+        }
+    }
+
+    /// One line for a saved automation: when it runs, which items and where (automationsFormat.ts describeTrigger).
+    static func trigger(_ schedule: AutomationSchedule?, filters: AutomationFilters?, marketplaces: [String],
+                        name: (String) -> String) -> String {
+        var picks = [filters?.department, filters?.category, filters?.brand, filters?.status]
+            .compactMap { $0 }.filter { !$0.isEmpty }
+        if let age = filters?.minAgeDays, age > 0 { picks.append("listed \(age)+ days") }
+        if let ids = filters?.conversationIDs, !ids.isEmpty { picks.append("\(ids.count) item\(ids.count == 1 ? "" : "s")") }
+        let place = marketplaces.isEmpty ? "" : "on \(marketplaces.map(name).joined(separator: ", "))"
+        let which = [picks.joined(separator: ", "), place].filter { !$0.isEmpty }.joined(separator: " ")
+        return [when(schedule), which].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// A server time as "Nov 5, 9:00 AM" in the automation's timezone.
+    static func runTime(_ raw: String?, timezone: String) -> String {
+        guard let raw else { return "—" }
+        guard let date = ServerDate.parse(raw) else { return raw }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, h:mm a"
+        formatter.timeZone = TimeZone(identifier: timezone) ?? .current
+        return formatter.string(from: date)
+    }
+
     static func actions(_ actions: [AutomationAction]) -> String {
         guard !actions.isEmpty else { return "No actions" }
         return actions.map { action in
@@ -338,5 +391,130 @@ enum AutomationFormat {
     static func money(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "—" }
         return value.rounded() == value ? "$\(Int(value))" : String(format: "$%.2f", value)
+    }
+}
+
+// MARK: eBay offers, sharing and offers to likers
+
+/// eBay offers (`GET /api/ebay-offers`): one setup per account, checked every 15 minutes.
+/// The iPhone shows it in the list read-only; it is set up and turned on from the web or Mac.
+struct EbayOffersSummary: Decodable, Sendable {
+    struct AllListings: Decodable, Sendable {
+        let enabled: Bool
+        let discountPercent: Int
+        let minimumPrice: String
+    }
+    struct Listing: Decodable, Sendable { let enabled: Bool }
+    let connected: Bool
+    let allListings: AllListings
+    let listings: [Listing]
+    let checkIntervalMinutes: Int?
+    let lastCheck: String?
+
+    var on: Bool { allListings.enabled || listings.contains(where: \.enabled) }
+}
+
+/// A Poshmark sharing schedule or an offers-to-likers rule (`GET /api/promotion-automations`).
+/// Saved off; only the seller turns one on, and any edit turns it off again.
+struct PromotionAutomationSummary: Decodable, Identifiable, Sendable {
+    struct Run: Decodable, Sendable {
+        let startedAt: String?
+        enum CodingKeys: String, CodingKey { case startedAt = "started_at" }
+    }
+    let id: String
+    let name: String
+    let marketplace: String
+    let action: String
+    let scope: String
+    let conversationIDs: [String]
+    let times: [String]
+    let timezone: String?
+    let discountPercent: Int?
+    let enabled: Bool
+    let available: Bool
+    let pausedReason: String?
+    let nextRunAt: String?
+    let lastRun: Run?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, marketplace, action, scope, times, timezone, enabled, available
+        case conversationIDs = "conversation_ids", discountPercent = "discount_percent", pausedReason = "paused_reason"
+        case nextRunAt = "next_run_at", lastRun = "last_run"
+    }
+}
+
+struct PromotionAutomationList: Decodable, Sendable {
+    let automations: [PromotionAutomationSummary]
+}
+
+/// One row for any automation, as the web list draws it (automationRows.ts).
+struct AutomationRowModel: Equatable, Sendable {
+    var name: String
+    var type: String
+    var when: String
+    var lastRun: String
+    var nextRun: String
+    /// The switch position, or nil when `state` shows instead.
+    var on: Bool?
+    var state: String = ""
+    var note: String = ""
+
+    /// What New offers, in the web's order.
+    static let kinds: [(kind: String, label: String, description: String)] = [
+        ("scheduled", "Price drop, relist or regenerate", "On a schedule; each item waits for your approval."),
+        ("ebay_offers", "eBay offers", "Offers to buyers watching your eBay listings."),
+        ("share", "Poshmark sharing", "Shares your Poshmark closet at the times you pick."),
+        ("offer", "Offers to likers", "Offers to new likers on Poshmark, Mercari or Depop."),
+    ]
+
+    static func type(_ actions: [AutomationAction]) -> String {
+        let labels = ["price": "Price drop", "relist": "Relist", "delist": "Delist", "regenerate": "Regenerate", "update_fields": "Update fields"]
+        var seen: [String] = []
+        for action in actions {
+            let label = labels[action.type] ?? action.type
+            if !seen.contains(label) { seen.append(label) }
+        }
+        return seen.isEmpty ? "Scheduled" : seen.joined(separator: ", ")
+    }
+
+    init(name: String, type: String, when: String, lastRun: String, nextRun: String, on: Bool?, state: String = "", note: String = "") {
+        self.name = name; self.type = type; self.when = when; self.lastRun = lastRun; self.nextRun = nextRun
+        self.on = on; self.state = state; self.note = note
+    }
+
+    init(automation task: Automation, name market: (String) -> String) {
+        let togglable = task.status == "active" || task.status == "paused"
+        self.init(name: task.name, type: Self.type(task.actions),
+                  when: AutomationFormat.trigger(task.schedule, filters: task.filters, marketplaces: task.marketplaces, name: market),
+                  lastRun: AutomationFormat.runTime(task.lastRunAt, timezone: task.timezone),
+                  nextRun: task.status == "active" ? AutomationFormat.runTime(task.nextRunAt, timezone: task.timezone) : "—",
+                  on: togglable ? task.status == "active" : nil,
+                  state: togglable ? "" : (task.status == "draft" ? "Draft" : "Done"))
+    }
+
+    init(ebay status: EbayOffersSummary, timezone: String = TimeZone.current.identifier) {
+        let every = status.checkIntervalMinutes ?? 15
+        let picked = status.listings.filter(\.enabled).count
+        let all = status.allListings
+        let scope = all.enabled
+            ? "All listings, \(all.discountPercent)% off\(all.minimumPrice.isEmpty ? "" : ", minimum $\(all.minimumPrice)")"
+            : picked > 0 ? "\(picked) listing\(picked == 1 ? "" : "s")" : "No listings yet"
+        self.init(name: "eBay offers", type: "eBay offers", when: "Every \(every) minutes · \(scope)",
+                  lastRun: AutomationFormat.runTime(status.lastCheck, timezone: timezone),
+                  nextRun: status.on && status.connected ? "Within \(every) min" : "—",
+                  on: status.connected ? status.on : nil, state: status.connected ? "" : "Not connected")
+    }
+
+    init(promotion row: PromotionAutomationSummary, name market: (String) -> String) {
+        let timezone = row.timezone ?? TimeZone.current.identifier
+        let count = row.conversationIDs.count
+        let scope = row.scope == "all" ? "all live listings" : "\(count) chosen listing\(count == 1 ? "" : "s")"
+        let when = row.action == "share"
+            ? "Every day \(row.times.map(AutomationFormat.clockLabel).joined(separator: ", ")) · \(scope)"
+            : "New likers on \(market(row.marketplace)) · \(row.discountPercent ?? 0)% off \(scope)"
+        self.init(name: row.name, type: row.action == "share" ? "\(market(row.marketplace)) sharing" : "Offers to likers",
+                  when: when, lastRun: AutomationFormat.runTime(row.lastRun?.startedAt, timezone: timezone),
+                  nextRun: row.enabled ? AutomationFormat.runTime(row.nextRunAt, timezone: timezone) : "—", on: row.enabled,
+                  note: row.enabled ? "" : row.pausedReason ?? (row.available ? "" : "\(market(row.marketplace)) offers are not available in Anteroom yet"))
     }
 }
