@@ -19,22 +19,26 @@ struct ChangelogView: View {
 
     var body: some View {
         List {
-            if let changelog {
-                ForEach(changelog.entries) { entry in
-                    Section {
-                        Text(markdown(entry.body)).font(.subheadline)
-                    } header: {
-                        HStack {
-                            Text(entry.version).monospacedDigit()
-                            Spacer()
-                            if let date = entry.date { Text(date) }
+            Group {
+                if let changelog {
+                    ForEach(changelog.entries) { entry in
+                        Section {
+                            Text(markdown(entry.body)).font(.subheadline)
+                        } header: {
+                            HStack {
+                                Text(entry.version).monospacedDigit()
+                                Spacer()
+                                if let date = entry.date { Text(date) }
+                            }
                         }
                     }
+                } else if let error {
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                 }
-            } else if let error {
-                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
             }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .overlay { if changelog == nil && error == nil { ProgressView() } }
         .navigationTitle("What's new")
         .navigationBarTitleDisplayMode(.inline)

@@ -20,24 +20,28 @@ struct ListingsSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                NavigationLink("Saved templates") { SavedTemplatesView(api: api) }
-            } footer: {
-                Text("Reusable listing fields, saved from a listing's Templates action.")
+            Group {
+                Section {
+                    NavigationLink("Saved templates") { SavedTemplatesView(api: api) }
+                } footer: {
+                    Text("Reusable listing fields, saved from a listing's Templates action.")
+                }
+                whereYouList
+                inventory
+                shipping
+                fields
+                listingFormulas
+                Section {
+                    NavigationLink("Similar items") { SimilarItemsView(api: api) }
+                } header: {
+                    Text("Duplicate check")
+                } footer: {
+                    Text("Merge items listed twice or mark them as different; nothing is deleted or delisted.")
+                }
             }
-            whereYouList
-            inventory
-            shipping
-            fields
-            listingFormulas
-            Section {
-                NavigationLink("Similar items") { SimilarItemsView(api: api) }
-            } header: {
-                Text("Duplicate check")
-            } footer: {
-                Text("Merge items listed twice or mark them as different; nothing is deleted or delisted.")
-            }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .navigationTitle("Listings")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }

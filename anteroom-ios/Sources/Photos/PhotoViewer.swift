@@ -177,28 +177,32 @@ struct PhotoAdjustSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    previewArea
-                        .frame(height: 280)
-                        .listRowInsets(EdgeInsets())
-                }
-                Section {
-                    Picker("Tool", selection: $tool) {
-                        Text("Crop").tag("crop")
-                        Text("Adjust").tag("adjust")
-                        Text("Background").tag("background")
+                Group {
+                    Section {
+                        previewArea
+                            .frame(height: 280)
+                            .listRowInsets(EdgeInsets())
                     }
-                    .pickerStyle(.segmented)
+                    Section {
+                        Picker("Tool", selection: $tool) {
+                            Text("Crop").tag("crop")
+                            Text("Adjust").tag("adjust")
+                            Text("Background").tag("background")
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    switch tool {
+                    case "crop": cropControls
+                    case "background": backgroundControls
+                    default: adjustControls
+                    }
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    }
                 }
-                switch tool {
-                case "crop": cropControls
-                case "background": backgroundControls
-                default: adjustControls
-                }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("Edit photo")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -471,24 +475,28 @@ struct ArrangePhotosSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    ForEach(Array(order.enumerated()), id: \.element.id) { index, photo in
-                        HStack(spacing: 12) {
-                            RemotePhoto(api: api, photoID: photo.id, maxPixels: 120, version: photo.version)
-                                .frame(width: 56, height: 56)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                            Text(index == 0 ? "Cover photo" : "Photo \(index + 1)")
+                Group {
+                    Section {
+                        ForEach(Array(order.enumerated()), id: \.element.id) { index, photo in
+                            HStack(spacing: 12) {
+                                RemotePhoto(api: api, photoID: photo.id, maxPixels: 120, version: photo.version)
+                                    .frame(width: 56, height: 56)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                Text(index == 0 ? "Cover photo" : "Photo \(index + 1)")
+                            }
+                            .accessibilityElement(children: .combine)
                         }
-                        .accessibilityElement(children: .combine)
+                        .onMove { order.move(fromOffsets: $0, toOffset: $1) }
+                    } footer: {
+                        Text("The first photo is the cover marketplaces show.")
                     }
-                    .onMove { order.move(fromOffsets: $0, toOffset: $1) }
-                } footer: {
-                    Text("The first photo is the cover marketplaces show.")
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    }
                 }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .environment(\.editMode, .constant(.active))
             .navigationTitle("Arrange photos")
             .navigationBarTitleDisplayMode(.inline)

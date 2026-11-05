@@ -47,54 +47,58 @@ struct SimilarItemsView: View {
 
     var body: some View {
         List {
-            Section {
-                Text("Items that share a photo or SKU, or whose titles match with the same brand and size. Open them to compare, keep one and merge the other into it, or mark them as different.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                if let pairs, total > pairs.count {
-                    Text("Showing the \(pairs.count) closest of \(total) pairs.").font(.footnote).foregroundStyle(.secondary)
-                }
-            }
-            if let error {
-                Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-            }
-            if let pairs {
-                if pairs.isEmpty {
-                    Text("No similar items found.").foregroundStyle(.secondary)
-                }
-                ForEach(pairs) { pair in
-                    Section {
-                        ForEach([(pair.first, pair.second), (pair.second, pair.first)], id: \.0.id) { item, other in
-                            VStack(alignment: .leading, spacing: 6) {
-                                NavigationLink(value: item.listing) {
-                                    HStack(spacing: 12) {
-                                        Group {
-                                            if let cover = item.listing.coverPhotoID {
-                                                RemotePhoto(api: api, photoID: cover, maxPixels: 120)
-                                            } else {
-                                                Image(systemName: "photo").foregroundStyle(.secondary)
-                                            }
-                                        }
-                                        .frame(width: 48, height: 48)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(item.title).lineLimit(2)
-                                            Text(item.meta).font(.caption).foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                                Button("Keep this one") { merging = (item, other) }
-                                    .buttonStyle(.bordered).font(.footnote).disabled(busy)
-                            }
-                        }
-                        Button("Not duplicates") { dismiss(pair) }.disabled(busy)
-                    } header: {
-                        Text(pair.reasons.map { Self.reasons[$0] ?? $0 }.joined(separator: " · "))
+            Group {
+                Section {
+                    Text("Items that share a photo or SKU, or whose titles match with the same brand and size. Open them to compare, keep one and merge the other into it, or mark them as different.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if let pairs, total > pairs.count {
+                        Text("Showing the \(pairs.count) closest of \(total) pairs.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-            } else if error == nil {
-                ProgressView("Comparing titles, SKUs and photos…")
+                if let error {
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                }
+                if let pairs {
+                    if pairs.isEmpty {
+                        Text("No similar items found.").foregroundStyle(.secondary)
+                    }
+                    ForEach(pairs) { pair in
+                        Section {
+                            ForEach([(pair.first, pair.second), (pair.second, pair.first)], id: \.0.id) { item, other in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    NavigationLink(value: item.listing) {
+                                        HStack(spacing: 12) {
+                                            Group {
+                                                if let cover = item.listing.coverPhotoID {
+                                                    RemotePhoto(api: api, photoID: cover, maxPixels: 120)
+                                                } else {
+                                                    Image(systemName: "photo").foregroundStyle(.secondary)
+                                                }
+                                            }
+                                            .frame(width: 48, height: 48)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(item.title).lineLimit(2)
+                                                Text(item.meta).font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    Button("Keep this one") { merging = (item, other) }
+                                        .buttonStyle(.bordered).font(.footnote).disabled(busy)
+                                }
+                            }
+                            Button("Not duplicates") { dismiss(pair) }.disabled(busy)
+                        } header: {
+                            Text(pair.reasons.map { Self.reasons[$0] ?? $0 }.joined(separator: " · "))
+                        }
+                    }
+                } else if error == nil {
+                    ProgressView("Comparing titles, SKUs and photos…")
+                }
             }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .navigationTitle("Similar items")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
