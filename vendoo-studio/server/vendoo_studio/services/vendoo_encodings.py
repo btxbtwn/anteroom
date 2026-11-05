@@ -13,7 +13,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from vendoo_studio.models.mercari_shipping import package_ounces
 from vendoo_studio.services.vendoo_item_shape import (
     _CAMEL_BOUNDARY,
     GENERAL_KEY,
@@ -22,7 +21,6 @@ from vendoo_studio.services.vendoo_item_shape import (
     _label_of,
     _norm,
 )
-from vendoo_studio.services.vendoo_specifics import specifics_key
 
 
 def observe_item_schema(items: list[dict[str, Any]]) -> dict[str, Any]:

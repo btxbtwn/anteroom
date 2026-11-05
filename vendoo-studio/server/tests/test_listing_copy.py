@@ -1,4 +1,3 @@
-import copy
 from io import BytesIO
 import json
 from uuid import uuid4
@@ -15,7 +14,6 @@ from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation, Message, Photo
-from vendoo_studio.models.job import Job
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo

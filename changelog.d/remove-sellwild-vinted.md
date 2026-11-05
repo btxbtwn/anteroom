@@ -1,0 +1,1 @@
+- Sellwild and Vinted are gone from Anteroom: no tabs, settings, List/Update/Delist, import, or sales checks for either. Existing listings stay in your inventory; only eBay, Etsy, Poshmark, Mercari and Depop remain as direct marketplaces.

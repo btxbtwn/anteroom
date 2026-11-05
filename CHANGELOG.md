@@ -6,10 +6,6 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.729 — 2026-11-05
-
-- Sellwild and Vinted are gone from Anteroom: no tabs, settings, List/Update/Delist, import, or sales checks for either. Existing listings stay in your inventory; only eBay, Etsy, Poshmark, Mercari and Depop remain as direct marketplaces.
-
 ## 0.1.728 — 2026-11-05
 
 - While the Mac app shows your account, this Mac's own listings stop checking sales, delisting after a sale, and running price drops, promotions, eBay offers and sourcing on their own, so nothing happens twice. Switching back to This Mac's Listings turns them on again.

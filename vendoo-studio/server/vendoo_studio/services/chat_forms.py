@@ -1,7 +1,6 @@
 """Current editor definitions for chat, including empty and optional fields."""
 from __future__ import annotations
 
-import asyncio
 import copy
 import json
 import re

@@ -9,7 +9,6 @@ and Depop's option codes.
 from __future__ import annotations
 
 import math
-import re
 from typing import Any
 
 from vendoo_studio.services.etsy_fields import sanitize_etsy_tags
@@ -22,13 +21,11 @@ from vendoo_studio.models.mercari_shipping import (
 from vendoo_studio.models.schema import DEPOP_OPTION_CODES
 from vendoo_studio.services.vendoo_item_shape import (
     SPECIFICS_SOURCES,
-    _bucket,
     _clean,
     _norm,
     _num_str,
     _string_list,
 )
-from vendoo_studio.services.vendoo_specifics import specifics_key
 
 # Etsy form codes (display labels overwrite these and leave the dropdown blank).
 ETSY_WHO_CODES = {
