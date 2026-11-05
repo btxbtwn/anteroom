@@ -56,7 +56,7 @@ describe("eBay offers", () => {
   it("shows offer controls on the eBay Offers tab", () => {
     const html = renderToStaticMarkup(<EbayWorkspace onOpenListing={vi.fn()} />);
     expect(html).toContain("Offers to interested buyers");
-    expect(html).toContain("Automatic offers check every 15 minutes");
+    expect(html).toContain("Every 15 minutes while Anteroom runs");
     expect(html).toContain("No unsold listings with eBay links");
     expect(html).toContain("All current and future listings");
   });
@@ -80,7 +80,7 @@ describe("eBay offers", () => {
     const html = renderToStaticMarkup(<EbayWorkspace onOpenListing={vi.fn()} />);
     expect(html).toContain("Dashboard panel");
     expect(html).toContain(">Offers<");
-    expect(html).not.toContain("Automatic offers check every 15 minutes");
+    expect(html).not.toContain("Every 15 minutes while Anteroom runs");
   });
 });
 

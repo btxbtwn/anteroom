@@ -1,6 +1,7 @@
 /**
- * Scheduled Poshmark sharing and automatic offers to likers. Each one is saved
- * off and runs only after the seller turns it on; any edit turns it off again.
+ * Forms for scheduled Poshmark sharing and automatic offers to likers, shown in
+ * the Automations side panel. Each one is saved off and runs only after the
+ * seller turns it on; any edit turns it off again.
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,7 +11,7 @@ import type { PromotionAction, PromotionAutomation, PromotionMarketplace } from 
 import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
 import {
-  ORDER_LABELS, SPEED_LABELS, bodyFromPromotionForm, describeOfferChecks, describePromotionAutomation, describePromotionMinimum, emptyPromotionForm, formFromAutomation, withListing,
+  ORDER_LABELS, SPEED_LABELS, bodyFromPromotionForm, describeOfferChecks, describePromotionMinimum, describePromotionAutomation, formFromAutomation, withListing,
   type PromotionAutomationForm,
 } from "./promotionAutomationsFormat";
 import { Button } from "./ui/button";
@@ -42,15 +43,51 @@ function Choice<T extends string>({ label, value, options, onChange }: {
   );
 }
 
-function Editor({ form, setForm, labels, waiting, maxCap, busy, onSave, onCancel }: {
-  form: PromotionAutomationForm; setForm: (form: PromotionAutomationForm) => void; labels: string[]; waiting: (m: PromotionMarketplace, a: PromotionAction) => boolean;
-  maxCap: number; busy: boolean; onSave: () => void; onCancel: () => void;
+/** Who turns a sharing schedule or offer rule on: only the seller, after reading what it will do. */
+export async function confirmPromotionOn(row: PromotionAutomation): Promise<boolean> {
+  const what = row.action === "share"
+    ? `Anteroom will share these ${marketplaceName(row.marketplace)} listings to your followers on its own at ${row.times.join(", ")} (${row.timezone}), up to ${(row.daily_cap ?? 0).toLocaleString()} a day.`
+    : `Anteroom will send ${row.discount_percent}% off offers to new likers on its own; ${describeOfferChecks(row.marketplace)}; ${describePromotionMinimum(row)}.`;
+  return confirmDialog(`Turn on “${row.name}”? ${what} It stops and turns itself off at the first limit or unconfirmed result. Nothing runs until the next round.`, { confirmLabel: "Turn on" });
+}
+
+export function usePromotionAutomations(enabled = true) {
+  return useQuery({ queryKey: KEY, queryFn: api.promotionAutomations.list, refetchInterval: 30000, enabled });
+}
+
+function useSavePromotion(onSaved: () => void) {
+  const client = useQueryClient();
+  const list = usePromotionAutomations();
+  return useMutation({
+    mutationFn: async (next: PromotionAutomationForm) => {
+      const built = bodyFromPromotionForm(next, list.data?.max_daily_cap ?? 6000);
+      if ("error" in built) throw new Error(built.error);
+      return next.id ? api.promotionAutomations.update(next.id, built.body) : api.promotionAutomations.create(built.body);
+    },
+    retry: false,
+    onSuccess: onSaved,
+    onSettled: () => { void client.invalidateQueries({ queryKey: KEY }); },
+  });
+}
+
+/** New or edit a sharing schedule or offer rule. Saving always leaves it off. */
+export function PromotionEditor({ initial, onSaved, onCancel }: {
+  initial: PromotionAutomationForm; onSaved: () => void; onCancel: () => void;
 }) {
+  const list = usePromotionAutomations();
+  const [form, setForm] = useState(initial);
+  const save = useSavePromotion(onSaved);
+  const data = list.data;
+  const labels = data?.shipping_labels || [];
+  const maxCap = data?.max_daily_cap ?? 6000;
+  const waiting = (marketplace: PromotionMarketplace, action: PromotionAction) => Boolean(data?.awaiting_capture?.[marketplace]?.includes(action));
+  const busy = save.isPending;
   const set = (patch: Partial<PromotionAutomationForm>) => setForm({ ...form, ...patch });
   const offerMarketplaces: PromotionMarketplace[] = ["poshmark", "mercari", "depop"];
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border p-3 text-sm">
-      <p className="font-medium">{form.id ? "Edit" : "New"} {form.action === "share" ? "sharing schedule" : "offer rule"} · saved off</p>
+    <div className="flex flex-col gap-3 text-sm">
+      <p className="text-muted-foreground">Saved off. Turn it on from the list; any edit turns it off again.</p>
+      {save.error ? <p role="alert" className="text-destructive-foreground">{save.error.message}</p> : null}
       <label className="flex flex-col gap-1">Name
         <Input value={form.name} maxLength={80} placeholder={form.action === "share" ? "Poshmark sharing" : "Offers to likers"} onChange={(event) => set({ name: event.target.value })} />
       </label>
@@ -112,20 +149,21 @@ function Editor({ form, setForm, labels, waiting, maxCap, busy, onSave, onCancel
             <span className="text-xs text-muted-foreground">Labels come from offers you reviewed. A listing where Poshmark does not offer this one is skipped.</span>
           </label>
         ) : null}
-        <p className="text-xs text-muted-foreground">Leave the minimum blank to use only the discount. This applies to future listings too. Saved individual minimums still apply. Offers go to new likers at most once a day per listing.</p>
+        <p className="text-xs text-muted-foreground">At most one offer a day per listing; saved individual minimums still apply.</p>
       </>}
       <div className="flex gap-2">
-        <Button size="sm" disabled={busy} onClick={onSave}>{busy ? <Spinner /> : null}Save</Button>
+        <Button size="sm" disabled={busy} onClick={() => save.mutate(form)}>{busy ? <Spinner /> : null}Save</Button>
         <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
       </div>
     </div>
   );
 }
 
-function Details({ automation, onSaveListings, busy }: {
-  automation: PromotionAutomation; onSaveListings: (form: PromotionAutomationForm) => void; busy: boolean;
-}) {
+/** One sharing schedule or offer rule: which listings it covers, and what its rounds did. */
+export function PromotionDetails({ automation }: { automation: PromotionAutomation }) {
   const client = useQueryClient();
+  const saveListings = useSavePromotion(() => undefined);
+  const busy = saveListings.isPending;
   const coverage = useQuery({ queryKey: [...KEY, automation.id, "coverage"], queryFn: () => api.promotionAutomations.coverage(automation.id) });
   const activity = useQuery({ queryKey: [...KEY, automation.id, "activity"], queryFn: () => api.promotionAutomations.activity(automation.id), refetchInterval: 30000 });
   const [form, setForm] = useState(() => formFromAutomation(automation));
@@ -137,9 +175,10 @@ function Details({ automation, onSaveListings, busy }: {
     retry: false, onSettled: refresh });
   const included = (id: string) => (form.scope === "items" ? form.conversationIds.includes(id) : !form.excludedIds.includes(id));
   const changed = form.excludedIds.join() !== automation.excluded_ids.join() || form.conversationIds.join() !== automation.conversation_ids.join();
-  const error = coverage.error || activity.error || saveFloors.error || settle.error;
+  const error = coverage.error || activity.error || saveFloors.error || settle.error || saveListings.error;
   return (
-    <div className="mt-3 flex flex-col gap-3 text-sm">
+    <div className="flex flex-col gap-3 text-sm">
+      <p className="text-muted-foreground">{describePromotionAutomation(automation)}</p>
       {error ? <p role="alert" className="text-xs text-destructive-foreground">{error.message}</p> : null}
       <div className="rounded-lg border border-border/60 p-3">
         <p className="font-medium">Listings {coverage.data ? `· ${coverage.data.included} covered` : ""}</p>
@@ -164,7 +203,7 @@ function Details({ automation, onSaveListings, busy }: {
           {coverage.data && !coverage.data.items.length ? <li className="text-xs text-muted-foreground">No live {marketplaceName(automation.marketplace)} listings with links in Anteroom.</li> : null}
         </ul>
         <div className="mt-2 flex flex-wrap gap-2">
-          <Button size="xs" variant="outline" disabled={busy || !changed} onClick={() => onSaveListings(form)}>Save listings (turns it off)</Button>
+          <Button size="xs" variant="outline" disabled={busy || !changed} onClick={() => saveListings.mutate(form)}>Save listings (turns it off)</Button>
           {automation.action === "offer" ? <Button size="xs" variant="outline" disabled={saveFloors.isPending || !Object.keys(floors).length}
             onClick={() => saveFloors.mutate()}>Save floors</Button> : null}
         </div>
@@ -195,89 +234,3 @@ function Details({ automation, onSaveListings, busy }: {
   );
 }
 
-export function MarketplaceAutomations() {
-  const client = useQueryClient();
-  const list = useQuery({ queryKey: KEY, queryFn: api.promotionAutomations.list, refetchInterval: 30000 });
-  const [form, setForm] = useState<PromotionAutomationForm | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
-  const refresh = () => { void client.invalidateQueries({ queryKey: KEY }); };
-  const save = useMutation({
-    mutationFn: async (next: PromotionAutomationForm) => {
-      const built = bodyFromPromotionForm(next, list.data?.max_daily_cap ?? 6000);
-      if ("error" in built) throw new Error(built.error);
-      return next.id ? api.promotionAutomations.update(next.id, built.body) : api.promotionAutomations.create(built.body);
-    },
-    retry: false,
-    onSuccess: () => setForm(null),
-    onSettled: refresh,
-  });
-  const act = useMutation({
-    mutationFn: async ({ kind, row }: { kind: "enable" | "pause" | "remove" | "pauseAll"; row?: PromotionAutomation }) => {
-      if (kind === "pauseAll") return api.promotionAutomations.pauseAll();
-      if (!row) return null;
-      if (kind === "pause") return api.promotionAutomations.pause(row.id);
-      if (kind === "remove") {
-        if (!(await confirmDialog(`Delete “${row.name}”? Its activity log goes with it.`, { variant: "destructive", confirmLabel: "Delete" }))) return null;
-        return api.promotionAutomations.remove(row.id);
-      }
-      const what = row.action === "share"
-        ? `Anteroom will share these ${marketplaceName(row.marketplace)} listings to your followers on its own at ${row.times.join(", ")} (${row.timezone}), up to ${(row.daily_cap ?? 0).toLocaleString()} a day.`
-        : `Anteroom will send ${row.discount_percent}% off offers to new likers on its own; ${describeOfferChecks(row.marketplace)}; ${describePromotionMinimum(row)}.`;
-      if (!(await confirmDialog(`Turn on “${row.name}”? ${what} It stops and turns itself off at the first limit or unconfirmed result. Nothing runs until the next round.`, { confirmLabel: "Turn on" }))) return null;
-      return api.promotionAutomations.enable(row.id);
-    },
-    retry: false,
-    onSettled: refresh,
-  });
-  const data = list.data;
-  const automations = data?.automations ?? [];
-  const waiting = (marketplace: PromotionMarketplace, action: PromotionAction) => Boolean(data?.awaiting_capture?.[marketplace]?.includes(action));
-  const busy = save.isPending || act.isPending;
-  const error = list.error?.message || save.error?.message || act.error?.message;
-  return (
-    <section className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
-      <h2 className="font-medium">Sharing and offers to likers</h2>
-      <p className="text-sm text-muted-foreground">
-        Scheduled Poshmark sharing and automatic offers to likers. Each one stays off until you turn it on, and any edit turns it off again.
-        A round stops and turns itself off at the marketplace's first limit, browser check or unconfirmed result. These never list, publish or delist.
-      </p>
-      {error ? <p role="alert" className="text-sm text-destructive-foreground">{error}</p> : null}
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => setForm(emptyPromotionForm("share"))}>New sharing schedule</Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => setForm(emptyPromotionForm("offer"))}>New offer rule</Button>
-        <Button size="sm" variant="ghost" disabled={busy || !automations.some((row) => row.enabled)} onClick={() => act.mutate({ kind: "pauseAll" })}>Pause all</Button>
-      </div>
-      {form ? <Editor form={form} setForm={setForm} labels={data?.shipping_labels || []} waiting={waiting} maxCap={data?.max_daily_cap ?? 6000}
-        busy={busy} onSave={() => save.mutate(form)} onCancel={() => { setForm(null); save.reset(); }} /> : null}
-      {list.isPending ? <Spinner /> : null}
-      {list.isSuccess && !automations.length ? <p className="text-sm text-muted-foreground">No sharing schedules or offer rules yet.</p> : null}
-      <ul className="flex flex-col gap-3">
-        {automations.map((row) => (
-          <li key={row.id} className="rounded-lg border border-border p-3 text-sm">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="font-medium">{row.name} · {marketplaceName(row.marketplace)}</p>
-                <p className="text-xs text-muted-foreground">{describePromotionAutomation(row)}</p>
-                <p className="text-xs">
-                  {row.enabled ? `On · next ${row.action === "share" ? "round" : "check"} ${when(row.next_run_at)}`
-                    : row.paused_reason || (row.available ? "Off" : `Off · ${marketplaceName(row.marketplace)} offers are not available in Anteroom yet`)}
-                </p>
-                {row.last_run ? <p className="text-xs text-muted-foreground">Last: {when(row.last_run.started_at)} · {row.last_run.sent} sent{row.last_run.note ? ` · ${row.last_run.note}` : ""}</p> : null}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {row.enabled
-                  ? <Button size="xs" variant="outline" disabled={busy} onClick={() => act.mutate({ kind: "pause", row })}>Pause</Button>
-                  : <Button size="xs" disabled={busy || !row.available} onClick={() => act.mutate({ kind: "enable", row })}>Turn on</Button>}
-                <Button size="xs" variant="ghost" disabled={busy} onClick={() => setForm(formFromAutomation(row))}>Edit</Button>
-                <Button size="xs" variant="ghost" onClick={() => setOpen(open === row.id ? null : row.id)}>{open === row.id ? "Hide" : "Listings and activity"}</Button>
-                <Button size="xs" variant="ghost" disabled={busy} onClick={() => act.mutate({ kind: "remove", row })}>Delete</Button>
-              </div>
-            </div>
-            {open === row.id ? <Details key={`${row.id}-${row.excluded_ids.join()}-${row.conversation_ids.join()}`} automation={row} busy={busy}
-              onSaveListings={(next) => save.mutate(next)} /> : null}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}

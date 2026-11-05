@@ -38,20 +38,26 @@ test("hosted Chrome imports, saved-off rules and sale switches are available", a
     }
   }
   await navigate(page, "Automations", phone);
-  await expect(page.getByRole("heading", { name: "Sharing and offers to likers", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "New sharing schedule", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Your automations", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New automation", exact: true }).click();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("button", { name: /^Poshmark sharing/ }).click();
+  await expect(sheet.getByRole("heading", { name: "New sharing schedule", exact: true })).toBeVisible();
+  await expect(sheet.getByText("Saved off. Turn it on from the list; any edit turns it off again.", { exact: true })).toBeVisible();
   const ruleName = `Web sharing ${info.project.name} ${Date.now()}`;
-  const sharing = page.getByText("New sharing schedule · saved off", { exact: true }).locator("..");
-  await sharing.getByRole("textbox", { name: "Name", exact: true }).fill(ruleName);
+  await sheet.getByRole("textbox", { name: "Name", exact: true }).fill(ruleName);
   const ruleSaved = page.waitForResponse(response => response.url().endsWith("/api/promotion-automations") && response.request().method() === "POST");
-  await sharing.getByRole("button", { name: "Save", exact: true }).click();
+  await sheet.getByRole("button", { name: "Save", exact: true }).click();
   expect((await ruleSaved).ok()).toBeTruthy();
-  await expect(page.getByText(`${ruleName} · Poshmark`, { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Turn on", exact: true }).first()).toBeVisible();
+  // Saved off: the new row's switch is off until the seller turns it on.
+  const toggle = page.getByRole("switch", { name: `Turn on ${ruleName}`, exact: true });
+  await expect(toggle).toBeVisible();
+  await expect(toggle).not.toBeChecked();
   await page.screenshot({ path: `e2e/results/hosted/session-automations-${info.project.name}.png`, fullPage: true });
-  await page.getByRole("button", { name: "New offer rule", exact: true }).click();
-  await expect(page.getByText("New offer rule · saved off", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: "New automation", exact: true }).click();
+  await sheet.getByRole("button", { name: /^Offers to likers/ }).click();
+  await expect(sheet.getByRole("heading", { name: "New offer rule", exact: true })).toBeVisible();
+  await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
   const loaded = page.waitForResponse(response => response.url().endsWith("/api/settings/sale-detection") && response.request().method() === "GET" && response.ok());
   await openConnections(page, phone);
   const initialDetection = await (await loaded).json();
