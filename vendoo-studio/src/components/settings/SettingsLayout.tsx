@@ -5,12 +5,13 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
+import { PAGE_WIDTH } from "../WorkspacePage";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 
 export function SettingsPageContainer({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className="topbar-scroll-fade min-h-0 flex-1 overflow-y-auto" data-settings-page-scroll>
-      <div className={cn("mx-auto flex w-full max-w-4xl flex-col gap-8 px-5 pt-6 pb-12 sm:px-6", className)}>
+      <div className={cn("mx-auto flex w-full flex-col gap-8 px-5 pt-6 pb-12 sm:px-6", PAGE_WIDTH.readable, className)}>
         {children}
       </div>
     </div>

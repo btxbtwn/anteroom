@@ -513,29 +513,33 @@ struct MultiOptionSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if allowsCustom, !needle.isEmpty, !all.contains(where: { $0.caseInsensitiveCompare(needle) == .orderedSame }) {
-                    Button("Add \"\(needle)\"") {
-                        toggle(needle)
-                        search = ""
-                    }
-                    .disabled(full)
-                }
-                ForEach(filtered, id: \.self) { option in
-                    Button { toggle(option) } label: {
-                        HStack {
-                            Text(option).foregroundStyle(.primary)
-                            Spacer()
-                            if selection.contains(option) {
-                                Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
-                            }
+                Group {
+                    if allowsCustom, !needle.isEmpty, !all.contains(where: { $0.caseInsensitiveCompare(needle) == .orderedSame }) {
+                        Button("Add \"\(needle)\"") {
+                            toggle(needle)
+                            search = ""
                         }
-                        .frame(minHeight: 32)
-                        .contentShape(Rectangle())
+                        .disabled(full)
                     }
-                    .disabled(full && !selection.contains(option))
-                    .accessibilityAddTraits(selection.contains(option) ? .isSelected : [])
+                    ForEach(filtered, id: \.self) { option in
+                        Button { toggle(option) } label: {
+                            HStack {
+                                Text(option).foregroundStyle(.primary)
+                                Spacer()
+                                if selection.contains(option) {
+                                    Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
+                                }
+                            }
+                            .frame(minHeight: 32)
+                            .contentShape(Rectangle())
+                        }
+                        .disabled(full && !selection.contains(option))
+                        .accessibilityAddTraits(selection.contains(option) ? .isSelected : [])
+                    }
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
             .navigationTitle(maxValues.map { "\(title) (\(selection.count)/\($0))" } ?? title)
             .navigationBarTitleDisplayMode(.inline)

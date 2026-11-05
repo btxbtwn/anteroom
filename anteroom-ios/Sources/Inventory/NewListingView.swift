@@ -13,25 +13,29 @@ struct NewListingView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField("Listing title", text: $title, axis: .vertical)
-                        .lineLimit(1...4)
-                        .focused($titleFocused)
-                        .accessibilityLabel("Listing title")
-                        .accessibilityIdentifier("new-listing-title")
-                } header: {
-                    Text("What are you listing?")
-                } footer: {
-                    Text("Add photos and item details on the next screen. You can change the title later.")
-                }
-                if let error {
+                Group {
                     Section {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
-                            .accessibilityLabel("Couldn't create listing. \(error)")
+                        TextField("Listing title", text: $title, axis: .vertical)
+                            .lineLimit(1...4)
+                            .focused($titleFocused)
+                            .accessibilityLabel("Listing title")
+                            .accessibilityIdentifier("new-listing-title")
+                    } header: {
+                        Text("What are you listing?")
+                    } footer: {
+                        Text("Add photos and item details on the next screen. You can change the title later.")
+                    }
+                    if let error {
+                        Section {
+                            Label(error, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.red)
+                                .accessibilityLabel("Couldn't create listing. \(error)")
+                        }
                     }
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("New listing")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

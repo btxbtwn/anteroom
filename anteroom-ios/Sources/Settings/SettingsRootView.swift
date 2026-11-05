@@ -11,30 +11,35 @@ struct SettingsRootView: View {
     var body: some View {
         NavigationStack {
             List {
-                // General's rows sit on this screen; a theme change rebuilds
-                // the window's colours and must not pop a pushed page.
-                GeneralSettingsSections(api: api)
-                Section {
-                    NavigationLink { ListingsSettingsView(api: api) } label: {
-                        Label("Listings", systemImage: "tag")
-                    }
-                    NavigationLink { ProvidersSettingsView(api: api) } label: {
-                        Label("Providers", systemImage: "sparkles")
-                    }
-                }
-                Section("Account") {
-                    if let email = session.email {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Signed in as").font(.footnote).foregroundStyle(.secondary)
-                            Text(email).textSelection(.enabled)
+                Group {
+                    // General's rows sit on this screen; a theme change rebuilds
+                    // the window's colours and must not pop a pushed page.
+                    GeneralSettingsSections(api: api)
+                    Section {
+                        NavigationLink { ListingsSettingsView(api: api) } label: {
+                            Label("Listings", systemImage: "tag")
                         }
-                        .padding(.vertical, 4)
+                        NavigationLink { ProvidersSettingsView(api: api) } label: {
+                            Label("Providers", systemImage: "sparkles")
+                        }
                     }
-                    Button("Sign out", role: .destructive) { confirmSignOut = true }
-                        .disabled(signingOut)
+                    Section("Account") {
+                        if let email = session.email {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Signed in as").font(.footnote).foregroundStyle(.secondary)
+                                Text(email).textSelection(.enabled)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        Button("Sign out", role: .destructive) { confirmSignOut = true }
+                            .disabled(signingOut)
+                    }
                 }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("Sign out of Anteroom?", isPresented: $confirmSignOut, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) {
                     signingOut = true
@@ -66,7 +71,7 @@ struct GeneralSettingsSections: View {
                 .accessibilityIdentifier("appearance-picker")
                 .accessibilityValue(appearance.theme.label)
                 .disabled(!appearance.hasLoaded || appearance.isLoading || appearance.isSaving)
-                Text("Dark matches the Anteroom workbench. Light inverts the same shell. System follows this iPhone.")
+                Text("System follows this iPhone’s appearance.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Picker("Listing names", selection: Binding(
                     get: { appearance.listingNames },

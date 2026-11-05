@@ -20,71 +20,75 @@ struct SalesRecordsView: View {
 
     var body: some View {
         List {
-            Section {
-                DatePicker("Sales from (UTC)", selection: $start, in: ...end, displayedComponents: .date)
-                DatePicker("Through (UTC)", selection: $end, in: start...Date(), displayedComponents: .date)
-                Picker("Marketplace", selection: $marketplace) {
-                    Text("All marketplaces").tag("all")
-                    ForEach(Self.markets, id: \.self) { Text(Marketplaces.name($0)).tag($0) }
-                }
-                Menu("Export CSV") {
-                    Button("Export inventory CSV") { exportCSV(inventory: true) }
-                    Button("Export sales CSV") { exportCSV(inventory: false) }
-                }
-            } footer: {
-                Text("How your sales are doing, and every sale with its price, fees and profit.")
-            }
-
-            if let overview {
+            Group {
                 Section {
-                    SalesOverviewSection(overview: overview, marketplaceChosen: marketplace != "all")
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                        .listRowBackground(Color.clear)
-                }
-            }
-
-            if let data {
-                Section {
-                    Text("\(data.summary.lines) sale records · \(data.summary.unrecorded) without recorded amounts · \(data.summary.needsReview) need review · \(data.summary.unmatched) need an inventory link.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    // Dollar totals are in the figures above; other currencies keep their own.
-                    ForEach(data.summary.currencies.filter { $0.currency != "USD" }) { group in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Sales in \(group.currency)").font(.subheadline.weight(.medium))
-                            Text("Net revenue: \(SalesLedgerFormat.money(group.netRevenue, group.currency)) · known on \(group.netKnown) of \(group.lines) lines")
-                            Text("Recorded profit: \(SalesLedgerFormat.money(group.profit, group.currency)) · known on \(group.profitKnown) of \(group.lines) lines")
-                        }
-                        .font(.caption)
+                    DatePicker("Sales from (UTC)", selection: $start, in: ...end, displayedComponents: .date)
+                    DatePicker("Through (UTC)", selection: $end, in: start...Date(), displayedComponents: .date)
+                    Picker("Marketplace", selection: $marketplace) {
+                        Text("All marketplaces").tag("all")
+                        ForEach(Self.markets, id: \.self) { Text(Marketplaces.name($0)).tag($0) }
                     }
-                }
-                Section {
-                    if data.rows.isEmpty {
-                        Text("No recorded orders in this period. Recover orders from a marketplace's Orders tab to add missing sales.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                    Menu("Export CSV") {
+                        Button("Export inventory CSV") { exportCSV(inventory: true) }
+                        Button("Export sales CSV") { exportCSV(inventory: false) }
                     }
-                    ForEach(data.rows) { row in recordRow(row) }
-                    if data.page > 1 || data.hasMore {
-                        HStack {
-                            Button("Previous") { page -= 1 }.disabled(page == 1 || loading)
-                            Spacer()
-                            Text("Page \(page)").font(.footnote)
-                            Spacer()
-                            Button("Next") { page += 1 }.disabled(!data.hasMore || loading)
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                } header: {
-                    Text("Sales records")
                 } footer: {
-                    Text("Record totals after discounts; leave an amount blank if unknown.")
+                    Text("How your sales are doing, and every sale with its price, fees and profit.")
                 }
-            } else if loading {
-                ProgressView("Loading sales records…")
+
+                if let overview {
+                    Section {
+                        SalesOverviewSection(overview: overview, marketplaceChosen: marketplace != "all")
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    }
+                }
+
+                if let data {
+                    Section {
+                        Text("\(data.summary.lines) sale records · \(data.summary.unrecorded) without recorded amounts · \(data.summary.needsReview) need review · \(data.summary.unmatched) need an inventory link.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        // Dollar totals are in the figures above; other currencies keep their own.
+                        ForEach(data.summary.currencies.filter { $0.currency != "USD" }) { group in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Sales in \(group.currency)").font(.subheadline.weight(.medium))
+                                Text("Net revenue: \(SalesLedgerFormat.money(group.netRevenue, group.currency)) · known on \(group.netKnown) of \(group.lines) lines")
+                                Text("Recorded profit: \(SalesLedgerFormat.money(group.profit, group.currency)) · known on \(group.profitKnown) of \(group.lines) lines")
+                            }
+                            .font(.caption)
+                        }
+                    }
+                    Section {
+                        if data.rows.isEmpty {
+                            Text("No recorded orders in this period. Recover orders from a marketplace's Orders tab to add missing sales.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        ForEach(data.rows) { row in recordRow(row) }
+                        if data.page > 1 || data.hasMore {
+                            HStack {
+                                Button("Previous") { page -= 1 }.disabled(page == 1 || loading)
+                                Spacer()
+                                Text("Page \(page)").font(.footnote)
+                                Spacer()
+                                Button("Next") { page += 1 }.disabled(!data.hasMore || loading)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    } header: {
+                        Text("Sales records")
+                    } footer: {
+                        Text("Record totals after discounts; leave an amount blank if unknown.")
+                    }
+                } else if loading {
+                    ProgressView("Loading sales records…")
+                }
+                if let error {
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                }
             }
-            if let error {
-                Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-            }
+            .listRowBackground(WorkspaceStyle.surface)
         }
+        .workspaceGroupedList()
         .refreshable { await load() }
         .task(id: "\(start)|\(end)|\(marketplace)|\(page)") { await load() }
         .onChange(of: marketplace) { page = 1 }
@@ -191,35 +195,39 @@ private struct SaleAmountsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Text("Sold on \(Marketplaces.name(row.marketplace)) · quantity \(row.quantity.map(String.init) ?? "unknown") · \(row.orderStatus.replacingOccurrences(of: "_", with: " "))")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    if row.financialsStale {
-                        Text("This order changed. Review every amount before saving again.").font(.footnote).foregroundStyle(.orange)
-                    }
-                }
-                Section {
-                    LabeledContent("Date") {
-                        TextField("YYYY-MM-DD", text: $soldOn)
-                            .multilineTextAlignment(.trailing)
-                            .textInputAutocapitalization(.never)
-                    }
-                    ForEach(SalesLedgerRow.fields, id: \.self) { field in
-                        LabeledContent(SalesLedgerRow.labels[field] ?? field) {
-                            TextField("0.00", text: Binding(get: { values[field] ?? "" }, set: { values[field] = $0 }))
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
+                Group {
+                    Section {
+                        Text("Sold on \(Marketplaces.name(row.marketplace)) · quantity \(row.quantity.map(String.init) ?? "unknown") · \(row.orderStatus.replacingOccurrences(of: "_", with: " "))")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if row.financialsStale {
+                            Text("This order changed. Review every amount before saving again.").font(.footnote).foregroundStyle(.orange)
                         }
                     }
-                } footer: {
-                    Text(footnote)
+                    Section {
+                        LabeledContent("Date") {
+                            TextField("YYYY-MM-DD", text: $soldOn)
+                                .multilineTextAlignment(.trailing)
+                                .textInputAutocapitalization(.never)
+                        }
+                        ForEach(SalesLedgerRow.fields, id: \.self) { field in
+                            LabeledContent(SalesLedgerRow.labels[field] ?? field) {
+                                TextField("0.00", text: Binding(get: { values[field] ?? "" }, set: { values[field] = $0 }))
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                    } footer: {
+                        Text(footnote)
+                    }
+                    .disabled(working)
+                    Section { Button("Reload record") { reload() }.disabled(working) }
+                    if let error {
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    }
                 }
-                .disabled(working)
-                Section { Button("Reload record") { reload() }.disabled(working) }
-                if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                }
+                .listRowBackground(WorkspaceStyle.surface)
             }
+            .workspaceGroupedList()
             .navigationTitle("Record sale amounts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

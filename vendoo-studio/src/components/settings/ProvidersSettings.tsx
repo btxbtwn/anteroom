@@ -1068,7 +1068,7 @@ export function ProvidersSettings() {
         <SettingsSection title="Setup">
           <SettingsRow
             title="API key"
-            description="From Cursor Dashboard → Integrations. Stored in Keychain; listing runs use the local Cursor SDK against an empty scratch folder. When Cursor is your listing model it also searches the web for sold comps."
+            description="From Cursor Dashboard → Integrations, stored in Keychain; as the listing model it also searches the web for sold comps."
             status={
               cursorTest.result ? (
                 <TestResult result={cursorTest.result} />
@@ -1151,7 +1151,7 @@ export function ProvidersSettings() {
         />
         <SettingsRow
           title="Primary"
-          description="Writes listings, and reads photos unless Photo analysis names another. Each provider's models are set in its editor below."
+          description="Writes listings, and reads photos unless Photo analysis names another provider."
           control={
             <SettingsSelect<ListingProviderId>
               aria-label="Primary listing AI"
@@ -1177,7 +1177,7 @@ export function ProvidersSettings() {
         />
         <SettingsRow
           title="Photo analysis"
-          description="Reads product photos before the listing is written, with that provider's photo model. A provider that is not ready falls back to the listing AI."
+          description="Reads photos before the listing is written, falling back to the listing AI if not ready."
           status={
             photoProvider !== "same" && !choiceReady(photoProvider) ? (
               <span className="inline-flex items-center gap-1.5 text-warning-foreground">

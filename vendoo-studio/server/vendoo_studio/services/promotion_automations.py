@@ -226,7 +226,9 @@ def _covered(db: Session, row: PromotionAutomation, everything: bool = False) ->
     """Live listings this automation covers (or every live one), with when each was listed."""
     excluded = set() if everything else set(row.excluded_ids or [])
     if row.scope == "items" and not everything:
-        convs = [conv for conv in (db.get(Conversation, conv_id) for conv_id in row.conversation_ids or []) if conv]
+        # Query rather than db.get: a draft deleted while the like feed was read may still be cached here.
+        found = {conv.id: conv for conv in db.query(Conversation).filter(Conversation.id.in_(row.conversation_ids or []))}
+        convs = [found[conv_id] for conv_id in row.conversation_ids or [] if conv_id in found]
     else:
         convs = db.query(Conversation).filter(Conversation.status != "sold").all()
     rows_by_item: dict[str, list[MarketplaceListing]] = {}

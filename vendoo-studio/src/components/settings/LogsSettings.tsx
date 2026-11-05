@@ -59,7 +59,7 @@ function ErrorLogSection() {
       <SettingsRow
         id="error-logs"
         title="Warnings and errors"
-        description="Problems Anteroom ran into while it was open, such as an AI provider rejecting its key or photos it could not read. Click one with details to see them. Keys and tokens are masked. The list clears when Anteroom restarts; the log file keeps them."
+        description="Problems since Anteroom opened, with keys masked; the list clears on restart but the log file keeps them."
         status={entries.length ? `${entries.length} ${entries.length === 1 ? "entry" : "entries"}` : undefined}
         control={
           <Button
