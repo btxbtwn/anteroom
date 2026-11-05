@@ -1,5 +1,0 @@
-- Analytics now opens on how you're doing: revenue, profit, items sold, average days to sell and sell-through for the period, each compared with the period before.
-- See items sold or revenue per week, and sales by marketplace, above your sales records.
-- Search, period, marketplace, show and sort now sit in one toolbar, and the period and marketplace also set the figures and charts.
-- Figures that can't be worked out from what you recorded say "Not enough data" instead of showing zero.
-- The iPhone app shows the same figures and weekly chart on Sales records.
