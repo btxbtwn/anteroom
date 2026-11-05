@@ -24,9 +24,11 @@ import { Badge } from "./ui/badge";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
-import { EmptyRow, PageHeader, Panel, WorkspacePage } from "./WorkspacePage";
+import { EmptyRow, Panel, WorkspacePage } from "./WorkspacePage";
 
 const ROW_HEIGHT = 56;
+// Narrow enough on a phone that the first marketplace column shows beside it.
+const ITEM_MIN = "min(13rem, 42vw)";
 const STATUS_LABELS: Record<ListingStatusFilter, string> = { all: "All", draft: "Draft", active: "Active", sold: "Sold", failed: "Failed" };
 const BADGE_VARIANT: Record<MarketplaceCellKind, "success" | "info" | "warning" | "error" | "outline" | null> = {
   listed: "success",
@@ -80,11 +82,14 @@ export function InventoryTablePage({
     overscan: 8,
     initialRect: { width: 1000, height: 800 },
   });
-  const columns = { gridTemplateColumns: `minmax(13rem, 2fr) 5.5rem repeat(${marketplaces.length}, minmax(8.5rem, 1fr))` } as CSSProperties;
+  const columns = { gridTemplateColumns: `minmax(${ITEM_MIN}, 2fr) 5.5rem repeat(${marketplaces.length}, minmax(8.5rem, 1fr))` } as CSSProperties;
+  // The table's own minimum, so a long title cannot widen the item column past it.
+  const tableWidth = { minWidth: `calc(${ITEM_MIN} + 5.5rem + ${marketplaces.length} * 8.5rem)` } as CSSProperties;
 
   return (
     <WorkspacePage width="expanded" className="h-full min-h-0 gap-4 pb-6">
-      <PageHeader title="Inventory" />
+      {/* The breadcrumb and the phone title bar already name the page. */}
+      <h1 className="sr-only">Inventory</h1>
       <div className="flex flex-wrap items-center gap-2">
         <InputGroup className="w-full sm:w-64">
           <InputGroupAddon><SearchIcon /></InputGroupAddon>
@@ -121,7 +126,7 @@ export function InventoryTablePage({
 
       <Panel divided={false} className="flex min-h-0 flex-1 flex-col bg-background">
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto overscroll-contain" role="table" aria-label="Inventory" aria-rowcount={rows.length + 1}>
-          <div className="min-w-max">
+          <div style={tableWidth}>
             <div role="row" className="sticky top-0 z-20 grid border-b border-border/60 bg-background text-xs font-medium text-muted-foreground" style={columns}>
               <div role="columnheader" className="sticky left-0 z-10 bg-background px-4 py-2.5">Item</div>
               <div role="columnheader" className="px-3 py-2.5 text-right">Price</div>
