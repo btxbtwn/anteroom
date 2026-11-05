@@ -36,7 +36,7 @@ function AppearanceSection() {
     <SettingsSection id="appearance" title="Appearance">
       <SettingsRow
         title="Theme"
-        description="Dark matches the Anteroom workbench. Light inverts the same shell. System follows the OS."
+        description="System follows your Mac’s appearance."
         control={
           <SettingsSelect<ThemePreference>
             aria-label="Theme"
@@ -54,7 +54,7 @@ function AppearanceSection() {
       <SettingsRow
         id="listing-names"
         title="Listing names"
-        description="What the sidebar calls each listing. By SKU, a listing without a SKU keeps its title."
+        description="What the sidebar calls each listing; one without a SKU keeps its title."
         control={
           <SettingsSelect<ListingNames>
             aria-label="Listing names"

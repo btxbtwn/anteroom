@@ -303,7 +303,7 @@ struct SavedTemplatesView: View {
                     ProgressView("Loading templates…")
                 }
             } footer: {
-                Text("Save selected fields from a listing's Templates action. To change a template's fields, save from a listing again and choose that template. Templates never include SKU, private notes, photos or marketplace links.")
+                Text("Save fields from a listing’s Templates action, never including SKU, private notes, photos or marketplace links.")
             }
             if let error {
                 Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
