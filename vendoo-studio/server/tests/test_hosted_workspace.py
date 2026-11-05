@@ -493,3 +493,18 @@ def test_thumbnails_are_kept_by_the_browser_and_read_one_row(cloud, signing_keys
     unversioned = client.get('/api/photos/' + photo + '/thumb?size=96', headers=alice)
     assert unversioned.status_code == 200 and 'immutable' not in unversioned.headers.get('cache-control', '')
     assert client.get(cover, headers=bob).status_code == 404
+
+
+def test_activity_names_a_running_marketplace_action_for_the_seller(cloud, signing_keys):  # noqa: F811
+    from vendoo_studio.models.job import Job
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Tee'}).json()['id']
+    with Session(engine) as db:
+        db.add(Job(id='job-1', conversation_id=identity, approved_revision_id='rev', user_id=USER_ID,
+                   listing_snapshot={}, status='dispatched', current_step='native_poshmark_list'))
+        db.commit()
+    activity = client.get(f'/api/conversations/{identity}/activity', headers=alice).json()
+    assert activity['busy'] is True
+    assert activity['items'] == ['Poshmark: Listing…']

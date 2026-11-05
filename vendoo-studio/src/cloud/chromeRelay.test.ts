@@ -6,7 +6,7 @@ vi.mock("../api/transport", () => ({
   studioFetch: vi.fn(async (url: string, options?: RequestInit) => { fetches.push({ url, options }); return responses.shift()!; }),
 }));
 
-import { relayOnce, startChromeRelay } from "./chromeRelay";
+import { relayAfterCheck, relayOnce, startChromeRelay } from "./chromeRelay";
 import { cloudExtension } from "../api/cloudExtension";
 import { studioFetch } from "../api/transport";
 
@@ -113,5 +113,21 @@ describe("Chrome relay", () => {
     expect(fetches[0].url).toBe("/api/browser-relay/next?capabilities=marketplace.actions,vinted.choices");
     expect(bridge.runMarketplaceCommand).toHaveBeenCalledWith(read, []);
     expect(JSON.parse(String(fetches[1].options?.body))).toEqual({ request_id: "b".repeat(32), payload: { ok: true, options: ["Women > Jeans"] } });
+  });
+});
+
+describe("relayAfterCheck", () => {
+  const connected = { ok: true, state: "connected" as const, extensionVersion: "0.2.55", supportedActions: ["marketplace.actions"] };
+  const unavailable = { ok: false, state: "unavailable" as const, extensionVersion: "" };
+
+  it("keeps relaying through one status check Chrome was too busy to answer", () => {
+    const busy = relayAfterCheck(unavailable, "marketplace.actions", 0);
+    expect(busy).toEqual({ relayed: "marketplace.actions", missed: 1 });
+    expect(relayAfterCheck(connected, busy.relayed, busy.missed)).toEqual({ relayed: "marketplace.actions", missed: 0 });
+  });
+
+  it("stops after two missed checks in a row, or at once when Chrome disconnects", () => {
+    expect(relayAfterCheck(unavailable, "marketplace.actions", 1)).toEqual({ relayed: "", missed: 2 });
+    expect(relayAfterCheck({ ok: true, state: "disconnected", extensionVersion: "0.2.55" }, "marketplace.actions", 0)).toEqual({ relayed: "", missed: 0 });
   });
 });
