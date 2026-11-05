@@ -72,7 +72,7 @@ struct ProvidersSettingsView: View {
                 } header: {
                     Text("API keys")
                 } footer: {
-                    Text("Encrypted in your account's private vault. Usage is billed by each provider to your own account. Sign-in providers need a connected Mac.")
+                    Text("Encrypted in your private vault and billed to your own provider accounts; sign-in providers need a connected Mac.")
                 }
             }
             if let error {
@@ -316,7 +316,7 @@ private struct MimoKeyView: View {
             } header: {
                 Text("API key")
             } footer: {
-                Text("Encrypted in your account's private vault. Usage is billed to your MiMo account. MiMo reads photos with mimo-v2.5 and writes listings with mimo-v2.5-pro. These are fixed.")
+                Text("Encrypted in your private vault and billed to your MiMo account, which uses mimo-v2.5 for photos and mimo-v2.5-pro for listings.")
             }
             if configured {
                 Section {

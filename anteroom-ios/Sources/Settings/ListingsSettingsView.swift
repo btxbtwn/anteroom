@@ -35,7 +35,7 @@ struct ListingsSettingsView: View {
             } header: {
                 Text("Duplicate check")
             } footer: {
-                Text("Find items that look like the same thing listed twice, then keep one and merge the other into it, or mark them as different. Nothing is deleted or delisted.")
+                Text("Merge items listed twice or mark them as different; nothing is deleted or delisted.")
             }
         }
         .navigationTitle("Listings")
@@ -80,7 +80,7 @@ struct ListingsSettingsView: View {
         } header: {
             Text("Where you list")
         } footer: {
-            Text("The marketplaces you list on. The status popup and inventory show only the ones you check. Anteroom lists on the ones it supports when you confirm it. Direct means Anteroom lists there when you confirm it; the others are not sent from here.")
+            Text("Only checked marketplaces appear in the status popup and inventory; Anteroom lists on Direct ones when you confirm.")
         }
     }
 
@@ -204,7 +204,7 @@ struct ListingsSettingsView: View {
         } header: {
             Text("Listing formulas")
         } footer: {
-            Text("Anteroom pins these formulas into every listing generation. Leave them as the defaults, or edit the placeholders for your shop. Clearing a field and saving restores the built-in formula.")
+            Text("Every generated listing follows these; clear a field and save to restore the default.")
         }
     }
 

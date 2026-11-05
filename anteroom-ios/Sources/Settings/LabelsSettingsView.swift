@@ -24,7 +24,7 @@ struct LabelsSettingsView: View {
                         .disabled(newLabel.trimmingCharacters(in: .whitespaces).isEmpty || saving)
                 }
             } footer: {
-                Text("Manage saved suggestions and label colors. Deleting a suggestion keeps labels already assigned to items.")
+                Text("Deleting a suggestion keeps labels already on items.")
             }
             if let prefs {
                 Section("Labels") {
