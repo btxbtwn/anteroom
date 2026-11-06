@@ -60,8 +60,8 @@ export function EbayVariationsEditor({ convId, listing, value, aspects, disabled
   const [source, setSource] = React.useState(value);
   if (source !== value) { setSource(value); setDraft(value); }
   // A variation's photos come from the ones the eBay form sends.
-  const { data: item = [] } = useQuery({ queryKey: ["photos", convId], queryFn: () => api.conversations.photos(convId) });
-  const { data: own = [] } = useQuery({ queryKey: ["photos", convId, "ebay"], queryFn: () => api.conversations.photos(convId, "ebay") });
+  const { data: item = [] } = useQuery({ queryKey: ["photos", convId], queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }) });
+  const { data: own = [] } = useQuery({ queryKey: ["photos", convId, "ebay"], queryFn: ({ signal }) => api.conversations.photos(convId, "ebay", { signal }) });
   const photos = formPhotos(listing, item, own, "ebay").picked;
   const commit = (next: EbayVariations) => { setDraft(next); onChange(next); };
   const updateRow = (index: number, patch: Partial<EbayVariationRow>, save = false) => {

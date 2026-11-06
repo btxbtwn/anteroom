@@ -47,7 +47,7 @@ export function AssistantThreadPanel({
 }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
-  const threads = useQuery({ queryKey: ["assistant", "threads"], queryFn: api.assistant.threads });
+  const threads = useQuery({ queryKey: ["assistant", "threads"], queryFn: ({ signal }) => api.assistant.threads({ signal }) });
   const remove = useMutation({
     mutationFn: (id: string) => api.assistant.deleteThread(id),
     onSuccess: (_result, id) => {

@@ -45,7 +45,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
 
   const { data: photos } = useQuery({
     queryKey: ["photos", convId],
-    queryFn: () => api.conversations.photos(convId),
+    queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }),
   });
 
   const deleteMutation = useMutation({

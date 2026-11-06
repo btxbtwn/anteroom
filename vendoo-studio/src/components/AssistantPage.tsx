@@ -118,7 +118,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const queryClient = useQueryClient();
   const messages = useQuery({
     queryKey: messagesKey(threadId ?? ""),
-    queryFn: () => api.assistant.messages(threadId!),
+    queryFn: ({ signal }) => api.assistant.messages(threadId!, { signal }),
     enabled: Boolean(threadId),
   });
   const [input, setInput] = useState("");

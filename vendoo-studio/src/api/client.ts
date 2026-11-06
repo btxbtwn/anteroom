@@ -113,9 +113,17 @@ export function errorMessage(body: ErrorBody, fallback: string): string {
   return fallback;
 }
 
+/** What a plain read accepts: React Query's signal, so a cancelled query stops its request. */
+export interface ReadOptions { signal?: AbortSignal }
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  if (!options) return listingScreenRead<T>(path, rawRequest);
+  if (!options) return read<T>(path);
   return rawRequest<T>(path, options);
+}
+
+/** A GET that may share a running listing-screen read; `signal` aborts only this caller's wait. */
+function read<T>(path: string, options?: ReadOptions): Promise<T> {
+  return listingScreenRead<T>(path, (readPath, signal) => rawRequest(readPath, signal ? { signal } : undefined), options?.signal);
 }
 
 async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
@@ -326,11 +334,11 @@ export const api = {
       request<ScoutCheck>(`/scout/${id}/decision`, { method: "POST", body: JSON.stringify({ decision }) }),
   },
   assistant: {
-    threads: () => request<AssistantThread[]>("/assistant/threads"),
+    threads: (options?: ReadOptions) => read<AssistantThread[]>("/assistant/threads", options),
     createThread: () => request<AssistantThread>("/assistant/threads", { method: "POST" }),
     deleteThread: (id: string) => request<{ ok: boolean }>(`/assistant/threads/${id}`, { method: "DELETE" }),
-    messages: (threadId?: string) =>
-      request<AssistantMessage[]>(`/assistant/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`),
+    messages: (threadId?: string, options?: ReadOptions) =>
+      read<AssistantMessage[]>(`/assistant/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`, options),
     /** What the seller told the assistant about how they run the shop. */
     note: () => request<{ note: string }>("/assistant/note"),
     saveNote: (note: string) => request<{ note: string }>("/assistant/note", { method: "PUT", body: JSON.stringify({ note }) }),
@@ -636,8 +644,8 @@ export const api = {
   },
   health: () => request<{ status: string; version: string }>("/health"),
 
-  status: () =>
-    request<{
+  status: (options?: ReadOptions) =>
+    read<{
       version: string;
       provider_configured: boolean;
       extension_connected: boolean;
@@ -647,15 +655,15 @@ export const api = {
       conversations?: number;
       setup_guide_dismissed?: boolean;
       data_dir?: string;
-    }>("/status"),
+    }>("/status", options),
 
   conversations: {
     copyBatchPreview: (ids: string[]) => request<{ rows: BatchCopyPreviewRow[] }>("/listings/copies/preview", { method: "POST", body: JSON.stringify({ conversation_ids: ids }) }),
     copyResult: (id: string, requestId: string) => request<Conversation>(`/conversations/${id}/copy-result/${requestId}`),
     copyPreview: (id: string) => request<CopyPreview>(`/conversations/${id}/copy-preview`),
     copy: (id: string, body: CopyListingRequest) => request<Conversation>(`/conversations/${id}/copy`, { method: "POST", body: JSON.stringify(body) }),
-    list: () => request<ConversationSummary[]>("/conversations"),
-    get: (id: string) => request<Conversation>(`/conversations/${id}`),
+    list: (options?: ReadOptions) => read<ConversationSummary[]>("/conversations", options),
+    get: (id: string, options?: ReadOptions) => read<Conversation>(`/conversations/${id}`, options),
     create: (body?: { title?: string; notes?: string; box_id?: string | null }) =>
       request<Conversation>("/conversations", { method: "POST", body: JSON.stringify(body || {}) }),
     update: (id: string, body: { title?: string; notes?: string; box_id?: string | null }) =>
@@ -666,11 +674,11 @@ export const api = {
       request<Conversation>(`/conversations/${id}/unsettle`, { method: "POST" }),
     stop: (id: string) =>
       request<{ ok: boolean }>(`/conversations/${id}/stop`, { method: "POST" }),
-    activity: (id: string) => request<ConversationActivity>(`/conversations/${id}/activity`),
-    messages: (id: string) => request<Message[]>(`/conversations/${id}/messages`),
+    activity: (id: string, options?: ReadOptions) => read<ConversationActivity>(`/conversations/${id}/activity`, options),
+    messages: (id: string, options?: ReadOptions) => read<Message[]>(`/conversations/${id}/messages`, options),
     /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */
-    photos: (id: string, marketplace?: string) =>
-      request<Photo[]>(`/conversations/${id}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`),
+    photos: (id: string, marketplace?: string, options?: ReadOptions) =>
+      read<Photo[]>(`/conversations/${id}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`, options),
     deletePhoto: (convId: string, photoId: string) =>
       request<OkResponse>(`/conversations/${convId}/photos/${photoId}`, { method: "DELETE" }),
     /** Rotate the stored image clockwise by `degrees` (90, -90 or 180). */
@@ -750,10 +758,10 @@ export const api = {
   },
 
   listings: {
-    get: (convId: string) => request<ListingResponse>(`/conversations/${convId}/listing`),
+    get: (convId: string, options?: ReadOptions) => read<ListingResponse>(`/conversations/${convId}/listing`, options),
     /** The marketplace forms for this listing's category (the eBay and Etsy editors read these). */
-    fields: (convId: string) =>
-      request<{ ok: boolean; forms: MarketplaceForm[] }>(`/conversations/${convId}/vendoo-api/fields`),
+    fields: (convId: string, options?: ReadOptions) =>
+      read<{ ok: boolean; forms: MarketplaceForm[] }>(`/conversations/${convId}/vendoo-api/fields`, options),
     update: (convId: string, listing: ListingData, expectedRevisionId: string) =>
       request<ListingUpdateResult>(`/conversations/${convId}/listing`, {
         method: "PUT",
@@ -822,13 +830,13 @@ export const api = {
   },
 
   jobs: {
-    queue: () => request<{
+    queue: (options?: ReadOptions) => read<{
       work: { conversation_id: string; title: string; detail: string }[];
       jobs: Job[];
-    }>("/jobs/queue"),
-    list: (conversationId?: string) => {
+    }>("/jobs/queue", options),
+    list: (conversationId?: string, options?: ReadOptions) => {
       const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : "";
-      return request<Job[]>(`/jobs${query}`);
+      return read<Job[]>(`/jobs${query}`, options);
     },
     cancel: (id: string) => request<Job>(`/jobs/${id}/cancel`, { method: "POST" }),
   },
