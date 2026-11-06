@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.742 — 2026-11-06
+
+- The listing's ⋯ menu now sits beside Regenerate, so the actions at the bottom of the marketplace list end flush with the bottom.
+
 ## 0.1.741 — 2026-11-06
 
 - Sorting by Date Sold (Newest) opens the Sold tab and lists every sale newest first.
