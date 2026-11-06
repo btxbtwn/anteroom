@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialOpenListing, openListingReducer } from "./openListing";
+import { initialOpenListing, isBrowserLinkClick, listingHref, openListingReducer } from "./openListing";
 
 describe("open listing", () => {
   it("opens a deep-linked listing immediately", () => {
@@ -47,5 +47,15 @@ describe("open listing", () => {
     expect(state).toMatchObject({ reviewTab: "forms", editTab: "mercari" });
     state = openListingReducer(state, { type: "tab", id: "a", value: "general" });
     expect(state).toMatchObject({ reviewTab: "input", editTab: "general" });
+  });
+  it("links to a listing by id", () => {
+    expect(listingHref("a b&c")).toBe("?listing=a+b%26c");
+  });
+  it("leaves modified and non-primary clicks to the browser", () => {
+    const click = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
+    expect(isBrowserLinkClick(click)).toBe(false);
+    expect(isBrowserLinkClick({ ...click, metaKey: true })).toBe(true);
+    expect(isBrowserLinkClick({ ...click, ctrlKey: true })).toBe(true);
+    expect(isBrowserLinkClick({ ...click, button: 1 })).toBe(true);
   });
 });

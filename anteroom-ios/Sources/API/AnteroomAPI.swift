@@ -99,6 +99,14 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/preflight"))
     }
 
+    /// The fields each listing still needs per marketplace; the inventory asks for the rows on screen.
+    func listingReadiness(_ ids: [String]) async throws -> [String: ListingReadiness] {
+        struct Payload: Decodable { let listings: [String: ListingReadiness] }
+        let payload: Payload = try await decode(request("GET", "api/listing-readiness",
+                                                        query: ids.map { URLQueryItem(name: "ids", value: $0) }))
+        return payload.listings
+    }
+
     func nativeMarketplaceStates(_ id: String) async throws -> [String: NativeDraftState] {
         let states: [String: NativeDraftState?] = try await decode(request("GET", "api/conversations/\(id)/native-marketplaces"))
         return states.compactMapValues { $0 }
@@ -434,15 +442,92 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/automations/approvals"))
     }
 
-    /// eBay offers, read-only on iPhone: set up and turned on from the web or Mac.
-    func ebayOffers() async throws -> EbayOffersSummary {
+    // MARK: eBay offers (no listing or delisting; sending and automation carry `confirm`)
+
+    func ebayOffers() async throws -> EbayOffersStatus {
         try await decode(request("GET", "api/ebay-offers"))
     }
 
-    /// Sharing schedules and offers to likers, read-only on iPhone.
-    func promotionAutomations() async throws -> [PromotionAutomationSummary] {
-        let list: PromotionAutomationList = try await decode(request("GET", "api/promotion-automations"))
-        return list.automations
+    /// Prices offers for the chosen listings; nothing is sent.
+    func previewEbayOffers(_ body: EbayOfferPreviewRequest) async throws -> [EbayOffer] {
+        let result: EbayOfferPreviews = try await decode(request("POST", "api/ebay-offers/preview", json: body))
+        return result.offers
+    }
+
+    func sendEbayOffers(_ attemptIDs: [String]) async throws -> [EbayOffer] {
+        let result: EbayOfferPreviews = try await decode(request("POST", "api/ebay-offers/send", json: EbayOfferApproval(attemptIDs: attemptIDs)))
+        return result.offers
+    }
+
+    func enableEbayOffers(_ attemptIDs: [String]) async throws {
+        _ = try await send(request("POST", "api/ebay-offers/enable", json: EbayOfferApproval(attemptIDs: attemptIDs)))
+    }
+
+    func enableAllEbayOffers(_ body: EbayOffersEnableAll) async throws {
+        _ = try await send(request("POST", "api/ebay-offers/enable-all", json: body))
+    }
+
+    /// Pauses one listing's rule, or every rule and the all-listings setting.
+    func pauseEbayOffers(ruleID: String? = nil) async throws {
+        _ = try await send(request("POST", ruleID.map { "api/ebay-offers/rules/\($0)/pause" } ?? "api/ebay-offers/pause"))
+    }
+
+    func markEbayOfferChecked(_ attemptID: String) async throws {
+        _ = try await send(request("POST", "api/ebay-offers/attempts/\(attemptID)/checked", json: ["confirm": true]))
+    }
+
+    /// Starts eBay sign-in; the seller finishes it on the page this returns.
+    func connectEbay() async throws -> URL {
+        struct Payload: Decodable { let authorizeUrl: URL }
+        let payload: Payload = try await decode(request("POST", "api/marketplace-accounts/ebay/connect"))
+        return payload.authorizeUrl
+    }
+
+    // MARK: Sharing and offers to likers (saved off; on only with `confirm`)
+
+    func promotionAutomations() async throws -> PromotionAutomationList {
+        try await decode(request("GET", "api/promotion-automations"))
+    }
+
+    /// Creates or updates a rule. Saving always leaves it off.
+    func savePromotionAutomation(_ body: PromotionAutomationBody, id: String?) async throws {
+        let path = id.map { "api/promotion-automations/\($0)" } ?? "api/promotion-automations"
+        _ = try await send(request(id == nil ? "POST" : "PUT", path, json: body))
+    }
+
+    func enablePromotionAutomation(_ id: String) async throws {
+        _ = try await send(request("POST", "api/promotion-automations/\(id)/enable", json: ["confirm": true]))
+    }
+
+    func pausePromotionAutomation(_ id: String) async throws {
+        _ = try await send(request("POST", "api/promotion-automations/\(id)/pause"))
+    }
+
+    func deletePromotionAutomation(_ id: String) async throws {
+        _ = try await send(request("DELETE", "api/promotion-automations/\(id)"))
+    }
+
+    func promotionCoverage(_ id: String) async throws -> PromotionCoverage {
+        try await decode(request("GET", "api/promotion-automations/\(id)/coverage"))
+    }
+
+    func promotionActivity(_ id: String) async throws -> PromotionActivity {
+        try await decode(request("GET", "api/promotion-automations/\(id)/activity"))
+    }
+
+    /// Individual offer minimums, keyed by item id; an empty value clears one.
+    func savePromotionFloors(marketplace: String, floors: [String: String]) async throws {
+        struct Body: Encodable { let marketplace: String; let floors: [String: String] }
+        _ = try await send(request("PUT", "api/promotions/floors", json: Body(marketplace: marketplace, floors: floors)))
+    }
+
+    /// Asks the marketplace what happened to an unconfirmed send.
+    func checkPromotion(_ id: String) async throws {
+        _ = try await send(request("POST", "api/promotions/\(id)/check"))
+    }
+
+    func markPromotionChecked(_ id: String) async throws {
+        _ = try await send(request("POST", "api/promotions/\(id)/checked", json: ["confirm": true]))
     }
 
     func relistGaps() async throws -> [RelistGap] {

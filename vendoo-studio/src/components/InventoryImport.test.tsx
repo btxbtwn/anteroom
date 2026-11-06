@@ -109,3 +109,31 @@ describe("Chrome marketplace inventory import", () => {
     etsy.mockRestore();
   });
 });
+
+describe("linking matches to existing items", () => {
+  const match = (id: string) => ({ conversation_id: id, title: `Item ${id}`, score: 0.9, price: 20, price_differs: false });
+
+  it("links every one-to-one match on the page in one step, leaving shared matches for review", () => {
+    const mutate = vi.fn();
+    useMutation.mockReturnValue({ mutate, isPending: false });
+    useQuery.mockReturnValue({ isSuccess: true, data: { total: 4, has_more: false, rows: [
+      { id: "100000001", title: "Coat", price: "20.00", quantity: 1, conversation_id: null, reason: null, match: match("a") },
+      { id: "100000002", title: "Shirt", price: "20.00", quantity: 1, conversation_id: null, reason: null, match: match("b") },
+      { id: "100000003", title: "Shirt too", price: "20.00", quantity: 1, conversation_id: null, reason: null, match: match("b") },
+      { id: "100000004", title: "Saved", price: "20.00", quantity: 1, conversation_id: "c", reason: null, match: null },
+    ] } });
+    const html = renderToStaticMarkup(<InventoryImport marketplace="ebay" accountKey="seller" onOpenListing={vi.fn()} />);
+    expect(html).toContain("Link matches on this page (1)");
+    expect(html).toContain("Link to this item");
+  });
+
+  it("sends an eBay link to the eBay import", async () => {
+    const { api } = await import("../api/client");
+    const submit = vi.spyOn(api.ebay, "importListing").mockResolvedValue({
+      conversation_id: "a", listing_id: "100000001", reused: true, linked: true, photo_count: 2, warnings: [] });
+    renderToStaticMarkup(<InventoryImport marketplace="ebay" accountKey="seller" onOpenListing={vi.fn()} />);
+    await useMutation.mock.calls[useMutation.mock.calls.length - 1][0].mutationFn([{ id: "100000001", link: "a" }]);
+    expect(submit).toHaveBeenCalledWith("100000001", "a");
+    submit.mockRestore();
+  });
+});

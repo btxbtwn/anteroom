@@ -43,7 +43,6 @@ export interface ConversationSummary {
   vendoo_created_at?: string | null;
   vendoo_modified_at?: string | null;
   vendoo_listed_at?: string | null;
-  vendoo_sold_at?: string | null;
   /** When Anteroom's sales ledger last saw a unit sell. */
   sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
@@ -69,6 +68,8 @@ export interface DirectRecord {
   failed?: boolean;
   /** Fields the marketplace rejected that the seller has not edited since. */
   fields?: number;
+  /** The live listing's price on this marketplace, when Anteroom knows it. */
+  price?: number | null;
 }
 
 export interface Conversation extends ConversationSummary {

@@ -36,6 +36,50 @@ final class InventoryModel {
         if let selected = try? await api.selectedMarketplaces() { preferredMarketplaces = selected }
     }
 
+    // MARK: Readiness
+
+    /// Each listing's missing fields per marketplace, as the editor's tabs count them.
+    private(set) var readiness: [String: [String: [MissingField]]] = [:]
+    private var readinessRead: [String: String] = [:]
+    private var readinessPending: [String] = []
+    private var readinessTask: Task<Void, Never>?
+
+    /// The missing fields a row shows: only the marketplaces the seller sells on.
+    func missing(_ listing: ListingSummary) -> [String: [MissingField]] {
+        let all = readiness[listing.id] ?? [:]
+        return preferredMarketplaces.isEmpty ? all : all.filter { preferredMarketplaces.contains($0.key) }
+    }
+
+    /// A row came on screen: read its readiness with the other rows that did, once per change.
+    func wantsReadiness(_ listing: ListingSummary) {
+        guard listing.settledAt == nil, readinessRead[listing.id] != listing.readinessKey else { return }
+        readinessRead[listing.id] = listing.readinessKey
+        readinessPending.append(listing.id)
+        guard readinessTask == nil else { return }
+        readinessTask = Task { [weak self] in
+            // Rows appear together while scrolling; one request reads them.
+            try? await Task.sleep(for: .milliseconds(150))
+            await self?.readPendingReadiness()
+        }
+    }
+
+    private func readPendingReadiness() async {
+        let ids = readinessPending
+        readinessPending = []
+        readinessTask = nil
+        for start in stride(from: 0, to: ids.count, by: 25) {
+            let block = Array(ids[start..<min(start + 25, ids.count)])
+            do {
+                for (id, check) in try await api.listingReadiness(block) {
+                    readiness[id] = check.marketplaces.mapValues(\.missing)
+                }
+            } catch {
+                // Advice only: the row keeps its record's state, and the next appearance asks again.
+                block.forEach { readinessRead[$0] = nil }
+            }
+        }
+    }
+
     func rows(search: String) -> [ListingSummary] {
         InventoryQuery.rows(listings, search: search, filters: filters)
     }

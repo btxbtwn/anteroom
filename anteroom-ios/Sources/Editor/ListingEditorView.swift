@@ -40,7 +40,7 @@ struct ListingEditorView: View {
                                     if let choice = model.choice(marketplace) {
                                         Label {
                                             Text(Marketplaces.name(marketplace))
-                                            Text(choice.label)
+                                            Text(choice.detail.map { "\(choice.label): \($0)" } ?? choice.label)
                                         } icon: {
                                             Image(systemName: choice.symbol)
                                         }
@@ -61,7 +61,7 @@ struct ListingEditorView: View {
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
                         }
                         .disabled(model.marketplaceTabs.isEmpty)
-                        .accessibilityLabel("Form, \(tab == "general" ? "General" : Marketplaces.name(tab))\(model.choice(tab).map { ", \($0.label)" } ?? "")")
+                        .accessibilityLabel("Form, \(tab == "general" ? "General" : Marketplaces.name(tab))\(model.choice(tab).map { ", \($0.label)\($0.detail.map { ": \($0)" } ?? "")" } ?? "")")
                         Spacer()
                         Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved")
                             .font(.caption).foregroundStyle(.secondary)

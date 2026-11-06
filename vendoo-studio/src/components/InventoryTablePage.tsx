@@ -9,11 +9,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ExternalLinkIcon, SearchIcon } from "lucide-react";
 import { api } from "../api/client";
+import type { MissingField, NativeMarketplace } from "../api/nativeMarketplaces";
 import { useWorkspaceRuntime } from "../app/runtime";
 import { cn } from "../lib/utils";
 import { editorTabs } from "./editorTabs";
 import { formatMoney } from "./analyticsFormat";
 import { LISTING_SORTS, LISTING_STATUS_TABS, statusCounts, matchesSearch, statusForSort, type ListingSortId, type ListingStatusFilter } from "./inventoryFilters";
+import { marketplacePrice, marketplacePriceDescription } from "./inventoryPrices";
 import { inventoryRows, listedCounts, marketplaceCell, type MarketplaceCellKind } from "./inventoryTable";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
@@ -24,11 +26,14 @@ import { Badge } from "./ui/badge";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
+import { useInventoryReadiness } from "./useInventoryReadiness";
 import { EmptyRow, Panel, WorkspacePage } from "./WorkspacePage";
 
 const ROW_HEIGHT = 56;
 // Narrow enough on a phone that the first marketplace column shows beside it.
 const ITEM_MIN = "min(13rem, 42vw)";
+// Room for a status badge and the live price beside it.
+const CELL_MIN = "9.5rem";
 const STATUS_LABELS: Record<ListingStatusFilter, string> = { all: "All", draft: "Draft", active: "Active", sold: "Sold", failed: "Failed" };
 const BADGE_VARIANT: Record<MarketplaceCellKind, "success" | "info" | "warning" | "error" | "outline" | null> = {
   listed: "success",
@@ -82,9 +87,11 @@ export function InventoryTablePage({
     overscan: 8,
     initialRect: { width: 1000, height: 800 },
   });
-  const columns = { gridTemplateColumns: `minmax(${ITEM_MIN}, 2fr) 5.5rem repeat(${marketplaces.length}, minmax(8.5rem, 1fr))` } as CSSProperties;
+  const visible = virtualizer.getVirtualItems();
+  const readiness = useInventoryReadiness(rows, visible[0]?.index ?? 0, visible[visible.length - 1]?.index ?? -1);
+  const columns = { gridTemplateColumns: `minmax(${ITEM_MIN}, 2fr) 5.5rem repeat(${marketplaces.length}, minmax(${CELL_MIN}, 1fr))` } as CSSProperties;
   // The table's own minimum, so a long title cannot widen the item column past it.
-  const tableWidth = { minWidth: `calc(${ITEM_MIN} + 5.5rem + ${marketplaces.length} * 8.5rem)` } as CSSProperties;
+  const tableWidth = { minWidth: `calc(${ITEM_MIN} + 5.5rem + ${marketplaces.length} * ${CELL_MIN})` } as CSSProperties;
 
   return (
     <WorkspacePage width="expanded" className="h-full min-h-0 gap-4 pb-6">
@@ -147,7 +154,7 @@ export function InventoryTablePage({
               <EmptyRow>{all.length ? "No matching listings" : "No listings yet"}</EmptyRow>
             ) : (
               <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
-                {virtualizer.getVirtualItems().map((item) => {
+                {visible.map((item) => {
                   const listing = rows[item.index];
                   const title = listing.title || "Untitled";
                   const name = (nameBySku && listing.sku?.trim()) || title;
@@ -177,7 +184,8 @@ export function InventoryTablePage({
                         {listing.price != null ? formatMoney(listing.price) : <span className="text-muted-foreground">—</span>}
                       </div>
                       {marketplaces.map((id) => (
-                        <MarketplaceCellView key={id} listing={listing} marketplace={id} title={title} onOpen={() => onOpenListing(listing.id, id)} />
+                        <MarketplaceCellView key={id} listing={listing} marketplace={id} title={title} onOpen={() => onOpenListing(listing.id, id)}
+                          missing={readiness[listing.id]?.marketplaces[id as NativeMarketplace]?.missing} />
                       ))}
                     </div>
                   );
@@ -191,22 +199,26 @@ export function InventoryTablePage({
   );
 }
 
-function MarketplaceCellView({ listing, marketplace, title, onOpen }: {
+function MarketplaceCellView({ listing, marketplace, title, onOpen, missing }: {
   listing: Listing;
   marketplace: string;
   title: string;
   onOpen: () => void;
+  /** The fields this marketplace still needs, once read. */
+  missing?: readonly MissingField[];
 }) {
-  const cell = marketplaceCell(listing, marketplace);
+  const cell = marketplaceCell(listing, marketplace, missing);
   const variant = BADGE_VARIANT[cell.kind];
   const name = marketplaceName(marketplace);
+  const price = marketplacePrice(listing, marketplace);
+  const priceText = price ? marketplacePriceDescription(price, name, listing.price) : null;
   return (
     <div role="cell" className="flex min-w-0 items-center gap-1 px-1.5 group-hover/row:bg-accent">
       <button
         type="button"
         className="flex h-9 min-w-0 flex-1 cursor-pointer items-center rounded-md px-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label={`${title} on ${name}: ${cell.label}. Open the ${name} form`}
-        title={`Open the ${name} form`}
+        aria-label={`${title} on ${name}: ${cell.detail ?? cell.label}${priceText ? `, ${priceText}` : ""}. Open the ${name} form`}
+        title={[cell.detail, priceText, `Open the ${name} form`].filter(Boolean).join(". ")}
         onClick={onOpen}
       >
         {variant ? (
@@ -214,6 +226,18 @@ function MarketplaceCellView({ listing, marketplace, title, onOpen }: {
         ) : (
           <span className={cn("truncate text-xs text-muted-foreground", cell.kind === "not_listed" && "text-muted-foreground/70")}>{cell.label}</span>
         )}
+        {price ? (
+          <span
+            className={cn(
+              "ms-auto shrink-0 ps-2 text-xs tabular-nums",
+              price.differs ? "font-medium text-foreground" : "text-muted-foreground",
+              price.amount == null && "text-muted-foreground/70",
+            )}
+            data-differs={price.differs || undefined}
+          >
+            {price.label}
+          </span>
+        ) : null}
       </button>
       {cell.url ? (
         <a
