@@ -17,6 +17,7 @@ from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachmen
 from vendoo_studio.version import app_version
 from vendoo_studio.services.local_requests import LocalRequestMiddleware
 from vendoo_studio.routes import marketplace_listings, marketplace_schemas, native_marketplaces
+from vendoo_studio.routes import listing_readiness as listing_readiness_route
 from vendoo_studio.routes import ebay_offers, listing_promotions, promotion_automations
 from vendoo_studio.routes import account_move, ebay
 from vendoo_studio.routes import chrome_import, similar_items
@@ -233,6 +234,7 @@ app.include_router(listing_promotions.router)
 app.include_router(promotion_automations.router)
 app.include_router(ebay.router)
 app.include_router(native_marketplaces.router)
+app.include_router(listing_readiness_route.router)
 app.include_router(marketplace_schemas.router)
 app.include_router(marketplace_listings.router)
 app.include_router(conversations.router)

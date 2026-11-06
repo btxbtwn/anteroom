@@ -86,6 +86,9 @@ struct ListEverywhereSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(name).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
                     ReadinessChip(choice: choice)
+                    if let detail = choice.detail {
+                        Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 0)
                 if choice.selectable {
@@ -101,7 +104,7 @@ struct ListEverywhereSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(!choice.selectable || sending)
-        .accessibilityLabel("\(name), \(choice.label)")
+        .accessibilityLabel("\(name), \(choice.label)\(choice.detail.map { ": \($0)" } ?? "")")
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 

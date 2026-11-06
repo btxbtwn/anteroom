@@ -66,16 +66,26 @@ struct InventoryTests {
           "mercari":{"state":"publishing","failed":false,"fields":0},
           "etsy":{"state":"not_saved","failed":false,"fields":0}}}
         """#.utf8))
-        let badges = tracked.marketplaceBadges
+        let badges = tracked.marketplaceBadges()
         precondition(badges.map(\.marketplace) == ["ebay", "poshmark", "mercari", "depop"], "Not listed stays off the row")
         precondition(badges.map(\.label) == ["Listed", "Needs 2 fields", "Working", "Draft"])
         precondition(badges.map(\.tone) == [.good, .attention, .neutral, .neutral])
         precondition(badges[0].url?.absoluteString == "https://www.ebay.com/itm/1")
-        precondition(rows[0].marketplaceBadges.isEmpty, "Rows without records decode and show nothing")
+        precondition(rows[0].marketplaceBadges().isEmpty, "Rows without records decode and show nothing")
         precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "not_saved", failed: true, fields: 1))?.label == "Needs 1 field")
         precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "not_saved", failed: true, fields: 0))?.tone == .problem)
         precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "pending_review"))?.label == "In review")
 
+        // Required fields not filled yet show before anything is listed, named by the server's count.
+        let missing = [MissingField(field: "price", label: "Item price", message: "Depop needs a price."),
+                       MissingField(field: "depop_specifics.condition", label: "Condition", message: "Condition is empty.")]
+        let ready = tracked.marketplaceBadges(missing: ["etsy": missing, "ebay": missing, "depop": missing, "poshmark": missing])
+        precondition(ready.map(\.label) == ["Listed", "Needs 2 fields", "Needs 2 fields", "Working", "Needs 2 fields"],
+                     "Live and running keep their state; draft, failed and not listed read the server's count")
+        precondition(ready.map(\.marketplace) == ["ebay", "etsy", "poshmark", "mercari", "depop"])
+        precondition(rows[0].marketplaceBadges(missing: ["depop": []]).isEmpty, "Nothing missing and no record says nothing")
+        precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "not_saved", failed: true, fields: 1),
+                                      missing: missing)?.label == "Needs 2 fields", "Rejected fields are already in the count")
         // Each marketplace's live price, marked when it is not the item price; unknown stays unknown.
         let priced = try JSONDecoder().decode(ListingSummary.self, from: Data(#"""
         {"id":"g","title":"Tee","status":"active","price":25,"direct_records":{
@@ -84,7 +94,7 @@ struct InventoryTests {
           "mercari":{"state":"published","price":null},
           "depop":{"state":"draft","price":28}}}
         """#.utf8))
-        let pricedBadges = priced.marketplaceBadges
+        let pricedBadges = priced.marketplaceBadges()
         precondition(pricedBadges.map(\.marketplace) == ["ebay", "poshmark", "mercari", "depop"])
         precondition(pricedBadges.map(\.price) == [25, 30, nil, nil], "Only a live listing has a price")
         precondition(pricedBadges.map(\.priceDiffers) == [false, true, false, false])

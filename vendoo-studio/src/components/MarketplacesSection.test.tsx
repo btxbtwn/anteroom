@@ -2,8 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { ListingData } from "../api/types";
-import type { NativeDraft, NativeDrafts } from "../api/nativeMarketplaces";
-import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, listChoice, missingRequired, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+import type { MissingField, NativeDraft, NativeDrafts, PreflightGap } from "../api/nativeMarketplaces";
+import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, listChoice, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
 import { readyMarketplaces } from "./ListEverywhereDialog";
 
 import { StructuredEditor } from "./ListingEditor";
@@ -16,10 +16,16 @@ vi.mock("@tanstack/react-query", async original => ({
 
 const live = { url: "https://www.mercari.com/us/item/m70565754838", listing_id: "m70565754838", source: "vendoo", sold_here: false, state: "live" } as const;
 
+/** The server always sends ``missing``; fixtures about other things leave it out. */
+function withMissing(preflight?: { marketplaces: Record<string, { ready: boolean; gaps: PreflightGap[]; missing?: MissingField[] }> }) {
+  return preflight && { ...preflight, marketplaces: Object.fromEntries(Object.entries(preflight.marketplaces)
+    .map(([id, check]) => [id, { ...check, missing: check.missing ?? [] }])) };
+}
+
 function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { error = null as Error | null, pending = false, etsyEligible = true,
   etsyReady = false, selected = "", notes = undefined as string[] | undefined,
   onAskChat = undefined as ((text: string) => void) | undefined, onEditField = undefined as ((field: string) => void) | undefined,
-  preflight = { marketplaces: {} } as { marketplaces: Record<string, { ready: boolean; gaps: { field: string; message: string; blocking: boolean }[] }> } | undefined,
+  preflight = { marketplaces: {} } as { marketplaces: Record<string, { ready: boolean; gaps: PreflightGap[]; missing?: MissingField[] }> } | undefined,
   preflightMissing = false, preflightPlaceholder = false, preflightError = false,
   nativeFields = [] as { key: string; path: string; label: string; value: string; required: boolean; options: string[] }[],
   listing = {} as ListingData, agentLocks = [] as string[] } = {}) {
@@ -28,7 +34,7 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
     : queryKey[0] === "native-editor-form" ? { data: { marketplace: selected, native: true, fields: nativeFields, notes: notes ?? [] } }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
     : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2", return_policy_id: "3" } : {}, isSuccess: true, isPending: false }
-    : queryKey[0] === "native-preflight" ? { data: preflightMissing ? undefined : preflight, isPending: preflightMissing, isPlaceholderData: preflightPlaceholder, isError: preflightError }
+    : queryKey[0] === "native-preflight" ? { data: preflightMissing ? undefined : withMissing(preflight), isPending: preflightMissing, isPlaceholderData: preflightPlaceholder, isError: preflightError }
     : { data: { shipping: [], processing: [] }, isPending: false, error: null });
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: pending, error: null, variables: { marketplace: "depop", kind: "draft" } });
   if (notes) return renderToStaticMarkup(
@@ -356,19 +362,21 @@ describe("marketplaces section", () => {
     expect(render({}, sold)).not.toContain("List everywhere…");
   });
 
-  it("says on every tab not listed yet whether it is ready, or how many required fields it needs", () => {
+  it("says on every tab not listed yet whether it is ready, or how many fields the server says it needs", () => {
     const html = render({}, { mercari: live }, { preflight: { marketplaces: {
       ebay: { ready: false, gaps: [
         { field: "price", message: "eBay needs a price.", blocking: true },
-        { field: "price", message: "Price must be a number.", blocking: true },
-        { field: "ebay_specifics.category_specifics.Color", message: "Color is required.", blocking: true },
+        { field: "ebay_specifics.category_specifics.Color", message: "Color is required.", blocking: false, required: true, label: "Color" },
         { field: "marketplace_photos.ebay", message: "One photo is left off.", blocking: false },
+      ], missing: [
+        { field: "price", label: "Price", message: "eBay needs a price." },
+        { field: "ebay_specifics.category_specifics.Color", label: "Color", message: "Color is required." },
       ] },
       poshmark: { ready: true, gaps: [{ field: "marketplace_photos.poshmark", message: "One photo is left off.", blocking: false }] },
       depop: { ready: true, gaps: [] },
     } } });
     expect(row(html, "eBay")).toContain("2 to fill");
-    expect(row(html, "eBay")).toContain('title="Needs 2 fields"');
+    expect(row(html, "eBay")).toContain('title="Needs 2 fields: Price, Color"');
     expect(row(html, "Poshmark")).toContain("Ready");
     expect(row(html, "Depop")).toContain("Ready");
     // A live listing keeps its own state; an unchecked one says nothing new.
@@ -377,24 +385,17 @@ describe("marketplaces section", () => {
     expect(render({}, {}, { preflightPlaceholder: true, preflight: { marketplaces: { depop: { ready: true, gaps: [] } } } })).not.toContain("Ready");
   });
 
-  it("counts each missing required field once", () => {
-    expect(missingRequired([
-      { field: "price", message: "a", blocking: true }, { field: "price", message: "b", blocking: true },
-      { field: "size", message: "c", blocking: false },
-    ])).toBe(1);
-    expect(missingRequired([])).toBe(0);
-  });
-
   it("describes each marketplace in List everywhere's picker, and only ready ones are picked by Select all ready", () => {
     const idle = rowStatus("ebay", undefined, undefined, "current", true);
-    const base = { status: idle, canAct: true, listable: true, retryIn: 0, soldSomewhere: false, check: { ready: true, gaps: [] } };
+    const base = { status: idle, canAct: true, listable: true, retryIn: 0, soldSomewhere: false, check: { ready: true, gaps: [], missing: [] } };
     const ready = listChoice("ebay", base);
-    const needs = listChoice("depop", { ...base, check: { ready: false, gaps: [{ field: "size", message: "Size", blocking: true }] } });
+    const needs = listChoice("depop", { ...base, check: { ready: false, gaps: [{ field: "size", message: "Size", blocking: true }],
+      missing: [{ field: "size", label: "Size", message: "Size" }, { field: "price", label: "Price", message: "Price" }] } });
     const listed = listChoice("mercari", { ...base, status: rowStatus("mercari", live, undefined, "current", true), listable: false });
     const sold = listChoice("poshmark", { ...base, status: rowStatus("poshmark", { ...live, sold_here: true }, undefined, "current", true), listable: false });
     const waiting = listChoice("etsy", { ...base, retryIn: 12 });
     expect(ready).toMatchObject({ label: "Ready", tone: "ready", selectable: true });
-    expect(needs).toMatchObject({ label: "Needs 1 field", tone: "needs", selectable: true });
+    expect(needs).toMatchObject({ label: "Needs 2 fields", tone: "needs", selectable: true, detail: "Size, Price" });
     expect(listed).toMatchObject({ label: "Listed", selectable: false });
     expect(sold).toMatchObject({ label: "Sold", selectable: false });
     expect(waiting).toMatchObject({ label: "Retry in 12s", selectable: false });

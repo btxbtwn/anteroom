@@ -4,7 +4,7 @@ import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, Ci
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from "../api/nativeMarketplaces";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightCheck, PreflightGap } from "../api/nativeMarketplaces";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
@@ -12,6 +12,7 @@ import { ListEverywhereDialog, type ListChoice } from "./ListEverywhereDialog";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { MarkSoldForm } from "./MarkSoldForm";
 import { marketplaceName } from "./marketplaceNames";
+import { missingDetail, needsText } from "./readiness";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
@@ -133,22 +134,15 @@ export function saidBesideList(gaps: readonly PreflightGap[], shownOnForm: reado
   return gaps.filter((gap) => !onForm.has(gap.field));
 }
 
-/** Required fields a marketplace still needs, each counted once. */
-export function missingRequired(gaps: readonly PreflightGap[]): number {
-  return new Set(gaps.filter((gap) => gap.blocking).map((gap) => gap.field)).size;
-}
-
-function fieldsText(count: number): string {
-  return `Needs ${count} ${count === 1 ? "field" : "fields"}`;
-}
 
 /** A marketplace's card in List everywhere's picker. */
 export function listChoice(marketplace: NativeMarketplace, { status, canAct, listable, retryIn, soldSomewhere, check }: {
   status: Status; canAct: boolean; listable: boolean; retryIn: number; soldSomewhere: boolean;
   /** The saved listing's field check, or null while it is unknown. */
-  check: { ready: boolean; gaps: PreflightGap[] } | null;
+  check: PreflightCheck | null;
 }): ListChoice {
-  const choice = (label: string, tone: ListChoice["tone"], selectable = false): ListChoice => ({ marketplace, label, tone, selectable });
+  const choice = (label: string, tone: ListChoice["tone"], selectable = false, detail?: string): ListChoice =>
+    ({ marketplace, label, tone, selectable, ...(detail ? { detail } : {}) });
   if (status.tone === "sold") return choice("Sold", "sold");
   if (status.tone === "live" && status.label === "Listed") return choice("Listed", "listed");
   if (!canAct) return choice("Not available here", "muted");
@@ -156,8 +150,8 @@ export function listChoice(marketplace: NativeMarketplace, { status, canAct, lis
   if (!listable || status.tone === "busy") return choice(status.label, "muted");
   if (retryIn > 0) return choice(`Retry in ${retryIn}s`, "muted");
   // Missing fields are advice, as on List…: the seller may still try.
-  const missing = check ? missingRequired(check.gaps) : 0;
-  if (missing) return choice(fieldsText(missing), "needs", true);
+  const missing = check?.missing ?? [];
+  if (missing.length) return choice(needsText(missing.length), "needs", true, missing.map((item) => item.label).join(", "));
   if (marketplace === "etsy" && status.tone === "attention") return choice(status.label, "needs", true);
   return check?.ready ? choice("Ready", "ready", true) : choice("Not checked", "muted", true);
 }
@@ -445,7 +439,7 @@ export function MarketplacesLayout({
     return !soldSomewhere;
   }
   /** This revision's field check for a marketplace, or null while it is unknown. */
-  function preflightCheck(marketplace: Marketplace): { ready: boolean; gaps: PreflightGap[] } | null {
+  function preflightCheck(marketplace: Marketplace): PreflightCheck | null {
     if (preflight.isPlaceholderData || preflight.isError) return null;
     return preflight.data?.marketplaces?.[marketplace as NativeMarketplace] ?? null;
   }
@@ -666,10 +660,10 @@ export function MarketplacesLayout({
             // a row not listed yet says whether its required fields are filled.
             const quiet = status?.tone === "idle";
             const check = marketplace && quiet ? preflightCheck(marketplace) : null;
-            const missing = check ? missingRequired(check.gaps) : 0;
+            const missing = check?.missing.length ?? 0;
             return (
               <li key={id} aria-label={name} className="group relative flex items-start">
-                <button type="button" aria-selected={current} title={check ? (missing ? fieldsText(missing) : "Ready to list") : status?.label} onClick={() => onSelect(id)}
+                <button type="button" aria-selected={current} title={check ? missingDetail(check.missing) : status?.label} onClick={() => onSelect(id)}
                   onPointerEnter={() => onPrepare?.(id)} onFocus={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
                   className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent",
                     current && "bg-accent text-foreground")}>

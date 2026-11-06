@@ -78,7 +78,7 @@ import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SalesCheck, SellerSale, SellerSaleResult } from "./marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight } from "./nativeMarketplaces";
+import type { ListingReadiness, NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
@@ -533,6 +533,10 @@ export const api = {
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
     preflight: (convId: string) =>
       request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight`),
+    /** The fields each listing still needs per marketplace; the inventory asks for the rows on screen. */
+    readiness: (convIds: readonly string[]) =>
+      request<{ listings: Record<string, ListingReadiness> }>(
+        `/listing-readiness?${convIds.map((id) => `ids=${encodeURIComponent(id)}`).join("&")}`),
     saveDraft: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/draft`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId }),

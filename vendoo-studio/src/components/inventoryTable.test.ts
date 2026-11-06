@@ -47,6 +47,35 @@ describe("marketplaceCell", () => {
   });
 });
 
+describe("marketplaceCell readiness", () => {
+  const missing = [
+    { field: "price", label: "Listing Price", message: "Listing Price: Required field is empty." },
+    { field: "depop_specifics.parcelSize", label: "Package size", message: "Depop needs a parcel size." },
+  ];
+
+  it("counts required fields left empty before anything is listed, and names them", () => {
+    expect(marketplaceCell({}, "depop", missing)).toEqual({
+      kind: "needs", label: "Needs 2 fields", url: null, detail: "Needs 2 fields: Listing Price, Package size",
+    });
+    expect(marketplaceCell({ direct_records: { depop: { state: "draft" } } }, "depop", missing)).toMatchObject({ kind: "needs" });
+    expect(marketplaceCell({}, "depop", [])).toMatchObject({ kind: "not_listed" });
+  });
+
+  it("uses the server's count, which already holds the rejected fields, over the record's own", () => {
+    const failed = { direct_records: { depop: { state: "not_saved", failed: true, fields: 1 } } };
+    expect(marketplaceCell(failed, "depop", missing)).toMatchObject({ label: "Needs 2 fields" });
+    expect(marketplaceCell(failed, "depop")).toMatchObject({ label: "Needs 1 field" });
+  });
+
+  it("never says a live, sold, running or delisted listing needs fields", () => {
+    expect(marketplaceCell({ direct_records: { depop: { state: "published" } } }, "depop", missing)).toMatchObject({ kind: "listed" });
+    expect(marketplaceCell({ vendoo_sold_dates: { depop: "2026-10-01" } }, "depop", missing)).toMatchObject({ kind: "sold" });
+    expect(marketplaceCell({ direct_records: { depop: { state: "saving" } } }, "depop", missing)).toMatchObject({ kind: "working" });
+    expect(marketplaceCell({ vendoo_marketplaces: ["depop"], removed_marketplaces: ["depop"] }, "depop", missing))
+      .toMatchObject({ kind: "delisted" });
+  });
+});
+
 describe("listedCounts", () => {
   it("counts live listings per marketplace for the column headers", () => {
     const rows = [
