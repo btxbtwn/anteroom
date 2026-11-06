@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 test("account menu holds extension connection and sign out", async ({ page }, info) => {
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();

@@ -48,7 +48,7 @@ test("an approved Chrome recovers from a missing Bridge without another Connect 
   // Bob, not Alice: the server keeps a Bridge present for 90 seconds, and the tests that
   // follow expect Alice's Chrome never to have connected.
   await page.clock.install();
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("bob@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();

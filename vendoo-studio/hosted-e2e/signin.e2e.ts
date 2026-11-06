@@ -7,7 +7,7 @@ async function signIn(page: Page, email: string, password: string) {
 }
 
 test("a seller signs in with an email and password", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await signIn(page, "alice@sandbox.test", "wrong password");
   await expect(page.getByRole("alert")).toContainText("don’t match");
   await signIn(page, "alice@sandbox.test", "sandbox");
@@ -16,7 +16,7 @@ test("a seller signs in with an email and password", async ({ page }) => {
 });
 
 test("a new seller creates an account and is asked to confirm their email", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByRole("button", { name: "Create an account" }).click();
   await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
   await page.getByLabel("Email address").fill("alice@sandbox.test");
@@ -30,7 +30,7 @@ test("a new seller creates an account and is asked to confirm their email", asyn
 });
 
 test("a seller who forgot their password sets a new one from the reset link", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByRole("button", { name: "Forgot password?" }).click();
   await page.getByLabel("Email address").fill("bob@sandbox.test");
   await page.getByRole("button", { name: "Email me a reset link" }).click();

@@ -11,8 +11,10 @@ import { AccountMenu } from "./AccountMenu";
 import { cloudExtension } from "../api/cloudExtension";
 import { applyTheme } from "../theme";
 import { installSoftwareKeyboard } from "../lib/softwareKeyboard";
-import { isMacApp, markMacApp } from "../lib/macApp";
+import { isMacApp, markMacApp, useMacApp } from "../lib/macApp";
 import { SetPassword, SignIn } from "./SignIn";
+import { Landing } from "./Landing";
+import { SIGN_IN_PATH, showsLanding } from "./landingRoute";
 import { linkOpenedElsewhere } from "./authMessages";
 import { followSellerChanges } from "./liveUpdates";
 import "../styles/app.css";
@@ -38,6 +40,7 @@ function CloudApp() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [newPassword, setNewPassword] = useState(false);
+  const mac = useMacApp();
   useEffect(() => {
     const connect = () => {
       const native = (window as unknown as { pywebview?: { api?: { connect_chatgpt_worker?: (token: string | null, owner: string | null) => Promise<unknown> } } }).pywebview?.api;
@@ -57,9 +60,10 @@ function CloudApp() {
         // The desktop workspace also has module-level stores. A new document
         // clears all of them before another account can render.
         // Let the Bridge revoke remembered approval before navigation unloads
-        // the content script and can discard the disconnect message.
+        // the content script and can discard the disconnect message. Signing out
+        // returns to the sign-in form, not the landing page.
         void cloudExtension({ id: previous, email: "" }).disconnect().finally(() => {
-          window.location.replace(window.location.origin);
+          window.location.replace(new URL(SIGN_IN_PATH, window.location.origin).href);
         });
         return;
       }
@@ -79,6 +83,7 @@ function CloudApp() {
   if (!ready) return <main className="cloud-auth">Loading…</main>;
   if (session && newPassword) return <div className="cloud-auth"><SetPassword client={supabase} onDone={() => setNewPassword(false)}/></div>;
   if (session) return <HostedWorkspace key={session.user.id} session={session}/>;
+  if (!error && showsLanding(window.location.search, mac)) return <Landing/>;
   return <div className="cloud-auth"><SignIn client={supabase} notice={error} sandbox={sandbox}/></div>;
 }
 
