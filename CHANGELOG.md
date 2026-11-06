@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.752 — 2026-11-06
+
+- The inventory table on the web and the iPhone badges now show where imported listings are live, sold or delisted, instead of "Not listed" everywhere.
+
 ## 0.1.751 — 2026-11-06
 
 - Keep the web app's listings loading while sharing and offer automations wait on Chrome. Those waits no longer tie up the database connections your pages need.
