@@ -9,6 +9,7 @@ import {
   marketplaceOptions,
   matchesSearch,
   sortListings,
+  statusForSort,
   statusCounts,
   visibleInInventory,
   isStale,
@@ -211,11 +212,11 @@ describe("sortListings", () => {
     expect(sortListings(inventory, "price_asc")).toEqual([tee, boots, draft]);
   });
 
-  it("sorts by the latest sale, from Anteroom's ledger or Vendoo's history", () => {
-    const vendooSale: FilterableListing = { title: "Vendoo sale", vendoo_sold_at: "2026-10-20T18:30:28+00:00" };
-    const ebaySale: FilterableListing = { title: "eBay sale", sold_at: "2026-11-02T03:51:17+00:00", vendoo_sold_at: null };
+  it("sorts by the latest sale on the ledger, the date Analytics shows", () => {
+    const olderSale: FilterableListing = { title: "Older sale", sold_at: "2026-10-20T18:30:28+00:00" };
+    const ebaySale: FilterableListing = { title: "eBay sale", sold_at: "2026-11-02T03:51:17+00:00" };
     const unsold: FilterableListing = { title: "Unsold" };
-    expect(sortListings([unsold, vendooSale, ebaySale], "sold_desc").map((l) => l.title)).toEqual(["eBay sale", "Vendoo sale", "Unsold"]);
+    expect(sortListings([unsold, olderSale, ebaySale], "sold_desc").map((l) => l.title)).toEqual(["eBay sale", "Older sale", "Unsold"]);
   });
 
   it("sorts by SKU and leaves listings without one at the end", () => {
@@ -370,5 +371,26 @@ describe("unsent edits", () => {
     const draftTab = { ...DEFAULT_LISTING_FILTERS, status: "draft" as const };
     expect(filterListings([sold], "", draftTab)).toEqual([]);
     expect(statusCounts([sold]).draft).toBeUndefined();
+  });
+});
+
+describe("statusForSort", () => {
+  it("opens the Sold tab when sorting by sale date", () => {
+    expect(statusForSort("sold_desc", "all")).toBe("sold");
+    expect(statusForSort("sold_desc", "active")).toBe("sold");
+  });
+
+  it("keeps the current tab for every other sort", () => {
+    expect(statusForSort("price_desc", "active")).toBe("active");
+    expect(statusForSort("recent", "sold")).toBe("sold");
+  });
+});
+
+describe("sold-date sort across shelves", () => {
+  it("orders open and finished sold listings together, newest sale first", () => {
+    const openSale = { id: "a", title: "Open, older sale", status: "sold", sold_at: "2026-11-01T00:00:00Z" };
+    const settledSale = { id: "b", title: "Finished, newer sale", status: "sold", sold_at: "2026-11-05T00:00:00Z", settled_at: "2026-11-05T00:00:00Z" };
+    // The sidebar hands the open shelf first, then the finished one.
+    expect(sortListings([openSale, settledSale], "sold_desc").map((l) => l.id)).toEqual(["b", "a"]);
   });
 });

@@ -13,7 +13,7 @@ import { useWorkspaceRuntime } from "../app/runtime";
 import { cn } from "../lib/utils";
 import { editorTabs } from "./editorTabs";
 import { formatMoney } from "./analyticsFormat";
-import { LISTING_SORTS, LISTING_STATUS_TABS, statusCounts, matchesSearch, type ListingSortId, type ListingStatusFilter } from "./inventoryFilters";
+import { LISTING_SORTS, LISTING_STATUS_TABS, statusCounts, matchesSearch, statusForSort, type ListingSortId, type ListingStatusFilter } from "./inventoryFilters";
 import { inventoryRows, listedCounts, marketplaceCell, type MarketplaceCellKind } from "./inventoryTable";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
@@ -116,7 +116,12 @@ export function InventoryTablePage({
             </Toggle>
           ))}
         </ToggleGroup>
-        <Select value={sort} onValueChange={(value) => { if (value) setSort(value as ListingSortId); }}>
+        <Select value={sort} onValueChange={(value) => {
+          if (!value) return;
+          const next = value as ListingSortId;
+          setSort(next);
+          setStatus(statusForSort(next, status));
+        }}>
           <SelectTrigger aria-label="Sort listings" className="ms-auto w-56 max-sm:ms-0 max-sm:w-full">
             <SelectValue>{LISTING_SORTS.find((item) => item.id === sort)?.label}</SelectValue>
           </SelectTrigger>

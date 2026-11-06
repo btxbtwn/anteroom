@@ -43,7 +43,6 @@ export interface ConversationSummary {
   vendoo_created_at?: string | null;
   vendoo_modified_at?: string | null;
   vendoo_listed_at?: string | null;
-  vendoo_sold_at?: string | null;
   /** When Anteroom's sales ledger last saw a unit sell. */
   sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
