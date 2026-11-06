@@ -86,7 +86,6 @@ struct SettingsRootView: View {
             }
         }
     }
-}
 
     private func deleteAccount() async {
         deleting = true
