@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.745 — 2026-11-06
+
+- Link the eBay and Etsy listings you already have to their Anteroom items, and link every suggested match on an import page at once, so the inventory table shows where each item is live.
+
+## 0.1.744 — 2026-11-06
+
+- The Sold tab's Date Sold order now matches the sales in Analytics. Clearing an item's other marketplaces after it sold no longer moves it to the top.
+
 ## 0.1.743 — 2026-11-06
 
 - Listings in the sidebar and suggestions are now links. Cmd-click (Ctrl-click on Windows) opens one in a new tab, and right-clicking offers "Open in new tab". A plain click still opens it in place.
