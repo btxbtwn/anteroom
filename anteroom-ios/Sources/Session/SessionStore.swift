@@ -193,6 +193,21 @@ final class SessionStore {
         state = .signedOut
     }
 
+    /// After the server deleted the account: forget this iPhone's session and
+    /// everything it kept of the seller's data. The account is gone, so only
+    /// the local session is cleared.
+    func finishAccountDeletion() async {
+        try? await client?.auth.signOut(scope: .local)
+        PhotoCache.images.removeAllObjects()
+        URLCache.shared.removeAllCachedResponses()
+        let files = FileManager.default
+        if let exports = try? files.contentsOfDirectory(at: files.temporaryDirectory, includingPropertiesForKeys: nil) {
+            for file in exports { try? files.removeItem(at: file) }
+        }
+        UserDefaults.standard.removeObject(forKey: Self.pendingResetKey)
+        state = .signedOut
+    }
+
     private static func readable(_ error: Error, for action: SignInAction) -> SignInFailure {
         if let auth = error as? AuthError {
             var serverMessage: String?

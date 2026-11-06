@@ -226,6 +226,17 @@ remove the first account's photo. Automated tests exercise the same ownership
 boundaries with real Postgres sessions; Storage HTTP transport is replaced locally.
 
 
+## Account deletion
+
+Revision `7c3e9a1d5b20` adds the private functions that let a seller delete
+their own account (see [account deletion](../../docs/account-deletion.md)).
+They delete from `auth.users` and `vault.secrets` and read `storage.objects` as
+the migration account, so run migrations as `postgres` on Supabase as before. No
+new secret is needed. If that account lacks those privileges, deletion answers
+503 and deletes nothing; check with
+`SELECT has_table_privilege('auth.users', 'DELETE')` as the migration account.
+
+
 ## Desktop Chrome connection
 
 The hosted header offers Connect Chrome for Bridge 0.2.38 or later. This is a

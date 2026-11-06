@@ -230,6 +230,34 @@ final class DestinationSandboxTests: XCTestCase {
     }
 }
 
+/// Settings → Account → Delete account explains what goes and what stays
+/// before anything is deleted. Cancelling keeps the account.
+@MainActor
+final class AccountDeletionSandboxTests: XCTestCase {
+    func testDeleteAccountExplainsAndCancels() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        app.tabBars.buttons["Settings"].tap()
+        let delete = app.buttons["delete-account"]
+        for _ in 0..<4 where !delete.isHittable { app.swipeUp() }
+        XCTAssertTrue(delete.waitForExistence(timeout: 15))
+        delete.tap()
+        let alert = app.alerts["Delete your Anteroom account?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 10))
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS 'stay there'")).firstMatch.exists,
+                      "The confirmation says live marketplace listings stay")
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Delete account confirmation"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        alert.buttons["Cancel"].tap()
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.firstMatch.exists, "Cancelling keeps the seller signed in")
+    }
+}
+
 /// Sales records lead with the period's figures and sales per week. The
 /// sandbox seeds sales, so both have data.
 @MainActor

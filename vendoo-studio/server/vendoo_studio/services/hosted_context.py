@@ -206,6 +206,12 @@ def catalog_state(owner):
         return _CATALOG_STATES.setdefault(owner, CatalogIndexState())
 
 
+def forget_catalog_state(owner):
+    """Drop a deleted account's index state from this process."""
+    with _CATALOG_STATES_LOCK:
+        _CATALOG_STATES.pop(owner, None)
+
+
 def for_seller(user_id, token=None, *, task_lease=None):
     from vendoo_studio import database
     owner = str(uuid.UUID(user_id))
