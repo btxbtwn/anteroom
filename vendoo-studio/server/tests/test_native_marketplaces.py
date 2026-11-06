@@ -522,6 +522,39 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(mercari.status_code, 409)
         self.assertIn("not live on Mercari", mercari.text)
 
+    def test_a_confirmed_list_or_update_records_the_price_the_marketplace_got(self):
+        # The seller set a Poshmark price apart from the item price.
+        priced = {**LISTING, "price": 12, "poshmark_specifics": {"poshmarkPrice": 15},
+                  "seller_fields": ["poshmark_specifics.poshmarkPrice"]}
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, priced, "user")
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
+        self.list("poshmark")
+        self.assertEqual(self.record("poshmark")["listed_price"], 15)
+        self.assertEqual(MarketplaceListingRepo(self.db).summaries(self.conv.id)[self.conv.id]["poshmark"]["price"], 15)
+
+        revised = listing_persistence.save_revision(self.db, self.conv.id, {**priced, "poshmark_specifics": {"poshmarkPrice": 18}}, "user")
+        self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error": "Poshmark needs a size.", "error_code": "rejected"}
+        self.client.post(f"{self.base}/poshmark/update", json={"revision_id": revised.id, "confirm": True})
+        self.run_jobs()
+        # A refused update leaves the live listing, and its price, as they were.
+        self.assertEqual(self.record("poshmark")["listed_price"], 15)
+
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
+        self.client.post(f"{self.base}/poshmark/update", json={"revision_id": revised.id, "confirm": True})
+        self.run_jobs()
+        self.assertEqual(self.record("poshmark")["listed_price"], 18)
+
+        # A listing the seller links by hand has a price Anteroom never saw.
+        from vendoo_studio.services.marketplace_delist import mark
+
+        mark(self.db, self.conv.id, "poshmark", "not_listed")
+        self.assertNotIn("listed_price", self.record("poshmark"))
+        MarketplaceListingRepo(self.db).save(self.conv.id, "poshmark", {"listed_price": 15})
+        mark(self.db, self.conv.id, "poshmark", "listed", POSH_URL)
+        record = self.record("poshmark")
+        self.assertEqual(record["state"], "published")
+        self.assertNotIn("listed_price", record)
+
     def live_on(self, platform, listing_id, url, **record):
         MarketplaceListingRepo(self.db).save(self.conv.id, platform, {
             "state": "published", "listing_id": listing_id, "listing_url": url, "revision_id": self.rev.id, **record})

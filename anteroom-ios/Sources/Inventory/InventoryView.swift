@@ -451,7 +451,13 @@ private struct MarketplaceBadges: View {
             VStack(alignment: .leading, spacing: 4) { chips }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(badges.map { "\(Marketplaces.name($0.marketplace)) \($0.label)" }.joined(separator: ", "))
+        .accessibilityLabel(badges.map(Self.spoken).joined(separator: ", "))
+    }
+
+    private static func spoken(_ badge: MarketplaceBadge) -> String {
+        let text = "\(Marketplaces.name(badge.marketplace)) \(badge.label)"
+        guard let price = badge.price else { return text }
+        return "\(text) at \(price.formatted(.currency(code: "USD")))\(badge.priceDiffers ? ", not the item price" : "")"
     }
 
     private var chips: some View {
@@ -459,6 +465,13 @@ private struct MarketplaceBadges: View {
             HStack(spacing: 3) {
                 Text(Marketplaces.name(badge.marketplace)).foregroundStyle(.secondary)
                 Text(badge.label).fontWeight(.medium).foregroundStyle(color(badge.tone))
+                if let price = badge.price {
+                    // A price apart from the item's own stands out, as on the desktop table.
+                    Text(price, format: .currency(code: "USD"))
+                        .monospacedDigit()
+                        .fontWeight(badge.priceDiffers ? .semibold : .regular)
+                        .foregroundStyle(badge.priceDiffers ? Color.primary : Color.secondary)
+                }
             }
             .font(.caption2)
             .lineLimit(1)

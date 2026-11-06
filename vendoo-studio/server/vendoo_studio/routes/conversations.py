@@ -43,6 +43,8 @@ class DirectRecord(BaseModel):
     failed: bool = False
     # Fields the marketplace rejected and the seller has not edited since.
     fields: int = 0
+    # The live listing's price on this marketplace, when Anteroom knows it.
+    price: float | None = None
 
 
 class ConversationSummary(BaseModel):

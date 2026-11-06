@@ -139,7 +139,11 @@ async def observe(db: Session, conv_id: str, marketplace: str, listing_id: str) 
     if result.get("variations"):
         # Per-SKU stock, so a sale of one size is not read as the whole item selling out.
         observation["variations"] = [{"sku": row["sku"], "quantity": row["quantity"]} for row in result["variations"]]
-    MarketplaceListingRepo(db).save(conv_id, marketplace, {"inventory_observation": observation})
+    values: dict = {"inventory_observation": observation}
+    if result["price"] is not None and not result.get("variations"):
+        # A verified read of the live listing: the price the marketplace has now.
+        values["listed_price"] = result["price"]
+    MarketplaceListingRepo(db).save(conv_id, marketplace, values)
     return {"listing_id": listing_id, **result, "differences": differences}
 
 

@@ -79,15 +79,23 @@ struct MarketplaceBadge: Hashable, Sendable {
     let label: String
     let tone: Tone
     let url: URL?
+    /// The live listing's price there, when known. Only a listed badge has one.
+    var price: Double?
+    /// The price is known and is not the item's own: a marketplace price the seller set, or one the marketplace changed.
+    var priceDiffers = false
 
     /// Nil when the item is not listed there: the row only names marketplaces with something to say.
-    init?(marketplace: String, record: DirectRecord) {
+    init?(marketplace: String, record: DirectRecord, basePrice: Double? = nil) {
         self.marketplace = marketplace
         switch record.state {
         case "published", "pending_review":
             label = record.state == "pending_review" ? "In review" : "Listed"
             tone = .good
             url = record.listingURL.flatMap(URL.init(string:))
+            price = record.price
+            if let price = record.price, let basePrice {
+                priceDiffers = (price * 100).rounded() != (basePrice * 100).rounded()
+            }
             return
         case "saving", "publishing", "updating":
             (label, tone) = ("Working", .neutral)
@@ -110,7 +118,7 @@ extension ListingSummary {
     /// Each marketplace Anteroom has a record for, in marketplace order.
     var marketplaceBadges: [MarketplaceBadge] {
         let records = directRecords ?? [:]
-        return Marketplaces.sorted(records.keys).compactMap { MarketplaceBadge(marketplace: $0, record: records[$0]!) }
+        return Marketplaces.sorted(records.keys).compactMap { MarketplaceBadge(marketplace: $0, record: records[$0]!, basePrice: price) }
     }
 
     /// Where the listing is live. Hosted rows carry only Anteroom's own listings.

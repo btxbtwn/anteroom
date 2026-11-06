@@ -68,6 +68,8 @@ export interface DirectRecord {
   failed?: boolean;
   /** Fields the marketplace rejected that the seller has not edited since. */
   fields?: number;
+  /** The live listing's price on this marketplace, when Anteroom knows it. */
+  price?: number | null;
 }
 
 export interface Conversation extends ConversationSummary {
