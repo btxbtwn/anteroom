@@ -27,7 +27,7 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
   if (info.project.name === "phone") {
     await page.getByRole("button", { name: "Inventory", exact: true }).click();
   }
-  await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: title, exact: true }).click();
+  await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "More listing actions", exact: true })).toBeVisible();
@@ -85,7 +85,7 @@ test("generation waits for all four photos and saves the listing from the editor
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: title, exact: true }).click();
+  await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
 
   let release!: () => void;
   const uploading = new Promise<void>(resolve => { release = resolve; });
@@ -213,7 +213,7 @@ test("typing before the initial details arrive preserves the pending edit and un
     expect(saved.sku).toBe("KEEP-123");
     expect(saved.knownFlaws).toBe("Keep this mark");
     await notes.fill("Saved after moving to another draft");
-    await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: otherTitle, exact: true }).click();
+    await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: otherTitle, exact: true }).click();
     await expect.poll(async () => {
       const response = await request.get(`${api}/api/conversations/${draft.id}`, { headers });
       return JSON.parse((await response.json()).notes || "{}").sellerNotes;

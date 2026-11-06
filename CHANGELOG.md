@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.743 — 2026-11-06
+
+- Listings in the sidebar and suggestions are now links. Cmd-click (Ctrl-click on Windows) opens one in a new tab, and right-clicking offers "Open in new tab". A plain click still opens it in place.
+
+## 0.1.742 — 2026-11-06
+
+- The listing's ⋯ menu now sits beside Regenerate, so the actions at the bottom of the marketplace list end flush with the bottom.
+
 ## 0.1.741 — 2026-11-06
 
 - Sorting by Date Sold (Newest) opens the Sold tab and lists every sale newest first.
