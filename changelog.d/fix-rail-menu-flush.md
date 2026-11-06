@@ -1,1 +1,0 @@
-- The listing's ⋯ menu now sits beside Regenerate, so the actions at the bottom of the marketplace list end flush with the bottom.
