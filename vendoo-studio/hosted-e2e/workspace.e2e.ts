@@ -20,7 +20,7 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
   expect((await request.get(`${api}/api/drafts/${draft.id}/photos/${photo.id}`, { headers: { Authorization: `Bearer ${bob.access_token}` } })).status()).toBe(404);
   expect((await request.get(`${api}/api/drafts`)).status()).toBe(401);
   expect((await request.post(`${api}/api/conversations/${draft.id}/vendoo-api/list`, { headers, data: { marketplaces: ["ebay"], confirm: true } })).status()).toBe(403);
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -59,7 +59,7 @@ test("a web deployment offers a reload without reloading the seller's tab", asyn
     const response = await route.fetch();
     await route.fulfill({ response, json: { ...await response.json(), version: "999.0.0" } });
   });
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -81,7 +81,7 @@ test("generation waits for all four photos and saves the listing from the editor
   const title = `Four-photo draft ${Date.now()}`;
   const draft = await (await request.post(`${api}/api/drafts`, { headers, data: { title } })).json();
   expect((await request.post(`${api}/api/drafts/${draft.id}/photos`, { headers, data: pixel })).status()).toBe(201);
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -131,7 +131,7 @@ test("two editors generate while a third saves without preloading unused marketp
       }
     }
   }
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -189,7 +189,7 @@ test("typing before the initial details arrive preserves the pending edit and un
   } })).json();
   const otherTitle = `Other details draft ${Date.now()}`;
   await request.post(`${api}/api/drafts`, { headers, data: { title: otherTitle } });
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -233,7 +233,7 @@ test("a listing that cannot load says so and loads its saved details on Retry in
     title: `Unavailable details ${info.project.name} ${Date.now()}`,
     notes: JSON.stringify({ vendooLabels: "A23", sellerNotes: "Saved notes" }),
   } })).json();
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -275,7 +275,7 @@ test("the Mac window hands its account session to the native AI worker and clear
       } } },
     });
   });
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();

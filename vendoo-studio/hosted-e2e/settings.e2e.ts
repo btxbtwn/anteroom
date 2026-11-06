@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 test("on the web, Settings → Connections shows the marketplace accounts", async ({ page }, info) => {
   test.skip(info.project.name === "phone", "The settings sidebar is the desktop layout");
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();

@@ -11,7 +11,10 @@ const RESET_PATH = "/?forgot-password";
 
 export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; notice?: string; sandbox?: boolean }) {
   const mac = useMacApp();
-  const [mode, setMode] = useState<Mode>(() => new URLSearchParams(window.location.search).has("forgot-password") ? "reset" : "sign_in");
+  const [mode, setMode] = useState<Mode>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.has("forgot-password") ? "reset" : params.has("create-account") ? "create_account" : "sign_in";
+  });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);

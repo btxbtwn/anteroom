@@ -22,7 +22,7 @@ test("hosted Chrome imports, saved-off rules and sale switches are available", a
   const errors: string[] = [], macReads: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   page.on("request", request => { if (request.url().endsWith("/api/extension/status")) macReads.push(request.url()); });
-  await page.goto("/");
+  await page.goto("/?sign-in");
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();

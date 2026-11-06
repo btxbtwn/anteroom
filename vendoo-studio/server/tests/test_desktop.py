@@ -508,7 +508,7 @@ class AccountWorkspaceTest(unittest.TestCase):
 
     def test_reopens_the_account_the_window_last_showed(self):
         desktop.remember_workspace(f"{desktop.HOSTED_URL}/?code=abc")
-        self.assertEqual(desktop.saved_workspace_url(), desktop.HOSTED_URL)
+        self.assertEqual(desktop.saved_workspace_url(), desktop.ACCOUNT_URL)
         desktop.remember_workspace(f"{desktop.APP_URL}/")
         self.assertEqual(desktop.saved_workspace_url(), desktop.APP_URL)
 
@@ -516,7 +516,7 @@ class AccountWorkspaceTest(unittest.TestCase):
         desktop.remember_workspace(desktop.HOSTED_URL)
         for url in (None, "about:blank", "https://www.poshmark.com/", f"{desktop.HOSTED_URL}.evil.test/"):
             desktop.remember_workspace(url)
-        self.assertEqual(desktop.saved_workspace_url(), desktop.HOSTED_URL)
+        self.assertEqual(desktop.saved_workspace_url(), desktop.ACCOUNT_URL)
 
     def test_an_unreadable_choice_opens_this_macs_listings(self):
         mac_workspace.WORKSPACE_FILE.write_text("{not json", encoding="utf-8")
@@ -528,10 +528,10 @@ class AccountWorkspaceTest(unittest.TestCase):
              patch.object(desktop, "ensure_frontend"), patch.object(desktop, "start_owned_server"), \
              patch.object(desktop, "reap_orphaned_bridges"), patch.object(desktop, "is_frozen", return_value=True), \
              patch.dict(sys.modules, {"vendoo_studio.services.keychain": SimpleNamespace(warm_keychain=lambda: None)}):
-            desktop.open_in_window(desktop.HOSTED_URL)
+            desktop.open_in_window(desktop.ACCOUNT_URL)
             window.load_url.assert_not_called()
             desktop._boot_window(window)
-            window.load_url.assert_called_once_with(desktop.HOSTED_URL)
+            window.load_url.assert_called_once_with(desktop.ACCOUNT_URL)
             desktop.open_in_window(desktop.APP_URL)
             window.load_url.assert_called_with(desktop.APP_URL)
 
@@ -543,7 +543,7 @@ class AccountWorkspaceTest(unittest.TestCase):
              patch.object(desktop, "reap_orphaned_bridges"), patch.object(desktop, "is_frozen", return_value=True), \
              patch.dict(sys.modules, {"vendoo_studio.services.keychain": SimpleNamespace(warm_keychain=lambda: None)}):
             desktop._boot_window(window)
-        window.load_url.assert_called_once_with(desktop.HOSTED_URL)
+        window.load_url.assert_called_once_with(desktop.ACCOUNT_URL)
 
     def test_account_menu_switches_the_window(self):
         menu_mod = SimpleNamespace(
@@ -558,4 +558,4 @@ class AccountWorkspaceTest(unittest.TestCase):
         with patch.object(desktop, "open_in_window") as open_in_window:
             actions["My Account"]()
             actions["This Mac’s Listings"]()
-        self.assertEqual(open_in_window.call_args_list, [call(desktop.HOSTED_URL), call(desktop.APP_URL)])
+        self.assertEqual(open_in_window.call_args_list, [call(desktop.ACCOUNT_URL), call(desktop.APP_URL)])

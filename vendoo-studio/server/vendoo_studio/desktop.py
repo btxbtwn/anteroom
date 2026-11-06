@@ -408,10 +408,14 @@ def remember_workspace(url: str | None) -> None:
         print(f"could not save the open workspace: {exc}", flush=True)
 
 
+# Signed-out browsers see the landing page at the hosted root; the Mac window goes straight to sign-in.
+ACCOUNT_URL = f"{HOSTED_URL}/?sign-in"
+
+
 def saved_workspace_url() -> str:
     from vendoo_studio.services import mac_workspace
 
-    return HOSTED_URL if mac_workspace.saved() == "account" else APP_URL
+    return ACCOUNT_URL if mac_workspace.saved() == "account" else APP_URL
 
 
 def open_in_window(url: str) -> None:
@@ -458,7 +462,7 @@ def studio_app_menu():
         Menu(
             "Account",
             [
-                MenuAction("My Account", lambda: open_in_window(HOSTED_URL)),
+                MenuAction("My Account", lambda: open_in_window(ACCOUNT_URL)),
                 MenuAction("This Mac’s Listings", lambda: open_in_window(APP_URL)),
             ],
         ),
