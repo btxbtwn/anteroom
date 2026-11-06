@@ -116,7 +116,7 @@ def title_similarity(a: str, b: str) -> float:
     return max(SequenceMatcher(None, " ".join(sorted(left)), " ".join(sorted(right))).ratio(), overlap)
 
 
-def _candidates(db: Session) -> list[tuple[str, str, set[str]]]:
+def match_candidates(db: Session) -> list[tuple[str, str, set[str]]]:
     rows = db.query(Conversation.id, Conversation.title).filter(Conversation.title.isnot(None)).all()
     return [(conv_id, title, title_tokens(title)) for conv_id, title in rows if title and title.strip()]
 
@@ -158,7 +158,7 @@ async def active_listings(db: Session, marketplace: str, cursor: str | None) -> 
     raw = reply.get("rows")
     if not isinstance(raw, list):
         raise ChromeImportError(502, f"Chrome did not return {_name(marketplace)}'s listings.")
-    items = _candidates(db)
+    items = match_candidates(db)
     rows = []
     for entry in raw[:MAX_ROWS]:
         if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not _LISTING_ID[marketplace].fullmatch(entry["id"]):
@@ -264,27 +264,13 @@ async def import_listing(db: Session, marketplace: str, listing: str) -> dict:
 
 async def link_listing(db: Session, marketplace: str, listing: str, conversation_id: str) -> dict:
     """Link a listing to an item the seller chose. The item's own edits and photos stay as they are."""
-    from vendoo_studio.services.marketplace_delist import DelistError, listings, mark
-
     listing_id = listing_id_from(marketplace, listing)
-    if not ConversationRepo(db).get(conversation_id):
-        raise ChromeImportError(404, "That Anteroom item no longer exists.")
-    try:
-        existing = inventory_import.owner(db, marketplace, listing_id)
-    except inventory_import.ImportConflict as exc:
-        raise ChromeImportError(409, str(exc)) from exc
-    if existing and existing.id != conversation_id:
-        raise ChromeImportError(409, "This listing is already linked to another Anteroom item.")
-    if not existing:
-        current = listings(db, conversation_id).get(marketplace) or {}
-        if current.get("listing_id") and current["listing_id"] != listing_id:
-            raise ChromeImportError(409, f"This item is already linked to another {_name(marketplace)} listing.")
+
+    async def verify() -> None:
         # The listing must still be the seller's and still for sale before it is linked.
         await _read(marketplace, listing_id)
-        try:
-            mark(db, conversation_id, marketplace, "listed", public_listing_url(marketplace, listing_id))
-        except DelistError as exc:
-            raise ChromeImportError(exc.status_code, str(exc)) from exc
-    return {"conversation_id": conversation_id, "listing_id": listing_id, "reused": True, "linked": True,
-            "photo_count": len(ConversationRepo(db).get_photos(conversation_id)),
-            "warnings": [] if existing else ["Linked to the existing item. Its edits and photos were kept."]}
+
+    try:
+        return await inventory_import.link_owned_listing(db, marketplace, listing_id, conversation_id, verify)
+    except inventory_import.LinkError as exc:
+        raise ChromeImportError(exc.status_code, str(exc)) from exc
