@@ -218,6 +218,9 @@ async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_p
         row.floor_cents = offer_floor(db, row)
     if blocked := blocking(db, row.marketplace, listing_id, row.action, new_like_at=new_like_at):
         raise PromotionError(409, blocked)
+    # Only reads are open here. End them before Chrome answers, which can take
+    # minutes: a held connection is one the seller's own pages cannot use.
+    db.commit()
     try:
         facts = await browser_bridge.request(SimpleNamespace(id=f"promotion-{row.batch_id}"), "marketplace.promotion_check", {
             "marketplace": row.marketplace, "action": row.action, "listing_id": listing_id,

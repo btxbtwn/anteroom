@@ -121,6 +121,20 @@ overlay only changed fields on incoming reads, and finish after the editor
 unmounts. Saves merge against loaded notes and retain managed metadata; failed
 edits remain available for retry. This still requires a production rerun.
 
+Production 0.1.740 exhausted the pool again on 2026-11-06 at 01:43 UTC, and
+every listing read from the web editor failed during it. Sampling
+`pg_stat_activity` on 0.1.741 showed the promotion scheduler `idle in
+transaction` for up to 139 s after a `listing_promotions` read: a share or
+offer check read the listing, then waited on Chrome with that transaction
+open. Each such wait holds one of the 12 connections for as long as Chrome
+takes. The check and the scheduler's like-feed read and read gap now commit
+first. `services/chrome_wait_connections.py` records which asyncio task holds
+each pooled connection. A Chrome wait (`ReplyWaits.register_wait`) that starts
+while its task still holds one logs the call site once in production and fails
+the test suite. Tests that replace Chrome above `register_wait` with a mock do
+not exercise the check. Not yet measured after deploy: whether the pool stays
+clear with automations running alongside two sellers' editors.
+
 ## 3. Keep traffic and refresh costs proportional to useful work
 
 Fly's HTTP concurrency type is `requests`, which is what
