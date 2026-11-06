@@ -239,10 +239,8 @@ export function ListingEditor({
         }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
         railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}
-        railStatus={<>
-          {editState.saving && <span role="status" className="text-xs text-muted-foreground">Saving…</span>}
-          <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>
-        </>}
+        railMenu={<ListingActionsMenu convId={convId} onCleared={onCleared} />}
+        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">Saving…</span> : undefined}
         onSelect={(id) => {
           setFieldTarget(null);
           setEditTab(id);

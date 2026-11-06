@@ -255,6 +255,14 @@ export function compareListings(sort: ListingSortId): ((left: FilterableListing,
   }
 }
 
+/**
+ * The status tab a sort belongs on. Only sold listings have a sale date, so
+ * sorting by it opens the Sold tab; every other sort keeps the current tab.
+ */
+export function statusForSort(sort: ListingSortId, status: ListingStatusFilter): ListingStatusFilter {
+  return sort === "sold_desc" ? "sold" : status;
+}
+
 export function sortListings<T extends FilterableListing>(listings: T[], sort: ListingSortId): T[] {
   const compare = compareListings(sort);
   return compare ? [...listings].sort(compare) : listings;

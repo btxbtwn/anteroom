@@ -15,6 +15,7 @@ import { inventoryStatus, listedFromImport, partialSale, statusHint, withDirectL
 import { compactRelativeTime, type Listing } from "./listingShelves";
 import { prefetchListingReads } from "../../api/navigationQueries";
 import { preloadListingCode } from "../../app/pageLoaders";
+import { isBrowserLinkClick, listingHref } from "../../app/openListing";
 import { useNavigationIntent } from "../../lib/useNavigationIntent";
 
 function canHover() {
@@ -194,10 +195,13 @@ export const ListingRow = memo(function ListingRow({
               onBlur={commitRename}
             />
           ) : (
-            <button
-              type="button"
+            <a
+              href={listingHref(listing.id)}
+              draggable={false}
               className={cn(
-                "block w-full cursor-pointer truncate text-left text-sm font-medium leading-snug text-inherit outline-none",
+                "block w-full cursor-pointer truncate text-left text-sm font-medium leading-snug text-inherit no-underline outline-none",
+                // Stretch the link over the row so right-click anywhere offers "Open in new tab".
+                !selecting && "after:absolute after:inset-0 after:content-['']",
                 // Hover actions float over the title; fade it under them.
                 !selecting &&
                   "group-hover/row:[mask-image:linear-gradient(to_right,#000_calc(100%-76px),transparent_calc(100%-56px))] group-focus-within/row:[mask-image:linear-gradient(to_right,#000_calc(100%-76px),transparent_calc(100%-56px))]",
@@ -205,6 +209,9 @@ export const ListingRow = memo(function ListingRow({
               title={name === title ? title : `${name} · ${title}`}
               onClick={(e) => {
                 e.stopPropagation();
+                // Cmd/Ctrl-click and friends open a new tab the browser's way.
+                if (isBrowserLinkClick(e)) return;
+                e.preventDefault();
                 activate();
               }}
               onDoubleClick={(e) => {
@@ -214,7 +221,7 @@ export const ListingRow = memo(function ListingRow({
               }}
             >
               {name}
-            </button>
+            </a>
           )}
           <div className="mt-0.5 flex items-center gap-2">
             <ListingStatusLabel status={status} title={statusTitle} />
