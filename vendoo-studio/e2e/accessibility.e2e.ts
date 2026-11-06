@@ -23,6 +23,8 @@ async function openInventory(page: Page, phone: boolean) {
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
+    // The drawer's items read as low-contrast text while it closes; check the inventory once it is gone.
+    await expect(page.getByRole("navigation", { name: "Pages" })).toBeHidden();
   }
   await expect(page.getByRole("list", { name: "Listings" }).getByRole("link").first()).toBeVisible();
 }
