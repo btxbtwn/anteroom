@@ -49,7 +49,7 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
         }
         finish({ ok: data.ok === true, state: ["connected", "disconnected", "pending"].includes(data.state) ? data.state : "unavailable",
           extensionVersion: typeof data.extensionVersion === "string" ? data.extensionVersion.slice(0, 30) : "",
-          supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item: unknown) => item === "poshmark.form.read" || item === "marketplace.actions" || item === "marketplace.sessions" || item === "marketplace.sales_history" || item === "marketplace.promotions" || item === "marketplace.import" || item === "vendoo.drafts") : [] });
+          supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item: unknown) => item === "poshmark.form.read" || item === "marketplace.actions" || item === "marketplace.sessions" || item === "marketplace.sales_history" || item === "marketplace.promotions" || item === "marketplace.import" || item === "vendoo.drafts" || item === "marketplace.signed_approvals") : [] });
       };
       const timeout = relay ? COMMAND_TIMEOUT_MS[relay.command.type] ?? 10_000 : action === "poshmark_form" ? 35000 : 2000;
       const timer = channel.setTimeout(() => finish({ ok: false, state: "unavailable", extensionVersion: "" }), timeout);

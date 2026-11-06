@@ -1,0 +1,2 @@
+- Chrome now runs a listing, update, delist, share or offer from the web only when Anteroom's server signed that exact action, so nothing else on the page can trigger one.
+- Chrome asks you to approve your Anteroom account again every 30 days.
