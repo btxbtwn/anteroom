@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.753 — 2026-11-06
+
+- Add a landing page at myanteroom.com for visitors who are not signed in, showing how one listing fills eBay, Poshmark, Mercari, Depop and Etsy.
+
 ## 0.1.752 — 2026-11-06
 
 - The inventory table on the web and the iPhone badges now show where imported listings are live, sold or delisted, instead of "Not listed" everywhere.
