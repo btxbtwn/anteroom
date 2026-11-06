@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.741 — 2026-11-06
+
+- Sorting by Date Sold (Newest) opens the Sold tab and lists every sale newest first.
+
 ## 0.1.740 — 2026-11-05
 
 - List an item again on a marketplace you delisted it from, on the web and the iPhone app.
