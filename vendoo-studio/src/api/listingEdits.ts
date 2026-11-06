@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type { ListingData, ListingResponse } from "./types";
 import { listingCategorySignature } from "../components/nativeFormStability";
+import { notifyUnsavedWork, registerUnsavedWork } from "../lib/unsavedWork";
 
 /** Keep newer field edits while accepting the server's normalized unchanged fields. */
 function rebase(saved: unknown, before: unknown, after: unknown, checkConflicts = false, path = ""): unknown {
@@ -27,13 +28,39 @@ class ListingEdits {
   private listeners = new Set<() => void>();
   private revisionId = "";
   private base: ListingData = {};
-  constructor(private client: QueryClient, private id: string) {}
+  constructor(
+    private client: QueryClient,
+    private id: string,
+    private registry: { attach: (edits: ListingEdits) => void; release: (edits: ListingEdits) => void },
+  ) {}
 
   getSnapshot = () => this.state;
-  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    this.registry.attach(this);
+    return () => {
+      this.listeners.delete(listener);
+      this.releaseIfIdle();
+    };
+  };
+  /** A queued draft, a save in flight, or a failed save the seller has not retried or discarded. */
+  get pending() {
+    return Boolean(this.state.draft) || this.state.saving;
+  }
   private update(state: typeof this.state) {
     this.state = state;
+    if (this.pending) unsavedQueues.add(this);
+    else unsavedQueues.delete(this);
+    notifyUnsavedWork();
     this.listeners.forEach(listener => listener());
+    this.releaseIfIdle();
+  }
+  /** Nothing watches it and nothing is left to save: drop it from the map. */
+  private releaseIfIdle() {
+    // Deferred: React re-subscribes in the same task when it remounts an editor.
+    setTimeout(() => {
+      if (!this.listeners.size && !this.pending && !this.state.error) this.registry.release(this);
+    }, 0);
   }
 
   save = (listing: ListingData) => {
@@ -97,11 +124,26 @@ class ListingEdits {
   }
 }
 
+const unsavedQueues = new Set<ListingEdits>();
+registerUnsavedWork({ pending: () => unsavedQueues.size > 0 });
+
 const queues = new WeakMap<QueryClient, Map<string, ListingEdits>>();
 export function listingEdits(client: QueryClient, id: string) {
   let listings = queues.get(client);
   if (!listings) { listings = new Map(); queues.set(client, listings); }
   let edits = listings.get(id);
-  if (!edits) { edits = new ListingEdits(client, id); listings.set(id, edits); }
+  if (!edits) {
+    const map = listings;
+    edits = new ListingEdits(client, id, {
+      attach: (live) => { if (!map.has(id)) map.set(id, live); },
+      release: (idle) => { if (map.get(id) === idle) map.delete(id); },
+    });
+    listings.set(id, edits);
+  }
   return edits;
+}
+
+/** How many listings hold a save queue; idle queues are dropped. */
+export function listingEditQueueCount(client: QueryClient): number {
+  return queues.get(client)?.size ?? 0;
 }

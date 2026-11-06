@@ -10,6 +10,9 @@ import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
 import { AccountMenu } from "./AccountMenu";
 import { cloudExtension } from "../api/cloudExtension";
 import { applyTheme } from "../theme";
+import { ErrorBoundary } from "../components/ErrorBoundary";
+import { installChunkReload } from "../lib/chunkReload";
+import { installUnsavedWorkGuard } from "../lib/unsavedWork";
 import { installSoftwareKeyboard } from "../lib/softwareKeyboard";
 import { isMacApp, markMacApp, useMacApp } from "../lib/macApp";
 import { SetPassword, SignIn } from "./SignIn";
@@ -34,6 +37,8 @@ const sandbox = import.meta.env.DEV && import.meta.env.VITE_ANTEROOM_SANDBOX ===
 applyTheme();
 installSoftwareKeyboard(window);
 markMacApp();
+installChunkReload();
+installUnsavedWorkGuard(window);
 
 function CloudApp() {
   const [session, setSession] = useState<Session | null>(null);
@@ -124,4 +129,6 @@ function HostedWorkspace({ session }: { session: Session }) {
   </WorkspaceRuntimeProvider>;
 }
 
-createRoot(document.getElementById("root")!).render(<React.StrictMode><CloudApp/></React.StrictMode>);
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode><ErrorBoundary label="Anteroom" className="h-dvh"><CloudApp/></ErrorBoundary></React.StrictMode>,
+);
