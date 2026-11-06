@@ -76,6 +76,9 @@ class ReplyWaits:
         self._wait_jobs: dict[str, str] = {}
 
     def register_wait(self, request_id: str, job_id: str | None = None) -> asyncio.Future:
+        from vendoo_studio.services.chrome_wait_connections import check_released
+
+        check_released()
         self.cancel_wait(request_id)
         fut = asyncio.get_running_loop().create_future()
         self._waits[request_id] = fut

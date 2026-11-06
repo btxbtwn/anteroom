@@ -338,6 +338,7 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     stop_note = f"Checked {OFFER_READS} listings; the rest are checked next time."
                     break
                 if reads:
+                    db.commit()  # Hold no connection through the pause between reads.
                     await sleep(READ_GAP_S)
                 reads += 1
             send = promotions.new_row(conv, row.marketplace, row.action, batch, row.discount_percent, row.id)
@@ -466,6 +467,7 @@ async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
             db.commit()
             continue
         if row.marketplace not in feeds:
+            db.commit()  # Hold no connection while Chrome reads the feed.
             try:
                 promotions.require_chrome()
                 started = _now()
