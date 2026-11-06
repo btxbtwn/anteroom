@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.748 — 2026-11-06
+
+- The Inventory table shows each listing's price on every marketplace it is live on, beside its status. A price that differs from the item price stands out, and a dash means Anteroom doesn't know that marketplace's price yet.
+- The iPhone inventory list shows the same per-marketplace prices on its marketplace badges.
+
 ## 0.1.747 — 2026-11-06
 
 - Send Depop offers to likers on marked-down items: the offer's discount now comes off the sale price buyers see, so Depop no longer turns them down.

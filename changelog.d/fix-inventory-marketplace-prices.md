@@ -1,2 +1,0 @@
-- The Inventory table shows each listing's price on every marketplace it is live on, beside its status. A price that differs from the item price stands out, and a dash means Anteroom doesn't know that marketplace's price yet.
-- The iPhone inventory list shows the same per-marketplace prices on its marketplace badges.
