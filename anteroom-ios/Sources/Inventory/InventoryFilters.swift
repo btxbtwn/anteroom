@@ -87,12 +87,20 @@ struct MarketplaceBadge: Hashable, Sendable {
     var priceDiffers = false
 
     /// Nil when there is nothing to say: not listed there and nothing missing.
-    /// The same rules as the desktop table's cell (inventoryTable.ts).
-    init?(marketplace: String, record: DirectRecord?, missing: [MissingField] = [], basePrice: Double? = nil) {
+    /// The same rules as the desktop table's cell (inventoryTable.ts): Anteroom's
+    /// own record outranks the imported history, and a sale stands either way.
+    init?(marketplace: String, record: DirectRecord?, missing: [MissingField] = [], basePrice: Double? = nil,
+          imported: Bool = false, removed: Bool = false, sold: Bool = false, importedURL: String? = nil) {
         self.marketplace = marketplace
         let needs = missing.isEmpty ? nil : needsText(missing.count)
         let live = ["published", "pending_review"].contains(record?.state ?? "")
-        url = live ? record?.listingURL.flatMap(URL.init(string:)) : nil
+        let busy = ["saving", "publishing", "updating"].contains(record?.state ?? "")
+        let importedLive = imported && !removed && !busy
+        url = sold || live || importedLive ? (record?.listingURL ?? importedURL).flatMap(URL.init(string:)) : nil
+        if sold {
+            (label, tone) = ("Sold", .neutral)
+            return
+        }
         switch record?.state {
         case "published", "pending_review":
             label = record?.state == "pending_review" ? "In review" : "Listed"
@@ -108,6 +116,10 @@ struct MarketplaceBadge: Hashable, Sendable {
         default:
             break
         }
+        if importedLive {
+            (label, tone) = ("Listed", .good)
+            return
+        }
         // The server's count already holds the rejected fields; before it arrives, the record's own.
         if !missing.isEmpty { detail = missingNames(missing) }
         if let record, record.failed {
@@ -121,6 +133,8 @@ struct MarketplaceBadge: Hashable, Sendable {
             (label, tone) = ("Checking", .neutral)
         case "draft":
             (label, tone) = (needs ?? "Draft", needs == nil ? .neutral : .attention)
+        case _ where removed:
+            (label, tone) = ("Delisted", .neutral)
         default:
             guard let needs else { return nil }
             (label, tone) = (needs, .attention)
@@ -129,30 +143,45 @@ struct MarketplaceBadge: Hashable, Sendable {
 }
 
 extension ListingSummary {
-    /// Each marketplace Anteroom has a record for or that still needs fields, in marketplace order.
+    /// The imported history keys Vestiaire's API integration separately; it is one marketplace.
+    private static func canonical(_ id: String) -> String { id == "vestiaireApi" ? "vestiaire" : id }
+
+    private var importedMarketplaces: Set<String> { Set((vendooMarketplaces ?? []).map(Self.canonical)) }
+    private var removed: Set<String> { Set((removedMarketplaces ?? []).map(Self.canonical)) }
+
+    /// Each marketplace with something to say, in marketplace order: Anteroom's
+    /// records, fields still needed, the imported history, sales and delists.
     func marketplaceBadges(missing: [String: [MissingField]] = [:]) -> [MarketplaceBadge] {
         let records = directRecords ?? [:]
+        let sold = vendooSoldDates ?? [:]
         let ids = Set(records.keys).union(missing.filter { !$0.value.isEmpty }.keys)
-        return Marketplaces.sorted(ids).compactMap {
-            MarketplaceBadge(marketplace: $0, record: records[$0], missing: missing[$0] ?? [], basePrice: price)
+            .union(importedMarketplaces).union(removed).union(sold.keys)
+        return Marketplaces.sorted(ids).compactMap { id in
+            MarketplaceBadge(marketplace: id, record: records[id], missing: missing[id] ?? [], basePrice: price,
+                             imported: importedMarketplaces.contains(id), removed: removed.contains(id),
+                             sold: sold[id] != nil, importedURL: vendooListingURLs?[id])
         }
     }
 
     /// Changes when a saved edit or a List result could change what is missing.
     var readinessKey: String { "\(updatedAt ?? "")|\(directRecords ?? [:])" }
 
-    /// Where the listing is live. Hosted rows carry only Anteroom's own listings.
+    /// Where the listing is live: the imported history plus Anteroom's own
+    /// publishes, less what Anteroom delisted.
     var liveMarketplaces: [String] {
         var seen = Set<String>()
-        return (directMarketplaces ?? []).filter { seen.insert($0).inserted }
+        let imported = (vendooMarketplaces ?? []).map(Self.canonical).filter { !removed.contains($0) }
+        return (imported + (directMarketplaces ?? [])).filter { seen.insert($0).inserted }
     }
 
-    /// A listing Anteroom published reads Active even if it was a draft; a sale
-    /// and a send in progress keep their own labels.
+    /// A listing Anteroom published reads Active even if it was a draft, and one
+    /// Anteroom delisted everywhere reads Draft; a sale and a send in progress
+    /// keep their own labels.
     var inventoryStatus: String {
         let status = self.status ?? "draft"
         if status == "sold" || status == "listing" { return status }
-        if !liveMarketplaces.isEmpty, ["draft", "in_progress", "failed"].contains(status) { return "active" }
+        if !(directMarketplaces ?? []).isEmpty, ["draft", "in_progress", "failed"].contains(status) { return "active" }
+        if status == "active", !removed.isEmpty, liveMarketplaces.isEmpty { return "draft" }
         return status
     }
 

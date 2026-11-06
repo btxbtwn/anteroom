@@ -18,6 +18,12 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
     var missingSaleData: [String]?
     /// Anteroom's own listing of the item, per marketplace.
     var directRecords: [String: DirectRecord]?
+    /// What the imported history says: where the item is live, each listing's
+    /// link, where it sold, and where Anteroom has delisted it since.
+    var vendooMarketplaces: [String]?
+    var vendooListingURLs: [String: String]?
+    var vendooSoldDates: [String: String]?
+    var removedMarketplaces: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, sku, price, quantity
@@ -29,6 +35,10 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
         case coverPhotoURL = "cover_photo_url"
         case missingSaleData = "missing_sale_data"
         case directRecords = "direct_records"
+        case vendooMarketplaces = "vendoo_marketplaces"
+        case vendooListingURLs = "vendoo_listing_urls"
+        case vendooSoldDates = "vendoo_sold_dates"
+        case removedMarketplaces = "removed_marketplaces"
     }
 
     var displayTitle: String {
