@@ -8,8 +8,10 @@ the checkout otherwise.
 
 from __future__ import annotations
 
+import os
+
 from alembic import context
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 from vendoo_studio.database import Base, database_url, load_models
 
@@ -41,13 +43,16 @@ def run_migrations_offline() -> None:
 
 # A revision that waits for a table lock queues every later query on that
 # table behind it, so a busy production table would stall the app. Fail the
-# deploy quickly instead; a revision that needs longer sets its own.
-LOCK_TIMEOUT = "5s"
+# deploy quickly instead; a revision that needs longer sets its own. The test
+# suite turns it off ("0"): its workers migrate fresh databases at once and
+# queue on the cluster-wide seller role.
+LOCK_TIMEOUT_SETTING = "ANTEROOM_MIGRATION_LOCK_TIMEOUT"
 
 
 def _limit_lock_waits(connection) -> None:
     if connection.dialect.name == "postgresql":
-        connection.exec_driver_sql(f"SET lock_timeout = '{LOCK_TIMEOUT}'")
+        timeout = os.environ.get(LOCK_TIMEOUT_SETTING) or "5s"
+        connection.execute(text("SELECT set_config('lock_timeout', :timeout, false)"), {"timeout": timeout})
         # A session setting outlives this commit; Alembic then opens its own transaction.
         connection.commit()
 

@@ -108,9 +108,10 @@ def upgrade():
     assert index_lock_problems(safe) == []
 
 
-def test_a_deploy_migration_gives_up_on_a_held_table_lock(migration_engine):  # noqa: F811
+def test_a_deploy_migration_gives_up_on_a_held_table_lock(migration_engine, monkeypatch):  # noqa: F811
     if migration_engine.dialect.name != 'postgresql':
         pytest.skip('Lock timeouts apply to Postgres')
+    monkeypatch.delenv('ANTEROOM_MIGRATION_LOCK_TIMEOUT', raising=False)
     schema_migrations.ensure_schema(migration_engine)
     config = migration_config(migration_engine)
     command.downgrade(config, LAST_UNCHECKED_REVISION)

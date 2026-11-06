@@ -194,7 +194,7 @@ fails the run if it never becomes ready. A model outage does not fail
 `/api/health`.
 
 `alembic upgrade head` runs on every deploy. `migrations/env.py` sets
-`lock_timeout = '5s'` on the migration connection, so a revision that cannot
+`lock_timeout = '5s'` on the migration connection (`ANTEROOM_MIGRATION_LOCK_TIMEOUT` overrides it; the test suite sets `0` because its workers migrate fresh databases at once), so a revision that cannot
 get its table lock fails the deploy (before Fly is touched) instead of queueing
 every seller's queries behind it. Retry when traffic is quieter rather than
 raising the timeout. Revisions after `e3bea75f1b9b` that build an index on an
