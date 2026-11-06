@@ -93,3 +93,31 @@ def test_upgrade_computes_existing_fields_and_sql_writes_keep_them_current(migra
     prepared = _row(ListingRevision.__table__, raw, "11111111-1111-1111-1111-111111111111")
     assert "inventory_fields" not in prepared
     assert prepared["listing_json"] == payload
+
+
+def test_hosted_inventory_reports_where_imported_listings_are_live(migration_engine):  # noqa: F811
+    """The web table and sidebar read the same import fields the Mac list sends."""
+    import json
+
+    engine = migration_engine
+    schema_migrations.ensure_schema(engine)
+    notes = {
+        "vendooMarketplaces": ["ebay", "poshmark", "mercari"],
+        "vendooListingUrls": {"ebay": "https://www.ebay.com/itm/123456789012",
+                              "poshmark": "https://poshmark.com/listing/Tee-66f0aabbccddeeff00112233",
+                              "mercari": "https://www.mercari.com/us/item/m12345678901/"},
+        "vendooLabels": "Tees, Summer",
+        "vendooDates": {"listed": "2026-10-01T12:00:00Z", "soldByMarketplace": {"mercari": "2026-11-01T12:00:00Z"}},
+        "marketplaceDelists": {"poshmark": {"state": "deleted", "listing_id": "66f0aabbccddeeff00112233"}},
+    }
+    with Session(engine) as db:
+        db.add(Conversation(id="tee", title="Tee", notes=json.dumps(notes)))
+        db.commit()
+        summary = inventory_response(db)[0]
+    assert "notes" not in summary
+    assert summary["vendoo_marketplaces"] == ["ebay", "poshmark", "mercari"]
+    assert summary["vendoo_listing_urls"]["ebay"] == "https://www.ebay.com/itm/123456789012"
+    assert summary["removed_marketplaces"] == ["poshmark"]
+    assert summary["vendoo_sold_dates"] == {"mercari": "2026-11-01T12:00:00Z"}
+    assert summary["vendoo_listed_at"] == "2026-10-01T12:00:00Z"
+    assert summary["vendoo_labels"] == ["Tees", "Summer"]

@@ -76,6 +76,22 @@ struct InventoryTests {
         precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "not_saved", failed: true, fields: 0))?.tone == .problem)
         precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "pending_review"))?.label == "In review")
 
+        // Imported listings read Listed with their own link; a sale and Anteroom's delist outrank the import.
+        let imported = try JSONDecoder().decode(ListingSummary.self, from: Data(#"""
+        {"id":"g","title":"Tee","status":"active","direct_marketplaces":[],"direct_records":{
+          "depop":{"state":"draft","failed":false,"fields":0}},
+         "vendoo_marketplaces":["ebay","poshmark","mercari","vestiaireApi"],
+         "vendoo_listing_urls":{"ebay":"https://www.ebay.com/itm/2"},
+         "vendoo_sold_dates":{"mercari":"2026-11-01T12:00:00Z"},
+         "removed_marketplaces":["poshmark"]}
+        """#.utf8))
+        let importedBadges = imported.marketplaceBadges
+        precondition(importedBadges.map(\.marketplace) == ["ebay", "poshmark", "mercari", "depop", "vestiaire"])
+        precondition(importedBadges.map(\.label) == ["Listed", "Delisted", "Sold", "Draft", "Listed"])
+        precondition(importedBadges[0].url?.absoluteString == "https://www.ebay.com/itm/2")
+        precondition(imported.liveMarketplaces == ["ebay", "mercari", "vestiaire"])
+        precondition(imported.inventoryStatus == "active")
+
         // Suggestions read as a state on the listing's own row.
         let suggestions = try JSONDecoder().decode([Suggestion].self, from: Data(#"""
         [{"conversation_id":"a","kind":"ready_to_generate","title":"Blue shirt","reason":"Photos added"},

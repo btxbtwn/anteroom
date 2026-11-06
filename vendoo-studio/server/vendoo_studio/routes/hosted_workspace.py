@@ -51,7 +51,14 @@ def check_box(db, box_id):
             raise HTTPException(404, 'Box not found')
 
 
-def conversation_response(row, listing=None, direct=None, *, include_notes=True, missing_sale_data=None):
+def conversation_response(row, listing=None, direct=None, *, notes=None, include_notes=True, missing_sale_data=None):
+    """One inventory row. ``notes`` are the parsed notes when the caller deferred loading them."""
+    from vendoo_studio.services.imported_listing import imported_fields
+    from vendoo_studio.services.vendoo_import import parse_notes
+
+    if notes is None:
+        notes = parse_notes(row.notes)
+    live_urls = {market: record['listing_url'] for market, record in (direct or {}).items() if record.get('listing_url')}
     result = {'id': row.id, 'title': row.title, 'status': row.status,
             'box_id': row.box_id, 'settled_at': row.settled_at, 'unsettled_at': row.unsettled_at,
             'created_at': row.created_at, 'updated_at': row.updated_at,
@@ -59,7 +66,7 @@ def conversation_response(row, listing=None, direct=None, *, include_notes=True,
             'quantity': (listing or {}).get('quantity'),
             'direct_marketplaces': [market for market, record in (direct or {}).items() if record['state'] in LIVE_STATES],
             'direct_records': direct or {},
-            'missing_sale_data': missing_sale_data or []}
+            'missing_sale_data': missing_sale_data or [], **imported_fields(notes, live_urls)}
     if include_notes:
         result['notes'] = row.notes
     return result
@@ -145,6 +152,8 @@ def inventory_response(db):
     # virtualizes locally. No historical pointers or fallback file URLs escape.
     rows = db.scalars(select(Conversation).options(defer(Conversation.notes)).order_by(Conversation.updated_at.desc(), Conversation.id.desc())).all()
     reconciled = {row.id: row.status for row in rows}
+    # Parsed once for analytics; the rows themselves leave notes unloaded.
+    notes = {identity: parsed for identity, _title, _status, parsed, _box in analytics.conversations}
     # Another device may create or delete a draft between these committed reads.
     analytics.conversations = [(identity, title, reconciled.get(identity, status), notes, box)
                               for identity, title, status, notes, box in analytics.conversations]
@@ -174,7 +183,7 @@ def inventory_response(db):
     missing = missing_from_records(records_from_lines(sales, rows_from_inputs(analytics)))
     summaries = []
     for row in rows:
-        summary = conversation_response(row, current.get(row.id), direct.get(row.id), include_notes=False,
+        summary = conversation_response(row, current.get(row.id), direct.get(row.id), notes=notes.get(row.id, {}), include_notes=False,
                                         missing_sale_data=missing.get(row.id, []))
         if row.id in covers:
             from vendoo_studio.services.photos import cover_thumb_url

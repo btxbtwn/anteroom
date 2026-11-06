@@ -80,51 +80,76 @@ struct MarketplaceBadge: Hashable, Sendable {
     let tone: Tone
     let url: URL?
 
+    /// Anteroom's own record outranks the imported history: it is newer, and a
+    /// direct delist is never reported back to the import. A sale stands either way.
     /// Nil when the item is not listed there: the row only names marketplaces with something to say.
-    init?(marketplace: String, record: DirectRecord) {
+    init?(marketplace: String, record: DirectRecord?, imported: Bool = false, removed: Bool = false,
+          sold: Bool = false, importedURL: String? = nil) {
         self.marketplace = marketplace
-        switch record.state {
+        let link = (record?.listingURL ?? importedURL).flatMap(URL.init(string:))
+        var url: URL?
+        switch record?.state ?? "" {
+        case _ where sold:
+            (label, tone, url) = ("Sold", .neutral, link)
         case "published", "pending_review":
-            label = record.state == "pending_review" ? "In review" : "Listed"
-            tone = .good
-            url = record.listingURL.flatMap(URL.init(string:))
-            return
+            (label, tone, url) = (record?.state == "pending_review" ? "In review" : "Listed", .good, link)
         case "saving", "publishing", "updating":
             (label, tone) = ("Working", .neutral)
-        case _ where record.failed && record.fields > 0:
-            (label, tone) = ("Needs \(record.fields) field\(record.fields == 1 ? "" : "s")", .attention)
-        case _ where record.failed:
+        case _ where imported && !removed:
+            (label, tone, url) = ("Listed", .good, link)
+        case _ where record?.failed == true && (record?.fields ?? 0) > 0:
+            let fields = record?.fields ?? 0
+            (label, tone) = ("Needs \(fields) field\(fields == 1 ? "" : "s")", .attention)
+        case _ where record?.failed == true:
             (label, tone) = ("Failed", .problem)
         case "draft":
             (label, tone) = ("Draft", .neutral)
         case "unknown":
             (label, tone) = ("Checking", .neutral)
+        case _ where removed:
+            (label, tone) = ("Delisted", .neutral)
         default:
             return nil
         }
-        url = nil
+        self.url = url
     }
 }
 
 extension ListingSummary {
-    /// Each marketplace Anteroom has a record for, in marketplace order.
+    /// The imported history keys Vestiaire's API integration separately; it is one marketplace.
+    private static func canonical(_ id: String) -> String { id == "vestiaireApi" ? "vestiaire" : id }
+
+    private var importedMarketplaces: Set<String> { Set((vendooMarketplaces ?? []).map(Self.canonical)) }
+    private var removed: Set<String> { Set((removedMarketplaces ?? []).map(Self.canonical)) }
+
+    /// Each marketplace with something to say, in marketplace order: Anteroom's
+    /// records, the imported history, sales and delists.
     var marketplaceBadges: [MarketplaceBadge] {
         let records = directRecords ?? [:]
-        return Marketplaces.sorted(records.keys).compactMap { MarketplaceBadge(marketplace: $0, record: records[$0]!) }
+        let sold = vendooSoldDates ?? [:]
+        let ids = Set(records.keys).union(importedMarketplaces).union(removed).union(sold.keys)
+        return Marketplaces.sorted(ids).compactMap { id in
+            MarketplaceBadge(marketplace: id, record: records[id], imported: importedMarketplaces.contains(id),
+                             removed: removed.contains(id), sold: sold[id] != nil, importedURL: vendooListingURLs?[id])
+        }
     }
 
-    /// Where the listing is live. Hosted rows carry only Anteroom's own listings.
+    /// Where the listing is live: the imported history plus Anteroom's own
+    /// publishes, less what Anteroom delisted.
     var liveMarketplaces: [String] {
         var seen = Set<String>()
-        return (directMarketplaces ?? []).filter { seen.insert($0).inserted }
+        let imported = (vendooMarketplaces ?? []).map(Self.canonical).filter { !removed.contains($0) }
+        return (imported + (directMarketplaces ?? [])).filter { seen.insert($0).inserted }
     }
 
-    /// A listing Anteroom published reads Active even if it was a draft; a sale
-    /// and a send in progress keep their own labels.
+    /// A listing Anteroom published reads Active even if it was a draft, and one
+    /// Anteroom delisted everywhere reads Draft; a sale and a send in progress
+    /// keep their own labels.
     var inventoryStatus: String {
         let status = self.status ?? "draft"
         if status == "sold" || status == "listing" { return status }
-        if !liveMarketplaces.isEmpty, ["draft", "in_progress", "failed"].contains(status) { return "active" }
+        if !(directMarketplaces ?? []).isEmpty, ["draft", "in_progress", "failed"].contains(status) { return "active" }
+        if status == "active", !removed.isEmpty, liveMarketplaces.isEmpty { return "draft" }
         return status
     }
 

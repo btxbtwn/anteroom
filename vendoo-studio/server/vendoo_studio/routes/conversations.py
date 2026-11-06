@@ -623,52 +623,15 @@ def _listings_match(a: dict | None, b: dict | None) -> bool:
     return shaped[0] == shaped[1]
 
 
-def _listing_urls(notes: dict) -> dict[str, str]:
-    raw = notes.get("vendooListingUrls")
-    if not isinstance(raw, dict):
-        return {}
-    return {str(market): str(url) for market, url in raw.items() if url}
-
-
-def _vendoo_dates(notes: dict) -> dict:
-    """Vendoo's time tracking for the row, as the sidebar and details read it."""
-    dates = notes.get("vendooDates")
-    if not isinstance(dates, dict):
-        dates = {}
-
-    def text(key: str) -> str | None:
-        return str(dates.get(key) or "") or None
-
-    def mapping(key: str) -> dict[str, str]:
-        raw = dates.get(key)
-        if not isinstance(raw, dict):
-            return {}
-        return {str(market): str(stamp) for market, stamp in raw.items() if stamp}
-
-    return {
-        "vendoo_created_at": text("created"),
-        "vendoo_modified_at": text("modified"),
-        "vendoo_listed_at": text("listed"),
-        "vendoo_sold_at": text("sold"),
-        "vendoo_listed_dates": mapping("listedByMarketplace"),
-        "vendoo_sold_dates": mapping("soldByMarketplace"),
-    }
-
-
 def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
-    from vendoo_studio.services.marketplace_delist import removed_marketplaces
-    from vendoo_studio.services.vendoo_import import parse_notes, split_vendoo_labels
-
-    notes = parse_notes(conv.notes)
-    notes_json = conv.notes
-    raw_labels = split_vendoo_labels(notes.get("vendooLabels"))
+    from vendoo_studio.services.imported_listing import imported_fields
+    from vendoo_studio.services.vendoo_import import parse_notes
 
     row = extras or {}
-    marketplaces = notes.get("vendooMarketplaces")
     return ConversationResponse(
         id=conv.id,
         title=conv.title,
-        notes=notes_json,
+        notes=conv.notes,
         status=conv.status,
         box_id=conv.box_id,
         settled_at=_iso(conv.settled_at),
@@ -676,23 +639,17 @@ def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
         created_at=conv.created_at.isoformat() if conv.created_at else "",
         updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
         cover_photo_url=row.get("cover_photo_url"),
-        vendoo_status=str(notes.get("vendooStatus") or "") or None,
-        vendoo_cover_url=str(notes.get("vendooCoverUrl") or "") or None,
         sku=row.get("sku"),
         price=row.get("price"),
-        vendoo_labels=raw_labels,
-        vendoo_marketplaces=[str(m) for m in marketplaces] if isinstance(marketplaces, list) else [],
         direct_marketplaces=[str(m) for m in row.get("direct_marketplaces") or []],
         direct_records=row.get("direct_records") or {},
-        removed_marketplaces=removed_marketplaces(notes, row.get("direct_listing_urls") or {}),
         units_sold=int(row.get("units_sold") or 0),
         quantity=row.get("quantity"),
         sold_at=row.get("sold_at"),
         missing_sale_data=row.get("missing_sale_data", []),
-        vendoo_listing_urls=_listing_urls(notes),
         unsent_edits=bool(row.get("unsent_edits")),
         etsy_eligible=bool(row.get("etsy_eligible", True)),
-        **_vendoo_dates(notes),
+        **imported_fields(parse_notes(conv.notes), row.get("direct_listing_urls") or {}),
     )
 
 

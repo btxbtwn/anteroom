@@ -1,0 +1,1 @@
+- The inventory table on the web and the iPhone badges now show where imported listings are live, sold or delisted, instead of "Not listed" everywhere.
