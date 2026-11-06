@@ -6,6 +6,7 @@ from vendoo_studio.models.conversation import Conversation, Photo, new_id
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.services.marketplace_identity import public_listing_url
+from vendoo_studio.services.seller_overrides import price_number
 
 
 def owners_by_id(db: Session, marketplace: str, listing_id: str) -> list[Conversation]:
@@ -35,6 +36,7 @@ def create_import(db: Session, marketplace: str, snapshot: dict, listing_id: str
             Listing(conversation_id=conv.id, current_revision_id=revision.id),
             MarketplaceListing(conversation_id=conv.id, marketplace=marketplace, state="published",
                                listing_id=listing_id, revision_id=revision.id, listing_url=public_url,
+                               listed_price=price_number(snapshot.get("price")),
                                **({"ebay_listing_id": listing_id} if marketplace == "ebay" else {}), **(binding or {})),
             *(Photo(conversation_id=conv.id, display_order=index, **meta) for index, meta in enumerate(photos)),
         ])

@@ -76,6 +76,20 @@ struct InventoryTests {
         precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "not_saved", failed: true, fields: 0))?.tone == .problem)
         precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "pending_review"))?.label == "In review")
 
+        // Each marketplace's live price, marked when it is not the item price; unknown stays unknown.
+        let priced = try JSONDecoder().decode(ListingSummary.self, from: Data(#"""
+        {"id":"g","title":"Tee","status":"active","price":25,"direct_records":{
+          "ebay":{"state":"published","price":25},
+          "poshmark":{"state":"published","price":30},
+          "mercari":{"state":"published","price":null},
+          "depop":{"state":"draft","price":28}}}
+        """#.utf8))
+        let pricedBadges = priced.marketplaceBadges
+        precondition(pricedBadges.map(\.marketplace) == ["ebay", "poshmark", "mercari", "depop"])
+        precondition(pricedBadges.map(\.price) == [25, 30, nil, nil], "Only a live listing has a price")
+        precondition(pricedBadges.map(\.priceDiffers) == [false, true, false, false])
+        precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "published", price: 19.99), basePrice: 19.99)?.priceDiffers == false)
+
         // Suggestions read as a state on the listing's own row.
         let suggestions = try JSONDecoder().decode([Suggestion].self, from: Data(#"""
         [{"conversation_id":"a","kind":"ready_to_generate","title":"Blue shirt","reason":"Photos added"},
