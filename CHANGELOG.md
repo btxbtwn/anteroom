@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.751 — 2026-11-06
+
+- Keep the web app's listings loading while sharing and offer automations wait on Chrome. Those waits no longer tie up the database connections your pages need.
+
 ## 0.1.750 — 2026-11-06
 
 - When a listing can't load, the editor now says so and offers Retry instead of showing empty labels, notes, measurements and photos. On iPhone, a listing that didn't load can no longer be saved over with blank fields.
