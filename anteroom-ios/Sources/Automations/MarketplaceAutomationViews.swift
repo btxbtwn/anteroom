@@ -17,6 +17,9 @@ struct EbayOffersView: View {
     @State private var error: String?
     @State private var working: String?
     @State private var confirmingAll = false
+    /// Offers waiting for the seller's go-ahead: sending now, or turning automatic offers on.
+    @State private var confirmingSend: [String]?
+    @State private var confirmingEnable: [String]?
 
     private var busy: Bool { working != nil }
 
@@ -60,6 +63,20 @@ struct EbayOffersView: View {
                     await load()
                     try? await Task.sleep(for: .seconds(15))
                 }
+            }
+            .confirmationDialog(EbayOffersForm.sendQuestion(count: confirmingSend?.count ?? 0),
+                                isPresented: shown($confirmingSend), titleVisibility: .visible, presenting: confirmingSend) { ids in
+                Button(EbayOffersForm.sendButton(count: ids.count)) { send(ids) }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("eBay sends each offer to the listing's interested buyers right away. A sent offer can't be taken back.")
+            }
+            .confirmationDialog(EbayOffersForm.enableQuestion(count: confirmingEnable?.count ?? 0),
+                                isPresented: shown($confirmingEnable), titleVisibility: .visible, presenting: confirmingEnable) { ids in
+                Button("Turn on automatic offers") { enableRules(ids) }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("Anteroom saves these discounts and minimums and sends offers to interested buyers on its own, checking every 15 minutes, until you pause it.")
             }
             .alert("Enable automatic offers?", isPresented: $confirmingAll) {
                 Button("Enable automatic offers") { enableAll() }
@@ -199,9 +216,11 @@ struct EbayOffersView: View {
                         .foregroundStyle(offer.state == "failed" || offer.state == "unknown" ? Color.red : Color.secondary)
                 }
             }
-            Button(working == "send" ? "Sending…" : "Send \(ready.count) \(ready.count == 1 ? "offer" : "offers") now") { send(ready) }
+            Button(working == "send" ? "Sending…" : EbayOffersForm.sendButton(count: ready.count)) { confirmingSend = ready }
                 .fontWeight(.semibold).disabled(busy || ready.isEmpty)
-            Button("Enable automatic offers for \(enable.count) \(enable.count == 1 ? "listing" : "listings")") { enableRules(enable) }
+            Button(working == "enable" ? "Turning on…" : "Enable automatic offers for \(enable.count) \(enable.count == 1 ? "listing" : "listings")") {
+                confirmingEnable = enable
+            }
                 .disabled(busy || enable.isEmpty || status.allListings.enabled)
         } header: {
             Text("Review offers · previews expire after 15 minutes")
@@ -231,6 +250,10 @@ struct EbayOffersView: View {
                 }
             }
         }
+    }
+
+    private func shown(_ pending: Binding<[String]?>) -> Binding<Bool> {
+        Binding(get: { pending.wrappedValue != nil }, set: { if !$0 { pending.wrappedValue = nil } })
     }
 
     /// A changed selection, discount or minimum drops the old preview, as on the web.
@@ -276,6 +299,7 @@ struct EbayOffersView: View {
     }
 
     private func send(_ ids: [String]) {
+        guard !busy else { return }
         perform("send") {
             let result = try await api.sendEbayOffers(ids)
             offers = offers?.map { offer in result.first { $0.id != nil && $0.id == offer.id } ?? offer }
@@ -284,6 +308,7 @@ struct EbayOffersView: View {
     }
 
     private func enableRules(_ ids: [String]) {
+        guard !busy else { return }
         perform("enable") {
             try await api.enableEbayOffers(ids)
             offers = nil

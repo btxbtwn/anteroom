@@ -12,6 +12,8 @@ struct ListingEditorView: View {
     @State private var showingListEverywhere = false
     @State private var showingMarketplaces = false
     @State private var tab = "general"
+    @State private var saves = 0
+    @State private var saveFailures = 0
     private let onSaved: () -> Void
 
     init(api: AnteroomAPI, listing: ListingSummary, onSaved: @escaping () -> Void) {
@@ -127,15 +129,28 @@ struct ListingEditorView: View {
             }
         }
         .confirmationDialog("Discard your changes?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-            Button("Discard changes", role: .destructive) { dismiss() }
+            Button("Discard changes", role: .destructive) {
+                model.forgetStash()
+                dismiss()
+            }
         }
         .alert("Couldn't save", isPresented: saveErrorShown) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(model.saveError ?? "")
         }
+        .alert("Unsaved changes", isPresented: draftNoticeShown) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.draftNotice ?? "")
+        }
+        .sensoryFeedback(.success, trigger: saves)
+        .sensoryFeedback(.error, trigger: saveFailures)
         .alert("Changed on another device", isPresented: $model.hasConflict) {
-            Button("Reload", role: .destructive) { Task { await model.load() } }
+            Button("Reload", role: .destructive) {
+                model.forgetStash()
+                Task { await model.load() }
+            }
             Button("Keep editing", role: .cancel) {}
         } message: {
             Text("Reloading shows the latest version and drops your edits here.")
@@ -181,13 +196,19 @@ struct ListingEditorView: View {
         // Pick up changes from other devices, but never over unsaved edits.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && !model.hasChanges && !model.isSaving && !model.isLoading { Task { await model.load() } }
+            // iOS may end the app in the background; keep unsaved edits until it reopens.
+            if phase == .background { model.stashEdits() }
         }
         // Edits from another device show up live, unless this one has unsaved changes.
         .task(id: live?.listings) {
             guard (live?.listings ?? 0) > 0 else { return }
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: .milliseconds(1500))
             if !Task.isCancelled && !model.hasChanges && !model.isSaving && !model.isLoading { await model.load() }
         }
+    }
+
+    private var draftNoticeShown: Binding<Bool> {
+        Binding(get: { model.draftNotice != nil }, set: { if !$0 { model.draftNotice = nil } })
     }
 
     private var saveErrorShown: Binding<Bool> {
@@ -197,7 +218,12 @@ struct ListingEditorView: View {
     private func save() {
         hideKeyboard()
         Task {
-            if await model.save() { onSaved() }
+            if await model.save() {
+                saves += 1
+                onSaved()
+            } else {
+                saveFailures += 1
+            }
         }
     }
 

@@ -26,6 +26,7 @@ struct AutomationsView: View {
     @State private var deletingPromotion: PromotionAutomation?
     @State private var history: HistoryTarget?
     @State private var deleting: Automation?
+    @State private var confirmingRun: Automation?
     @State private var busy: String?
     @State private var error: String?
     @Environment(\.openURL) private var openURL
@@ -156,6 +157,13 @@ struct AutomationsView: View {
             .sheet(item: $history) { target in
                 AutomationHistoryView(api: api, automation: target.automation, runs: target.runs)
             }
+            .confirmationDialog("Run “\(confirmingRun?.name ?? "")” now?", isPresented: Binding(get: { confirmingRun != nil }, set: { if !$0 { confirmingRun = nil } }),
+                                titleVisibility: .visible, presenting: confirmingRun) { task in
+                Button("Run now") { start(task, dryRun: false) }
+                Button("Cancel", role: .cancel) {}
+            } message: { task in
+                Text(AutomationFormat.runNowMessage(task))
+            }
             .confirmationDialog("Delete \"\(deleting?.name ?? "")\"?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                                 titleVisibility: .visible) {
                 Button("Delete", role: .destructive) { if let task = deleting { run { try await api.deleteAutomation(task.id) } } }
@@ -194,13 +202,15 @@ struct AutomationsView: View {
                 Button("Edit", systemImage: "pencil") { editing = EditTarget(automation: task) }
                 if task.status != "draft" {
                     Button("Dry run", systemImage: "eye") { start(task, dryRun: true) }
-                    Button("Run now", systemImage: "bolt") { start(task, dryRun: false) }
+                        .disabled(busy == task.id)
+                    Button(busy == task.id ? "Running…" : "Run now…", systemImage: "bolt") { confirmingRun = task }
+                        .disabled(busy == task.id)
                 }
                 Button("History", systemImage: "clock") { showHistory(task) }
                 Divider()
                 Button("Delete", systemImage: "trash", role: .destructive) { deleting = task }
             } label: {
-                Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
+                Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("More for \(task.name)")
@@ -282,7 +292,7 @@ struct AutomationsView: View {
             .buttonStyle(.plain)
             control()
             Menu(content: menu) {
-                Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
+                Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("More for \(view.name)")
@@ -362,7 +372,10 @@ struct AutomationsView: View {
         }
     }
 
+    /// One run at a time per automation: its switch and menu wait until it ends.
     private func start(_ task: Automation, dryRun: Bool) {
+        guard busy != task.id else { return }
+        busy = task.id
         error = nil
         Task {
             do {
@@ -372,6 +385,7 @@ struct AutomationsView: View {
             } catch {
                 self.error = error.localizedDescription
             }
+            busy = nil
         }
     }
 

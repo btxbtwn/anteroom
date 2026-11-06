@@ -6,20 +6,50 @@ struct APIError: LocalizedError, Sendable {
 
     var errorDescription: String? { message }
     var isConflict: Bool { status == 409 }
+
+    static let signInEnded = "Your sign-in has ended. Sign in again."
+    static let signInRenewed = "Your sign-in was renewed. Try that again."
+}
+
+/// How the API client gets the seller's token, and what it does when the server refuses it.
+struct APIAuthorization: Sendable {
+    /// The current access token; the sign-in library refreshes it when it expires.
+    var accessToken: @Sendable () async throws -> String
+    /// A newly issued access token. Throws when the sign-in can no longer be renewed.
+    var refreshedToken: @Sendable () async throws -> String
+    /// The sign-in has ended: go back to the sign-in screen.
+    var signedOut: @Sendable () async -> Void
 }
 
 /// Client for the hosted Anteroom API (`vendoo_studio.hosted:app`). Every
 /// request carries the seller's current Supabase access token.
+///
+/// When the server refuses the token (401) the client renews the sign-in once.
+/// A read (GET) is then sent again; anything else is not, because it may have
+/// already run. When the sign-in cannot be renewed the seller is signed out.
 final class AnteroomAPI: Sendable {
     private let baseURL: URL
-    private let accessToken: @Sendable () async throws -> String
-    private let session = URLSession(configuration: .ephemeral)
+    private let auth: APIAuthorization
+    private let session: URLSession
     private let thumbnails = RequestGate(limit: 4)
     private let choiceLists = ChoiceListCache()
+    private let runtimeCache = RuntimeCache()
 
-    init(baseURL: URL, accessToken: @escaping @Sendable () async throws -> String) {
+    /// Where CSV exports are written for the share sheet; emptied on sign-out.
+    static var exportsDirectory: URL {
+        FileManager.default.temporaryDirectory.appending(path: "Exports", directoryHint: .isDirectory)
+    }
+
+    init(baseURL: URL, auth: APIAuthorization, configuration: URLSessionConfiguration = .ephemeral) {
         self.baseURL = baseURL
-        self.accessToken = accessToken
+        self.auth = auth
+        session = URLSession(configuration: configuration)
+    }
+
+    /// Forgets what belongs to the signed-in seller: cached server answers and exported files.
+    func forgetSeller() async {
+        await runtimeCache.clear()
+        try? FileManager.default.removeItem(at: Self.exportsDirectory)
     }
 
     // MARK: Listings (the shared workspace contract the desktop and web use)
@@ -80,18 +110,12 @@ final class AnteroomAPI: Sendable {
         return payload.suggestions
     }
 
-    /// Marketplace tabs this workspace can edit natively (`/api/runtime`).
-    func marketplaceForms() async throws -> [String] {
-        struct Payload: Decodable { let marketplace_forms: [String]? }
-        let payload: Payload = try await decode(request("GET", "api/runtime"))
-        return payload.marketplace_forms ?? []
-    }
-
-    /// Marketplaces this workspace can list on now (`/api/runtime`); empty while it cannot.
-    func actionMarketplaces() async throws -> [String] {
-        struct Payload: Decodable { let action_marketplaces: [String]? }
-        let payload: Payload = try await decode(request("GET", "api/runtime"))
-        return payload.action_marketplaces ?? []
+    /// What this workspace offers (`/api/runtime`): views, features, the
+    /// marketplace tabs it edits natively and the marketplaces it can list on
+    /// now. Screens asking at about the same time share one request, and an
+    /// answer is reused for 30 seconds; `fresh` asks the server again.
+    func runtime(fresh: Bool = false) async throws -> WorkspaceRuntime {
+        try await runtimeCache.value(fresh: fresh) { try await self.decode(self.request("GET", "api/runtime")) }
     }
 
     /// Which required fields each marketplace still needs, for the saved listing.
@@ -118,14 +142,16 @@ final class AnteroomAPI: Sendable {
     }
 
     /// Lists the saved revision on one marketplace the seller named and confirmed.
-    func listOnMarketplace(_ id: String, marketplace: String, revisionID: String) async throws {
+    func listOnMarketplace(_ id: String, marketplace: String, revisionID: String, confirmation: SellerConfirmation) async throws {
+        try Self.require(confirmation, .list, [marketplace])
         struct Body: Encodable { let revision_id: String; let confirm: Bool }
         _ = try await send(request("POST", "api/conversations/\(id)/native-marketplaces/\(marketplace)/list",
                                    json: Body(revision_id: revisionID, confirm: true)))
     }
 
     /// Sends the saved revision to the live listing on one marketplace the seller named and confirmed.
-    func updateOnMarketplace(_ id: String, marketplace: String, revisionID: String) async throws {
+    func updateOnMarketplace(_ id: String, marketplace: String, revisionID: String, confirmation: SellerConfirmation) async throws {
+        try Self.require(confirmation, .update, [marketplace])
         struct Body: Encodable { let revision_id: String; let confirm: Bool }
         _ = try await send(request("POST", "api/conversations/\(id)/native-marketplaces/\(marketplace)/update",
                                    json: Body(revision_id: revisionID, confirm: true)))
@@ -150,11 +176,19 @@ final class AnteroomAPI: Sendable {
     }
 
     /// Delists from the marketplaces the seller named and confirmed.
-    func delist(_ id: String, marketplaces: [String]) async throws -> [String: MarketplaceLiveListing] {
+    func delist(_ id: String, marketplaces: [String], confirmation: SellerConfirmation) async throws -> [String: MarketplaceLiveListing] {
+        try Self.require(confirmation, .delist, marketplaces)
         struct Body: Encodable { let marketplaces: [String]; let confirm: Bool }
         let listings: [String: MarketplaceLiveListing?] = try await decode(request(
             "POST", "api/conversations/\(id)/marketplace-listings/delist", json: Body(marketplaces: marketplaces, confirm: true)))
         return listings.compactMapValues { $0 }
+    }
+
+    /// Refuses before anything is sent unless the seller confirmed this action on these marketplaces.
+    private static func require(_ confirmation: SellerConfirmation, _ action: SellerConfirmation.Action, _ marketplaces: [String]) throws {
+        guard confirmation.covers(action, marketplaces) else {
+            throw APIError(status: 0, message: "Nothing was sent. Confirm which marketplaces to \(action.rawValue) first.")
+        }
     }
 
     /// A marketplace's synced category tree (eBay's is about 20,000 nodes).
@@ -534,13 +568,6 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/errors"))
     }
 
-    /// Views and features the hosted workspace offers (`/api/runtime`).
-    func runtime() async throws -> (views: [String], features: [String]) {
-        struct Payload: Decodable { let views: [String]?; let features: [String] }
-        let payload: Payload = try await decode(request("GET", "api/runtime"))
-        return (payload.views ?? [], payload.features)
-    }
-
     // MARK: Analytics
 
     func analytics(range: String, start: Date? = nil, end: Date? = nil) async throws -> InventoryAnalytics {
@@ -580,11 +607,13 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("PUT", "api/sales-ledger/\(id)/financials", json: body))
     }
 
-    /// A CSV export as a file to share.
+    /// A CSV export as a file to share. Delete it when the share sheet closes;
+    /// sign-out empties the folder too.
     func exportCSV(_ path: String, query: [URLQueryItem] = [], filename: String) async throws -> URL {
         let data = try await send(request("GET", path, query: query))
-        let url = FileManager.default.temporaryDirectory.appending(path: filename)
-        try data.write(to: url, options: .atomic)
+        try FileManager.default.createDirectory(at: Self.exportsDirectory, withIntermediateDirectories: true)
+        let url = Self.exportsDirectory.appending(path: filename)
+        try data.write(to: url, options: [.atomic, .completeFileProtection])
         return url
     }
 
@@ -721,10 +750,6 @@ final class AnteroomAPI: Sendable {
 
     // MARK: Shared workspace and durable draft tasks
 
-    func capabilities() async throws -> WorkspaceCapabilities {
-        try await decode(request("GET", "api/runtime"))
-    }
-
     func workspaceStatus() async throws -> WorkspaceStatus {
         try await decode(request("GET", "api/status"))
     }
@@ -773,6 +798,7 @@ final class AnteroomAPI: Sendable {
                 if data.count >= 65536 { break }
                 data.append(byte)
             }
+            if http.statusCode == 401 { throw await renewAfterRefusal(data).error }
             throw APIError(status: http.statusCode, message: Self.message(from: data, status: http.statusCode))
         }
         var finished = false
@@ -864,6 +890,7 @@ final class AnteroomAPI: Sendable {
                 if data.count >= 65536 { break }
                 data.append(byte)
             }
+            if http.statusCode == 401 { throw await renewAfterRefusal(data).error }
             throw APIError(status: http.statusCode, message: Self.message(from: data, status: http.statusCode))
         }
         var failure: String?
@@ -920,7 +947,16 @@ final class AnteroomAPI: Sendable {
     private func request(_ method: String, _ path: String, query: [URLQueryItem] = []) async throws -> URLRequest {
         var url = baseURL.appending(path: path)
         if !query.isEmpty { url.append(queryItems: query) }
-        let token = try await accessToken()
+        let token: String
+        do {
+            token = try await auth.accessToken()
+        } catch let offline as URLError {
+            throw offline
+        } catch {
+            // The saved sign-in is gone or can no longer be renewed.
+            await auth.signedOut()
+            throw APIError(status: 401, message: APIError.signInEnded)
+        }
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = method
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -940,19 +976,67 @@ final class AnteroomAPI: Sendable {
     }
 
     private func send(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError(status: 0, message: "Anteroom didn't answer. Try again.")
+        let (data, status) = try await perform(request)
+        if status == 401 {
+            let refusal = await renewAfterRefusal(data)
+            // Only a read is safe to send again; anything else may already have run.
+            guard let token = refusal.token, request.httpMethod == "GET" else { throw refusal.error }
+            var retry = request
+            retry.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (again, againStatus) = try await perform(retry)
+            if againStatus == 401, Self.isSessionRefusal(again) {
+                // A token issued moments ago was refused too: the account can't be used.
+                await auth.signedOut()
+                throw APIError(status: 401, message: APIError.signInEnded)
+            }
+            guard (200..<300).contains(againStatus) else {
+                throw APIError(status: againStatus, message: Self.message(from: again, status: againStatus))
+            }
+            return again
         }
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError(status: http.statusCode, message: Self.message(from: data, status: http.statusCode))
+        guard (200..<300).contains(status) else {
+            throw APIError(status: status, message: Self.message(from: data, status: status))
         }
         return data
     }
 
+    private func perform(_ request: URLRequest) async throws -> (Data, Int) {
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError(status: 0, message: "Anteroom didn't answer. Try again.")
+        }
+        return (data, http.statusCode)
+    }
+
+    /// The server refused a request with 401. A refusal of the seller's session
+    /// renews the sign-in (or signs out when it can't be renewed); any other 401,
+    /// such as a marketplace that signed Anteroom out, keeps the server's message.
+    /// Returns the error to report, and the renewed token when there is one.
+    private func renewAfterRefusal(_ data: Data) async -> (error: APIError, token: String?) {
+        guard Self.isSessionRefusal(data) else {
+            return (APIError(status: 401, message: Self.message(from: data, status: 401)), nil)
+        }
+        do {
+            let token = try await auth.refreshedToken()
+            return (APIError(status: 401, message: APIError.signInRenewed), token)
+        } catch is URLError {
+            return (APIError(status: 0, message: "Anteroom couldn't renew your sign-in. Check your connection and try again."), nil)
+        } catch {
+            await auth.signedOut()
+            return (APIError(status: 401, message: APIError.signInEnded), nil)
+        }
+    }
+
+    /// The hosted API's own refusals name the seller session; a marketplace's 401 does not.
+    private static func isSessionRefusal(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = object["detail"] as? String else { return true }
+        return detail.localizedCaseInsensitiveContains("session")
+    }
+
     /// FastAPI errors carry `detail` as a sentence or a list of validation issues.
     private static func message(from data: Data, status: Int) -> String {
-        if status == 401 { return "Your sign-in has ended. Sign in again." }
+        if status == 401 && isSessionRefusal(data) { return APIError.signInEnded }
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             if let detail = object["detail"] as? String { return detail }
             if let issues = object["detail"] as? [[String: Any]] {
@@ -961,6 +1045,60 @@ final class AnteroomAPI: Sendable {
             }
         }
         return "Something went wrong (\(status)). Try again."
+    }
+}
+
+/// What `/api/runtime` says this workspace offers.
+struct WorkspaceRuntime: Decodable, Sendable, Equatable {
+    var views: [String] = []
+    var features: [String] = []
+    /// Marketplace tabs this workspace can edit natively.
+    var marketplaceForms: [String] = []
+    /// Marketplaces this workspace can list on now; empty while it cannot.
+    var actionMarketplaces: [String] = []
+
+    enum CodingKeys: String, CodingKey {
+        case views, features
+        case marketplaceForms = "marketplace_forms"
+        case actionMarketplaces = "action_marketplaces"
+    }
+
+    init(views: [String] = [], features: [String] = [], marketplaceForms: [String] = [], actionMarketplaces: [String] = []) {
+        self.views = views
+        self.features = features
+        self.marketplaceForms = marketplaceForms
+        self.actionMarketplaces = actionMarketplaces
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        views = try container.decodeIfPresent([String].self, forKey: .views) ?? []
+        features = try container.decodeIfPresent([String].self, forKey: .features) ?? []
+        marketplaceForms = try container.decodeIfPresent([String].self, forKey: .marketplaceForms) ?? []
+        actionMarketplaces = try container.decodeIfPresent([String].self, forKey: .actionMarketplaces) ?? []
+    }
+}
+
+/// One `/api/runtime` answer, shared by the screens that ask within 30 seconds.
+actor RuntimeCache {
+    private var current: (task: Task<WorkspaceRuntime, Error>, asked: Date)?
+
+    func value(fresh: Bool, load: @escaping @Sendable () async throws -> WorkspaceRuntime) async throws -> WorkspaceRuntime {
+        if fresh || current.map({ Date().timeIntervalSince($0.asked) > 30 }) ?? true {
+            current = (Task { try await load() }, Date())
+        }
+        let task = current!.task
+        do {
+            return try await task.value
+        } catch {
+            // A failed answer is not kept; the next screen asks again.
+            if current?.task == task { current = nil }
+            throw error
+        }
+    }
+
+    func clear() {
+        current = nil
     }
 }
 

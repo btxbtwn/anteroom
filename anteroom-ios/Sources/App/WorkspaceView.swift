@@ -10,7 +10,7 @@ struct WorkspaceView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var appearance: AppearanceModel
     /// What this server offers, read once per session; nil until then.
-    @State private var runtime: (views: [String], features: [String])?
+    @State private var runtime: WorkspaceRuntime?
 
     init(api: AnteroomAPI) {
         self.api = api
@@ -32,7 +32,7 @@ struct WorkspaceView: View {
         .task { await session.followChanges() }
         .task {
             // Without an answer the workspace opens with the tabs every server has.
-            runtime = (try? await api.runtime()) ?? (views: [], features: [])
+            runtime = (try? await api.runtime()) ?? WorkspaceRuntime()
         }
         .task(id: scenePhase) {
             if scenePhase == .active { await appearance.refresh() }
