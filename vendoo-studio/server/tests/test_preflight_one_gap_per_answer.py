@@ -18,6 +18,7 @@ class OneGapPerAnswerTest(unittest.TestCase):
         """``gaps`` with the checks this test supplies instead of the real modules."""
         with patch.object(direct_preflight, "_REQUIREMENTS", {marketplace: [lambda snapshot, context: found]}), \
              patch.object(direct_preflight, "_unresolved", return_value=[]), \
+             patch.object(direct_preflight, "_empty_form_rows", return_value=[]), \
              patch("vendoo_studio.services.native_contract.gaps", return_value=[]), \
              patch.object(direct_preflight, "RULE_MODULES", ()):
             return direct_preflight.gaps({}, marketplace)

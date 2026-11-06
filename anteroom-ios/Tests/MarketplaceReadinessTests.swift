@@ -6,15 +6,18 @@ struct MarketplaceReadinessTests {
     static func main() throws {
         let preflight = try JSONDecoder().decode(NativePreflight.self, from: Data(#"""
         {"revision_id":"r1","marketplaces":{
-          "ebay":{"ready":true,"gaps":[{"field":"marketplace_photos.ebay","message":"One photo is left off.","blocking":false}]},
+          "ebay":{"ready":true,"gaps":[{"field":"marketplace_photos.ebay","message":"One photo is left off.","blocking":false}],"missing":[]},
           "depop":{"ready":false,"gaps":[
             {"field":"price","message":"Depop needs a price.","blocking":true},
-            {"field":"price","message":"Price must be a number.","blocking":true},
-            {"field":"depop_specifics.size","message":"Size is required.","blocking":true}]}
+            {"field":"depop_specifics.condition","message":"Condition: Required field is empty.","blocking":false,"required":true,"label":"Condition"}],
+           "missing":[
+            {"field":"price","label":"Item price","message":"Depop needs a price."},
+            {"field":"depop_specifics.condition","label":"Condition","message":"Condition: Required field is empty."}]}
         }}
         """#.utf8))
-        precondition(preflight.marketplaces["ebay"]?.missingRequired == 0)
-        precondition(preflight.marketplaces["depop"]?.missingRequired == 2)
+        // The count is the server's: required fields left empty count, not only the ones refusing List.
+        precondition(preflight.marketplaces["ebay"]?.missing.isEmpty == true)
+        precondition(preflight.marketplaces["depop"]?.missing.count == 2)
 
         func make(_ marketplace: String, canAct: Bool = true, draft: NativeDraftState? = nil,
                   live: MarketplaceLiveListing? = nil, sold: Bool = false) -> ListChoice {
@@ -28,6 +31,7 @@ struct MarketplaceReadinessTests {
         let unchecked = make("etsy")
         precondition(ready == ListChoice(marketplace: "ebay", label: "Ready", tone: .ready, selectable: true))
         precondition(needs.label == "Needs 2 fields" && needs.tone == .needs && needs.selectable)
+        precondition(needs.detail == "Item price, Condition")
         precondition(listed.label == "Listed" && !listed.selectable)
         precondition(sold.label == "Sold" && !sold.selectable)
         precondition(unchecked.label == "Not checked" && unchecked.selectable)

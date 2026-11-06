@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.749 — 2026-11-06
+
+- "Needs N fields" on the marketplace tabs, in List everywhere and in the inventory now also counts required fields you haven't filled yet, before you list anything, not only the fields a marketplace rejected. Hover the count, or open List everywhere on the iPhone, to see which fields.
+
 ## 0.1.748 — 2026-11-06
 
 - The Inventory table shows each listing's price on every marketplace it is live on, beside its status. A price that differs from the item price stands out, and a dash means Anteroom doesn't know that marketplace's price yet.

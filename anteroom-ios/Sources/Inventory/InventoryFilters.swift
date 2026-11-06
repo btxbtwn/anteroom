@@ -79,47 +79,66 @@ struct MarketplaceBadge: Hashable, Sendable {
     let label: String
     let tone: Tone
     let url: URL?
+    /// The fields still needed, by name, when the label counts them from the server.
+    var detail: String? = nil
     /// The live listing's price there, when known. Only a listed badge has one.
     var price: Double?
     /// The price is known and is not the item's own: a marketplace price the seller set, or one the marketplace changed.
     var priceDiffers = false
 
-    /// Anteroom's own record outranks the imported history: it is newer, and a
-    /// direct delist is never reported back to the import. A sale stands either way.
-    /// Nil when the item is not listed there: the row only names marketplaces with something to say.
-    init?(marketplace: String, record: DirectRecord?, basePrice: Double? = nil, imported: Bool = false,
-          removed: Bool = false, sold: Bool = false, importedURL: String? = nil) {
+    /// Nil when there is nothing to say: not listed there and nothing missing.
+    /// The same rules as the desktop table's cell (inventoryTable.ts): Anteroom's
+    /// own record outranks the imported history, and a sale stands either way.
+    init?(marketplace: String, record: DirectRecord?, missing: [MissingField] = [], basePrice: Double? = nil,
+          imported: Bool = false, removed: Bool = false, sold: Bool = false, importedURL: String? = nil) {
         self.marketplace = marketplace
-        let link = (record?.listingURL ?? importedURL).flatMap(URL.init(string:))
-        var url: URL?
-        switch record?.state ?? "" {
-        case _ where sold:
-            (label, tone, url) = ("Sold", .neutral, link)
+        let needs = missing.isEmpty ? nil : needsText(missing.count)
+        let live = ["published", "pending_review"].contains(record?.state ?? "")
+        let busy = ["saving", "publishing", "updating"].contains(record?.state ?? "")
+        let importedLive = imported && !removed && !busy
+        url = sold || live || importedLive ? (record?.listingURL ?? importedURL).flatMap(URL.init(string:)) : nil
+        if sold {
+            (label, tone) = ("Sold", .neutral)
+            return
+        }
+        switch record?.state {
         case "published", "pending_review":
-            (label, tone, url) = (record?.state == "pending_review" ? "In review" : "Listed", .good, link)
+            label = record?.state == "pending_review" ? "In review" : "Listed"
+            tone = .good
             price = record?.price
             if let price, let basePrice {
                 priceDiffers = (price * 100).rounded() != (basePrice * 100).rounded()
             }
+            return
         case "saving", "publishing", "updating":
             (label, tone) = ("Working", .neutral)
-        case _ where imported && !removed:
-            (label, tone, url) = ("Listed", .good, link)
-        case _ where record?.failed == true && (record?.fields ?? 0) > 0:
-            let fields = record?.fields ?? 0
-            (label, tone) = ("Needs \(fields) field\(fields == 1 ? "" : "s")", .attention)
-        case _ where record?.failed == true:
-            (label, tone) = ("Failed", .problem)
-        case "draft":
-            (label, tone) = ("Draft", .neutral)
+            return
+        default:
+            break
+        }
+        if importedLive {
+            (label, tone) = ("Listed", .good)
+            return
+        }
+        // The server's count already holds the rejected fields; before it arrives, the record's own.
+        if !missing.isEmpty { detail = missingNames(missing) }
+        if let record, record.failed {
+            if let needs { (label, tone) = (needs, .attention) }
+            else if record.fields > 0 { (label, tone) = (needsText(record.fields), .attention) }
+            else { (label, tone) = ("Failed", .problem) }
+            return
+        }
+        switch record?.state {
         case "unknown":
             (label, tone) = ("Checking", .neutral)
+        case "draft":
+            (label, tone) = (needs ?? "Draft", needs == nil ? .neutral : .attention)
         case _ where removed:
             (label, tone) = ("Delisted", .neutral)
         default:
-            return nil
+            guard let needs else { return nil }
+            (label, tone) = (needs, .attention)
         }
-        self.url = url
     }
 }
 
@@ -131,16 +150,21 @@ extension ListingSummary {
     private var removed: Set<String> { Set((removedMarketplaces ?? []).map(Self.canonical)) }
 
     /// Each marketplace with something to say, in marketplace order: Anteroom's
-    /// records, the imported history, sales and delists.
-    var marketplaceBadges: [MarketplaceBadge] {
+    /// records, fields still needed, the imported history, sales and delists.
+    func marketplaceBadges(missing: [String: [MissingField]] = [:]) -> [MarketplaceBadge] {
         let records = directRecords ?? [:]
         let sold = vendooSoldDates ?? [:]
-        let ids = Set(records.keys).union(importedMarketplaces).union(removed).union(sold.keys)
+        let ids = Set(records.keys).union(missing.filter { !$0.value.isEmpty }.keys)
+            .union(importedMarketplaces).union(removed).union(sold.keys)
         return Marketplaces.sorted(ids).compactMap { id in
-            MarketplaceBadge(marketplace: id, record: records[id], basePrice: price, imported: importedMarketplaces.contains(id),
-                             removed: removed.contains(id), sold: sold[id] != nil, importedURL: vendooListingURLs?[id])
+            MarketplaceBadge(marketplace: id, record: records[id], missing: missing[id] ?? [], basePrice: price,
+                             imported: importedMarketplaces.contains(id), removed: removed.contains(id),
+                             sold: sold[id] != nil, importedURL: vendooListingURLs?[id])
         }
     }
+
+    /// Changes when a saved edit or a List result could change what is missing.
+    var readinessKey: String { "\(updatedAt ?? "")|\(directRecords ?? [:])" }
 
     /// Where the listing is live: the imported history plus Anteroom's own
     /// publishes, less what Anteroom delisted.
