@@ -9,9 +9,11 @@ import { Radio, RadioGroup } from "../ui/radio-group";
 import { Spinner } from "../ui/spinner";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 import { confirmDialog } from "../../ui/confirmDialog";
+import { useWorkspaceRuntime } from "../../app/runtime";
 
 export function EbayOffersSettings() {
   const queryClient = useQueryClient();
+  const { hosted } = useWorkspaceRuntime();
   const status = useQuery({ queryKey: ["ebay-offers"], queryFn: api.ebayOffers.status, refetchInterval: 15000 });
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [minimums, setMinimums] = useState<Record<string, string>>({});
@@ -55,7 +57,8 @@ export function EbayOffersSettings() {
   });
   const connect = useMutation({
     mutationFn: () => api.directConnections.connect("ebay"),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (hosted) window.open(result.authorizeUrl, "_blank", "noopener,noreferrer");
       setNotice("Finish signing in on the eBay page that opened, then preview your offers again.");
       void queryClient.invalidateQueries({ queryKey: ["direct-connections"] });
     },
