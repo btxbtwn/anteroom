@@ -25,6 +25,7 @@ import {
   LISTING_STATUS_TABS,
   activeFilterCount,
   compactCount,
+  statusForSort,
   toggleValue,
   type ListingFilters as Filters,
   type ListingSortId,
@@ -278,7 +279,10 @@ export function ListingFilters({
           <MenuPopup align="end" className="min-w-44">
             <MenuRadioGroup
               value={filters.sort}
-              onValueChange={(value) => onChange({ ...filters, sort: value as ListingSortId })}
+              onValueChange={(value) => {
+                const sort = value as ListingSortId;
+                onChange({ ...filters, sort, status: statusForSort(sort, filters.status) });
+              }}
             >
               {LISTING_SORTS.map((option) => (
                 <MenuRadioItem key={option.id} value={option.id}>

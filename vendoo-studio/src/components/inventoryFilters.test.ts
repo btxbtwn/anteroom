@@ -9,6 +9,7 @@ import {
   marketplaceOptions,
   matchesSearch,
   sortListings,
+  statusForSort,
   statusCounts,
   visibleInInventory,
   isStale,
@@ -370,5 +371,26 @@ describe("unsent edits", () => {
     const draftTab = { ...DEFAULT_LISTING_FILTERS, status: "draft" as const };
     expect(filterListings([sold], "", draftTab)).toEqual([]);
     expect(statusCounts([sold]).draft).toBeUndefined();
+  });
+});
+
+describe("statusForSort", () => {
+  it("opens the Sold tab when sorting by sale date", () => {
+    expect(statusForSort("sold_desc", "all")).toBe("sold");
+    expect(statusForSort("sold_desc", "active")).toBe("sold");
+  });
+
+  it("keeps the current tab for every other sort", () => {
+    expect(statusForSort("price_desc", "active")).toBe("active");
+    expect(statusForSort("recent", "sold")).toBe("sold");
+  });
+});
+
+describe("sold-date sort across shelves", () => {
+  it("orders open and finished sold listings together, newest sale first", () => {
+    const openSale = { id: "a", title: "Open, older sale", status: "sold", sold_at: "2026-11-01T00:00:00Z" };
+    const settledSale = { id: "b", title: "Finished, newer sale", status: "sold", sold_at: "2026-11-05T00:00:00Z", settled_at: "2026-11-05T00:00:00Z" };
+    // The sidebar hands the open shelf first, then the finished one.
+    expect(sortListings([openSale, settledSale], "sold_desc").map((l) => l.id)).toEqual(["b", "a"]);
   });
 });
