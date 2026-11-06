@@ -1,4 +1,5 @@
 /** What the inventory table shows for one listing on one marketplace. */
+import type { MissingField } from "../api/nativeMarketplaces";
 import type { DirectRecord } from "../api/types";
 import {
   DEFAULT_LISTING_FILTERS,
@@ -8,6 +9,7 @@ import {
   type ListingSortId,
   type ListingStatusFilter,
 } from "./inventoryFilters";
+import { missingDetail, needsText } from "./readiness";
 import { activeAnchorMs, settledAnchorMs, type Listing } from "./sidebar/listingShelves";
 
 export type MarketplaceCellKind = "listed" | "sold" | "draft" | "needs" | "failed" | "working" | "delisted" | "not_listed";
@@ -17,6 +19,8 @@ export interface MarketplaceCell {
   label: string;
   /** The live listing's page, when one is known. */
   url: string | null;
+  /** The fields still needed, by name, when the cell counts some. */
+  detail?: string;
 }
 
 export type TableListing = {
@@ -32,15 +36,11 @@ const BUSY = new Set(["saving", "publishing", "updating"]);
 // Vendoo keys Vestiaire's API integration separately; Settings treats it as one marketplace.
 const ALIASES: Record<string, string> = { vestiaireApi: "vestiaire" };
 
-function plural(count: number, word: string): string {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
-}
-
 /**
  * Anteroom's own record outranks the imported history: it is newer, and a
  * direct delist is never reported back to the import. A sale stands either way.
  */
-export function marketplaceCell(listing: TableListing, marketplace: string): MarketplaceCell {
+export function marketplaceCell(listing: TableListing, marketplace: string, missing?: readonly MissingField[]): MarketplaceCell {
   const record = listing.direct_records?.[marketplace];
   const imported = (listing.vendoo_marketplaces || []).some((id) => (ALIASES[id] || id) === marketplace);
   const removed = (listing.removed_marketplaces || []).some((id) => (ALIASES[id] || id) === marketplace);
@@ -51,14 +51,18 @@ export function marketplaceCell(listing: TableListing, marketplace: string): Mar
   }
   if (record && BUSY.has(record.state)) return { kind: "working", label: "Working", url: null };
   if (imported && !removed) return { kind: "listed", label: "Listed", url };
+  // The server's count already holds the rejected fields; before it arrives, the record's own.
+  const needs = missing?.length ? { kind: "needs" as const, label: needsText(missing.length), url: null, detail: missingDetail(missing) } : null;
   if (record?.failed) {
+    if (needs) return needs;
     return record.fields
-      ? { kind: "needs", label: `Needs ${plural(record.fields, "field")}`, url: null }
+      ? { kind: "needs", label: needsText(record.fields), url: null }
       : { kind: "failed", label: "Failed", url: null };
   }
-  if (record?.state === "draft") return { kind: "draft", label: "Draft", url: null };
   if (record?.state === "unknown") return { kind: "working", label: "Checking", url: null };
+  if (record?.state === "draft") return needs ?? { kind: "draft", label: "Draft", url: null };
   if (removed) return { kind: "delisted", label: "Delisted", url: null };
+  if (needs) return needs;
   return { kind: "not_listed", label: "Not listed", url: null };
 }
 

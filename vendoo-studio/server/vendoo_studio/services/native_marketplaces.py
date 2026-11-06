@@ -31,12 +31,13 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.marketplace_listing import BUSY_STATES, UNSETTLED_STATES
+from vendoo_studio.models.marketplace_listing import BUSY_STATES, LIVE_STATES, UNSETTLED_STATES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, marketplace_media
+from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, listing_readiness, marketplace_media
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
+from vendoo_studio.services.seller_overrides import price_for
 log = logging.getLogger("vendoo_studio.native_marketplaces")
 
 
@@ -310,6 +311,10 @@ def _apply_result(db: Session, conv_id: str, marketplace: str, job_id: str, acti
         values = _outcome(marketplace, action, record, result if isinstance(result, dict) else {})
     except NativeMarketplaceError as exc:
         values = {"state": "unknown", **_CLEARED_ERROR, "error": str(exc), "error_code": "uncertain"}
+    if isinstance(result, dict) and result.get("ok") is True and values["state"] in LIVE_STATES:
+        # Confirmed live: the marketplace has the price this action sent.
+        job = JobRepo(db).get(job_id)
+        values["listed_price"] = price_for(job.listing_snapshot if job else None, marketplace)
     stored = _store(db, conv_id, marketplace, values)
     JobRepo(db).add_event(job_id, "native_result", f"native_{marketplace}_{action}", {
         "marketplace": marketplace, "action": action, "ok": result.get("ok") is True, "state": stored["state"],
@@ -506,6 +511,7 @@ def preflight(conv_id: str, db: Session) -> dict:
     prepared = prepare_listing_snapshot(db, conv, revision.listing_json)
     body = ListRequest(revision_id=revision.id)
     photos = ConversationRepo(db).get_all_photos(conv_id)
+    records = MarketplaceListingRepo(db).for_conversation(conv_id)
     out = {}
     for marketplace in NAMES:
         found = direct_preflight.gaps(attach_form(copy.deepcopy(prepared), marketplace), marketplace,
@@ -514,7 +520,9 @@ def preflight(conv_id: str, db: Session) -> dict:
         if left_off:
             found.append(direct_preflight.gap(f"marketplace_photos.{marketplace}", left_off, blocking=False))
         found = [direct_preflight.with_fix(item) for item in found]
-        out[marketplace] = {"ready": not direct_preflight.blocking(found), "gaps": found}
+        rejected = listing_readiness.rejected_fields(records.get(marketplace) or {})
+        out[marketplace] = {"ready": not direct_preflight.blocking(found), "gaps": found,
+                            "missing": listing_readiness.missing(found, rejected)}
     return {"revision_id": revision.id, "marketplaces": out}
 
 

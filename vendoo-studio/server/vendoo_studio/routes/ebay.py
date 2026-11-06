@@ -61,6 +61,8 @@ async def listing(listing_id: str):
 
 class ImportRequest(BaseModel):
     listing_id: str = Field(pattern=r"^[0-9]{9,15}$")
+    # Link the listing to this existing item instead of creating a new one.
+    link_conversation_id: str | None = Field(None, min_length=1, max_length=64)
 
 
 @router.get("/import/active")
@@ -75,7 +77,10 @@ async def import_candidates(page: int = Query(1, ge=1, le=10000), db: Session = 
 async def import_item(body: ImportRequest, db: Session = Depends(get_db)):
     """Read an owned eBay listing into Anteroom. This never changes eBay."""
     try:
-        return await ebay_import.import_listing(await EbayClient.connect(), db, body.listing_id)
+        client = await EbayClient.connect()
+        if body.link_conversation_id:
+            return await ebay_import.link_listing(client, db, body.listing_id, body.link_conversation_id)
+        return await ebay_import.import_listing(client, db, body.listing_id)
     except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
         raise failure(exc) from exc
 

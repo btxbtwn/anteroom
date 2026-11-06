@@ -39,8 +39,9 @@ struct InventoryView: View {
                 }
                 ForEach(rows) { listing in
                     NavigationLink(value: listing) {
-                        ListingRow(api: model.api, listing: listing, hint: hints[listing.id])
+                        ListingRow(api: model.api, listing: listing, hint: hints[listing.id], missing: model.missing(listing))
                     }
+                    .onAppear { model.wantsReadiness(listing) }
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
@@ -345,10 +346,11 @@ struct ListingRow: View {
     let api: AnteroomAPI
     let listing: ListingSummary
     var hint: String?
+    var missing: [String: [MissingField]] = [:]
     @Environment(AppearanceModel.self) private var appearance
 
     var body: some View {
-        ListingRowContent(listing: listing, bySKU: appearance.listingNames == .sku, hint: hint) {
+        ListingRowContent(listing: listing, bySKU: appearance.listingNames == .sku, hint: hint, missing: missing) {
             if let cover = listing.coverPhotoID {
                 RemotePhoto(api: api, photoID: cover, maxPixels: 96)
             } else {
@@ -367,12 +369,15 @@ struct ListingRowContent<Thumbnail: View>: View {
     let listing: ListingSummary
     var bySKU = false
     var hint: String?
+    var missing: [String: [MissingField]] = [:]
     let thumbnail: Thumbnail
 
-    init(listing: ListingSummary, bySKU: Bool = false, hint: String? = nil, @ViewBuilder thumbnail: () -> Thumbnail) {
+    init(listing: ListingSummary, bySKU: Bool = false, hint: String? = nil, missing: [String: [MissingField]] = [:],
+         @ViewBuilder thumbnail: () -> Thumbnail) {
         self.listing = listing
         self.bySKU = bySKU
         self.hint = hint
+        self.missing = missing
         self.thumbnail = thumbnail()
     }
 
@@ -417,7 +422,7 @@ struct ListingRowContent<Thumbnail: View>: View {
                         .background(WorkspaceStyle.warning.opacity(0.14), in: Capsule())
                         .accessibilityLabel("Missing sale data: \(missing.joined(separator: ", "))")
                 }
-                let badges = listing.marketplaceBadges
+                let badges = listing.marketplaceBadges(missing: missing)
                 if !badges.isEmpty {
                     MarketplaceBadges(badges: badges)
                 }
@@ -451,7 +456,14 @@ private struct MarketplaceBadges: View {
             VStack(alignment: .leading, spacing: 4) { chips }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(badges.map { "\(Marketplaces.name($0.marketplace)) \($0.label)" }.joined(separator: ", "))
+        .accessibilityLabel(badges.map(Self.spoken).joined(separator: ", "))
+    }
+
+    private static func spoken(_ badge: MarketplaceBadge) -> String {
+        var text = "\(Marketplaces.name(badge.marketplace)) \(badge.label)"
+        if badge.tone == .attention, let detail = badge.detail { text += ": \(detail)" }
+        guard let price = badge.price else { return text }
+        return "\(text) at \(price.formatted(.currency(code: "USD")))\(badge.priceDiffers ? ", not the item price" : "")"
     }
 
     private var chips: some View {
@@ -459,6 +471,13 @@ private struct MarketplaceBadges: View {
             HStack(spacing: 3) {
                 Text(Marketplaces.name(badge.marketplace)).foregroundStyle(.secondary)
                 Text(badge.label).fontWeight(.medium).foregroundStyle(color(badge.tone))
+                if let price = badge.price {
+                    // A price apart from the item's own stands out, as on the desktop table.
+                    Text(price, format: .currency(code: "USD"))
+                        .monospacedDigit()
+                        .fontWeight(badge.priceDiffers ? .semibold : .regular)
+                        .foregroundStyle(badge.priceDiffers ? Color.primary : Color.secondary)
+                }
             }
             .font(.caption2)
             .lineLimit(1)

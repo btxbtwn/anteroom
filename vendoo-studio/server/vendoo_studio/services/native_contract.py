@@ -501,8 +501,9 @@ def gaps(listing: dict, market: str) -> list[dict]:
     contract = (listing.get(KEY) or {}).get(market)
     if not isinstance(contract, dict):
         return []
-    def gap(path, message, *, blocking=True):
-        return {"field": path, "message": message, "blocking": blocking}
+    def gap(path, message, *, blocking=True, label=None):
+        label = str(label or "").strip()
+        return {"field": path, "message": message, "blocking": blocking, **({"label": label} if label else {})}
     if contract.get("unavailable"):
         return [gap(f"{market}_specifics", "The marketplace form could not be loaded. Reload its fields before listing.")]
     fields = contract.get("fields") or []
@@ -557,14 +558,14 @@ def gaps(listing: dict, market: str) -> list[dict]:
             # account at List. Missing one here does not stop the listing, so it
             # is said, not refused.
             found.append(gap(path, f"{row.get('label') or path}: {error}",
-                             blocking=not account_resolved(row)))
+                             blocking=not account_resolved(row), label=row.get("label")))
         elif (row.get("required") and item_field(row, market) and not borrowed and value not in (None, "", [], {})
               and not is_locked(listing, path)):
             proof = _evidence(listing, path)
             if proof.get("value") != value or not proof.get("quote"):
                 # Required product facts still need evidence before listing.
                 found.append(gap(path, f"{row.get('label') or path}: Check this answer against photo or seller evidence before listing.",
-                                 blocking=True))
+                                 blocking=True, label=row.get("label")))
     return found
 
 

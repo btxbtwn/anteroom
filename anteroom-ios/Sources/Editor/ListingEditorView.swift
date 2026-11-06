@@ -25,55 +25,59 @@ struct ListingEditorView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if let loadError = model.loadError {
                     WorkspaceSection("Couldn't load listing") {
-                        Text(loadError).foregroundStyle(.red)
+                        Text("Your saved details weren't changed. Try again in a moment.")
+                        Text(loadError).font(.footnote).foregroundStyle(.red)
                         Button("Try again") { Task { await model.load() } }
                     }
                 }
-                HStack(spacing: 8) {
-                    Menu {
-                        Picker("Form", selection: $tab) {
-                            Label("General", systemImage: "square.and.pencil").tag("general")
-                            ForEach(model.marketplaceTabs, id: \.self) { marketplace in
-                                if let choice = model.choice(marketplace) {
-                                    Label {
-                                        Text(Marketplaces.name(marketplace))
-                                        Text(choice.label)
-                                    } icon: {
-                                        Image(systemName: choice.symbol)
+                // A listing that never loaded has no details to show; blank fields would read as lost ones.
+                if model.hasLoaded || model.loadError == nil {
+                    HStack(spacing: 8) {
+                        Menu {
+                            Picker("Form", selection: $tab) {
+                                Label("General", systemImage: "square.and.pencil").tag("general")
+                                ForEach(model.marketplaceTabs, id: \.self) { marketplace in
+                                    if let choice = model.choice(marketplace) {
+                                        Label {
+                                            Text(Marketplaces.name(marketplace))
+                                            Text(choice.detail.map { "\(choice.label): \($0)" } ?? choice.label)
+                                        } icon: {
+                                            Image(systemName: choice.symbol)
+                                        }
+                                        .tag(marketplace)
+                                    } else {
+                                        Text(Marketplaces.name(marketplace)).tag(marketplace)
                                     }
-                                    .tag(marketplace)
-                                } else {
-                                    Text(Marketplaces.name(marketplace)).tag(marketplace)
                                 }
                             }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(tab == "general" ? "General" : Marketplaces.name(tab)).fontWeight(.semibold)
+                                if let choice = model.choice(tab) { ReadinessChip(choice: choice) }
+                                Image(systemName: "chevron.down").font(.caption)
+                            }
+                            .padding(.horizontal, 12).frame(minHeight: 44)
+                            .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
                         }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(tab == "general" ? "General" : Marketplaces.name(tab)).fontWeight(.semibold)
-                            if let choice = model.choice(tab) { ReadinessChip(choice: choice) }
-                            Image(systemName: "chevron.down").font(.caption)
-                        }
-                        .padding(.horizontal, 12).frame(minHeight: 44)
-                        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
+                        .disabled(model.marketplaceTabs.isEmpty)
+                        .accessibilityLabel("Form, \(tab == "general" ? "General" : Marketplaces.name(tab))\(model.choice(tab).map { ", \($0.label)\($0.detail.map { ": \($0)" } ?? "")" } ?? "")")
+                        Spacer()
+                        Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    .disabled(model.marketplaceTabs.isEmpty)
-                    .accessibilityLabel("Form, \(tab == "general" ? "General" : Marketplaces.name(tab))\(model.choice(tab).map { ", \($0.label)" } ?? "")")
-                    Spacer()
-                    Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .font(.subheadline)
-                .padding(.horizontal, 4)
+                    .font(.subheadline)
+                    .padding(.horizontal, 4)
 
-                if tab == "general" {
-                    ListingInspectorSection("Photos") {
-                        PhotoStrip(api: model.api, listingID: model.listingID, canAdd: model.isDraft)
+                    if tab == "general" {
+                        ListingInspectorSection("Photos") {
+                            PhotoStrip(api: model.api, listingID: model.listingID, canAdd: model.isDraft)
+                        }
+                        SellerInputFields(inputs: $model.form.sellerInputs)
+                        GeneralListingFields(form: $model.form, options: model.options, api: model.api)
+                    } else {
+                        MarketplaceFormView(model: model, marketplace: tab)
                     }
-                    SellerInputFields(inputs: $model.form.sellerInputs)
-                    GeneralListingFields(form: $model.form, options: model.options, api: model.api)
-                } else {
-                    MarketplaceFormView(model: model, marketplace: tab)
                 }
             }
             .padding(16)

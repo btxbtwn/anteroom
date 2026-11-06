@@ -37,7 +37,8 @@ import { useChatBusy } from "./chat/liveChatStore";
 import { ListingActionsMenu } from "./ListingReviewActions";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
-import { BookmarkCheckIcon, BookmarkPlusIcon, HistoryIcon } from "lucide-react";
+import { BookmarkCheckIcon, BookmarkPlusIcon, CircleAlertIcon, HistoryIcon } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
 import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, GeneralCategorySelect, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
@@ -154,20 +155,36 @@ export function ListingEditor({
     refetchInterval: (query) => (sessionActive ? jobsPollMs(query.state.data) : false),
   });
 
-  const { data } = useQuery({
+  const listingQuery = useQuery({
     queryKey: ["listing", convId],
     queryFn: () => api.listings.get(convId),
     enabled: !unsaved,
   });
+  const { data } = listingQuery;
 
   const { data: marketplaceSettings } = useQuery({
     queryKey: ["settings-marketplaces"],
     queryFn: api.settings.marketplaces,
   });
-  const { data: conversation } = useQuery({
+  const conversationQuery = useQuery({
     queryKey: ["conversation", convId],
     queryFn: () => api.conversations.get(convId),
   });
+  const { data: conversation } = conversationQuery;
+  // A failed read must not look like an empty listing: blank labels, notes and
+  // photos read as lost data, and a label added there would replace the saved ones.
+  // Fields stay editable while the first read is only slow.
+  const loadError = unsaved ? null : (!data && listingQuery.error) || (!conversation && conversationQuery.error) || null;
+  const [retrying, setRetrying] = React.useState(false);
+  const retryLoad = async () => {
+    setRetrying(true);
+    try {
+      await Promise.all(["listing", "conversation", "photos"].map((key) =>
+        queryClient.refetchQueries({ queryKey: [key, convId], exact: true })));
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const Layout = vendoo ? VendooLayout : MarketplacesLayout;
   const tabs = React.useMemo(() => editorTabs(marketplaceSettings?.selected, runtime), [marketplaceSettings?.selected, runtime]);
@@ -230,7 +247,20 @@ export function ListingEditor({
 
       <div className={cn("listing-form-area", chat && "has-chat")}>
       {mode.isPending ? <p role="status" className="p-3 text-xs text-muted-foreground">Loading listing workflow…</p> : mode.error && !mode.data ?
-        <p role="alert" className="p-3 text-xs text-destructive-foreground">{mode.error.message}</p> :
+        <p role="alert" className="p-3 text-xs text-destructive-foreground">{mode.error.message}</p> : loadError ?
+        <Alert variant="error" className="m-3 self-start">
+          <CircleAlertIcon />
+          <AlertTitle>This listing didn't load</AlertTitle>
+          <AlertDescription className="gap-2">
+            <p>Your saved details weren't changed. Try again in a moment.</p>
+            <p className="text-xs">{loadError.message}</p>
+            <div>
+              <Button size="xs" variant="outline" disabled={retrying} onClick={() => void retryLoad()}>
+                {retrying ? "Retrying…" : "Retry"}
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert> :
       <Layout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
         disabled={generating || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
@@ -239,10 +269,8 @@ export function ListingEditor({
         }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
         railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}
-        railStatus={<>
-          {editState.saving && <span role="status" className="text-xs text-muted-foreground">Saving…</span>}
-          <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>
-        </>}
+        railMenu={<ListingActionsMenu convId={convId} onCleared={onCleared} />}
+        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">Saving…</span> : undefined}
         onSelect={(id) => {
           setFieldTarget(null);
           setEditTab(id);

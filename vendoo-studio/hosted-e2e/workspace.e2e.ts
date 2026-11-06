@@ -27,7 +27,7 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
   if (info.project.name === "phone") {
     await page.getByRole("button", { name: "Inventory", exact: true }).click();
   }
-  await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: title, exact: true }).click();
+  await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "More listing actions", exact: true })).toBeVisible();
@@ -85,7 +85,7 @@ test("generation waits for all four photos and saves the listing from the editor
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: title, exact: true }).click();
+  await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
 
   let release!: () => void;
   const uploading = new Promise<void>(resolve => { release = resolve; });
@@ -213,7 +213,7 @@ test("typing before the initial details arrive preserves the pending edit and un
     expect(saved.sku).toBe("KEEP-123");
     expect(saved.knownFlaws).toBe("Keep this mark");
     await notes.fill("Saved after moving to another draft");
-    await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: otherTitle, exact: true }).click();
+    await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: otherTitle, exact: true }).click();
     await expect.poll(async () => {
       const response = await request.get(`${api}/api/conversations/${draft.id}`, { headers });
       return JSON.parse((await response.json()).notes || "{}").sellerNotes;
@@ -221,6 +221,43 @@ test("typing before the initial details arrive preserves the pending edit and un
     await page.goto(`/?listing=${draft.id}`);
     await expect(page.locator(`#item-notes-${draft.id}`)).toHaveValue("Saved after moving to another draft");
   } finally { release(); }
+});
+
+test("a listing that cannot load says so and loads its saved details on Retry instead of showing an empty form", async ({ page, request }, info) => {
+  test.setTimeout(60_000);
+  const alice = await (await request.post(`${api}/local/auth/v1/token?grant_type=password`, {
+    data: { email: "alice@sandbox.test", password: "sandbox" },
+  })).json();
+  const headers = { Authorization: `Bearer ${alice.access_token}` };
+  const draft = await (await request.post(`${api}/api/drafts`, { headers, data: {
+    title: `Unavailable details ${info.project.name} ${Date.now()}`,
+    notes: JSON.stringify({ vendooLabels: "A23", sellerNotes: "Saved notes" }),
+  } })).json();
+  await page.goto("/");
+  await page.getByLabel("Email address").fill("alice@sandbox.test");
+  await page.getByLabel("Password").fill("sandbox");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible();
+  // The hosted API answers this way when its database connections run out.
+  let unavailable = true;
+  await page.route(`**/api/conversations/${draft.id}**`, async route => {
+    if (!unavailable || route.request().method() !== "GET") return route.continue();
+    await route.fulfill({ status: 503, contentType: "application/json", headers: { "Retry-After": "5" },
+      body: JSON.stringify({ detail: "Cloud data is temporarily unavailable" }) });
+  });
+  if (info.project.name === "phone") {
+    await page.getByRole("button", { name: "Inventory", exact: true }).click();
+    await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: draft.title, exact: true }).click();
+    await page.getByRole("tab", { name: "Listing", exact: true }).click();
+  } else {
+    await page.goto(`/?listing=${draft.id}`);
+  }
+  await expect(page.getByRole("alert").filter({ hasText: "This listing didn't load" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(`#item-notes-${draft.id}`)).toHaveCount(0);
+  unavailable = false;
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.locator(`#item-notes-${draft.id}`)).toHaveValue("Saved notes");
+  await expect(page.getByText("A23", { exact: true })).toBeVisible();
 });
 
 test("the Mac window hands its account session to the native AI worker and clears it on logout", async ({ page }, info) => {

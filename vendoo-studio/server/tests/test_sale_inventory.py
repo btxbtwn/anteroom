@@ -105,8 +105,11 @@ def test_partial_stock_is_not_automatically_delisted_even_if_seller_enabled_the_
 def test_observation_contains_only_public_inventory_fields(etsy_imported):
     conv_id, _ = prepare(etsy_imported)
     inventory_tests.read_listings(etsy_imported, conv_id)
-    saved = MarketplaceListingRepo(etsy_imported.db).get(conv_id, "etsy")["inventory_observation"]
+    record = MarketplaceListingRepo(etsy_imported.db).get(conv_id, "etsy")
+    saved = record["inventory_observation"]
     assert set(saved) == {"listing_id", "checked_at", "state", "quantity", "price"}
+    # The verified read is the price the marketplace has now.
+    assert saved["price"] is not None and record["listed_price"] == saved["price"]
     assert "fixture-token" not in str(saved)
     assert saved["checked_at"] <= utcnow().isoformat() + "+00:00"
 

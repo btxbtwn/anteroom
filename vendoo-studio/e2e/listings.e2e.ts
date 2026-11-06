@@ -14,7 +14,7 @@ test("the inventory shows the sample listings", async ({ page, phone }) => {
   }
   const listings = page.getByRole("list", { name: "Listings" });
   for (const title of SAMPLES) {
-    await expect(listings.getByRole("button", { name: title, exact: true })).toBeVisible();
+    await expect(listings.getByRole("link", { name: title, exact: true })).toBeVisible();
   }
 });
 

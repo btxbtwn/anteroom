@@ -65,7 +65,7 @@ test("recorded amounts appear in sales records and missing data marks sold inven
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory", exact: true }).click();
   }
   await page.getByRole("tab", { name: /^Sold/ }).click();
-  const row = page.getByRole("listitem").filter({ has: page.getByRole("button", { name: title, exact: true }) });
+  const row = page.getByRole("listitem").filter({ has: page.getByRole("link", { name: title, exact: true }) });
   await expect(row.getByText("Missing sale data", { exact: true })).toBeVisible();
   await expect(row.locator('[title="Missing: fees"]')).toBeVisible();
   await page.screenshot({ path: info.outputPath("missing-sale-data.png") });
@@ -91,7 +91,7 @@ test("recorded amounts appear in sales records and missing data marks sold inven
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory", exact: true }).click();
   }
-  await expect(row.getByRole("button", { name: title, exact: true })).toBeVisible();
+  await expect(row.getByRole("link", { name: title, exact: true })).toBeVisible();
   await expect(row.getByText("Missing sale data", { exact: true })).toHaveCount(0);
 });
 

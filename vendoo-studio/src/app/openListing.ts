@@ -41,3 +41,13 @@ export function openListingReducer(state: OpenListing | null, action: OpenListin
   if (action.type === "message") return { ...state, queuedMessage: action.value };
   return { ...state, nonce: state.nonce + 1, reviewTab: "input", editTab: "general", queuedMessage: null };
 }
+
+/* A link that opens this listing; the app reads ?listing= on load. */
+export function listingHref(id: string): string {
+  return `?${new URLSearchParams({ listing: id })}`;
+}
+
+/* Cmd/Ctrl/Shift/Alt or a non-primary button: let the browser handle the link. */
+export function isBrowserLinkClick(event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): boolean {
+  return event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+}

@@ -35,6 +35,9 @@ final class ListingEditorModel {
     private(set) var isLoading = true
     private(set) var isSaving = false
     private(set) var loadError: String?
+    /// False until the saved listing has been read once. Before that the form
+    /// holds placeholders, not the seller's details, so it is neither shown nor saved.
+    private(set) var hasLoaded = false
     var saveError: String?
     var hasConflict = false
     /// Each marketplace tab's state for the saved listing: ready, fields missing, listed or sold.
@@ -48,7 +51,7 @@ final class ListingEditorModel {
         saved = form
     }
 
-    var hasChanges: Bool { !isLoading && (form != saved || !pending.isEmpty) }
+    var hasChanges: Bool { hasLoaded && !isLoading && (form != saved || !pending.isEmpty) }
     var isDraft: Bool { status == "draft" }
     var title: String { form.fields.title }
 
@@ -80,6 +83,7 @@ final class ListingEditorModel {
             next.sellerInputs = SellerInputs(notes: conversation.notes)
             form = next
             saved = next
+            hasLoaded = true
             loadError = nil
             Task { await loadReadiness() }
         } catch {

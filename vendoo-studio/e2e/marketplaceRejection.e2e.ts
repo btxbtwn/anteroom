@@ -22,7 +22,8 @@ test("a marketplace rejection leaves the form editable and List available for re
       const path = new URL(route.request().url()).pathname;
       if (path.endsWith("/preflight")) {
         await route.fulfill({ json: { revision_id: (await saved.json()).current_revision_id, marketplaces: {
-          poshmark: { ready: false, gaps: [{ field: "poshmark_specifics.inventoryRows", message: "Size needs review.", blocking: true }] },
+          poshmark: { ready: false, gaps: [{ field: "poshmark_specifics.inventoryRows", message: "Size needs review.", blocking: true }],
+            missing: [{ field: "poshmark_specifics.inventoryRows", label: "Size", message: "Size needs review." }] },
         } } });
       } else if (path.endsWith("/poshmark/list")) {
         expect(route.request().method()).toBe("POST");

@@ -264,6 +264,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(marketplaces_router)
     from vendoo_studio.routes.hosted_direct_listing import router as direct_listing_router
     app.include_router(direct_listing_router)
+    from vendoo_studio.routes import listing_readiness as listing_readiness_route
+    app.include_router(listing_readiness_route.router)
     from vendoo_studio.routes.hosted_browser_relay import router as browser_relay_router, sessions_router
     app.include_router(browser_relay_router)
     app.include_router(sessions_router)
