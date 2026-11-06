@@ -1,1 +1,0 @@
-- When a listing can't load, the editor now says so and offers Retry instead of showing empty labels, notes, measurements and photos. On iPhone, a listing that didn't load can no longer be saved over with blank fields.
