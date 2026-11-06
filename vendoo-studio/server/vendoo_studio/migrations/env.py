@@ -39,6 +39,19 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# A revision that waits for a table lock queues every later query on that
+# table behind it, so a busy production table would stall the app. Fail the
+# deploy quickly instead; a revision that needs longer sets its own.
+LOCK_TIMEOUT = "5s"
+
+
+def _limit_lock_waits(connection) -> None:
+    if connection.dialect.name == "postgresql":
+        connection.exec_driver_sql(f"SET lock_timeout = '{LOCK_TIMEOUT}'")
+        # A session setting outlives this commit; Alembic then opens its own transaction.
+        connection.commit()
+
+
 def run_migrations_online() -> None:
     connection = context.config.attributes.get("connection")
     if connection is not None:
@@ -54,6 +67,7 @@ def run_migrations_online() -> None:
 
     engine = create_engine(_url())
     with engine.connect() as conn:
+        _limit_lock_waits(conn)
         context.configure(
             connection=conn,
             target_metadata=target_metadata,

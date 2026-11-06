@@ -135,6 +135,15 @@ the test suite. Tests that replace Chrome above `register_wait` with a mock do
 not exercise the check. Not yet measured after deploy: whether the pool stays
 clear with automations running alongside two sellers' editors.
 
+Machines reach each other's `/internal/` routes at
+`http://[FLY_PRIVATE_IP]:8080` on the private network
+(`device_routes.local_base_url`), which does not pass through Fly's proxy. The
+proxy adds `Fly-Client-IP` to every request it forwards from the internet, so
+any `/internal/` request carrying that header answers 404 before the process
+token is checked. A leaked `ANTEROOM_PROCESS_TOKEN` alone therefore cannot
+reach a seller's Chrome or Mac from outside. Do not route internal calls
+through the public hostname or `<app>.fly.dev`.
+
 ## 3. Keep traffic and refresh costs proportional to useful work
 
 Fly's HTTP concurrency type is `requests`, which is what
@@ -149,12 +158,50 @@ failure and cancellation still do.
 Private photos stay private. A thumbnail cache and Realtime fan-out have not
 been re-measured in this change.
 
+Chat image messages hold at most one upload per seller and four across the
+Machine (each can hold about 170 MB while it is parsed; four fit the 2 GB
+Machine's measured free memory). A message that cannot get a slot within 10 s
+answers 429 (same seller) or 503 (Machine busy) with `Retry-After`; nobody
+waits behind another seller's 120-second upload. Images are written to Storage
+before the draft row is locked and the task is queued; a failed queue deletes
+them again.
+
+New generate, chat and assistant submissions take a token from a per-seller
+bucket: 120 at once, refilled at one a second. This is abuse protection, not a
+quota; selecting a hundred drafts and generating them all fits in the burst.
+Resuming a stream does not count. The bucket lives in each process, so a second
+Machine would double the effective allowance; that is acceptable while one
+Machine serves traffic.
+
+Uvicorn's access log stays off because sign-in callbacks carry one-time codes
+in the URL. The hosted app logs one line per request instead: method, matched
+route template (`/api/conversations/{conv_id}/messages`, or `-` when no route
+matched, such as a refused session), status and milliseconds. It never logs the
+path as sent, a query string, a header or a body.
+
 ## 4. Deploy and recover without losing work
 
-`/api/health` is liveness and remains the Fly check. `/api/ready` runs
-`SELECT 1` with a one-second local statement timeout and is not the Fly check
-while only one Machine can take traffic. A model outage does not fail
+`/api/health` is liveness and remains the Fly check. `/api/ready` reads the
+database's Alembic revision (through `anteroom_private.schema_revision()`,
+since the runtime login cannot read `alembic_version`) with a one-second local
+statement timeout. It answers 503 `unavailable` when Postgres cannot be
+reached and 503 `schema_mismatch` when the revision is not the one this build
+was made for. It is not the Fly check while only one Machine can take traffic:
+a database blip or the old Machine seeing the new schema mid-deploy must not
+stop the proxy from routing, or restart the only Machine in a loop. The deploy
+workflow instead waits for `/api/ready` after the new version is live and
+fails the run if it never becomes ready. A model outage does not fail
 `/api/health`.
+
+`alembic upgrade head` runs on every deploy. `migrations/env.py` sets
+`lock_timeout = '5s'` on the migration connection, so a revision that cannot
+get its table lock fails the deploy (before Fly is touched) instead of queueing
+every seller's queries behind it. Retry when traffic is quieter rather than
+raising the timeout. Revisions after `e3bea75f1b9b` that build an index on an
+existing table must use `op.create_index(..., postgresql_concurrently=True)`
+inside `with op.get_context().autocommit_block():`
+(`tests/test_migration_locking.py` enforces it). A concurrent build that fails
+leaves an `INVALID` index; drop it before retrying.
 
 Fly still sends SIGTERM with a 300-second grace period. Uvicorn allows active
 requests 120 seconds, then the draft worker stops claiming and has up to 120
