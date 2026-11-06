@@ -60,7 +60,6 @@ export type FilterableListing = {
   direct_marketplaces?: string[];
   removed_marketplaces?: string[];
   vendoo_listed_at?: string | null;
-  vendoo_sold_at?: string | null;
   sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
   vendoo_sold_dates?: Record<string, string>;

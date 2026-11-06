@@ -212,11 +212,11 @@ describe("sortListings", () => {
     expect(sortListings(inventory, "price_asc")).toEqual([tee, boots, draft]);
   });
 
-  it("sorts by the latest sale, from Anteroom's ledger or Vendoo's history", () => {
-    const vendooSale: FilterableListing = { title: "Vendoo sale", vendoo_sold_at: "2026-10-20T18:30:28+00:00" };
-    const ebaySale: FilterableListing = { title: "eBay sale", sold_at: "2026-11-02T03:51:17+00:00", vendoo_sold_at: null };
+  it("sorts by the latest sale on the ledger, the date Analytics shows", () => {
+    const olderSale: FilterableListing = { title: "Older sale", sold_at: "2026-10-20T18:30:28+00:00" };
+    const ebaySale: FilterableListing = { title: "eBay sale", sold_at: "2026-11-02T03:51:17+00:00" };
     const unsold: FilterableListing = { title: "Unsold" };
-    expect(sortListings([unsold, vendooSale, ebaySale], "sold_desc").map((l) => l.title)).toEqual(["eBay sale", "Vendoo sale", "Unsold"]);
+    expect(sortListings([unsold, olderSale, ebaySale], "sold_desc").map((l) => l.title)).toEqual(["eBay sale", "Older sale", "Unsold"]);
   });
 
   it("sorts by SKU and leaves listings without one at the end", () => {

@@ -481,3 +481,39 @@ def test_listing_rows_carry_the_latest_sale_anteroom_recorded(env):
     assert rows["sold-on-ebay"]["sold_at"] == "2026-11-02T03:51:17+00:00"
     assert rows["unsold"]["sold_at"] is None
     assert env.client.get("/api/conversations/sold-on-ebay").json()["sold_at"] == "2026-11-02T03:51:17+00:00"
+
+
+def _analytics_sale_dates(db, conv_id):
+    return sorted(row.sold_at for row in load_rows(db) if row.conversation_id == conv_id and row.sold_at)
+
+
+def test_a_sold_listing_carries_the_sale_date_analytics_shows(env):
+    """Clearing the other marketplaces later is not a newer sale: the Sold tab sorts by the real order."""
+    item(env.db, "coat")
+    line(env.db, "coat", "ebay", order="o1", order_line="l1", when=datetime(2026, 10, 20, 15, 0),
+         financials={"item_revenue": "40"})
+    # A check that read the Depop listing sold today, after the eBay sale.
+    env.db.add(MarketplaceSale(marketplace="depop", order_id="shop-tee-136d", line_id="shop-tee-136d",
+                               listing_id="shop-tee-136d", conversation_id="coat",
+                               received_at=datetime(2026, 11, 6, 1, 0)))
+    env.db.commit()
+
+    row = next(row for row in env.client.get("/api/conversations").json() if row["id"] == "coat")
+
+    assert row["status"] == "sold"
+    assert row["sold_at"] == "2026-10-20T15:00:00+00:00"
+    assert [moment.isoformat() for moment in _analytics_sale_dates(env.db, "coat")] == [row["sold_at"]]
+
+
+def test_a_sale_whose_date_the_seller_cleared_has_no_sale_date(env):
+    item(env.db, "coat")
+    sale = line(env.db, "coat", "ebay", order="o1", order_line="l1", financials={"item_revenue": "40"})
+    sale.sold_at = None
+    sale.financials = {**sale.financials, "sold_on": None}
+    env.db.commit()
+
+    row = next(row for row in env.client.get("/api/conversations").json() if row["id"] == "coat")
+
+    assert row["status"] == "sold"
+    assert row["sold_at"] is None
+    assert _analytics_sale_dates(env.db, "coat") == []
