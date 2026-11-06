@@ -1,0 +1,1 @@
+- Keep a marketplace action running when another server checks on it, and let Cancel reach it from any server.

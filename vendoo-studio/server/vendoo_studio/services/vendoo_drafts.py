@@ -127,7 +127,7 @@ def _prepare(db, conv_id: str, revision_id: str) -> dict:
                 }
             job = JobRepo(db).create(conv_id, revision_id, snapshot,
                 status="dispatched", current_step="vendoo_session")
-            claim_api_job(job.id)
+            claim_api_job(db, job.id)
     except BaseException:
         db.rollback()
         approved_photos.release(snapshot)

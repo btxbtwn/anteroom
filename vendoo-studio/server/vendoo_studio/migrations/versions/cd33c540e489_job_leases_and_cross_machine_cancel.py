@@ -1,0 +1,36 @@
+"""Job leases and cross-Machine cancel
+
+Revision ID: cd33c540e489
+Revises: e3bea75f1b9b
+Create Date: 2026-11-06 17:48:50.007490
+
+A running marketplace job records which Machine runs it and until when, and a
+Cancel is recorded on the job row, so liveness and cancellation no longer live
+in one process's memory. Existing rows have no lease: they are judged by the
+watchdog exactly as before. Postgres adds these columns without rewriting the
+table (constant default).
+"""
+from __future__ import annotations
+
+from alembic import op
+import sqlalchemy as sa
+
+
+revision = 'cd33c540e489'
+down_revision = 'e3bea75f1b9b'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    with op.batch_alter_table('jobs', schema=None) as batch_op:
+        batch_op.add_column(sa.Column('lease_owner', sa.String(length=64), nullable=True))
+        batch_op.add_column(sa.Column('leased_until', sa.DateTime(timezone=True), nullable=True))
+        batch_op.add_column(sa.Column('cancel_requested', sa.Boolean(), server_default=sa.false(), nullable=False))
+
+
+def downgrade() -> None:
+    with op.batch_alter_table('jobs', schema=None) as batch_op:
+        batch_op.drop_column('cancel_requested')
+        batch_op.drop_column('leased_until')
+        batch_op.drop_column('lease_owner')

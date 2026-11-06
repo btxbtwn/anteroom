@@ -20,8 +20,8 @@ from vendoo_studio.main import app
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
-from vendoo_studio.services import native_marketplaces as native
-from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job
+from vendoo_studio.services import api_job_lock, native_marketplaces as native
+from vendoo_studio.services.api_job_lock import claim_api_job, job_is_live, release_api_job
 from vendoo_studio.services.browser_bridge import BrowserBridgeError
 from vendoo_studio.services.job_watchdog import fail_stalled_jobs
 from vendoo_studio.services.photo_store import LocalPhotoStore
@@ -402,7 +402,7 @@ class NativeMarketplacesTest(unittest.TestCase):
             self.assertEqual(calls[1].args[2]["operation_id"], f"{record['job_id']}-2")
             self.assertEqual(seen, [[record["job_id"]], [record["job_id"]]])
             self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
-            self.assertFalse(api_job_is_live(record["job_id"]))
+            self.assertFalse(job_is_live(self.db, record["job_id"]))
 
     def test_list_does_not_publish_when_preparation_fails(self):
         self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error": "Mercari needs a brand.", "error_code": "missing_fields",
@@ -942,7 +942,7 @@ class NativeMarketplacesTest(unittest.TestCase):
             self.assertIsNotNone(JobRepo(self.db).get(record["job_id"]))
         self.assertEqual(self.client.get(f"/api/conversations/{self.conv.id}/marketplace-listings").json()["poshmark"]["listing_id"],
                          "6adc371572e62463d992ffef")
-        claim_api_job(record["job_id"])
+        claim_api_job(self.db, record["job_id"])
         MarketplaceListingRepo(self.db).save(self.conv.id, "poshmark", {"state": "updating"})
         try:
             self.assertEqual(self.client.post(f"/api/conversations/{self.conv.id}/reset", json={}).status_code, 409)
@@ -1040,7 +1040,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         live.updated_at = utcnow() - timedelta(minutes=30)
         self.db.commit()
         MarketplaceListingRepo(self.db).save(self.conv.id, "mercari", {"state": "saving", "job_id": dead.id})
-        claim_api_job(live.id)
+        claim_api_job(self.db, live.id)
         try:
             self.assertEqual(fail_stalled_jobs(self.db), [dead.id])
             self.assertEqual(live.status, "dispatched")
@@ -1052,12 +1052,108 @@ class NativeMarketplacesTest(unittest.TestCase):
     def test_reconnect_keeps_a_native_action_running_in_this_process(self):
         repo = JobRepo(self.db)
         job = repo.create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step="native_mercari_publish")
-        claim_api_job(job.id)
+        claim_api_job(self.db, job.id)
         try:
             fail_stalled_jobs(self.db, now=utcnow() + timedelta(seconds=6))
             self.assertEqual(job.status, "dispatched")
         finally:
             release_api_job(job.id)
+
+    # --- Two Machines sharing one database ---------------------------------------
+
+    def machines(self):
+        a = api_job_lock.JobLeases("machineA", heartbeat=False)
+        b = api_job_lock.JobLeases("machineB", heartbeat=False)
+        self.addCleanup(lambda: [leases.release(job.id) for job in JobRepo(self.db).list_all() for leases in (a, b)])
+        return a, b
+
+    def test_on_the_mac_a_running_job_is_tracked_in_memory_only(self):
+        job = JobRepo(self.db).create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step="native_mercari_publish")
+        self.assertIsNone(api_job_lock.process_leases().owner)
+        claim_api_job(self.db, job.id)
+        try:
+            self.db.refresh(job)
+            self.assertEqual((job.lease_owner, job.leased_until), (None, None))
+            self.assertTrue(job_is_live(self.db, job.id))
+        finally:
+            release_api_job(job.id)
+        self.assertFalse(job_is_live(self.db, job.id))
+
+    def test_a_watchdog_on_another_machine_leaves_a_running_job_until_its_lease_lapses(self):
+        a, b = self.machines()
+        repo = JobRepo(self.db)
+        job = repo.create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step="native_mercari_publish")
+        MarketplaceListingRepo(self.db).save(self.conv.id, "mercari", {"state": "publishing", "job_id": job.id})
+        a.claim(self.db, job.id)
+        # Quiet far past the orphan grace, but A's lease is current: B leaves it running.
+        self.assertEqual(fail_stalled_jobs(self.db, now=utcnow() + timedelta(seconds=20), leases=b), [])
+        self.db.expire_all()
+        self.assertEqual(repo.get(job.id).status, "dispatched")
+        self.assertEqual(self.record("mercari")["state"], "publishing")
+        with patch.object(api_job_lock, "_process", b):
+            self.assertTrue(job_is_live(self.db, job.id))
+            # Check, Reset and Mark on B wait for it too.
+            self.assertEqual(self.client.post(f"/api/conversations/{self.conv.id}/reset", json={}).status_code, 409)
+        # A renews while B sweeps: B's stale view does not fail it.
+        a.renew()
+        self.assertFalse(b.interrupt(self.db, job.id, "x", utcnow()))
+        # A stops renewing. Once its lease lapses, B marks the job interrupted and its result unconfirmed.
+        lapsed = utcnow() + api_job_lock.LEASE + timedelta(seconds=1)
+        self.assertEqual(fail_stalled_jobs(self.db, now=lapsed, leases=b), [job.id])
+        self.db.expire_all()
+        failed = repo.get(job.id)
+        self.assertEqual(failed.status, "failed")
+        self.assertIn("interrupted", failed.last_error)
+        record = self.record("mercari")
+        self.assertEqual((record["state"], record["error_code"]), ("unknown", "uncertain"))
+        # Nothing is retried: no new job, no marketplace call.
+        self.assertEqual([j.id for j in repo.list_by_conversation(self.conv.id)], [job.id])
+        self.bridge.assert_not_called()
+        self.assertEqual(self.launched, [])
+        # If A is still alive, its next renewal finds the job gone and stops it at its next safe point.
+        self.assertFalse(a.cancel_requested(job.id))
+        a.renew()
+        self.assertTrue(a.cancel_requested(job.id))
+
+    def test_a_restarted_machine_does_not_wait_out_its_own_old_lease(self):
+        a, _b = self.machines()
+        job = JobRepo(self.db).create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step="native_mercari_publish")
+        a.claim(self.db, job.id)
+        restarted = api_job_lock.JobLeases("machineA", heartbeat=False)
+        self.assertEqual(fail_stalled_jobs(self.db, now=utcnow() + timedelta(seconds=6), leases=restarted), [job.id])
+
+    def test_cancel_on_another_machine_stops_the_job_where_it_runs(self):
+        a, b = self.machines()
+        calls = []
+
+        async def bridge(job, kind, payload, timeout=None):
+            calls.append(kind)
+            if kind == "marketplace.execute":
+                # The seller's Cancel lands on B while A waits on Chrome.
+                with patch.object(api_job_lock, "_process", b):
+                    self.assertEqual(self.client.post(f"{self.base}/poshmark/cancel").status_code, 200)
+                    # A second press does not ask again.
+                    self.client.post(f"{self.base}/poshmark/cancel")
+                self.assertFalse(a.cancel_requested(job.id))
+                # A's next heartbeat reads the request from the job row.
+                a.renew()
+            await asyncio.sleep(3600)
+
+        self.bridge.side_effect = bridge
+        with patch.object(api_job_lock, "_process", a), patch.object(native, "CANCEL_POLL_S", 0.01):
+            response = self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True}).json()
+            started = time.monotonic()
+            self.run_jobs()
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(calls, ["marketplace.execute"])
+        job = JobRepo(self.db).get(response["job_id"])
+        self.assertEqual((job.status, job.cancel_requested, job.lease_owner), ("cancelled", True, "machineA"))
+        requested = [e for e in JobRepo(self.db).get_events(job.id) if e.event_type == "native_cancel_requested"]
+        self.assertEqual(len(requested), 1)
+        sent = self.manager.send_message.call_args.args[0]
+        self.assertEqual(sent["type"], "job.cancel")
+        record = self.record("poshmark")
+        self.assertEqual((record["state"], record["error_code"]), ("unknown", "uncertain"))
 
 
 class MigrationFromNotesTest(unittest.TestCase):

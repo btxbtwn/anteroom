@@ -220,7 +220,7 @@ class MarketplaceDelistTest(unittest.TestCase):
         # The seller looked: an unconfirmed Mercari listing that is not there goes back to its draft.
         self.assertEqual(self.client.post(f"{self.base}/mercari/mark", json={"state": "not_listed"}).status_code, 200)
         self.assertEqual(records.get(self.conv.id, "mercari")["state"], "draft")
-        claim_api_job("j2")
+        claim_api_job(self.db, "j2")
         try:
             self.assertEqual(self.client.post(f"{self.base}/poshmark/mark", json={"state": "sold"}).status_code, 409)
         finally:

@@ -32,6 +32,31 @@ table is `anteroom_private.device_routes`. Until that migration is applied, a
 single process keeps using its local relays. A worker process must not be
 started before the migration and `ANTEROOM_PROCESS_TOKEN` exist.
 
+Direct marketplace jobs record their owner on the job row. On Fly
+(`FLY_MACHINE_ID` set) the Machine running a job holds a 30-second lease on it
+and renews it every 5 seconds from one thread. Another Machine's watchdog, Check,
+Reset and Mark treat the job as running until that lease lapses, and only then
+mark it interrupted with its result unconfirmed; nothing is retried or queued
+again. Cancel sets the row's `cancel_requested`; the owner picks it up with its
+next renewal, so a Cancel that reaches another Machine stops the job within
+about 5 seconds. One server process per Machine is assumed: a restarted Machine
+does not wait out its own earlier lease. The Mac writes no lease and keeps
+liveness in memory.
+
+Scheduled work on two Machines with role `all` (or two workers): draft and
+assistant tasks are claimed with fenced leases; automation slots by a unique
+run per slot, and a waiting run by an atomic status change; a timed promotion
+round by an atomic change of its due time; each promotion send re-checks its
+journal under the seller's advisory lock; eBay offer sends reserve their rule
+atomically; sale rows are unique per order line. Still not claimed across
+Machines: an automation run still `running` after 20 minutes can be requeued by
+another Machine and continue its unacted items there (regenerations and
+approval requests only, never marketplace writes); a Machine starting up marks
+another Machine's in-flight eBay offer or promotion round unknown or
+interrupted and pauses that rule (conservative, never resent); and Sourcing
+refreshes and sale reads can run on both, costing duplicate reads only. Run one
+role `all` or `worker` Machine until these are claimed.
+
 **Not deployed, pending cost approval.** Prices are Fly's published monthly
 rates for continuous Machines in the cheapest US regions (`iad` / `ewr`) as of
 2026-11-03. San Jose uses a regional multiplier; confirm it on
