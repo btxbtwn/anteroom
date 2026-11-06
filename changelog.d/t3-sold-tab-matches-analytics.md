@@ -1,1 +1,0 @@
-- The Sold tab's Date Sold order now matches the sales in Analytics. Clearing an item's other marketplaces after it sold no longer moves it to the top.
