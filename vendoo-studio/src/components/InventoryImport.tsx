@@ -16,7 +16,10 @@ interface Importer {
 function importerFor(marketplace: ImportMarketplace): Importer {
   if (marketplace === "ebay" || marketplace === "etsy") {
     const direct = api[marketplace];
-    return { candidates: (page) => direct.importCandidates(page), importListing: (listing) => direct.importListing(listing) };
+    return {
+      candidates: (page) => direct.importCandidates(page),
+      importListing: (listing, linkConversationId) => linkConversationId ? direct.importListing(listing, linkConversationId) : direct.importListing(listing),
+    };
   }
   return {
     candidates: (_page, cursor) => api.chromeImport.importCandidates(marketplace, cursor),
@@ -92,9 +95,14 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
   // A row that looks like an existing item waits for the seller to link it or import it on purpose.
   const available = rows.filter((row) => !row.reason && !row.conversation_id && !row.match && !results[row.id]).map((row) => row.id);
   const imported = Object.values(results);
+  // Every suggested match on this page, one listing per local item: two listings
+  // that look like the same item wait for the seller to pick.
+  const suggested = rows.filter((row) => row.match && !row.conversation_id && !results[row.id]);
+  const linkable = suggested.filter((row) => suggested.filter((other) => other.match!.conversation_id === row.match!.conversation_id).length === 1)
+    .map((row) => ({ id: row.id, link: row.match!.conversation_id }));
 
   return <PageSection title={`Import from ${name}`} description={`Bring your active ${name} listings and photos into Anteroom. This reads ${name} and saves local inventory; it does not change or publish listings.`}>
-    <PageNote>{SUPPORT[marketplace]} Existing Anteroom items are opened again without replacing their edits or photos.</PageNote>
+    <PageNote>{SUPPORT[marketplace]} Existing Anteroom items are opened again without replacing their edits or photos. Linking a match only records that the item is live on {name}; check the suggested matches before linking them.</PageNote>
     <form className="ebay-search-form" onSubmit={(event) => { event.preventDefault(); if (!run.isPending) run.mutate([{ id: itemId.trim() }]); }}>
       <label className="min-w-48 flex-1 space-y-1 text-xs">{direct ? `${name} listing ID` : `${name} listing link or ID`}
         {direct ? <Input required inputMode="numeric" pattern={idPattern} maxLength={marketplace === "ebay" ? 15 : 20} value={itemId} disabled={run.isPending}
@@ -110,6 +118,7 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
       <Button size="xs" variant="ghost" disabled={run.isPending || candidates.isFetching} onClick={() => void candidates.refetch()}>Refresh listings</Button>
       <Button size="xs" variant="ghost" disabled={run.isPending || !available.length} onClick={() => setSelected(available)}>Select this page</Button>
       <Button size="xs" variant="outline" disabled={run.isPending || !selected.length} onClick={() => run.mutate(selected.map((id) => ({ id })))}>Import selected ({selected.length})</Button>
+      <Button size="xs" variant="outline" disabled={run.isPending || !linkable.length} onClick={() => run.mutate(linkable)}>Link matches on this page ({linkable.length})</Button>
       {run.isPending ? <Button size="xs" variant="ghost" disabled={stopping} onClick={() => { stop.current = true; setStopping(true); }}>
         {stopping ? "Stopping after this listing…" : "Stop after this listing"}</Button> : null}
     </div>

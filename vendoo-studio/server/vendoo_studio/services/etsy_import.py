@@ -23,6 +23,14 @@ def _money(raw) -> float:
     return price
 
 
+def _float(value) -> float | None:
+    try:
+        number = float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+    return number if number is not None and math.isfinite(number) else None
+
+
 def _count(value) -> int:
     if type(value) is not int or value < 0:
         raise EtsyFailure("Etsy did not return a reliable available quantity.", 409)
@@ -31,6 +39,9 @@ def _count(value) -> int:
 
 async def active_listings(client: EtsyClient, db: Session, page_number: int) -> dict:
     page = await etsy_workspace.listings(client, "active", (page_number - 1) * PAGE_SIZE)
+    from vendoo_studio.services.chrome_import import match_candidates, suggested_match
+
+    items = match_candidates(db)
     rows = []
     for item in page["rows"]:
         price = item.get("price")
@@ -39,8 +50,11 @@ async def active_listings(client: EtsyClient, db: Session, page_number: int) -> 
             existing = inventory_import.owner(db, "etsy", item["id"])
         except inventory_import.ImportConflict as exc:
             existing, reason = None, str(exc)
-        rows.append({"id": item["id"], "title": item["title"], "price": price["amount"] if price and price["currency"] == "USD" else None,
-                     "quantity": item["quantity"], "reason": reason, "conversation_id": existing.id if existing else None})
+        usd = price["amount"] if price and price["currency"] == "USD" else None
+        match = None if existing or "more than one" in (reason or "") else suggested_match(db, "etsy", item["title"], _float(usd), items)
+        rows.append({"id": item["id"], "title": item["title"], "price": usd,
+                     "quantity": item["quantity"], "reason": reason, "conversation_id": existing.id if existing else None,
+                     "match": match})
     return {"rows": rows, "page": page_number, "total": page["total"], "has_more": page["nextOffset"] is not None}
 
 
@@ -133,3 +147,19 @@ async def import_listing(client: EtsyClient, db: Session, listing_id: str) -> di
         )
     except inventory_import.ImportConflict as exc:
         raise EtsyFailure(str(exc), 409) from exc
+
+
+async def link_listing(client: EtsyClient, db: Session, listing_id: str, conversation_id: str) -> dict:
+    """Link an active Etsy listing to an item the seller chose. Reads Etsy only; the item is kept as it is."""
+    async def verify() -> None:
+        item = await client.listing(listing_id)
+        if str(item.get("listing_id")) != listing_id or str(item.get("shop_id")) != client.shop_id:
+            raise EtsyFailure("This listing does not belong to the connected Etsy shop.", 409)
+        if item.get("state") != "active":
+            raise EtsyFailure("This Etsy listing is not active.", 409)
+        client.assert_current()
+
+    try:
+        return await inventory_import.link_owned_listing(db, "etsy", listing_id, conversation_id, verify)
+    except inventory_import.LinkError as exc:
+        raise EtsyFailure(str(exc), exc.status_code) from exc

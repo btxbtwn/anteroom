@@ -231,3 +231,24 @@ def test_import_reconciles_old_sales_without_marketplace_writes(imported):
     response = run(imported).json()
     imported.db.refresh(sale)
     assert sale.conversation_id == response["conversation_id"]
+
+
+def test_active_page_suggests_an_existing_item_and_links_it_without_copying(imported):
+    from vendoo_studio.services.marketplace_delist import listings
+
+    conv = ConversationRepo(imported.db).create(title="Wool silk coat")
+    imported.db.commit()
+    row = imported.client.get("/api/etsy/import/active?page=1").json()["rows"][0]
+    assert row["match"]["conversation_id"] == conv.id
+    response = imported.client.post("/api/etsy/import", json={"listing_id": "555", "link_conversation_id": conv.id})
+    assert response.status_code == 200, response.text
+    assert response.json()["linked"] is True
+    assert listings(imported.db, conv.id)["etsy"]["listing_id"] == "555"
+    assert imported.db.query(Conversation).count() == 1 and imported.remote.downloads == []
+
+
+def test_linking_refuses_an_inactive_etsy_listing(imported):
+    conv = ConversationRepo(imported.db).create(title="Coat")
+    imported.remote.item["state"] = "sold_out"
+    assert imported.client.post("/api/etsy/import", json={"listing_id": "555", "link_conversation_id": conv.id}).status_code == 409
+    assert imported.db.query(MarketplaceListing).count() == 0
