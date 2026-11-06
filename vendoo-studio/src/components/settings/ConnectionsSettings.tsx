@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { EXTENSION_STATUS_POLL_MS, pollMs } from "../../api/polling";
+import { BUSY_POLL_MS, EXTENSION_STATUS_POLL_MS, IDLE_POLL_MS, pollMs } from "../../api/polling";
 import { extensionConnection } from "../ExtensionStatus";
 import { StatusDot } from "../StatusDot";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
@@ -355,7 +355,7 @@ function ChromeSessionRow({
     queryFn: api.marketplaceSessions.status,
     enabled: chromeReady,
     retry: false,
-    refetchInterval: chromeReady ? 60_000 : false,
+    refetchInterval: chromeReady ? () => pollMs(60_000) : false,
   });
   const connect = useMutation({
     mutationFn: () => api.marketplaceSessions.connect(marketplace),
@@ -412,7 +412,7 @@ function HostedChromeSessions({ salesSwitch, checks }: {
     queryKey: ["marketplace-sessions"],
     queryFn: api.marketplaceSessions.status,
     retry: false,
-    refetchInterval: (query) => (query.state.status === "error" ? 15_000 : 60_000),
+    refetchInterval: (query) => pollMs(query.state.status === "error" ? 15_000 : 60_000),
   });
   const chromeReady = sessions.isSuccess;
   return (
@@ -447,13 +447,13 @@ function MarketplaceSection() {
     queryFn: api.directConnections.status,
     refetchInterval: (query) => {
       const accounts = query.state.data?.accounts;
-      return accounts && Object.values(accounts).some((account) => account.pending) ? 2000 : 15000;
+      return accounts && Object.values(accounts).some((account) => account.pending) ? pollMs(BUSY_POLL_MS) : pollMs(15000);
     },
   });
   const detection = useQuery({
     queryKey: ["sale-detection"],
     queryFn: () => api.settings.saleDetection(),
-    refetchInterval: 60_000,
+    refetchInterval: () => pollMs(60_000),
     enabled: sessionWorkflows,
   });
   const saveDetection = useMutation({
@@ -594,7 +594,7 @@ function TailscaleHttpsRow() {
   const { data, isPending, isError, error } = useQuery({
     queryKey: ["settings-tailscale"],
     queryFn: api.settings.tailscale,
-    refetchInterval: 5000,
+    refetchInterval: () => pollMs(IDLE_POLL_MS),
   });
   const enableMutation = useMutation({
     mutationFn: api.settings.enableTailscale,
