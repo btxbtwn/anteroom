@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { BULK_READ_CONCURRENCY, mapWithConcurrency } from "../lib/concurrency";
 import type { Photo } from "../api/types";
 import { moveItem } from "../photoDrop";
 import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
@@ -63,7 +64,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all(listings.map(async (listing) => {
+    void mapWithConcurrency(listings, BULK_READ_CONCURRENCY, async (listing) => {
       const guess = guessGarment(listing.title);
       try {
         const conv = await api.conversations.get(listing.id);
@@ -71,7 +72,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
       } catch {
         return [listing.id, parseItemDetails(null, guess)] as const;
       }
-    })).then((entries) => {
+    }).then((entries) => {
       if (cancelled) return;
       savedRef.current = Object.fromEntries(entries.map(([id, details]) => [id, JSON.stringify(details)]));
       setRows(Object.fromEntries(entries));
@@ -365,7 +366,7 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: numb
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["photos", convId],
-    queryFn: () => api.conversations.photos(convId),
+    queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }),
   });
   const photos = data || [];
   const [dragId, setDragId] = useState<string | null>(null);
@@ -508,7 +509,7 @@ function ReviewZoom({
 }) {
   const { data } = useQuery({
     queryKey: ["photos", convId],
-    queryFn: () => api.conversations.photos(convId),
+    queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }),
   });
   const photos = data || [];
   const photo = photos[index];
