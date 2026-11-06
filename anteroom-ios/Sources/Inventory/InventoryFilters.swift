@@ -79,39 +79,59 @@ struct MarketplaceBadge: Hashable, Sendable {
     let label: String
     let tone: Tone
     let url: URL?
+    /// The fields still needed, by name, when the label counts them from the server.
+    var detail: String? = nil
 
-    /// Nil when the item is not listed there: the row only names marketplaces with something to say.
-    init?(marketplace: String, record: DirectRecord) {
+    /// Nil when there is nothing to say: not listed there and nothing missing.
+    /// The same rules as the desktop table's cell (inventoryTable.ts).
+    init?(marketplace: String, record: DirectRecord?, missing: [MissingField] = []) {
         self.marketplace = marketplace
-        switch record.state {
+        let needs = missing.isEmpty ? nil : needsText(missing.count)
+        let live = ["published", "pending_review"].contains(record?.state ?? "")
+        url = live ? record?.listingURL.flatMap(URL.init(string:)) : nil
+        switch record?.state {
         case "published", "pending_review":
-            label = record.state == "pending_review" ? "In review" : "Listed"
+            label = record?.state == "pending_review" ? "In review" : "Listed"
             tone = .good
-            url = record.listingURL.flatMap(URL.init(string:))
             return
         case "saving", "publishing", "updating":
             (label, tone) = ("Working", .neutral)
-        case _ where record.failed && record.fields > 0:
-            (label, tone) = ("Needs \(record.fields) field\(record.fields == 1 ? "" : "s")", .attention)
-        case _ where record.failed:
-            (label, tone) = ("Failed", .problem)
-        case "draft":
-            (label, tone) = ("Draft", .neutral)
+            return
+        default:
+            break
+        }
+        // The server's count already holds the rejected fields; before it arrives, the record's own.
+        if !missing.isEmpty { detail = missingNames(missing) }
+        if let record, record.failed {
+            if let needs { (label, tone) = (needs, .attention) }
+            else if record.fields > 0 { (label, tone) = (needsText(record.fields), .attention) }
+            else { (label, tone) = ("Failed", .problem) }
+            return
+        }
+        switch record?.state {
         case "unknown":
             (label, tone) = ("Checking", .neutral)
+        case "draft":
+            (label, tone) = (needs ?? "Draft", needs == nil ? .neutral : .attention)
         default:
-            return nil
+            guard let needs else { return nil }
+            (label, tone) = (needs, .attention)
         }
-        url = nil
     }
 }
 
 extension ListingSummary {
-    /// Each marketplace Anteroom has a record for, in marketplace order.
-    var marketplaceBadges: [MarketplaceBadge] {
+    /// Each marketplace Anteroom has a record for or that still needs fields, in marketplace order.
+    func marketplaceBadges(missing: [String: [MissingField]] = [:]) -> [MarketplaceBadge] {
         let records = directRecords ?? [:]
-        return Marketplaces.sorted(records.keys).compactMap { MarketplaceBadge(marketplace: $0, record: records[$0]!) }
+        let ids = Set(records.keys).union(missing.filter { !$0.value.isEmpty }.keys)
+        return Marketplaces.sorted(ids).compactMap {
+            MarketplaceBadge(marketplace: $0, record: records[$0], missing: missing[$0] ?? [])
+        }
     }
+
+    /// Changes when a saved edit or a List result could change what is missing.
+    var readinessKey: String { "\(updatedAt ?? "")|\(directRecords ?? [:])" }
 
     /// Where the listing is live. Hosted rows carry only Anteroom's own listings.
     var liveMarketplaces: [String] {

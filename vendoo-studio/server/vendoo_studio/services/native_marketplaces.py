@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.marketplace_listing import BUSY_STATES, UNSETTLED_STATES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, marketplace_media
+from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, listing_readiness, marketplace_media
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
 log = logging.getLogger("vendoo_studio.native_marketplaces")
@@ -506,6 +506,7 @@ def preflight(conv_id: str, db: Session) -> dict:
     prepared = prepare_listing_snapshot(db, conv, revision.listing_json)
     body = ListRequest(revision_id=revision.id)
     photos = ConversationRepo(db).get_all_photos(conv_id)
+    records = MarketplaceListingRepo(db).for_conversation(conv_id)
     out = {}
     for marketplace in NAMES:
         found = direct_preflight.gaps(attach_form(copy.deepcopy(prepared), marketplace), marketplace,
@@ -514,7 +515,9 @@ def preflight(conv_id: str, db: Session) -> dict:
         if left_off:
             found.append(direct_preflight.gap(f"marketplace_photos.{marketplace}", left_off, blocking=False))
         found = [direct_preflight.with_fix(item) for item in found]
-        out[marketplace] = {"ready": not direct_preflight.blocking(found), "gaps": found}
+        rejected = listing_readiness.rejected_fields(records.get(marketplace) or {})
+        out[marketplace] = {"ready": not direct_preflight.blocking(found), "gaps": found,
+                            "missing": listing_readiness.missing(found, rejected)}
     return {"revision_id": revision.id, "marketplaces": out}
 
 

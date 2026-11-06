@@ -23,8 +23,16 @@ export interface NativeDraft {
   progress?: { step: string; label: string; index: number; total: number } | null;
 }
 export type NativeDrafts = Partial<Record<NativeMarketplace, NativeDraft>>;
-export interface PreflightGap { field: string; message: string; blocking: boolean }
+export interface PreflightGap { field: string; message: string; blocking: boolean; required?: boolean; label?: string }
+/** A field a marketplace still needs: required and empty, or rejected on the last List. Counted once. */
+export interface MissingField { field: string; label: string; message: string }
+export interface PreflightCheck { ready: boolean; gaps: PreflightGap[]; missing: MissingField[] }
 export interface NativePreflight {
   revision_id: string | null;
-  marketplaces: Partial<Record<NativeMarketplace, { ready: boolean; gaps: PreflightGap[] }>>;
+  marketplaces: Partial<Record<NativeMarketplace, PreflightCheck>>;
+}
+/** Each listing's missing fields per marketplace (`GET /listing-readiness`), for the inventory. */
+export interface ListingReadiness {
+  revision_id: string | null;
+  marketplaces: Partial<Record<NativeMarketplace, { missing: MissingField[] }>>;
 }

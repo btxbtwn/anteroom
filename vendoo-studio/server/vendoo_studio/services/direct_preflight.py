@@ -54,8 +54,12 @@ def requirement(*marketplaces: str) -> Callable[[Requirement], Requirement]:
     return register
 
 
-def gap(field_path: str, message: str, *, blocking: bool = True) -> dict:
-    return {"field": field_path, "message": message, "blocking": blocking}
+def gap(field_path: str, message: str, *, blocking: bool = True, required: bool = False,
+        label: str | None = None) -> dict:
+    """One answer a marketplace needs. ``required`` marks an empty required field
+    that does not refuse List on its own but still counts toward readiness."""
+    return {"field": field_path, "message": message, "blocking": blocking,
+            **({"required": True} if required else {}), **({"label": label} if label else {})}
 
 
 _GAP_FIXES = {
@@ -118,7 +122,8 @@ def _unresolved(snapshot: dict, marketplace: str) -> list[dict]:
         if not value:
             # A required field left empty. Refused values are reported first, and their note already says why.
             if not any(existing["field"] == field for existing in found):
-                found.append(gap(field, f"{name} needs {aspect}, and it is empty.", blocking=False))
+                found.append(gap(field, f"{name} needs {aspect}, and it is empty.", blocking=False,
+                                 required=True, label=aspect))
             continue
         if aspect == "condition":
             # The row shows the grade it would send; say that, not that the row is unfilled.
@@ -127,6 +132,62 @@ def _unresolved(snapshot: dict, marketplace: str) -> list[dict]:
             continue
         found.append(gap(field, f"{aspect} “{value}” is not one of {name}'s choices, so it is left empty.", blocking=False))
     return found
+
+
+# The sell forms Anteroom builds locally, without a network read, before the
+# marketplace's own form has been captured for this listing.
+_LOCAL_FORMS = {"poshmark": "vendoo_studio.services.poshmark_form",
+                "depop": "vendoo_studio.services.depop_form",
+                "mercari": "vendoo_studio.services.mercari_form"}
+_NOT_ANSWERS = {"note", "badge", "photos", "variations"}
+
+
+def _empty(row: dict) -> bool:
+    value = row.get("value")
+    if row.get("input_type") == "inventory":
+        # Poshmark's Size: required only where the category has sizes, answered by any picked size.
+        return bool(row.get("inventory_groups")) and not any(
+            isinstance(item, dict) and item.get("sizeId") for item in value or [])
+    return value in (None, "", [], {})
+
+
+def _empty_form_rows(snapshot: dict, marketplace: str) -> list[dict]:
+    """Required rows of the marketplace's own form the listing leaves empty.
+
+    A captured form contract is checked by ``native_contract.gaps``; before one
+    exists the locally built form names the same required rows. They are said
+    beside List and counted as missing; the marketplace refuses them on List.
+    """
+    from vendoo_studio.services import native_contract
+
+    if (snapshot.get(native_contract.KEY) or {}).get(marketplace) or marketplace not in _LOCAL_FORMS:
+        return []
+    form = importlib.import_module(_LOCAL_FORMS[marketplace]).form(snapshot)
+    found = []
+    for row in form.get("fields") or []:
+        path = str(row.get("path") or row.get("key") or "")
+        if (not path or not row.get("required") or row.get("locked") or row.get("input_type") in _NOT_ANSWERS
+                or native_contract.account_resolved(row)):
+            continue
+        if _empty(row) and not _general_answer(snapshot, path):
+            label = str(row.get("label") or "").strip() or None
+            found.append(gap(path, f"{label or path}: Required field is empty.", blocking=False,
+                             required=True, label=label))
+    return found
+
+
+def _general_answer(snapshot: dict, path: str) -> bool:
+    """Whether List fills an empty marketplace row from General or the prepared form.
+
+    A Poshmark or Depop condition, brand or color left empty on its own form is
+    sent from the listing's General answer of the same name.
+    """
+    name = path.rsplit(".", 1)[-1]
+    form = snapshot.get("form")
+    form = form if isinstance(form, dict) else {}
+    overrides = form.get("overrides")
+    overrides = overrides if isinstance(overrides, dict) else {}
+    return any(value not in (None, "", [], {}) for value in (snapshot.get(name), overrides.get(name)))
 
 
 def gaps(snapshot: dict, marketplace: str, context: Context | None = None) -> list[dict]:
@@ -139,18 +200,18 @@ def gaps(snapshot: dict, marketplace: str, context: Context | None = None) -> li
     from vendoo_studio.services.native_contract import gaps as native_form_gaps
 
     found.extend(native_form_gaps(snapshot, marketplace))
+    found.extend(_empty_form_rows(snapshot, marketplace))
     # One missing answer is said once. The module checks and the captured form
     # both name the same field, and the form's own row is the less informative
     # way to say it, so a field keeps its first message after the blocking ones
     # and the specific ones are preferred over "Required field is empty."
-    seen: set[str] = set()
-    unique = []
+    # The form's own label names the field however it is said.
+    seen: dict[str, dict] = {}
     for item in sorted(found, key=lambda item: (not item["blocking"], _generic(item["message"]))):
-        key = _same_answer(item["field"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(item)
-    return unique
+        kept = seen.setdefault(same_answer(item["field"]), item)
+        if kept is not item and item.get("label") and not kept.get("label"):
+            seen[same_answer(item["field"])] = {**kept, "label": item["label"]}
+    return list(seen.values())
 
 
 # A marketplace form's copy of a shared field follows General until the seller
@@ -158,7 +219,7 @@ def gaps(snapshot: dict, marketplace: str, context: Context | None = None) -> li
 _FOLLOWED = frozenset({"title", "description", "brand", "department"})
 
 
-def _same_answer(field: str) -> str:
+def same_answer(field: str) -> str:
     """The key two reports of one missing answer share."""
     head, _, leaf = str(field).rpartition(".")
     if leaf in _FOLLOWED and head.endswith("_specifics"):

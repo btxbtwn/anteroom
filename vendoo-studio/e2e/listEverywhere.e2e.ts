@@ -16,9 +16,10 @@ test("List everywhere lists only the marketplaces the seller picks, after they c
       const list = path.match(/\/native-marketplaces\/(\w+)\/list$/);
       if (path.endsWith("/preflight")) {
         await route.fulfill({ json: { revision_id: revision, marketplaces: {
-          ebay: { ready: true, gaps: [] },
-          poshmark: { ready: true, gaps: [] },
-          depop: { ready: false, gaps: [{ field: "depop_specifics.size", message: "Depop needs a size.", blocking: true }] },
+          ebay: { ready: true, gaps: [], missing: [] },
+          poshmark: { ready: true, gaps: [], missing: [] },
+          depop: { ready: false, gaps: [{ field: "depop_specifics.size", message: "Depop needs a size.", blocking: true }],
+            missing: [{ field: "depop_specifics.size", label: "Size", message: "Depop needs a size." }] },
         } } });
       } else if (list) {
         listed.push({ marketplace: list[1], confirm: route.request().postDataJSON().confirm });

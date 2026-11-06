@@ -12,9 +12,9 @@ struct NativePreflight: Decodable, Equatable {
     struct Check: Decodable, Equatable {
         let ready: Bool
         let gaps: [Gap]
-
-        /// Required fields still empty, each counted once.
-        var missingRequired: Int { Set(gaps.filter(\.blocking).map(\.field)).count }
+        /// What the marketplace still needs, counted once by the server: required
+        /// fields left empty and fields it rejected on the last List.
+        let missing: [MissingField]
     }
 
     let revisionID: String?
@@ -25,6 +25,32 @@ struct NativePreflight: Decodable, Equatable {
         case marketplaces
     }
 }
+
+/// A field a marketplace still needs, as the server names it.
+struct MissingField: Decodable, Equatable, Hashable, Sendable {
+    let field: String
+    let label: String
+    let message: String
+}
+
+/// Each listing's missing fields per marketplace (`/api/listing-readiness`), for the inventory.
+struct ListingReadiness: Decodable, Equatable, Sendable {
+    struct Marketplace: Decodable, Equatable, Sendable { let missing: [MissingField] }
+
+    let revisionID: String?
+    let marketplaces: [String: Marketplace]
+
+    enum CodingKeys: String, CodingKey {
+        case revisionID = "revision_id"
+        case marketplaces
+    }
+}
+
+/// "Needs 2 fields".
+func needsText(_ count: Int) -> String { "Needs \(count) \(count == 1 ? "field" : "fields")" }
+
+/// What the marketplace's form and List picks name.
+func missingNames(_ missing: [MissingField]) -> String { missing.map(\.label).joined(separator: ", ") }
 
 /// What Anteroom last did on a marketplace (`/native-marketplaces`, the web's `NativeDraft`).
 struct NativeDraftState: Decodable, Equatable {
@@ -80,6 +106,8 @@ struct ListChoice: Equatable, Identifiable {
     let label: String
     let tone: Tone
     let selectable: Bool
+    /// The fields still needed, by name, when the label counts some.
+    var detail: String? = nil
 
     var id: String { marketplace }
 
@@ -87,8 +115,8 @@ struct ListChoice: Equatable, Identifiable {
     /// and missing fields are advice, so the seller may still pick it.
     static func make(_ marketplace: String, canAct: Bool, check: NativePreflight.Check?,
                      draft: NativeDraftState?, live: MarketplaceLiveListing?, soldSomewhere: Bool) -> ListChoice {
-        func choice(_ label: String, _ tone: Tone, _ selectable: Bool = false) -> ListChoice {
-            ListChoice(marketplace: marketplace, label: label, tone: tone, selectable: selectable)
+        func choice(_ label: String, _ tone: Tone, _ selectable: Bool = false, detail: String? = nil) -> ListChoice {
+            ListChoice(marketplace: marketplace, label: label, tone: tone, selectable: selectable, detail: detail)
         }
         if live?.soldHere == true { return choice("Sold", .sold) }
         let removed = ["deleted", "deleting"].contains(live?.state ?? "")
@@ -102,8 +130,9 @@ struct ListChoice: Equatable, Identifiable {
         if !canAct { return choice("Not available here", .muted) }
         if soldSomewhere { return choice("Not listed", .muted) }
         if let check {
-            let missing = check.missingRequired
-            if missing > 0 { return choice("Needs \(missing) \(missing == 1 ? "field" : "fields")", .needs, true) }
+            if !check.missing.isEmpty {
+                return choice(needsText(check.missing.count), .needs, true, detail: missingNames(check.missing))
+            }
             if check.ready { return choice("Ready", .ready, true) }
         }
         return choice("Not checked", .muted, true)

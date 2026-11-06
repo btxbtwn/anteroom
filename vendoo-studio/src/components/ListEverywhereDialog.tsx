@@ -14,6 +14,8 @@ export interface ListChoice {
   label: string;
   tone: "ready" | "needs" | "listed" | "sold" | "muted";
   selectable: boolean;
+  /** The fields still needed, by name, when the badge counts some. */
+  detail?: string;
 }
 
 const BADGE: Record<ListChoice["tone"], "success" | "warning" | "secondary" | "info" | "outline"> = {
@@ -77,6 +79,7 @@ export function ListEverywhereDialog({ title, choices, onConfirm, onClose }: {
                     <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
                       <span className="truncate font-medium text-foreground">{name}</span>
                       <Badge variant={BADGE[choice.tone]} size="sm">{choice.label}</Badge>
+                      {choice.detail ? <span className="w-full truncate text-muted-foreground text-xs" title={choice.detail}>{choice.detail}</span> : null}
                     </span>
                     <Checkbox aria-label={`List on ${name}`} checked={checked} disabled={!choice.selectable}
                       onCheckedChange={(value) => toggle(choice.marketplace, value === true)} />
