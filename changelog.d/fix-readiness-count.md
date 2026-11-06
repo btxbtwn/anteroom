@@ -1,1 +1,0 @@
-- "Needs N fields" on the marketplace tabs, in List everywhere and in the inventory now also counts required fields you haven't filled yet, before you list anything, not only the fields a marketplace rejected. Hover the count, or open List everywhere on the iPhone, to see which fields.
