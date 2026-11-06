@@ -1,1 +1,0 @@
-- Link the eBay and Etsy listings you already have to their Anteroom items, and link every suggested match on an import page at once, so the inventory table shows where each item is live.
