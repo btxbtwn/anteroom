@@ -245,10 +245,12 @@ test("a listing that cannot load says so and loads its saved details on Retry in
     await route.fulfill({ status: 503, contentType: "application/json", headers: { "Retry-After": "5" },
       body: JSON.stringify({ detail: "Cloud data is temporarily unavailable" }) });
   });
-  await page.goto(`/?listing=${draft.id}`);
   if (info.project.name === "phone") {
+    await page.getByRole("button", { name: "Inventory", exact: true }).click();
     await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: draft.title, exact: true }).click();
     await page.getByRole("tab", { name: "Listing", exact: true }).click();
+  } else {
+    await page.goto(`/?listing=${draft.id}`);
   }
   await expect(page.getByRole("alert").filter({ hasText: "This listing didn't load" })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(`#item-notes-${draft.id}`)).toHaveCount(0);
