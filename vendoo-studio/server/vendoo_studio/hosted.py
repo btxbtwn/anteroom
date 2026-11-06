@@ -125,7 +125,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         from vendoo_studio.database import engine as database_engine
         loop_checkouts = LoopCheckoutWarning(database_engine)
         from vendoo_studio.services import chrome_wait_connections
-        chrome_wait_connections.watch(database_engine)
+        # Leave a watch someone else started (the test session's) in place on shutdown.
+        watching = chrome_wait_connections.watch(database_engine)
         worker = offers = watchdog = sale_checks = promotion_scheduler = None
         stopping = threading.Event()
         backgrounds = []
@@ -167,7 +168,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             yield
         finally:
             loop_checkouts.close()
-            chrome_wait_connections.unwatch(database_engine)
+            if watching:
+                chrome_wait_connections.unwatch(database_engine)
             if backgrounds:
                 stopping.set()
                 try:
