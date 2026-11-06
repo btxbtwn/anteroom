@@ -396,30 +396,182 @@ enum AutomationFormat {
 
 // MARK: eBay offers, sharing and offers to likers
 
-/// eBay offers (`GET /api/ebay-offers`): one setup per account, checked every 15 minutes.
-/// The iPhone shows it in the list read-only; it is set up and turned on from the web or Mac.
-struct EbayOffersSummary: Decodable, Sendable {
-    struct AllListings: Decodable, Sendable {
+/// eBay offers (`GET /api/ebay-offers`, EbayOffersSettings.tsx): one setup per
+/// account, checked every 15 minutes by the hosted API. Offers go only to
+/// buyers eBay marks eligible; sending and turning automation on both carry `confirm`.
+struct EbayOffersStatus: Decodable, Sendable {
+    struct AllListings: Decodable, Equatable, Sendable {
         let enabled: Bool
         let discountPercent: Int
         let minimumPrice: String
     }
-    struct Listing: Decodable, Sendable { let enabled: Bool }
+    struct Listing: Decodable, Identifiable, Equatable, Sendable {
+        let conversationId: String
+        let listingId: String
+        let title: String
+        let ruleId: String?
+        let enabled: Bool
+        let discountPercent: Int
+        let minimumPrice: String
+        var id: String { listingId }
+    }
     let connected: Bool
     let allListings: AllListings
     let listings: [Listing]
+    let history: [EbayOffer]
     let checkIntervalMinutes: Int?
     let lastCheck: String?
+    let lastError: String?
 
     var on: Bool { allListings.enabled || listings.contains(where: \.enabled) }
 }
 
+/// A previewed, sent or skipped offer (`attempt_out`).
+struct EbayOffer: Decodable, Equatable, Sendable {
+    let id: String?
+    let ruleId: String?
+    let conversationId: String?
+    let listingId: String?
+    let title: String?
+    let currentPrice: String?
+    let offerPrice: String?
+    let minimumPrice: String?
+    let discountPercent: Int?
+    let eligible: Bool?
+    let state: String
+    let note: String?
+    let createdAt: String?
+
+    /// What the preview says about this offer, as the web does.
+    var previewNote: String {
+        if state == "preview" {
+            return eligible == true ? "Ready to send to eBay-eligible buyers." : "No eligible buyers yet. You can enable automatic offers for future buyers."
+        }
+        return note ?? state
+    }
+}
+
+struct EbayOfferPreviews: Decodable, Sendable { let offers: [EbayOffer] }
+
+struct EbayOfferSelection: Encodable, Equatable, Sendable {
+    let conversationID: String
+    let minimumPrice: String
+    enum CodingKeys: String, CodingKey { case conversationID = "conversation_id", minimumPrice = "minimum_price" }
+}
+
+struct EbayOfferPreviewRequest: Encodable, Equatable, Sendable {
+    let selections: [EbayOfferSelection]
+    let discountPercent: Int
+    enum CodingKeys: String, CodingKey { case selections, discountPercent = "discount_percent" }
+}
+
+/// Send now or turn automatic offers on for previewed listings: always confirmed.
+struct EbayOfferApproval: Encodable, Equatable, Sendable {
+    let attemptIDs: [String]
+    let confirm = true
+    enum CodingKeys: String, CodingKey { case attemptIDs = "attempt_ids", confirm }
+}
+
+struct EbayOffersEnableAll: Encodable, Equatable, Sendable {
+    let discountPercent: Int
+    let minimumPrice: String?
+    let confirm = true
+    enum CodingKeys: String, CodingKey { case discountPercent = "discount_percent", minimumPrice = "minimum_price", confirm }
+}
+
+/// The eBay offers form (EbayOffersSettings.tsx), with the web's checks.
+struct EbayOffersForm: Equatable, Sendable {
+    static let maxPreview = 50
+
+    /// "all" or "selected"; nil follows what is saved.
+    var scope: String?
+    var selected: Set<String> = []
+    var minimums: [String: String] = [:]
+    var discount = "10"
+    /// nil shows what is saved.
+    var allDiscount: String?
+    var allMinimum: String?
+
+    /// A whole percent from 5 to 99, like the web's `Number.isInteger` check.
+    static func percent(_ text: String) -> Int? {
+        guard let value = Double(text.trimmingCharacters(in: .whitespaces)), value.rounded() == value, value >= 5, value <= 99 else { return nil }
+        return Int(value)
+    }
+
+    /// Dollars with at most two decimals, above zero.
+    static func isPrice(_ text: String) -> Bool {
+        text.wholeMatch(of: #/\d+(\.\d{1,2})?/#) != nil && (Double(text) ?? 0) > 0
+    }
+
+    func activeScope(_ status: EbayOffersStatus) -> String { scope ?? (status.allListings.enabled ? "all" : "selected") }
+    func globalDiscount(_ status: EbayOffersStatus) -> String { allDiscount ?? String(status.allListings.discountPercent) }
+    func globalMinimum(_ status: EbayOffersStatus) -> String { allMinimum ?? status.allListings.minimumPrice }
+
+    func globalValid(_ status: EbayOffersStatus) -> Bool {
+        let minimum = globalMinimum(status)
+        return Self.percent(globalDiscount(status)) != nil && (minimum.isEmpty || Self.isPrice(minimum))
+    }
+
+    /// All listings is on with exactly these settings, so there is nothing to save.
+    func allUnchanged(_ status: EbayOffersStatus) -> Bool {
+        let saved = status.allListings
+        guard saved.enabled, let discount = Double(globalDiscount(status)), Int(exactly: discount) == saved.discountPercent else { return false }
+        let minimum = globalMinimum(status)
+        if minimum.isEmpty { return saved.minimumPrice.isEmpty }
+        return !saved.minimumPrice.isEmpty && Double(minimum) == Double(saved.minimumPrice)
+    }
+
+    func enableAll(_ status: EbayOffersStatus) -> EbayOffersEnableAll? {
+        guard globalValid(status), let percent = Self.percent(globalDiscount(status)) else { return nil }
+        let minimum = globalMinimum(status)
+        return EbayOffersEnableAll(discountPercent: percent, minimumPrice: minimum.isEmpty ? nil : minimum)
+    }
+
+    /// What the seller reads before turning offers on for every listing.
+    func enableAllMessage(_ status: EbayOffersStatus) -> String {
+        let minimum = globalMinimum(status)
+        return "Enable \(globalDiscount(status))% off offers on all current and future eBay listings in Anteroom? "
+            + (minimum.isEmpty ? "No minimum price will apply." : "Offers below $\(minimum) are skipped.")
+            + " This replaces individual automatic offer rules. Anteroom checks every 15 minutes and sends to all buyers eBay marks eligible."
+    }
+
+    func minimum(for listing: EbayOffersStatus.Listing) -> String { minimums[listing.conversationId] ?? listing.minimumPrice }
+
+    func selectedListings(_ status: EbayOffersStatus) -> [EbayOffersStatus.Listing] {
+        status.listings.filter { selected.contains($0.conversationId) }
+    }
+
+    /// The preview request, or nil while the selection, discount or a minimum is not ready.
+    func preview(_ status: EbayOffersStatus) -> EbayOfferPreviewRequest? {
+        let picked = selectedListings(status)
+        guard !picked.isEmpty, picked.count <= Self.maxPreview, let percent = Self.percent(discount),
+              picked.allSatisfy({ Self.isPrice(minimum(for: $0)) }) else { return nil }
+        return EbayOfferPreviewRequest(selections: picked.map { EbayOfferSelection(conversationID: $0.conversationId, minimumPrice: minimum(for: $0)) },
+                                       discountPercent: percent)
+    }
+
+    /// Previewed offers that can be sent now, and those that can turn automatic offers on.
+    static func readyIDs(_ offers: [EbayOffer]) -> [String] {
+        offers.filter { $0.state == "preview" && $0.eligible == true }.compactMap(\.id)
+    }
+
+    static func enableIDs(_ offers: [EbayOffer]) -> [String] {
+        offers.filter { $0.state == "preview" }.compactMap(\.id)
+    }
+}
+
 /// A Poshmark sharing schedule or an offers-to-likers rule (`GET /api/promotion-automations`).
 /// Saved off; only the seller turns one on, and any edit turns it off again.
-struct PromotionAutomationSummary: Decodable, Identifiable, Sendable {
-    struct Run: Decodable, Sendable {
+/// Rounds run in the seller's own Chrome, through an open Anteroom tab with Bridge.
+struct PromotionAutomation: Decodable, Identifiable, Sendable {
+    struct Run: Decodable, Identifiable, Sendable {
+        let id: String
         let startedAt: String?
-        enum CodingKeys: String, CodingKey { case startedAt = "started_at" }
+        let sent: Int
+        let skipped: Int
+        let failed: Int
+        let note: String?
+        enum CodingKeys: String, CodingKey { case id, sent, skipped, failed, note, startedAt = "started_at" }
     }
     let id: String
     let name: String
@@ -427,9 +579,17 @@ struct PromotionAutomationSummary: Decodable, Identifiable, Sendable {
     let action: String
     let scope: String
     let conversationIDs: [String]
+    let excludedIDs: [String]
+    let minDaysListed: Int
+    let shareOrder: String?
+    let speed: String?
+    let dailyCap: Int?
     let times: [String]
     let timezone: String?
     let discountPercent: Int?
+    let minLikes: Int?
+    let shippingLabel: String?
+    let minimumPrice: String?
     let enabled: Bool
     let available: Bool
     let pausedReason: String?
@@ -437,14 +597,238 @@ struct PromotionAutomationSummary: Decodable, Identifiable, Sendable {
     let lastRun: Run?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, marketplace, action, scope, times, timezone, enabled, available
-        case conversationIDs = "conversation_ids", discountPercent = "discount_percent", pausedReason = "paused_reason"
+        case id, name, marketplace, action, scope, times, timezone, speed, enabled, available
+        case conversationIDs = "conversation_ids", excludedIDs = "excluded_ids", minDaysListed = "min_days_listed"
+        case shareOrder = "share_order", dailyCap = "daily_cap", discountPercent = "discount_percent", minLikes = "min_likes"
+        case shippingLabel = "shipping_label", minimumPrice = "minimum_price", pausedReason = "paused_reason"
         case nextRunAt = "next_run_at", lastRun = "last_run"
     }
 }
 
 struct PromotionAutomationList: Decodable, Sendable {
-    let automations: [PromotionAutomationSummary]
+    let automations: [PromotionAutomation]
+    let awaitingCapture: [String: [String]]
+    let maxDailyCap: Int
+    let shippingLabels: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case automations, awaitingCapture = "awaiting_capture", maxDailyCap = "max_daily_cap", shippingLabels = "shipping_labels"
+    }
+}
+
+/// The body create and update accept (`AutomationBody` in routes/promotion_automations.py).
+struct PromotionAutomationBody: Encodable, Equatable, Sendable {
+    var marketplace: String
+    var action: String
+    var name: String
+    var scope: String
+    var conversationIDs: [String]
+    var excludedIDs: [String]
+    var minDaysListed: Int
+    var shareOrder: String?
+    var speed: String?
+    var dailyCap: Int?
+    var times: [String]?
+    var timezone: String?
+    var discountPercent: Int?
+    var minimumPrice: String?
+    var minLikes: Int?
+    var shippingLabel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case marketplace, action, name, scope, speed, times, timezone
+        case conversationIDs = "conversation_ids", excludedIDs = "excluded_ids", minDaysListed = "min_days_listed"
+        case shareOrder = "share_order", dailyCap = "daily_cap", discountPercent = "discount_percent"
+        case minimumPrice = "minimum_price", minLikes = "min_likes", shippingLabel = "shipping_label"
+    }
+}
+
+/// Which listings a sharing schedule or offer rule covers (`/coverage`).
+struct PromotionCoverage: Decodable, Sendable {
+    struct Item: Decodable, Identifiable, Sendable {
+        let conversationID: String
+        let title: String?
+        let listingID: String
+        let listedDays: Int?
+        let floor: String?
+        let included: Bool
+        let tooNew: Bool
+        var id: String { conversationID }
+        enum CodingKeys: String, CodingKey {
+            case title, floor, included
+            case conversationID = "conversation_id", listingID = "listing_id", listedDays = "listed_days", tooNew = "too_new"
+        }
+    }
+    let items: [Item]
+    let included: Int
+}
+
+/// What a schedule's rounds did (`/activity`).
+struct PromotionActivity: Decodable, Sendable {
+    struct Send: Decodable, Identifiable, Sendable {
+        let id: String
+        let action: String
+        let title: String?
+        let listingID: String
+        let offerPrice: String?
+        let state: String
+        let note: String?
+        enum CodingKeys: String, CodingKey { case id, action, title, state, note, listingID = "listing_id", offerPrice = "offer_price" }
+    }
+    let runs: [PromotionAutomation.Run]
+    let sends: [Send]
+}
+
+struct PromotionFormError: Error, Equatable { let message: String }
+
+/// The sharing and offers-to-likers form (promotionAutomationsFormat.ts), field for field.
+struct PromotionForm: Equatable, Sendable {
+    static let offerMarketplaces = ["poshmark", "mercari", "depop"]
+    static let speeds: [(value: String, label: String)] = [
+        ("slow", "Slow (about 15 s apart)"), ("normal", "Normal (about 7 s apart)"), ("fast", "Fast (about 4 s apart)")]
+    static let orders: [(value: String, label: String)] = [
+        ("newest", "Newest listed first"), ("oldest", "Oldest listed first"), ("random", "Random")]
+
+    var id: String?
+    var marketplace = "poshmark"
+    var action: String
+    var name = ""
+    var scope = "all"
+    var conversationIDs: [String] = []
+    var excludedIDs: [String] = []
+    var minDays = "0"
+    var order = "newest"
+    var speed = "normal"
+    var dailyCap = "300"
+    var times = "09:00, 20:00"
+    var timezone: String
+    var discount = "10"
+    var minimumPrice = ""
+    var minLikes = "1"
+    var shippingLabel = ""
+
+    init(action: String, marketplace: String = "poshmark", timezone: String = TimeZone.current.identifier) {
+        self.action = action
+        self.marketplace = marketplace
+        self.timezone = timezone
+    }
+
+    init(automation row: PromotionAutomation) {
+        self.init(action: row.action, marketplace: row.marketplace, timezone: row.timezone ?? TimeZone.current.identifier)
+        id = row.id
+        name = row.name
+        scope = row.scope
+        conversationIDs = row.conversationIDs
+        excludedIDs = row.excludedIDs
+        minDays = String(row.minDaysListed)
+        order = row.shareOrder ?? "newest"
+        speed = row.speed ?? "normal"
+        dailyCap = String(row.dailyCap ?? 300)
+        times = row.times.joined(separator: ", ")
+        discount = String(row.discountPercent ?? 10)
+        minLikes = String(row.minLikes ?? 1)
+        shippingLabel = row.shippingLabel ?? ""
+        minimumPrice = row.minimumPrice ?? ""
+    }
+
+    private static func whole(_ text: String, _ low: Int, _ high: Int) -> Int? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard trimmed.wholeMatch(of: #/\d+/#) != nil, let number = Int(trimmed), number >= low, number <= high else { return nil }
+        return number
+    }
+
+    /// The request body, or what the seller still has to fix.
+    func body(maxDailyCap: Int) -> Result<PromotionAutomationBody, PromotionFormError> {
+        guard let days = Self.whole(minDays, 0, 365) else { return .failure(.init(message: "Minimum days listed is a whole number from 0 to 365.")) }
+        if scope == "items" && conversationIDs.isEmpty { return .failure(.init(message: "Choose at least one listing, or cover all live listings.")) }
+        var body = PromotionAutomationBody(marketplace: marketplace, action: action, name: name.trimmingCharacters(in: .whitespaces), scope: scope,
+                                           conversationIDs: scope == "items" ? conversationIDs : [], excludedIDs: excludedIDs, minDaysListed: days)
+        if action == "share" {
+            guard let cap = Self.whole(dailyCap, 1, maxDailyCap) else {
+                return .failure(.init(message: "The daily cap is 1 to \(maxDailyCap.formatted()) shares."))
+            }
+            var rounds: [String] = []
+            for time in times.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init) where !rounds.contains(time) { rounds.append(time) }
+            if rounds.isEmpty || rounds.count > 6 || rounds.contains(where: { $0.wholeMatch(of: #/([01]?\d|2[0-3]):[0-5]\d/#) == nil }) {
+                return .failure(.init(message: "Enter 1 to 6 round times like 09:00, 20:00."))
+            }
+            let zone = timezone.trimmingCharacters(in: .whitespaces)
+            body.shareOrder = order
+            body.speed = speed
+            body.dailyCap = cap
+            body.times = rounds
+            body.timezone = zone.isEmpty ? "UTC" : zone
+            return .success(body)
+        }
+        guard let percent = Self.whole(discount, 1, 99) else { return .failure(.init(message: "Enter the discount as a whole percent from 1 to 99.")) }
+        guard let likes = Self.whole(minLikes, 1, 1000) else { return .failure(.init(message: "Minimum likes is a whole number from 1 to 1,000.")) }
+        let minimum = minimumPrice.trimmingCharacters(in: .whitespaces)
+        if !minimum.isEmpty && (minimum.wholeMatch(of: #/\d+(\.\d{1,2})?/#) == nil || (Double(minimum) ?? 0) <= 0 || (Double(minimum) ?? 0) > 9_999_999.99) {
+            return .failure(.init(message: "Enter a positive minimum price with at most two decimal places, or leave it blank."))
+        }
+        body.discountPercent = percent
+        body.minimumPrice = minimum.isEmpty ? nil : minimum
+        body.minLikes = likes
+        let label = shippingLabel.trimmingCharacters(in: .whitespaces)
+        body.shippingLabel = marketplace == "poshmark" && !label.isEmpty ? label : nil
+        return .success(body)
+    }
+
+    func includes(_ conversationID: String) -> Bool {
+        scope == "items" ? conversationIDs.contains(conversationID) : !excludedIDs.contains(conversationID)
+    }
+
+    /// Include or leave out one listing, keeping the scope the seller chose.
+    mutating func set(_ conversationID: String, included: Bool) {
+        if scope == "items" {
+            conversationIDs.removeAll { $0 == conversationID }
+            if included { conversationIDs.append(conversationID) }
+        } else {
+            excludedIDs.removeAll { $0 == conversationID }
+            if !included { excludedIDs.append(conversationID) }
+        }
+    }
+}
+
+enum PromotionFormat {
+    static func orderLabel(_ order: String?) -> String {
+        PromotionForm.orders.first { $0.value == (order ?? "newest") }?.label ?? "Newest listed first"
+    }
+
+    static func offerChecks(_ marketplace: String) -> String {
+        marketplace == "poshmark" || marketplace == "depop"
+            ? "checks recent likes about every minute; catch-up checks every 15 minutes"
+            : "checks every 15 minutes"
+    }
+
+    static func minimum(_ row: PromotionAutomation) -> String {
+        "\(row.minimumPrice.map { "minimum $\($0)" } ?? "no shared minimum price"); saved individual minimums also apply"
+    }
+
+    /// One sentence for what a rule does (describePromotionAutomation).
+    static func describe(_ row: PromotionAutomation, name market: (String) -> String) -> String {
+        let count = row.conversationIDs.count
+        let scope = row.scope == "all" ? "all live listings" : "\(count) chosen \(count == 1 ? "listing" : "listings")"
+        let excluded = row.excludedIDs.isEmpty ? "" : ", \(row.excludedIDs.count) excluded"
+        let age = row.minDaysListed > 0 ? ", listed \(row.minDaysListed)+ days" : ""
+        if row.action == "share" {
+            return "Shares \(scope)\(excluded)\(age) at \(row.times.joined(separator: ", ")) (\(row.timezone ?? "UTC")) · "
+                + "\(orderLabel(row.shareOrder).lowercased()) · \(row.speed ?? "normal") · up to \((row.dailyCap ?? 0).formatted()) a day"
+        }
+        let shipping = row.marketplace == "poshmark"
+            ? " · \(row.shippingLabel.map { "shipping discount “\($0)”" } ?? "no shipping discount")" : ""
+        let likes = row.minLikes ?? 1
+        return "\(row.discountPercent ?? 0)% off to new likers on \(scope)\(excluded)\(age) with \(likes)+ \(likes == 1 ? "like" : "likes")"
+            + " · \(minimum(row))\(shipping) · \(offerChecks(row.marketplace)) on \(market(row.marketplace))"
+    }
+
+    /// What the seller reads before turning a rule on (confirmPromotionOn).
+    static func confirmOn(_ row: PromotionAutomation, name market: (String) -> String) -> String {
+        let what = row.action == "share"
+            ? "Anteroom will share these \(market(row.marketplace)) listings to your followers on its own at \(row.times.joined(separator: ", ")) (\(row.timezone ?? "UTC")), up to \((row.dailyCap ?? 0).formatted()) a day."
+            : "Anteroom will send \(row.discountPercent ?? 0)% off offers to new likers on its own; \(offerChecks(row.marketplace)); \(minimum(row))."
+        return "\(what) It stops and turns itself off at the first limit or unconfirmed result. Nothing runs until the next round."
+    }
 }
 
 /// One row for any automation, as the web list draws it (automationRows.ts).
@@ -492,7 +876,7 @@ struct AutomationRowModel: Equatable, Sendable {
                   state: togglable ? "" : (task.status == "draft" ? "Draft" : "Done"))
     }
 
-    init(ebay status: EbayOffersSummary, timezone: String = TimeZone.current.identifier) {
+    init(ebay status: EbayOffersStatus, timezone: String = TimeZone.current.identifier) {
         let every = status.checkIntervalMinutes ?? 15
         let picked = status.listings.filter(\.enabled).count
         let all = status.allListings
@@ -505,7 +889,7 @@ struct AutomationRowModel: Equatable, Sendable {
                   on: status.connected ? status.on : nil, state: status.connected ? "" : "Not connected")
     }
 
-    init(promotion row: PromotionAutomationSummary, name market: (String) -> String) {
+    init(promotion row: PromotionAutomation, name market: (String) -> String) {
         let timezone = row.timezone ?? TimeZone.current.identifier
         let count = row.conversationIDs.count
         let scope = row.scope == "all" ? "all live listings" : "\(count) chosen listing\(count == 1 ? "" : "s")"

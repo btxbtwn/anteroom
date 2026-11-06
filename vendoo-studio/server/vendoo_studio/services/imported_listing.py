@@ -36,7 +36,6 @@ def _dates(notes: dict) -> dict:
         "vendoo_created_at": text("created"),
         "vendoo_modified_at": text("modified"),
         "vendoo_listed_at": text("listed"),
-        "vendoo_sold_at": text("sold"),
         "vendoo_listed_dates": mapping("listedByMarketplace"),
         "vendoo_sold_dates": mapping("soldByMarketplace"),
     }

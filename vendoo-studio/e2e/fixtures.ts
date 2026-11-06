@@ -77,7 +77,7 @@ export async function openListing(page: Page, phone: boolean, title: string): Pr
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
-  await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: title, exact: true }).click();
+  await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
 }
 
 /** The editor's Title box; on a phone it is on the Listing tab. */

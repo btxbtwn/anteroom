@@ -91,7 +91,6 @@ class ConversationSummary(BaseModel):
     vendoo_created_at: str | None = None
     vendoo_modified_at: str | None = None
     vendoo_listed_at: str | None = None
-    vendoo_sold_at: str | None = None
     vendoo_listed_dates: dict[str, str] = {}
     vendoo_sold_dates: dict[str, str] = {}
     # Edited here since the item's live direct listings were written: Update
