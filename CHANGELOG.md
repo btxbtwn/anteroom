@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.746 — 2026-11-06
+
+- Set up, edit and turn on eBay offers, Poshmark sharing and offers to likers from the iPhone, with the same settings and checks as the web.
+- On the web, Connect eBay in eBay offers now opens eBay's sign-in page.
+
 ## 0.1.745 — 2026-11-06
 
 - Link the eBay and Etsy listings you already have to their Anteroom items, and link every suggested match on an import page at once, so the inventory table shows where each item is live.

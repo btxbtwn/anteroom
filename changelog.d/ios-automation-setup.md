@@ -1,2 +1,0 @@
-- Set up, edit and turn on eBay offers, Poshmark sharing and offers to likers from the iPhone, with the same settings and checks as the web.
-- On the web, Connect eBay in eBay offers now opens eBay's sign-in page.
