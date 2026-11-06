@@ -10,7 +10,6 @@ paths = [
   '''(^|/)\.venv/''',
   '''(^|/)node_modules/''',
   '''(^|/)dist/''',
-  '''(^|/)vendoo-studio/data/''',
   '''(^|/)vendoo-studio/\.mp/''',
   '''(^|/)vendoo-studio/\.venv/''',
 ]

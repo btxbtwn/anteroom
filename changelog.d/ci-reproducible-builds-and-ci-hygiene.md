@@ -1,0 +1,1 @@
+- The Mac app and the web app now install the exact, verified package versions that were tested, so each update ships what was checked.

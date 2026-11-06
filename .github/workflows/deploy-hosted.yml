@@ -76,12 +76,17 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          version: "0.12.13"
+
       - name: Install the hosted server
         if: steps.gate.outputs.skip != 'true'
         working-directory: vendoo-studio
         run: |
           python -m pip install -U pip
-          python -m pip install -e ".[hosted]"
+          ./scripts/install-locked.sh python hosted
 
       - name: Apply pending migrations
         if: steps.gate.outputs.skip != 'true'
