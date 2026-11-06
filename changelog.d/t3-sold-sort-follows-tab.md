@@ -1,0 +1,1 @@
+- Sorting by Date Sold (Newest) opens the Sold tab and lists every sale newest first.
