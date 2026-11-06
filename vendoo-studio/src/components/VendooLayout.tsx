@@ -10,7 +10,7 @@ export function useListingMode() {
 }
 
 export function VendooLayout({ convId, revisionId, disabled, ids, selected, onSelect, railActions,
-  railStatus, children }: ComponentProps<typeof MarketplacesLayout>) {
+  railMenu, railStatus, children }: ComponentProps<typeof MarketplacesLayout>) {
   const client = useQueryClient();
   const key = ["vendoo-draft", convId];
   const draft = useQuery({ queryKey: key,
@@ -29,7 +29,11 @@ export function VendooLayout({ convId, revisionId, disabled, ids, selected, onSe
         aria-current={id === selected ? "page" : undefined} onClick={() => onSelect(id)}>
         {id === "general" ? "General" : marketplaceName(id)}
       </Button>)}
-      <div className="mt-auto flex flex-col gap-1 border-t pt-2">{railActions}{railStatus}</div>
+      <div className="relative mt-auto flex flex-col gap-1 border-t pt-2">
+        {railStatus && <div className="pointer-events-none absolute bottom-full end-1 mb-1 flex items-center gap-1.5">{railStatus}</div>}
+        {railMenu && <span className="absolute end-0.5 top-2 z-10">{railMenu}</span>}
+        {railActions}
+      </div>
     </nav>
     <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
       <section aria-label="Vendoo draft" className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 p-2 text-xs">

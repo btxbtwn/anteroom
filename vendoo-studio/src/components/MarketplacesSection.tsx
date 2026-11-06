@@ -198,12 +198,14 @@ export function useReportFieldsShown(marketplace: string, fields: readonly strin
 
 export function MarketplacesLayout({
   convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField,
-  ids, selected, onSelect, onPrepare, railActions, railStatus, children,
+  ids, selected, onSelect, onPrepare, railActions, railMenu, railStatus, children,
 }: MarketplaceProps & {
   ids: readonly string[];
   /** Listing-wide actions pinned above the rail's own, e.g. Regenerate. */
   railActions?: ReactNode;
-  /** The listing's sync state and overflow menu, the rail's last line. */
+  /** The listing's overflow menu, on the right of the first action row. */
+  railMenu?: ReactNode;
+  /** The listing's sync state, floated above the actions so it never moves them. */
   railStatus?: ReactNode;
   selected: string;
   onSelect: (id: string) => void;
@@ -707,8 +709,12 @@ export function MarketplacesLayout({
           })}
         </ul>
         {/* Listing-wide actions sit apart from the marketplaces, pinned to the
-            rail's foot: quiet rows that match it, the destructive one last. */}
-        <div className="mt-auto flex flex-col gap-0.5 border-t pt-1.5 [&>[data-slot=button]]:w-full [&>[data-slot=button]]:justify-start">
+            rail's foot: quiet rows that match it, the destructive one last.
+            The overflow menu shares the first row, like a marketplace row's. */}
+        <div className={cn("relative mt-auto flex flex-col gap-0.5 border-t pt-1.5 [&>[data-slot=button]]:w-full [&>[data-slot=button]]:justify-start",
+          railMenu && "[&>[data-slot=button]:first-of-type]:pe-7")}>
+          {railStatus && <div className="pointer-events-none absolute bottom-full end-1 mb-1 flex items-center gap-1.5">{railStatus}</div>}
+          {railMenu && <span className="absolute end-0.5 top-1.5 z-10">{railMenu}</span>}
           {railActions}
           {readyToList.length > 1 && (
             <Button size="xs" variant="ghost" disabled={busy} title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
@@ -721,7 +727,6 @@ export function MarketplacesLayout({
               <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
             </Button>
           )}
-          {railStatus && <div className="mt-1 flex min-h-6 items-center gap-1.5 border-t ps-2 pt-1">{railStatus}</div>}
         </div>
       </nav>
       {picking && <ListEverywhereDialog title={title} choices={choices} onClose={() => setPicking(false)}

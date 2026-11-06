@@ -118,27 +118,28 @@ export function ListingSidebar({
   // Keep the controlled search input responsive while filtering large inventories.
   const deferredQuery = useDeferredValue(listingQuery);
   const needle = deferredQuery.trim().toLowerCase();
-  const { activeListings, settledListings } = useMemo(() => {
+  const { orderedListings, settledListings } = useMemo(() => {
     const visible = filterListings(conversations || [], needle, filters);
     const active = visible.filter((listing) => !listing.settled_at).sort((left, right) => activeAnchorMs(right) - activeAnchorMs(left));
     const settled = visible.filter((listing) => listing.settled_at).sort((left, right) => settledAnchorMs(right) - settledAnchorMs(left) || left.id.localeCompare(right.id));
-    // Every sort but "recent" replaces each shelf's own recency order.
+    // "Recent" keeps open listings above finished ones; every other sort orders
+    // the whole list as one, so a sale-date sort runs newest to oldest throughout.
     return {
-      activeListings: sortListings(active, filters.sort),
-      settledListings: sortListings(settled, filters.sort),
+      orderedListings: sortListings([...active, ...settled], filters.sort),
+      settledListings: settled,
     };
   }, [conversations, filters, needle]);
 
   // Finished listings stay out of the working list. Search and the Sold tab still find them.
   const shownListings = useMemo(() => {
-    const rows = [...activeListings, ...settledListings].filter((listing) =>
+    const rows = orderedListings.filter((listing) =>
       visibleInInventory(listing, filters.status, Boolean(needle)));
     if (activeView === "listings" && selectedConvId && !rows.some((listing) => listing.id === selectedConvId)) {
       const open = settledListings.find((listing) => listing.id === selectedConvId);
       if (open) rows.unshift(open);
     }
     return rows;
-  }, [activeListings, activeView, filters.status, needle, selectedConvId, settledListings]);
+  }, [orderedListings, activeView, filters.status, needle, selectedConvId, settledListings]);
 
 
   const listingEligibleIds = useMemo(
@@ -409,7 +410,7 @@ export function ListingSidebar({
             {(!conversations || conversations.length === 0) && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No listings yet</p>
             )}
-            {conversations && conversations.length > 0 && activeListings.length === 0 && settledListings.length === 0 && (
+            {conversations && conversations.length > 0 && orderedListings.length === 0 && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No matching listings</p>
             )}
           </VirtualListingList>
