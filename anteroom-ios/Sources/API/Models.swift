@@ -64,17 +64,20 @@ struct DirectRecord: Codable, Hashable, Sendable {
     var failed = false
     /// Fields the marketplace rejected that the seller has not edited since.
     var fields = 0
+    /// The live listing's price on this marketplace, when Anteroom knows it.
+    var price: Double?
 
     enum CodingKeys: String, CodingKey {
-        case state, failed, fields
+        case state, failed, fields, price
         case listingURL = "listing_url"
     }
 
-    init(state: String, listingURL: String? = nil, failed: Bool = false, fields: Int = 0) {
+    init(state: String, listingURL: String? = nil, failed: Bool = false, fields: Int = 0, price: Double? = nil) {
         self.state = state
         self.listingURL = listingURL
         self.failed = failed
         self.fields = fields
+        self.price = price
     }
 
     init(from decoder: Decoder) throws {
@@ -83,6 +86,7 @@ struct DirectRecord: Codable, Hashable, Sendable {
         listingURL = try container.decodeIfPresent(String.self, forKey: .listingURL)
         failed = try container.decodeIfPresent(Bool.self, forKey: .failed) ?? false
         fields = try container.decodeIfPresent(Int.self, forKey: .fields) ?? 0
+        price = try container.decodeIfPresent(Double.self, forKey: .price)
     }
 }
 

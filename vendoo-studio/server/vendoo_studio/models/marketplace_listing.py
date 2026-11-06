@@ -15,6 +15,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
@@ -97,6 +98,11 @@ class MarketplaceListing(SellerOwned, Base):
     # Unused since Sellwild was removed; columns kept so existing DBs stay readable without a migration.
     sellwild_category_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sellwild_condition_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # The price the live listing has: what the last confirmed List or Update
+    # sent, a verified read of the marketplace, or the imported listing's own.
+    # Null when unknown, such as a listing the seller linked by hand.
+    listed_price: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Latest verified direct inventory read; listing identity and read-start time
     # keep a later sale or replacement link from reusing stale stock.

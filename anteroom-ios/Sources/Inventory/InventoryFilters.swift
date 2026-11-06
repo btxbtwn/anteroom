@@ -79,12 +79,16 @@ struct MarketplaceBadge: Hashable, Sendable {
     let label: String
     let tone: Tone
     let url: URL?
+    /// The live listing's price there, when known. Only a listed badge has one.
+    var price: Double?
+    /// The price is known and is not the item's own: a marketplace price the seller set, or one the marketplace changed.
+    var priceDiffers = false
 
     /// Anteroom's own record outranks the imported history: it is newer, and a
     /// direct delist is never reported back to the import. A sale stands either way.
     /// Nil when the item is not listed there: the row only names marketplaces with something to say.
-    init?(marketplace: String, record: DirectRecord?, imported: Bool = false, removed: Bool = false,
-          sold: Bool = false, importedURL: String? = nil) {
+    init?(marketplace: String, record: DirectRecord?, basePrice: Double? = nil, imported: Bool = false,
+          removed: Bool = false, sold: Bool = false, importedURL: String? = nil) {
         self.marketplace = marketplace
         let link = (record?.listingURL ?? importedURL).flatMap(URL.init(string:))
         var url: URL?
@@ -93,6 +97,10 @@ struct MarketplaceBadge: Hashable, Sendable {
             (label, tone, url) = ("Sold", .neutral, link)
         case "published", "pending_review":
             (label, tone, url) = (record?.state == "pending_review" ? "In review" : "Listed", .good, link)
+            price = record?.price
+            if let price, let basePrice {
+                priceDiffers = (price * 100).rounded() != (basePrice * 100).rounded()
+            }
         case "saving", "publishing", "updating":
             (label, tone) = ("Working", .neutral)
         case _ where imported && !removed:
@@ -129,7 +137,7 @@ extension ListingSummary {
         let sold = vendooSoldDates ?? [:]
         let ids = Set(records.keys).union(importedMarketplaces).union(removed).union(sold.keys)
         return Marketplaces.sorted(ids).compactMap { id in
-            MarketplaceBadge(marketplace: id, record: records[id], imported: importedMarketplaces.contains(id),
+            MarketplaceBadge(marketplace: id, record: records[id], basePrice: price, imported: importedMarketplaces.contains(id),
                              removed: removed.contains(id), sold: sold[id] != nil, importedURL: vendooListingURLs?[id])
         }
     }

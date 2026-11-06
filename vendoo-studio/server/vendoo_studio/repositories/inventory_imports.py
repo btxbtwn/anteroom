@@ -23,6 +23,11 @@ def owners_by_id(db: Session, marketplace: str, listing_id: str) -> list[Convers
     ).all()
 
 
+def _price(value) -> float | None:
+    """The imported listing's own price: what the marketplace has now."""
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
+
+
 def create_import(db: Session, marketplace: str, snapshot: dict, listing_id: str, photos: list[dict], binding: dict | None = None, *, identity: str) -> Conversation:
     public_url = public_listing_url(marketplace, listing_id)
     conv = Conversation(id=identity, title=snapshot["title"], status="active")
@@ -35,6 +40,7 @@ def create_import(db: Session, marketplace: str, snapshot: dict, listing_id: str
             Listing(conversation_id=conv.id, current_revision_id=revision.id),
             MarketplaceListing(conversation_id=conv.id, marketplace=marketplace, state="published",
                                listing_id=listing_id, revision_id=revision.id, listing_url=public_url,
+                               listed_price=_price(snapshot.get("price")),
                                **({"ebay_listing_id": listing_id} if marketplace == "ebay" else {}), **(binding or {})),
             *(Photo(conversation_id=conv.id, display_order=index, **meta) for index, meta in enumerate(photos)),
         ])

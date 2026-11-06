@@ -134,6 +134,7 @@ def test_import_creates_local_inventory_photos_and_direct_identity_without_vendo
     assert snapshot["marketplace_category_ids"] == {"ebay": "63862"}
     binding = imported.db.query(MarketplaceListing).one()
     assert binding.listing_id == binding.ebay_listing_id == ITEM_ID and binding.state == "published"
+    assert binding.listed_price == 45.5
     assert binding.ebay_offer_id is None and binding.ebay_inventory_written is None
     saved_photos = imported.db.query(Photo).order_by(Photo.display_order).all()
     assert [photo.display_order for photo in saved_photos] == [0, 1]
