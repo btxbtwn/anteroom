@@ -32,6 +32,21 @@ struct AutomationsView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        screen
+            .confirmationDialog("Run “\(confirmingRun?.name ?? "")” now?", isPresented: runConfirmationShown,
+                                titleVisibility: .visible, presenting: confirmingRun) { task in
+                Button("Run now") { start(task, dryRun: false) }
+                Button("Cancel", role: .cancel) {}
+            } message: { task in
+                Text(AutomationFormat.runNowMessage(task))
+            }
+    }
+
+    private var runConfirmationShown: Binding<Bool> {
+        Binding(get: { confirmingRun != nil }, set: { if !$0 { confirmingRun = nil } })
+    }
+
+    private var screen: some View {
         NavigationStack {
             List {
                 Group {
@@ -156,13 +171,6 @@ struct AutomationsView: View {
             }
             .sheet(item: $history) { target in
                 AutomationHistoryView(api: api, automation: target.automation, runs: target.runs)
-            }
-            .confirmationDialog("Run “\(confirmingRun?.name ?? "")” now?", isPresented: Binding(get: { confirmingRun != nil }, set: { if !$0 { confirmingRun = nil } }),
-                                titleVisibility: .visible, presenting: confirmingRun) { task in
-                Button("Run now") { start(task, dryRun: false) }
-                Button("Cancel", role: .cancel) {}
-            } message: { task in
-                Text(AutomationFormat.runNowMessage(task))
             }
             .confirmationDialog("Delete \"\(deleting?.name ?? "")\"?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                                 titleVisibility: .visible) {
