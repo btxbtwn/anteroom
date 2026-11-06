@@ -14,7 +14,6 @@ export type Listing = {
   price?: number | null;
   vendoo_labels?: string[];
   vendoo_listed_at?: string | null;
-  vendoo_sold_at?: string | null;
   sold_at?: string | null;
   vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
@@ -42,9 +41,9 @@ export function activeAnchorMs(listing: Listing): number {
   return Math.max(timestampMs(listing.updated_at), timestampMs(listing.unsettled_at), timestampMs(listing.created_at));
 }
 
-/** The latest sale: Anteroom's own ledger or the imported Vendoo history, whichever is newer. */
-export function soldAtMs(listing: { sold_at?: string | null; vendoo_sold_at?: string | null }): number {
-  return Math.max(timestampMs(listing.sold_at), timestampMs(listing.vendoo_sold_at));
+/** The latest sale on the sales ledger, the date Analytics shows for it. */
+export function soldAtMs(listing: { sold_at?: string | null }): number {
+  return timestampMs(listing.sold_at);
 }
 
 /** A finished listing sorts by its latest sale, or by when it was finished if that came later. */
