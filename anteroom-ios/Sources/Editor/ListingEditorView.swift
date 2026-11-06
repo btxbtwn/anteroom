@@ -22,8 +22,23 @@ struct ListingEditorView: View {
     }
 
     var body: some View {
+        editor
+            .alert("Unsaved changes", isPresented: draftNoticeShown) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(model.draftNotice ?? "")
+            }
+            .sensoryFeedback(.success, trigger: saves)
+            .sensoryFeedback(.error, trigger: saveFailures)
+            // iOS may end the app in the background; keep unsaved edits until it reopens.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background { model.stashEdits() }
+            }
+    }
+
+    private var editor: some View {
         @Bindable var model = model
-        ScrollView {
+        return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let loadError = model.loadError {
                     WorkspaceSection("Couldn't load listing") {
@@ -139,13 +154,6 @@ struct ListingEditorView: View {
         } message: {
             Text(model.saveError ?? "")
         }
-        .alert("Unsaved changes", isPresented: draftNoticeShown) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.draftNotice ?? "")
-        }
-        .sensoryFeedback(.success, trigger: saves)
-        .sensoryFeedback(.error, trigger: saveFailures)
         .alert("Changed on another device", isPresented: $model.hasConflict) {
             Button("Reload", role: .destructive) {
                 model.forgetStash()
@@ -196,8 +204,6 @@ struct ListingEditorView: View {
         // Pick up changes from other devices, but never over unsaved edits.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && !model.hasChanges && !model.isSaving && !model.isLoading { Task { await model.load() } }
-            // iOS may end the app in the background; keep unsaved edits until it reopens.
-            if phase == .background { model.stashEdits() }
         }
         // Edits from another device show up live, unless this one has unsaved changes.
         .task(id: live?.listings) {
