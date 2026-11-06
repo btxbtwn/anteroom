@@ -6,6 +6,7 @@ import type { Suggestion, SuggestionKind } from "../api/types";
 import { staleSuggestionIds } from "../bulkPriceDrop";
 import { BulkPriceDropDialog } from "./BulkPriceDropDialog";
 import { useWorkspaceRuntime } from "../app/runtime";
+import { isBrowserLinkClick, listingHref } from "../app/openListing";
 import { Button } from "./ui/button";
 import { ListingThumb } from "./sidebar/ListingBits";
 import { displayCoverUrl } from "./sidebar/coverSrc";
@@ -125,12 +126,18 @@ function SuggestionRow({
   onSelect: (conversationId: string) => void;
 }) {
   return (
-    <button
-      type="button"
+    <a
+      href={listingHref(suggestion.conversation_id)}
+      draggable={false}
       data-active={selected}
-      className="flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] border border-border bg-card px-2.5 py-2 text-left text-sidebar-foreground/90 transition-colors hover:bg-accent data-[active=true]:bg-accent"
+      className="flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] border border-border bg-card px-2.5 py-2 text-left text-sidebar-foreground/90 no-underline transition-colors hover:bg-accent data-[active=true]:bg-accent"
       title={`${suggestionKindLabel(suggestion.kind)}. ${suggestion.reason}`}
-      onClick={() => onSelect(suggestion.conversation_id)}
+      onClick={(event) => {
+        // Cmd/Ctrl-click and right-click open a new tab; a plain click opens it here.
+        if (isBrowserLinkClick(event)) return;
+        event.preventDefault();
+        onSelect(suggestion.conversation_id);
+      }}
     >
       <ListingThumb src={displayCoverUrl(suggestion.cover_photo_url)} />
       <div className="min-w-0 flex-1">
@@ -138,6 +145,6 @@ function SuggestionRow({
         <div className="mt-0.5 text-xs font-medium leading-snug text-foreground">{suggestionKindLabel(suggestion.kind)}</div>
         <div className="mt-px text-2xs leading-snug text-muted-foreground">{suggestion.reason}</div>
       </div>
-    </button>
+    </a>
   );
 }

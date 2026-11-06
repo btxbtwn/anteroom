@@ -35,7 +35,7 @@ test("another batch and inventory selection stay available while generation wait
     }
     expect(started.size).toBe(2);
     await expect(page.getByRole("button", { name: "Select listings", exact: true })).toBeEnabled();
-    await page.getByRole("list", { name: "Listings" }).getByRole("button", { name: titles[2], exact: true }).click();
+    await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: titles[2], exact: true }).click();
     const field = await titleBox(page, phone);
     await field.fill(`Edited during concurrent work ${suffix}`);
     await expect(field).toHaveValue(`Edited during concurrent work ${suffix}`);
