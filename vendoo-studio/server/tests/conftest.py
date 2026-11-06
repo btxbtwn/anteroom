@@ -63,6 +63,15 @@ def _no_connection_held_during_chrome_waits():
     chrome_wait_connections.unwatch(engine)
 
 
+@pytest.fixture(autouse=True)
+def _chrome_wait_check_stays_on(_no_connection_held_during_chrome_waits):
+    """A hosted app's shutdown unwatches the shared engine; watch it again for every test."""
+    from vendoo_studio.database import engine
+    from vendoo_studio.services import chrome_wait_connections
+
+    chrome_wait_connections.watch(engine)
+
+
 @pytest.fixture(scope="session")
 def _endpoint_checkouts():
     """Watch every pool for connections an async route handler takes on the event loop."""
