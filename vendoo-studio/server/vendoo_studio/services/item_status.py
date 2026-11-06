@@ -98,6 +98,29 @@ def _quantities(db: Session, conv_ids: set[str] | None, first_sales: dict[str, d
 
 
 
+def sale_moment(line: MarketplaceSale) -> datetime | None:
+    """When a ledger line sold, as Analytics dates it. None once the seller cleared the date."""
+    raw = line.financials
+    if isinstance(raw, dict) and "sold_on" in raw and raw["sold_on"] is None:
+        return None
+    return _time(line.sold_at or line.received_at)
+
+
+def counted_sales(lines: list[MarketplaceSale], quantity: int) -> list[MarketplaceSale]:
+    """A sold item's sales, oldest first, no more than the units it had in stock.
+
+    When the seller sells on one marketplace and clears the item's other
+    listings, each check that reads one of those listings as sold records a
+    line with no order behind it. Keep every line that has an order, and only
+    as many of the rest as the item had units; a genuine relist that sold
+    again has its own order or listing report.
+    """
+    ordered = sorted(lines, key=lambda line: (line.sold_at or line.received_at, line.id))
+    room = max(0, max(1, quantity) - sum(line.is_order_backed for line in ordered))
+    reported = [line for line in ordered if not line.is_order_backed][:room]
+    return [line for line in ordered if line.is_order_backed or line in reported]
+
+
 def _read_sold_out(observations: dict[str, dict], lines: list[MarketplaceSale]) -> bool:
     """A direct stock read, taken after the latest sale on that listing, showing no units left."""
     for line in lines:
@@ -171,21 +194,24 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
         quantity = max(1, quantities.get(conv_id, 1))
         own = lines.get(conv_id, [])
         units = sum(_units(line.quantity) for line in own)
-        moments = [_time(line.sold_at or line.received_at) for line in own]
         marks = notes.get("marketplaceMarks")
         if not isinstance(marks, dict):
             marks = {}
         with_lines = {line.marketplace for line in own}
+        mark_moments = []
         for marketplace, mark in marks.items():
             # A mark made before Mark as sold recorded a sale line.
             if isinstance(mark, dict) and mark.get("state") == "sold" and marketplace not in with_lines:
                 units += 1
-                moments.append(_time(mark.get("at")))
-        sold_at = max(filter(None, moments), default=None)
+                mark_moments.append(_time(mark.get("at")))
         sold_out = units > 0 and quantity > 1 and _read_sold_out(observations.get(conv_id, {}), own)
         if vendoo == "sold" or units >= quantity or sold_out:
-            result[conv_id] = ItemStatus("sold", units, quantity, sold_at, own=vendoo != "sold")
+            # The latest sale Analytics counts, so the Sold tab orders sales as Analytics lists them.
+            moments = [sale_moment(line) for line in counted_sales(own, quantity)] if own else mark_moments
+            result[conv_id] = ItemStatus("sold", units, quantity, max(filter(None, moments), default=None),
+                                         own=vendoo != "sold")
             continue
+        sold_at = max(filter(None, [*(sale_moment(line) for line in own), *mark_moments]), default=None)
         live_direct = direct.get(conv_id, {})
         listed_marks = [name for name, mark in marks.items() if isinstance(mark, dict) and mark.get("state") == "listed"]
         removed = set(removed_marketplaces(notes, live_direct))
