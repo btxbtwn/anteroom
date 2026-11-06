@@ -72,6 +72,8 @@ async def get_listing_profiles():
 
 class ImportRequest(BaseModel):
     listing_id: str = Field(pattern=r"^[1-9][0-9]{0,19}$")
+    # Link the listing to this existing item instead of creating a new one.
+    link_conversation_id: str | None = Field(None, min_length=1, max_length=64)
 
 
 @router.get("/import/active")
@@ -82,6 +84,9 @@ async def import_candidates(response: Response, page: int = Query(1, ge=1, le=40
 @router.post("/import")
 async def import_item(body: ImportRequest, response: Response, db: Session = Depends(get_db)):
     """Read one owned Etsy listing into local inventory; never change Etsy."""
+    if body.link_conversation_id:
+        conversation_id = body.link_conversation_id
+        return await _read_workspace(lambda client: etsy_import.link_listing(client, db, body.listing_id, conversation_id), response)
     return await _read_workspace(lambda client: etsy_import.import_listing(client, db, body.listing_id), response)
 
 

@@ -35,6 +35,9 @@ async def active_listings(client: EbayClient, db: Session, page_number: int) -> 
     active = result["xml"].find("e:ActiveList", NS)
     if active is None:
         return {"rows": [], "page": page_number, "total": 0, "has_more": False}
+    from vendoo_studio.services.chrome_import import match_candidates, suggested_match
+
+    items = match_candidates(db)
     rows = []
     for item in active.findall("e:ItemArray/e:Item", NS):
         identifier = item.findtext("e:ItemID", namespaces=NS) or ""
@@ -54,14 +57,25 @@ async def active_listings(client: EbayClient, db: Session, page_number: int) -> 
             existing = inventory_import.owner(db, "ebay", identifier)
         except inventory_import.ImportConflict as exc:
             existing, reason = None, str(exc)
-        rows.append({"id": identifier, "title": item.findtext("e:Title", namespaces=NS) or identifier,
-                     "price": price.text if price is not None and price.get("currencyID") == "USD" else None,
+        title = item.findtext("e:Title", namespaces=NS) or identifier
+        usd = price.text if price is not None and price.get("currencyID") == "USD" else None
+        # An existing item can be linked to even a listing this import cannot copy.
+        match = None if existing or "more than one" in (reason or "") else suggested_match(db, "ebay", title, _float(usd), items)
+        rows.append({"id": identifier, "title": title, "price": usd,
                      "quantity": max(0, total - sold) if total is not None and sold is not None else None,
-                     "reason": reason, "conversation_id": existing.id if existing else None})
+                     "reason": reason, "conversation_id": existing.id if existing else None, "match": match})
     pages = _number(active.findtext("e:PaginationResult/e:TotalNumberOfPages", namespaces=NS))
     total = _number(active.findtext("e:PaginationResult/e:TotalNumberOfEntries", namespaces=NS))
     return {"rows": rows, "page": page_number, "total": total,
             "has_more": page_number < pages if pages is not None else len(rows) == PAGE_SIZE}
+
+
+def _float(value: str | None) -> float | None:
+    try:
+        number = float(value) if value else None
+    except ValueError:
+        return None
+    return number if number is not None and math.isfinite(number) else None
 
 
 def _seller_sku(value) -> str | None:
@@ -113,3 +127,22 @@ async def import_listing(client: EbayClient, db: Session, listing_id: str) -> di
         )
     except inventory_import.ImportConflict as exc:
         raise EbayFailure(str(exc), 409) from exc
+
+
+async def link_listing(client: EbayClient, db: Session, listing_id: str, conversation_id: str) -> dict:
+    """Link an active eBay listing to an item the seller chose. Reads eBay only; the item is kept as it is."""
+    from vendoo_studio.services.keychain import get_marketplace_accounts
+
+    async def verify() -> None:
+        info = await ebay_actions.listing(client, listing_id)
+        account = get_marketplace_accounts().get("ebay") or {}
+        if info.get("id") != listing_id or not account.get("label") or str(info.get("seller") or "").casefold() != str(account["label"]).casefold():
+            raise EbayFailure("This listing does not belong to the connected seller.", 409)
+        if info.get("status") != "Active":
+            raise EbayFailure("This eBay listing is not active.", 409)
+        assert_identity(client.seller)
+
+    try:
+        return await inventory_import.link_owned_listing(db, "ebay", listing_id, conversation_id, verify)
+    except inventory_import.LinkError as exc:
+        raise EbayFailure(str(exc), exc.status_code) from exc
