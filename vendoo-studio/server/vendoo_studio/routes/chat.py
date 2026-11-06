@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import SessionLocal, get_db
+from vendoo_studio.database import SessionLocal, get_db, in_worker_session
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import activity
 from vendoo_studio.services.photo_store import photo_store
@@ -329,11 +329,7 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
 @router.post("/api/conversations/{conv_id}/generate/cancel")
 async def cancel_generate_listing(conv_id: str):
     stop_generation(conv_id)
-    db = SessionLocal()
-    try:
-        ConversationRepo(db).update_status(conv_id, "draft")
-    finally:
-        db.close()
+    await in_worker_session(lambda db: ConversationRepo(db).update_status(conv_id, "draft"))
     return {"ok": True}
 
 
