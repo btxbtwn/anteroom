@@ -1,1 +1,0 @@
-- Send Depop offers to likers on marked-down items: the offer's discount now comes off the sale price buyers see, so Depop no longer turns them down.

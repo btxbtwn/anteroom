@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.747 — 2026-11-06
+
+- Send Depop offers to likers on marked-down items: the offer's discount now comes off the sale price buyers see, so Depop no longer turns them down.
+
 ## 0.1.746 — 2026-11-06
 
 - Set up, edit and turn on eBay offers, Poshmark sharing and offers to likers from the iPhone, with the same settings and checks as the web.
