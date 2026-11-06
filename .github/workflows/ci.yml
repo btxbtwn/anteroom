@@ -154,7 +154,7 @@ jobs:
           .venv/bin/python -m pip install -U pip
           .venv/bin/python -m pip install -e ".[dev]"
           npm ci
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium webkit
       - name: Compile Bridge network rules in Chromium
         if: matrix.suite.name == 'sandbox'
         run: node scripts/check-bridge-network.mjs

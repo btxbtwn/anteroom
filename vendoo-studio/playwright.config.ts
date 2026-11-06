@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 // Browser tests run against the sandbox (scripts/sandbox.sh): fresh sample data,
 // a fake AI provider, no network, and publishing refused. They cover the desktop
-// layout and the phone layout. See e2e/README.md.
+// layout and the phone layout, the phone in Chromium and WebKit. See e2e/README.md.
 const API_PORT = process.env.VENDOO_STUDIO_PORT || "4329";
 const WEB_PORT = process.env.VENDOO_STUDIO_WEB_PORT || "5184";
 
@@ -23,6 +23,8 @@ export default defineConfig({
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
     { name: "phone", use: { ...devices["iPhone 15"], browserName: "chromium" } },
+    // The Mac app's webview and iOS Safari are WebKit.
+    { name: "phone-webkit", use: { ...devices["iPhone 15"] } },
   ],
   webServer: {
     command: "./scripts/sandbox.sh",

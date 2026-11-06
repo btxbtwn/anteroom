@@ -28,3 +28,4 @@ desktop/build_info.json
 uv.lock
 e2e/results/
 e2e/report/
+coverage/
