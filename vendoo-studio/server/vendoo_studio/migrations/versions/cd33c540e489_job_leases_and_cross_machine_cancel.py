@@ -23,10 +23,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table('jobs', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('lease_owner', sa.String(length=64), nullable=True))
-        batch_op.add_column(sa.Column('leased_until', sa.DateTime(timezone=True), nullable=True))
-        batch_op.add_column(sa.Column('cancel_requested', sa.Boolean(), server_default=sa.false(), nullable=False))
+    # Adopting a database from before migrations creates these columns with its tables.
+    existing = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("jobs")}
+    # Plain ADD COLUMN on both databases: no rebuild of the jobs table is needed.
+    for column in (sa.Column('lease_owner', sa.String(length=64), nullable=True),
+                   sa.Column('leased_until', sa.DateTime(timezone=True), nullable=True),
+                   sa.Column('cancel_requested', sa.Boolean(), server_default=sa.false(), nullable=False)):
+        if column.name not in existing:
+            op.add_column('jobs', column)
 
 
 def downgrade() -> None:
