@@ -51,6 +51,19 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _no_connection_held_during_chrome_waits():
+    """Fail any test whose code waits on Chrome while holding a pooled database connection."""
+    from vendoo_studio.database import engine
+    from vendoo_studio.services import chrome_wait_connections
+
+    chrome_wait_connections.watch(engine)
+    chrome_wait_connections.strict = True
+    yield
+    chrome_wait_connections.strict = False
+    chrome_wait_connections.unwatch(engine)
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _local_test_client_origin():
     """Exercise the same Host checks as the real loopback app, not testserver."""
     from unittest.mock import patch

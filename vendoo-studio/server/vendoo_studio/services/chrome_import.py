@@ -254,6 +254,7 @@ async def import_listing(db: Session, marketplace: str, listing: str) -> dict:
         return {"conversation_id": existing.id, "listing_id": listing_id, "reused": True, "linked": False,
                 "photo_count": len(ConversationRepo(db).get_photos(existing.id)),
                 "warnings": ["Already in Anteroom. Existing edits and photos were kept."]}
+    db.commit()  # Only reads are open. Hold no connection while Chrome reads the listing.
     data, photos = snapshot(marketplace, await _read(marketplace, listing_id))
     try:
         result = await inventory_import.save_owned_listing(db, marketplace, listing_id, data, photos, lambda: None)
@@ -280,6 +281,7 @@ async def link_listing(db: Session, marketplace: str, listing: str, conversation
         if current.get("listing_id") and current["listing_id"] != listing_id:
             raise ChromeImportError(409, f"This item is already linked to another {_name(marketplace)} listing.")
         # The listing must still be the seller's and still for sale before it is linked.
+        db.commit()  # Only reads are open. Hold no connection while Chrome reads the listing.
         await _read(marketplace, listing_id)
         try:
             mark(db, conversation_id, marketplace, "listed", public_listing_url(marketplace, listing_id))

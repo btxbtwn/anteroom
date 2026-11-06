@@ -1,0 +1,1 @@
+- Keep the web app's listings loading while sharing and offer automations wait on Chrome. Those waits no longer tie up the database connections your pages need.
