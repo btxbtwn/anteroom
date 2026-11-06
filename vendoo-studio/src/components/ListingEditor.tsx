@@ -9,6 +9,7 @@ import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { listingEdits } from "../api/listingEdits";
+import { registerUnsavedWork } from "../lib/unsavedWork";
 import { DIRECT_FORM_MARKETS, nativeFormOptions, prefetchListingForm } from "../api/listingForms";
 import { PhotoTray } from "./PhotoTray";
 import { useListingSessionActive } from "./listingSession";
@@ -151,13 +152,13 @@ export function ListingEditor({
   const sessionActive = useListingSessionActive();
   const { data: jobs } = useQuery({
     queryKey: ["jobs", convId],
-    queryFn: () => api.jobs.list(convId),
+    queryFn: ({ signal }) => api.jobs.list(convId, { signal }),
     refetchInterval: (query) => (sessionActive ? jobsPollMs(query.state.data) : false),
   });
 
   const listingQuery = useQuery({
     queryKey: ["listing", convId],
-    queryFn: () => api.listings.get(convId),
+    queryFn: ({ signal }) => api.listings.get(convId, { signal }),
     enabled: !unsaved,
   });
   const { data } = listingQuery;
@@ -168,7 +169,7 @@ export function ListingEditor({
   });
   const conversationQuery = useQuery({
     queryKey: ["conversation", convId],
-    queryFn: () => api.conversations.get(convId),
+    queryFn: ({ signal }) => api.conversations.get(convId, { signal }),
   });
   const { data: conversation } = conversationQuery;
   // A failed read must not look like an empty listing: blank labels, notes and
@@ -217,7 +218,7 @@ export function ListingEditor({
   // stream ends, and "Ask chat" beside "Filling discovered fields…" contradicts it.
   const { data: activity } = useQuery({
     queryKey: ["activity", convId],
-    queryFn: () => api.conversations.activity(convId),
+    queryFn: ({ signal }) => api.conversations.activity(convId, { signal }),
     refetchInterval: (query) => (sessionActive ? activityPollMs(Boolean(query.state.data?.busy)) : false),
   });
   const generating = chatBusy || Boolean(activity?.busy);
@@ -446,7 +447,7 @@ export function StructuredEditor({
   // changes, and a price or brand edit does not fetch it again.
   const formsQuery = useQuery({
     queryKey: ["listing-fields", convId],
-    queryFn: () => api.listings.fields(convId),
+    queryFn: ({ signal }) => api.listings.fields(convId, { signal }),
     enabled: !nativeTab,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
@@ -621,25 +622,19 @@ export function StructuredEditor({
     );
   };
 
-  const handleBlur = (key: string) => {
-    if (editingDisabled.current || agentFieldLocked(key, agentLocks) || local[key] == null) return;
-    setDrafts(current => {
-      const next = { ...current };
-      delete next[`${tab}|${key}`];
-      return next;
-    });
+  /** Writes a typed field into `target` (a copy of the listing); false when there is nothing to save. */
+  const applyDraft = (target: ListingData, key: string): boolean => {
+    if (agentFieldLocked(key, agentLocks) || local[key] == null) return false;
     const field = fields.find((entry) => entry.key === key);
-    if (field?.locked) return;
+    if (field?.locked) return false;
     const text = formFieldText(local[key]);
-    if (text.trim() === "[object Object]") return;
+    if (text.trim() === "[object Object]") return false;
     const alias = field?.optionAliases?.[text.trim()];
     // A saved value the picker cannot hold ("S" where Mercari lists "S (4-6)")
     // is saved as the choice it stands for, even when nothing else changed.
     if (alias) {
-      const updated = cloneListing(listing);
-      setListingEditorValue(updated, key, alias);
-      emitChange(updated);
-      return;
+      setListingEditorValue(target, key, alias);
+      return true;
     }
     // Compare with the labeled value the control was showing. The form's original
     // value stays in defaultValue and must not block a later edit that matches it.
@@ -647,11 +642,54 @@ export function StructuredEditor({
     const followed = field ? marketplacePriceFollowsGeneral(listing, field, tab) : false;
     const raw = field ? editorFieldValue(listing, field, tab) : getListingEditorValue(listing, key);
     const current = followed && listing?.price != null ? formFieldText(listing.price) : labelOf(formFieldText(raw));
-    if (text === current) return;
-    const updated = cloneListing(listing);
-    setListingEditorValue(updated, key, field?.type === "number" ? coerce(text) : text);
-    emitChange(updated);
+    if (text === current) return false;
+    setListingEditorValue(target, key, field?.type === "number" ? coerce(text) : text);
+    return true;
   };
+
+  const handleBlur = (key: string) => {
+    if (editingDisabled.current || agentFieldLocked(key, agentLocks) || local[key] == null) return;
+    setDrafts(current => {
+      const next = { ...current };
+      delete next[`${tab}|${key}`];
+      return next;
+    });
+    const updated = cloneListing(listing);
+    if (applyDraft(updated, key)) emitChange(updated);
+  };
+
+  // A field saves on blur. Closing the listing, switching to another one, or
+  // leaving the page does not always blur it, so save whatever is typed then.
+  const commitDrafts = () => {
+    const prefix = `${tab}|`;
+    const keys = Object.keys(drafts).filter((id) => id.startsWith(prefix)).map((id) => id.slice(prefix.length));
+    if (!keys.length || editingDisabled.current) return;
+    const updated = cloneListing(listing);
+    let changed = false;
+    for (const key of keys) changed = applyDraft(updated, key) || changed;
+    setDrafts({});
+    if (changed) emitChange(updated);
+  };
+  const commitDraftsRef = React.useRef(commitDrafts);
+  const hasDrafts = Object.keys(drafts).length > 0;
+  React.useLayoutEffect(() => {
+    commitDraftsRef.current = commitDrafts;
+  });
+  React.useEffect(() => {
+    const pending = { current: hasDrafts };
+    const unregister = registerUnsavedWork({
+      pending: () => pending.current,
+      commit: () => {
+        pending.current = false;
+        commitDraftsRef.current();
+      },
+    });
+    return () => {
+      // Unmounting: save what was typed, then stop counting it as unsaved.
+      if (pending.current) commitDraftsRef.current();
+      unregister();
+    };
+  }, [hasDrafts]);
 
   const commitField = (key: string, value: string | string[] | boolean) => {
     if (editingDisabled.current || agentFieldLocked(key, agentLocks) || fields.find((field) => field.key === key)?.locked) return;
@@ -674,9 +712,13 @@ export function StructuredEditor({
     setDrafts((current) => ({ ...current, [`${tab}|${key}`]: value }));
   };
 
-  const viewContext = { tab, listing, local, fields, categoryStale };
-  const viewFields = fields.map((field) => presentNativeField(field, viewContext));
-  const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
+  // Rows, visibility and sections only change with the form, the listing or a typed value,
+  // not with the saving flag, a poll or a parent re-render.
+  const { viewFields, renderedFields } = React.useMemo(() => {
+    const viewContext = { tab, listing, local, fields, categoryStale };
+    const presented = fields.map((field) => presentNativeField(field, viewContext));
+    return { viewFields: presented, renderedFields: presented.filter((field) => nativeFieldVisible(field, viewContext)) };
+  }, [tab, listing, local, fields, categoryStale]);
   // Placeholder checks describe the previous revision, before its fields were filled.
   const gaps = nativeTab && !preflight.isPlaceholderData && !preflight.isError
     ? preflight.data?.marketplaces?.[tab as NativeMarketplace]?.gaps ?? [] : [];
@@ -693,8 +735,8 @@ export function StructuredEditor({
     : [];
   // A marketplace form that names its headings keeps them, with its order and row layout.
   const pageLayout = nativeTab && renderedFields.some((field) => field.section);
-  const sections = pageLayout ? nativeFormSections(renderedFields)
-    : tab === "general" ? generalFormSections(renderedFields) : groupFieldsIntoSections(renderedFields);
+  const sections = React.useMemo(() => pageLayout ? nativeFormSections(renderedFields)
+    : tab === "general" ? generalFormSections(renderedFields) : groupFieldsIntoSections(renderedFields), [pageLayout, tab, renderedFields]);
   // Only loading, errors and gaps get a line; a form that loaded fine needs none.
   const formStatus = nativeTab && !nativeQuery.data && nativeQuery.isFetching
     ? "Loading the marketplace’s category fields and choices…"
