@@ -1,1 +1,0 @@
-- Listings in the sidebar and suggestions are now links. Cmd-click (Ctrl-click on Windows) opens one in a new tab, and right-clicking offers "Open in new tab". A plain click still opens it in place.
