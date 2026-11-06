@@ -543,6 +543,21 @@ test('the Depop worker completes the bulk job over HTTP and answers duplicates f
   assert.equal(seen.filter(r => r.key === DEPOP_JOB).length, 3);
 });
 
+test('a marked-down Depop listing takes the discount off its sale price, as buyers see it', async () => {
+  // Listed at $50 with a 25% markdown: buyers pay $37.50, and Depop accepts offers up to 5% below that.
+  const sale = { [DEPOP_PREVIEW]: [200, depopPreview({ prices: { original_price: depopPrice('50.00'), current_price: depopPrice('37.50') } })] };
+  const check = offerWorker('depop', depopAnswers(sale));
+  await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
+    listing_id: SLUG, discount_percent: 10 } });
+  assert.deepEqual(check.results[0], { ok: true, price_cents: 3750, like_count: 3, minimum_discount_percent: 5, maximum_discount_percent: 33,
+    shipping_discounts: [], offer_price_cents: 3375 });
+
+  const send = offerWorker('depop', depopAnswers(sale));
+  await depopOffer(send, { price_cents: 3750, offer_price_cents: 3375, floor_cents: 3000 });
+  assert.deepEqual(send.results[0], { ok: true, state: 'done' });
+  assert.deepEqual(send.requests.filter(r => r.key.startsWith('POST')).map(r => r.body), [{ offer_currency: 'USD', offer_value: '33.75' }]);
+});
+
 test('Depop never offers below the floor or its lowest offer, above 5% off, on a changed price, several sizes or someone else’s item', async () => {
   const cases = [
     [{}, { offer_price_cents: 4250, floor_cents: 4500 }],

@@ -43,6 +43,8 @@ class DirectRecord(BaseModel):
     failed: bool = False
     # Fields the marketplace rejected and the seller has not edited since.
     fields: int = 0
+    # The live listing's price on this marketplace, when Anteroom knows it.
+    price: float | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -91,7 +93,6 @@ class ConversationSummary(BaseModel):
     vendoo_created_at: str | None = None
     vendoo_modified_at: str | None = None
     vendoo_listed_at: str | None = None
-    vendoo_sold_at: str | None = None
     vendoo_listed_dates: dict[str, str] = {}
     vendoo_sold_dates: dict[str, str] = {}
     # Edited here since the item's live direct listings were written: Update
@@ -649,7 +650,6 @@ def _vendoo_dates(notes: dict) -> dict:
         "vendoo_created_at": text("created"),
         "vendoo_modified_at": text("modified"),
         "vendoo_listed_at": text("listed"),
-        "vendoo_sold_at": text("sold"),
         "vendoo_listed_dates": mapping("listedByMarketplace"),
         "vendoo_sold_dates": mapping("soldByMarketplace"),
     }

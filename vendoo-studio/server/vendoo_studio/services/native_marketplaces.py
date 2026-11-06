@@ -31,12 +31,13 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.marketplace_listing import BUSY_STATES, UNSETTLED_STATES
+from vendoo_studio.models.marketplace_listing import BUSY_STATES, LIVE_STATES, UNSETTLED_STATES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, listing_readiness, marketplace_media
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
+from vendoo_studio.services.seller_overrides import price_for
 log = logging.getLogger("vendoo_studio.native_marketplaces")
 
 
@@ -310,6 +311,10 @@ def _apply_result(db: Session, conv_id: str, marketplace: str, job_id: str, acti
         values = _outcome(marketplace, action, record, result if isinstance(result, dict) else {})
     except NativeMarketplaceError as exc:
         values = {"state": "unknown", **_CLEARED_ERROR, "error": str(exc), "error_code": "uncertain"}
+    if isinstance(result, dict) and result.get("ok") is True and values["state"] in LIVE_STATES:
+        # Confirmed live: the marketplace has the price this action sent.
+        job = JobRepo(db).get(job_id)
+        values["listed_price"] = price_for(job.listing_snapshot if job else None, marketplace)
     stored = _store(db, conv_id, marketplace, values)
     JobRepo(db).add_event(job_id, "native_result", f"native_{marketplace}_{action}", {
         "marketplace": marketplace, "action": action, "ok": result.get("ok") is True, "state": stored["state"],

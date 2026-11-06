@@ -360,9 +360,10 @@ async function depopOfferState(requests, slug, deadline) {
   const listed = depopProductPrice(product);
   const price = listed != null ? Math.round(listed * 100) : preview.original_cents;
   if (!(price > 0)) throw depopOfferDrift('listing price');
-  // A marked-down item is offered against its current price, as Depop's preview shows it.
-  const basis = preview.current_cents ? Math.min(price, preview.current_cents) : price;
-  return { product, price, likes: preview.eligible_count, preview, lowest: preview.lowest_cents, highest: centOffer(basis, DEPOP_OFFER_MIN_PERCENT) };
+  // A marked-down item is priced, and discounted, from what buyers pay now, as Depop's preview shows it.
+  const current = preview.current_cents ? Math.min(price, preview.current_cents) : price;
+  return { product, price: current, likes: preview.eligible_count, preview, lowest: preview.lowest_cents,
+    highest: centOffer(current, DEPOP_OFFER_MIN_PERCENT) };
 }
 
 async function checkDepopPromotion(payload, deadline) {

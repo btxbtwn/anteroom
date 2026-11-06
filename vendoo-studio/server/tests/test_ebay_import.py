@@ -134,6 +134,7 @@ def test_import_creates_local_inventory_photos_and_direct_identity_without_vendo
     assert snapshot["marketplace_category_ids"] == {"ebay": "63862"}
     binding = imported.db.query(MarketplaceListing).one()
     assert binding.listing_id == binding.ebay_listing_id == ITEM_ID and binding.state == "published"
+    assert binding.listed_price == 45.5
     assert binding.ebay_offer_id is None and binding.ebay_inventory_written is None
     saved_photos = imported.db.query(Photo).order_by(Photo.display_order).all()
     assert [photo.display_order for photo in saved_photos] == [0, 1]
@@ -285,3 +286,35 @@ def test_an_anteroom_inventory_key_is_not_imported_as_the_item_sku():
     assert ebay_import.listing_snapshot({**info, "sku": "ar-abc123"})["sku"] is None
     assert ebay_import.listing_snapshot({**info, "sku": ""})["sku"] is None
     assert ebay_import.listing_snapshot({**info, "sku": "COAT-1"})["sku"] == "COAT-1"
+
+
+def test_active_list_suggests_an_existing_item_and_links_it_without_copying(imported):
+    from vendoo_studio.services.marketplace_delist import listings
+
+    conv = ConversationRepo(imported.db).create(title="Vintage Wool Coat")
+    listing_persistence.save_revision(imported.db, conv.id, {"title": "Vintage Wool Coat", "price": 45}, "user")
+    imported.db.commit()
+    row = imported.client.get("/api/ebay/import/active?page=1").json()["rows"][0]
+    assert row["match"]["conversation_id"] == conv.id and row["match"]["price_differs"] is False
+    response = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID, "link_conversation_id": conv.id})
+    assert response.status_code == 200, response.text
+    assert response.json()["linked"] is True
+    assert listings(imported.db, conv.id)["ebay"]["listing_id"] == ITEM_ID
+    assert imported.db.query(Conversation).count() == 1 and imported.downloads == []
+    assert ListingRepo(imported.db).get_revisions(conv.id)[0].listing_json["title"] == "Vintage Wool Coat"
+    # Once linked, the listing names its item and no longer suggests one.
+    row = imported.client.get("/api/ebay/import/active?page=1").json()["rows"][0]
+    assert row["conversation_id"] == conv.id and row["match"] is None
+    other = ConversationRepo(imported.db).create(title="Other")
+    assert imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID, "link_conversation_id": other.id}).status_code == 409
+
+
+def test_linking_refuses_a_listing_that_is_not_the_sellers_or_not_active(imported):
+    conv = ConversationRepo(imported.db).create(title="Coat")
+    imported.remote.item.find("Seller/UserID").text = "someone-else"
+    assert imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID, "link_conversation_id": conv.id}).status_code == 409
+    imported.remote.item.find("Seller/UserID").text = "seller"
+    imported.remote.item.find("SellingStatus/ListingStatus").text = "Completed"
+    assert imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID, "link_conversation_id": conv.id}).status_code == 409
+    assert imported.db.query(MarketplaceListing).count() == 0
+    assert imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID, "link_conversation_id": "missing"}).status_code == 404

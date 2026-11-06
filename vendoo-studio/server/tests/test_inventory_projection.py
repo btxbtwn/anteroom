@@ -50,8 +50,8 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
         assert summary["sku"] == "coat-1" and summary["price"] == 42 and summary["quantity"] == 2
         assert summary["direct_marketplaces"] == ["ebay"]
         assert summary["direct_records"] == {
-            "ebay": {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0},
-            "mercari": {"state": "not_saved", "listing_url": None, "failed": True, "fields": 1},
+            "ebay": {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0, "price": None},
+            "mercari": {"state": "not_saved", "listing_url": None, "failed": True, "fields": 1, "price": None},
         }
         assert reads
         assert not any("listing_json" in query for query in reads)

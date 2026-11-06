@@ -60,7 +60,6 @@ export type FilterableListing = {
   direct_marketplaces?: string[];
   removed_marketplaces?: string[];
   vendoo_listed_at?: string | null;
-  vendoo_sold_at?: string | null;
   sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
   vendoo_sold_dates?: Record<string, string>;
@@ -253,6 +252,14 @@ export function compareListings(sort: ListingSortId): ((left: FilterableListing,
     default:
       return null;
   }
+}
+
+/**
+ * The status tab a sort belongs on. Only sold listings have a sale date, so
+ * sorting by it opens the Sold tab; every other sort keeps the current tab.
+ */
+export function statusForSort(sort: ListingSortId, status: ListingStatusFilter): ListingStatusFilter {
+  return sort === "sold_desc" ? "sold" : status;
 }
 
 export function sortListings<T extends FilterableListing>(listings: T[], sort: ListingSortId): T[] {

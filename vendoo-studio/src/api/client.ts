@@ -256,8 +256,8 @@ export const api = {
   },
   etsy: {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/etsy/import/active?page=${page}`),
-    importListing: (listingId: string) => request<MarketplaceImportResult>("/etsy/import", {
-      method: "POST", body: JSON.stringify({ listing_id: listingId }),
+    importListing: (listingId: string, linkConversationId?: string) => request<MarketplaceImportResult>("/etsy/import", {
+      method: "POST", body: JSON.stringify({ listing_id: listingId, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
     }),
     notAllowed: () => request<EtsyNotAllowedResponse>("/etsy/not-allowed"),
     shop: () => request<EtsyShop>("/etsy/shop"),
@@ -440,8 +440,8 @@ export const api = {
   },
   ebay: {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/ebay/import/active?page=${page}`),
-    importListing: (listingId: string) => request<MarketplaceImportResult>("/ebay/import", {
-      method: "POST", body: JSON.stringify({ listing_id: listingId }),
+    importListing: (listingId: string, linkConversationId?: string) => request<MarketplaceImportResult>("/ebay/import", {
+      method: "POST", body: JSON.stringify({ listing_id: listingId, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
     }),
     read: (section: string, params: Record<string, string | number> = {}) =>
       request<EbayPageData>(`/ebay/read/${section}?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),

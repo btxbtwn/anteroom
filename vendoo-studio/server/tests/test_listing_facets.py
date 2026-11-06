@@ -110,7 +110,7 @@ class ListingFacetsTest(unittest.TestCase):
         conv = self.convs.create(title="Levi's 501")
         other = self.convs.create(title="Untouched")
         records = MarketplaceListingRepo(self.db)
-        records.save(conv.id, "ebay", {"state": "published", "listing_url": "https://www.ebay.com/itm/1"})
+        records.save(conv.id, "ebay", {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "listed_price": 42.5})
         records.save(conv.id, "poshmark", {"state": "not_saved", "error": "Fix 2 fields", "error_fields": [
             {"field": "size", "message": "Required"}, {"field": "brand", "message": "Required"}]})
         records.save(conv.id, "depop", {"state": "draft", "draft_url": "https://www.depop.com/drafts/1"})
@@ -119,9 +119,10 @@ class ListingFacetsTest(unittest.TestCase):
         self.assertEqual(records.summaries(conv.id), {conv.id: direct[conv.id]})
         response = _conv_response(conv, _extras(None, None, None, False, direct[conv.id]))
         self.assertEqual(response.direct_records["ebay"].model_dump(),
-                         {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0})
+                         {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0,
+                          "price": 42.5})
         self.assertEqual(response.direct_records["poshmark"].model_dump(),
-                         {"state": "not_saved", "listing_url": None, "failed": True, "fields": 2})
+                         {"state": "not_saved", "listing_url": None, "failed": True, "fields": 2, "price": None})
         self.assertEqual(response.direct_records["depop"].state, "draft")
         self.assertEqual(response.direct_marketplaces, ["ebay"])
 

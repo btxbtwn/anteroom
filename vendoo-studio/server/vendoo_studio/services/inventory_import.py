@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import httpx
 from sqlalchemy.orm import Session
@@ -19,6 +19,12 @@ from vendoo_studio.services.safe_fetch import DOWNLOAD_TIMEOUT_SEC, fetch_public
 
 class ImportConflict(ValueError):
     pass
+
+
+class LinkError(ValueError):
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
 
 
 def owner(db: Session, marketplace: str, listing_id: str):
@@ -79,3 +85,40 @@ async def save_owned_listing(db: Session, marketplace: str, listing_id: str, sna
         if not retained:
             for meta in downloaded:
                 photo_store().delete(meta["stored_filename"])
+
+
+_NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
+
+
+async def link_owned_listing(db: Session, marketplace: str, listing_id: str, conversation_id: str,
+                             verify: Callable[[], Awaitable[None]]) -> dict:
+    """Record that an existing item is live on this marketplace listing.
+
+    Only the link is written: the item's edits and photos stay as they are, and
+    the marketplace is only read. ``verify`` checks the listing is still the
+    seller's and still for sale, and raises when it is not.
+    """
+    from vendoo_studio.services.marketplace_delist import DelistError, listings, mark
+    from vendoo_studio.services.marketplace_identity import public_listing_url
+
+    name = _NAMES.get(marketplace, marketplace)
+    if not ConversationRepo(db).get(conversation_id):
+        raise LinkError(404, "That Anteroom item no longer exists.")
+    try:
+        existing = owner(db, marketplace, listing_id)
+    except ImportConflict as exc:
+        raise LinkError(409, str(exc)) from exc
+    if existing and existing.id != conversation_id:
+        raise LinkError(409, "This listing is already linked to another Anteroom item.")
+    if not existing:
+        current = listings(db, conversation_id).get(marketplace) or {}
+        if current.get("listing_id") and current["listing_id"] != listing_id:
+            raise LinkError(409, f"This item is already linked to another {name} listing.")
+        await verify()
+        try:
+            mark(db, conversation_id, marketplace, "listed", public_listing_url(marketplace, listing_id))
+        except DelistError as exc:
+            raise LinkError(exc.status_code, str(exc)) from exc
+    return {"conversation_id": conversation_id, "listing_id": listing_id, "reused": True, "linked": True,
+            "photo_count": len(ConversationRepo(db).get_photos(conversation_id)),
+            "warnings": [] if existing else ["Linked to the existing item. Its edits and photos were kept."]}

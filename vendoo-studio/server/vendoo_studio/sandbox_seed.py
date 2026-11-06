@@ -70,6 +70,43 @@ SAMPLES = (
     },
 )
 
+# Sample listings live on marketplaces, by sample title: (marketplace, public
+# link, the price that marketplace has). The sandbox never publishes, so each is
+# marked listed the way a seller links one by hand, and the price a confirmed
+# List would have recorded is written beside it. None leaves the price unknown.
+LIVE = {
+    "Sandbox blue tee": (
+        ("ebay", "https://www.ebay.com/itm/256400000001", 25),
+        ("poshmark", "https://poshmark.com/listing/6adc371572e62463d992ff01", 30),
+        ("mercari", "https://www.mercari.com/us/item/m10000000001/", None),
+    ),
+    "Sandbox black jeans": (
+        ("ebay", "https://www.ebay.com/itm/256400000002", 38),
+        ("depop", "https://www.depop.com/products/sandbox-black-jeans/", 34),
+    ),
+    "Sandbox floral dress": (
+        ("poshmark", "https://poshmark.com/listing/6adc371572e62463d992ff03", 62),
+        ("etsy", "https://www.etsy.com/listing/1700000003", 54),
+    ),
+}
+
+
+def _seed_live(client: httpx.Client, conv_id: str, title: str) -> None:
+    from sqlalchemy import update
+
+    from vendoo_studio.database import engine
+    from vendoo_studio.models.marketplace_listing import MarketplaceListing
+
+    for marketplace, url, price in LIVE.get(title, ()):
+        client.post(f"/api/conversations/{conv_id}/marketplace-listings/{marketplace}/mark",
+                    json={"state": "listed", "url": url}).raise_for_status()
+        if price is not None:
+            with engine.begin() as connection:
+                connection.execute(update(MarketplaceListing).where(
+                    MarketplaceListing.conversation_id == conv_id, MarketplaceListing.marketplace == marketplace,
+                ).values(listed_price=price))
+
+
 # Sample automations, so the Automations page opens on a populated list. Saving
 # one only schedules it; delists and relists still wait for approval per item.
 AUTOMATIONS = (
@@ -173,6 +210,7 @@ def seed(base_url: str) -> list[str]:
                     f"/api/conversations/{conv['id']}/listing",
                     json={"listing": sample["listing"], "expected_revision_id": ""},
                 ).raise_for_status()
+            _seed_live(client, conv["id"], sample["title"])
             created.append(conv["id"])
         for title, color, marketplace, days_ago, price, fees, cost in SOLD:
             conv = client.post("/api/conversations", json={"title": title}).raise_for_status().json()
@@ -210,6 +248,7 @@ def seed_hosted(base_url: str) -> list[str]:
                     'title': listing['title'], 'notes': '', 'expected_updated_at': draft['updated_at'],
                     'fields': {key: value for key, value in listing.items() if key != 'title'},
                 }).raise_for_status()
+            _seed_live(client, draft['id'], sample['title'])
             created.append(draft['id'])
         for title, color, marketplace, days_ago, price, fees, cost in SOLD:
             draft = client.post('/api/drafts', json={'title': title}).raise_for_status().json()

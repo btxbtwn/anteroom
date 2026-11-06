@@ -6,6 +6,40 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.748 — 2026-11-06
+
+- The Inventory table shows each listing's price on every marketplace it is live on, beside its status. A price that differs from the item price stands out, and a dash means Anteroom doesn't know that marketplace's price yet.
+- The iPhone inventory list shows the same per-marketplace prices on its marketplace badges.
+
+## 0.1.747 — 2026-11-06
+
+- Send Depop offers to likers on marked-down items: the offer's discount now comes off the sale price buyers see, so Depop no longer turns them down.
+
+## 0.1.746 — 2026-11-06
+
+- Set up, edit and turn on eBay offers, Poshmark sharing and offers to likers from the iPhone, with the same settings and checks as the web.
+- On the web, Connect eBay in eBay offers now opens eBay's sign-in page.
+
+## 0.1.745 — 2026-11-06
+
+- Link the eBay and Etsy listings you already have to their Anteroom items, and link every suggested match on an import page at once, so the inventory table shows where each item is live.
+
+## 0.1.744 — 2026-11-06
+
+- The Sold tab's Date Sold order now matches the sales in Analytics. Clearing an item's other marketplaces after it sold no longer moves it to the top.
+
+## 0.1.743 — 2026-11-06
+
+- Listings in the sidebar and suggestions are now links. Cmd-click (Ctrl-click on Windows) opens one in a new tab, and right-clicking offers "Open in new tab". A plain click still opens it in place.
+
+## 0.1.742 — 2026-11-06
+
+- The listing's ⋯ menu now sits beside Regenerate, so the actions at the bottom of the marketplace list end flush with the bottom.
+
+## 0.1.741 — 2026-11-06
+
+- Sorting by Date Sold (Newest) opens the Sold tab and lists every sale newest first.
+
 ## 0.1.740 — 2026-11-05
 
 - List an item again on a marketplace you delisted it from, on the web and the iPhone app.

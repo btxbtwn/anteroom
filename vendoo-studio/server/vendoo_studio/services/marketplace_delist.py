@@ -222,7 +222,7 @@ def _forget_deleted_listing(db: Session, conv_id: str, marketplace: str) -> None
     records.save(conv_id, marketplace, {"error": None, "error_code": None, "error_fields": None, "marketplace_message": None,
                                         "retry_after": None, "etsy_pending_write": None,
                                         "state": _resting_state(marketplace, record), "listing_url": None,
-                                        "listing_id": None, "revision_id": None})
+                                        "listing_id": None, "revision_id": None, "listed_price": None})
 
 
 MARKS = ("listed", "sold", "not_listed")
@@ -270,16 +270,17 @@ def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | No
 
         # Not live: keep the marketplace IDs so a new List reuses them, drop the link.
         records.save(conv_id, marketplace, {**cleared, "state": _resting_state(marketplace, record), "listing_url": None,
-                                            "listing_id": None, "revision_id": None})
+                                            "listing_id": None, "revision_id": None, "listed_price": None})
     elif state == "listed" and record.get("state") != "published":
         # The seller looked and the listing is there. That is true whether the
         # record was unconfirmed or had already been reset to a resting state
         # after a publish Anteroom could not confirm: the mark is the evidence
         # the machine record was missing, so it becomes live here.
         records.save(conv_id, marketplace, {**cleared, "state": "published", "listing_url": value["url"],
-                                            "listing_id": value["listing_id"]})
+                                            "listing_id": value["listing_id"], "listed_price": None})
     elif state != "not_listed" and record.get("state") in UNSETTLED_STATES:
-        records.save(conv_id, marketplace, {**cleared, "state": "published"})
+        # The seller saw it listed, not at which price: the unconfirmed action may not have changed it.
+        records.save(conv_id, marketplace, {**cleared, "state": "published", "listed_price": None})
     if record.get("job_id") and record.get("state") in UNSETTLED_STATES and JobRepo(db).get(record["job_id"]):
         JobRepo(db).add_event(record["job_id"], "native_marked", None, {"marketplace": marketplace, "mark": state})
     _store(db, conv_id, "marketplaceMarks", marketplace, value)

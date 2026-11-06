@@ -81,10 +81,14 @@ struct MarketplaceBadge: Hashable, Sendable {
     let url: URL?
     /// The fields still needed, by name, when the label counts them from the server.
     var detail: String? = nil
+    /// The live listing's price there, when known. Only a listed badge has one.
+    var price: Double?
+    /// The price is known and is not the item's own: a marketplace price the seller set, or one the marketplace changed.
+    var priceDiffers = false
 
     /// Nil when there is nothing to say: not listed there and nothing missing.
     /// The same rules as the desktop table's cell (inventoryTable.ts).
-    init?(marketplace: String, record: DirectRecord?, missing: [MissingField] = []) {
+    init?(marketplace: String, record: DirectRecord?, missing: [MissingField] = [], basePrice: Double? = nil) {
         self.marketplace = marketplace
         let needs = missing.isEmpty ? nil : needsText(missing.count)
         let live = ["published", "pending_review"].contains(record?.state ?? "")
@@ -93,6 +97,10 @@ struct MarketplaceBadge: Hashable, Sendable {
         case "published", "pending_review":
             label = record?.state == "pending_review" ? "In review" : "Listed"
             tone = .good
+            price = record?.price
+            if let price, let basePrice {
+                priceDiffers = (price * 100).rounded() != (basePrice * 100).rounded()
+            }
             return
         case "saving", "publishing", "updating":
             (label, tone) = ("Working", .neutral)
@@ -126,7 +134,7 @@ extension ListingSummary {
         let records = directRecords ?? [:]
         let ids = Set(records.keys).union(missing.filter { !$0.value.isEmpty }.keys)
         return Marketplaces.sorted(ids).compactMap {
-            MarketplaceBadge(marketplace: $0, record: records[$0], missing: missing[$0] ?? [])
+            MarketplaceBadge(marketplace: $0, record: records[$0], missing: missing[$0] ?? [], basePrice: price)
         }
     }
 

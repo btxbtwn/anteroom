@@ -214,6 +214,7 @@ def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsIn
 
 def rows_from_inputs(inputs: AnalyticsInputs) -> list[AnalyticsItem]:
     """Calculate costs and sales from already-loaded values, without database I/O."""
+    from vendoo_studio.services.item_status import counted_sales
     from vendoo_studio.services.sell_through import _parse_moment
     from vendoo_studio.services.vendoo_import import VENDOO_MARKETPLACE_ALIASES, split_vendoo_labels
 
@@ -251,11 +252,12 @@ def rows_from_inputs(inputs: AnalyticsInputs) -> list[AnalyticsItem]:
             labels=tuple(split_vendoo_labels(notes.get("vendooLabels"))),
         )
         # A send in flight keeps its one row, as before; its sales count once it settles.
-        sales = [] if effective in _BUSY else _item_sales(base, lines.get(conv_id, []), listed_text)
+        own_lines = lines.get(conv_id, [])
         if effective == "sold":
             # Nothing is left to sell: reports from the other marketplaces are the
             # same sale being cleared, not more stock going out.
-            sales = _stocked_sales(sales, derived.quantity)
+            own_lines = counted_sales(own_lines, derived.quantity)
+        sales = [] if effective in _BUSY else _item_sales(base, own_lines, listed_text)
         # Unsold stock merged into another item is counted there; its sales still count here.
         merged_away = bool(notes.get("mergedInto")) and effective != "sold"
         if (effective != "sold" or not sales) and not merged_away:
@@ -264,23 +266,6 @@ def rows_from_inputs(inputs: AnalyticsInputs) -> list[AnalyticsItem]:
             rows.append(replace(base, sold_at=derived.sold_at) if fallback_sold else base)
         rows.extend([replace(sale, stock=False) for sale in sales] if merged_away else sales)
     return rows
-
-
-def _stocked_sales(sales: list[AnalyticsItem], quantity: int) -> list[AnalyticsItem]:
-    """A sold item's sales cannot outnumber the units it had in stock.
-
-    When the seller sells on one marketplace and clears the item's other
-    listings, each check that reads one of those listings as sold used to add
-    a sale of its own. Those rows have no order behind them. Keep every sale
-    that does, and only as many of the rest as the item had units; a genuine
-    relist that sold again has its own order or listing report.
-    """
-    limit = max(1, quantity)
-    ordered = [sale for sale in sales if sale.order_backed]
-    reported = [sale for sale in sales if not sale.order_backed]
-    room = max(0, limit - len(ordered))
-    keep = {id(sale) for sale in ordered} | {id(sale) for sale in reported[:room]}
-    return [sale for sale in sales if id(sale) in keep]
 
 
 def _item_sales(base: AnalyticsItem, lines: list, listed_text: str) -> list[AnalyticsItem]:
@@ -293,12 +278,10 @@ def _item_sales(base: AnalyticsItem, lines: list, listed_text: str) -> list[Anal
 
 def _ledger_row(base: AnalyticsItem, line, listed_text: str, days_between) -> AnalyticsItem:
     """A sales-ledger line as a sold row, with the amounts the seller or marketplace recorded."""
+    from vendoo_studio.services.item_status import sale_moment
     from vendoo_studio.services.sales_ledger import financial_values
 
-    moment = line.sold_at or line.received_at
-    if isinstance(line.financials, dict) and "sold_on" in line.financials and line.financials["sold_on"] is None:
-        moment = None
-    sold_at = moment.replace(tzinfo=UTC) if moment and moment.tzinfo is None else moment
+    sold_at = sale_moment(line)
     data, stale = financial_values(line)
     # Analytics totals are in dollars; another currency is a sale with no amount here.
     data = data if data and not stale and data.get("currency") == "USD" else {}

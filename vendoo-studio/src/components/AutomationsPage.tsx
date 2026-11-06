@@ -116,7 +116,7 @@ const PROMOTION_KEY = ["promotion-automations"] as const;
 
 export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string) => void }) {
   const queryClient = useQueryClient();
-  const { features } = useWorkspaceRuntime();
+  const { features, hosted } = useWorkspaceRuntime();
   const hasEbayOffers = features.has("ebay_offers");
   const hasPromotions = features.has("marketplace_sessions");
   const list = useQuery({ queryKey: LIST_KEY, queryFn: () => api.automations.list() });
@@ -174,7 +174,11 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
       return null;
     });
   };
-  const connectEbay = () => change("ebay_offers", () => api.directConnections.connect("ebay"));
+  /** On the web the eBay sign-in opens in a new tab; the Mac opens it itself. */
+  const connectEbay = () => change("ebay_offers", async () => {
+    const result = await api.directConnections.connect("ebay");
+    if (hosted) window.open(result.authorizeUrl, "_blank", "noopener,noreferrer");
+  });
   const remove = async (task: Automation) => {
     const ok = await confirmDialog(`Delete “${task.name}”? Its run history goes with it.`, {
       variant: "destructive", confirmLabel: "Delete",
