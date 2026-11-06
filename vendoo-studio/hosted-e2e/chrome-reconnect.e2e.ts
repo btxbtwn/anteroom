@@ -24,7 +24,7 @@ test("an approved Chrome recovers from a missing Bridge without another Connect 
     await route.fulfill({ response, body: (await response.text()).replace("https://myanteroom.com", new URL(baseURL!).origin) });
   });
   await page.route("**/api/browser-relay/next?**", route => route.abort());
-  // The simulated Bridge must not leave presence behind for other tests sharing Alice.
+  // The simulated Bridge must not leave presence behind for other tests.
   await page.route("**/api/browser-relay/heartbeat", route => route.abort());
   await page.addInitScript(() => {
     const state = window as Window & { bridgeReady: boolean; connectClicks: number; onBridgeDisconnect: () => Promise<void> };
@@ -45,9 +45,11 @@ test("an approved Chrome recovers from a missing Bridge without another Connect 
         supportedActions: ["marketplace.actions", "marketplace.sessions", "marketplace.sales_history"] }, location.origin);
     });
   });
+  // Bob, not Alice: the server keeps a Bridge present for 90 seconds, and the tests that
+  // follow expect Alice's Chrome never to have connected.
   await page.clock.install();
   await page.goto("/");
-  await page.getByLabel("Email address").fill("alice@sandbox.test");
+  await page.getByLabel("Email address").fill("bob@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("button", { name: "Account", exact: true }).click();
