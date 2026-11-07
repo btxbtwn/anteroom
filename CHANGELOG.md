@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.761 — 2026-11-07
+
+- Listings on the web open again instead of showing "This listing didn't load" when they have blank fields or are sold out.
+
 ## 0.1.760 — 2026-11-07
 
 - The Mac app and the web app now install the exact, verified package versions that were tested, so each update ships what was checked.
