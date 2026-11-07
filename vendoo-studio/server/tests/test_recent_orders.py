@@ -21,6 +21,7 @@ def setup_sync(monkeypatch):
     monkeypatch.setattr(sync, "current", lambda: SimpleNamespace(seller_id="alice", session_factory=factory))
     recover = AsyncMock(return_value={"nextPage": None})
     monkeypatch.setattr(sync.order_recovery, "recover", recover)
+    monkeypatch.setattr(sync.order_amounts, "backfill", AsyncMock(return_value=0))
     return recover, factory, clock
 
 
@@ -159,3 +160,10 @@ def test_sale_poll_runs_catch_up_after_response(monkeypatch):
     with TestClient(app) as client:
         assert client.get("/api/marketplace-sales").status_code == 200
     refresh.assert_awaited_once()
+
+
+def test_each_catch_up_also_fills_older_sale_amounts_even_after_a_failed_read(setup_sync):
+    recover, factory, _clock = setup_sync
+    recover.side_effect = RuntimeError("private provider response")
+    asyncio.run(sync.refresh())
+    sync.order_amounts.backfill.assert_awaited_once_with("ebay", factory)
