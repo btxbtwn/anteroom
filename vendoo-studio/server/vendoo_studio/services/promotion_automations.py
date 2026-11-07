@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 
+from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal
@@ -300,14 +301,21 @@ def _skip_note(reasons: Counter) -> str:
 
 
 async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.sleep,
-                    like_events: dict[str, datetime] | None = None) -> PromotionRun:
+                    like_events: dict[str, datetime] | None = None) -> PromotionRun | None:
     """One round: share the next listings, or offer on listings with new likers. Stops at the first limit."""
     now = _now()
+    if like_events is None:
+        # Claim the due round: when two Machines read the same due rule, one runs it.
+        claimed = db.execute(update(PromotionAutomation).execution_options(synchronize_session=False).where(
+            PromotionAutomation.id == row.id, PromotionAutomation.next_run_at == row.next_run_at,
+        ).values(next_run_at=next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL))
+        if cast(CursorResult, claimed).rowcount != 1:
+            db.rollback()
+            return None
+        db.refresh(row)
     run = PromotionRun(automation_id=row.id, started_at=now)
     db.add(run)
     row.last_run_at = now
-    if like_events is None:
-        row.next_run_at = next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL
     db.commit()
     reasons: Counter = Counter()
     counts = Counter()
@@ -434,8 +442,8 @@ async def tick(db: Session, *, now: datetime | None = None, sleep=asyncio.sleep)
     for row in due:
         if JobRepo(db).get_active():
             break
-        await run_round(db, row, sleep=sleep)
-        ran += 1
+        if await run_round(db, row, sleep=sleep) is not None:
+            ran += 1
     return ran
 
 

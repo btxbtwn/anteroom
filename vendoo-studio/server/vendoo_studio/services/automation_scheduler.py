@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
+from typing import cast
 
+from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal
@@ -154,7 +156,12 @@ def _resume_waiting(db: Session, now: datetime) -> AutomationRun | None:
             continue
         if run.id in _inflight:
             continue
-        run.status = "running"
+        # Claimed once: another Machine reading the same waiting run moves on.
+        claimed = db.execute(update(AutomationRun).execution_options(synchronize_session=False).where(
+            AutomationRun.id == run.id, AutomationRun.status == "waiting").values(status="running"))
+        if cast(CursorResult, claimed).rowcount != 1:
+            db.rollback()
+            continue
         db.commit()
         db.refresh(run)
         return run

@@ -7,24 +7,18 @@ __pycache__/
 *.pyc
 .env
 *.log
-data/vendoo_studio.db
-data/vendoo_studio.db-shm
-data/vendoo_studio.db-wal
-data/backups/
-data/pairing_token.txt
-data/photos/*
-!data/photos/.gitkeep
+# data/ is the dev server's data folder. Only the files below are tracked;
+# everything the app writes there at runtime stays out of Git.
+data/*
+!data/category-trees-seed.json.gz
+!data/fill-logs/
 data/fill-logs/*
 !data/fill-logs/.gitkeep
-data/vendoo-extension/
-data/extension-reload-pending
-data/Chrome/
 .vite/
 build/
 release/
 desktop/AppIcon.icns
 desktop/build_info.json
 *.egg-info/
-uv.lock
 e2e/results/
 e2e/report/

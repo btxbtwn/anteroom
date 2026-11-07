@@ -6,6 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.762 — 2026-11-07
+
+- Keep a marketplace action running when another server checks on it, and let Cancel reach it from any server.
+
+## 0.1.761 — 2026-11-07
+
+- Listings on the web open again instead of showing "This listing didn't load" when they have blank fields or are sold out.
+
+## 0.1.760 — 2026-11-07
+
+- The Mac app and the web app now install the exact, verified package versions that were tested, so each update ships what was checked.
+
+## 0.1.759 — 2026-11-07
+
+- On myanteroom.com, Inventory's Date Sold (Newest) now puts your newest sales first, in the same order as Analytics.
+
 ## 0.1.758 — 2026-11-07
 
 - Listing links in Assistant answers open the listing again, instead of a blank Inventory page in a new tab.

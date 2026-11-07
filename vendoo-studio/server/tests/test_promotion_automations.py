@@ -338,6 +338,25 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(len(self.promoted()), 2)
         self.assertIn("daily cap", self.db.query(PromotionRun).order_by(PromotionRun.started_at.desc()).first().note)
 
+    def test_a_due_round_another_machine_already_started_does_not_run_again(self):
+        saved = self.create(SHARE)
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        # Machine B read the same due rule, in its own session, before A claimed it.
+        machine_b = sessionmaker(bind=self.db.get_bind())()
+        self.addCleanup(machine_b.close)
+        stale = machine_b.get(PromotionAutomation, saved["id"])
+        self.assertEqual(self.tick(), 1)
+        sent = len(self.promoted())
+        self.assertGreater(sent, 0)
+        due_at = self.db.get(PromotionAutomation, saved["id"]).next_run_at
+        self.assertNotEqual(stale.next_run_at, due_at)
+        self.assertIsNone(asyncio.run(promotion_automations.run_round(machine_b, stale, sleep=AsyncMock())))
+        self.db.expire_all()
+        self.assertEqual(len(self.promoted()), sent)
+        self.assertEqual(self.db.query(PromotionRun).count(), 1)
+        self.assertEqual(self.db.get(PromotionAutomation, saved["id"]).next_run_at, due_at)
+
     def test_first_rate_limit_stops_and_pauses(self):
         saved = self.create({**SHARE, "daily_cap": 10, "share_order": "oldest"})
         self.enable(saved["id"])
