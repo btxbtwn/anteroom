@@ -559,3 +559,45 @@ class AccountWorkspaceTest(unittest.TestCase):
             actions["My Account"]()
             actions["This Mac’s Listings"]()
         self.assertEqual(open_in_window.call_args_list, [call(desktop.ACCOUNT_URL), call(desktop.APP_URL)])
+
+
+class SandboxDesktopIsolationTest(unittest.TestCase):
+    def test_sandbox_keeps_the_log_and_keychain_off_the_sellers_mac(self):
+        # The desktop app must log into the sandbox's data folder and use the
+        # in-memory keyring before it touches the Keychain. It runs in its own
+        # process because sandbox.install() patches keyring and sockets for good.
+        import subprocess
+
+        script = """
+from vendoo_studio import desktop
+def fake_window():
+    import keyring
+    print("keyring", type(keyring.get_keyring()).__name__, flush=True)
+desktop.run_window = fake_window
+desktop.reexec_in_venv_if_needed = lambda: None
+desktop.main([])
+"""
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root) / "home"
+            data = Path(root) / "data"
+            home.mkdir()
+            env = {
+                "PATH": "/usr/bin:/bin",
+                "PYTHONPATH": str(Path(desktop.__file__).resolve().parents[1]),
+                "HOME": str(home),
+                "ANTEROOM_SANDBOX": "1",
+                "VENDOO_STUDIO_DATA_DIR": str(data),
+            }
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                cwd=root,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(list(home.rglob("*.log")), [])
+            log = data / "logs" / desktop.CHANNEL["log"]
+            self.assertIn("keyring MemoryKeyring", log.read_text(encoding="utf-8"))

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.782 — 2026-11-07
+
+- The Mac app's sandbox mode no longer writes to your real log file or reads your Keychain.
+
 ## 0.1.781 — 2026-11-07
 
 - The database check no longer reports a false problem with a database from an earlier version: it now lists the updates Anteroom applies on its next start and only flags gaps those updates do not cover.
