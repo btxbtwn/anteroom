@@ -36,8 +36,11 @@ in the sandbox.
   `SandboxProvider`. Hosted-mode tests mint Supabase sessions themselves (see
   `tests/test_seller_sessions.py`) and need Postgres (`ANTEROOM_TEST_DATABASE_URL`).
 - **Frontend logic:** Vitest, files next to the code (`src/**/*.test.ts(x)`).
-  Components render with `renderToStaticMarkup`; there is no DOM in Vitest.
-  Anything needing a real browser belongs in Playwright.
+  Vitest runs in its default Node environment, so there is no DOM by default;
+  components render with `renderToStaticMarkup`. A test file that needs hooks
+  or effects (for example `src/components/chat/useChatStream.ts`) may opt into a DOM with a
+  `// @vitest-environment jsdom` (or `happy-dom`) comment once that dev
+  dependency is added. Anything needing a real browser belongs in Playwright.
 - **The running app:** Playwright in `e2e/*.e2e.ts`, run with `npm run e2e`. The
   config starts its own sandbox (API 4329, UI 5184) and runs every test in a
   `desktop` (1440x900) and a `phone` (iPhone 15) project.

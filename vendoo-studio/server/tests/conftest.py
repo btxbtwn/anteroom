@@ -32,6 +32,9 @@ def pytest_configure(config):
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     if os.environ.get("ANTEROOM_TEST_DATABASE_URL"):
         _postgres_database(worker or "main")
+        # Workers migrate fresh databases at once and queue on the shared
+        # seller role; the deploy's lock timeout is tested on its own.
+        os.environ.setdefault("ANTEROOM_MIGRATION_LOCK_TIMEOUT", "0")
     if not worker:
         return
     base = Path(os.environ.get("VENDOO_STUDIO_DATA_DIR") or tempfile.mkdtemp(prefix="vendoo-studio-tests-"))
