@@ -1,1 +1,0 @@
-- The iPhone's inventory Sort menu now has the same choices as the web app: Stalest, Freshest and Date Sold (Newest), which opens the Sold tab.
