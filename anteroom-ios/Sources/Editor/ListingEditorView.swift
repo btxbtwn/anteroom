@@ -134,7 +134,7 @@ struct ListingEditorView: View {
                 } else {
                     Button("Save") { save() }
                         .fontWeight(.semibold)
-                        .buttonStyle(.borderedProminent)
+                        .workspaceProminentButton()
                         .disabled(!model.hasChanges || model.isSaving)
                 }
             }

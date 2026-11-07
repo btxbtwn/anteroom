@@ -91,9 +91,6 @@
   "src/styles/photo-tray.css": {
     "hardcoded-color": 9
   },
-  "src/styles/responsive.css": {
-    "hardcoded-color": 1
-  },
   "src/styles/sidebar.css": {
     "heavy-weight": 2
   },
