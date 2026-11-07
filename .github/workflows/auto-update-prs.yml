@@ -1,0 +1,90 @@
+name: Auto-update PRs
+
+# main only takes a PR that is up to date with it, so each merge leaves every
+# other PR behind. This brings the oldest PR queued with auto-merge
+# (`gh pr merge <n> --auto --merge`) up to date, one at a time; GitHub merges it
+# when CI passes, and that push to main starts the next one.
+on:
+  push:
+    branches: [main]
+  # A PR's CI finished: start the next PR if this one failed.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  # Queued while nothing else is in flight. Runs main's copy of this file and
+  # never runs the PR's code.
+  pull_request_target:
+    types: [auto_merge_enabled]
+  workflow_dispatch:
+
+concurrency:
+  group: auto-update-prs
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+
+jobs:
+  update:
+    name: Update the next queued PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          # A push with GITHUB_TOKEN would not start the PR's CI; the deploy
+          # key's push does, as for the Version workflow's release commits.
+          ssh-key: ${{ secrets.VERSION_PUSH_KEY }}
+          fetch-depth: 0
+      - name: Merge main into the oldest queued PR that is behind
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # A merge that brings changelog notes is followed by a release
+          # commit; update PRs onto that instead of twice.
+          if [ "$EVENT" = push ] && git diff --diff-filter=A --name-only HEAD^1 HEAD -- changelog.d | grep -qv README.md; then
+            echo "A release commit follows this merge; waiting for it."
+            exit 0
+          fi
+
+          # GitHub works out whether a PR is behind lazily after main moves.
+          for _ in 1 2 3 4 5 6; do
+            gh pr list --state open --limit 100 \
+              --json number,headRefName,isDraft,headRepositoryOwner,mergeStateStatus,autoMergeRequest,statusCheckRollup \
+              --jq "[.[] | select(.autoMergeRequest != null and (.isDraft | not) and .headRepositoryOwner.login == \"$OWNER\")]" > queued.json
+            jq -e 'all(.mergeStateStatus != "UNKNOWN")' queued.json > /dev/null && break
+            sleep 10
+          done
+
+          # The CI workflow's final "CI" check: it appears once every other CI job
+          # has finished and fails if any of them did.
+          ci='(.statusCheckRollup | map(select(.name == "CI")) | last)'
+          running='any(.statusCheckRollup[]; .workflowName == "CI" and .status != "COMPLETED")'
+          in_flight=$(jq -r "[.[] | select(.mergeStateStatus != \"BEHIND\" and $running)] | map(.number) | join(\" \")" queued.json)
+          if [ -n "$in_flight" ]; then
+            echo "Already up to date and running CI: #$in_flight"
+            exit 0
+          fi
+
+          # Oldest queued first. A PR whose CI failed stays put until it is fixed.
+          jq -r "sort_by(.autoMergeRequest.enabledAt) | .[] | select(.mergeStateStatus == \"BEHIND\" and $ci.conclusion != \"FAILURE\") | \"\(.number) \(.headRefName)\"" queued.json > candidates.txt
+          while read -r number branch; do
+            git fetch --quiet origin "$branch"
+            git checkout --quiet -B "$branch" "origin/$branch"
+            if git merge --quiet --no-edit origin/main; then
+              git push --quiet origin "HEAD:refs/heads/$branch"
+              echo "Updated #$number ($branch) with main."
+              exit 0
+            fi
+            git merge --abort
+            echo "#$number conflicts with main; it needs a hand merge."
+          done < candidates.txt
+          echo "No queued PR is behind main."
