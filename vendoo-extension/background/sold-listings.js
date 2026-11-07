@@ -48,7 +48,7 @@ function waitForTabLoad(tabId, timeoutMs) {
 
     function onUpdated(id, info, tab) {
       // The blank page the tab opens on finishes loading too.
-      if (id !== tabId || info.status !== 'complete' || !/^https:\/\/www\.ebay\.com\//.test(tab.url || '')) return;
+      if (id !== tabId || info.status !== 'complete' || !(tab.url || '').startsWith('https://www.ebay.com/')) return;
       clearTimeout(timer);
       chrome.tabs.onUpdated.removeListener(onUpdated);
       resolve();

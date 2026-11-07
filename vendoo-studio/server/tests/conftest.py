@@ -27,7 +27,10 @@ def _postgres_database(worker: str) -> None:
 
 
 def pytest_configure(config):
-    """Give each xdist worker its own data dir before vendoo_studio.config is imported."""
+    """Give each test process its own data dir before vendoo_studio.config is imported.
+
+    Without one, a run without xdist would write into the repo's data/ folder.
+    """
     config.addinivalue_line("markers", "sqlite_only(reason): needs the Mac's SQLite database file")
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     if os.environ.get("ANTEROOM_TEST_DATABASE_URL"):
@@ -35,10 +38,8 @@ def pytest_configure(config):
         # Workers migrate fresh databases at once and queue on the shared
         # seller role; the deploy's lock timeout is tested on its own.
         os.environ.setdefault("ANTEROOM_MIGRATION_LOCK_TIMEOUT", "0")
-    if not worker:
-        return
     base = Path(os.environ.get("VENDOO_STUDIO_DATA_DIR") or tempfile.mkdtemp(prefix="vendoo-studio-tests-"))
-    worker_dir = base / worker
+    worker_dir = base / (worker or "main")
     worker_dir.mkdir(parents=True, exist_ok=True)
     os.environ["VENDOO_STUDIO_DATA_DIR"] = str(worker_dir)
 

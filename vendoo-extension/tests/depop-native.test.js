@@ -707,7 +707,7 @@ test('a Depop draft that drops its package size is refused, not left to fail at 
   c.marketplaceSleep = async () => {};
   const sent = { ...FULL, tags: [], form: { ...FULL.form, ships_from_zip: '70115' } };
   const saved = {};
-  c.fetch = async (url, options = {}) => {
+  c.fetch = async url => {
     const { pathname } = new URL(url);
     if (pathname === '/api/v1/addresses/') return reply(200, [{ id: 2, postal_code: '70115', last_modified: '2024-01-01T00:00:00Z' }]);
     if (pathname === '/presentation/api/v1/users/me/') return reply(200, { country: 'US' });
@@ -741,7 +741,6 @@ function skuDraft({ stored = {} } = {}) {
   const saved = { id: '123456', description: 'Private draft', price_amount: '12', pictures: [{ id: 789 }], missing_fields: [], ...stored };
   let writes = 0;
   c.fetch = async (url, options = {}) => {
-    const { pathname } = new URL(url);
     if (options.method === 'PUT') {
       writes += 1;
       const body = JSON.parse(options.body);
@@ -767,7 +766,7 @@ test('a Depop draft a new SKU collides on is written again without it', async ()
 });
 
 test('a Depop draft that already holds the SKU names what the seller has to clear', async () => {
-  const { c, run } = skuDraft({ stored: { sku: 'TOPSHOP-6' } });
+  const { run } = skuDraft({ stored: { sku: 'TOPSHOP-6' } });
   const result = await run();
   assert.equal(result.ok, false);
   assert.equal(result.safe_to_retry, true);

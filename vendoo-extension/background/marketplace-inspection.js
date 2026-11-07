@@ -96,7 +96,7 @@ async function inspectMarketplaceDocument(origin, requestedScript) {
       const url = new URL(raw); return url.origin === origin && /^\/api\/v3\/ajax\/(?:bespoke\/)?shop\/\d+\//.test(url.pathname);
     }).map(sanitized))].slice(0, 60),
     api_parameters: performance.getEntriesByType('resource').map(entry => new URL(entry.name))
-      .filter(url => url.origin === origin && /\/listings\/v3\/search$/.test(url.pathname))
+      .filter(url => url.origin === origin && url.pathname.endsWith('/listings/v3/search'))
       .slice(-1).map(url => ({ path: url.pathname, names: [...url.searchParams.keys()] })),
     links: [...document.querySelectorAll('a[href]')].filter(visible).map(el => el.href)
       .filter(href => { const url = new URL(href); return url.origin === origin && /\/your\/shops\/|sellinghub|\/listings|\/sell(?:\/|$)/.test(url.pathname); })
