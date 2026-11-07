@@ -35,10 +35,13 @@ jobs:
       - id: changes
         env:
           BEFORE: ${{ github.event.before }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           case "$GITHUB_EVENT_NAME" in
             # checkout tests a merge; its first parent is the actual base.
             pull_request) base="$(git rev-parse HEAD^1)" ;;
+            # The queue tests main plus every PR ahead of this one.
+            merge_group) base="$MERGE_GROUP_BASE" ;;
             push) base="$BEFORE" ;;
             *) base="" ;;
           esac
@@ -142,9 +145,11 @@ jobs:
         env:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.after }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           case "$GITHUB_EVENT_NAME" in
             pull_request) range="$(git merge-base HEAD^1 HEAD^2)..HEAD^2" ;;
+            merge_group) range="$MERGE_GROUP_BASE..HEAD" ;;
             push)
               if [ -n "$BEFORE" ] && [ "${BEFORE//0/}" != "" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
                 range="$BEFORE..$AFTER"
