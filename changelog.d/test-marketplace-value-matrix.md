@@ -1,1 +1,0 @@
-- Poshmark's Size now shows the size List will send: a tag such as Large (12/14) or Waist 32 lands on Poshmark's own spelling, a 3XL tee lands in Big & Tall, and a kids' size lands in the boys' or girls' group the listing names.
