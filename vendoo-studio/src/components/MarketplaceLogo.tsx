@@ -72,6 +72,7 @@ export function MarketplaceLogo({
     return (
       <span
         className="marketplace-logo"
+        role="img"
         title={label}
         aria-label={label}
         style={{ width: size, height: size }}
@@ -102,6 +103,7 @@ export function MarketplaceLogo({
   return (
     <span
       className="marketplace-logo marketplace-logo-fallback"
+      role="img"
       title={label}
       aria-label={label}
       style={{ width: size, height: size }}

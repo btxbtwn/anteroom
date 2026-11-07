@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "../api/client";
+import { pollMs } from "../api/polling";
 import type { PromotionAction, PromotionAutomation, PromotionMarketplace } from "../api/promotions";
 import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
@@ -52,7 +53,7 @@ export async function confirmPromotionOn(row: PromotionAutomation): Promise<bool
 }
 
 export function usePromotionAutomations(enabled = true) {
-  return useQuery({ queryKey: KEY, queryFn: api.promotionAutomations.list, refetchInterval: 30000, enabled });
+  return useQuery({ queryKey: KEY, queryFn: api.promotionAutomations.list, refetchInterval: () => pollMs(30000), enabled });
 }
 
 function useSavePromotion(onSaved: () => void) {
@@ -165,7 +166,7 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
   const saveListings = useSavePromotion(() => undefined);
   const busy = saveListings.isPending;
   const coverage = useQuery({ queryKey: [...KEY, automation.id, "coverage"], queryFn: () => api.promotionAutomations.coverage(automation.id) });
-  const activity = useQuery({ queryKey: [...KEY, automation.id, "activity"], queryFn: () => api.promotionAutomations.activity(automation.id), refetchInterval: 30000 });
+  const activity = useQuery({ queryKey: [...KEY, automation.id, "activity"], queryFn: () => api.promotionAutomations.activity(automation.id), refetchInterval: () => pollMs(30000) });
   const [form, setForm] = useState(() => formFromAutomation(automation));
   const [floors, setFloors] = useState<Record<string, string>>({});
   const refresh = () => { void client.invalidateQueries({ queryKey: KEY }); };

@@ -97,11 +97,11 @@ export function RegenerateListingButton({
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const { data: photos } = useQuery({
     queryKey: ["photos", convId],
-    queryFn: () => api.conversations.photos(convId),
+    queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }),
   });
   const { data: listingData } = useQuery({
     queryKey: ["listing", convId],
-    queryFn: () => api.listings.get(convId),
+    queryFn: ({ signal }) => api.listings.get(convId, { signal }),
   });
   const hasPhotos = Boolean(photos?.length);
   const hasPrice = listingHasPrice(listingData?.listing);

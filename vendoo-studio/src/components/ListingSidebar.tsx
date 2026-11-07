@@ -12,7 +12,6 @@ import type { WorkspaceView } from "./workspaceCrumbs";
 import type { Suggestion } from "../api/types";
 import {
   DEFAULT_LISTING_FILTERS,
-  filterListings,
   labelCounts,
   labelOptions,
   inStatusTab,
@@ -23,9 +22,7 @@ import {
   notListedOnCounts,
   unsentCount,
   staleCounts,
-  sortListings,
   statusCounts,
-  visibleInInventory,
   type ListingFilters as Filters,
 } from "./inventoryFilters";
 import { PlusIcon, SearchIcon, Table2Icon, XIcon } from "lucide-react";
@@ -34,7 +31,9 @@ import { Kbd } from "./ui/kbd";
 import { SIDEBAR_ICON_BUTTON, SIDEBAR_ROW } from "./sidebar/sidebarStyles";
 import { ListingRow } from "./sidebar/ListingRow";
 import { VirtualListingList } from "./sidebar/VirtualListingList";
-import { activeAnchorMs, settledAnchorMs, type Listing } from "./sidebar/listingShelves";
+import type { Listing } from "./sidebar/listingShelves";
+import { shelveListings } from "./sidebar/shelveListings";
+import { setListingSearch, useListingSearch } from "./sidebar/listingSearch";
 import { BulkActionBar, BulkSelectionDialogs } from "./sidebar/BulkSelection";
 import { SettingsSidebarNav } from "./sidebar/SettingsSidebarNav";
 import { SidebarFooter } from "./sidebar/SidebarFooter";
@@ -56,8 +55,8 @@ interface Props {
   activeView: WorkspaceView;
   settingsSection: SettingsSectionId;
   mobileOpen?: boolean;
-  listingQuery: string;
-  onSearchQueryChange: (query: string) => void;
+  /** Phones: typing a search opens the listings drawer. */
+  onSearch?: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string, title: string) => void;
   onCreate: () => void;
@@ -85,8 +84,7 @@ export function ListingSidebar({
   activeView,
   settingsSection,
   mobileOpen,
-  listingQuery,
-  onSearchQueryChange,
+  onSearch,
   onSelect,
   onDelete,
   onCreate,
@@ -116,30 +114,15 @@ export function ListingSidebar({
 
 
   // Keep the controlled search input responsive while filtering large inventories.
+  const listingQuery = useListingSearch();
   const deferredQuery = useDeferredValue(listingQuery);
   const needle = deferredQuery.trim().toLowerCase();
-  const { orderedListings, settledListings } = useMemo(() => {
-    const visible = filterListings(conversations || [], needle, filters);
-    const active = visible.filter((listing) => !listing.settled_at).sort((left, right) => activeAnchorMs(right) - activeAnchorMs(left));
-    const settled = visible.filter((listing) => listing.settled_at).sort((left, right) => settledAnchorMs(right) - settledAnchorMs(left) || left.id.localeCompare(right.id));
-    // "Recent" keeps open listings above finished ones; every other sort orders
-    // the whole list as one, so a sale-date sort runs newest to oldest throughout.
-    return {
-      orderedListings: sortListings([...active, ...settled], filters.sort),
-      settledListings: settled,
-    };
-  }, [conversations, filters, needle]);
-
+  const openListingId = activeView === "listings" ? selectedConvId : null;
   // Finished listings stay out of the working list. Search and the Sold tab still find them.
-  const shownListings = useMemo(() => {
-    const rows = orderedListings.filter((listing) =>
-      visibleInInventory(listing, filters.status, Boolean(needle)));
-    if (activeView === "listings" && selectedConvId && !rows.some((listing) => listing.id === selectedConvId)) {
-      const open = settledListings.find((listing) => listing.id === selectedConvId);
-      if (open) rows.unshift(open);
-    }
-    return rows;
-  }, [orderedListings, activeView, filters.status, needle, selectedConvId, settledListings]);
+  const { shown: shownListings, matched } = useMemo(
+    () => shelveListings(conversations || [], needle, filters, openListingId),
+    [conversations, needle, filters, openListingId],
+  );
 
 
   const listingEligibleIds = useMemo(
@@ -222,7 +205,8 @@ export function ListingSidebar({
   } = settingsSearch;
 
   const handleSearchChange = (value: string) => {
-    onSearchQueryChange(value);
+    setListingSearch(value);
+    onSearch?.();
   };
 
   const handleFiltersChange = (next: Filters) => {
@@ -410,7 +394,7 @@ export function ListingSidebar({
             {(!conversations || conversations.length === 0) && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No listings yet</p>
             )}
-            {conversations && conversations.length > 0 && orderedListings.length === 0 && (
+            {conversations && conversations.length > 0 && matched === 0 && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No matching listings</p>
             )}
           </VirtualListingList>

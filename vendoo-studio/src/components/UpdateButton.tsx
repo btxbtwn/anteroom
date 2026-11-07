@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { pollMs } from "../api/polling";
 import { confirmDialog } from "../ui/confirmDialog";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -83,7 +84,7 @@ export function useStudioUpdate() {
   const { data, isFetching, isFetched, refetch } = useQuery({
     queryKey: ["updates"],
     queryFn: api.updates.status,
-    refetchInterval: POLL_MS,
+    refetchInterval: () => pollMs(POLL_MS),
     refetchOnWindowFocus: true,
   });
 
