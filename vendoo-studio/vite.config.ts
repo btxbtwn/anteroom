@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -78,6 +79,16 @@ export default defineConfig({
           });
         },
       },
+    },
+  },
+  test: {
+    // Off unless `npm run test:coverage` (vitest run --coverage) asks for it,
+    // so the plain `npm test` stays fast. Reported only; there is no threshold.
+    coverage: {
+      provider: "v8",
+      reporter: ["text-summary", "html"],
+      reportsDirectory: "coverage",
+      include: ["src/**/*.{ts,tsx}"],
     },
   },
   build: {

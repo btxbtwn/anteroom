@@ -270,7 +270,7 @@ export function ListingFilters({
 
         <Menu>
           <MenuTrigger
-            aria-label="Sort listings"
+            aria-label={`Sort listings: ${sortLabel}`}
             className={cn(SIDEBAR_ROW, "ml-auto h-7 max-[900px]:h-11 w-auto gap-1 px-2 text-xs data-[popup-open]:bg-sidebar-row-hover [&>svg]:size-3")}
           >
             <span className="truncate">{sortLabel}</span>

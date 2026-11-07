@@ -57,12 +57,12 @@ export function ItemDetails({ convId }: Props) {
 
   const { data: conv } = useQuery({
     queryKey: ["conversation", convId],
-    queryFn: () => api.conversations.get(convId),
+    queryFn: ({ signal }) => api.conversations.get(convId, { signal }),
   });
 
   const { data: conversations } = useQuery({
     queryKey: ["conversations"],
-    queryFn: api.conversations.list,
+    queryFn: ({ signal }) => api.conversations.list({ signal }),
   });
 
   const { data: uiPrefs } = useQuery({

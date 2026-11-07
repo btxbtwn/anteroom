@@ -54,7 +54,8 @@ class Heartbeat(BaseModel):
     model_config = ConfigDict(extra='forbid')
     capabilities: list[Literal['marketplace.actions',
                                'marketplace.sessions', 'marketplace.sales_history',
-                               'marketplace.promotions', 'marketplace.import', 'vendoo.drafts']] = Field(max_length=8)
+                               'marketplace.promotions', 'marketplace.import', 'vendoo.drafts',
+                               'marketplace.signed_approvals']] = Field(max_length=8)
 
 
 @router.post('/heartbeat')

@@ -28,6 +28,7 @@ function marketplaceLog(marketplace, step, details = {}) {
 // The marketplace's own words, without anything that looks like a secret.
 function marketplaceScrub(text) {
   return String(text ?? '')
+    // oxlint-disable-next-line no-control-regex -- strips control characters on purpose
     .replace(/[\u0000-\u001f\u007f]+/g, ' ')
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]')
     .replace(/\bBearer\s+\S+/gi, 'Bearer [hidden]')
@@ -41,7 +42,7 @@ function marketplaceScrub(text) {
 }
 
 // Message-like fields of a marketplace error body, never the whole body.
-function marketplaceBodyMessage(body, marketplace) {
+function marketplaceBodyMessage(body) {
   if (body == null) return '';
   if (typeof body === 'string') return body;
   if (typeof body !== 'object') return '';
@@ -182,7 +183,7 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
       const status = response.status;
       const statusLine = `HTTP ${status}${response.statusText ? ` ${response.statusText}` : ''}`;
       const plain = !data && text && !/<html|<!doctype/i.test(text) ? marketplaceScrub(text).slice(0, 180) : '';
-      const ownWords = data ? marketplaceBodyMessage(data, marketplace) || statusLine : (plain || statusLine);
+      const ownWords = data ? marketplaceBodyMessage(data) || statusLine : (plain || statusLine);
       // Normal pages carry bot-check scripts too, so only a blocked or
       // unexpected answer is read for challenge markers.
       const unexpected = status < 300 && status !== 204 && expect === 'json' && !data;

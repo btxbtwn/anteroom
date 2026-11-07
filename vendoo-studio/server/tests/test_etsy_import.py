@@ -67,6 +67,8 @@ def imported(tmp_path, monkeypatch):
 
     monkeypatch.setattr(inventory_import, "fetch_public", fetch)
     app.dependency_overrides[get_db] = lambda: db
+    # Import steps open their own sessions on worker threads.
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", sessionmaker(bind=db.get_bind()))
     client = TestClient(app)
     yield SimpleNamespace(client=client, db=db, remote=state, directory=tmp_path)
     client.close()

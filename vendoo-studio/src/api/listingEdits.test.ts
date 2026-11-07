@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "./client";
 import { createStudioQueryClient } from "./queryClient";
-import { listingEdits } from "./listingEdits";
+import { listingEditQueueCount, listingEdits } from "./listingEdits";
+import { hasUnsavedWork } from "../lib/unsavedWork";
 import type { ListingData, ListingResponse, ListingUpdateResult } from "./types";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -184,4 +185,31 @@ it("keeps explicitly cleared choices when a refresh returns older saved values",
     }));
     expect(edits.getSnapshot().draft?.depop_specifics).toEqual({ style: [] });
   } finally { client.clear(); }
+});
+
+it("counts a queued or in-flight save as unsaved work and drops the queue once idle", async () => {
+  const { client, edits } = setup();
+  let finish: (response: Response) => void = () => {};
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+  const unsubscribe = edits.subscribe(() => {});
+  edits.save({ title: "Edited", price: 10 });
+  expect(hasUnsavedWork()).toBe(true);
+  unsubscribe();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  // Closing the editor mid-save keeps the queue until the save lands.
+  expect(listingEditQueueCount(client)).toBe(1);
+  finish(new Response(JSON.stringify(result("r1", { title: "Edited", price: 10 }))));
+  await vi.waitFor(() => expect(edits.getSnapshot().saving).toBe(false));
+  expect(edits.pending).toBe(false);
+  await vi.waitFor(() => expect(listingEditQueueCount(client)).toBe(0));
+});
+
+it("keeps a queue that is re-subscribed in the same task, as a remount does", async () => {
+  const { client, edits } = setup();
+  edits.subscribe(() => {})();
+  const unsubscribe = edits.subscribe(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(listingEdits(client, "item")).toBe(edits);
+  unsubscribe();
+  await vi.waitFor(() => expect(listingEditQueueCount(client)).toBe(0));
 });

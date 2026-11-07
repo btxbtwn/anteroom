@@ -39,7 +39,9 @@ async def _delist(db: Session, conv_id: str, marketplaces: list[str]) -> dict:
     from vendoo_studio.services.marketplace_delist import DelistError, delist
 
     try:
-        result = await delist(db, conv_id, marketplaces, True)
+        # End this session's read first: the delist waits on the marketplaces.
+        db.commit()
+        result = await delist(conv_id, marketplaces, True)
     except DelistError as exc:
         if exc.status_code == 409 and "another automation" in str(exc).lower():
             raise AutomationBusy() from exc
@@ -175,7 +177,9 @@ async def _native_one(db: Session, conv_id: str, name: str, revision_id: str, ki
             return stalled
         try:
             # This call follows the seller's consumed item-specific approval.
-            result = await start(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
+            # End this session's read first: the start waits on Chrome or the marketplace.
+            db.commit()
+            result = await start(conv_id, name, ListRequest(revision_id=revision_id, confirm=True))
         except NativeMarketplaceError as exc:
             return {"ok": False, "marketplace": name, "error": str(exc)}
         if result.get("job_id") and not await _wait_for_job(db, result["job_id"]):

@@ -4,13 +4,18 @@
   const KEY = 'anteroom_cloud_connections';
   const APPROVALS_KEY = 'anteroom_cloud_approvals';
   const TTL = 2 * 60 * 1000;
+  // A remembered approval lasts this long; then the seller approves the account again.
+  const APPROVAL_TTL = 30 * 24 * 60 * 60 * 1000;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
   const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);
   // What a relaying Bridge runs: marketplace actions, and each named read under its own name.
   const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts'];
 
-  function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null, runCommand = null } = {}) {
+  function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null, runCommand = null,
+    verifyApproval = null } = {}) {
+    // A Bridge that runs relayed writes must check the hosted API's signature on each one.
+    if (runCommand && !verifyApproval) throw new Error('Relayed commands need an approval check.');
     // Serializing state changes prevents two tabs from overwriting each other's
     // session records across asynchronous chrome.storage operations.
     let tail = Promise.resolve();
@@ -25,11 +30,14 @@
     const page = sender => sender.id === api.runtime.id && Number.isInteger(sender.tab?.id)
       && sender.frameId === 0 && typeof sender.documentId === 'string'
       && site(sender.url) && site(sender.tab.url) && (!sender.origin || sender.origin === ORIGIN);
-    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? RELAY_CAPABILITIES : [])] });
+    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? [...RELAY_CAPABILITIES, 'marketplace.signed_approvals'] : [])] });
     async function read() { return (await api.storage.session.get(KEY))[KEY] || {}; }
     async function write(records) { await api.storage.session.set({ [KEY]: records }); }
     async function readApprovals() { return (await api.storage.local.get(APPROVALS_KEY))[APPROVALS_KEY] || {}; }
     async function writeApprovals(records) { await api.storage.local.set({ [APPROVALS_KEY]: records }); }
+    // An approval from before approvals expired has no time and counts as expired.
+    const live = approval => UUID.test(approval?.connectionId || '') && Number.isFinite(approval.approvedAt)
+      && now() - approval.approvedAt < APPROVAL_TTL && approval.approvedAt <= now();
     async function closeApproval(record) {
       if (Number.isInteger(record?.pending?.windowId)) {
         try { await api.windows.remove(record.pending.windowId); } catch { /* Already closed. */ }
@@ -81,8 +89,14 @@
           record = null;
           await write(records);
         }
-        const approval = (await readApprovals())[message.accountId];
-        if (UUID.test(approval?.connectionId || '')) {
+        const approvals = await readApprovals();
+        const approval = approvals[message.accountId];
+        if (approval && !live(approval)) {
+          // Expired: forget it, so Connect asks the seller in the extension's window again.
+          delete approvals[message.accountId];
+          await writeApprovals(approvals);
+        }
+        if (live(approval)) {
           await closeApproval(record);
           records[id] = { accountId: message.accountId, approved: true, connectionId: approval.connectionId };
           await write(records);
@@ -129,7 +143,7 @@
       } catch { await clear(id); return { ok: false }; }
       const connectionId = randomId();
       const approvals = await readApprovals();
-      approvals[record.accountId] = { connectionId };
+      approvals[record.accountId] = { connectionId, approvedAt: now() };
       await writeApprovals(approvals);
       records[id] = { accountId: record.accountId, approved: true, connectionId };
       await write(records);
@@ -140,8 +154,8 @@
       const granted = async () => {
         const record = (await read())[sender.tab.id];
         const approval = (await readApprovals())[message.accountId];
-        return record?.approved && record.accountId === message.accountId && approval?.connectionId === record.connectionId
-          ? record.connectionId : null;
+        return record?.approved && record.accountId === message.accountId && live(approval)
+          && approval.connectionId === record.connectionId ? record.connectionId : null;
       };
       const connection = await serial(granted);
       if (!connection) return null;
@@ -179,10 +193,15 @@
       const current = await approvedPage(message, sender);
       if (!current) return { ok: false, error_code: 'not_connected' };
       if (!await current()) return { ok: false, error_code: 'account_changed' };
+      // A write runs only with the hosted API's signed approval for this account and
+      // exactly this command. The refusal goes back to the hosted API, which shows it.
+      const refusal = await verifyApproval(command, message.accountId);
+      if (refusal) return { ok: true, reply: refusal };
+      const { approval: _approval, ...payload } = command.payload;
       // The marketplace call runs outside the state queue, like a form read. Its
       // reply goes back to the hosted API even if the page then signs out, so
       // a finished List is never mistaken for one that did not happen.
-      return { ok: true, reply: await runCommand(command, photos) };
+      return { ok: true, reply: await runCommand({ ...command, payload }, photos) };
     }
     return {
       handle: (message, sender) => message?.type === 'cloud.connection' && message.action === 'poshmark_form'
@@ -203,7 +222,8 @@
   }
   if (typeof module !== 'undefined') module.exports = { createCloudConnection, ORIGIN };
   else {
-    const bridge = createCloudConnection(chrome, { readForm: readCloudPoshmarkForm, runCommand: runCloudMarketplaceCommand });
+    const bridge = createCloudConnection(chrome, { readForm: readCloudPoshmarkForm, runCommand: runCloudMarketplaceCommand,
+      verifyApproval: CloudApprovals.createApprovalVerifier(chrome).verify });
     chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (message?.type !== 'cloud.connection') return;
       bridge.handle(message, sender).then(reply).catch(() => reply({ ok: false }));

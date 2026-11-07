@@ -45,12 +45,13 @@ const RECONNECT_MS = 1500;
 const RECONNECT_TRIES = 8;
 const LOST_CONNECTION =
   "Lost the connection to Anteroom. If it was still answering, the answer appears here when you come back.";
-/** How an answer points at a listing: `[title](#listing-<id>)`. */
-const LISTING_LINK = /^#listing-([\w-]+)$/;
+/** How an answer points at a listing: `[title](#listing-<id>)`, or `#<id>` in answers saved before the server fixed that form. */
+const LISTING_LINK = /^#(?:listing-([\w-]+)|([0-9a-f]{12}))$/;
 
 /** The listing an answer's link opens, or null for any other link. */
 export function linkedListingId(href: string | null | undefined): string | null {
-  return LISTING_LINK.exec(href ?? "")?.[1] ?? null;
+  const match = LISTING_LINK.exec(href ?? "");
+  return match?.[1] ?? match?.[2] ?? null;
 }
 
 /**
@@ -118,7 +119,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const queryClient = useQueryClient();
   const messages = useQuery({
     queryKey: messagesKey(threadId ?? ""),
-    queryFn: () => api.assistant.messages(threadId!),
+    queryFn: ({ signal }) => api.assistant.messages(threadId!, { signal }),
     enabled: Boolean(threadId),
   });
   const [input, setInput] = useState("");

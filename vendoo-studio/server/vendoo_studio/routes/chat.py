@@ -329,11 +329,12 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
 @router.post("/api/conversations/{conv_id}/generate/cancel")
 async def cancel_generate_listing(conv_id: str):
     stop_generation(conv_id)
-    db = SessionLocal()
-    try:
-        ConversationRepo(db).update_status(conv_id, "draft")
-    finally:
-        db.close()
+
+    def mark_draft() -> None:
+        with SessionLocal() as db:
+            ConversationRepo(db).update_status(conv_id, "draft")
+
+    await asyncio.to_thread(mark_draft)
     return {"ok": True}
 
 

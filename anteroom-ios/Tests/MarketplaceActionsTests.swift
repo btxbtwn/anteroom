@@ -90,6 +90,10 @@ struct MarketplaceActionsTests {
         let delist = MarketplaceActions.delistQuestion(title: "Blue shirt", marketplaces: ["ebay", "mercari"])
         precondition(delist.title == "Delist “Blue shirt” from 2 marketplaces?" && delist.button == "Delist from 2")
         precondition(delist.message.contains("• eBay: ended\n• Mercari: deleted"))
+        let everywhere = MarketplaceActions.listEverywhereQuestion(title: "Blue shirt", marketplaces: ["ebay", "etsy", "depop"])
+        precondition(everywhere.title == "List “Blue shirt” on 3 marketplaces?" && everywhere.button == "List on 3 marketplaces")
+        precondition(everywhere.message.contains("eBay, Etsy and Depop") && everywhere.message.contains("Depop goes through Chrome"))
+        precondition(MarketplaceActions.listEverywhereQuestion(title: "Blue shirt", marketplaces: ["ebay"]) == one)
 
         // A rate limit counts down from the marketplace's retry time.
         let now = Date(timeIntervalSince1970: 1_800_000_000)

@@ -14,6 +14,10 @@ struct PhotoStrip: View {
     @State private var uploading = 0
     @State private var showingCamera = false
     @State private var error: String?
+    /// Prepared photos that didn't upload, kept for Retry.
+    @State private var failedUploads: [Data] = []
+    @State private var uploadMessage: String?
+    @State private var uploadFailures = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var photoToDelete: ListingPhoto?
 
@@ -105,12 +109,28 @@ struct PhotoStrip: View {
                     .foregroundStyle(.secondary)
             }
 
+            if let uploadMessage {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(uploadMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                    Spacer(minLength: 0)
+                    if !failedUploads.isEmpty {
+                        Button("Retry") { Task { await retryFailed() } }
+                            .font(.footnote.weight(.semibold))
+                            .frame(minHeight: 44)
+                            .disabled(uploading > 0)
+                            .accessibilityLabel("Retry \(failedUploads.count) \(failedUploads.count == 1 ? "photo" : "photos")")
+                    }
+                }
+            }
             if let error {
                 Text(error)
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
         }
+        .sensoryFeedback(.error, trigger: uploadFailures)
         .confirmationDialog("Delete this photo?", isPresented: Binding(
             get: { photoToDelete != nil },
             set: { if !$0 { photoToDelete = nil } }
@@ -135,14 +155,14 @@ struct PhotoStrip: View {
             Task { await upload(items) }
         }
         .fullScreenCover(isPresented: $showingCamera) {
-            CameraPicker { data in
-                Task { await upload([data]) }
+            CameraPicker { image in
+                Task { await uploadCaptured(image) }
             }
             .ignoresSafeArea()
         }
     }
 
-    private var remaining: Int { max(0, Self.limit - photos.count - uploading) }
+    private var remaining: Int { max(0, Self.limit - photos.count - uploading - failedUploads.count) }
 
     private func load() async {
         do {
@@ -153,39 +173,39 @@ struct PhotoStrip: View {
     }
 
     private func upload(_ items: [PhotosPickerItem]) async {
-        uploading += items.count
-        for item in items {
-            defer { uploading -= 1 }
-            guard let data = try? await item.loadTransferable(type: Data.self) else {
-                error = "Couldn't read one of the photos."
-                continue
-            }
-            await send(data)
+        await send(items) { item in
+            guard let data = try? await item.loadTransferable(type: Data.self) else { return nil }
+            return await Task.detached(priority: .userInitiated) { PhotoPreparer.jpeg(from: data) }.value
         }
     }
 
-    private func upload(_ captured: [Data]) async {
-        uploading += captured.count
-        for data in captured {
-            defer { uploading -= 1 }
-            await send(data)
+    private func uploadCaptured(_ image: UIImage) async {
+        let photo = CapturedPhoto(image: image)
+        await send([photo]) { captured in
+            await Task.detached(priority: .userInitiated) { PhotoPreparer.jpeg(from: captured.image) }.value
         }
     }
 
-    private func send(_ original: Data) async {
-        let jpeg = await Task.detached(priority: .userInitiated) {
-            PhotoPreparer.jpeg(from: original)
-        }.value
-        guard let jpeg else {
-            error = "That photo couldn't be opened."
-            return
+    /// Sends the kept photos again, as they were prepared.
+    private func retryFailed() async {
+        let kept = failedUploads
+        failedUploads = []
+        await send(kept) { $0 }
+    }
+
+    /// Uploads a batch, keeping iOS from suspending it if the seller switches
+    /// apps, then says how many didn't make it.
+    private func send<Source>(_ sources: [Source], prepare: @MainActor (Source) async -> Data?) async {
+        uploading += sources.count
+        let report = await withBackgroundTime("Upload photos") {
+            await PhotoUploadReport.run(sources, prepare: prepare,
+                                        upload: { try await api.uploadPhoto(listingID: listingID, jpeg: $0) },
+                                        uploaded: { photos.append($0) },
+                                        finished: { uploading -= 1 })
         }
-        do {
-            photos.append(try await api.uploadPhoto(listingID: listingID, jpeg: jpeg))
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
+        failedUploads += report.failed
+        uploadMessage = report.message
+        if report.problems > 0 { uploadFailures += 1 }
     }
 
     private func delete(_ photo: ListingPhoto) {
@@ -257,6 +277,11 @@ enum PhotoCache {
         cache.countLimit = 200
         return cache
     }()
+}
+
+/// A camera photo on its way to `PhotoPreparer`; UIKit images are safe to read from any thread.
+private struct CapturedPhoto: @unchecked Sendable {
+    let image: UIImage
 }
 
 private struct PhotoSelection: Identifiable {

@@ -51,54 +51,52 @@ def preflight(conv_id: str, db: Session = Depends(get_db, scope="function")):
     return _sync(native.preflight, conv_id, db)
 
 
+# These actions wait on Chrome or a marketplace. They take no request session: the service runs
+# each database step on a worker thread with a short session of its own.
 @router.post("/{marketplace}/inspect")
-async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: InspectRequest, db: Session = Depends(get_db, scope="function")):
-    return await _reply(native.inspect_page(conv_id, marketplace, body, db))
+async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: InspectRequest):
+    return await _reply(native.inspect_page(conv_id, marketplace, body))
 
 
 @router.post("/{marketplace}/list")
-async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session = Depends(get_db, scope="function")):
-    return await _reply(native.list_now(conv_id, marketplace, body, db))
+async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest):
+    return await _reply(native.list_now(conv_id, marketplace, body))
 
 
 @router.post("/{marketplace}/update")
-async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session = Depends(get_db, scope="function")):
-    return await _reply(native.update_live(conv_id, marketplace, body, db))
+async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest):
+    return await _reply(native.update_live(conv_id, marketplace, body))
 
 
 @router.post("/{marketplace}/draft")
-async def save_draft(conv_id: str, marketplace: Marketplace, body: SaveDraftRequest, db: Session = Depends(get_db, scope="function")):
-    return await _reply(native.save_draft(conv_id, marketplace, body.revision_id, db))
+async def save_draft(conv_id: str, marketplace: Marketplace, body: SaveDraftRequest):
+    return await _reply(native.save_draft(conv_id, marketplace, body.revision_id))
 
 
 @router.post("/{marketplace}/cancel")
-async def cancel(conv_id: str, marketplace: Marketplace, db: Session = Depends(get_db, scope="function")):
-    return await _reply(native.cancel(conv_id, marketplace, db))
+async def cancel(conv_id: str, marketplace: Marketplace):
+    return await _reply(native.cancel(conv_id, marketplace))
 
 
 @router.get("/{marketplace}/form")
-async def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop"],
-                      revision_id: str | None = None, db: Session = Depends(get_db, scope="function")):
+def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop"],
+                revision_id: str | None = None, db: Session = Depends(get_db, scope="function")):
     import asyncio
-
-    from starlette.concurrency import run_in_threadpool
 
     from vendoo_studio.services import native_editor
     from vendoo_studio.services.choice_lists import share
 
-    # The form reads the database and may wait on eBay or Chrome. A worker thread
-    # keeps those waits from holding up every other request the app is answering.
-    def load():
-        return share(asyncio.run(native_editor.editor_form(conv_id, marketplace, revision_id, db)))
+    # The form reads the database and may wait on eBay or Chrome. A plain function runs in
+    # FastAPI's threadpool, which keeps those waits from holding up every other request.
     try:
-        return await run_in_threadpool(load)
+        return share(asyncio.run(native_editor.editor_form(conv_id, marketplace, revision_id, db)))
     except native.NativeMarketplaceError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @router.post("/{marketplace}/check")
-async def check_result(conv_id: str, marketplace: Marketplace, body: CheckRequest | None = None, db: Session = Depends(get_db, scope="function")):
-    return await _reply(native.check_result(conv_id, marketplace, db, body))
+async def check_result(conv_id: str, marketplace: Marketplace, body: CheckRequest | None = None):
+    return await _reply(native.check_result(conv_id, marketplace, body))
 
 
 @router.post("/{marketplace}/reset")

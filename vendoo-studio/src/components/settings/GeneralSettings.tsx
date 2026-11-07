@@ -179,7 +179,7 @@ export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () =>
   const { hosted } = useWorkspaceRuntime();
   const { data: status } = useQuery({
     queryKey: ["status"],
-    queryFn: api.status,
+    queryFn: ({ signal }) => api.status({ signal }),
   });
   return (
     <>

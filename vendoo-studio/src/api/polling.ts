@@ -37,7 +37,9 @@ export function setLiveUpdates(live: boolean): void {
  */
 export function pollMs(ms: number): number {
   const value = liveUpdates && ms >= IDLE_POLL_MS ? Math.max(ms, LIVE_IDLE_POLL_MS) : ms;
-  return document.hasFocus() ? value : Math.max(value, IDLE_POLL_MS);
+  // Server rendering has no window to focus; the client re-evaluates on its first tick.
+  const focused = typeof document === "undefined" || document.hasFocus();
+  return focused ? value : Math.max(value, IDLE_POLL_MS);
 }
 
 /** Every observer of a jobs query polls by the same rule, or each runs its own timer. */
@@ -53,4 +55,17 @@ export function fillLogPollMs(jobStatus: string | null | undefined): number {
 /** A listing's background work: generation, field fills, a send's readback. */
 export function activityPollMs(busy: boolean): number {
   return pollMs(busy ? LIVE_POLL_MS : IDLE_POLL_MS);
+}
+
+/**
+ * The inventory list is the heaviest read. A finished send already refreshes
+ * it (App watches the queue), and live updates announce every change, so it
+ * polls a little faster only while a row shows a send in progress and nothing
+ * else will say when that row changes.
+ */
+export const INVENTORY_BUSY_POLL_MS = 5000;
+
+export function inventoryPollMs(rows: { status?: string | null }[] | undefined): number {
+  const sending = !liveUpdates && Boolean(rows?.some((row) => row.status === "listing"));
+  return pollMs(sending ? INVENTORY_BUSY_POLL_MS : IDLE_POLL_MS);
 }

@@ -30,7 +30,7 @@ class JobResponse(BaseModel):
 
 
 @router.get("/queue")
-async def get_queue(db: Session = Depends(get_db)):
+def get_queue(db: Session = Depends(get_db)):
     from vendoo_studio.services import activity
     from vendoo_studio.services.streaming import active_generations
     from vendoo_studio.models.conversation import Conversation

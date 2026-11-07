@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PackageSearchIcon } from "lucide-react";
 import { api } from "../api/client";
+import { pollMs } from "../api/polling";
 import type { SourceBoxes, SourcingCart, SourcingLot, SourcingPick, SourcingPrefs, SourcingSnapshot, SourcingState } from "../api/types";
 import { cn } from "../lib/utils";
 import { toastManager } from "./ui/toast";
@@ -91,7 +92,7 @@ function BoxSourcing({ onOpenListing }: Props) {
     // Keep watching until the list catches up with saved shipping and budget settings.
     refetchInterval: (current) => {
       const state = current.state.data;
-      return state && (state.refreshing || planNeedsUpdate(state)) ? 3000 : false;
+      return state && (state.refreshing || planNeedsUpdate(state)) ? pollMs(3000) : false;
     },
   });
   const onSaved = (state: SourcingState) => queryClient.setQueryData(QUERY_KEY, state);

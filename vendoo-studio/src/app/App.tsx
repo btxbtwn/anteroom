@@ -1,10 +1,10 @@
 import { useWorkspaceRuntime } from "./runtime";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, useReducer, type CSSProperties, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useReducer, type CSSProperties } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, pollMs } from "../api/polling";
+import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, inventoryPollMs, pollMs } from "../api/polling";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
-import { isChatToggleShortcut, ListingChatPopup, type ListingChatStatus } from "../components/ListingChatPopup";
+import { isChatToggleShortcut } from "../components/ListingChatPopup";
 import { ListingSession } from "../components/listingSession";
 import { SetupChecklist } from "../components/SetupChecklist";
 import { ListingSidebar } from "../components/ListingSidebar";
@@ -31,7 +31,6 @@ import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
 import { toastManager } from "../components/ui/toast";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
-import { Spinner } from "../components/ui/spinner";
 import {
   groupImageFilesByFolder,
   listingTitleForFolder,
@@ -49,12 +48,13 @@ import { ThemeSync } from "../components/ThemeSync";
 import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSessionNotice";
 
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
-import { initialOpenListing, openListingReducer, type OpenListing } from "./openListing";
+import { initialOpenListing, openListingReducer } from "./openListing";
 import { loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode } from "./pageLoaders";
+import { ListingChatPane, ListingEditorPane, pageLoading, type ListingPaneActions } from "./ListingPanes";
+import { ErrorBoundary } from "../components/ErrorBoundary";
+import { setListingSearch, useListingSearch } from "../components/sidebar/listingSearch";
 import { prefetchListingReads } from "../api/navigationQueries";
 
-const ChatPanel = lazy(loadChatPanel);
-const ListingEditor = lazy(loadListingEditor);
 const SettingsPage = lazy(pageLoaders.settings);
 const AnalyticsPage = lazy(pageLoaders.analytics);
 const AssistantPage = lazy(pageLoaders.assistant);
@@ -65,11 +65,6 @@ const InventoryTablePage = lazy(pageLoaders.inventory);
 // A page's code is fetched the first time it is opened. Fetching it once the
 // app has settled means a tap does not wait on the network for it.
 const PAGE_LOADERS = [...Object.values(pageLoaders), loadListingEditor, loadChatPanel];
-const pageLoading = (
-  <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading">
-    <Spinner className="size-5 text-muted-foreground" />
-  </div>
-);
 const FirstRunGuide = lazy(() =>
   import("../components/FirstRunGuide").then((module) => ({ default: module.FirstRunGuide })),
 );
@@ -120,7 +115,6 @@ export function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => listingFromUrl && window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
   const [mobileThreadsOpen, setMobileThreadsOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [listingQuery, setListingQuery] = useState("");
   const [setupGuideOpen, setSetupGuideOpen] = useState(setupGuideAutoOpen === true);
   const [pendingBulkGroups, setPendingBulkGroups] = useState<PhotoFolderGroup[] | null>(null);
   const mainPanelRef = useRef<HTMLElement>(null);
@@ -129,7 +123,6 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = usePanelCollapsed("sidebar");
   // On desktop the listing's chat is a column beside the form, or a pop-up over it when narrow; minimized, it is a pill.
   const [chatMinimized, setChatMinimized] = usePanelCollapsed("listing-chat");
-  const [chatStatus, setChatStatus] = useState<ListingChatStatus | null>(null);
   const setChatOpen = useCallback((open: boolean) => setChatMinimized(!open), [setChatMinimized]);
   const [threadsCollapsed, setThreadsCollapsed] = usePanelCollapsed("threads");
   const panelWidthStyle = {
@@ -141,25 +134,21 @@ export function App() {
 
   const { data: status } = useQuery({
     queryKey: ["status"],
-    queryFn: api.status,
+    queryFn: ({ signal }) => api.status({ signal }),
     refetchInterval: (query) => pollMs(query.state.data?.active_job_id ? BUSY_POLL_MS : IDLE_POLL_MS),
   });
   useReloadStaleFrontend(status?.version);
-  // Re-reading the whole inventory is the heaviest request Studio makes, so it
-  // only runs fast while a job is moving rows. Studio's own edits invalidate it.
+  // Re-reading the whole inventory is the heaviest request Studio makes.
+  // Studio's own edits and finished sends (the queue watcher below) refresh it;
+  // the poll only backs those up. See inventoryPollMs.
   const { data: conversations } = useQuery({
     queryKey: ["conversations"],
-    queryFn: api.conversations.list,
-    refetchInterval: (query) =>
-      pollMs(
-        status?.active_job_id || query.state.data?.some((c) => c.status === "listing")
-          ? BUSY_POLL_MS
-          : IDLE_POLL_MS,
-      ),
+    queryFn: ({ signal }) => api.conversations.list({ signal }),
+    refetchInterval: (query) => inventoryPollMs(query.state.data),
   });
   const assistantThreads = useQuery({
     queryKey: ["assistant", "threads"],
-    queryFn: api.assistant.threads,
+    queryFn: ({ signal }) => api.assistant.threads({ signal }),
     enabled: runtime.features.has("assistant"),
   });
   // A blank chat is the home screen. A thread opens only when the seller picks one or sends the first message.
@@ -170,7 +159,7 @@ export function App() {
     : null;
   const queue = useQuery({
     queryKey: ["queue"],
-    queryFn: api.jobs.queue,
+    queryFn: ({ signal }) => api.jobs.queue({ signal }),
     refetchInterval: (query) =>
       pollMs(hasOpenJob(query.state.data?.jobs) || query.state.data?.work.length ? BUSY_POLL_MS : IDLE_POLL_MS),
   });
@@ -449,10 +438,9 @@ export function App() {
       ? { label: "Inventory", onClick: () => { goListings(); setMobileSidebarOpen(true); } }
       : null;
 
-  const handleListingSearch = (value: string) => {
-    setListingQuery(value);
+  const openSidebarForSearch = useCallback(() => {
     if (isMobile) setMobileSidebarOpen(true);
-  };
+  }, [isMobile]);
 
   const createConv = useMutation({
     mutationFn: () => api.conversations.create({ title: "New Listing" }),
@@ -580,46 +568,37 @@ export function App() {
 
   const deleteListing = useCallback((id: string) => deleteConversation(id), [deleteConversation]);
 
-  const renderChat = (listing: OpenListing) => !runtime.features.has("generation") ? null : (
-    <Suspense fallback={pageLoading}>
-      <ChatPanel
-        convId={listing.id}
-        queuedMessage={listing.queuedMessage}
-        onQueuedMessageConsumed={() => dispatchOpenListing({ type: "message", id: listing.id, value: null })}
-        onStatusChange={setChatStatus}
-      />
-    </Suspense>
-  );
-  const renderEditor = (listing: OpenListing, chat?: ReactNode) => (
-    <Suspense fallback={null}>
-      <ListingEditor
-        convId={listing.id}
-        reviewTab={listing.reviewTab}
-        onReviewTabChange={(value) => dispatchOpenListing({ type: "review", id: listing.id, value })}
-        editTab={listing.editTab}
-        onEditTabChange={(value) => dispatchOpenListing({ type: "tab", id: listing.id, value })}
-        onAskChat={(text) => {
-          dispatchOpenListing({ type: "message", id: listing.id, value: text });
-          setMobilePane(runtime.hosted ? "editor" : "workspace");
-          setChatOpen(true);
-        }}
-        onCleared={() => {
-          clearListingWorkspace(listing.id);
-        }}
-        onEditInventoryLocation={openEbayInventoryLocation}
-        onBulkListingsCreated={(listings, generate) => {
-          if (generate) void generateBatch(listings);
-          const first = listings[0]?.convId;
-          if (!first) return;
-          setSelectedConvId(first);
-          goListings();
-          setMobilePane(runtime.hosted ? "editor" : "workspace");
-          setMobileSidebarOpen(false);
-        }}
-        chat={runtime.features.has("generation") ? chat : undefined}
-      />
-    </Suspense>
-  );
+  // The open listing's panes get one stable set of actions; each call reads
+  // the workspace as it is now, so the panes need not re-render when it changes.
+  const paneHandlers = useRef<Omit<ListingPaneActions, "dispatch"> | null>(null);
+  useLayoutEffect(() => {
+    paneHandlers.current = {
+      askChat: (id, text) => {
+        dispatchOpenListing({ type: "message", id, value: text });
+        setMobilePane(runtime.hosted ? "editor" : "workspace");
+        setChatOpen(true);
+      },
+      cleared: clearListingWorkspace,
+      editInventoryLocation: openEbayInventoryLocation,
+      bulkCreated: (listings, generate) => {
+        if (generate) void generateBatch(listings);
+        const first = listings[0]?.convId;
+        if (!first) return;
+        setSelectedConvId(first);
+        goListings();
+        setMobilePane(runtime.hosted ? "editor" : "workspace");
+        setMobileSidebarOpen(false);
+      },
+    };
+  });
+  const paneActions = useMemo<ListingPaneActions>(() => ({
+    dispatch: dispatchOpenListing,
+    askChat: (id, text) => paneHandlers.current?.askChat(id, text),
+    cleared: (id) => paneHandlers.current?.cleared(id),
+    editInventoryLocation: () => paneHandlers.current?.editInventoryLocation(),
+    bulkCreated: (listings, generate) => paneHandlers.current?.bulkCreated(listings, generate),
+  }), []);
+  const generation = runtime.features.has("generation");
 
   return (
     <div className="app-shell" style={panelWidthStyle}>
@@ -651,8 +630,7 @@ export function App() {
             activeView={activeView}
             settingsSection={settingsSection}
             mobileOpen={!isMobile || mobileSidebarOpen}
-            listingQuery={listingQuery}
-            onSearchQueryChange={handleListingSearch}
+            onSearch={openSidebarForSearch}
             onSelect={openListing}
             onDelete={deleteListing}
             onCreate={createListing}
@@ -738,102 +716,100 @@ export function App() {
           </header>
           <div className="workspace-body">
             <main className="panel main-panel" ref={mainPanelRef}>
-              {activeView === "settings" ? (
-                <Suspense fallback={pageLoading}>
-                  <SettingsPage
-                    onOpenListing={openListing}
-                    section={settingsSection}
-                    targetId={settingsTargetId}
-                    onTargetHandled={() => setSettingsTargetId(null)}
-                    onOpenSetupGuide={() => setSetupGuideOpen(true)}
+              <ErrorBoundary label="This page" resetKey={activeView === "settings" ? `settings:${settingsSection}` : activeView}>
+                {activeView === "settings" ? (
+                  <Suspense fallback={pageLoading}>
+                    <SettingsPage
+                      onOpenListing={openListing}
+                      section={settingsSection}
+                      targetId={settingsTargetId}
+                      onTargetHandled={() => setSettingsTargetId(null)}
+                      onOpenSetupGuide={() => setSetupGuideOpen(true)}
+                    />
+                  </Suspense>
+                ) : activeView === "analytics" ? (
+                  <Suspense fallback={pageLoading}>
+                    <AnalyticsPage onOpenListing={openListing} />
+                  </Suspense>
+                ) : activeView === "marketplaces" ? (
+                  <Suspense fallback={pageLoading}>
+                    <MarketplacesPage marketplace={marketplace} onMarketplaceChange={setMarketplace} onOpenListing={openListing} />
+                  </Suspense>
+                ) : activeView === "automations" ? (
+                  <Suspense fallback={pageLoading}>
+                    <AutomationsPage onOpenListing={openListing} />
+                  </Suspense>
+                ) : activeView === "assistant" ? (
+                  <Suspense fallback={pageLoading}>
+                    <AssistantPage
+                      onOpenProviders={openProviders}
+                      onOpenListing={openListing}
+                      threadId={assistantThreadId}
+                      onThreadReady={setPickedThreadId}
+                    />
+                  </Suspense>
+                ) : activeView === "sourcing" ? (
+                  <Suspense fallback={pageLoading}>
+                    <SourcingPage onOpenListing={openListing} />
+                  </Suspense>
+                ) : activeView === "inventory" ? (
+                  <Suspense fallback={pageLoading}>
+                    <InventoryTablePage
+                      conversations={conversations}
+                      onOpenListing={openListing}
+                    />
+                  </Suspense>
+                ) : selectedConvId ? null : needsSetup ? (
+                  <SetupChecklist
+                    providerConfigured={providerConfigured}
+                    chromeAvailable={status?.chrome_available !== false}
+                    extensionConnected={Boolean(status?.extension_connected)}
+                    creating={createConv.isPending}
+                    onOpenSettings={openSettings}
+                    onStartGuide={() => setSetupGuideOpen(true)}
+                    onCreate={createListing}
                   />
-                </Suspense>
-              ) : activeView === "analytics" ? (
-                <Suspense fallback={pageLoading}>
-                  <AnalyticsPage onOpenListing={openListing} />
-                </Suspense>
-              ) : activeView === "marketplaces" ? (
-                <Suspense fallback={pageLoading}>
-                  <MarketplacesPage marketplace={marketplace} onMarketplaceChange={setMarketplace} onOpenListing={openListing} />
-                </Suspense>
-              ) : activeView === "automations" ? (
-                <Suspense fallback={pageLoading}>
-                  <AutomationsPage onOpenListing={openListing} />
-                </Suspense>
-              ) : activeView === "assistant" ? (
-                <Suspense fallback={pageLoading}>
-                  <AssistantPage
-                    onOpenProviders={openProviders}
-                    onOpenListing={openListing}
-                    threadId={assistantThreadId}
-                    onThreadReady={setPickedThreadId}
-                  />
-                </Suspense>
-              ) : activeView === "sourcing" ? (
-                <Suspense fallback={pageLoading}>
-                  <SourcingPage onOpenListing={openListing} />
-                </Suspense>
-              ) : activeView === "inventory" ? (
-                <Suspense fallback={pageLoading}>
-                  <InventoryTablePage
-                    conversations={conversations}
-                    query={listingQuery}
-                    onQueryChange={setListingQuery}
-                    onOpenListing={openListing}
-                  />
-                </Suspense>
-              ) : selectedConvId ? null : needsSetup ? (
-                <SetupChecklist
-                  providerConfigured={providerConfigured}
-                  chromeAvailable={status?.chrome_available !== false}
-                  extensionConnected={Boolean(status?.extension_connected)}
-                  creating={createConv.isPending}
-                  onOpenSettings={openSettings}
-                  onStartGuide={() => setSetupGuideOpen(true)}
-                  onCreate={createListing}
-                />
-              ) : (
-                <Empty className="flex-1 overflow-y-auto">
-                  <EmptyHeader>
-                    <EmptyTitle>Turn product photos into marketplace-ready drafts</EmptyTitle>
-                    <EmptyDescription>Pick up where Anteroom suggests, or start a new listing.</EmptyDescription>
-                  </EmptyHeader>
-                  <EmptyContent className="max-w-md">
-                    {runtime.features.has("suggestions") && <SuggestionsPanel
-                      selectedConvId={selectedConvId}
-                      onSelect={openListing}
-                    />}
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={createConv.isPending}
-                      title={createListingTitle}
-                      onClick={createListing}
-                    >
-                      <PlusIcon />
-                      Create a listing
-                    </Button>
-                  </EmptyContent>
-                </Empty>
-              )}
+                ) : (
+                  <Empty className="flex-1 overflow-y-auto">
+                    <EmptyHeader>
+                      <EmptyTitle>Turn product photos into marketplace-ready drafts</EmptyTitle>
+                      <EmptyDescription>Pick up where Anteroom suggests, or start a new listing.</EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent className="max-w-md">
+                      {runtime.features.has("suggestions") && <SuggestionsPanel
+                        selectedConvId={selectedConvId}
+                        onSelect={openListing}
+                      />}
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={createConv.isPending}
+                        title={createListingTitle}
+                        onClick={createListing}
+                      >
+                        <PlusIcon />
+                        Create a listing
+                      </Button>
+                    </EmptyContent>
+                  </Empty>
+                )}
+              </ErrorBoundary>
               {selectedConvId && (
                 <div hidden={activeView !== "listings"} className="listing-workspace">
                   {openListingState && (
                     <div className="listing-workspace-main listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>
                       <ListingSession active={activeView === "listings"}>
                         {isMobile ? (
-                          <div className="chat-column">{renderChat(openListingState)}</div>
+                          <div className="chat-column">
+                            {generation && <ListingChatPane listing={openListingState} actions={paneActions} />}
+                          </div>
                         ) : (
-                          renderEditor(openListingState, (
-                            <ListingChatPopup
-                              convId={openListingState.id}
-                              open={!chatMinimized}
-                              onOpenChange={setChatOpen}
-                              status={chatStatus}
-                            >
-                              {renderChat(openListingState)}
-                            </ListingChatPopup>
-                          ))
+                          <ListingEditorPane
+                            listing={openListingState}
+                            actions={paneActions}
+                            chatOpen={generation ? !chatMinimized : undefined}
+                            onChatOpenChange={generation ? setChatOpen : undefined}
+                          />
                         )}
                       </ListingSession>
                     </div>
@@ -848,7 +824,7 @@ export function App() {
                 {openListingState ? (
                   <div className="listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>
                     <ListingSession active={activeView === "listings"}>
-                      {renderEditor(openListingState)}
+                      <ListingEditorPane listing={openListingState} actions={paneActions} />
                     </ListingSession>
                   </div>
                 ) : (
@@ -886,13 +862,7 @@ export function App() {
         <nav className="mobile-mail-toolbar" aria-label="Search and create listings">
           <label className="mobile-mail-search">
             <SearchIcon className="size-4.5 shrink-0" />
-            <input
-              type="search"
-              value={listingQuery}
-              onChange={(e) => handleListingSearch(e.target.value)}
-              placeholder="Search"
-              aria-label="Search listings"
-            />
+            <MobileListingSearch />
           </label>
           <button
             type="button"
@@ -957,5 +927,19 @@ export function App() {
         </Suspense>
       ) : null}
     </div>
+  );
+}
+
+/** The phone toolbar's search box; it shares the sidebar's search text. */
+function MobileListingSearch() {
+  const query = useListingSearch();
+  return (
+    <input
+      type="search"
+      value={query}
+      onChange={(e) => setListingSearch(e.target.value)}
+      placeholder="Search"
+      aria-label="Search listings"
+    />
   );
 }

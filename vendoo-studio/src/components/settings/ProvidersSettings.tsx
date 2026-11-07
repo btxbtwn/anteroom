@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, ExternalLinkIcon, KeyRoundIcon, LogInIcon, PlugZapIcon, TerminalIcon, Trash2Icon } from "lucide-react";
 import { useWorkspaceRuntime } from "../../app/runtime";
 import { api } from "../../api/client";
+import { IDLE_POLL_MS, pollMs } from "../../api/polling";
 import type { AIKeyProvider, KeyProviderId, ListingProviderId, PhotoProviderChoice, ProviderStatus } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { ClaudeLoginTerminal } from "../ClaudeLoginTerminal";
@@ -628,7 +629,7 @@ export function ProvidersSettings() {
   const { data: provider } = useQuery({
     queryKey: ["settings-provider"],
     queryFn: api.settings.provider,
-    refetchInterval: hosted ? 10_000 : false,
+    refetchInterval: hosted ? () => pollMs(IDLE_POLL_MS) : false,
   });
   const chatgptSignedIn = Boolean(provider?.chatgpt?.signed_in);
   const claudeSignedIn = Boolean(provider?.claude?.signed_in);

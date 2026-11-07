@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import { pollMs } from "../api/polling";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightCheck, PreflightGap } from "../api/nativeMarketplaces";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket } from "../api/marketplaceSessions";
@@ -231,7 +232,7 @@ export function MarketplacesLayout({
   const liveKey = ["marketplace-listings", convId];
   // List runs in the background: poll while any marketplace action is running.
   const native = useQuery({ queryKey: nativeKey, queryFn: () => api.nativeMarketplaces.status(convId),
-    refetchInterval: (query) => Object.values(query.state.data ?? {}).some((draft) => isRunning(draft)) ? 1500 : false });
+    refetchInterval: (query) => Object.values(query.state.data ?? {}).some((draft) => isRunning(draft)) ? pollMs(1500) : false });
   const live = useQuery({ queryKey: liveKey, queryFn: () => api.marketplaceListings.get(convId) });
   // A save can fix the fields a failed List asked for, which clears that error on the server.
   const seenRevision = useRef(revisionId);
@@ -663,7 +664,7 @@ export function MarketplacesLayout({
             const missing = check?.missing.length ?? 0;
             return (
               <li key={id} aria-label={name} className="group relative flex items-start">
-                <button type="button" aria-selected={current} title={check ? missingDetail(check.missing) : status?.label} onClick={() => onSelect(id)}
+                <button type="button" aria-current={current ? "true" : undefined} title={check ? missingDetail(check.missing) : status?.label} onClick={() => onSelect(id)}
                   onPointerEnter={() => onPrepare?.(id)} onFocus={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
                   className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent",
                     current && "bg-accent text-foreground")}>

@@ -18,6 +18,8 @@ VERSION_FILE = STUDIO / "VERSION"
 CHANGELOG_FILE = REPO / "CHANGELOG.md"
 
 SKIP_PARTS = {
+    # Developer notes and form-sweep tools in vendoo-extension/; Chrome never loads them.
+    "AGENTS.md",
     ".git",
     ".gitignore",
     ".playwright-mcp",
@@ -28,6 +30,7 @@ SKIP_PARTS = {
     "sample-listing.json",
     "studio-build.js",
     "tests",
+    "tools",
 }
 
 

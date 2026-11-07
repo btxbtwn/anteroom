@@ -51,7 +51,7 @@ class FailStalledJobsTest(unittest.TestCase):
         rev = listing_persistence.save_revision(self.db, conv.id, {"title": "Tee"}, source="model")
         job = JobRepo(self.db).create(conv.id, rev.id, {"title": "Tee"}, status=status, current_step=step)
         if live:
-            claim_api_job(job.id)
+            claim_api_job(self.db, job.id)
             self.live.append(job.id)
         return job
 

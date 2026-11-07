@@ -29,6 +29,14 @@ const ERRORS: Record<string, string> = {
   rate_limited: "Poshmark asked you to wait. Try again later.",
   schema_drift: "Poshmark's form changed. Anteroom needs an update before showing it.",
 };
+const BRIDGE_ACTIONS = ["poshmark.form.read", "marketplace.actions", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts", "marketplace.signed_approvals"];
+/** The connection a Bridge reported, keeping only states and actions this page knows. */
+function toConnection(data: Record<string, unknown>): CloudConnection {
+  const state = data.state === "connected" || data.state === "disconnected" || data.state === "pending" ? data.state : "unavailable";
+  return { ok: data.ok === true, state,
+    extensionVersion: typeof data.extensionVersion === "string" ? data.extensionVersion.slice(0, 30) : "",
+    supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item): item is string => typeof item === "string" && BRIDGE_ACTIONS.includes(item)) : [] };
+}
 export function cloudExtension(account: BrowserAccount, channel: Window = window) {
   function send(action: "status" | "connect" | "disconnect" | "poshmark_form" | "marketplace_command",
     listing?: Record<string, string | number | null>, relay?: { command: RelayedCommand; photos: RelayedPhoto[] }): Promise<Record<string, unknown>> {
@@ -47,9 +55,7 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
         if (action === "marketplace_command") {
           finish({ ok: data.ok === true, reply: data.reply, error_code: data.error_code }); return;
         }
-        finish({ ok: data.ok === true, state: ["connected", "disconnected", "pending"].includes(data.state) ? data.state : "unavailable",
-          extensionVersion: typeof data.extensionVersion === "string" ? data.extensionVersion.slice(0, 30) : "",
-          supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item: unknown) => item === "poshmark.form.read" || item === "marketplace.actions" || item === "marketplace.sessions" || item === "marketplace.sales_history" || item === "marketplace.promotions" || item === "marketplace.import" || item === "vendoo.drafts") : [] });
+        finish({ ...toConnection(data) });
       };
       const timeout = relay ? COMMAND_TIMEOUT_MS[relay.command.type] ?? 10_000 : action === "poshmark_form" ? 35000 : 2000;
       const timer = channel.setTimeout(() => finish({ ok: false, state: "unavailable", extensionVersion: "" }), timeout);
@@ -58,10 +64,10 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
         ...(action === "connect" ? { email: account.email } : {}), ...(listing ? { listing } : {}), ...relay }, ORIGIN);
     });
   }
-  const status = async () => await send("status") as unknown as CloudConnection;
+  const status = async () => toConnection(await send("status"));
   return {
-    status, connect: async () => await send("connect") as unknown as CloudConnection,
-    disconnect: async () => await send("disconnect") as unknown as CloudConnection,
+    status, connect: async () => toConnection(await send("connect")),
+    disconnect: async () => toConnection(await send("disconnect")),
     /** Run one relayed command in Chrome. Returns the Bridge's reply, or a failure the server records as unconfirmed. */
     runMarketplaceCommand: async (command: RelayedCommand, photos: RelayedPhoto[]): Promise<Record<string, unknown>> => {
       const result = await send("marketplace_command", undefined, { command, photos });

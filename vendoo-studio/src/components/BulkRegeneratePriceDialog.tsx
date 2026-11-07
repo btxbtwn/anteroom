@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import { BULK_READ_CONCURRENCY, mapWithConcurrency } from "../lib/concurrency";
 import type { PriceDropPreview } from "../api/types";
 import {
   BULK_DROP_PERCENTS,
@@ -53,16 +54,14 @@ export function BulkRegeneratePriceDialog({
   useEffect(() => {
     if (choice.kind !== "suggested" || pricedIds.length === 0) return;
     let cancelled = false;
-    void Promise.all(
-      pricedIds.map(async (id) => {
-        try {
-          const preview = await api.listings.priceDropPreview(id);
-          return [id, suggestionFromPreview(preview)] as const;
-        } catch {
-          return [id, null] as const;
-        }
-      }),
-    ).then((results) => {
+    void mapWithConcurrency(pricedIds, BULK_READ_CONCURRENCY, async (id) => {
+      try {
+        const preview = await api.listings.priceDropPreview(id);
+        return [id, suggestionFromPreview(preview)] as const;
+      } catch {
+        return [id, null] as const;
+      }
+    }).then((results) => {
       if (cancelled) return;
       const next = new Map<string, BulkPriceSuggestion | null>();
       let failed = 0;

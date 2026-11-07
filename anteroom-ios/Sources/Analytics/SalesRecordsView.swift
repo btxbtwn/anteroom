@@ -98,7 +98,8 @@ struct SalesRecordsView: View {
             SaleAmountsSheet(api: api, row: row) { Task { await load() } }
         }
         .sheet(item: Binding(get: { export.map(ExportFile.init) }, set: { export = $0?.url })) { file in
-            ShareSheet(items: [file.url])
+            // The CSV holds sales records: it is deleted once the share finishes or is cancelled.
+            ShareSheet(items: [file.url]) { [url = file.url] in try? FileManager.default.removeItem(at: url) }
         }
     }
 
@@ -173,8 +174,11 @@ private struct ExportFile: Identifiable {
 
 private struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
+    let onFinish: @Sendable () -> Void
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        controller.completionWithItemsHandler = { [onFinish] _, _, _, _ in onFinish() }
+        return controller
     }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
