@@ -1,1 +1,0 @@
-- Offers to likers and sharing no longer log "connect Chrome first" while Chrome is just reconnecting, such as right after an update. A scheduled round waits up to 10 minutes for Chrome instead of being used up; if Chrome stays disconnected longer, Activity still says so.
