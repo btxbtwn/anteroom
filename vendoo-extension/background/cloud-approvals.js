@@ -9,7 +9,7 @@
   // `openssl ec -in bridge-signing.pem -pubout` prints, without its BEGIN/END lines.
   // Set it before releasing the Bridge (docs/hosted-production.md, **Bridge approval key**).
   // While it is empty, the Bridge refuses every write the web relays.
-  const BRIDGE_APPROVAL_PUBLIC_KEY = '';
+  const BRIDGE_APPROVAL_PUBLIC_KEY = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETSODemzvbkZtbvrN9kXt4ERklx7tQbbrqLkgX6QwByD/MFVX1TWzNeYgtsP5Gx0G4eLKXbCrCT1emOHbRIYq+A==';
   // Commands that change something: listings, Vendoo drafts, buyer offers. A result check
   // may resume an interrupted List. Must match SIGNED_COMMANDS on the server.
   const SIGNED_COMMANDS = new Set(['job.vendoo_api', 'marketplace.execute', 'marketplace.result',
