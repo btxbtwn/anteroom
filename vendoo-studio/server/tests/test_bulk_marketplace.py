@@ -9,7 +9,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, in_worker_session, load_models
@@ -23,9 +22,9 @@ EBAY_URL = "https://www.ebay.com/itm/123456789012"
 
 
 @pytest.fixture
-def db(monkeypatch):
+def db(monkeypatch, tmp_path):
     load_models()
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(f"sqlite:///{tmp_path / 'bulk.db'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     # Perform opens its own short sessions (database.in_worker_session).
@@ -36,6 +35,12 @@ def db(monkeypatch):
     finally:
         session.close()
         engine.dispose()
+
+
+def test_concurrent_bulk_sessions_have_separate_connections(db):
+    engine = db.get_bind()
+    with engine.connect() as first, engine.connect() as second:
+        assert first.connection.driver_connection is not second.connection.driver_connection
 
 
 @pytest.fixture
