@@ -1,0 +1,2 @@
+- eBay and Etsy sales now fill in their own amounts: eBay records the sale price, shipping the buyer paid, eBay's fees, refunds and eBay shipping labels; Etsy records the sale price, shipping the buyer paid and refunds. Older sales without amounts are filled in a few at a time.
+- Amounts you entered yourself are never replaced, and your cost of goods is kept.
