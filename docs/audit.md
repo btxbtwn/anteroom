@@ -63,6 +63,12 @@ Every run, in this order:
    `vendoo-studio/.venv/bin/python vendoo-studio/scripts/smoke-packaged-sandbox.py /Applications/Anteroom.app`.
    This checks the installed release in sandbox mode on a temporary data
    folder. Note its version. The release may be behind `main`; that is expected.
+   Before and after, check that
+   `~/Library/Application Support/Anteroom/logs/Anteroom.log` was not created
+   or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). Unset
+   any leftover `VENDOO_STUDIO_PORT` / `ANTEROOM_SANDBOX` from that run before
+   starting `./sandbox.sh --hosted` (hosted defaults to 4320; an inherited
+   `4321` makes it fail to bind).
 6. One hand-driven core journey on each surface: create a draft, add photos,
    generate, edit a field, save, reopen, and try to publish (it must be
    refused). Surfaces:
@@ -71,7 +77,10 @@ Every run, in this order:
      `alice@sandbox.test` / `sandbox`);
    - iPhone in the Simulator against the hosted sandbox, driven with the T3
      device tools (`device_list`, `device_open`, `device_screenshot`), never
-     raw `simctl` input.
+     raw `simctl` input. If `device_list` reports `simctl` missing even when
+     `xcode-select -p` points at Xcode.app, record the hand-driven Simulator
+     journey as **not run** with that error; still run
+     `./anteroom-ios/test-sandbox.sh`.
 
 ## New features
 
