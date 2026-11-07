@@ -46,8 +46,8 @@ function browser(c, pages) {
     update: async (id, options) => {
       calls.push(['update', id, options.url]);
       // The blank page finishing first must not count as the search loading.
-      for (const listener of [...listeners]) listener(id, { status: 'complete' }, { url: 'about:blank' });
-      for (const listener of [...listeners]) listener(id, { status: 'complete' }, { url: options.url });
+      for (const listener of Array.from(listeners)) listener(id, { status: 'complete' }, { url: 'about:blank' });
+      for (const listener of Array.from(listeners)) listener(id, { status: 'complete' }, { url: options.url });
       return { id };
     },
     remove: async id => { calls.push(['remove', id]); },
