@@ -450,7 +450,7 @@ class AutodelistOptionTest(unittest.TestCase):
         created = self.handle(_ebay_event())
         seen = {}
 
-        async def fake_delist(db, conv_id, markets, confirm):
+        async def fake_delist(conv_id, markets, confirm):
             seen["call"] = (conv_id, list(markets), confirm)
             return {name: {"state": "deleted"} for name in markets}
 
@@ -466,7 +466,7 @@ class AutodelistOptionTest(unittest.TestCase):
 
         calls = []
 
-        async def fake_delist(db, conv_id, markets, confirm):
+        async def fake_delist(conv_id, markets, confirm):
             calls.append(markets)
             raise DelistError(409, "Connect Chrome first.")
 

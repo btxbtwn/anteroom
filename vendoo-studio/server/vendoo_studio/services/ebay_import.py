@@ -116,20 +116,20 @@ def listing_snapshot(info: dict) -> dict:
             "ebay_specifics": {**specifics, **({"conditionDescription": info["conditionDescription"]} if info.get("conditionDescription") else {})}}
 
 
-async def import_listing(client: EbayClient, db: Session, listing_id: str) -> dict:
+async def import_listing(client: EbayClient, listing_id: str) -> dict:
     info = await ebay_actions.owned_listing(client, listing_id)
     if info.get("id") != listing_id:
         raise EbayFailure("eBay returned a different listing. Nothing was imported.", 409)
     snapshot = listing_snapshot(info)
     try:
         return await inventory_import.save_owned_listing(
-            db, "ebay", listing_id, snapshot, info.get("images", []), lambda: assert_identity(client.seller),
+            "ebay", listing_id, snapshot, info.get("images", []), lambda: assert_identity(client.seller),
         )
     except inventory_import.ImportConflict as exc:
         raise EbayFailure(str(exc), 409) from exc
 
 
-async def link_listing(client: EbayClient, db: Session, listing_id: str, conversation_id: str) -> dict:
+async def link_listing(client: EbayClient, listing_id: str, conversation_id: str) -> dict:
     """Link an active eBay listing to an item the seller chose. Reads eBay only; the item is kept as it is."""
     from vendoo_studio.services.keychain import get_marketplace_accounts
 
@@ -143,6 +143,6 @@ async def link_listing(client: EbayClient, db: Session, listing_id: str, convers
         assert_identity(client.seller)
 
     try:
-        return await inventory_import.link_owned_listing(db, "ebay", listing_id, conversation_id, verify)
+        return await inventory_import.link_owned_listing("ebay", listing_id, conversation_id, verify)
     except inventory_import.LinkError as exc:
         raise EbayFailure(str(exc), exc.status_code) from exc

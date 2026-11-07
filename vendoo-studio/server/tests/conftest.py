@@ -66,6 +66,46 @@ def _no_connection_held_during_chrome_waits():
     chrome_wait_connections.unwatch(engine)
 
 
+@pytest.fixture(autouse=True)
+def _chrome_wait_check_stays_on(_no_connection_held_during_chrome_waits):
+    """A hosted app's shutdown unwatches the shared engine; watch it again for every test."""
+    from vendoo_studio.database import engine
+    from vendoo_studio.services import chrome_wait_connections
+
+    chrome_wait_connections.watch(engine)
+
+
+@pytest.fixture(scope="session")
+def _endpoint_checkouts():
+    """Watch every pool for connections an async route handler takes on the event loop."""
+    from sqlalchemy import event
+    from sqlalchemy.pool import Pool
+
+    from loop_checkouts import EndpointCheckouts
+
+    watcher = EndpointCheckouts()
+    event.listen(Pool, "checkout", watcher.checkout)
+    yield watcher
+    event.remove(Pool, "checkout", watcher.checkout)
+
+
+@pytest.fixture(autouse=True)
+def _no_database_work_on_the_event_loop(_endpoint_checkouts):
+    """Fail a test whose request ran a query on the event loop from an async route handler.
+
+    The production counterpart is ``LoopCheckoutWarning`` in ``hosted.py``, which only logs.
+    Handlers recorded in ``async_route_sessions_baseline.txt`` are still being fixed.
+    """
+    from loop_checkouts import recorded
+
+    _endpoint_checkouts.found.clear()
+    yield
+    found = {name: site for name, site in _endpoint_checkouts.found.items() if name not in recorded()}
+    _endpoint_checkouts.found.clear()
+    assert not found, ("An async route handler took a database connection on the event loop. Make it a "
+                       f"plain def, or run its database steps through database.in_worker_session: {found}")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _local_test_client_origin():
     """Exercise the same Host checks as the real loopback app, not testserver."""

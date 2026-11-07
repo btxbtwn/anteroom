@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.models.marketplace_listing import BUSY_STATES, LIVE_STATES, UNSETTLED_STATES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
@@ -345,7 +346,7 @@ def _plan(marketplace: str, kind: str, record: dict, revision_id: str) -> list[s
     return ["publish"] if current else ["save_draft", "publish"]
 
 
-async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -> tuple[dict, list]:
+def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -> tuple[dict, list]:
     from vendoo_studio.services.extension_connection import marketplace_actions_refusal
     from vendoo_studio.services import activity
     from vendoo_studio.services.streaming import active_generation
@@ -375,19 +376,21 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
             etsy_listings.connected_shop_id()
         except ValueError as exc:
             raise NativeMarketplaceError(409, str(exc)) from exc
-    elif marketplace == "ebay":
-        from vendoo_studio.services.ebay_client import EbayClient
-        from vendoo_studio.services.marketplace_accounts import SignInRequired
-
-        try:
-            await EbayClient.connect()
-        except SignInRequired as exc:
-            raise NativeMarketplaceError(409, "Connect eBay in Settings → Connections before listing.") from exc
-    elif refusal := marketplace_actions_refusal():
+    elif marketplace != "ebay" and (refusal := marketplace_actions_refusal()):
         raise NativeMarketplaceError(409, refusal)
     photos, warning = _photos(db, conv_id, snapshot, marketplace)
     snapshot["_approved_photo_warning"] = warning
     return snapshot, photos
+
+
+async def _require_ebay() -> None:
+    from vendoo_studio.services.ebay_client import EbayClient
+    from vendoo_studio.services.marketplace_accounts import SignInRequired
+
+    try:
+        await EbayClient.connect()
+    except SignInRequired as exc:
+        raise NativeMarketplaceError(409, "Connect eBay in Settings → Connections before listing.") from exc
 
 
 def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tuple[list, str]:
@@ -395,7 +398,37 @@ def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tupl
     return marketplace_media.photos_for(snapshot, ConversationRepo(db).get_all_photos(conv_id), marketplace)
 
 
-async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, db: Session) -> dict:
+async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str) -> dict:
+    """Check, ask Chrome or eBay, then open the job. Each database step runs on a worker thread
+    with its own session, so no pooled connection is held while Chrome or eBay answers."""
+    snapshot, photos, deleted_here = await in_worker_session(_check_start, conv_id, marketplace, body, kind)
+    if marketplace == "ebay":
+        await _require_ebay()
+    from vendoo_studio.services.chrome_catalog import live_preview
+
+    preview = await live_preview(snapshot) if marketplace in {"poshmark", "depop"} else None
+    options = await in_worker_session(_after_preview, marketplace, body, snapshot, preview)
+    from vendoo_studio.services import approved_photos
+
+    # The copies are made before the start gate, off the event loop: on the web each photo is a
+    # Storage download and upload, and neither the gate nor the server should wait on them.
+    try:
+        snapshot[approved_photos.KEY] = await asyncio.to_thread(approved_photos.capture, photos)
+    except (OSError, ValueError) as exc:
+        raise NativeMarketplaceError(409, "Could not preserve the approved photos. Review them and try again.") from exc
+
+    async def open_and_launch() -> dict:
+        record, job_id, steps = await in_worker_session(
+            _open_job, conv_id, marketplace, body, kind, snapshot, photos, deleted_here)
+        _launch(run_job(job_id, conv_id, marketplace, steps, options))
+        record["running"] = True
+        return record
+
+    # A claimed job always gets its worker, even if the request is cancelled while the job opens.
+    return await asyncio.shield(open_and_launch())
+
+
+def _check_start(db: Session, conv_id: str, marketplace: str, body: ListRequest, kind: str) -> tuple[dict, list, bool]:
     from vendoo_studio.services import listing_mode
 
     listing_mode.require("direct", db)
@@ -417,10 +450,14 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         if existing.get("listing_id") and existing.get("state") != "deleted":
             raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
         deleted_here = existing.get("state") == "deleted"
-    snapshot, photos = await _preflight(db, conv_id, marketplace, body)
-    from vendoo_studio.services.chrome_catalog import apply_direct_ids, live_preview, remember_direct_categories
+    snapshot, photos = _preflight(db, conv_id, marketplace, body)
+    return snapshot, photos, deleted_here
 
-    preview = await live_preview(snapshot) if marketplace in {"poshmark", "depop"} else None
+
+def _after_preview(db: Session, marketplace: str, body: ListRequest, snapshot: dict, preview: dict | None) -> dict:
+    """Keep the category ids Chrome resolved, and return the job's marketplace options."""
+    from vendoo_studio.services.chrome_catalog import apply_direct_ids, remember_direct_categories
+
     if preview and apply_direct_ids(snapshot, preview.get("categories") or {}):
         remember_direct_categories(db, ListingRepo(db).get_revision(body.revision_id), snapshot.get("direct_category_ids") or {})
     # Local field checks are advisory. The seller-confirmed attempt goes to
@@ -434,14 +471,14 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
                    "readiness_state_id": body.readiness_state_id or defaults.get("readiness_state_id"),
                    "return_policy_id": body.return_policy_id or defaults.get("return_policy_id"),
                    "package": body.etsy_package.model_dump() if body.etsy_package else listing_package(snapshot)}
-    from vendoo_studio.services import approved_photos
+    return options
 
-    # The copies are made before the start gate, off the event loop: on the web each photo is a
-    # Storage download and upload, and neither the gate nor the server should wait on them.
-    try:
-        snapshot[approved_photos.KEY] = await asyncio.to_thread(approved_photos.capture, photos)
-    except (OSError, ValueError) as exc:
-        raise NativeMarketplaceError(409, "Could not preserve the approved photos. Review them and try again.") from exc
+
+def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, kind: str, snapshot: dict,
+              photos: list, deleted_here: bool) -> tuple[dict, str, list[str]]:
+    from vendoo_studio.services import approved_photos, listing_mode
+
+    name = NAMES[marketplace]
     job = None
     try:
         with listing_mode.guard(db, "direct"):
@@ -485,9 +522,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
             approved_photos.release(snapshot)
         raise
     _progress(db, job.id, marketplace, steps[0], 0, len(steps))
-    _launch(run_job(job.id, conv_id, marketplace, steps, options))
-    record["running"] = True
-    return record
+    return record, job.id, steps
 
 
 def _context(db: Session, conv_id: str, marketplace: str, body: ListRequest | None = None) -> direct_preflight.Context:
@@ -525,19 +560,19 @@ def preflight(conv_id: str, db: Session) -> dict:
     return {"revision_id": revision.id, "marketplaces": out}
 
 
-async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session) -> dict:
+async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest) -> dict:
     """Start listing on one marketplace in one seller-confirmed step. Returns at once; poll status."""
-    return await _start(conv_id, marketplace, body, "list", db)
+    return await _start(conv_id, marketplace, body, "list")
 
 
-async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session) -> dict:
+async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest) -> dict:
     """Write the listing saved in Anteroom onto the one already live. One confirmation, never a second listing."""
-    return await _start(conv_id, marketplace, body, "update", db)
+    return await _start(conv_id, marketplace, body, "update")
 
 
-async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str, db: Session) -> dict:
+async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str) -> dict:
     """Save only. No confirmation, publish step, or automatic publish retry."""
-    return await _start(conv_id, marketplace, ListRequest(revision_id=revision_id), "save_draft", db)
+    return await _start(conv_id, marketplace, ListRequest(revision_id=revision_id), "save_draft")
 
 
 def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:
@@ -686,7 +721,9 @@ async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: 
         if stored["state"] == "unknown":
             # A reply was lost. Read what the marketplace has now, while still holding the slot.
             _progress(db, job.id, marketplace, "checking")
-            checked = await _read_result(db, conv_id, marketplace, stored, snapshot, stored.get("draft_url"), job)
+            checked = await _read_result(
+                marketplace, stored, snapshot, stored.get("draft_url"), job, context=None,
+                remember=lambda values: _store(db, conv_id, marketplace, values))
             if checked is not None:
                 stored = _apply_result(db, conv_id, marketplace, job.id, step, checked)
         return stored
@@ -773,13 +810,18 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
             db.close()
 
 
-async def cancel(conv_id: str, marketplace: Marketplace, db: Session) -> dict:
+async def cancel(conv_id: str, marketplace: Marketplace) -> dict:
     """Stop a running List or Update at its next safe point. The job keeps the slot until the work stops."""
+    record = await in_worker_session(_running_record, conv_id, marketplace)
+    await request_cancel(record["job_id"], record)
+    return (await in_worker_session(lambda db: status(conv_id, db)))[marketplace]
+
+
+def _running_record(db: Session, conv_id: str, marketplace: str) -> dict:
     record = _record(db, conv_id, marketplace)
     if not _running(db, record):
         raise NativeMarketplaceError(409, f"No {NAMES[marketplace]} action is running.")
-    await request_cancel(db, record["job_id"], record)
-    return status(conv_id, db)[marketplace]
+    return record
 
 
 async def cancel_job(db: Session, job) -> None:
@@ -787,42 +829,46 @@ async def cancel_job(db: Session, job) -> None:
     marketplace = str(job.current_step or "").removeprefix("native_").split("_", 1)[0]
     record = _record(db, job.conversation_id, marketplace) if marketplace in NAMES else {}
     if job_is_live(db, job.id):
-        await request_cancel(db, job.id, record)
+        db.commit()
+        await request_cancel(job.id, record)
         return
     JobRepo(db).update_status(job.id, "cancelled", job.current_step, error="Cancelled.")
     mark_interrupted(db, job.id)
 
 
-async def request_cancel(db: Session, job_id: str, record: dict) -> None:
+async def request_cancel(job_id: str, record: dict) -> None:
     # Recorded on the job: the Machine running it stops at its next safe point.
-    if not request_job_cancel(db, job_id):
+    if not await in_worker_session(_record_cancel, job_id, record.get("marketplace")):
         return
-    JobRepo(db).add_event(job_id, "native_cancel_requested", None, {"marketplace": record.get("marketplace")})
     if record.get("operation_id"):
         await _send_cancel(record["operation_id"])
 
 
+def _record_cancel(db: Session, job_id: str, marketplace: str | None) -> bool:
+    if not request_job_cancel(db, job_id):
+        return False
+    JobRepo(db).add_event(job_id, "native_cancel_requested", None, {"marketplace": marketplace})
+    return True
+
+
 # --- Check, Reset and automatic reconcile --------------------------------------
 
-async def _read_result(db: Session, conv_id: str, marketplace: str, record: dict, snapshot: dict,
-                       candidate: str | None, job) -> dict | None:
-    """Read the action's result from the marketplace (or Chrome's journal). Never writes.
+async def _read_result(marketplace: str, record: dict, snapshot: dict, candidate: str | None, job, *,
+                       context: dict | None, remember) -> dict | None:
+    """Read the action's result from the marketplace (or Chrome's journal). Never writes the marketplace.
 
-    None means Chrome has no journal for it: the seller has to look.
+    ``context`` is ``_result_context`` for a Chrome marketplace; ``remember`` keeps what eBay
+    reports along the way. None means Chrome has no journal for it: the seller has to look.
     """
     if marketplace == "etsy":
         return await etsy_listings.check(snapshot, record, candidate)
     if marketplace == "ebay":
         from vendoo_studio.services import ebay_listings
 
-        def remember(values: dict) -> None:
-            _store(db, conv_id, marketplace, values)
-
         return await ebay_listings.check(record, snapshot, remember)
     try:
         reply = await browser_bridge.request(job, "marketplace.result", {
-            "marketplace": marketplace, "operation_id": record.get("operation_id"),
-            "context": _result_context(db, conv_id, marketplace, record, snapshot, candidate),
+            "marketplace": marketplace, "operation_id": record.get("operation_id"), "context": context,
         }, timeout=65)
     except browser_bridge.BrowserBridgeError as exc:
         raise NativeMarketplaceError(502, "Chrome could not check the result. Connect Chrome and check again.") from exc
@@ -831,8 +877,26 @@ async def _read_result(db: Session, conv_id: str, marketplace: str, record: dict
     return reply["result"]
 
 
-async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body: CheckRequest | None = None) -> dict:
-    """Read-only: ask the marketplace what the last action did, and record it."""
+async def check_result(conv_id: str, marketplace: Marketplace, body: CheckRequest | None = None) -> dict:
+    """Read-only: ask the marketplace what the last action did, and record it.
+
+    The database steps run on worker threads; none holds a connection while the marketplace answers.
+    """
+    record, snapshot, candidate, context, check_job_id = await in_worker_session(
+        _open_check, conv_id, marketplace, body)
+    remembered: list[dict] = []
+    try:
+        result = await _read_result(marketplace, record, snapshot, candidate, _JobRef(check_job_id),
+                                    context=context, remember=remembered.append)
+        return await in_worker_session(_settle_check, conv_id, marketplace, record, check_job_id, remembered, result)
+    except BaseException:
+        await asyncio.shield(in_worker_session(_fail_check, conv_id, marketplace, check_job_id, remembered))
+        raise
+    finally:
+        release_api_job(check_job_id)
+
+
+def _open_check(db: Session, conv_id: str, marketplace: str, body: CheckRequest | None):
     from vendoo_studio.services.extension_connection import current_extension
 
     _conversation(db, conv_id)
@@ -848,6 +912,8 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
     candidate = draft_url(marketplace, body.draft_url) if body and body.draft_url else record.get("draft_url")
     if record.get("draft_url") and candidate != record["draft_url"]:
         raise NativeMarketplaceError(409, "Check the draft already linked to this listing.")
+    context = (None if marketplace in API_MARKETPLACES
+               else _result_context(db, conv_id, marketplace, record, snapshot, candidate))
     repo = JobRepo(db)
     with start_gate():
         if blocking_job(repo, marketplace) is not None:
@@ -856,26 +922,37 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
         check_job = repo.create(conv_id, record.get("revision_id") or "", snapshot, status="dispatched",
                                 current_step=f"native_{marketplace}_check")
         claim_api_job(db, check_job.id)
-    try:
-        result = await _read_result(db, conv_id, marketplace, record, snapshot, candidate, check_job)
-        if result is None:
-            stored = _store(db, conv_id, marketplace, {**_CLEARED_ERROR, "state": "unknown", "error_code": "uncertain",
-                                                       "error": CHROME_SILENT.format(name=NAMES[marketplace])})
-        else:
-            stored = _apply_result(db, conv_id, marketplace, record["job_id"], record.get("action") or "", result)
-        settled = stored["state"] not in UNSETTLED_STATES
-        if action_job and settled and not stored.get("error"):
-            if action_job.status in {"failed", "dispatched"}:
-                action_job.status, action_job.last_error = "completed", None
-                db.commit()
-                repo.add_event(action_job.id, "native_result_verified", action_job.current_step)
-        repo.update_status(check_job.id, "completed")
-        return stored
-    except BaseException:
-        repo.update_status(check_job.id, "failed", error="Check did not finish.")
-        raise
-    finally:
-        release_api_job(check_job.id)
+    return record, snapshot, candidate, context, check_job.id
+
+
+def _keep_remembered(db: Session, conv_id: str, marketplace: str, remembered: list[dict]) -> None:
+    for values in remembered:
+        _store(db, conv_id, marketplace, values)
+
+
+def _settle_check(db: Session, conv_id: str, marketplace: str, record: dict, check_job_id: str,
+                  remembered: list[dict], result: dict | None) -> dict:
+    _keep_remembered(db, conv_id, marketplace, remembered)
+    if result is None:
+        stored = _store(db, conv_id, marketplace, {**_CLEARED_ERROR, "state": "unknown", "error_code": "uncertain",
+                                                   "error": CHROME_SILENT.format(name=NAMES[marketplace])})
+    else:
+        stored = _apply_result(db, conv_id, marketplace, record["job_id"], record.get("action") or "", result)
+    repo = JobRepo(db)
+    action_job = repo.get(record["job_id"])
+    settled = stored["state"] not in UNSETTLED_STATES
+    if action_job and settled and not stored.get("error"):
+        if action_job.status in {"failed", "dispatched"}:
+            action_job.status, action_job.last_error = "completed", None
+            db.commit()
+            repo.add_event(action_job.id, "native_result_verified", action_job.current_step)
+    repo.update_status(check_job_id, "completed")
+    return stored
+
+
+def _fail_check(db: Session, conv_id: str, marketplace: str, check_job_id: str, remembered: list[dict]) -> None:
+    _keep_remembered(db, conv_id, marketplace, remembered)
+    JobRepo(db).update_status(check_job_id, "failed", error="Check did not finish.")
 
 
 def reset(conv_id: str, marketplace: Marketplace, db: Session) -> dict:
@@ -914,22 +991,21 @@ async def reconcile(*, chrome: bool) -> int:
     Runs on startup (eBay and Etsy) and when Chrome reconnects (all). A record
     whose check cannot run now (another job holds the slot) waits for the next one.
     """
-    from vendoo_studio.database import SessionLocal
-
     checked = 0
-    with SessionLocal() as db:
-        targets = [(row.conversation_id, row.marketplace, row.job_id) for row in MarketplaceListingRepo(db).unsettled()]
-        for conv_id, marketplace, job_id in targets:
-            if not job_id or job_is_live(db, job_id) or (marketplace not in API_MARKETPLACES and not chrome):
-                continue
-            try:
-                await check_result(conv_id, marketplace, db)
-                checked += 1
-            except NativeMarketplaceError as exc:
-                log.info("Reconcile skipped %s for %s: %s", marketplace, conv_id, exc)
-            except Exception:  # noqa: BLE001 - one record must not stop the rest
-                log.exception("Reconcile failed for %s on %s", conv_id, marketplace)
+    for conv_id, marketplace in await in_worker_session(_reconcile_targets, chrome):
+        try:
+            await check_result(conv_id, marketplace)
+            checked += 1
+        except NativeMarketplaceError as exc:
+            log.info("Reconcile skipped %s for %s: %s", marketplace, conv_id, exc)
+        except Exception:  # noqa: BLE001 - one record must not stop the rest
+            log.exception("Reconcile failed for %s on %s", conv_id, marketplace)
     return checked
+
+
+def _reconcile_targets(db: Session, chrome: bool) -> list[tuple[str, str]]:
+    return [(row.conversation_id, row.marketplace) for row in MarketplaceListingRepo(db).unsettled()
+            if row.job_id and not job_is_live(db, row.job_id) and (row.marketplace in API_MARKETPLACES or chrome)]
 
 
 async def reconcile_after_reconnect() -> None:
@@ -940,9 +1016,24 @@ async def reconcile_after_reconnect() -> None:
         log.exception("Reconnect reconcile failed")
 
 
-async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: InspectRequest, db: Session):
+async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: InspectRequest):
     """Read a marketplace page's form. Holds the automation slot so no action starts into a busy Chrome."""
+    job_id = await in_worker_session(_open_inspection, conv_id, marketplace)
+    try:
+        reply = await browser_bridge.request(_JobRef(job_id), "marketplace.inspect", {
+            "marketplace": marketplace, "script_url": body.script_url, "background": body.background,
+        }, timeout=45)
+        await in_worker_session(lambda db: JobRepo(db).update_status(job_id, "completed"))
+        return reply
+    except browser_bridge.BrowserBridgeError as exc:
+        await in_worker_session(lambda db: JobRepo(db).update_status(
+            job_id, "failed", error="Chrome could not inspect the marketplace page."))
+        raise NativeMarketplaceError(502, "Chrome could not inspect the marketplace page.") from exc
+    finally:
+        release_api_job(job_id)
 
+
+def _open_inspection(db: Session, conv_id: str, marketplace: str) -> str:
     _conversation(db, conv_id)
     repo = JobRepo(db)
     with start_gate():
@@ -950,17 +1041,7 @@ async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: I
             raise NativeMarketplaceError(409, "Wait for the current Chrome job to finish.")
         job = repo.create(conv_id, "", {}, status="dispatched", current_step=f"native_{marketplace}_inspect")
         claim_api_job(db, job.id)
-    try:
-        reply = await browser_bridge.request(job, "marketplace.inspect", {
-            "marketplace": marketplace, "script_url": body.script_url, "background": body.background,
-        }, timeout=45)
-        repo.update_status(job.id, "completed")
-        return reply
-    except browser_bridge.BrowserBridgeError as exc:
-        repo.update_status(job.id, "failed", error="Chrome could not inspect the marketplace page.")
-        raise NativeMarketplaceError(502, "Chrome could not inspect the marketplace page.") from exc
-    finally:
-        release_api_job(job.id)
+    return job.id
 
 
 def listing_package(snapshot: dict) -> dict | None:

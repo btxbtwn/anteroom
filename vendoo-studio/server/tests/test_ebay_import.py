@@ -1,5 +1,6 @@
 from io import BytesIO
 from types import SimpleNamespace
+import asyncio
 import xml.etree.ElementTree as ET
 
 import httpx
@@ -112,6 +113,8 @@ def imported(tmp_path, monkeypatch):
 
     monkeypatch.setattr(inventory_import, "fetch_public", fetch)
     app.dependency_overrides[get_db] = lambda: db
+    # Import steps open their own sessions on worker threads.
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", sessionmaker(bind=db.get_bind()))
     client = TestClient(app)
     yield SimpleNamespace(client=client, db=db, remote=remote, downloads=downloads, directory=tmp_path)
     client.close()
@@ -270,7 +273,8 @@ def test_two_requests_finishing_the_same_import_reuse_one_item_and_clean_unused_
 
     async def other_request_finishes(urls, collection_id):
         meta = await original(urls, collection_id)
-        inventory_imports.create_import(imported.db, "ebay", {"title": "First request won"}, ITEM_ID, [], identity="winning-import")
+        await asyncio.to_thread(inventory_imports.create_import, imported.db, "ebay", {"title": "First request won"},
+                                ITEM_ID, [], identity="winning-import")
         return meta
 
     monkeypatch.setattr(inventory_import, "download_photos", other_request_finishes)

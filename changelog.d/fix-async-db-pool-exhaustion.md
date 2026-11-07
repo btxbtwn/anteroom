@@ -1,0 +1,1 @@
+- Listing, delisting, checking results and importing listings no longer tie up the cloud database while Chrome, eBay or Etsy answers, so other pages keep loading during those actions.

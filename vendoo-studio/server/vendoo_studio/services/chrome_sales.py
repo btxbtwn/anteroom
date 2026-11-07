@@ -133,7 +133,7 @@ def live_item_listings(db: Session, conv_id: str) -> dict[str, str]:
     return found
 
 
-async def check_item(db: Session, conv_id: str, *, session_factory=None) -> dict:
+async def check_item(conv_id: str, *, session_factory=None) -> dict:
     """Read this item's live listings now, so a sale shows while the seller looks at it.
 
     Opening an item brings each of its shops' next check forward to this item
@@ -148,7 +148,7 @@ async def check_item(db: Session, conv_id: str, *, session_factory=None) -> dict
 
     extension_manager = current_extension()
     result: dict = {"ok": True, "checked": [], "recorded": [], "skipped": None}
-    wanted = {name: listing_id for name, listing_id in live_item_listings(db, conv_id).items()
+    wanted = {name: listing_id for name, listing_id in (await asyncio.to_thread(_live, session_factory, conv_id)).items()
               if sale_detection_enabled(name)}
     if not wanted:
         result["skipped"] = "No live listing to check."
@@ -169,6 +169,17 @@ async def check_item(db: Session, conv_id: str, *, session_factory=None) -> dict
             after = await asyncio.to_thread(_line_ids, session_factory, conv_id)
             result["recorded"].extend(sorted(after - before))
     return result
+
+
+def _live(session_factory, conv_id: str) -> dict:
+    with (session_factory or _sessions())() as db:
+        return live_item_listings(db, conv_id)
+
+
+def _sessions():
+    from vendoo_studio.database import SessionLocal
+
+    return SessionLocal
 
 
 def _line_ids(session_factory, conv_id: str) -> set[str]:
