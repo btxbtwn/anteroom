@@ -97,6 +97,7 @@ export function ListingFilters({
   marketplaceCounts,
   notListedCount,
   unsentCount,
+  missingSaleCount,
   staleCounts,
   onChange,
 }: {
@@ -113,6 +114,8 @@ export function ListingFilters({
   notListedCount: number;
   /** How many listings hold edits not yet sent to a marketplace. */
   unsentCount: number;
+  /** How many listings have a sale missing details. */
+  missingSaleCount: number;
   /** How many listings each staleness cutoff would keep, keyed by its days. */
   staleCounts: Record<number, number>;
   onChange: (next: Filters) => void;
@@ -219,6 +222,14 @@ export function ListingFilters({
               glyph={<Dot tone="info" />}
               label="Unsent edits"
               onSelect={() => onChange({ ...filters, unsent: !filters.unsent })}
+            />
+            <FilterRow
+              checked={filters.missingSale}
+              count={missingSaleCount}
+              title="Sold listings whose sales records lack the price, fees, shipping, cost of goods or sale date"
+              glyph={<Dot tone="warning" />}
+              label="Missing sale details"
+              onSelect={() => onChange({ ...filters, missingSale: !filters.missingSale })}
             />
 
             <MenuSeparator />

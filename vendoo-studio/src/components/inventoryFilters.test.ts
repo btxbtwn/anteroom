@@ -20,6 +20,7 @@ import {
   notListedOnCounts,
   staleCounts,
   unsentCount,
+  missingSaleCount,
   toggleValue,
   type FilterableListing,
 } from "./inventoryFilters";
@@ -334,6 +335,26 @@ describe("filter options", () => {
   it("toggles a value in and out", () => {
     expect(toggleValue(["ebay"], "etsy")).toEqual(["ebay", "etsy"]);
     expect(toggleValue(["ebay", "etsy"], "ebay")).toEqual(["etsy"]);
+  });
+});
+
+describe("missing sale details", () => {
+  const incomplete: FilterableListing = { ...tee, status: "sold", missing_sale_data: ["fees", "sale date"] };
+  const complete: FilterableListing = { ...tee, status: "sold", missing_sale_data: [] };
+  const unsold: FilterableListing = { ...tee };
+
+  it("keeps only listings whose sale is missing details", () => {
+    const rows = filterListings([incomplete, complete, unsold], "", { ...DEFAULT_LISTING_FILTERS, missingSale: true });
+    expect(rows).toEqual([incomplete]);
+  });
+
+  it("counts them for the filter row and the Filters badge", () => {
+    expect(missingSaleCount([incomplete, complete, unsold, incomplete])).toBe(2);
+    expect(activeFilterCount({ ...DEFAULT_LISTING_FILTERS, missingSale: true })).toBe(1);
+  });
+
+  it("is off by default", () => {
+    expect(filterListings([incomplete, complete, unsold], "", DEFAULT_LISTING_FILTERS)).toHaveLength(3);
   });
 });
 
