@@ -15,6 +15,9 @@ enum ListingSort: String, CaseIterable, Identifiable, Sendable {
     case priceAsc = "price_asc"
     case skuAsc = "sku_asc"
     case skuDesc = "sku_desc"
+    case stalest
+    case freshest
+    case soldDesc = "sold_desc"
 
     var id: String { rawValue }
 
@@ -31,6 +34,9 @@ enum ListingSort: String, CaseIterable, Identifiable, Sendable {
         case .priceAsc: "Price (Lowest)"
         case .skuAsc: "SKU (A-Z)"
         case .skuDesc: "SKU (Z-A)"
+        case .stalest: "Stalest (Listed longest ago)"
+        case .freshest: "Freshest (Listed most recently)"
+        case .soldDesc: "Date Sold (Newest)"
         }
     }
 }
@@ -49,6 +55,13 @@ struct InventoryFilters: Equatable, Sendable {
     /// them, or, with none picked, the listings no marketplace carries.
     var notListed = false
     var sort: ListingSort = .recent
+
+    /// Only sold listings have a sale date, so sorting by it opens the Sold
+    /// tab; every other sort keeps the current tab, as on the desktop.
+    mutating func choose(_ sort: ListingSort) {
+        self.sort = sort
+        if sort == .soldDesc { status = .sold }
+    }
 
     /// The status tab shows itself, so this counts only the menu filters.
     var activeCount: Int { max(marketplaces.count, notListed ? 1 : 0) }
@@ -197,6 +210,16 @@ extension ListingSummary {
         return settled > 0 ? settled : Self.stamp(updatedAt)
     }
 
+    /// When the longest-standing live listing went up. An item is only as fresh
+    /// as its stalest live marketplace, so a new listing elsewhere does not
+    /// reset it. Falls back to the item-wide listing date. 0 when never listed.
+    fileprivate var oldestLiveListed: Double {
+        let sold = vendooSoldDates ?? [:]
+        let stamps = (vendooMarketplaces ?? []).filter { sold[$0] == nil }
+            .map { Self.stamp(vendooListedDates?[$0]) }.filter { $0 > 0 }
+        return stamps.min() ?? Self.stamp(vendooListedAt)
+    }
+
     fileprivate static func stamp(_ value: String?) -> Double {
         ServerDate.parse(value)?.timeIntervalSince1970 ?? 0
     }
@@ -320,8 +343,15 @@ enum InventoryQuery {
         case .priceAsc: return { byNumber($0.price, $1.price, 1) }
         case .skuAsc: return { byText($0.sku, $1.sku, 1) }
         case .skuDesc: return { byText($0.sku, $1.sku, -1) }
+        // A listing that never went live has no staleness to compare, so it
+        // sorts last either way rather than pretending to be the oldest.
+        case .stalest: return { byNumber(nonZero($0.oldestLiveListed), nonZero($1.oldestLiveListed), 1) }
+        case .freshest: return { byNumber(nonZero($0.oldestLiveListed), nonZero($1.oldestLiveListed), -1) }
+        case .soldDesc: return { byNumber(nonZero(ListingSummary.stamp($0.soldAt)), nonZero(ListingSummary.stamp($1.soldAt)), -1) }
         }
     }
+
+    private static func nonZero(_ value: Double) -> Double? { value > 0 ? value : nil }
 
     private static func sign(_ value: Double) -> Int { value < 0 ? -1 : value > 0 ? 1 : 0 }
 

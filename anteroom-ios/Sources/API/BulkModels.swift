@@ -215,3 +215,35 @@ struct MarkdownResult: Decodable, Sendable {
     let applied: [Applied]
     let skipped: [BulkSkipped]
 }
+
+/// A wholesale box the seller bought stock in (GET /api/boxes).
+struct SourceBox: Decodable, Identifiable, Hashable, Sendable {
+    let id: String
+    /// "raghouse", "tvf", "papercrane", or the name of any other store.
+    let store: String
+    let title: String
+
+    /// What the web's box picker shows (boxLabel in BulkUploadDialog.tsx).
+    var label: String { "\(Self.storeName(store)) · \(title)" }
+
+    static func storeName(_ store: String) -> String {
+        ["raghouse": "Raghouse", "tvf": "Thrift Vintage Fashion", "papercrane": "PaperCrane"][store] ?? store
+    }
+}
+
+/// Measurements suggested from photos (POST /api/measurements/read). Nothing is saved.
+struct MeasurementReading: Decodable, Sendable {
+    struct Read: Decodable, Sendable {
+        /// "accepted", "disagree" or "cannot_read".
+        let status: String
+        let value: Double?
+    }
+
+    let photosRead: Int
+    let measurements: [String: Read]
+
+    enum CodingKeys: String, CodingKey {
+        case photosRead = "photos_read"
+        case measurements
+    }
+}

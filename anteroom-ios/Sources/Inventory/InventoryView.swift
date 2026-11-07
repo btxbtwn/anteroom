@@ -6,8 +6,8 @@ struct InventoryView: View {
     @State private var model: InventoryModel
     @State private var search = ""
     @State private var path: [ListingSummary] = []
-    @State private var showingNewListing = false
-    @State private var createdListing: ListingSummary?
+    @State private var creatingListing = false
+    @State private var bulkListing = false
     @State private var renaming: ListingSummary?
     @State private var newTitle = ""
     @State private var deleting: ListingSummary?
@@ -129,15 +129,15 @@ struct InventoryView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("New listing", systemImage: "plus") { showingNewListing = true }
+                    Button("Bulk listing", systemImage: "square.stack.3d.up") { bulkListing = true }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityHint("Make many drafts from one batch of photos")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("New listing", systemImage: "plus", action: newListing)
+                        .disabled(creatingListing)
                         .frame(minWidth: 44, minHeight: 44)
                         .accessibilityHint("Create a draft, then add photos and item details")
-                }
-            }
-            .sheet(isPresented: $showingNewListing, onDismiss: openCreatedListing) {
-                NewListingView(api: model.api) { listing in
-                    model.created(listing)
-                    createdListing = listing
                 }
             }
             .alert("Rename listing", isPresented: renameShown) {
@@ -162,6 +162,9 @@ struct InventoryView: View {
             }
             .sheet(item: $templating) { listing in
                 ListingTemplatesSheet(api: model.api, listingID: listing.id) { Task { await model.reload() } }
+            }
+            .sheet(isPresented: $bulkListing) {
+                BulkListingView(api: model.api) { Task { await model.reload() } }
             }
             .sheet(item: $bulk) { action in
                 switch action {
@@ -222,7 +225,7 @@ struct InventoryView: View {
 
     private var sortMenu: some View {
         Menu {
-            Picker("Sort listings", selection: Binding(get: { model.filters.sort }, set: { model.filters.sort = $0 })) {
+            Picker("Sort listings", selection: Binding(get: { model.filters.sort }, set: { model.filters.choose($0) })) {
                 ForEach(ListingSort.allCases) { sort in Text(sort.label).tag(sort) }
             }
         } label: {
@@ -239,10 +242,13 @@ struct InventoryView: View {
                 ContentUnavailableView {
                     Label("Your inventory starts here", systemImage: "tag")
                 } description: {
-                    Text("Create a listing, add your photos, and keep your draft ready to edit.")
+                    Text("Create a listing, or make many drafts at once from one batch of photos.")
                 } actions: {
-                    Button("New listing") { showingNewListing = true }
-                        .buttonStyle(.borderedProminent)
+                    Button("New listing", action: newListing)
+                        .disabled(creatingListing)
+                        .workspaceProminentButton()
+                        .frame(minHeight: 44)
+                    Button("Bulk listing") { bulkListing = true }
                         .frame(minHeight: 44)
                 }
             } else if !search.isEmpty {
@@ -265,7 +271,7 @@ struct InventoryView: View {
             } actions: {
                 Button("Try again") { Task { await model.reload() } }
                     .disabled(model.isLoading)
-                    .buttonStyle(.borderedProminent)
+                    .workspaceProminentButton()
                     .frame(minHeight: 44)
             }
         } else if !model.hasLoaded && model.isLoading {
@@ -300,10 +306,15 @@ struct InventoryView: View {
         Task { await model.reload() }
     }
 
-    private func openCreatedListing() {
-        guard let listing = createdListing else { return }
-        createdListing = nil
-        path.append(listing)
+    /// Like the web: one tap makes an untitled draft and opens it. The
+    /// seller adds photos there and generation writes the title.
+    private func newListing() {
+        guard !creatingListing else { return }
+        creatingListing = true
+        Task {
+            defer { creatingListing = false }
+            if let listing = await model.createListing() { path.append(listing) }
+        }
     }
 }
 
@@ -406,7 +417,11 @@ struct ListingRowContent<Thumbnail: View>: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).font(.subheadline.weight(.medium)).lineLimit(2)
                 HStack(spacing: 6) {
-                    Text(listing.statusLabel).fontWeight(.medium).foregroundStyle(statusColor)
+                    HStack(spacing: 5) {
+                        Circle().fill(statusColor).frame(width: 6, height: 6).accessibilityHidden(true)
+                        Text(listing.statusLabel).fontWeight(.medium)
+                            .foregroundStyle(listing.inventoryStatus == "failed" ? WorkspaceStyle.destructive : WorkspaceStyle.mutedText)
+                    }
                     if let price = listing.price {
                         Text(price, format: .currency(code: "USD")).foregroundStyle(.secondary)
                     }
@@ -440,7 +455,7 @@ struct ListingRowContent<Thumbnail: View>: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The web's status tones (ListingBits.tsx): a draft stays muted.
+    /// The web's status dots (ListingBits.tsx): the word stays muted.
     private var statusColor: Color {
         switch listing.inventoryStatus {
         case "draft": WorkspaceStyle.mutedText
