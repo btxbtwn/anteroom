@@ -1,1 +1,0 @@
-- Filter your inventory to sold listings that are missing sale details, such as fees, the sale price or the sale date, from the Filters menu.

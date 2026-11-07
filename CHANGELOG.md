@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.771 — 2026-11-07
+
+- Filter your inventory to sold listings that are missing sale details, such as fees, the sale price or the sale date, from the Filters menu.
+
 ## 0.1.770 — 2026-11-07
 
 - The iPhone's inventory Sort menu now has the same choices as the web app: Stalest, Freshest and Date Sold (Newest), which opens the Sold tab.
