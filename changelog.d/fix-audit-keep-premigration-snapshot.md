@@ -1,0 +1,1 @@
+- The backup taken just before a database upgrade is no longer cleared out by newer backups from the same day, so going back to an earlier version restores your data from right before the upgrade.
