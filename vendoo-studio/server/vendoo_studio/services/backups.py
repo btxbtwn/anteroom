@@ -9,8 +9,8 @@ nobody has opened is a guess rather than a backup.
 
 Snapshots live beside the database in ``backups/`` and are gzipped: the
 database is mostly JSON text and compresses around six-fold, which matters
-because a month of them is kept and every one is copied to the backup folder
-as well. When a backup folder is configured they go there too, which is the
+because up to twenty of them are kept and every one is copied to the backup
+folder as well. When a backup folder is configured they go there too, which is the
 copy that survives losing the machine.
 """
 
@@ -37,17 +37,21 @@ log = logging.getLogger("vendoo_studio.backups")
 BACKUP_FOLDER_KEY = "backup_folder"
 PREFIX = "vendoo_studio"
 STAMP_FORMAT = "%Y%m%d-%H%M%S"
+# The reason schema_migrations gives the snapshot it takes before migrating.
+PRE_MIGRATION = "pre-migration"
 NAME_PATTERN = re.compile(rf"^{PREFIX}-(\d{{8}}-\d{{6}})-([a-z0-9-]+)\.db(\.gz)?$")
 
-# Keep the newest few always, plus one per day for a month. Do not keep every
-# snapshot from the last day: with a multi-GB database each pre-update clone
-# is another full copy, and a day of updates will fill the disk.
+# Keep the newest few always, plus one per day for up to a month, within the
+# caps below. Do not keep every snapshot from the last day: with a multi-GB
+# database each pre-update clone is another full copy, and a day of updates
+# will fill the disk.
 KEEP_NEWEST = 3
 KEEP_DAILY_FOR = timedelta(days=30)
 # A month of daily copies of a database that grew to several GB is a folder
 # nobody has room for, so retention is capped by size and count as well as by
-# age. The newest few survive either cap: a backup you cannot restore from is
-# worth less than the space it saves.
+# age: with the newest three taken hours apart, twenty snapshots is about
+# seventeen days. The newest few survive either cap: a backup you cannot
+# restore from is worth less than the space it saves.
 MAX_SNAPSHOT_COUNT = 20
 MAX_RETAINED_BYTES = 8 * 1024**3
 # VACUUM INTO writes a whole second copy of the database, and it writes it
@@ -167,7 +171,15 @@ def latest_snapshot(directory: Path | None = None) -> Snapshot | None:
 
 
 def _keepers(snapshots: list[Snapshot], now: datetime) -> set[Path]:
-    keep = {snapshot.path for snapshot in snapshots[:KEEP_NEWEST]}
+    always = {snapshot.path for snapshot in snapshots[:KEEP_NEWEST]}
+    # A rollback restores the database as it was just before the last
+    # migration. A timer snapshot later that day would win the day, so the
+    # newest pre-migration snapshot is kept outright: it counts towards the
+    # caps like the newest few, but they never push it out.
+    pre_migration = next((s for s in snapshots if s.reason == PRE_MIGRATION), None)
+    if pre_migration is not None:
+        always.add(pre_migration.path)
+    keep = set(always)
     seen_days: set[str] = set()
     for snapshot in snapshots:
         age = now - snapshot.taken_at
@@ -178,15 +190,16 @@ def _keepers(snapshots: list[Snapshot], now: datetime) -> set[Path]:
             seen_days.add(day)
             keep.add(snapshot.path)
 
-    # Newest first, so once either cap is reached everything older goes too.
+    # Newest first, so once either cap is reached everything older goes too,
+    # apart from the snapshots kept outright.
     capped: set[Path] = set()
     retained = 0
     for position, snapshot in enumerate(s for s in snapshots if s.path in keep):
         retained += snapshot.size_bytes
-        if position >= KEEP_NEWEST and (
+        if snapshot.path not in always and (
             position >= MAX_SNAPSHOT_COUNT or retained > MAX_RETAINED_BYTES
         ):
-            break
+            continue
         capped.add(snapshot.path)
     return capped
 

@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.780 — 2026-11-07
+
+- The backup taken just before a database upgrade is no longer cleared out by newer backups from the same day, so going back to an earlier version restores your data from right before the upgrade.
+
+## 0.1.779 — 2026-11-07
+
+- A listing no longer stays stuck on Generating when the AI stops answering: after 5 quiet minutes Anteroom stops waiting, names the AI and the step that stalled, and the listing is ready to retry.
+- Chat and the business assistant end the same way when the AI goes quiet, instead of spinning until a restart.
+- A Keychain prompt nobody answers, or a Claude process that stops responding, no longer holds up Anteroom.
+
 ## 0.1.778 — 2026-11-07
 
 - Bulk listing on iPhone: choose photos for many items at once, group each item's photos, set the box, cost and labels every draft shares, and each item's SKU and measurements (typed or read from yardstick photos). Arrange and turn photos before creating, then create the drafts or create and generate them, the same as on desktop.

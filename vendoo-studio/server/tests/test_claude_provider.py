@@ -16,6 +16,7 @@ from claude_agent_sdk import ResultMessage, StreamEvent
 from vendoo_studio.providers.claude_agent import SIGNED_OUT, ClaudeProvider, to_claude_turn
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
 from vendoo_studio.services import claude_auth
+from vendoo_studio.services.provider_deadlines import unwrap
 
 
 def _text_delta(text: str) -> StreamEvent:
@@ -250,7 +251,7 @@ class ListingProviderClaudeTest(unittest.TestCase):
             ),
             patch("vendoo_studio.services.listing_provider.claude_signed_in", return_value=True),
         ):
-            self.assertIsInstance(listing_provider.get_listing_provider(), ClaudeProvider)
+            self.assertIsInstance(unwrap(listing_provider.get_listing_provider()), ClaudeProvider)
             self.assertTrue(listing_provider.provider_is_configured())
 
     def test_settings_report_the_claude_account(self):
