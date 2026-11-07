@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.job import Job, JobEvent
@@ -36,9 +36,12 @@ class ListedIndex:
 
 def load_listed_index(db: Session) -> ListedIndex:
     index = ListedIndex()
-    jobs = db.query(Job).all()
+    # Only the columns read below: each job's listing snapshot is a whole listing.
+    jobs = db.query(Job).options(load_only(Job.id, Job.conversation_id, Job.status, Job.current_step, Job.vendoo_item_id,
+                                           Job.created_at, Job.updated_at)).all()
     by_id = {job.id: job for job in jobs}
-    for event in db.query(JobEvent).filter(JobEvent.event_type == "native_result").all():
+    events = db.query(JobEvent).options(load_only(JobEvent.job_id, JobEvent.payload, JobEvent.created_at))
+    for event in events.filter(JobEvent.event_type == "native_result").all():
         job = by_id.get(event.job_id)
         found = _publish_event(job, event)
         if found is not None and job is not None:
