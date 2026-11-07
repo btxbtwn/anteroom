@@ -1,0 +1,1 @@
+- On iPhone, the chat composer and tab bar use the system glass look, and the tab bar shrinks while you scroll.
