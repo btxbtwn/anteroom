@@ -142,8 +142,7 @@ class ItemSaleCheckTest(unittest.TestCase):
         with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
                 mock.patch("vendoo_studio.services.extension_connection.extension_manager", manager), \
                 mock.patch("vendoo_studio.services.marketplace_accounts.announce_sales", announced):
-            with Session() as db:
-                result = asyncio.run(chrome_sales.check_item(db, conv_id, session_factory=Session))
+            result = asyncio.run(chrome_sales.check_item(conv_id, session_factory=Session))
         return result, announced
 
     def test_a_sale_reported_by_the_listing_is_recorded_at_once(self):
@@ -207,14 +206,12 @@ class ItemSaleCheckTest(unittest.TestCase):
         # A Facebook link left from before has nothing to read.
         facebook = _listing(Session, {"vendooListingUrls": {"facebook": "https://www.facebook.com/marketplace/item/1234567890123456/"}})
 
-        with Session() as db:
-            nothing = asyncio.run(chrome_sales.check_item(db, draft, session_factory=Session))
-            social = asyncio.run(chrome_sales.check_item(db, facebook, session_factory=Session))
+        nothing = asyncio.run(chrome_sales.check_item(draft, session_factory=Session))
+        social = asyncio.run(chrome_sales.check_item(facebook, session_factory=Session))
         self.assertEqual(nothing["skipped"], "No live listing to check.")
         self.assertEqual(social["skipped"], "No live listing to check.")
         with mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=False)):
-            with Session() as db:
-                offline = asyncio.run(chrome_sales.check_item(db, listed, session_factory=Session))
+            offline = asyncio.run(chrome_sales.check_item(listed, session_factory=Session))
         self.assertEqual((offline["ok"], offline["skipped"]), (False, "Connect Chrome first."))
 
 
@@ -283,8 +280,7 @@ class NotesClaimedSaleCheckTest(unittest.TestCase):
         with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
                 mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True, capabilities={"marketplace.sales_history"})), \
                 mock.patch("vendoo_studio.services.marketplace_accounts.announce_sales", announced):
-            with Session() as db:
-                result = asyncio.run(chrome_sales.check_item(db, conv_id, session_factory=Session))
+            result = asyncio.run(chrome_sales.check_item(conv_id, session_factory=Session))
 
         self.assertEqual((result["checked"], len(result["recorded"])), (["depop"], 1))
         with Session() as db:
@@ -307,8 +303,7 @@ class NotesClaimedSaleCheckTest(unittest.TestCase):
         async def request(_job, _message_type, payload=None, timeout=40):
             raise AssertionError("A recorded sale needs no check")
 
-        with Session() as db:
-            result = asyncio.run(chrome_sales.check_item(db, conv_id, session_factory=Session))
+        result = asyncio.run(chrome_sales.check_item(conv_id, session_factory=Session))
         self.assertEqual((result["checked"], result["skipped"]), ([], "No live listing to check."))
 
 
@@ -328,8 +323,7 @@ class DetectedSaleProtectionTest(unittest.TestCase):
         with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
                 mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True, capabilities={"marketplace.sales_history"})), \
                 mock.patch("vendoo_studio.services.marketplace_accounts.announce_sales", mock.AsyncMock()):
-            with Session() as db:
-                return asyncio.run(chrome_sales.check_item(db, conv_id, session_factory=Session))
+            return asyncio.run(chrome_sales.check_item(conv_id, session_factory=Session))
 
     def test_the_listing_that_sold_cannot_be_delisted_or_relisted_by_an_automation(self):
         from vendoo_studio.services import automation_actions, marketplace_delist
@@ -343,8 +337,9 @@ class DetectedSaleProtectionTest(unittest.TestCase):
         with Session() as db:
             entry = marketplace_delist.listings(db, conv_id)["depop"]
             self.assertEqual((entry["sold_here"], entry["state"]), (True, "live"))
-            with self.assertRaises(marketplace_delist.DelistError) as refused:
-                asyncio.run(marketplace_delist.delist(db, conv_id, ["depop"], True))
+            with self.assertRaises(marketplace_delist.DelistError) as refused, \
+                    mock.patch("vendoo_studio.database.SessionLocal", Session):
+                asyncio.run(marketplace_delist.delist(conv_id, ["depop"], True))
             self.assertIn("sold on depop", str(refused.exception).lower())
             # Automation and bulk actions leave it out, and still see the other listing.
             live, fresh = automation_actions._partition(db, conv_id, ["depop", "poshmark"])
@@ -412,8 +407,7 @@ class MarkedSoldElsewhereTest(unittest.TestCase):
         with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
                 mock.patch("vendoo_studio.services.extension_connection.extension_manager", mock.Mock(connected=True, capabilities={"marketplace.sales_history"})), \
                 mock.patch("vendoo_studio.services.marketplace_accounts.announce_sales", mock.AsyncMock()):
-            with Session() as db:
-                return asyncio.run(chrome_sales.check_item(db, conv_id, session_factory=Session))
+            return asyncio.run(chrome_sales.check_item(conv_id, session_factory=Session))
 
     def test_the_listing_marked_sold_elsewhere_adds_no_second_sale(self):
         Session = sessionmaker(bind=_engine())

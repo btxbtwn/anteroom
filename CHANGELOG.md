@@ -6,6 +6,30 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.758 — 2026-11-07
+
+- Listing links in Assistant answers open the listing again, instead of a blank Inventory page in a new tab.
+
+## 0.1.757 — 2026-11-07
+
+- Keep the hosted app from switching off the check that catches database connections held while waiting on Chrome.
+
+## 0.1.756 — 2026-11-07
+
+- Listing, delisting, checking results and importing listings no longer tie up the cloud database while Chrome, eBay or Etsy answers, so other pages keep loading during those actions.
+
+## 0.1.755 — 2026-11-07
+
+- On the web, one seller's slow image upload no longer holds up everyone else's chat messages.
+- Sending a chat image no longer locks the draft while the image is being stored.
+- Very rapid repeated generate or chat requests now get a short "try again" instead of piling up, without limiting normal use.
+- Tighten private server-to-server access and add request logs that never include links, sign-in codes or message contents.
+- Database updates during a deploy now give up quickly instead of stalling the app, and a deploy checks the database is on the expected version.
+
+## 0.1.754 — 2026-11-07
+
+- Delete your Anteroom account from the web app's account menu or the iPhone's Settings. Your listings, photos, records, settings and stored sign-ins are removed; listings that are live on marketplaces stay there.
+
 ## 0.1.753 — 2026-11-06
 
 - Add a landing page at myanteroom.com for visitors who are not signed in, showing how one listing fills eBay, Poshmark, Mercari, Depop and Etsy.

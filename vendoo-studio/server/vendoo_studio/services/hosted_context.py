@@ -6,6 +6,7 @@ import re
 import tempfile
 import threading
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -195,7 +196,11 @@ class HostedPhotoStore:
             return path
 
 
-_CATALOG_STATES: dict = {}
+# Recently active sellers' catalog indexes, least recent first. A dropped
+# seller's index is rebuilt from their files on next use; a request already
+# holding the old state keeps using it.
+CATALOG_STATES_KEPT = 256
+_CATALOG_STATES: OrderedDict = OrderedDict()
 _CATALOG_STATES_LOCK = threading.Lock()
 
 
@@ -203,7 +208,19 @@ def catalog_state(owner):
     """The seller's catalog index state, kept across requests so the index is built once."""
     from vendoo_studio.services.catalog_index import CatalogIndexState
     with _CATALOG_STATES_LOCK:
-        return _CATALOG_STATES.setdefault(owner, CatalogIndexState())
+        state = _CATALOG_STATES.pop(owner, None)
+        if state is None:
+            state = CatalogIndexState()
+        _CATALOG_STATES[owner] = state
+        while len(_CATALOG_STATES) > CATALOG_STATES_KEPT:
+            _CATALOG_STATES.popitem(last=False)
+        return state
+
+
+def forget_catalog_state(owner):
+    """Drop a deleted account's index state from this process."""
+    with _CATALOG_STATES_LOCK:
+        _CATALOG_STATES.pop(owner, None)
 
 
 def for_seller(user_id, token=None, *, task_lease=None):

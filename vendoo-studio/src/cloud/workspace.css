@@ -15,3 +15,5 @@
 .cloud-profile-email{margin:0 0 10px;color:var(--muted-foreground);overflow-wrap:anywhere}
 .cloud-profile-menu .connection-controls button:first-child{flex:1;min-width:0}
 .cloud-profile-signout{width:100%;margin-top:10px}
+.cloud-profile-menu .cloud-profile-delete{width:100%;margin-top:6px;border-color:transparent;color:var(--destructive-foreground)}
+.cloud-profile-error{margin:8px 0 0;color:var(--destructive-foreground)}

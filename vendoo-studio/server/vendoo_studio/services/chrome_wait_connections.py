@@ -61,7 +61,7 @@ def _checkin(_dbapi_connection, record) -> None:
 
 
 def watch(engine) -> bool:
-    """Start watching ``engine``. False when something else already watches it, which then owns ``unwatch``."""
+    """Start watching ``engine``. False when something else already watches it and owns ``unwatch``."""
     if event.contains(engine, "checkout", _checkout):
         return False
     event.listen(engine, "checkout", _checkout)

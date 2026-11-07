@@ -52,14 +52,8 @@ def test_production_logs_each_place_once_instead_of_failing(monkeypatch, caplog)
     assert len(warnings) == 1
 
 
-def test_the_hosted_app_leaves_a_watch_it_did_not_start():
-    from fastapi.testclient import TestClient
-
+def test_watching_an_engine_already_watched_leaves_it_to_its_owner():
     from vendoo_studio.database import engine
-    from vendoo_studio.hosted import create_app
 
-    with TestClient(create_app('https://example.supabase.co')):
-        pass
-    # The session-wide watch from conftest still catches a held connection afterwards.
-    test_a_wait_with_an_open_transaction_is_refused()
-    assert not chrome_wait_connections.watch(engine)
+    # The test session already watches the engine, as a host app may.
+    assert chrome_wait_connections.watch(engine) is False

@@ -609,6 +609,10 @@ export const api = {
     coverage: (id: string) => request<PromotionCoverage>(`/promotion-automations/${encodeURIComponent(id)}/coverage`),
     activity: (id: string) => request<PromotionActivity>(`/promotion-automations/${encodeURIComponent(id)}/activity`),
   },
+  /** Hosted only: deletes the signed-in seller's account. Live marketplace listings are left alone. */
+  account: {
+    delete: () => request<{ deleted: boolean }>("/account", { method: "DELETE", body: JSON.stringify({ confirm: true }) }),
+  },
   bulkDelete: {
     preview: (conversationIds: string[]) =>
       request<{ rows: BulkDeleteRow[] }>("/listings/bulk-delete/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds }) }),
