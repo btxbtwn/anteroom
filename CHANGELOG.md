@@ -6,6 +6,40 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.776 — 2026-11-07
+
+- Buttons, switches and charts use plain black and white instead of bright blue, on the web and iPhone.
+- Listing status shows as a small colored dot beside the word, so the inventory list is calmer.
+- The assistant's example questions are a simple list instead of floating bubbles.
+
+## 0.1.775 — 2026-11-07
+
+- On iPhone, New listing opens a draft right away. You no longer type a title first; the AI writes it.
+
+## 0.1.774 — 2026-11-07
+
+- On iPhone, the chat composer and tab bar use the system glass look, and the tab bar shrinks while you scroll.
+
+## 0.1.773 — 2026-11-07
+
+- Add photos from the Files app on iPhone, next to Camera and Library.
+
+## 0.1.772 — 2026-11-07
+
+- On a phone, the listing editor now matches the iPhone app: the form uses the full screen width, and you switch between General and each marketplace from a picker at the top instead of a sidebar.
+
+## 0.1.771 — 2026-11-07
+
+- Filter your inventory to sold listings that are missing sale details, such as fees, the sale price or the sale date, from the Filters menu.
+
+## 0.1.770 — 2026-11-07
+
+- The iPhone's inventory Sort menu now has the same choices as the web app: Stalest, Freshest and Date Sold (Newest), which opens the Sold tab.
+
+## 0.1.769 — 2026-11-07
+
+- Listings on the web open again instead of showing "Operational fields cannot be supplied".
+
 ## 0.1.768 — 2026-11-07
 
 - Offers to likers and sharing no longer log "connect Chrome first" while Chrome is just reconnecting, such as right after an update. A scheduled round waits up to 10 minutes for Chrome instead of being used up; if Chrome stays disconnected longer, Activity still says so.

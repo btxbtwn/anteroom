@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type MouseEvent } from "react";
-import { CircleAlertIcon } from "lucide-react";
+import { ArrowUpRightIcon, CircleAlertIcon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage } from "../api/assistant";
@@ -421,24 +421,24 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   if (empty) {
     return (
-      <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col items-center px-4">
-        <div className="grid h-full w-full max-w-208 grid-rows-[1fr_auto_1fr]">
-          <div className="flex flex-col justify-end pb-5">
-            <h1 className="mb-2 text-center font-semibold text-xl tracking-tight text-foreground">Ask about your business</h1>
-            <p className="text-center text-muted-foreground text-sm leading-relaxed">
-              You review every change before it is saved, and nothing here publishes a listing.
-            </p>
-          </div>
+      <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-y-auto px-4">
+        {/* As wide as the composer's surface, so the heading and questions line up with it. */}
+        <div className="flex w-full max-w-[calc(var(--chat-content-max-width)+2rem)] flex-col pt-[18vh] pb-8 max-[900px]:pt-6">
+          <h1 className="mx-3 mb-1 font-semibold sm:mx-4 text-xl tracking-tight text-foreground">Ask about your business</h1>
+          <p className="mx-3 mb-3 text-muted-foreground text-sm sm:mx-4">
+            You review every change before it is saved. Nothing here publishes a listing.
+          </p>
           {composer}
-          <ul className="mt-1 flex list-none flex-wrap content-start justify-center gap-2 p-0">
+          <ul aria-label="Example questions" className="mx-3 mt-4 list-none divide-y sm:mx-4 divide-border/60 border-border/60 border-y p-0">
             {ASSISTANT_STARTERS.map((starter) => (
               <li key={starter}>
                 <button
                   type="button"
-                  className="cursor-pointer rounded-full border border-border/70 bg-card px-3 py-1.5 text-left text-secondary-label text-sm leading-snug max-[900px]:min-h-11 transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
+                  className="group flex min-h-10 w-full cursor-pointer items-center justify-between gap-3 py-2 text-left text-muted-foreground text-sm transition-colors hover:text-foreground max-[900px]:min-h-11"
                   onClick={() => { void ask(starter); }}
                 >
-                  {starter}
+                  <span>{starter}</span>
+                  <ArrowUpRightIcon aria-hidden className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 max-[900px]:opacity-60" />
                 </button>
               </li>
             ))}

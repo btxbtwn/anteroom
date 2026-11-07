@@ -28,7 +28,21 @@ def stored_listing_fields(raw):
             key: value for key, value in categories.items()
             if key in MARKETS or key.removesuffix('_path') in MARKETS
         }
-    return editable_listing(payload)
+    return editable_listing(without_operational_keys(payload))
+
+
+def operational_key(key):
+    normalized = ''.join(character for character in key.lower() if character.isalnum())
+    return key.startswith('_') or len(key) > 100 or normalized in BLOCKED
+
+
+def without_operational_keys(value):
+    """Drop server-owned keys (imported live links, internal markers) a client may not edit."""
+    if isinstance(value, dict):
+        return {key: without_operational_keys(item) for key, item in value.items() if not operational_key(key)}
+    if isinstance(value, list):
+        return [without_operational_keys(item) for item in value]
+    return value
 
 
 def editable_listing(raw):
@@ -68,8 +82,7 @@ def editable_listing(raw):
             return
         if isinstance(value, dict):
             for key, item in value.items():
-                normalized = ''.join(character for character in key.lower() if character.isalnum())
-                if key.startswith('_') or len(key) > 100 or normalized in BLOCKED:
+                if operational_key(key):
                     raise HTTPException(422, 'Operational fields cannot be supplied')
                 validate(item, depth + 1)
             return

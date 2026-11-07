@@ -68,26 +68,29 @@ export function SelectCheckbox({
   );
 }
 
-const STATUS_TONES: Record<string, string> = {
-  draft: "text-muted-foreground",
-  "in-progress": "text-info-foreground",
-  listing: "text-info-foreground",
-  active: "text-success-foreground",
-  sold: "text-primary",
-  failed: "text-destructive-foreground",
+// Status is a small dot beside a muted word, so a list of mostly-active items
+// stays quiet. Only a failure colors the word itself.
+const STATUS_DOTS: Record<string, string> = {
+  draft: "bg-muted-foreground/50",
+  "in-progress": "bg-info",
+  listing: "bg-info",
+  active: "bg-success",
+  sold: "bg-foreground",
+  failed: "bg-destructive",
 };
 
-/** Lifecycle word under a listing title, coloured by status. */
+/** Lifecycle word under a listing title, with a dot coloured by status. */
 export function ListingStatusLabel({ status, title }: { status: string; title?: string }) {
   const key = status.replace(/_/g, "-");
   return (
     <span
       className={cn(
-        "max-w-full truncate text-2xs font-medium capitalize leading-tight",
-        STATUS_TONES[key] ?? "text-sidebar-muted-foreground",
+        "inline-flex max-w-full items-center gap-1.5 truncate text-2xs font-medium capitalize leading-tight",
+        key === "failed" ? "text-destructive-foreground" : "text-sidebar-muted-foreground",
       )}
       title={title}
     >
+      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOTS[key] ?? "bg-muted-foreground/50")} />
       {status.replace(/_/g, " ")}
     </span>
   );

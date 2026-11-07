@@ -52,7 +52,7 @@ struct ListEverywhereSheet: View {
                     }
                     .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.borderedProminent)
+                .workspaceProminentButton()
                 .disabled(chosen.isEmpty || sending)
                 .padding(16)
                 .background(.bar)

@@ -225,7 +225,7 @@ struct InventoryView: View {
 
     private var sortMenu: some View {
         Menu {
-            Picker("Sort listings", selection: Binding(get: { model.filters.sort }, set: { model.filters.sort = $0 })) {
+            Picker("Sort listings", selection: Binding(get: { model.filters.sort }, set: { model.filters.choose($0) })) {
                 ForEach(ListingSort.allCases) { sort in Text(sort.label).tag(sort) }
             }
         } label: {
@@ -246,7 +246,7 @@ struct InventoryView: View {
                 } actions: {
                     Button("New listing", action: newListing)
                         .disabled(creatingListing)
-                        .buttonStyle(.borderedProminent)
+                        .workspaceProminentButton()
                         .frame(minHeight: 44)
                     Button("Bulk listing") { bulkListing = true }
                         .frame(minHeight: 44)
@@ -271,7 +271,7 @@ struct InventoryView: View {
             } actions: {
                 Button("Try again") { Task { await model.reload() } }
                     .disabled(model.isLoading)
-                    .buttonStyle(.borderedProminent)
+                    .workspaceProminentButton()
                     .frame(minHeight: 44)
             }
         } else if !model.hasLoaded && model.isLoading {
@@ -417,7 +417,11 @@ struct ListingRowContent<Thumbnail: View>: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).font(.subheadline.weight(.medium)).lineLimit(2)
                 HStack(spacing: 6) {
-                    Text(listing.statusLabel).fontWeight(.medium).foregroundStyle(statusColor)
+                    HStack(spacing: 5) {
+                        Circle().fill(statusColor).frame(width: 6, height: 6).accessibilityHidden(true)
+                        Text(listing.statusLabel).fontWeight(.medium)
+                            .foregroundStyle(listing.inventoryStatus == "failed" ? WorkspaceStyle.destructive : WorkspaceStyle.mutedText)
+                    }
                     if let price = listing.price {
                         Text(price, format: .currency(code: "USD")).foregroundStyle(.secondary)
                     }
@@ -451,7 +455,7 @@ struct ListingRowContent<Thumbnail: View>: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The web's status tones (ListingBits.tsx): a draft stays muted.
+    /// The web's status dots (ListingBits.tsx): the word stays muted.
     private var statusColor: Color {
         switch listing.inventoryStatus {
         case "draft": WorkspaceStyle.mutedText
