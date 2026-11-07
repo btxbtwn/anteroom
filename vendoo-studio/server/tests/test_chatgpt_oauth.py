@@ -23,6 +23,7 @@ from vendoo_studio.providers.chatgpt_codex import (
     web_search_sources,
 )
 from vendoo_studio.services.chatgpt_oauth import profile_from_tokens
+from vendoo_studio.services.provider_deadlines import unwrap
 
 
 def _jwt(payload: dict) -> str:
@@ -334,7 +335,7 @@ class ListingProviderPrefersChatGPTTest(unittest.TestCase):
             patch("vendoo_studio.services.listing_provider.get_api_key", return_value="sk-test"),
             patch("vendoo_studio.providers.chatgpt_codex.get_chatgpt_models", return_value={}),
         ):
-            provider = listing_provider.get_listing_provider()
+            provider = unwrap(listing_provider.get_listing_provider())
         self.assertIsInstance(provider, ChatGPTCodexProvider)
 
     def test_uses_mimo_when_primary(self):
@@ -350,7 +351,7 @@ class ListingProviderPrefersChatGPTTest(unittest.TestCase):
             patch("vendoo_studio.services.listing_provider.get_api_key", return_value="sk-test"),
             patch("vendoo_studio.providers.chatgpt_codex.get_chatgpt_models", return_value={}),
         ):
-            provider = listing_provider.get_listing_provider()
+            provider = unwrap(listing_provider.get_listing_provider())
         self.assertIsInstance(provider, MiMoProvider)
 
     def test_falls_back_to_chatgpt_when_mimo_primary_but_missing_key(self):
@@ -366,7 +367,7 @@ class ListingProviderPrefersChatGPTTest(unittest.TestCase):
             patch("vendoo_studio.services.listing_provider.get_api_key", return_value=None),
             patch("vendoo_studio.providers.chatgpt_codex.get_chatgpt_models", return_value={}),
         ):
-            provider = listing_provider.get_listing_provider()
+            provider = unwrap(listing_provider.get_listing_provider())
         self.assertIsInstance(provider, ChatGPTCodexProvider)
 
     def test_no_fallback_when_fallback_is_none(self):
@@ -381,7 +382,7 @@ class ListingProviderPrefersChatGPTTest(unittest.TestCase):
             patch("vendoo_studio.services.listing_provider.get_api_key", return_value=None),
             patch("vendoo_studio.providers.chatgpt_codex.get_chatgpt_models", return_value={}),
         ):
-            self.assertIsNone(listing_provider.get_listing_provider())
+            self.assertIsNone(unwrap(listing_provider.get_listing_provider()))
 
     def test_falls_back_to_mimo_key(self):
         from vendoo_studio.providers.xiaomi_mimo import MiMoProvider
@@ -395,7 +396,7 @@ class ListingProviderPrefersChatGPTTest(unittest.TestCase):
             patch("vendoo_studio.services.listing_provider.chatgpt_signed_in", return_value=False),
             patch("vendoo_studio.services.listing_provider.get_api_key", return_value="sk-test"),
         ):
-            provider = listing_provider.get_listing_provider()
+            provider = unwrap(listing_provider.get_listing_provider())
         self.assertIsInstance(provider, MiMoProvider)
 
     def test_unconfigured_without_chatgpt_or_key(self):
@@ -410,7 +411,7 @@ class ListingProviderPrefersChatGPTTest(unittest.TestCase):
             patch("vendoo_studio.services.listing_provider.get_api_key", return_value=None),
             patch("vendoo_studio.services.listing_provider.get_cursor_api_key", return_value=None),
         ):
-            self.assertIsNone(listing_provider.get_listing_provider())
+            self.assertIsNone(unwrap(listing_provider.get_listing_provider()))
             self.assertFalse(listing_provider.provider_is_configured())
 
 

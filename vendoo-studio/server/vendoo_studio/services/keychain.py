@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import sys
 import threading
+from collections.abc import Callable
 
 log = logging.getLogger("vendoo_studio.keychain")
 
@@ -43,6 +45,13 @@ MIGRATION_MARKER = "legacy-migrated"
 MIGRATION_FLAG_FILE = "keychain-migrated"
 
 _lock = threading.RLock()
+# A Keychain prompt nobody answers (the Mac is locked, or the seller is on their
+# phone) blocks the call until someone clicks. Callers stop waiting after this
+# long and treat the item as unreadable; the call itself keeps waiting for the
+# prompt, and later reads of the same item join it instead of piling up.
+KEYCHAIN_TIMEOUT_SEC = 30.0
+_inflight: dict[str, concurrent.futures.Future] = {}
+_inflight_lock = threading.Lock()
 # Accounts with changes not yet saved. Only these override what is on disk,
 # so a stale cache cannot roll back a secret another process just wrote.
 _touched: set[str] = set()
@@ -61,6 +70,30 @@ def mask_secret(value: str | None) -> str | None:
     if len(value) > 12:
         return value[:8] + "..." + value[-4:]
     return "***"
+
+
+def _in_time[T](what: str, call: Callable[[], T], *, join: str | None = None) -> T:
+    """``call()`` on its own thread, waiting at most ``KEYCHAIN_TIMEOUT_SEC``.
+
+    Calls with the same ``join`` key share one thread while it is running.
+    """
+    def run(future: concurrent.futures.Future) -> None:
+        try:
+            future.set_result(call())
+        except BaseException as exc:  # noqa: BLE001 - handed to whoever waits
+            future.set_exception(exc)
+
+    with _inflight_lock:
+        future = _inflight.get(join) if join else None
+        if future is None or future.done():
+            future = concurrent.futures.Future()
+            if join:
+                _inflight[join] = future
+            threading.Thread(target=run, args=(future,), daemon=True, name="keychain").start()
+    try:
+        return future.result(KEYCHAIN_TIMEOUT_SEC)
+    except concurrent.futures.TimeoutError:
+        raise TimeoutError(f"The Keychain did not answer the {what} within {KEYCHAIN_TIMEOUT_SEC:g} seconds") from None
 
 
 def _keyring():
@@ -86,26 +119,34 @@ def _keyring():
     return keyring
 
 
+def _get_password(account: str) -> str | None:
+    return _in_time(f"read of {account}", lambda: _keyring().get_password(KEYRING_SERVICE, account), join=account)
+
+
 def _read_password(account: str) -> str | None:
     try:
-        return _keyring().get_password(KEYRING_SERVICE, account)
+        return _get_password(account)
     except Exception:
         log.warning("keychain read failed for %s", account, exc_info=True)
         return None
 
 
+def _set_password(account: str, value: str) -> None:
+    keyring = _keyring()
+    if sys.platform == "darwin":
+        from keyring.backends.macOS import Keyring
+
+        if isinstance(keyring.get_keyring(), Keyring):
+            from vendoo_studio.services.macos_keychain import set_password
+
+            set_password(KEYRING_SERVICE, account, value)
+            return
+    keyring.set_password(KEYRING_SERVICE, account, value)
+
+
 def _write_password(account: str, value: str) -> bool:
     try:
-        keyring = _keyring()
-        if sys.platform == "darwin":
-            from keyring.backends.macOS import Keyring
-
-            if isinstance(keyring.get_keyring(), Keyring):
-                from vendoo_studio.services.macos_keychain import set_password
-
-                set_password(KEYRING_SERVICE, account, value)
-                return True
-        keyring.set_password(KEYRING_SERVICE, account, value)
+        _in_time(f"write of {account}", lambda: _set_password(account, value))
         return True
     except Exception as exc:
         log.warning("keychain write failed for %s (%s)", account, type(exc).__name__)
@@ -118,7 +159,7 @@ class _Unavailable(Exception):
 
 def _read_item(account: str) -> str | None:
     try:
-        return _keyring().get_password(KEYRING_SERVICE, account)
+        return _get_password(account)
     except Exception as exc:
         log.warning("keychain read failed for %s", account, exc_info=True)
         raise _Unavailable(account) from exc
