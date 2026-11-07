@@ -10,6 +10,8 @@ final class InventoryModel {
     private(set) var suggestions: [Suggestion] = []
     private(set) var isLoading = false
     private(set) var hasLoaded = false
+    /// When the inventory last came back from the server.
+    private(set) var loadedAt: Date?
     var filters = InventoryFilters()
     var error: String?
 
@@ -25,6 +27,7 @@ final class InventoryModel {
             try Task.checkCancellation()
             listings = rows
             hasLoaded = true
+            loadedAt = Date()
             error = nil
         } catch is CancellationError {
         } catch let failure as URLError where failure.code == .cancelled {
@@ -35,6 +38,14 @@ final class InventoryModel {
         if let ranked = try? await api.suggestions() { suggestions = ranked }
         if let selected = try? await api.selectedMarketplaces() { preferredMarketplaces = selected }
     }
+
+    /// Coming back to the app reloads, unless the inventory is under 30 seconds old.
+    func shouldReloadOnReturn(now: Date = Date()) -> Bool {
+        InventoryQuery.isStale(loadedAt: loadedAt, now: now)
+    }
+
+    /// Marketplace work changes a row's state only while that row is in progress.
+    var hasWorkInProgress: Bool { InventoryQuery.hasWorkInProgress(listings) }
 
     // MARK: Readiness
 

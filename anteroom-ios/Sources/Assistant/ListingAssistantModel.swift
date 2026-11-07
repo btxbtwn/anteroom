@@ -34,7 +34,7 @@ final class ListingAssistantModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            async let capabilities = api.capabilities()
+            async let capabilities = api.runtime()
             async let status = api.workspaceStatus()
             async let transcript = api.messages(listingID)
             async let activity = api.activity(listingID)

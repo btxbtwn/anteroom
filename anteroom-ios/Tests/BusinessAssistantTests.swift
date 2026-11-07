@@ -43,6 +43,8 @@ struct BusinessAssistantTests {
         precondition(AssistantFormat.linkedListingID("#listing-abc_12-x") == "abc_12-x")
         precondition(AssistantFormat.linkedListingID("anteroom://app#listing-abc") == "abc")
         precondition(AssistantFormat.linkedListingID("https://example.com/listing-abc") == nil)
+        precondition(AssistantFormat.linkedListingID("#0a398113547b") == "0a398113547b")
+        precondition(AssistantFormat.linkedListingID("#notes") == nil)
         precondition(AssistantFormat.linkedListingID("#listing-") == nil && AssistantFormat.linkedListingID("#listing-a/b") == nil)
 
         // A question asked here is drawn until the saved conversation brings it back, then its answer.

@@ -58,11 +58,11 @@ it("warms only safe listing reads and reuses them on mount", async () => {
   try {
     await prefetchListingReads(client, "item");
     await prefetchListingReads(client, "item");
-    expect(get).toHaveBeenCalledExactlyOnceWith("item");
+    expect(get).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
     expect(client.getQueryData(["conversation", "item"])).toEqual({ id: "item" });
     expect(client.getQueryData(["photos", "item"])).toEqual([]);
     expect(client.getQueryData(["messages", "item"])).toEqual([]);
-    expect(listing).toHaveBeenCalledExactlyOnceWith("item");
+    expect(listing).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
     const observer = new QueryObserver(client, { queryKey: ["listing", "item"], queryFn: () => api.listings.get("item") });
     const unsubscribe = observer.subscribe(() => {});
     expect(observer.getCurrentResult().data?.listing.title).toBe("Saved listing");
@@ -84,9 +84,9 @@ it("warms every read the listing screen makes on open", async () => {
   const sales = vi.spyOn(api.marketplaceSales, "list").mockResolvedValue([] as never);
   try {
     await prefetchListingReads(client, "item");
-    expect(jobs).toHaveBeenCalledExactlyOnceWith("item");
-    expect(activity).toHaveBeenCalledExactlyOnceWith("item");
-    expect(fields).toHaveBeenCalledExactlyOnceWith("item");
+    expect(jobs).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
+    expect(activity).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
+    expect(fields).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
     expect(live).toHaveBeenCalledExactlyOnceWith("item");
     expect(native).toHaveBeenCalledExactlyOnceWith("item");
     expect(sales).toHaveBeenCalledExactlyOnceWith({ conversationId: "item" });
@@ -109,7 +109,7 @@ it("mounting a prefetched thread shows its messages synchronously without anothe
     const unsubscribe = observer.subscribe(() => {});
     expect(observer.getCurrentResult().data).toEqual(messages);
     expect(observer.getCurrentResult().isFetching).toBe(false);
-    expect(read).toHaveBeenCalledExactlyOnceWith("thread");
+    expect(read).toHaveBeenCalledExactlyOnceWith("thread", { signal: expect.any(AbortSignal) });
     unsubscribe();
   } finally { client.clear(); }
 });

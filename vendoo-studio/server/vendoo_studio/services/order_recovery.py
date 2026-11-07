@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 import re
@@ -116,9 +117,10 @@ def _ebay_lines(order: ET.Element) -> list[OrderLine]:
             for row in order.findall("e:TransactionArray/e:Transaction", NS)]
 
 
-async def _ebay_payment(client: EbayClient, lines: list[OrderLine]) -> list[OrderLine]:
+async def _ebay_payment(client: EbayClient, lines: list[OrderLine]) -> tuple[list[OrderLine], dict | None]:
+    """The order's lines with their payment status, and the Fulfillment order that holds its amounts."""
     if not lines or lines[0].status != "paid":
-        return lines
+        return lines, None
     # Fulfillment supplies payment/refund status. Its lineItemId is never used
     # as a ledger key: the Trading IDs above remain the notification identity.
     detail = await client.request("GET", f"/sell/fulfillment/v1/order/{lines[0].order_id}")
@@ -126,9 +128,9 @@ async def _ebay_payment(client: EbayClient, lines: list[OrderLine]) -> list[Orde
         raise RecoveryError("eBay did not verify this order's payment identity. This page was not saved.")
     status = {"PAID": "paid", "FULLY_REFUNDED": "refunded", "PARTIALLY_REFUNDED": "partially_refunded"}.get(detail.get("orderPaymentStatus") or "")
     if status is None:
-        return []
+        return [], None
     modified = _time(detail.get("lastModifiedDate"))
-    return [replace(line, status=status, modified_at=max(filter(None, (line.modified_at, modified)), default=None)) for line in lines]
+    return [replace(line, status=status, modified_at=max(filter(None, (line.modified_at, modified)), default=None)) for line in lines], detail
 
 
 def _connection(identity, expected: str | None, connected_at: str) -> str:
@@ -153,7 +155,7 @@ async def _read(marketplace: str, start: datetime, end: datetime, page: int, exp
         if (not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows) or len(rows) > PAGE_SIZE
                 or type(count) is not int or count < 0 or (not rows and (page - 1) * PAGE_SIZE < count)):
             raise RecoveryError("Etsy returned an unreadable order page. Nothing on this page was saved.")
-        return [_etsy_lines(row) for row in rows], page * PAGE_SIZE < count, client.assert_current, connection
+        return [(_etsy_lines(row), row) for row in rows], page * PAGE_SIZE < count, client.assert_current, connection, None
     client = await EbayClient.connect()
     connection = _connection(client.seller, expected_connection, connected_at)
     root = ET.Element("GetOrdersRequest", xmlns=NS["e"])
@@ -179,12 +181,12 @@ async def _read(marketplace: str, start: datetime, end: datetime, page: int, exp
             return await _ebay_payment(client, _ebay_lines(row))
 
     results = await asyncio.gather(*(payment(row) for row in rows), return_exceptions=True)
-    verified_orders: list[list[OrderLine]] = []
+    verified_orders: list[tuple[list[OrderLine], dict | None]] = []
     for result in results:
         if isinstance(result, BaseException):
             raise result
         verified_orders.append(result)
-    return verified_orders, more == "true", lambda: assert_identity(client.seller), connection
+    return verified_orders, more == "true", lambda: assert_identity(client.seller), connection, client
 
 
 async def recover_ebay_notification(order_id: str, *, session_factory) -> list[str]:
@@ -204,7 +206,7 @@ async def recover_ebay_notification(order_id: str, *, session_factory) -> list[s
     rows = response.findall("e:OrderArray/e:Order", NS)
     if len(rows) != 1 or rows[0].findtext("e:OrderID", namespaces=NS) != order_id:
         raise RecoveryError("eBay did not verify the notified order. This event will be retried.")
-    lines = await _ebay_payment(client, _ebay_lines(rows[0]))
+    lines, detail = await _ebay_payment(client, _ebay_lines(rows[0]))
     observed = datetime.now(UTC).replace(tzinfo=None)
 
     def store():
@@ -219,7 +221,22 @@ async def recover_ebay_notification(order_id: str, *, session_factory) -> list[s
             return [row.id for row in db.query(MarketplaceSale).filter_by(marketplace="ebay", order_id=order_id).all()
                     if row.id not in before and row.order_status in PAID_STATUSES]
 
-    return await asyncio.to_thread(store)
+    created = await asyncio.to_thread(store)
+    with session_factory() as db:
+        await _record_amounts(db, "ebay", [(order_id, detail)], observed, client)
+    return created
+
+
+async def _record_amounts(db: Session, marketplace: str, orders: list[tuple[str, dict | None]], observed: datetime,
+                          client: EbayClient | None) -> None:
+    """Add each order's money after its lines are saved. Amounts never fail the order read itself."""
+    from vendoo_studio.services import order_amounts
+
+    try:
+        await order_amounts.record(db, marketplace, orders, observed, client)
+    except Exception:  # noqa: BLE001 - the sale stays recorded; its amounts are retried later
+        db.rollback()
+        logging.getLogger(__name__).warning("%s order amounts could not be recorded; the next check will retry", marketplace)
 
 
 def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datetime) -> dict:
@@ -295,7 +312,8 @@ async def recover(db: Session, marketplace: str, start: date, end: date, page: i
         if boundary < start_at or boundary > end_at:
             raise RecoveryError("The recovery boundary is outside the selected dates.", 422)
         end_at = boundary
-    orders, more, verify, connection = await _read(marketplace, start_at, end_at, page, connection, connected_at)
+    read, more, verify, connection, client = await _read(marketplace, start_at, end_at, page, connection, connected_at)
+    orders = [lines for lines, _ in read]
     lines = [line for order in orders for line in order]
     counts: dict[str, int] = {}
     for attempt in range(2):
@@ -312,6 +330,7 @@ async def recover(db: Session, marketplace: str, start: date, end: date, page: i
             db.rollback()
             raise
     matched = reconcile_unmatched(db, marketplace=marketplace)
+    await _record_amounts(db, marketplace, [(order[0].order_id, source) for order, source in read if order], observed, client)
     return {"marketplace": marketplace, "connection": connection, "through": end_at.replace(tzinfo=UTC).isoformat(), "page": page, "nextPage": page + 1 if more and page < MAX_PAGES else None,
             "ordersScanned": len(orders), "skippedOrders": sum(not order for order in orders), "matched": matched,
             "truncated": more and page == MAX_PAGES, **counts}

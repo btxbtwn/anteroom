@@ -45,6 +45,12 @@ describe("cloud extension transport", () => {
     const disconnected = bridge.disconnect();
     expect(c.sent[c.sent.length - 1]?.data).not.toHaveProperty("email"); c.reply(); await disconnected;
   });
+  it("keeps only the states and actions this page knows from a Bridge's status", async () => {
+    const c = channel(); const pending = cloudExtension(ACCOUNT, c.target).status();
+    c.reply({ data: { ...c.sent[0].data, source: "anteroom-extension", version: 1, ok: true, state: "hacked",
+      extensionVersion: "x".repeat(50), supportedActions: ["marketplace.actions", "unknown", 7] } });
+    await expect(pending).resolves.toEqual({ ok: true, state: "unavailable", extensionVersion: "x".repeat(30), supportedActions: ["marketplace.actions"] });
+  });
   it("never opens the bridge from an unapproved origin", async () => {
     const c = channel("https://evil.example");
     await expect(cloudExtension(ACCOUNT, c.target).connect()).resolves.toMatchObject({ state: "unavailable" });

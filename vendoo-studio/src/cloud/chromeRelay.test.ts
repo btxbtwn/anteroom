@@ -114,6 +114,15 @@ describe("Chrome relay", () => {
     expect(JSON.parse(String(fetches[2].options?.body)).payload).toMatchObject({ ok: false, safe_to_retry: true });
   });
 
+  it("reports a failure after the command reached Chrome as uncertain, not safe to retry", async () => {
+    responses = [Response.json(command), new Response(new Uint8Array([1, 2, 3])), Response.json({ ok: true })];
+    const bridge = { runMarketplaceCommand: vi.fn(async () => { throw new Error("Chrome went away"); }) };
+    await relayOnce(bridge, ["marketplace.actions"]);
+    expect(bridge.runMarketplaceCommand).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetches[2].options?.body)).payload).toEqual({ ok: false, safe_to_retry: false,
+      error: "Chrome did not finish this action.", error_code: "uncertain" });
+  });
+
 });
 
 describe("Chrome relay with several marketplaces", () => {

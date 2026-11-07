@@ -378,6 +378,9 @@ private struct MarketplacePhotoPicker: View {
     @State private var picked: [PhotosPickerItem] = []
     @State private var uploading = false
     @State private var uploadError: String?
+    /// Prepared photos that didn't upload, kept for Retry.
+    @State private var failedUploads: [Data] = []
+    @State private var uploadFailures = 0
 
     private static let limits = ["ebay": 24, "etsy": 20, "poshmark": 16, "mercari": 12, "depop": 8]
     private var limit: Int { Self.limits[marketplace] ?? 20 }
@@ -417,7 +420,18 @@ private struct MarketplacePhotoPicker: View {
                     }
                     .disabled(uploading)
                 }
-                if let uploadError { Text(uploadError).font(.footnote).foregroundStyle(.red) }
+                if let uploadError {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(uploadError).font(.footnote).foregroundStyle(.red)
+                        Spacer(minLength: 0)
+                        if !failedUploads.isEmpty {
+                            Button("Retry") { Task { await retryFailed() } }
+                                .font(.footnote.weight(.semibold))
+                                .frame(minHeight: 44)
+                                .disabled(uploading)
+                        }
+                    }
+                }
                 HStack {
                     Text("\(sent.count) of \(limit) photos sent")
                         .font(.footnote).foregroundStyle(sent.count > limit ? .red : .secondary)
@@ -435,6 +449,7 @@ private struct MarketplacePhotoPicker: View {
             picked = []
             Task { await upload(items) }
         }
+        .sensoryFeedback(.error, trigger: uploadFailures)
     }
 
     /// The seller's own pick, or empty when the item's photos are used.
@@ -460,25 +475,35 @@ private struct MarketplacePhotoPicker: View {
 
     /// Photos added here belong to this form only and are ticked to send.
     private func upload(_ items: [PhotosPickerItem]) async {
+        await send(items) { item in
+            guard let data = try? await item.loadTransferable(type: Data.self) else { return nil }
+            return await Task.detached(priority: .userInitiated) { PhotoPreparer.jpeg(from: data) }.value
+        }
+    }
+
+    /// Sends the kept photos again, as they were prepared.
+    private func retryFailed() async {
+        let kept = failedUploads
+        failedUploads = []
+        await send(kept) { $0 }
+    }
+
+    private func send<Source>(_ sources: [Source], prepare: @MainActor (Source) async -> Data?) async {
         uploading = true
         defer { uploading = false }
         var next = pick.isEmpty ? Array(itemPhotoIDs.prefix(limit)) : pick
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self),
-                  let jpeg = await Task.detached(priority: .userInitiated, operation: { PhotoPreparer.jpeg(from: data) }).value else {
-                uploadError = "Couldn't read one of the photos."
-                continue
-            }
-            do {
-                let photo = try await model.api.uploadPhoto(listingID: model.listingID, jpeg: jpeg, marketplace: marketplace)
-                photos.append(photo)
-                next.append(photo.id)
-                uploadError = nil
-            } catch {
-                uploadError = error.localizedDescription
-            }
+        let report = await withBackgroundTime("Upload photos") {
+            await PhotoUploadReport.run(sources, prepare: prepare,
+                                        upload: { try await model.api.uploadPhoto(listingID: model.listingID, jpeg: $0, marketplace: marketplace) },
+                                        uploaded: { photo in
+                                            photos.append(photo)
+                                            next.append(photo.id)
+                                        })
         }
-        model.setValue(.array(next.map(JSONValue.string)), for: field)
+        failedUploads += report.failed
+        uploadError = report.message
+        if report.problems > 0 { uploadFailures += 1 }
+        if report.uploaded > 0 { model.setValue(.array(next.map(JSONValue.string)), for: field) }
     }
 
     private func toggle(_ id: String) {

@@ -67,7 +67,7 @@ export function FirstRunGuide({
     // Fast only while OpenRouter's sign-in waits on the browser for its key.
     refetchInterval: (query) =>
       openRouterWaiting && !query.state.data?.providers.some((entry) => entry.id === "openrouter" && entry.masked_key)
-        ? BUSY_POLL_MS
+        ? pollMs(BUSY_POLL_MS)
         : false,
   });
   const savedKeyIds = (aiKeys?.providers ?? []).filter((entry) => entry.masked_key).map((entry) => entry.id);

@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from test_seller_ownership import migration_engine, migration_config, read_rows, seed_previous_release  # noqa: F401
+from test_seller_ownership import JOB_LEASE_DEFAULTS, migration_engine, migration_config, read_rows, seed_previous_release  # noqa: F401
 from vendoo_studio.database import Base, load_models
 from vendoo_studio.models.conversation import Conversation, Message, Photo
 from vendoo_studio.services import schema_migrations
@@ -158,6 +158,8 @@ def test_populated_previous_release_upgrade_preserves_records_and_old_foreign_ke
             "category_path": None, "title": "Vintage coat", "type": None,
             "season": None, "material": None,
         }
+    for row in before.get("jobs", []):
+        row.update(JOB_LEASE_DEFAULTS)
     assert read_rows(engine, names) == before
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []

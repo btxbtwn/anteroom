@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LIVE_POLL_MS, pollMs } from "../api/polling";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getAccountMove, startAccountMove, type AccountMoveResult } from "../api/accountMove";
 import { Button } from "../components/ui/button";
@@ -38,7 +39,7 @@ function MoveToAccountDialog({ onClose }: { onClose: () => void }) {
   const status = useQuery({
     queryKey: ["account-move"],
     queryFn: getAccountMove,
-    refetchInterval: (query) => (query.state.data?.progress.state === "running" ? 1000 : false),
+    refetchInterval: (query) => (query.state.data?.progress.state === "running" ? pollMs(LIVE_POLL_MS) : false),
   });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

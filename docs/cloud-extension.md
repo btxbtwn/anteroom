@@ -18,9 +18,10 @@ start a marketplace job.
 2. Sign in at `https://myanteroom.com`.
 3. Choose **Connect Chrome** and approve **Connect browser** in the extension's
    confirmation window. The web page then shows **Chrome connected**.
-4. Approval is remembered for that account in this Chrome profile. Closing a
-   tab, refreshing the page, restarting Chrome or updating the Bridge does not
-   require approval again. The signed-in page reconnects automatically when the
+4. Approval is remembered for that account in this Chrome profile for 30
+   days. Closing a tab, refreshing the page, restarting Chrome or updating the
+   Bridge does not require approval again. After 30 days, **Connect Chrome**
+   opens the same confirmation window again. The signed-in page reconnects automatically when the
    Bridge returns. Keep an Anteroom tab open for marketplace reads and actions;
    remembered permission does not make a closed or sleeping browser available.
 5. **Disconnect**, signing out or changing accounts revokes the old account's
@@ -96,6 +97,38 @@ the native iPhone app reads the same shared records after desktop Chrome saves t
 Bridge 0.2.39 adds a strictly bounded read-only General-field payload and native
 form response for Poshmark previews. The original connection protocol remains
 unchanged; no cloud credential is added. See [form previews](cloud-marketplace-forms.md).
+
+## Signed approvals
+
+Any script that runs on the Anteroom page can post a command to the content
+script, so the page's `confirm: true` does not show that the seller confirmed
+anything. Since Bridge 0.2.56, every write the hosted API relays carries
+`payload.approval`: an ES256 compact JWS signed by the API
+(`services/bridge_approvals.py`) when the page takes the command. Its claims
+bind the seller's account (`sub`), the command (`cmd`), marketplace (`mkt`),
+action (`act`), listing (`lid`), job and message ids, a SHA-256 of the whole
+command in sorted-key JSON (`sha`), a single-use id (`jti`) and a five-minute
+expiry.
+
+The worker (`background/cloud-approvals.js`) checks the signature with the
+public key it ships with, then the expiry (one minute of clock leeway), each
+bound field against the command and the page's approved account, and the hash.
+It remembers each used `jti` in `chrome.storage.local` until it expires and
+refuses a second use. It strips the approval before running the command. A
+refusal returns `error_code: "rejected"` with the reason, and nothing reaches
+the marketplace.
+
+Signed: `marketplace.execute`, `marketplace.result` (it may resume an interrupted
+List), `marketplace.delete`, `marketplace.promote` and `job.vendoo_api`. Reads,
+promotion checks and results, and `job.cancel` are not. A Bridge declares
+`marketplace.signed_approvals`, and the API signs only for one that does: an
+older Bridge would refuse the extra field on promotions. A Bridge whose
+`BRIDGE_APPROVAL_PUBLIC_KEY` is empty refuses every relayed write. The key and
+rollout order are in [the operating guide](hosted-production.md#6-bridge-approval-key).
+
+The Mac app's loopback socket does not use these approvals. Its pairing token
+comes from `/api/extension/pairing-token` on `127.0.0.1`, which only a program
+on the same computer can reach. Writes there carry `confirm: true` only.
 
 ## Which Bridge may run marketplace actions
 

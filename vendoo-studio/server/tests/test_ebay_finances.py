@@ -107,3 +107,15 @@ async def test_multiple_sale_records_do_not_double_an_order_level_fee_total():
                                                           transaction(identifier="two", value="20", totalFeeAmount={"currency": "USD", "value": "10"})]}
     result = await order_financials(client, "order-1")
     assert result.net == Decimal("40") and result.original_sale_fees is None
+
+
+async def test_label_spend_is_label_purchases_less_label_refunds():
+    client = AsyncMock()
+    entries = [transaction(totalFeeAmount={"currency": "USD", "value": "4.00"}),
+               transaction("SHIPPING_LABEL", "5", "DEBIT", "label"), transaction("SHIPPING_LABEL", "1", "CREDIT", "label-credit")]
+    client.request.return_value = {"transactions": entries, "total": len(entries)}
+    result = await order_financials(client, "order-1")
+    assert result is not None and result.shipping_labels == Decimal(4)
+    client.request.return_value = {"transactions": entries[:1], "total": 1}
+    result = await order_financials(client, "order-1")
+    assert result is not None and result.shipping_labels is None

@@ -128,3 +128,26 @@ test('simultaneous tabs retain independent session records across worker reconst
   const restored = createCloudConnection(s.api, { now: () => 1000 });
   assert.equal((await restored.handle({ type: 'cloud.connection', action: 'status', accountId: ALICE }, s.sender)).state, 'pending');
 });
+
+test('a remembered approval expires after 30 days and Connect asks in the extension window again', async () => {
+  const s = setup();
+  await s.page('connect'); await s.approval('approve');
+  assert.equal(typeof s.approvals().anteroom_cloud_approvals[ALICE].approvedAt, 'number');
+  s.advance(29 * 24 * 60 * 60 * 1000);
+  assert.equal((await s.page('status')).state, 'connected');
+  s.advance(24 * 60 * 60 * 1000);
+  assert.equal((await s.page('status')).state, 'disconnected');
+  assert.deepEqual(s.approvals().anteroom_cloud_approvals, {}, 'the expired approval is forgotten');
+  assert.equal((await s.page('connect')).state, 'pending');
+  assert.equal(s.opened.length, 2);
+  assert.equal(s.opened[1].url, 'chrome-extension://bridge/cloud-connect.html#' + REQUEST);
+  assert.deepEqual(await s.approval('approve'), { ok: true });
+  assert.equal((await s.page('status')).state, 'connected');
+});
+
+test('an approval remembered before approvals expired must be given again', async () => {
+  const s = setup();
+  await s.api.storage.local.set({ anteroom_cloud_approvals: { [ALICE]: { connectionId: REQUEST } } });
+  assert.equal((await s.page('status')).state, 'disconnected');
+  assert.equal((await s.page('connect')).state, 'pending');
+});

@@ -7,7 +7,7 @@ import Observation
 @MainActor
 @Observable
 final class ListingEditorModel {
-    struct Form: Equatable {
+    struct Form: Equatable, Codable {
         var sellerInputs = SellerInputs()
         var fields = GeneralFields()
         var price = ""
@@ -40,6 +40,9 @@ final class ListingEditorModel {
     private(set) var hasLoaded = false
     var saveError: String?
     var hasConflict = false
+    /// Said once after opening: unsaved edits kept from last time came back, or were dropped.
+    var draftNotice: String?
+    private var checkedStash = false
     /// Each marketplace tab's state for the saved listing: ready, fields missing, listed or sold.
     private(set) var choices: [ListChoice] = []
 
@@ -66,7 +69,7 @@ final class ListingEditorModel {
             if options == GeneralOptions(), let lists = try? await api.generalOptions() { options = lists }
             if marketplaceTabs.isEmpty {
                 // Settings → Where you list decides which forms show, as on the web.
-                async let forms = try? api.marketplaceForms()
+                async let forms = try? api.runtime().marketplaceForms
                 async let chosen = try? api.selectedMarketplaces()
                 if let tabs = await forms {
                     let selected = await chosen.map(Set.init)
@@ -85,9 +88,42 @@ final class ListingEditorModel {
             saved = next
             hasLoaded = true
             loadError = nil
+            if !checkedStash {
+                checkedStash = true
+                restoreStash()
+            }
             Task { await loadReadiness() }
         } catch {
             loadError = error.localizedDescription
+        }
+    }
+
+    // MARK: Unsaved edits kept on the phone
+
+    /// Keeps unsaved edits on the phone while the app is in the background,
+    /// where iOS may end it. Save, Discard and sign-out remove them.
+    func stashEdits() {
+        guard hasChanges else { return EditorDraftStore.remove(listingID) }
+        EditorDraftStore.save(EditorDraft(listingID: listingID, revisionID: revisionID, baselineInputs: saved.sellerInputs,
+                                          form: form, pending: pending, savedAt: Date()))
+    }
+
+    func forgetStash() {
+        EditorDraftStore.remove(listingID)
+    }
+
+    /// Puts kept edits back when they were made on the version still saved;
+    /// otherwise drops them, since they'd overwrite changes made elsewhere.
+    private func restoreStash() {
+        guard let draft = EditorDraftStore.load(listingID) else { return }
+        EditorDraftStore.remove(listingID)
+        let when = draft.savedAt.formatted(date: .abbreviated, time: .shortened)
+        if draft.restores(revisionID: revisionID, inputs: saved.sellerInputs) {
+            form = draft.form
+            pending = draft.pending
+            draftNotice = "Your unsaved changes from \(when) are back. Save to keep them."
+        } else {
+            draftNotice = "This listing changed somewhere else after \(when), so your unsaved changes from then were discarded."
         }
     }
 
@@ -104,7 +140,7 @@ final class ListingEditorModel {
     func loadReadiness() async {
         let shown = marketplaceTabs.filter(Self.listMarketplaces.contains)
         guard !shown.isEmpty else { return choices = [] }
-        async let acting = try? api.actionMarketplaces()
+        async let acting = try? api.runtime().actionMarketplaces
         async let check = try? api.marketplacePreflight(listingID)
         async let states = try? api.nativeMarketplaceStates(listingID)
         async let live = try? api.marketplaceLiveListings(listingID)
@@ -119,14 +155,15 @@ final class ListingEditorModel {
     }
 
     /// Starts List on each marketplace the seller picked and confirmed. Returns what failed, if anything.
-    func list(on marketplaces: [String]) async -> String? {
+    func list(on marketplaces: [String], confirmation: SellerConfirmation) async -> String? {
         guard let revisionID else { return "Save the listing first." }
         var failures: [String] = []
         await withTaskGroup(of: String?.self) { group in
             for marketplace in marketplaces {
                 group.addTask { [api, listingID] in
                     do {
-                        try await api.listOnMarketplace(listingID, marketplace: marketplace, revisionID: revisionID)
+                        try await api.listOnMarketplace(listingID, marketplace: marketplace, revisionID: revisionID,
+                                                        confirmation: confirmation)
                         return nil
                     } catch {
                         return "\(Marketplaces.name(marketplace)): \(error.localizedDescription)"
@@ -190,6 +227,7 @@ final class ListingEditorModel {
             }
         }
         Task { await loadReadiness() }
+        forgetStash()
         if form.sellerInputs != saved.sellerInputs {
             do {
                 try await api.saveNotes(listingID, notes: notes)

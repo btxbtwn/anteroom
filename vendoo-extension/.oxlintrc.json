@@ -1,0 +1,45 @@
+{
+  "$schema": "../vendoo-studio/node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "oxc",
+    "unicorn"
+  ],
+  "env": {
+    "browser": true,
+    "node": true,
+    "webextensions": true,
+    "serviceworker": true
+  },
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      {
+        "vars": "local",
+        "caughtErrors": "none",
+        "argsIgnorePattern": "^_",
+        "ignoreRestSiblings": true
+      }
+    ]
+  },
+  "ignorePatterns": [
+    "node_modules/**"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "background.js",
+        "background/**",
+        "content-scripts/**",
+        "cloud-connect.js",
+        "cloud-marketplace-protocol.js",
+        "tools/**"
+      ],
+      "rules": {
+        "no-unused-vars": "off"
+      }
+    }
+  ]
+}

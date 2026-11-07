@@ -23,7 +23,7 @@ fi
 curl -fsS http://localhost:4320/api/health
 cd "$ROOT/anteroom-ios"
 xcodegen
-xcodebuild test -project Anteroom.xcodeproj -scheme Anteroom \
+xcodebuild test -project Anteroom.xcodeproj -scheme Anteroom -only-testing:AnteroomUITests \
   -destination "${ANTEROOM_TEST_DESTINATION:-platform=iOS Simulator,name=iPhone 17}" \
   -resultBundlePath "${ANTEROOM_TEST_RESULTS:-/tmp/anteroom-sandbox-$(date +%s).xcresult}" \
   CODE_SIGNING_ALLOWED=NO

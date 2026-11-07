@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { pollMs } from "../api/polling";
 import type { MarketplacesLayout } from "./MarketplacesSection";
 import { marketplaceName } from "./marketplaceNames";
 import { Button } from "./ui/button";
@@ -15,7 +16,7 @@ export function VendooLayout({ convId, revisionId, disabled, ids, selected, onSe
   const key = ["vendoo-draft", convId];
   const draft = useQuery({ queryKey: key,
     queryFn: () => api.vendooDraft.status(convId),
-    refetchInterval: query => query.state.data?.status === "dispatched" ? 1500 : false });
+    refetchInterval: query => query.state.data?.status === "dispatched" ? pollMs(1500) : false });
   const send = useMutation({ retry: false,
     mutationFn: () => api.vendooDraft.send(convId, revisionId!),
     onSuccess: result => { client.setQueryData(key, result); void client.invalidateQueries({ queryKey: ["jobs", convId] }); },

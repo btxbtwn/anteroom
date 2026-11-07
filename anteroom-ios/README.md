@@ -47,10 +47,12 @@ VoiceOver field labels, photo add/delete, and light/dark appearance.
 
 ## Build on a Mac
 
-Needs Xcode 16 or newer and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+CI builds with Xcode 26.6 and XcodeGen 2.46.0
+(`tools/install-xcodegen.sh` installs that release after checking its
+checksum); use the same versions locally.
 
 ```sh
-brew install xcodegen
+anteroom-ios/tools/install-xcodegen.sh "$HOME/.local/xcodegen" && export PATH="$HOME/.local/xcodegen/xcodegen/bin:$PATH"
 cd anteroom-ios
 cp Config/Local.xcconfig.example Config/Local.xcconfig   # add the publishable key and your team ID
 xcodegen
@@ -59,6 +61,17 @@ open Anteroom.xcodeproj
 
 The Xcode project is generated from `project.yml` and not tracked. Change
 `project.yml`, never the generated project, and run `xcodegen` again.
+
+After generating, `tools/after-xcodegen.sh` (XcodeGen's `postGenCommand`)
+does two things:
+
+- copies `Config/Package.resolved` into the project, so every build uses the
+  same Supabase (2.55.6, `exactVersion` in `project.yml`) and the same
+  versions of its dependencies. To update a package, change `project.yml`,
+  resolve in Xcode, and commit the new `Package.resolved` back to `Config/`.
+- writes `Config/Version.xcconfig` (not tracked) with the app version from
+  `vendoo-studio/VERSION`, the version the whole product ships as. The build
+  number comes from the CI run.
 
 ## Sign-in
 
@@ -70,9 +83,16 @@ iPhone that asked for it.
 ## CI and TestFlight
 
 `.github/workflows/ios.yml` builds for the Simulator on every change under
-`anteroom-ios/`. On `main` (or when run by hand from the Actions tab) it also
-archives, signs and uploads the build to TestFlight, numbered by the workflow
-run. Install it on the iPhone from the TestFlight app.
+`anteroom-ios/` and runs every test: the small executable checks under
+`Tests/`, the XCTest unit tests under `UnitTests/` and the hosted sandbox UI
+tests under `UITests/`. Only on `main`, and only after the build and all tests
+pass, it archives, signs and uploads the build to TestFlight, numbered by the
+workflow run. A run started by hand on another branch never uploads. Install
+it on the iPhone from the TestFlight app.
+
+The unit tests stub the network with `URLProtocol`: request building, error
+messages, the seller-confirmation requirement, the 401 handling below, photo
+upload failure counting and kept unsaved edits.
 
 Signing uses an App Store Connect API key (Admin role) stored as the
 repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_P8`; Xcode
@@ -165,7 +185,11 @@ Marketplaces pane (`MarketplacesSection.tsx`), ported in
   An outcome Anteroom could not confirm offers Check result, never a retry.
 
 Nothing lists, updates or delists without the seller's tap and confirmation, and the
-phone never retries either. `Tests/MarketplaceActionsTests.swift` covers the
+phone never retries either. The API calls for List, Update and Delist take a
+`SellerConfirmation`, which only the confirmation dialog in
+`Sources/Editor/SellerConfirmation.swift` can make, for the action and
+marketplaces it named; List everywhere asks the same way. CI fails if app code
+calls the test-only constructor. `Tests/MarketplaceActionsTests.swift` covers the
 rows and confirmations; the hosted sandbox refuses List, Update and Delist, which the
 sheet shows under the marketplace.
 
@@ -212,3 +236,23 @@ It is foreground refresh, not instant cross-device Realtime synchronization.
 The contract test checks response decoding and theme-only update payloads.
 The hosted simulator test selects Light, Dark and System, relaunches for each,
 and records screenshots in the `iphone-sandbox-results` artifact.
+
+## Sign-in that ends
+
+When the hosted API refuses the seller's token (401), the app renews the
+sign-in once. A read is then sent again; a write is not, because it may have
+already run, so the seller sees "Your sign-in was renewed. Try that again."
+When the sign-in can't be renewed, the app signs out to the sign-in screen. A
+401 that names a marketplace (eBay signed Anteroom out) keeps its own message
+and the sign-in. Signing out also deletes exported CSVs, cached photos and kept
+editor edits from the phone.
+
+## Kept edits and uploads
+
+Unsaved editor edits are written to the phone when the app goes to the
+background and come back when that listing is opened again, unless the listing
+was saved somewhere else since; then they are dropped and the seller is told.
+Photo uploads keep going for a while after switching apps, count every photo
+that didn't upload ("2 of 10 photos didn't upload") and keep those photos for
+Retry. Camera photos are shrunk to the upload size off the main thread and
+encoded once.

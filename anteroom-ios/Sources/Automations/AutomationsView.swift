@@ -26,11 +26,27 @@ struct AutomationsView: View {
     @State private var deletingPromotion: PromotionAutomation?
     @State private var history: HistoryTarget?
     @State private var deleting: Automation?
+    @State private var confirmingRun: Automation?
     @State private var busy: String?
     @State private var error: String?
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        screen
+            .confirmationDialog("Run “\(confirmingRun?.name ?? "")” now?", isPresented: runConfirmationShown,
+                                titleVisibility: .visible, presenting: confirmingRun) { task in
+                Button("Run now") { start(task, dryRun: false) }
+                Button("Cancel", role: .cancel) {}
+            } message: { task in
+                Text(AutomationFormat.runNowMessage(task))
+            }
+    }
+
+    private var runConfirmationShown: Binding<Bool> {
+        Binding(get: { confirmingRun != nil }, set: { if !$0 { confirmingRun = nil } })
+    }
+
+    private var screen: some View {
         NavigationStack {
             List {
                 Group {
@@ -194,13 +210,15 @@ struct AutomationsView: View {
                 Button("Edit", systemImage: "pencil") { editing = EditTarget(automation: task) }
                 if task.status != "draft" {
                     Button("Dry run", systemImage: "eye") { start(task, dryRun: true) }
-                    Button("Run now", systemImage: "bolt") { start(task, dryRun: false) }
+                        .disabled(busy == task.id)
+                    Button(busy == task.id ? "Running…" : "Run now…", systemImage: "bolt") { confirmingRun = task }
+                        .disabled(busy == task.id)
                 }
                 Button("History", systemImage: "clock") { showHistory(task) }
                 Divider()
                 Button("Delete", systemImage: "trash", role: .destructive) { deleting = task }
             } label: {
-                Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
+                Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("More for \(task.name)")
@@ -282,7 +300,7 @@ struct AutomationsView: View {
             .buttonStyle(.plain)
             control()
             Menu(content: menu) {
-                Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
+                Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("More for \(view.name)")
@@ -362,7 +380,10 @@ struct AutomationsView: View {
         }
     }
 
+    /// One run at a time per automation: its switch and menu wait until it ends.
     private func start(_ task: Automation, dryRun: Bool) {
+        guard busy != task.id else { return }
+        busy = task.id
         error = nil
         Task {
             do {
@@ -372,6 +393,7 @@ struct AutomationsView: View {
             } catch {
                 self.error = error.localizedDescription
             }
+            busy = nil
         }
     }
 

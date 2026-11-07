@@ -4,6 +4,9 @@ import { Popover, PopoverPopup } from "../components/ui/popover";
 import { chromeNotice } from "./chromeNotice";
 import { relayAfterCheck, startChromeRelay } from "./chromeRelay";
 
+// A status check that fails counts as Chrome not answering, like one that times out.
+const UNAVAILABLE: CloudConnection = { ok: false, state: "unavailable", extensionVersion: "" };
+
 export function ChromeConnection({ account }: { account: BrowserAccount }) {
   const [bridge] = useState(() => cloudExtension(account));
   const [connection, setConnection] = useState<CloudConnection | null>(null);
@@ -21,14 +24,14 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
   }, []);
   useEffect(() => {
     let active = true;
-    const check = () => { void bridge.status().then(status => { if (active) apply(status); }); };
+    const check = () => { void bridge.status().catch(() => UNAVAILABLE).then(status => { if (active) apply(status); }); };
     check();
     window.addEventListener("focus", check);
     return () => { active = false; window.removeEventListener("focus", check); };
   }, [bridge, apply]);
   useEffect(() => {
     let active = true;
-    const interval = window.setInterval(() => { void bridge.status().then(status => { if (active) apply(status); }); }, connection?.state === "pending" ? 1500 : 15000);
+    const interval = window.setInterval(() => { void bridge.status().catch(() => UNAVAILABLE).then(status => { if (active) apply(status); }); }, connection?.state === "pending" ? 1500 : 15000);
     return () => { active = false; window.clearInterval(interval); };
   }, [bridge, apply, connection?.state]);
   const connectedNow = connection?.ok === true && connection.state === "connected";

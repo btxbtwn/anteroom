@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import get_db
+from vendoo_studio.database import get_db, in_worker_session
 from vendoo_studio.services import chrome_sales, marketplace_delist, sales_ledger
 
 router = APIRouter(prefix="/api/conversations/{conv_id}/marketplace-listings", tags=["marketplace-listings"])
@@ -39,20 +39,21 @@ def mark(conv_id: str, marketplace: str, body: MarkRequest, db: Session = Depend
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
+# Delist and Check sales wait on marketplaces or Chrome. They take no request session;
+# each database step runs on a worker thread with a short session of its own.
 @router.post("/delist")
-async def delist(conv_id: str, body: DelistRequest, db: Session = Depends(get_db)):
+async def delist(conv_id: str, body: DelistRequest):
     try:
-        return await marketplace_delist.delist(db, conv_id, body.marketplaces, body.confirm)
+        return await marketplace_delist.delist(conv_id, body.marketplaces, body.confirm)
     except marketplace_delist.DelistError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @router.post("/check-sales")
-async def check_sales(conv_id: str, db: Session = Depends(get_db)):
+async def check_sales(conv_id: str):
     """Read this item's live listings for a sale now. Nothing on any marketplace changes."""
-    result = await chrome_sales.check_item(db, conv_id)
-    db.expire_all()
-    return {**result, "listings": marketplace_delist.listings(db, conv_id)}
+    result = await chrome_sales.check_item(conv_id)
+    return {**result, "listings": await in_worker_session(marketplace_delist.listings, conv_id)}
 
 
 @router.post("/sold")

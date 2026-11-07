@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
+import { pollMs } from "../../api/polling";
 import { ChevronRightIcon, Trash2Icon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -46,7 +47,7 @@ function ErrorLogSection() {
   const { data, error } = useQuery({
     queryKey: ["error-logs"],
     queryFn: api.settings.errorLogs,
-    refetchInterval: () => (document.hidden ? false : 5000),
+    refetchInterval: () => (document.hidden ? false : pollMs(5000)),
   });
   const clear = useMutation({
     mutationFn: api.settings.clearErrorLogs,

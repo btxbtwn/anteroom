@@ -51,8 +51,12 @@ def check_box(db, box_id):
             raise HTTPException(404, 'Box not found')
 
 
-def conversation_response(row, listing=None, direct=None, *, notes=None, include_notes=True, missing_sale_data=None):
-    """One inventory row. ``notes`` are the parsed notes when the caller deferred loading them."""
+def conversation_response(row, listing=None, direct=None, *, notes=None, include_notes=True, missing_sale_data=None, sold=None):
+    """One inventory row. ``notes`` are the parsed notes when the caller deferred loading them.
+
+    ``sold`` is the item's status from its sales: the Sold tab sorts by its
+    sale date, the one Analytics shows.
+    """
     from vendoo_studio.services.imported_listing import imported_fields
     from vendoo_studio.services.vendoo_import import parse_notes
 
@@ -66,6 +70,8 @@ def conversation_response(row, listing=None, direct=None, *, notes=None, include
             'quantity': (listing or {}).get('quantity'),
             'direct_marketplaces': [market for market, record in (direct or {}).items() if record['state'] in LIVE_STATES],
             'direct_records': direct or {},
+            'units_sold': sold.units_sold if sold else 0,
+            'sold_at': sold.sold_at.isoformat() if sold and sold.sold_at else None,
             'missing_sale_data': missing_sale_data or [], **imported_fields(notes, live_urls)}
     if include_notes:
         result['notes'] = row.notes
@@ -184,7 +190,7 @@ def inventory_response(db):
     summaries = []
     for row in rows:
         summary = conversation_response(row, current.get(row.id), direct.get(row.id), notes=notes.get(row.id, {}), include_notes=False,
-                                        missing_sale_data=missing.get(row.id, []))
+                                        missing_sale_data=missing.get(row.id, []), sold=analytics.statuses.get(row.id))
         if row.id in covers:
             from vendoo_studio.services.photos import cover_thumb_url
             summary['cover_photo_url'] = cover_thumb_url(*covers[row.id])
@@ -204,10 +210,13 @@ def create_conversation(body: ConversationInput, db=Depends(get_seller_db, scope
 
 @router.get('/conversations/{identity}')
 def get_conversation(identity: str, db=Depends(get_seller_db, scope="function")):
+    from vendoo_studio.services.item_status import status_for
     from vendoo_studio.services.sales_records import missing_by_conversation
+    from vendoo_studio.services.vendoo_import import parse_notes
 
     row = conversation(db, identity)
-    return conversation_response(row, missing_sale_data=missing_by_conversation(db, identity).get(identity, []))
+    return conversation_response(row, missing_sale_data=missing_by_conversation(db, identity).get(identity, []),
+                                 sold=status_for(db, identity, parse_notes(row.notes)))
 
 
 @router.patch('/conversations/{identity}')
@@ -562,23 +571,21 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
-async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay'],
-                              revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
-    from starlette.concurrency import run_in_threadpool
+def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay'],
+                        revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.choice_lists import share
     from vendoo_studio.services.native_editor import editor_form
     from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
-    def load():
-        # These canonical builders read verified catalogs and the owned
-        # snapshot. Mercari also reads anonymous public shipping quotes, and
-        # eBay reads its category schema and the seller's own policies with
-        # their connected account. No marketplace write runs.
-        try:
-            current = db.get(Listing, identity)
-            if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
-                raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
-            return share(asyncio.run(editor_form(identity, marketplace, revision_id, db)))
-        except NativeMarketplaceError as error:
-            raise HTTPException(error.status_code, str(error)) from None
-    return await run_in_threadpool(load)
+    # These canonical builders read verified catalogs and the owned snapshot.
+    # Mercari also reads anonymous public shipping quotes, and eBay reads its
+    # category schema and the seller's own policies with their connected
+    # account. No marketplace write runs. A plain function runs in FastAPI's
+    # threadpool, so none of it waits on the request loop.
+    try:
+        current = db.get(Listing, identity)
+        if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
+            raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
+        return share(asyncio.run(editor_form(identity, marketplace, revision_id, db)))
+    except NativeMarketplaceError as error:
+        raise HTTPException(error.status_code, str(error)) from None
