@@ -6,6 +6,24 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.777 — 2026-11-07
+
+- Poshmark's Size now shows the size List will send: a tag such as Large (12/14) or Waist 32 lands on Poshmark's own spelling, a 3XL tee lands in Big & Tall, and a kids' size lands in the boys' or girls' group the listing names.
+
+## 0.1.776 — 2026-11-07
+
+- Buttons, switches and charts use plain black and white instead of bright blue, on the web and iPhone.
+- Listing status shows as a small colored dot beside the word, so the inventory list is calmer.
+- The assistant's example questions are a simple list instead of floating bubbles.
+
+## 0.1.775 — 2026-11-07
+
+- On iPhone, New listing opens a draft right away. You no longer type a title first; the AI writes it.
+
+## 0.1.774 — 2026-11-07
+
+- On iPhone, the chat composer and tab bar use the system glass look, and the tab bar shrinks while you scroll.
+
 ## 0.1.773 — 2026-11-07
 
 - Add photos from the Files app on iPhone, next to Camera and Library.

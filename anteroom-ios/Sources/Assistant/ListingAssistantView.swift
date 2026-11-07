@@ -83,7 +83,7 @@ struct ListingAssistantView: View {
         } else {
             HStack(spacing: 12) {
                 Button("Generate from photos", systemImage: "sparkles") { confirmGenerate = true }
-                    .buttonStyle(.borderedProminent)
+                    .workspaceProminentButton()
                 Button("Regenerate", systemImage: "arrow.triangle.2.circlepath") { confirmRegenerate = true }
                     .buttonStyle(.bordered)
             }
@@ -179,11 +179,11 @@ struct ListingAssistantView: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 4)
             }
-            .workspacePanel(radius: WorkspaceStyle.composerRadius)
+            .workspaceComposer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(WorkspaceStyle.background)
+        .workspaceComposerBar()
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []

@@ -52,12 +52,12 @@ struct SignInView: View {
                     Button(action: submit) {
                         HStack {
                             Spacer()
-                            if isWorking { ProgressView().tint(.white) } else { Text(buttonTitle) }
+                            if isWorking { ProgressView().tint(WorkspaceStyle.accentForeground) } else { Text(buttonTitle) }
                             Spacer()
                         }
                         .padding(.vertical, 8)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .workspaceProminentButton()
                     .disabled(!canSubmit)
                     if let notice {
                         Text(notice).font(.footnote).foregroundStyle(.secondary)
@@ -173,12 +173,12 @@ struct NewPasswordView: View {
                     Button(action: save) {
                         HStack {
                             Spacer()
-                            if isSaving { ProgressView().tint(.white) } else { Text("Save password") }
+                            if isSaving { ProgressView().tint(WorkspaceStyle.accentForeground) } else { Text("Save password") }
                             Spacer()
                         }
                         .padding(.vertical, 8)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .workspaceProminentButton()
                     .disabled(isSaving || password.count < SignInMessages.minimumPasswordLength)
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")

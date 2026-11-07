@@ -1,0 +1,141 @@
+{
+  "_comment": "General categories and tag sizes the marketplace value matrix runs through each marketplace's production mapping (server/tests/test_marketplace_value_matrix.py and tests/marketplace-value-matrix.test.js). 'native' is the category each marketplace's own list resolves the General category to; the Python test checks native_category_match still picks it. Size groups named general_* are read from General's size list in skills/list-this/references/vendoo-dropdown-options.json.",
+  "size_groups": {
+    "neck": ["14.5", "15.5", "16 34/35"],
+    "waist_inseam": ["32x30", "W32 L30", "34x32", "32\""],
+    "suit": ["38R", "40", "40R", "42L"],
+    "women_numeric": ["00", "0", "2", "4", "6", "8", "10", "12", "14", "16", "18", "20", "22", "24", "Large (12/14)"],
+    "women_waist": ["24", "25", "26", "27", "28", "29", "30", "31", "32"],
+    "kids": ["2T", "3T", "4T", "5T", "4", "5", "6", "6X", "7", "8", "10", "12", "14", "16", "18", "10/12", "14/16", "XS (4/5)", "S (6/7)", "M (8)", "L (10/12)", "XL (18/20)", "XS", "S", "M", "L", "XL"],
+    "shoes": ["5", "5.5", "6", "6.5", "7", "7.5", "8", "8.5", "9", "9.5", "10", "10.5", "11", "11.5", "12", "13"],
+    "one_size": ["One Size", "OS", "One size fits most"]
+  },
+  "families": [
+    {
+      "general": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts",
+      "sizes": ["general_letters"],
+      "native": {
+        "poshmark": {"id": "01008c10d97b4e1245005764/07008c10d97b4e1245005764", "path": "Men > Shirts > None"},
+        "mercari": {"id": "303", "path": "Men > Tops > T-shirts"},
+        "depop": {"id": "menswear_tshirts", "path": "Men > Tops > T-shirts"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > Casual Button-Down Shirts",
+      "sizes": ["general_letters", "neck"],
+      "native": {
+        "poshmark": {"id": "01008c10d97b4e1245005764/07008c10d97b4e1245005764/30009813d97b4e3995005764", "path": "Men > Shirts > Casual Button Down Shirts"},
+        "mercari": {"id": "297", "path": "Men > Tops > Button-front"},
+        "depop": {"id": "menswear_shirts", "path": "Men > Tops > Shirts"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Men > Men's Clothing > Coats, Jackets & Vests",
+      "sizes": ["general_letters"],
+      "native": {
+        "poshmark": {"id": "01008c10d97b4e1245005764/04008c10d97b4e1245005764", "path": "Men > Jackets & Coats > None"},
+        "mercari": {"id": "362", "path": "Men > Coats & jackets > Other"},
+        "depop": {"id": "menswear_other-coats-jackets", "path": "men > coats and jackets > Other"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Men > Men's Clothing > Jeans",
+      "sizes": ["general_numbers", "waist_inseam", "general_letters"],
+      "native": {
+        "poshmark": {"id": "01008c10d97b4e1245005764/05008c10d97b4e1245005764", "path": "Men > Jeans > None"},
+        "mercari": {"id": "328", "path": "Men > Jeans > Other"},
+        "depop": {"id": "menswear_jeans", "path": "men > bottoms > Jeans"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shorts",
+      "sizes": ["general_numbers", "general_letters"],
+      "native": {
+        "poshmark": {"id": "01008c10d97b4e1245005764/09008c10d97b4e1245005764", "path": "Men > Shorts > None"},
+        "mercari": {"id": "346", "path": "Men > Shorts > Other"},
+        "depop": {"id": "menswear_shorts", "path": "men > bottoms > Shorts"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Men > Men's Clothing > Suits & Suit Separates",
+      "sizes": ["general_tailored", "suit"],
+      "native": {
+        "poshmark": {"id": "01008c10d97b4e1245005764/0a008c10d97b4e1245005764/43009813d97b4e3995005764", "path": "Men > Suits & Blazers > Suits"},
+        "mercari": {"id": "375", "path": "Men > Suits > Other"},
+        "depop": {"id": "menswear_suits", "path": "men > suits > Suits"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
+      "sizes": ["general_letters", "women_numeric"],
+      "native": {
+        "poshmark": {"id": "000e8975d97b4e80ef00a955/00188975d97b4e80ef00a955", "path": "Women > Tops > None"},
+        "mercari": {"id": "165", "path": "Women > Tops & blouses > Other"},
+        "depop": {"id": "womenswear_other-tops", "path": "Women > Tops > Other"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Women > Women's Clothing > Dresses",
+      "sizes": ["general_letters", "women_numeric"],
+      "native": {
+        "poshmark": {"id": "000e8975d97b4e80ef00a955/00108975d97b4e80ef00a955", "path": "Women > Dresses > None"},
+        "mercari": {"id": "154", "path": "Women > Dresses > Other"},
+        "depop": {"id": "womenswear_dresses", "path": "women > dresses > Dresses"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Women > Women's Clothing > Jeans",
+      "sizes": ["women_numeric", "women_waist"],
+      "native": {
+        "poshmark": {"id": "000e8975d97b4e80ef00a955/001a8975d97b4e80ef00a955", "path": "Women > Jeans > None"},
+        "mercari": {"id": "194", "path": "Women > Jeans > Other"},
+        "depop": {"id": "womenswear_jeans", "path": "women > bottoms > Jeans"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Kids > Girls > Girls' Clothing (Sizes 4 & Up) > Dresses",
+      "sizes": ["kids"],
+      "native": {
+        "poshmark": {"id": "20008c10d97b4e1245005764/22008c10d97b4e1245005764", "path": "Kids > Dresses > None"},
+        "mercari": {"id": "1908", "path": "Kids > Girls dresses > Girls (4+)"},
+        "depop": {"id": "kidswear_dresses", "path": "kids > dresses > Dresses"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Kids > Boys > Boys' Clothing (Sizes 4 & Up) > Tops, Shirts & T-Shirts",
+      "sizes": ["kids"],
+      "native": {
+        "poshmark": {"id": "20008c10d97b4e1245005764/2e008c10d97b4e1245005764", "path": "Kids > Shirts & Tops > None"},
+        "mercari": {"id": "1934", "path": "Kids > Boys tops & t-shirts > Boys (4+)"},
+        "depop": null
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Men > Men's Shoes > Athletic Shoes",
+      "sizes": ["shoes"],
+      "native": {
+        "poshmark": {"id": "01008c10d97b4e1245005764/08008c10d97b4e1245005764/38009813d97b4e3995005764", "path": "Men > Shoes > Athletic Shoes"},
+        "mercari": {"id": "399", "path": "Men > Shoes > Fashion sneakers"},
+        "depop": {"id": "menswear_trainers", "path": "men > footwear > Sneakers"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Women > Women's Shoes > Athletic Shoes",
+      "sizes": ["shoes"],
+      "native": {
+        "poshmark": {"id": "000e8975d97b4e80ef00a955/00268975d97b4e80ef00a955/00fe9287d97b4e80ef00a955", "path": "Women > Shoes > Athletic Shoes"},
+        "mercari": {"id": "285", "path": "Women > Shoes > Fashion sneakers"},
+        "depop": {"id": "womenswear_trainers", "path": "women > footwear > Sneakers"}
+      }
+    },
+    {
+      "general": "Clothing, Shoes & Accessories > Men > Men's Accessories > Hats",
+      "sizes": ["one_size"],
+      "native": {
+        "poshmark": {"id": "01008c10d97b4e1245005764/02008c10d97b4e1245005764/05009813d97b4e3995005764", "path": "Men > Accessories > Hats"},
+        "mercari": {"id": "392", "path": "Men > Men's accessories > Hats"},
+        "depop": {"id": "menswear_hat", "path": "men > accessories > Hats and caps"}
+      }
+    }
+  ]
+}

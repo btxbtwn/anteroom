@@ -225,11 +225,11 @@ struct BusinessAssistantView: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 4)
             }
-            .workspacePanel(radius: WorkspaceStyle.composerRadius)
+            .workspaceComposer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(WorkspaceStyle.background)
+        .workspaceComposerBar()
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []
@@ -337,7 +337,7 @@ private struct ChangesCard: View {
                     Button("Dismiss") { Task { await model.settle(turn, .dismissChanges) } }
                         .buttonStyle(.bordered)
                     Button(model.settling == turn.id ? "Applying…" : "Apply") { Task { await model.settle(turn, .apply) } }
-                        .buttonStyle(.borderedProminent)
+                        .workspaceProminentButton()
                 }
                 .disabled(model.settling != nil)
             }
@@ -368,7 +368,7 @@ private struct AutomationCard: View {
                 CardFailure(turn: turn, model: model)
                 HStack {
                     Button("Confirm") { Task { await model.settle(turn, .confirm) } }
-                        .buttonStyle(.borderedProminent)
+                        .workspaceProminentButton()
                         .disabled(automation.proposal?.ready == false)
                     Button("Dismiss") { Task { await model.settle(turn, .dismissAutomation) } }
                         .buttonStyle(.bordered)

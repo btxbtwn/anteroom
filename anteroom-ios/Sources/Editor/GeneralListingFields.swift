@@ -20,6 +20,7 @@ struct GeneralListingFields: View {
         ListingInspectorSection("Listing") {
             WorkspaceField("Title") {
                 TextField("Title", text: $form.fields.title, axis: .vertical).lineLimit(1...3)
+                    .accessibilityIdentifier("listing-title")
             }
             WorkspaceField("Description") {
                 TextField("Describe your item", text: $form.fields.description, axis: .vertical).lineLimit(5...16)

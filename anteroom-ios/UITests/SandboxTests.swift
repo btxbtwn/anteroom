@@ -7,12 +7,15 @@ final class SandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        let title = openNewListing(app)
-        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        // New listing opens an untitled draft straight away; no title first.
+        openNewListing(app)
         let name = "Simulator draft \(UUID().uuidString.prefix(8))"
         enterListingTitle(name, app: app)
-        app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
+        app.navigationBars[name].buttons["Save"].tap()
+        let saved = NSPredicate(format: "enabled == false")
+        expectation(for: saved, evaluatedWith: app.navigationBars[name].buttons["Save"])
+        waitForExpectations(timeout: 30)
         app.terminate()
         launchSandbox(app)
         XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 30))
@@ -26,10 +29,9 @@ final class SellerInputSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        _ = openNewListing(app)
+        openNewListing(app)
         let name = "Seller inputs \(UUID().uuidString.prefix(8))"
         enterListingTitle(name, app: app)
-        app.buttons["Create draft"].tap()
         XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
 
         enter("seller-notes", text: "Found at a local estate sale", app: app)
@@ -387,23 +389,27 @@ final class EbayFormSandboxTests: XCTestCase {
 fileprivate extension XCTestCase {
     @MainActor
     func enterListingTitle(_ text: String, app: XCUIApplication) {
-        // The sheet focuses this field automatically. Tapping it again can
-        // open the AutoFill edit menu and intercept the next keyboard event.
-        dismissKeyboardIntroduction(app)
-        // SwiftUI's multiline input wrapper can report no keyboard focus or
-        // value while its text view visibly has both. Send keyboard input to
-        // the focused app; creation and reopen assertions verify the title.
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
-        app.typeText(text)
-        // Typing right after the keyboard introduction closes can keep only
-        // the first characters. When the field reports what it holds and it
-        // is a partial title, erase it and type again.
-        let field = app.descendants(matching: .any).matching(identifier: "new-listing-title").firstMatch
+        // The editor's Title field sits below photos and seller inputs.
+        let field = app.descendants(matching: .any).matching(identifier: "listing-title").firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 15), "The new draft must open in the editor")
+        for _ in 0..<12 where !field.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(field.isHittable)
+        // A tap during a scroll can miss focus; tap until the field has it.
+        // Tapping the right end puts the cursor after any existing text.
         for _ in 0..<3 {
-            guard let typed = field.value as? String, !typed.isEmpty, typed != "Listing title", typed != text else { return }
-            app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count))
-            app.typeText(text)
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+            dismissKeyboardIntroduction(app)
+            if app.keyboards.firstMatch.waitForExistence(timeout: 3),
+               (field.value(forKey: "hasKeyboardFocus") as? Bool) == true { break }
         }
+        // The hosted API names a new draft "New Listing"; replace that.
+        if let current = field.value as? String, !current.isEmpty, current != "Title" {
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+        }
+        field.typeText(text)
+        let done = app.buttons["Done"].firstMatch
+        if app.keyboards.firstMatch.exists, done.waitForExistence(timeout: 5) { done.tap() }
+        // Seller-input steps after this scroll back up to their own fields.
     }
 
     @MainActor
@@ -416,22 +422,16 @@ fileprivate extension XCTestCase {
     }
 
     @MainActor
-    func openNewListing(_ app: XCUIApplication) -> XCUIElement {
-        // A vertical TextField can appear as either native input type.
-        let title = app.descendants(matching: .any).matching(identifier: "new-listing-title").firstMatch
-        for _ in 0..<2 {
-            if title.exists { return title }
-            let create = app.buttons["New listing"].firstMatch
-            XCTAssertTrue(create.waitForExistence(timeout: 30))
-            XCTAssertTrue(create.isHittable)
-            create.tap()
-            if title.waitForExistence(timeout: 10) { return title }
-            // Only retry opening the sheet while still at Inventory. This
-            // navigation has no write; callers submit Create draft once.
-            XCTAssertTrue(app.navigationBars["Inventory"].exists)
-        }
-        XCTFail("New listing must open its title input before typing")
-        return title
+    func openNewListing(_ app: XCUIApplication) {
+        // One tap creates an untitled draft and opens it (no title sheet),
+        // so tap once: a second tap would make a second draft.
+        let create = app.buttons["New listing"].firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 30))
+        XCTAssertTrue(create.isHittable)
+        create.tap()
+        // The editor shows the draft's title, or "Listing" while it has none.
+        let editor = app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["Listing", "New Listing"])).firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 15), "New listing must open the untitled draft in the editor")
     }
 
     @MainActor
