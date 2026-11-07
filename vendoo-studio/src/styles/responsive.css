@@ -73,7 +73,7 @@
   .sidebar-select-btn[data-active="true"] {
     background: var(--color-cobalt);
     border-color: transparent;
-    color: #fff;
+    color: var(--color-accent-ink);
   }
 
   .sidebar-select-btn:disabled {
