@@ -4,13 +4,16 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
+  # Pins packages to Config/Package.resolved and sets the app version.
+  postGenCommand: tools/after-xcodegen.sh
 configFiles:
   Debug: Config/App.xcconfig
   Release: Config/App.xcconfig
 packages:
   Supabase:
     url: https://github.com/supabase/supabase-swift
-    majorVersion: 2.0.0
+    # Exact, with every dependency pinned in Config/Package.resolved.
+    exactVersion: 2.55.6
 targets:
   Anteroom:
     type: application
@@ -19,6 +22,9 @@ targets:
       - path: Sources
         excludes:
           - Info.plist
+          - PrivacyInfo.xcprivacy
+      - path: Sources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: Supabase
         product: Supabase
@@ -47,9 +53,17 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
         ENABLE_PREVIEWS: YES
+  AnteroomTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [UnitTests]
+    dependencies:
+      - target: Anteroom
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
   AnteroomUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -65,6 +79,7 @@ schemes:
     build:
       targets:
         Anteroom: all
+        AnteroomTests: [test]
         AnteroomUITests: [test]
     test:
-      targets: [AnteroomUITests]
+      targets: [AnteroomTests, AnteroomUITests]

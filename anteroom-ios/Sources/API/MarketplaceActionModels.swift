@@ -149,6 +149,16 @@ enum MarketplaceActions {
                 "List on \(name)")
     }
 
+    /// The confirmation for List everywhere, naming every marketplace picked.
+    static func listEverywhereQuestion(title: String, marketplaces: [String]) -> (title: String, message: String, button: String) {
+        guard marketplaces.count != 1 else { return listQuestion(title: title, marketplace: marketplaces[0]) }
+        let names = marketplaces.map(Marketplaces.name)
+        let list = names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
+        return ("List “\(title)” on \(names.count) marketplaces?",
+                "This creates a live listing on \(list) from the listing saved in Anteroom.\(chromeNote(marketplaces))",
+                "List on \(names.count) marketplaces")
+    }
+
     /// The confirmation for Update (the web's `updateNow`).
     static func updateQuestion(title: String, marketplace: String) -> (title: String, message: String, button: String) {
         let name = Marketplaces.name(marketplace)

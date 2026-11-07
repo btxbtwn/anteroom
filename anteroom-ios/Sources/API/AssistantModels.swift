@@ -1,9 +1,5 @@
 import Foundation
 
-struct WorkspaceCapabilities: Decodable, Sendable {
-    let features: [String]
-}
-
 struct WorkspaceStatus: Decodable, Sendable {
     let providerConfigured: Bool
     enum CodingKeys: String, CodingKey { case providerConfigured = "provider_configured" }

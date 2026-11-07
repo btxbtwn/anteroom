@@ -203,6 +203,22 @@ extension ListingSummary {
 }
 
 enum InventoryQuery {
+    /// Coming back to the app reloads an inventory older than this.
+    static let returnReloadAge: TimeInterval = 30
+
+    static func isStale(loadedAt: Date?, now: Date) -> Bool {
+        guard let loadedAt else { return true }
+        return now.timeIntervalSince(loadedAt) >= returnReloadAge
+    }
+
+    /// A row generating, or saving, listing or updating on a marketplace, moves on as its job does.
+    static func hasWorkInProgress(_ listings: [ListingSummary]) -> Bool {
+        listings.contains { listing in
+            listing.status == "in_progress"
+                || (listing.directRecords ?? [:]).values.contains { ["saving", "publishing", "updating", "unknown"].contains($0.state) }
+        }
+    }
+
     /// Title and SKU, as the desktop search reads them.
     static func matchesSearch(_ listing: ListingSummary, _ needle: String) -> Bool {
         guard !needle.isEmpty else { return true }

@@ -22,6 +22,9 @@ final class MarketplaceActionsModel {
     private(set) var starting: Set<String> = []
     private(set) var actionErrors: [String: String] = [:]
     private(set) var delisting = false
+    /// Advance when a running List, Update or Delist ends well or badly, for haptics.
+    private(set) var succeeded = 0
+    private(set) var failed = 0
 
     init(api: AnteroomAPI, listingID: String, revisionID: String?) {
         self.api = api
@@ -48,7 +51,8 @@ final class MarketplaceActionsModel {
 
     func load() async {
         do {
-            async let markets = api.actionMarketplaces()
+            // Pull to refresh and opening the sheet ask again: Chrome may have connected since.
+            async let markets = api.runtime(fresh: true).actionMarketplaces
             async let records = api.nativeMarketplaceStates(listingID)
             async let listings = api.marketplaceLiveListings(listingID)
             let (marketplaces, nativeDrafts, liveListings) = try await (markets, records, listings)
@@ -66,36 +70,45 @@ final class MarketplaceActionsModel {
 
     /// Reads progress only; never starts anything.
     func refreshStatus() async {
+        let before = Dictionary(rows.map { ($0.marketplace, $0.running) }, uniquingKeysWith: { first, _ in first })
         if let records = try? await api.nativeMarketplaceStates(listingID) { drafts = records }
         if let listings = try? await api.marketplaceLiveListings(listingID) { live = listings }
+        let ended = rows.filter { before[$0.marketplace] == true && !$0.running }
+        if ended.contains(where: { $0.tone == .failed || $0.tone == .attention || $0.unconfirmed }) { failed += 1 }
+        else if !ended.isEmpty { succeeded += 1 }
     }
 
     /// Lists on one marketplace. The seller has confirmed it.
-    func list(_ marketplace: String) async {
+    func list(_ marketplace: String, confirmation: SellerConfirmation) async {
         guard let revisionID else { return }
         await run(marketplace) {
-            try await self.api.listOnMarketplace(self.listingID, marketplace: marketplace, revisionID: revisionID)
+            try await self.api.listOnMarketplace(self.listingID, marketplace: marketplace, revisionID: revisionID,
+                                                 confirmation: confirmation)
         }
     }
 
     /// Delists from the marketplaces named. The seller has confirmed it.
-    func delist(_ marketplaces: [String]) async {
+    func delist(_ marketplaces: [String], confirmation: SellerConfirmation) async {
         delisting = true
         defer { delisting = false }
         for marketplace in marketplaces { actionErrors[marketplace] = nil }
         do {
-            live = try await api.delist(listingID, marketplaces: marketplaces)
+            live = try await api.delist(listingID, marketplaces: marketplaces, confirmation: confirmation)
         } catch {
             let message = error.localizedDescription
             for marketplace in marketplaces { actionErrors[marketplace] = message }
+            failed += 1
         }
         await refreshStatus()
     }
 
     /// Updates the live listing. The seller has confirmed it.
-    func update(_ marketplace: String) async {
+    func update(_ marketplace: String, confirmation: SellerConfirmation) async {
         guard let revisionID else { return }
-        await run(marketplace) { try await self.api.updateOnMarketplace(self.listingID, marketplace: marketplace, revisionID: revisionID) }
+        await run(marketplace) {
+            try await self.api.updateOnMarketplace(self.listingID, marketplace: marketplace, revisionID: revisionID,
+                                                   confirmation: confirmation)
+        }
     }
 
     /// Saves an unpublished draft on the marketplace. Nothing goes live.
@@ -118,7 +131,12 @@ final class MarketplaceActionsModel {
         starting.insert(marketplace)
         actionErrors[marketplace] = nil
         defer { starting.remove(marketplace) }
-        do { try await work() } catch { actionErrors[marketplace] = error.localizedDescription }
+        do {
+            try await work()
+        } catch {
+            actionErrors[marketplace] = error.localizedDescription
+            failed += 1
+        }
         await refreshStatus()
     }
 }
@@ -128,18 +146,7 @@ struct MarketplaceActionsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var model: MarketplaceActionsModel
-    @State private var confirming: Pending?
-
-    private enum Pending: Identifiable {
-        case list(String), update(String), delist([String])
-        var id: String {
-            switch self {
-            case .list(let name): "list-" + name
-            case .update(let name): "update-" + name
-            case .delist(let names): "delist-" + names.joined(separator: ",")
-            }
-        }
-    }
+    @State private var confirming: SellerConfirmationRequest?
 
     init(api: AnteroomAPI, listingID: String, revisionID: String?, title: String) {
         self.title = title
@@ -180,19 +187,16 @@ struct MarketplaceActionsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
-            .confirmationDialog(question?.title ?? "", isPresented: confirmingShown, titleVisibility: .visible,
-                                presenting: confirming) { pending in
-                switch pending {
-                case .list(let name):
-                    Button(question?.button ?? "List") { Task { await model.list(name) } }
-                case .update(let name):
-                    Button(question?.button ?? "Update") { Task { await model.update(name) } }
-                case .delist(let names):
-                    Button(question?.button ?? "Delist", role: .destructive) { Task { await model.delist(names) } }
+            .sensoryFeedback(.success, trigger: model.succeeded)
+            .sensoryFeedback(.error, trigger: model.failed)
+            .sellerConfirmation($confirming) { confirmed in
+                Task {
+                    switch confirmed.action {
+                    case .list: await model.list(confirmed.marketplaces[0], confirmation: confirmed)
+                    case .update: await model.update(confirmed.marketplaces[0], confirmation: confirmed)
+                    case .delist: await model.delist(confirmed.marketplaces, confirmation: confirmed)
+                    }
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: { _ in
-                Text(question?.message ?? "")
             }
             .task { await model.load() }
             // A List or Delist runs in the background: follow it while one is running.
@@ -204,19 +208,6 @@ struct MarketplaceActionsView: View {
                 }
             }
         }
-    }
-
-    private var question: (title: String, message: String, button: String)? {
-        switch confirming {
-        case .list(let name): MarketplaceActions.listQuestion(title: title, marketplace: name)
-        case .update(let name): MarketplaceActions.updateQuestion(title: title, marketplace: name)
-        case .delist(let names): MarketplaceActions.delistQuestion(title: title, marketplaces: names)
-        case nil: nil
-        }
-    }
-
-    private var confirmingShown: Binding<Bool> {
-        Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
     }
 
     @ViewBuilder
@@ -259,13 +250,13 @@ struct MarketplaceActionsView: View {
                         .disabled(busy)
                 } else {
                     if row.canUpdate {
-                        Button("Update…") { confirming = .update(row.marketplace) }
+                        Button("Update…") { confirming = .update(title: title, marketplace: row.marketplace) }
                             .buttonStyle(.bordered)
                             .tint(row.outdated ? WorkspaceStyle.accent : nil)
                             .disabled(busy || model.revisionID == nil)
                     }
                     if row.canDelist {
-                        Button("Delist…", role: .destructive) { confirming = .delist([row.marketplace]) }
+                        Button("Delist…", role: .destructive) { confirming = .delist(title: title, marketplaces: [row.marketplace]) }
                             .buttonStyle(.bordered)
                             .disabled(busy || model.delisting)
                     }
@@ -277,7 +268,7 @@ struct MarketplaceActionsView: View {
                     if row.canList {
                         let wait = model.retryIn(row.marketplace)
                         Button(busy ? "Working…" : wait > 0 ? "Retry in \(wait)s" : "List…") {
-                            confirming = .list(row.marketplace)
+                            confirming = .list(title: title, marketplace: row.marketplace)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(busy || wait > 0 || model.revisionID == nil)
