@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.766 — 2026-11-07
+
+- myanteroom.com now tells you when Chrome is running an older Anteroom Bridge than the site, so fixes such as Depop offers on marked-down items reach your Chrome instead of failing quietly.
+
 ## 0.1.765 — 2026-11-07
 
 - Chrome now runs a listing, update, delist, share or offer from the web only when Anteroom's server signed that exact action, so nothing else on the page can trigger one.
