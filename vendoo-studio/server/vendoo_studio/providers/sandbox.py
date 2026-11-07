@@ -4,10 +4,15 @@ It reads no photos and calls no model. Photo analysis returns fixed evidence,
 and chat returns a fixed listing when the prompt asks for JSON, otherwise a
 short reply. That is enough to drive generation, chat and the editor end to
 end; it says nothing about the quality of a real model's listing.
+
+A call whose photo notes or prompt contain ``STALL_MARKER`` never answers, the
+way a provider that stopped responding behaves. Tests and agents use it to
+check that every long action ends in a named error instead of spinning.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 
@@ -44,6 +49,12 @@ EVIDENCE = {
 }
 
 REPLY = "Sandbox reply: no model was called."
+STALL_MARKER = "[sandbox:stall]"
+
+
+async def _stall() -> None:
+    """Wait forever, like a provider that stopped answering."""
+    await asyncio.Event().wait()
 
 
 def _prompt_text(messages) -> str:
@@ -63,10 +74,15 @@ class SandboxProvider:
     listing_model = "sandbox"
 
     async def analyze_photos(self, photo_paths, notes="", listing_rules="", **_kwargs) -> dict:
+        if STALL_MARKER in (notes or ""):
+            await _stall()
         return {"evidence": json.loads(json.dumps(EVIDENCE))}
 
     async def chat(self, messages, stream=True) -> AsyncIterator[str]:
-        if "json" in _prompt_text(messages).lower():
+        prompt = _prompt_text(messages)
+        if STALL_MARKER in prompt:
+            await _stall()
+        if "json" in prompt.lower():
             yield "```json\n" + json.dumps(LISTING, indent=2) + "\n```"
         else:
             yield REPLY

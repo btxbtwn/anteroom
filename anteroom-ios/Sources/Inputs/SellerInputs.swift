@@ -7,6 +7,16 @@ struct SellerInputs: Equatable, Sendable, Codable {
         case top, pants, skirt
         var id: String { rawValue }
         var label: String { rawValue.capitalized }
+
+        /// Keys and labels mirror garmentMeasurements.ts and the backend
+        /// GARMENT_MEASUREMENTS definition.
+        var fields: [(key: String, label: String)] {
+            switch self {
+            case .top: return [("pitToPit", "Pit to Pit"), ("length", "Length"), ("sleeve", "Sleeve")]
+            case .pants: return [("waist", "Waist"), ("rise", "Rise"), ("inseam", "Inseam"), ("legOpening", "Leg Opening")]
+            case .skirt: return [("waist", "Waist"), ("hip", "Hip"), ("length", "Length")]
+            }
+        }
     }
 
     private let originalNotes: String

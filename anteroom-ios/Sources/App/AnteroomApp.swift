@@ -9,6 +9,7 @@ struct AnteroomApp: App {
             RootView()
                 .environment(session)
                 .tint(WorkspaceStyle.accent)
+                .toggleStyle(WorkspaceSwitchStyle())
                 .task { await session.start() }
                 .onOpenURL { url in
                     Task { await session.completeSignIn(from: url) }

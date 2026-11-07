@@ -46,7 +46,7 @@ struct SellerInputFields: View {
             } else {
                 garmentPicker.pickerStyle(.segmented)
             }
-            ForEach(measurementFields, id: \.key) { field in
+            ForEach(inputs.garment.fields, id: \.key) { field in
                 WorkspaceField(field.label) {
                     TextField("Inches", text: Binding(
                         get: { inputs.measurement(field.key) },
@@ -70,15 +70,5 @@ struct SellerInputFields: View {
             }
         }
         .accessibilityIdentifier("seller-garment")
-    }
-
-    // Field keys and labels are the shared UI/JSON contract from desktop's
-    // garmentMeasurements.ts and the backend GARMENT_MEASUREMENTS definition.
-    private var measurementFields: [(key: String, label: String)] {
-        switch inputs.garment {
-        case .top: return [("pitToPit", "Pit to Pit"), ("length", "Length"), ("sleeve", "Sleeve")]
-        case .pants: return [("waist", "Waist"), ("rise", "Rise"), ("inseam", "Inseam"), ("legOpening", "Leg Opening")]
-        case .skirt: return [("waist", "Waist"), ("hip", "Hip"), ("length", "Length")]
-        }
     }
 }

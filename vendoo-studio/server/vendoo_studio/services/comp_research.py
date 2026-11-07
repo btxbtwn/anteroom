@@ -21,7 +21,7 @@ from typing import cast
 
 from vendoo_studio.config import skills_dir
 from vendoo_studio.services import live_trace, model_slots
-from vendoo_studio.services.ai_key_catalog import KEY_PROVIDERS
+from vendoo_studio.services.provider_deadlines import provider_label
 from vendoo_studio.services.brave_search import (
     brave_active_queries,
     brave_sold_queries,
@@ -110,14 +110,6 @@ class ModelSearch:
     search: Searcher
 
 
-_PROVIDER_LABELS = {
-    "chatgpt": "ChatGPT",
-    "claude": "Claude",
-    "cursor": "Cursor",
-    "xiaomi-mimo": "MiMo",
-}
-
-
 def model_search() -> ModelSearch | None:
     """The listing model's native web search, or None when it has none."""
     provider = get_listing_provider()
@@ -126,8 +118,7 @@ def model_search() -> ModelSearch | None:
     search = getattr(provider, "web_search", None)
     if not callable(search):
         return None
-    label = _PROVIDER_LABELS.get(provider.name) or getattr(KEY_PROVIDERS.get(provider.name), "label", provider.name)
-    return ModelSearch(label, cast(Searcher, search))
+    return ModelSearch(provider_label(provider.name), cast(Searcher, search))
 
 
 def comps_search_available() -> bool:
