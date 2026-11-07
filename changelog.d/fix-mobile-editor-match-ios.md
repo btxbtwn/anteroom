@@ -1,0 +1,1 @@
+- On a phone, the listing editor now matches the iPhone app: the form uses the full screen width, and you switch between General and each marketplace from a picker at the top instead of a sidebar.

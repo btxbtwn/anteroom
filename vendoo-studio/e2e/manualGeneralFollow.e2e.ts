@@ -1,4 +1,4 @@
-import { createListing, expect, openListing, test, titleBox } from "./fixtures";
+import { createListing, expect, openListing, openForm, test, titleBox } from "./fixtures";
 
 test("manual General edits reach every marketplace and survive reload without generation", async ({page, request, phone}, info) => {
   test.setTimeout(150_000);
@@ -19,7 +19,7 @@ test("manual General edits reach every marketplace and survive reload without ge
     await input.blur();
     await expect.poll(async () => (await (await request.get(`/api/conversations/${id}/listing`)).json()).listing.title).toBe("Manually corrected title");
     for (const market of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop"]) {
-      await page.getByRole("navigation", {name: "Marketplaces"}).getByRole("button", {name: new RegExp(`^${market} ${market}`)}).click();
+      await openForm(page, phone, market);
       const form = page.getByRole("group", {name: `${market} listing fields`});
       if (market === "Depop") await expect(form.getByRole("textbox", {name: /description/i}).first()).toHaveValue(/Manual draft/, {timeout: 30000});
       else await expect(form.getByRole("textbox", {name: /title/i}).first()).toHaveValue("Manually corrected title", {timeout: 30000});
