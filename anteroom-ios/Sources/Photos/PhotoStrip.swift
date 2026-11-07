@@ -1,7 +1,8 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// The listing's photos, with buttons to add from the camera or library.
+/// The listing's photos, with buttons to add from the camera, library or Files.
 /// Photos save as soon as they upload, separately from Save. Like the hosted
 /// web app, new photos can be added while the listing is a draft.
 struct PhotoStrip: View {
@@ -13,12 +14,12 @@ struct PhotoStrip: View {
     @State private var picked: [PhotosPickerItem] = []
     @State private var uploading = 0
     @State private var showingCamera = false
+    @State private var showingFiles = false
     @State private var error: String?
     /// Prepared photos that didn't upload, kept for Retry.
     @State private var failedUploads: [Data] = []
     @State private var uploadMessage: String?
     @State private var uploadFailures = 0
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var photoToDelete: ListingPhoto?
 
     private static let limit = 30
@@ -33,7 +34,7 @@ struct PhotoStrip: View {
                     Image(systemName: "photo.on.rectangle.angled").font(.title2)
                     Text(canAdd ? "Add photos of your item" : "No photos").font(.subheadline.weight(.medium))
                     if canAdd {
-                        Text("Use the camera or choose photos from your library.")
+                        Text("Use the camera or choose photos from your library or Files.")
                             .font(.footnote).multilineTextAlignment(.center)
                     }
                 }
@@ -80,27 +81,12 @@ struct PhotoStrip: View {
                 }
             }
 
-            let controlsLayout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-                : AnyLayout(HStackLayout(spacing: 12))
             if canAdd {
-            controlsLayout {
-                if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    Button { showingCamera = true } label: {
-                        Label("Camera", systemImage: "camera").frame(minHeight: 44)
-                    }
-                        .accessibilityLabel("Take a listing photo")
-                        .buttonStyle(.bordered)
-                }
-                PhotosPicker(selection: $picked, maxSelectionCount: remaining, matching: .images) {
-                    Label("Library", systemImage: "photo.on.rectangle").frame(minHeight: 44)
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Add photos from library")
-                Text("\(photos.count)/\(Self.limit)")
-                    .accessibilityLabel("\(photos.count) of \(Self.limit) photos")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            // One row when it fits; otherwise the counter, then the buttons, wrap.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { addButtons; photoCount }
+                VStack(alignment: .leading, spacing: 12) { HStack(spacing: 12) { addButtons }; photoCount }
+                VStack(alignment: .leading, spacing: 12) { addButtons; photoCount }
             }
             .disabled(remaining == 0)
             } else {
@@ -154,12 +140,47 @@ struct PhotoStrip: View {
             picked = []
             Task { await upload(items) }
         }
+        .fileImporter(isPresented: $showingFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                Task { await uploadFiles(Array(urls.prefix(remaining))) }
+            case .failure(let failure):
+                error = failure.localizedDescription
+            }
+        }
         .fullScreenCover(isPresented: $showingCamera) {
             CameraPicker { image in
                 Task { await uploadCaptured(image) }
             }
             .ignoresSafeArea()
         }
+    }
+
+    @ViewBuilder private var addButtons: some View {
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            Button { showingCamera = true } label: {
+                Label("Camera", systemImage: "camera").frame(minHeight: 44)
+            }
+                .accessibilityLabel("Take a listing photo")
+                .buttonStyle(.bordered)
+        }
+        PhotosPicker(selection: $picked, maxSelectionCount: remaining, matching: .images) {
+            Label("Library", systemImage: "photo.on.rectangle").frame(minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel("Add photos from library")
+        Button { showingFiles = true } label: {
+            Label("Files", systemImage: "folder").frame(minHeight: 44)
+        }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Add photos from Files")
+    }
+
+    private var photoCount: some View {
+        Text("\(photos.count)/\(Self.limit)")
+            .accessibilityLabel("\(photos.count) of \(Self.limit) photos")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
     }
 
     private var remaining: Int { max(0, Self.limit - photos.count - uploading - failedUploads.count) }
@@ -176,6 +197,19 @@ struct PhotoStrip: View {
         await send(items) { item in
             guard let data = try? await item.loadTransferable(type: Data.self) else { return nil }
             return await Task.detached(priority: .userInitiated) { PhotoPreparer.jpeg(from: data) }.value
+        }
+    }
+
+    /// Photos picked in Files (iCloud Drive, On My iPhone, connected drives).
+    /// The URLs sit outside the app's sandbox, so each is opened only while it is read.
+    private func uploadFiles(_ urls: [URL]) async {
+        await send(urls) { url in
+            await Task.detached(priority: .userInitiated) {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return PhotoPreparer.jpeg(from: data)
+            }.value
         }
     }
 

@@ -8,6 +8,7 @@ import re
 from functools import lru_cache
 
 from vendoo_studio.config import skills_dir
+from vendoo_studio.models.sizes import size_choice
 from vendoo_studio.services.chrome_listing import poshmark_color_name
 from vendoo_studio.services.seller_overrides import get_path, marketplace_text, price_for
 
@@ -40,26 +41,59 @@ def _multiple(listing: dict) -> bool:
     return many(listing.get("quantity"))
 
 
+def _kids_gender(listing: dict) -> str:
+    """boys or girls from the listing's department or category, never guessed."""
+    paths = listing.get("marketplace_categories")
+    ebay = listing.get("ebay_specifics")
+    for source in (listing.get("department"), ebay.get("department") if isinstance(ebay, dict) else None,
+                   listing.get("category_path"), *(paths.values() if isinstance(paths, dict) else ())):
+        text = str(source or "").lower()
+        boys, girls = bool(re.search(r"\bboy'?s?'?\b", text)), bool(re.search(r"\bgirl'?s?'?\b", text))
+        if boys != girls:
+            return "boys" if boys else "girls"
+    return ""
+
+
+def _size_pools(listing: dict, groups: list, key) -> list[list]:
+    """The size groups List looks in, in order: the named group or fit, else the
+    standard group then Plus and Big & Tall, and a kids' category's gender then Baby."""
+    details = listing.get("poshmark_specifics") or {}
+    group_id = details.get("sizeSetId")
+    if group_id:
+        return [[group for group in groups if group["id"] == group_id]]
+    fit = key(details.get("sizeType") or listing.get("sizeType") or "standard")
+    if fit == "regular":
+        fit = "standard"
+    labelled = lambda *labels: [group for group in groups if key(group["label"]) in labels]  # noqa: E731
+    if fit != "standard":
+        return [labelled(fit)]
+    if labelled("standard"):
+        # Past the standard range Poshmark keeps larger sizes in Plus or Big & Tall.
+        return [labelled("standard"), labelled("plus", "bigtall")]
+    if labelled("boys", "girls"):
+        gender = _kids_gender(listing)
+        return [labelled(gender), labelled("baby")] if gender else []
+    return [[group for group in groups if group["id"] != "custom"]]
+
+
 def _initial_inventory(listing: dict, groups: list) -> list:
     details = listing.get("poshmark_specifics") or {}
     def key(value):
         return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
-    group_id = details.get("sizeSetId")
-    fit = key(details.get("sizeType") or listing.get("sizeType") or "standard")
-    if fit == "regular":
-        fit = "standard"
-    candidates = [group for group in groups if group["id"] == group_id] if group_id else [
-        group for group in groups if key(group["label"]) == fit]
     system = str(details.get("sizeSystem") or "us").lower()
     native_id = details.get("nativeSizeId")
     wanted = marketplace_text(listing, "poshmark", "size")
     matches = []
-    for group in candidates:
-        for size in (group.get("systems") or {}).get(system, group.get("sizes") or []):
-            matches_id = native_id is not None and str(size["id"]) == str(native_id)
-            matches_label = native_id is None and key(wanted) and key(size["label"]) == key(wanted)
-            if matches_id or matches_label:
-                matches.append((group["id"], size["id"]))
+    for pool in _size_pools(listing, groups, key):
+        for group in pool:
+            sizes = (group.get("systems") or {}).get(system, group.get("sizes") or [])
+            # The tag's size as this group spells it: L for Large (12/14), Waist 32 for 32.
+            label = size_choice(wanted, [size["label"] for size in sizes]) if native_id is None else None
+            for size in sizes:
+                if (native_id is not None and str(size["id"]) == str(native_id)) or (label and size["label"] == label):
+                    matches.append((group["id"], size["id"]))
+        if matches:
+            break
     selected = matches[0] if len(matches) == 1 else ("", "")
     return [{"sizeSetId": selected[0], "sizeId": selected[1], "quantity": listing.get("quantity", 1), "sku": ""}]
 

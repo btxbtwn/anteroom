@@ -11,9 +11,11 @@ screen in the same PR or note it for a follow-up.
 
 ## Principles
 
-1. **Neutral by default.** Text, borders and surfaces are gray. Color means
-   something: the primary action, a link, focus, or a status the seller should
-   notice. A marketplace's brand color appears in its logo only.
+1. **Neutral by default.** Text, borders, surfaces and the primary action are
+   gray or ink. Color means a status the seller should notice. The primary
+   button is the darkest thing on the page (light) or the lightest (dark), as
+   in Linear and Vercel; it is never a brand blue. A marketplace's brand color
+   appears in its logo only.
 2. **One of everything.** One page layout, one tab style, one card surface, one
    type scale. Before writing new markup, find the shared component that
    already does it.
@@ -56,8 +58,11 @@ exception is drawing over live third-party content (the browser preview).
 - `text-muted-foreground`: secondary text, labels and descriptions.
 - Status: `text-success-foreground`, `text-warning-foreground`,
   `text-destructive-foreground`, `text-info-foreground`. Use them only for a
-  state that needs attention. The default state (for example *Draft*) stays
-  muted.
+  state that needs attention. A routine state (*Draft*, *Active*, *Sold*) is a
+  muted word with a 6px colored dot (`ListingStatusLabel`), not colored text.
+- Primary action and focus: `bg-primary` is ink (zinc-900 / neutral-100) and
+  the focus ring is gray. Do not reintroduce a blue accent for buttons,
+  switches, charts or selection.
 
 **Surfaces**
 - Page: `bg-background`.
@@ -138,6 +143,10 @@ line.
 Reject a change that adds any of these:
 
 - Purple, indigo or blue gradients; glows; aurora or blurred color backgrounds.
+- A saturated blue primary button, send button or switch; colored drop shadows
+  under buttons; soft floating shadows under inputs.
+- A cloud of pill-shaped suggestion chips. Offer example prompts as a plain
+  list with dividers.
 - Brand or accent colors in chrome: tab underlines, card top borders, side
   stripes, tinted section backgrounds.
 - Uppercase, letter-spaced labels above every heading.

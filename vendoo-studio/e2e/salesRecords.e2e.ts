@@ -70,6 +70,19 @@ test("recorded amounts appear in sales records and missing data marks sold inven
   await expect(row.locator('[title="Missing: fees"]')).toBeVisible();
   await page.screenshot({ path: info.outputPath("missing-sale-data.png") });
 
+  // The Filters menu narrows the inventory to sales missing details.
+  await page.getByRole("button", { name: "Filters" }).click();
+  const missingFilter = page.getByRole("menuitemcheckbox", { name: /Missing sale details/ });
+  await missingFilter.click();
+  await expect(missingFilter).toBeChecked();
+  await page.screenshot({ path: info.outputPath("missing-sale-filter-menu.png") });
+  await page.keyboard.press("Escape");
+  await expect(row.getByText("Missing sale data", { exact: true })).toBeVisible();
+  await page.screenshot({ path: info.outputPath("missing-sale-filter.png") });
+  await page.getByRole("button", { name: /Filters/ }).click();
+  await missingFilter.click();
+  await page.keyboard.press("Escape");
+
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Analytics", exact: true }).click();

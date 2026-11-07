@@ -85,3 +85,17 @@ export async function titleBox(page: Page, phone: boolean) {
   if (phone) await page.getByRole("tab", { name: "Listing" }).click();
   return page.getByRole("group", { name: "General listing fields" }).getByRole("textbox", { name: "Title", exact: true });
 }
+
+/**
+ * Open a listing's form. A desktop picks it from the rail beside the form; a phone,
+ * like the iPhone app, from the form picker above it.
+ */
+export async function openForm(page: Page, phone: boolean, name: string): Promise<void> {
+  const nav = page.getByRole("navigation", { name: "Marketplaces" });
+  if (phone) {
+    await nav.getByRole("button", { name: /^Form, / }).click();
+    await page.getByRole("menuitem", { name: new RegExp(`^${name}`) }).click();
+  } else {
+    await nav.getByRole("button", { name: new RegExp(`^${name} ${name}`) }).click();
+  }
+}

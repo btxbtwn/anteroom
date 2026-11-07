@@ -6,6 +6,40 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.778 — 2026-11-07
+
+- Bulk listing on iPhone: choose photos for many items at once, group each item's photos, set the box, cost and labels every draft shares, and each item's SKU and measurements (typed or read from yardstick photos). Arrange and turn photos before creating, then create the drafts or create and generate them, the same as on desktop.
+
+## 0.1.777 — 2026-11-07
+
+- Poshmark's Size now shows the size List will send: a tag such as Large (12/14) or Waist 32 lands on Poshmark's own spelling, a 3XL tee lands in Big & Tall, and a kids' size lands in the boys' or girls' group the listing names.
+
+## 0.1.776 — 2026-11-07
+
+- Buttons, switches and charts use plain black and white instead of bright blue, on the web and iPhone.
+- Listing status shows as a small colored dot beside the word, so the inventory list is calmer.
+- The assistant's example questions are a simple list instead of floating bubbles.
+
+## 0.1.775 — 2026-11-07
+
+- On iPhone, New listing opens a draft right away. You no longer type a title first; the AI writes it.
+
+## 0.1.774 — 2026-11-07
+
+- On iPhone, the chat composer and tab bar use the system glass look, and the tab bar shrinks while you scroll.
+
+## 0.1.773 — 2026-11-07
+
+- Add photos from the Files app on iPhone, next to Camera and Library.
+
+## 0.1.772 — 2026-11-07
+
+- On a phone, the listing editor now matches the iPhone app: the form uses the full screen width, and you switch between General and each marketplace from a picker at the top instead of a sidebar.
+
+## 0.1.771 — 2026-11-07
+
+- Filter your inventory to sold listings that are missing sale details, such as fees, the sale price or the sale date, from the Filters menu.
+
 ## 0.1.770 — 2026-11-07
 
 - The iPhone's inventory Sort menu now has the same choices as the web app: Stalest, Freshest and Date Sold (Newest), which opens the Sold tab.

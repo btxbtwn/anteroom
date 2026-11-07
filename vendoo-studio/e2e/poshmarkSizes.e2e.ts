@@ -1,4 +1,4 @@
-import { test, expect, createListing, openListing, titleBox } from "./fixtures";
+import { test, expect, createListing, openListing, openForm, titleBox } from "./fixtures";
 
 // A real category/group from the bundled Poshmark form, with XS/S/M/L choices.
 const category = "01008c10d97b4e1245005764/04008c10d97b4e1245005764/18009813d97b4e3995005764";
@@ -24,7 +24,7 @@ for (const change of ["size", "system", "custom size during refresh"]) test(`cor
     });
     await openListing(page, phone, title);
     await expect(await titleBox(page, phone)).toBeVisible();
-    await page.getByRole("navigation", { name: "Marketplaces" }).getByRole("button", { name: /^Poshmark Poshmark/ }).click();
+    await openForm(page, phone, "Poshmark");
     if (custom) {
       const size = page.getByRole("textbox", { name: "Custom size 1", exact: true });
       await size.fill("Custom M");

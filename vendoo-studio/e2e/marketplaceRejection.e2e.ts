@@ -1,4 +1,4 @@
-import { createListing, expect, openListing, test, titleBox } from "./fixtures";
+import { createListing, expect, openListing, openForm, test, titleBox } from "./fixtures";
 
 test("a marketplace rejection leaves the form editable and List available for retry", async ({ page, phone, request }, info) => {
   const title = `Marketplace rejection ${info.project.name} ${Date.now()}`;
@@ -37,7 +37,7 @@ test("a marketplace rejection leaves the form editable and List available for re
     });
     await openListing(page, phone, title);
     await expect(await titleBox(page, phone)).toBeVisible();
-    await page.getByRole("navigation", { name: "Marketplaces" }).getByRole("button", { name: /^Poshmark Poshmark/ }).click();
+    await openForm(page, phone, "Poshmark");
     const list = page.getByRole("button", { name: "List…", exact: true });
     await expect(list).toBeEnabled();
     await list.click();
