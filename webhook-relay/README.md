@@ -16,10 +16,15 @@ ship: eBay's Cert ID and Etsy's shared secret.
   Anteroom fetches the details itself, so buyer names, addresses and prices
   never sit in the cloud. Unacknowledged events wait 30 days.
 - **Brokers sign-in.** eBay and Etsy only redirect to HTTPS, and eBay's code
-  exchange needs the Cert ID, so the relay hosts the callback, exchanges the
-  code, links the account, and hands the tokens to the device once (held at
-  most 15 minutes). Refreshes go through the relay for the same reason. For
-  eBay it also subscribes the seller to `ORDER_CONFIRMATION`.
+  exchange needs the Cert ID, so the relay hosts the callback and exchanges the
+  code. It then sends the approving browser back to the Anteroom that started
+  the sign-in (`returnTo`: this Mac's loopback finish page, Anteroom on the web,
+  or the iPhone app) with a one-time claim. The tokens (held at most 15 minutes,
+  with only the claim's hash) go to the device once, and only with that claim;
+  the account is linked to the device then. Someone who sends a seller a
+  sign-in link they started cannot collect the seller's tokens. Refreshes go
+  through the relay for the same reason. For eBay it also subscribes the seller
+  to `ORDER_CONFIRMATION`.
 - **Forwards Etsy API calls** with the app's `x-api-key`, only for Etsy
   accounts linked to the calling device. Nothing is stored.
 - **Forwards public eBay research** for linked devices: active keyword/image
@@ -35,14 +40,14 @@ ship: eBay's Cert ID and Etsy's shared secret.
 | `GET /ebay?challenge_code=` | eBay | Endpoint challenge |
 | `POST /ebay` | eBay | Notifications: sales, account deletion |
 | `POST /etsy` | Etsy | Order, listing and inventory webhooks |
-| `GET /oauth/{ebay,etsy}/callback` | Seller's browser | Finishes a sign-in |
+| `GET /oauth/{ebay,etsy}/callback` | Seller's browser | Exchanges the code, then redirects to `returnTo?marketplace=&state=&claim=` |
 | `GET /privacy` | Anyone | What the relay keeps |
 | `POST /devices` | Anteroom | Registers a device: `{deviceId, token}`. 5 per minute per IP |
 | `GET /studio/stream?after=<seq>` | Anteroom | WebSocket: backlog, then live events. Send `{"type":"ack","through":<seq>}` |
 | `GET /studio/events?after=<seq>` | Anteroom | Same events, pulled |
 | `POST /studio/ack` `{"through":<seq>}` | Anteroom | Drops events up to `seq` |
-| `POST /studio/oauth/{ebay,etsy}/start` | Anteroom | `{state, authorizeUrl}` to open in the browser |
-| `GET /studio/oauth/result?state=` | Anteroom | 202 while pending, then the account and tokens, once |
+| `POST /studio/oauth/{ebay,etsy}/start?returnTo=` | Anteroom | `{state, authorizeUrl}` to open in the browser; 400 for a `returnTo` that is not Anteroom's |
+| `GET /studio/oauth/result?state=&claim=` | Anteroom | 202 while pending or without the claim; 403 for a wrong claim; then the account and tokens, once. A failed sign-in is reported without a claim |
 | `POST /studio/oauth/{ebay,etsy}/refresh` `{"refreshToken"}` | Anteroom | New tokens; 401 means sign in again |
 | `GET /studio/accounts` | Anteroom | Linked accounts |
 | `DELETE /studio/accounts/{ebay,etsy}/<id>` | Anteroom | Unlinks one |

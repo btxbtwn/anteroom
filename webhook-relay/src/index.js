@@ -177,19 +177,41 @@ async function handleRegister(request, env) {
 
 // --- Sign-in ------------------------------------------------------------------
 
+// Where the approving browser goes back to: the Anteroom that started the
+// sign-in on this computer, Anteroom on the web, or the iPhone app. The claim
+// travels in that redirect, so it must never go anywhere else.
+function allowedReturn(env, marketplace, value) {
+  let target;
+  try {
+    target = new URL(value ?? "");
+  } catch {
+    return null;
+  }
+  if (target.username || target.password || target.search || target.hash) return null;
+  if (target.href === "anteroom://marketplace-signin") return target.href;
+  if (target.protocol === "http:" && ["127.0.0.1", "localhost"].includes(target.hostname)) {
+    return target.pathname === `/api/marketplace-accounts/${marketplace}/finish` ? target.href : null;
+  }
+  const webOrigins = (env.ANTEROOM_WEB_ORIGINS ?? "").split(",").map((origin) => origin.trim()).filter(Boolean);
+  return target.protocol === "https:" && target.pathname === "/" && webOrigins.includes(target.origin) ? target.href : null;
+}
+
 async function handleOAuthStart(env, deviceId, marketplace, url) {
+  if (marketplace !== "ebay" && marketplace !== "etsy") return json({ error: "unknown marketplace" }, 404);
+  const returnTo = allowedReturn(env, marketplace, url.searchParams.get("returnTo"));
+  if (!returnTo) return json({ error: "Update Anteroom to connect this marketplace." }, 400);
   const state = randomToken(24);
   if (marketplace === "ebay") {
     if (!ebayConfigured(env) || !env.EBAY_RUNAME) return json({ error: "eBay sign-in is not configured" }, 503);
     const features = (url.searchParams.get("features") || "").split(",").filter(Boolean);
     if (features.some((name) => !Object.hasOwn(EBAY_FEATURE_SCOPES, name))) return json({ error: "unknown eBay permission group" }, 400);
-    await directory(env).startSession(state, deviceId, "ebay");
+    await directory(env).startSession(state, deviceId, "ebay", returnTo);
     return json({ state, authorizeUrl: ebayAuthorizeUrl(env, state, features) });
   }
   if (marketplace === "etsy") {
     if (!etsyConfigured(env)) return json({ error: "Etsy sign-in is not configured" }, 503);
     const verifier = randomToken(48);
-    await directory(env).startSession(state, deviceId, "etsy", verifier);
+    await directory(env).startSession(state, deviceId, "etsy", returnTo, verifier);
     const authorizeUrl = etsyAuthorizeUrl(env, {
       state,
       challenge: await pkceChallenge(verifier),
@@ -197,7 +219,6 @@ async function handleOAuthStart(env, deviceId, marketplace, url) {
     });
     return json({ state, authorizeUrl });
   }
-  return json({ error: "unknown marketplace" }, 404);
 }
 
 function tokenSet(body) {
@@ -264,13 +285,15 @@ async function handleOAuthCallback(env, marketplace, url) {
       marketplace === "ebay"
         ? await completeEbay(env, url, code)
         : await completeEtsy(env, url, code, session.verifier);
-    await dir.link(marketplace, done.accountId, session.deviceId, done.label);
-    if (done.userId) await dir.link("etsy-user", done.userId, session.deviceId, done.label);
-    await dir.finishSession(state, done.result);
-    return callbackPage({
-      ok: true,
-      title: `${name} is connected`,
-      detail: `${done.label ? `${done.label} is` : "Your account is"} now linked to Anteroom. You can close this tab.`,
+    const link = [{ marketplace, accountId: done.accountId, label: done.label }];
+    if (done.userId) link.push({ marketplace: "etsy-user", accountId: done.userId, label: done.label });
+    const claim = randomToken(24);
+    await dir.finishSession(state, { link, result: done.result }, await sha256Hex(claim));
+    const back = new URL(session.returnTo);
+    back.search = new URLSearchParams({ marketplace, state, claim }).toString();
+    return new Response(null, {
+      status: 303,
+      headers: { location: back.href, "cache-control": "no-store", "referrer-policy": "no-referrer" },
     });
   } catch (error) {
     console.error(`[${name.toUpperCase()}] sign-in`, error.message);
@@ -362,9 +385,11 @@ async function handleStudio(request, env, url, deviceId) {
   if (start && request.method === "POST") return handleOAuthStart(env, deviceId, start[1], url);
   if (pathname === "/studio/oauth/result" && request.method === "GET") {
     const state = url.searchParams.get("state") ?? "";
-    const outcome = await directory(env).takeResult(state, deviceId);
+    const claim = url.searchParams.get("claim");
+    const outcome = await directory(env).takeResult(state, deviceId, claim ? await sha256Hex(claim) : null);
     if (outcome.status === "pending") return json({ status: "pending" }, 202);
     if (outcome.status === "unknown") return json({ status: "unknown" }, 404);
+    if (outcome.status === "refused") return json({ error: "this sign-in was not confirmed" }, 403);
     return json({ status: "done", ...outcome.result });
   }
   const refresh = /^\/studio\/oauth\/(ebay|etsy)\/refresh$/.exec(pathname);

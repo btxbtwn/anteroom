@@ -122,8 +122,30 @@ async function mockEbayBasics() {
   route("GET", /notification\/v1\/public_key\/kid-1/, () => ({ algorithm: "ECDSA", digest: "SHA1", key: pem }));
 }
 
-async function connectEbay(token, userId = "seller-1") {
-  await mockEbayBasics();
+const returnTo = (marketplace) => `http://127.0.0.1:4318/api/marketplace-accounts/${marketplace}/finish`;
+
+async function startSignIn(token, marketplace, { query = "", to = returnTo(marketplace) } = {}) {
+  const params = new URLSearchParams(query);
+  params.set("returnTo", to);
+  const response = await relay(`/studio/oauth/${marketplace}/start?${params}`, authed(token, { method: "POST" }));
+  expect(response.status).toBe(200);
+  return response.json();
+}
+
+// The seller's browser approves; the relay sends it back to Anteroom with a one-time claim.
+async function approve(marketplace, state, code) {
+  const callback = await relay(`/oauth/${marketplace}/callback?code=${code}&state=${state}`, { redirect: "manual" });
+  expect(callback.status).toBe(303);
+  const location = new URL(callback.headers.get("location"));
+  expect(location.searchParams.get("state")).toBe(state);
+  expect(location.searchParams.get("marketplace")).toBe(marketplace);
+  return { location, claim: location.searchParams.get("claim") };
+}
+
+const result = (token, state, claim) =>
+  relay(`/studio/oauth/result?${new URLSearchParams(claim === undefined ? { state } : { state, claim })}`, authed(token));
+
+function mockEbaySignIn(userId) {
   route("GET", /apiz\.ebay\.com\/commerce\/identity\/v1\/user/, () => ({ userId, username: `name-${userId}` }));
   route("GET", /notification\/v1\/destination/, () => ({ destinations: [] }));
   route("POST", /notification\/v1\/destination$/, () =>
@@ -131,23 +153,34 @@ async function connectEbay(token, userId = "seller-1") {
   );
   route("GET", /notification\/v1\/subscription/, () => ({ subscriptions: [] }));
   route("POST", /notification\/v1\/subscription$/, () => new Response(null, { status: 201 }));
-  const start = await (await relay("/studio/oauth/ebay/start", authed(token, { method: "POST" }))).json();
-  const callback = await relay(`/oauth/ebay/callback?code=abc&state=${start.state}`);
-  expect(callback.status).toBe(200);
-  return start;
 }
 
-async function connectEtsy(token, { userId = "777", shopId = "42" } = {}) {
+async function connectEbay(token, userId = "seller-1") {
+  await mockEbayBasics();
+  mockEbaySignIn(userId);
+  const start = await startSignIn(token, "ebay");
+  const { claim } = await approve("ebay", start.state, "abc");
+  const done = await result(token, start.state, claim);
+  expect(done.status).toBe(200);
+  return { ...start, result: await done.json() };
+}
+
+function mockEtsySignIn(userId, shopId) {
   route("POST", /api\.etsy\.com\/v3\/public\/oauth\/token/, () => ({
     access_token: `${userId}.access`,
     refresh_token: `${userId}.refresh`,
     expires_in: 3600,
   }));
   route("GET", new RegExp(`api\\.etsy\\.com/v3/application/users/${userId}/shops`), () => ({ shop_id: Number(shopId), shop_name: `Shop${shopId}` }));
-  const start = await (await relay("/studio/oauth/etsy/start", authed(token, { method: "POST" }))).json();
-  const callback = await relay(`/oauth/etsy/callback?code=etsy-code&state=${start.state}`);
-  expect(callback.status).toBe(200);
-  return start;
+}
+
+async function connectEtsy(token, { userId = "777", shopId = "42" } = {}) {
+  mockEtsySignIn(userId, shopId);
+  const start = await startSignIn(token, "etsy");
+  const { claim } = await approve("etsy", start.state, "etsy-code");
+  const done = await result(token, start.state, claim);
+  expect(done.status).toBe(200);
+  return { ...start, result: await done.json() };
 }
 
 // --- Tests -------------------------------------------------------------------
@@ -179,6 +212,85 @@ describe("devices", () => {
   });
 });
 
+describe("sign-in", () => {
+  it("only returns to Anteroom's own addresses", async () => {
+    const a = await register();
+    await mockEbayBasics();
+    const start = (to) =>
+      relay(`/studio/oauth/ebay/start${to === undefined ? "" : `?returnTo=${encodeURIComponent(to)}`}`, authed(a.token, { method: "POST" }));
+    for (const to of [
+      undefined,
+      "https://evil.example/",
+      "https://myanteroom.com.evil.example/",
+      "https://myanteroom.com/elsewhere",
+      "http://myanteroom.com/",
+      "http://127.0.0.1:4318/api/marketplace-accounts/etsy/finish",
+      "http://127.0.0.1:4318/api/settings",
+      "http://192.168.1.20:4318/api/marketplace-accounts/ebay/finish",
+      "http://user@127.0.0.1:4318/api/marketplace-accounts/ebay/finish",
+      "anteroom://login-callback",
+      "javascript:alert(1)",
+    ]) {
+      expect((await start(to)).status, String(to)).toBe(400);
+    }
+    for (const to of [
+      "http://127.0.0.1:4318/api/marketplace-accounts/ebay/finish",
+      "http://localhost:5173/api/marketplace-accounts/ebay/finish",
+      "https://myanteroom.com/",
+      "anteroom://marketplace-signin",
+    ]) {
+      expect((await start(to)).status, to).toBe(200);
+    }
+  });
+
+  it("returns the approving browser to the address the device asked for", async () => {
+    const a = await register();
+    for (const to of ["https://myanteroom.com/", "anteroom://marketplace-signin"]) {
+      mockEtsySignIn("790", "70");
+      const start = await startSignIn(a.token, "etsy", { to });
+      const { location } = await approve("etsy", start.state, "etsy-code");
+      expect(`${location.protocol}//${location.host}${location.pathname}`).toBe(to);
+    }
+  });
+
+  it("gives a device nothing for a sign-in someone else approved until Anteroom claims it", async () => {
+    const owner = await register();
+    const attacker = await register();
+    await connectEbay(owner.token, "victim");
+
+    // The attacker starts a sign-in and gets the victim to approve it.
+    const start = await startSignIn(attacker.token, "ebay");
+    const { claim } = await approve("ebay", start.state, "abc");
+
+    // Without the claim, which only the approving browser saw, there is nothing to collect.
+    const waiting = await result(attacker.token, start.state);
+    expect(waiting.status).toBe(202);
+    expect(await waiting.text()).not.toContain("ebay-user-token");
+    const guessed = await result(attacker.token, start.state, "guess");
+    expect(guessed.status).toBe(403);
+    expect(await guessed.text()).not.toContain("ebay-user-token");
+
+    // The victim's account stays linked to the victim's device.
+    const accounts = async (token) => (await (await relay("/studio/accounts", authed(token))).json()).accounts;
+    expect(await accounts(attacker.token)).toEqual([]);
+    expect((await accounts(owner.token)).map((x) => x.accountId)).toEqual(["victim"]);
+
+    // The claim is single use and links the account only when redeemed.
+    expect(claim).toMatch(/^[A-Za-z0-9_-]{32,}$/);
+  });
+
+  it("reports a cancelled sign-in to the device without a redirect", async () => {
+    const a = await register();
+    await mockEbayBasics();
+    const start = await startSignIn(a.token, "ebay");
+    const page = await relay(`/oauth/ebay/callback?state=${start.state}&error=access_denied`, { redirect: "manual" });
+    expect(page.status).toBe(400);
+    const done = await result(a.token, start.state);
+    expect(done.status).toBe(200);
+    expect(await done.json()).toMatchObject({ status: "done", marketplace: "ebay", error: "access_denied" });
+  });
+});
+
 describe("Etsy", () => {
   it("signs in with PKCE, hands the tokens over once, and links the shop", async () => {
     const a = await register();
@@ -194,22 +306,22 @@ describe("Etsy", () => {
     expect(await pkceChallenge(params.get("code_verifier"))).toBe(authorize.searchParams.get("code_challenge"));
     expect(exchange.headers.get("x-api-key")).toBe("test-keystring:test-shared-secret");
 
-    const result = await relay(`/studio/oauth/result?state=${start.state}`, authed(a.token));
-    expect(result.status).toBe(200);
-    const body = await result.json();
+    const body = start.result;
     expect(body).toMatchObject({ status: "done", marketplace: "etsy", accountId: "42", shopName: "Shop42" });
     expect(body.tokens).toMatchObject({ accessToken: "777.access", refreshToken: "777.refresh" });
-    expect((await relay(`/studio/oauth/result?state=${start.state}`, authed(a.token))).status).toBe(404);
+    expect((await result(a.token, start.state)).status).toBe(404);
 
     const accounts = await (await relay("/studio/accounts", authed(a.token))).json();
     expect(accounts.accounts).toEqual([expect.objectContaining({ marketplace: "etsy", accountId: "42", label: "Shop42" })]);
   });
 
-  it("does not hand one device's sign-in to another", async () => {
+  it("does not hand one device's sign-in to another, even with the claim", async () => {
     const a = await register();
     const b = await register();
-    const start = await connectEtsy(a.token, { userId: "778", shopId: "43" });
-    expect((await relay(`/studio/oauth/result?state=${start.state}`, authed(b.token))).status).toBe(404);
+    mockEtsySignIn("778", "43");
+    const start = await startSignIn(a.token, "etsy");
+    const { claim } = await approve("etsy", start.state, "etsy-code");
+    expect((await result(b.token, start.state, claim)).status).toBe(404);
   });
 
   it("refuses a reused or unknown sign-in link", async () => {
@@ -268,13 +380,14 @@ describe("Etsy", () => {
 describe("eBay", () => {
   it("grants feature groups explicitly and brokers public reads only for authenticated devices", async () => {
     const device = await register();
-    const start = await relay("/studio/oauth/ebay/start?features=messages,finances", authed(device.token, { method: "POST" }));
-    const scope = new URL((await start.json()).authorizeUrl).searchParams.get("scope");
+    const start = await startSignIn(device.token, "ebay", { query: "features=messages,finances" });
+    const scope = new URL(start.authorizeUrl).searchParams.get("scope");
     expect(scope).toContain("commerce.message");
     expect(scope).toContain("/sell.finances");
     expect(scope).not.toContain("sell.finances.earnings.read");
     expect(scope).not.toContain("sell.marketing");
-    expect((await relay("/studio/oauth/ebay/start?features=made-up", authed(device.token, { method: "POST" }))).status).toBe(400);
+    const madeUp = `/studio/oauth/ebay/start?features=made-up&returnTo=${encodeURIComponent(returnTo("ebay"))}`;
+    expect((await relay(madeUp, authed(device.token, { method: "POST" }))).status).toBe(400);
     const research = (operation, params = {}) => relay("/studio/ebay/research", authed(device.token, { method: "POST", body: JSON.stringify({ operation, params }) }));
     expect((await relay("/studio/ebay/research", { method: "POST" })).status).toBe(401);
     expect((await research("search", { q: "coat" })).status).toBe(403);
@@ -314,9 +427,8 @@ describe("eBay", () => {
     expect(subscription.headers.get("authorization")).toBe("Bearer ebay-user-token");
     expect(JSON.parse(subscription.body)).toMatchObject({ topicId: "ORDER_CONFIRMATION", destinationId: "dest-1" });
 
-    const result = await (await relay(`/studio/oauth/result?state=${start.state}`, authed(a.token))).json();
-    expect(result).toMatchObject({ marketplace: "ebay", accountId: "seller-a", username: "name-seller-a", warnings: [] });
-    expect(result.tokens.refreshToken).toBe("ebay-refresh");
+    expect(start.result).toMatchObject({ marketplace: "ebay", accountId: "seller-a", username: "name-seller-a", warnings: [] });
+    expect(start.result.tokens.refreshToken).toBe("ebay-refresh");
 
     const order = {
       metadata: { topic: "ORDER_CONFIRMATION", schemaVersion: "1.0", deprecated: false },
@@ -344,10 +456,9 @@ describe("eBay", () => {
     await mockEbayBasics();
     route("GET", /apiz\.ebay\.com\/commerce\/identity\/v1\/user/, () => ({ userId: "seller-w", username: "w" }));
     route("GET", /notification\/v1\/destination/, () => new Response("{}", { status: 500 }));
-    const start = await (await relay("/studio/oauth/ebay/start", authed(a.token, { method: "POST" }))).json();
-    expect((await relay(`/oauth/ebay/callback?code=abc&state=${start.state}`)).status).toBe(200);
-    const result = await (await relay(`/studio/oauth/result?state=${start.state}`, authed(a.token))).json();
-    expect(result.warnings).toHaveLength(1);
+    const start = await startSignIn(a.token, "ebay");
+    const { claim } = await approve("ebay", start.state, "abc");
+    expect((await (await result(a.token, start.state, claim)).json()).warnings).toHaveLength(1);
   });
 
   it("drops notifications for unlinked sellers and unlinks on account deletion", async () => {

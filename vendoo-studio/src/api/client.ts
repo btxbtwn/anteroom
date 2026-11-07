@@ -508,6 +508,10 @@ export const api = {
     status: () => request<DirectConnectionsStatus>("/marketplace-accounts"),
     connect: (marketplace: DirectMarketplace) =>
       request<{ authorizeUrl: string }>(`/marketplace-accounts/${marketplace}/connect`, { method: "POST" }),
+    finish: (marketplace: DirectMarketplace, state: string, claim: string) =>
+      request<{ marketplace: DirectMarketplace; label: string | null }>(`/marketplace-accounts/${marketplace}/finish`, {
+        method: "POST", body: JSON.stringify({ state, claim }),
+      }),
     cancel: (marketplace: DirectMarketplace) =>
       request<OkResponse>(`/marketplace-accounts/${marketplace}/connect`, { method: "DELETE" }),
     disconnect: (marketplace: DirectMarketplace) =>

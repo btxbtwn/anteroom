@@ -3,6 +3,8 @@ import time
 
 import httpx
 
+from vendoo_studio import config
+
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
 from test_seller_sessions import jwks, signing_keys  # noqa: F401
@@ -21,12 +23,15 @@ def test_each_seller_signs_in_to_their_own_ebay_through_the_relay(cloud, signing
     monkeypatch.setattr(VaultSecretStore, 'update', lambda self, account, mutator: vault.__setitem__((self.owner, account), mutator(vault.get((self.owner, account)))))
 
     async def relay(method, path, **kwargs):
-        calls.append((method, path))
+        params = kwargs.get('params') or {}
+        calls.append((method, path, params))
         if path.endswith('/start'):
-            return httpx.Response(200, json={'state': 'state-' + str(len(calls)), 'authorizeUrl': 'https://auth.ebay.com/x'})
-        if path == '/studio/oauth/result':
+            return httpx.Response(200, json={'state': 'alice-state', 'authorizeUrl': 'https://auth.ebay.com/x'})
+        if path == '/studio/oauth/result' and params.get('claim') == 'claim-from-browser':
             return httpx.Response(200, json={'accountId': 'alice-ebay', 'username': 'alice_closet',
                                              'tokens': {'accessToken': 'private-access', 'refreshToken': 'private-refresh', 'expiresIn': 7200}})
+        if path == '/studio/oauth/result':
+            return httpx.Response(202, json={'status': 'pending'})
         return httpx.Response(204)
 
     monkeypatch.setattr(marketplace_accounts, 'relay_request', relay)
@@ -38,12 +43,19 @@ def test_each_seller_signs_in_to_their_own_ebay_through_the_relay(cloud, signing
     started = client.post('/api/marketplace-accounts/ebay/connect', headers=alice)
     assert started.status_code == 200, started.text
     assert started.json() == {'authorizeUrl': 'https://auth.ebay.com/x'}
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        status = client.get('/api/marketplace-accounts', headers=alice).json()
-        if status['accounts']['ebay']['connected']:
-            break
-        time.sleep(0.05)
+    start_params = next(params for _method, path, params in calls if path.endswith('/start'))
+    assert start_params['returnTo'] == f'{config.HOSTED_URL}/'
+    state = 'alice-state'
+    time.sleep(0.1)
+    assert not client.get('/api/marketplace-accounts', headers=alice).json()['accounts']['ebay']['connected']
+    # Bob's browser cannot finish Alice's sign-in, even with the claim.
+    finish = {'state': state, 'claim': 'claim-from-browser'}
+    assert client.post('/api/marketplace-accounts/ebay/finish', headers=bob, json=finish).status_code == 409
+    assert not any(params.get('claim') for _m, path, params in calls if path == '/studio/oauth/result')
+    done = client.post('/api/marketplace-accounts/ebay/finish', headers=alice, json=finish)
+    assert done.status_code == 200, done.text
+    assert done.json() == {'marketplace': 'ebay', 'label': 'alice_closet'}
+    status = client.get('/api/marketplace-accounts', headers=alice).json()
     assert status['accounts']['ebay'] == {'connected': True, 'label': 'alice_closet', 'connectedAt': status['accounts']['ebay']['connectedAt'],
                                           'pending': False, 'authorizeUrl': None, 'error': None}
     assert 'private-access' not in client.get('/api/marketplace-accounts', headers=alice).text
@@ -56,3 +68,19 @@ def test_each_seller_signs_in_to_their_own_ebay_through_the_relay(cloud, signing
     assert client.delete('/api/marketplace-accounts/ebay', headers=alice).status_code == 200
     assert not client.get('/api/marketplace-accounts', headers=alice).json()['accounts']['ebay']['connected']
     assert not any('private-access' in str(value) for value in vault.values())
+
+
+def test_the_iphone_app_asks_the_relay_to_return_to_the_app(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, _ = cloud
+    starts = []
+
+    async def relay(method, path, **kwargs):
+        if path.endswith('/start'):
+            starts.append(kwargs.get('params'))
+            return httpx.Response(200, json={'state': 'state-app', 'authorizeUrl': 'https://auth.ebay.com/x'})
+        return httpx.Response(202, json={'status': 'pending'})
+
+    monkeypatch.setattr(marketplace_accounts, 'relay_request', relay)
+    reply = client.post('/api/marketplace-accounts/ebay/connect', headers=headers(signing_keys), json={'client': 'app'})
+    assert reply.status_code == 200, reply.text
+    assert starts[0]['returnTo'] == 'anteroom://marketplace-signin'
