@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.756 — 2026-11-07
+
+- Listing, delisting, checking results and importing listings no longer tie up the cloud database while Chrome, eBay or Etsy answers, so other pages keep loading during those actions.
+
 ## 0.1.755 — 2026-11-07
 
 - On the web, one seller's slow image upload no longer holds up everyone else's chat messages.
