@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.777 — 2026-11-07
+
+- Poshmark's Size now shows the size List will send: a tag such as Large (12/14) or Waist 32 lands on Poshmark's own spelling, a 3XL tee lands in Big & Tall, and a kids' size lands in the boys' or girls' group the listing names.
+
 ## 0.1.776 — 2026-11-07
 
 - Buttons, switches and charts use plain black and white instead of bright blue, on the web and iPhone.
