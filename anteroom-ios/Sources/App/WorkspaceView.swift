@@ -58,6 +58,20 @@ struct WorkspaceView: View {
             SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
+        .minimizingTabBarOnScroll()
+    }
+}
+
+private extension View {
+    /// On iOS 26 the tab bar shrinks while the seller scrolls down a list and
+    /// comes back on scroll up, leaving more room for listings. Its labels stay.
+    @ViewBuilder
+    func minimizingTabBarOnScroll() -> some View {
+        if #available(iOS 26, *) {
+            tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
+        }
     }
 }
 

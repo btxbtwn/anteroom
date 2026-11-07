@@ -60,8 +60,44 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/conversations"))
     }
 
-    func createListing(title: String) async throws -> ListingSummary {
-        try await decode(request("POST", "api/conversations", json: ["title": title]))
+    /// An untitled draft, like the web's New listing; generation names it.
+    /// Bulk listing passes each item's Item Details notes and its box.
+    func createListing(notes: String? = nil, boxID: String? = nil) async throws -> ListingSummary {
+        struct Body: Encodable {
+            let notes: String?
+            let boxID: String?
+            enum CodingKeys: String, CodingKey {
+                case notes
+                case boxID = "box_id"
+            }
+        }
+        return try await decode(request("POST", "api/conversations", json: Body(notes: notes, boxID: boxID)))
+    }
+
+    /// The boxes the seller bought stock in, newest first as the server orders them.
+    func boxes() async throws -> [SourceBox] {
+        struct Page: Decodable { let boxes: [SourceBox] }
+        let page: Page = try await decode(request("GET", "api/boxes"))
+        return page.boxes
+    }
+
+    /// Suggests an item's measurements from photos not uploaded yet, the way
+    /// the web's bulk upload does. The server reads at most 20. Saves nothing.
+    func readMeasurements(jpegs: [Data], garment: SellerInputs.Garment) async throws -> MeasurementReading {
+        let boundary = "anteroom-\(UUID().uuidString)"
+        var body = Data()
+        for (index, jpeg) in jpegs.prefix(20).enumerated() {
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"files\"; filename=\"photo\(index).jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".utf8))
+            body.append(jpeg)
+            body.append(Data("\r\n".utf8))
+        }
+        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"garment\"\r\n\r\n\(garment.rawValue)\r\n--\(boundary)--\r\n".utf8))
+        var upload = try await request("POST", "api/measurements/read")
+        upload.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        upload.httpBody = body
+        // Each reading is several photo-model calls.
+        upload.timeoutInterval = 180
+        return try await decode(upload)
     }
 
     func conversation(_ id: String) async throws -> ConversationDetail {
