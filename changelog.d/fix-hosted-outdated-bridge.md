@@ -1,1 +1,0 @@
-- myanteroom.com now tells you when Chrome is running an older Anteroom Bridge than the site, so fixes such as Depop offers on marked-down items reach your Chrome instead of failing quietly.
