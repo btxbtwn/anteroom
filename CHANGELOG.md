@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.763 — 2026-11-07
+
+- eBay and Etsy sales now fill in their own amounts: eBay records the sale price, shipping the buyer paid, eBay's fees, refunds and eBay shipping labels; Etsy records the sale price, shipping the buyer paid and refunds. Older sales without amounts are filled in a few at a time.
+- Amounts you entered yourself are never replaced, and your cost of goods is kept.
+
 ## 0.1.762 — 2026-11-07
 
 - Keep a marketplace action running when another server checks on it, and let Cancel reach it from any server.
