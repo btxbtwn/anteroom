@@ -28,6 +28,12 @@ log = logging.getLogger("vendoo_studio.claude")
 
 MAX_PROCESSES = 12
 IDLE_CLOSE_SEC = 180.0
+# ``/clear`` answers in well under a second. A process that has not answered
+# in this long is wedged: closing it frees its slot, where waiting held the slot
+# forever and, once every slot was held, every later Claude call with it.
+CLEAR_TIMEOUT_SEC = 30.0
+# Closing a process that ignores the request must not hold its caller either.
+DISCONNECT_TIMEOUT_SEC = 10.0
 
 
 @dataclass
@@ -193,13 +199,15 @@ async def _connect(options: Any) -> Any:
 
 async def _disconnect(client: Any) -> None:
     with contextlib.suppress(Exception):
-        await client.disconnect()
+        async with asyncio.timeout(DISCONNECT_TIMEOUT_SEC):
+            await client.disconnect()
 
 
 async def _clear(client: Any) -> None:
-    await client.query("/clear")
-    async for _ in client.receive_response():
-        pass
+    async with asyncio.timeout(CLEAR_TIMEOUT_SEC):
+        await client.query("/clear")
+        async for _ in client.receive_response():
+            pass
 
 
 @contextlib.asynccontextmanager
