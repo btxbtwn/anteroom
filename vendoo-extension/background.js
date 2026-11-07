@@ -432,4 +432,5 @@ async function handleStudioMessage(msg) {
 importScripts('cloud-marketplace-protocol.js');
 importScripts('background/cloud-marketplace-forms.js');
 importScripts('background/cloud-marketplace-actions.js');
+importScripts('background/cloud-approvals.js');
 importScripts('background/cloud-connection.js');

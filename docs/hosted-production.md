@@ -277,6 +277,45 @@ live generation.
 has been run. There is no separate staging app in this change, so that load
 was not pointed at production.
 
+## 6. Bridge approval key
+
+The hosted API signs every marketplace write it relays to the seller's Chrome
+(List, Update, Save draft, result checks, Delist, shares and offers, Vendoo
+drafts). Anteroom Bridge 0.2.56 and later run none of them without that
+signature, so a script on the Anteroom page cannot list, change or delete a
+listing on its own. See [the Bridge protocol](cloud-extension.md#signed-approvals).
+
+The private key is the Fly secret **`ANTEROOM_BRIDGE_SIGNING_KEY`**: an ECDSA
+P-256 key in PKCS#8 PEM. Generate it once, on a trusted computer, and never
+commit it:
+
+```bash
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out bridge-signing.pem
+fly secrets set ANTEROOM_BRIDGE_SIGNING_KEY="$(cat bridge-signing.pem)" --stage
+openssl pkey -in bridge-signing.pem -pubout | sed '1d;$d' | tr -d '\n'; echo
+```
+
+The last command prints the public key. Put that one line in
+`BRIDGE_APPROVAL_PUBLIC_KEY` in `vendoo-extension/background/cloud-approvals.js`.
+The two must be a pair: a Bridge with another key, or none, refuses every write
+from the web and tells the seller why. Keep the PEM file in the team's password
+manager, not on disk. Every API Machine needs the same secret.
+
+Roll out in this order, because installed Bridges update days after a release:
+
+1. Set the secret (staged, as above).
+2. Deploy the API. It signs writes only for a Bridge that declares
+   `marketplace.signed_approvals`, so Bridges already installed keep working
+   unchanged.
+3. Release the Bridge with the matching public key. From then on, that Bridge
+   refuses any relayed write without a valid approval.
+
+Rotating the key is the same three steps. Approvals last five minutes, so a
+Bridge released with the new key refuses writes signed with the old one: deploy
+the API with the new secret first, then release the Bridge promptly. Without the
+secret the API logs a warning for each write and sends it unsigned, which a
+current Bridge refuses.
+
 ## Audit
 
 | Priority | State on 2026-11-03 | Still required |

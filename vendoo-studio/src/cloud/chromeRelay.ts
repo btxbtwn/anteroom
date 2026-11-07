@@ -24,8 +24,9 @@ function approvedPhotos(command: RelayedCommand): { id: string; mime_type: strin
     typeof photo?.id === "string" && typeof photo?.mime_type === "string");
 }
 
-/** What a Bridge may declare it runs for the hosted API: marketplace actions, and each named read. */
-export const RELAY_CAPABILITIES = ["marketplace.actions", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts"] as const;
+/** What a Bridge may declare it runs for the hosted API: marketplace actions, each named read,
+ * and checking the server's signed approval on every write. */
+export const RELAY_CAPABILITIES = ["marketplace.actions", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts", "marketplace.signed_approvals"] as const;
 
 async function nextCommand(capabilities: readonly string[]): Promise<RelayedCommand | null> {
   const declared = RELAY_CAPABILITIES.filter((capability) => capabilities.includes(capability));
