@@ -1,5 +1,8 @@
 """Catch missed eBay and Etsy sale notifications while the seller uses their workspace.
 
+Each catch-up also records the sale amounts of those orders, and of a few
+older recorded sales that have none yet (see ``order_amounts``).
+
 Reuses read-only order recovery: never notifies, delists or changes stock.
 The seven-day overlap also refreshes cancellations without trusting webhooks.
 """
@@ -10,7 +13,7 @@ import logging
 import time
 from datetime import UTC, datetime, timedelta
 
-from vendoo_studio.services import order_recovery
+from vendoo_studio.services import order_amounts, order_recovery
 from vendoo_studio.services.service_context import current
 from vendoo_studio.services.user_settings import sale_detection_enabled
 
@@ -67,5 +70,9 @@ async def _refresh(marketplace: str) -> None:
             through = datetime.fromisoformat(result["through"])
     except Exception:  # One failed catch-up must not break the workspace or expose provider payloads.
         log.warning("Recent %s orders could not be checked; the next catch-up will retry", name)
+    try:
+        await order_amounts.backfill(marketplace, factory)
+    except Exception:  # Older sales' amounts wait for the next catch-up.
+        log.warning("Earlier %s sale amounts could not be read; the next catch-up will retry", name)
     finally:
         _running.discard(key)

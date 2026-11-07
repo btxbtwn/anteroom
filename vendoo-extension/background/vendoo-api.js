@@ -268,13 +268,9 @@ async function vendooFetchOnce(url, { method = 'GET', token, json, body, headers
   };
   const requestBody = json !== undefined ? JSON.stringify(json) : body;
   try {
-    const res = await fetch(url, {
-      method,
-      credentials: 'include',
-      signal: controller.signal,
-      headers: requestHeaders,
-      body: requestBody,
-    });
+    const init = { method, credentials: 'include', signal: controller.signal, headers: requestHeaders };
+    if (requestBody !== undefined) init.body = requestBody;
+    const res = await fetch(url, init);
     let data = null;
     if (responseType === 'json') {
       const text = await res.text();
@@ -323,7 +319,7 @@ async function uploadVendooPhoto(session, photo) {
       // another. Cache only completed PUTs, bounded by count and age.
       const write = vendooPhotoCacheWrite.catch(() => {}).then(async () => {
         const latest = await chrome.storage.local.get(cacheKey);
-        const entries = { ...(latest?.[cacheKey] || {}), [photoKey]: { image, at: Date.now() } };
+        const entries = { ...latest?.[cacheKey], [photoKey]: { image, at: Date.now() } };
         const retained = Object.entries(entries)
           .filter(([, entry]) => Date.now() - entry.at < VENDOO_PHOTO_CACHE_TTL_MS)
           .sort((a, b) => b[1].at - a[1].at)

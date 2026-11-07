@@ -78,7 +78,7 @@ function FooterButton({
         render={
           <button
             type="button"
-            className={cn(SIDEBAR_ICON_BUTTON, LABELED_BUTTON)}
+            className={cn(SIDEBAR_ICON_BUTTON, LABELED_BUTTON, "group/footer-page")}
             aria-label={label}
             aria-current={active ? "page" : undefined}
             data-active={active}
@@ -89,7 +89,10 @@ function FooterButton({
         }
       >
         <Icon />
-        <span className="hidden truncate @min-[18rem]/footer:inline">{label}</span>
+        {/* The icon colour is too faint for text; the name uses the sidebar's muted text colour. */}
+        <span className="hidden truncate text-sidebar-muted-foreground group-hover/footer-page:text-sidebar-foreground group-data-[active=true]/footer-page:text-sidebar-foreground @min-[18rem]/footer:inline">
+          {label}
+        </span>
       </TooltipTrigger>
       <TooltipPopup side="top">{label}</TooltipPopup>
     </Tooltip>

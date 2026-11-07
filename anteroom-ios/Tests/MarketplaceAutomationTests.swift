@@ -171,6 +171,9 @@ struct MarketplaceAutomationTests {
                    "batch_id":"b","marketplace":"poshmark"}]}
         """#.utf8))
         precondition(activity.sends[0].state == "unknown" && activity.runs[0].note == "Stopped")
+        precondition(EbayOffersForm.sendButton(count: 1) == "Send 1 offer now")
+        precondition(EbayOffersForm.sendQuestion(count: 3) == "Send 3 offers to buyers on eBay now?")
+        precondition(EbayOffersForm.enableQuestion(count: 1) == "Turn on automatic offers for 1 listing?")
         print("Marketplace automation tests passed")
     }
 }

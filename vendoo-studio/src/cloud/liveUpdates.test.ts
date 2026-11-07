@@ -2,7 +2,7 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IDLE_POLL_MS, LIVE_IDLE_POLL_MS, pollMs, setLiveUpdates } from "../api/polling";
 import { createStudioQueryClient, LIVE_STALE_MS, STALE_MS } from "../api/queryClient";
-import { followSellerChanges, invalidateTopics, queryKeyMatchesTopic, TOPIC_QUERY_KEYS } from "./liveUpdates";
+import { followSellerChanges, INVENTORY_REFRESH_MS, invalidateTopics, queryKeyMatchesTopic, TOPIC_QUERY_KEYS } from "./liveUpdates";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -183,6 +183,39 @@ describe("followSellerChanges", () => {
     fake.change("jobs");
     vi.advanceTimersByTime(300);
     expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-reads the inventory list at most once per window while a job streams changes", async () => {
+    vi.useFakeTimers();
+    const fake = fakeSupabase();
+    const client = new QueryClient();
+    const inventory = vi.fn(async () => []);
+    const jobs = vi.fn(async () => []);
+    const observers = [
+      new QueryObserver(client, { queryKey: ["conversations"], queryFn: inventory, staleTime: Infinity }),
+      new QueryObserver(client, { queryKey: ["jobs"], queryFn: jobs, staleTime: Infinity }),
+    ];
+    const unsubscribe = observers.map((observer) => observer.subscribe(() => {}));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(inventory).toHaveBeenCalledTimes(1);
+    const stop = followSellerChanges(fake.client as never, "seller-1", "token", client);
+    await Promise.resolve();
+    fake.status("SUBSCRIBED");
+    // Ten bursts, one every 400 ms: jobs follow each one, the list at most every five seconds.
+    for (let burst = 0; burst < 10; burst += 1) {
+      fake.change("jobs");
+      await vi.advanceTimersByTimeAsync(400);
+    }
+    expect(jobs).toHaveBeenCalledTimes(11);
+    // The first read, then the first burst's.
+    expect(inventory).toHaveBeenCalledTimes(2);
+    // The last change is still fetched once the window passes, and nothing after it.
+    await vi.advanceTimersByTimeAsync(INVENTORY_REFRESH_MS);
+    expect(inventory).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(INVENTORY_REFRESH_MS * 2);
+    expect(inventory).toHaveBeenCalledTimes(3);
+    stop();
+    unsubscribe.forEach((off) => off());
   });
 
   it("catches up on everything after the channel reconnects", async () => {

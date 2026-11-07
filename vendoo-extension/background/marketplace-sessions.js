@@ -13,6 +13,7 @@ function sessionLabel(record) {
     const value = record[key];
     if (typeof value !== 'string') continue;
     const label = value.trim();
+    // oxlint-disable-next-line no-control-regex -- rejects labels with control characters
     if (label && label.length <= 80 && !/[\u0000-\u001f]/.test(label)) return label;
   }
   return null;

@@ -36,7 +36,7 @@
       category_id: String(value.category_id || ''), fields };
     try { return JSON.stringify(result).length <= 6_000_000 ? result : null; } catch { return null; }
   }
-  // Marketplace commands the hosted API relays, already approved and confirmed there.
+  // Marketplace commands the hosted API relays, approved and confirmed there and signed (background/cloud-approvals.js).
   const COMMANDS = new Set(['marketplace.execute', 'marketplace.result', 'marketplace.delete', 'job.cancel']);
   // The marketplaces the web reaches only through the seller's Chrome.
   const MARKETPLACES = new Set(['poshmark', 'mercari', 'depop']);
@@ -73,7 +73,7 @@
           if (!Number.isInteger(p.discount_percent) || p.discount_percent < 1 || p.discount_percent > 99) return false;
         }
       } else {
-        keys.push('action_id', 'confirm', 'price_cents', 'offer_price_cents', 'floor_cents', 'shipping_discount_id', 'gap_ms');
+        keys.push('action_id', 'confirm', 'price_cents', 'offer_price_cents', 'floor_cents', 'shipping_discount_id', 'gap_ms', 'approval');
         const cents = n => Number.isInteger(n) && n > 0 && n <= 2147483647;
         if (p.confirm !== true || !/^[A-Za-z0-9-]{6,64}$/.test(p.action_id || '') || !cents(p.price_cents)) return false;
         if (p.action === 'offer' ? (!cents(p.offer_price_cents) || !cents(p.floor_cents) || p.offer_price_cents < p.floor_cents)
@@ -91,6 +91,8 @@
     if (!plain(value) || Object.keys(value).some(key => !['type', 'job_id', 'message_id', 'payload'].includes(key))) return null;
     const payload = value.payload;
     if (!/^[0-9a-f]{32}$/.test(value.message_id || '') || !plain(payload) || payload.request_id !== value.message_id) return null;
+    // The hosted API's signed approval of a write, checked by the worker before it runs.
+    if (Object.hasOwn(payload, 'approval') && (typeof payload.approval !== 'string' || payload.approval.length > 3000)) return null;
     if (value.type === 'job.vendoo_api') {
       if (payload.listing_mode !== 'vendoo' || !/^[a-f0-9-]{1,64}$/i.test(value.job_id || '')
           || size(value) > 2_000_000 || !Array.isArray(payload.ops) || !payload.ops.length) return null;

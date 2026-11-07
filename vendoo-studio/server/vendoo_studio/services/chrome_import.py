@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.schema import VALID_CONDITIONS, ListingSchema
 from vendoo_studio.repositories.queries import ConversationRepo
@@ -152,12 +153,16 @@ def suggested_match(db: Session, marketplace: str, title: str, price: float | No
     return None
 
 
-async def active_listings(db: Session, marketplace: str, cursor: str | None) -> dict:
+async def active_listings(marketplace: str, cursor: str | None) -> dict:
     _check(marketplace)
     reply = await _ask(marketplace, "marketplace.import.page", {"cursor": cursor})
     raw = reply.get("rows")
     if not isinstance(raw, list):
         raise ChromeImportError(502, f"Chrome did not return {_name(marketplace)}'s listings.")
+    return await in_worker_session(_page, marketplace, reply, raw)
+
+
+def _page(db: Session, marketplace: str, reply: dict, raw: list) -> dict:
     items = match_candidates(db)
     rows = []
     for entry in raw[:MAX_ROWS]:
@@ -243,36 +248,40 @@ async def _read(marketplace: str, listing_id: str) -> dict:
     return listing
 
 
-async def import_listing(db: Session, marketplace: str, listing: str) -> dict:
-    """Create a local item for one listing, or reopen the item that already has it."""
-    listing_id = listing_id_from(marketplace, listing)
+def _already_imported(db: Session, marketplace: str, listing_id: str) -> dict | None:
     try:
         existing = inventory_import.owner(db, marketplace, listing_id)
     except inventory_import.ImportConflict as exc:
         raise ChromeImportError(409, str(exc)) from exc
-    if existing:
-        return {"conversation_id": existing.id, "listing_id": listing_id, "reused": True, "linked": False,
-                "photo_count": len(ConversationRepo(db).get_photos(existing.id)),
-                "warnings": ["Already in Anteroom. Existing edits and photos were kept."]}
-    db.commit()  # Only reads are open. Hold no connection while Chrome reads the listing.
+    if not existing:
+        return None
+    return {"conversation_id": existing.id, "listing_id": listing_id, "reused": True, "linked": False,
+            "photo_count": len(ConversationRepo(db).get_photos(existing.id)),
+            "warnings": ["Already in Anteroom. Existing edits and photos were kept."]}
+
+
+async def import_listing(marketplace: str, listing: str) -> dict:
+    """Create a local item for one listing, or reopen the item that already has it."""
+    listing_id = listing_id_from(marketplace, listing)
+    if existing := await in_worker_session(_already_imported, marketplace, listing_id):
+        return existing
     data, photos = snapshot(marketplace, await _read(marketplace, listing_id))
     try:
-        result = await inventory_import.save_owned_listing(db, marketplace, listing_id, data, photos, lambda: None)
+        result = await inventory_import.save_owned_listing(marketplace, listing_id, data, photos, lambda: None)
     except inventory_import.ImportConflict as exc:
         raise ChromeImportError(409, str(exc)) from exc
     return {**result, "linked": False}
 
 
-async def link_listing(db: Session, marketplace: str, listing: str, conversation_id: str) -> dict:
+async def link_listing(marketplace: str, listing: str, conversation_id: str) -> dict:
     """Link a listing to an item the seller chose. The item's own edits and photos stay as they are."""
     listing_id = listing_id_from(marketplace, listing)
 
     async def verify() -> None:
         # The listing must still be the seller's and still for sale before it is linked.
-        db.commit()  # Only reads are open. Hold no connection while Chrome reads the listing.
         await _read(marketplace, listing_id)
 
     try:
-        return await inventory_import.link_owned_listing(db, marketplace, listing_id, conversation_id, verify)
+        return await inventory_import.link_owned_listing(marketplace, listing_id, conversation_id, verify)
     except inventory_import.LinkError as exc:
         raise ChromeImportError(exc.status_code, str(exc)) from exc

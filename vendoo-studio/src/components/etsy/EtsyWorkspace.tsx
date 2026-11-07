@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, RefreshCwIcon, Settings2Icon } from "lucide-react";
 import { api } from "../../api/client";
+import { BUSY_POLL_MS, pollMs } from "../../api/polling";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { WorkspaceTabs } from "../ebay/WorkspaceTabs";
 import "../ebay/ebay.css";
@@ -25,7 +26,7 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
   const queryClient = useQueryClient();
   const connection = useQuery({
     queryKey: ["direct-connections"], queryFn: api.directConnections.status,
-    refetchInterval: (query) => query.state.data?.accounts.etsy.pending ? 2000 : 15000,
+    refetchInterval: (query) => pollMs(query.state.data?.accounts.etsy.pending ? BUSY_POLL_MS : 15000),
   });
   const account = connection.data?.accounts.etsy;
   const connected = Boolean(account?.connected);

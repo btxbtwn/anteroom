@@ -146,6 +146,21 @@ struct InventoryTests {
         let encoded = try JSONEncoder().encode(saved)
         let reread = try JSONDecoder().decode([String: JSONValue].self, from: encoded)
         precondition(reread == saved)
+
+        // Job events reload the inventory only while a row is generating or working on a marketplace.
+        precondition(InventoryQuery.hasWorkInProgress(rows), "Green hat is in progress")
+        precondition(!InventoryQuery.hasWorkInProgress(Array(rows.prefix(4))))
+        var publishing = rows[0]
+        publishing.directRecords = ["ebay": DirectRecord(state: "publishing")]
+        precondition(InventoryQuery.hasWorkInProgress([publishing]))
+        publishing.directRecords = ["ebay": DirectRecord(state: "published")]
+        precondition(!InventoryQuery.hasWorkInProgress([publishing]))
+
+        // Returning to the app reloads only an inventory at least 30 seconds old.
+        let loaded = Date(timeIntervalSince1970: 1_800_000_000)
+        precondition(InventoryQuery.isStale(loadedAt: nil, now: loaded))
+        precondition(!InventoryQuery.isStale(loadedAt: loaded, now: loaded.addingTimeInterval(29)))
+        precondition(InventoryQuery.isStale(loadedAt: loaded, now: loaded.addingTimeInterval(30)))
         print("Inventory tests passed")
     }
 

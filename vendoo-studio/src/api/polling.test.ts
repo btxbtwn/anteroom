@@ -5,6 +5,8 @@ import {
   fillLogPollMs,
   hasOpenJob,
   IDLE_POLL_MS,
+  INVENTORY_BUSY_POLL_MS,
+  inventoryPollMs,
   jobsPollMs,
   LIVE_IDLE_POLL_MS,
   LIVE_POLL_MS,
@@ -67,5 +69,19 @@ describe("query poll rules", () => {
     expect(fillLogPollMs("dispatched")).toBe(BUSY_POLL_MS);
     expect(activityPollMs(false)).toBe(IDLE_POLL_MS);
     expect(activityPollMs(true)).toBe(LIVE_POLL_MS);
+  });
+});
+
+describe("inventoryPollMs", () => {
+  it("polls a little faster only while a row is being sent and nothing live announces it", () => {
+    focusWindow(true);
+    expect(inventoryPollMs(undefined)).toBe(IDLE_POLL_MS);
+    expect(inventoryPollMs([{ status: "draft" }, { status: "active" }])).toBe(IDLE_POLL_MS);
+    expect(inventoryPollMs([{ status: "draft" }, { status: "listing" }])).toBe(INVENTORY_BUSY_POLL_MS);
+    setLiveUpdates(true);
+    expect(inventoryPollMs([{ status: "listing" }])).toBe(LIVE_IDLE_POLL_MS);
+    setLiveUpdates(false);
+    focusWindow(false);
+    expect(inventoryPollMs([{ status: "listing" }])).toBe(IDLE_POLL_MS);
   });
 });

@@ -50,8 +50,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const name = marketplaceName(marketplace);
   const ownKey = ["photos", convId, marketplace];
-  const { data: item = [] } = useQuery({ queryKey: ["photos", convId], queryFn: () => api.conversations.photos(convId) });
-  const { data: own = [] } = useQuery({ queryKey: ownKey, queryFn: () => api.conversations.photos(convId, marketplace) });
+  const { data: item = [] } = useQuery({ queryKey: ["photos", convId], queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }) });
+  const { data: own = [] } = useQuery({ queryKey: ownKey, queryFn: ({ signal }) => api.conversations.photos(convId, marketplace, { signal }) });
   const { data: rules } = useQuery({ queryKey: ["marketplace-media"], queryFn: api.marketplaceMedia.rules, staleTime: Infinity });
   const videoRules = runtime.hosted ? undefined : rules?.video_rules?.[marketplace];
   const { data: library } = useQuery({

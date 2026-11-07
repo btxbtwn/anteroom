@@ -23,7 +23,7 @@ fi
 
 if [[ ! -x "$PYTHON" ]]; then
   echo "Create the Python environment first:" >&2
-  echo "  cd $ROOT && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e '.[package]'" >&2
+  echo "  cd $ROOT && python3.12 -m venv .venv" >&2
   exit 1
 fi
 
@@ -33,7 +33,8 @@ fi
 }
 
 cd "$ROOT"
-"$PYTHON" -m pip install -e ".[package]"
+# The exact packages uv.lock pins, hash-checked, so the app ships what CI tested.
+"$ROOT/scripts/install-locked.sh" "$PYTHON" package
 if [[ ! -d node_modules ]]; then
   npm install
 fi

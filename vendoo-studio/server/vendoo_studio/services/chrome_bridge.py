@@ -25,6 +25,8 @@ CHROME_APP_BINARIES = (
 )
 
 EXTENSION_SKIP = {
+    # Developer notes and form-sweep tools in vendoo-extension/; Chrome never loads them.
+    "AGENTS.md",
     ".git",
     ".gitignore",
     ".playwright-mcp",
@@ -34,6 +36,7 @@ EXTENSION_SKIP = {
     "sample-listing.json",
     "studio-build.js",
     "tests",
+    "tools",
 }
 
 BUILD_STAMP_NAME = "studio-build.js"

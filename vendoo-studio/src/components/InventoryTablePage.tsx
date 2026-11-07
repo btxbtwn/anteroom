@@ -28,6 +28,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./u
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import { useInventoryReadiness } from "./useInventoryReadiness";
 import { EmptyRow, Panel, WorkspacePage } from "./WorkspacePage";
+import { setListingSearch, useListingSearch } from "./sidebar/listingSearch";
 
 const ROW_HEIGHT = 56;
 // Narrow enough on a phone that the first marketplace column shows beside it.
@@ -48,17 +49,13 @@ const BADGE_VARIANT: Record<MarketplaceCellKind, "success" | "info" | "warning" 
 
 export function InventoryTablePage({
   conversations,
-  query,
-  onQueryChange,
   onOpenListing,
 }: {
   conversations: Listing[] | undefined;
-  query: string;
-  onQueryChange: (query: string) => void;
   /** Opens the listing's editor, on a marketplace's tab when one is named. */
   onOpenListing: (id: string, tab?: string) => void;
 }) {
-  "use no memo"; // TanStack's mutable virtualizer must be read on every render.
+  const query = useListingSearch();
   const runtime = useWorkspaceRuntime();
   const [status, setStatus] = useState<ListingStatusFilter>("all");
   const [sort, setSort] = useState<ListingSortId>("recent");
@@ -78,7 +75,7 @@ export function InventoryTablePage({
   const tabs = (["all", ...LISTING_STATUS_TABS] as const).filter((tab) => tab !== "failed" || counts.failed);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  // oxlint-disable-next-line react/incompatible-library -- This component explicitly opts out of compiler memoization above.
+  // oxlint-disable-next-line react/incompatible-library -- The app does not use the React Compiler; nothing memoizes this component.
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -103,7 +100,7 @@ export function InventoryTablePage({
           <InputGroupInput
             type="search"
             value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
+            onChange={(event) => setListingSearch(event.target.value)}
             placeholder="Search title, SKU or label"
             aria-label="Search listings by title, SKU or label"
           />

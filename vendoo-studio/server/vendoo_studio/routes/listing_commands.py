@@ -103,14 +103,19 @@ async def set_price(conv_id: str, body: SetPriceBody, db: Session = Depends(get_
         from vendoo_studio.services.native_marketplaces import NativeMarketplaceError, update_live
 
         current = ListingRepo(db).get_current(conv_id)
+        # The price was saved just above, so the listing has a current revision.
+        assert current is not None and current.current_revision_id
+        current_revision_id = current.current_revision_id
         live = live_listings(db, conv_id)
+        # End this read before the updates, which wait on Chrome or the marketplace.
+        db.commit()
         targets = [market] if market else [name for name in _PUSHABLE if (live.get(name) or {}).get("state") == "live"]
         for name in targets:
             entry = live.get(name) or {}
             if entry.get("state") != "live" or not entry.get("listing_id"):
                 continue
             try:
-                await update_live(conv_id, name, ListRequest(revision_id=current.current_revision_id, confirm=True), db)
+                await update_live(conv_id, name, ListRequest(revision_id=current_revision_id, confirm=True))
                 pushed.append(name)
                 break
             except NativeMarketplaceError as exc:

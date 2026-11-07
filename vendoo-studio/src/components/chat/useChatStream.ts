@@ -171,8 +171,7 @@ export function useChatStream({
       if (isAbortError(e)) {
         if (!stillMine()) return;
         if (getLive(convId).userCancelled) {
-          const restoreText = getLive(convId).lastSendText;
-          const restore = getLive(convId).restoreInputOnAbort;
+          // A generate has no composer text to give back; the last chat message is not its own.
           foldLiveTurn(convId, { cancelled: true });
           patchLive(convId, {
             streamText: "",
@@ -186,7 +185,6 @@ export function useChatStream({
             userCancelled: false,
             restoreInputOnAbort: false,
           });
-          if (restore && restoreText) setInput(restoreText);
           return;
         }
         patchLive(convId, { controller: null });
@@ -207,13 +205,15 @@ export function useChatStream({
       }
     }
     const failed = isStreamError(assembled);
-    if (stillMine()) {
+    const finished = stillMine();
+    if (finished) {
       patchLive(convId, { streaming: false, generating: false, controller: null });
       // The answer stays on screen below "Worked for"; a failure keeps its work in view.
       if (!failed) foldLiveTurn(convId);
     }
     await refreshListingQueries(queryClient, convId);
-    if (stillMine() && !failed) {
+    // Clear the live reply once the saved messages hold it, unless another stream started meanwhile.
+    if (finished && !failed && !getLive(convId).controller) {
       patchLive(convId, {
         streamText: "",
         streamTrace: [],
@@ -298,12 +298,13 @@ export function useChatStream({
       const { parts } = await consumeResponseSse(res, (event, nextParts) => applySseToLive(convId, event, nextParts));
       const assembled = parts.content;
       if (stillMine() && isStreamError(assembled)) patchLive(convId, { failedAction: "send" });
-      if (stillMine()) {
+      const finished = stillMine();
+      if (finished) {
         patchLive(convId, { streaming: false, controller: null });
         if (!isStreamError(assembled)) foldLiveTurn(convId);
       }
       await refreshListingQueries(queryClient, convId);
-      if (stillMine() && !isStreamError(assembled)) {
+      if (finished && !isStreamError(assembled) && !getLive(convId).controller) {
         patchLive(convId, {
           streamText: "",
           streamTrace: [],
@@ -374,6 +375,8 @@ export function useChatStream({
 
   const handleCancelDiscovery = useCallback(async () => {
     const probeId = activeProbe?.id;
+    // Take the open request before clearing it, so it can still be aborted.
+    const open = getLive(convId).controller;
     patchLive(convId, {
       userCancelled: true,
       restoreInputOnAbort: false,
@@ -386,7 +389,7 @@ export function useChatStream({
       generating: false,
       controller: null,
     });
-    getLive(convId).controller?.abort();
+    open?.abort();
     await Promise.allSettled([
       studioFetch(`/api/conversations/${convId}/generate/cancel`, { method: "POST" }),
       probeId ? api.jobs.cancel(probeId) : Promise.resolve(),

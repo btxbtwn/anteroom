@@ -115,7 +115,7 @@ export function SettingsRow({
             <h3 className="flex items-center gap-2 text-sm font-medium text-foreground">{title}</h3>
           </div>
           {description ? (
-            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">{description}</p>
+            <p className="max-w-xl text-xs leading-normal text-muted-foreground">{description}</p>
           ) : null}
           {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
         </div>
@@ -142,7 +142,7 @@ export function SettingsNote({
       role={tone === "error" ? "alert" : props.role}
       className={cn(
         "max-w-xl text-xs leading-normal [overflow-wrap:anywhere]",
-        tone === "muted" && "text-muted-foreground/80",
+        tone === "muted" && "text-muted-foreground",
         tone === "error" && "text-destructive-foreground",
         tone === "success" && "text-success-foreground",
         tone === "warning" && "text-warning-foreground",

@@ -78,6 +78,10 @@ def seed_previous_release(engine):
     return rows
 
 
+# Columns a later revision added to jobs, as an upgraded row reads them.
+JOB_LEASE_DEFAULTS = {"lease_owner": None, "leased_until": None, "cancel_requested": False}
+
+
 def read_rows(engine, names):
     with engine.connect() as connection:
         metadata = sa.MetaData()
@@ -118,7 +122,7 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
                                        "sku": None, "price": 42, "quantity": None, "cost": None, "brand": None,
                                        "category_path": None, "title": "Vintage coat", "type": None,
                                        "season": None, "material": None,
-                                   }} if name == "listing_revisions" else {})) for row in rows]
+                                   }} if name == "listing_revisions" else {}), **(JOB_LEASE_DEFAULTS if name == "jobs" else {})) for row in rows]
 
     inspector = sa.inspect(engine)
     for table in Base.metadata.tables.values():
@@ -173,7 +177,7 @@ def test_pre_alembic_database_gets_ownership_without_losing_rows(migration_engin
                 "sku": None, "price": 42, "quantity": None, "cost": None, "brand": None,
                 "category_path": None, "title": "Vintage coat", "type": None,
                 "season": None, "material": None,
-            }} if name == "listing_revisions" else {})) for row in rows]
+            }} if name == "listing_revisions" else {}), **(JOB_LEASE_DEFAULTS if name == "jobs" else {})) for row in rows]
     assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION
     assert len(backups.list_snapshots(backups.BACKUPS_DIR)) == 1
 

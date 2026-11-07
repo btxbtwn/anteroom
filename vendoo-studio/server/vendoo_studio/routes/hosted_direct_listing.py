@@ -12,7 +12,6 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from starlette.concurrency import run_in_threadpool
 
 from vendoo_studio.database import get_db
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
@@ -42,28 +41,28 @@ def preflight(conv_id: str, db: Session = Depends(get_db, scope="function")):
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/list')
-async def list_now(conv_id: str, marketplace: Direct, body: ListRequest, db: Session = Depends(get_db, scope="function")):
-    return await native_marketplaces.list_now(conv_id, marketplace, body, db)
+async def list_now(conv_id: str, marketplace: Direct, body: ListRequest):
+    return await native_marketplaces.list_now(conv_id, marketplace, body)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/update')
-async def update_live(conv_id: str, marketplace: Direct, body: ListRequest, db: Session = Depends(get_db, scope="function")):
-    return await native_marketplaces.update_live(conv_id, marketplace, body, db)
+async def update_live(conv_id: str, marketplace: Direct, body: ListRequest):
+    return await native_marketplaces.update_live(conv_id, marketplace, body)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/draft')
-async def save_draft(conv_id: str, marketplace: Direct, body: native_marketplaces.SaveDraftRequest, db: Session = Depends(get_db, scope="function")):
-    return await native_marketplaces.save_draft(conv_id, marketplace, body, db)
+async def save_draft(conv_id: str, marketplace: Direct, body: native_marketplaces.SaveDraftRequest):
+    return await native_marketplaces.save_draft(conv_id, marketplace, body)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/cancel')
-async def cancel(conv_id: str, marketplace: Direct, db: Session = Depends(get_db, scope="function")):
-    return await native_marketplaces.cancel(conv_id, marketplace, db)
+async def cancel(conv_id: str, marketplace: Direct):
+    return await native_marketplaces.cancel(conv_id, marketplace)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/check')
-async def check_result(conv_id: str, marketplace: Direct, body: CheckRequest | None = None, db: Session = Depends(get_db, scope="function")):
-    return await native_marketplaces.check_result(conv_id, marketplace, body, db)
+async def check_result(conv_id: str, marketplace: Direct, body: CheckRequest | None = None):
+    return await native_marketplaces.check_result(conv_id, marketplace, body)
 
 
 @router.post(PREFIX + '/native-marketplaces/{marketplace}/reset')
@@ -75,28 +74,26 @@ router.add_api_route(PREFIX + '/marketplace-listings/delist', marketplace_listin
 
 
 @router.get(PREFIX + '/vendoo-api/fields')
-async def listing_fields(conv_id: str, db: Session = Depends(get_db, scope="function")):
+def listing_fields(conv_id: str, db: Session = Depends(get_db, scope="function")):
     """The Etsy form: the category's saved fields and Etsy's own properties, built
     as on the Mac. The web never asks Chrome for a schema, so an unread leaf shows
-    Etsy's live properties and the listing's own values."""
+    Etsy's live properties and the listing's own values. Database reads and Etsy's
+    token lookup block, so this plain function runs in FastAPI's threadpool."""
     from vendoo_studio.services import listing_mode
     if listing_mode.read(db) == "vendoo":
         from vendoo_studio.routes.vendoo_api import listing_fields as vendoo_fields
-        return await vendoo_fields(conv_id, db)
+        return vendoo_fields(conv_id, db)
     from vendoo_studio.models.listing_values import marketplace_dropdown_forms
     from vendoo_studio.services.category_fields import listing_category_ids, load_fields
 
-    def load():
-        # Database reads and Etsy's token lookup block; keep them off the request loop.
-        if not ConversationRepo(db).get(conv_id):
-            raise HTTPException(404, 'Conversation not found')
-        # The newest version only: older ones can each be hundreds of KB.
-        latest = ListingRepo(db).latest_revision(conv_id)
-        listing = latest.listing_json if latest else {}
-        db.commit()
-        category_id = listing_category_ids(listing).get('etsy')
-        if not category_id:
-            return {'ok': True, 'forms': []}
-        static = marketplace_dropdown_forms().get('etsy') or {}
-        return {'ok': True, 'forms': [asyncio.run(leaf_form(listing, 'etsy', category_id, load_fields('etsy', category_id) or {}, static))]}
-    return await run_in_threadpool(load)
+    if not ConversationRepo(db).get(conv_id):
+        raise HTTPException(404, 'Conversation not found')
+    # The newest version only: older ones can each be hundreds of KB.
+    latest = ListingRepo(db).latest_revision(conv_id)
+    listing = latest.listing_json if latest else {}
+    db.commit()
+    category_id = listing_category_ids(listing).get('etsy')
+    if not category_id:
+        return {'ok': True, 'forms': []}
+    static = marketplace_dropdown_forms().get('etsy') or {}
+    return {'ok': True, 'forms': [asyncio.run(leaf_form(listing, 'etsy', category_id, load_fields('etsy', category_id) or {}, static))]}

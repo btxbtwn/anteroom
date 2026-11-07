@@ -6,6 +6,54 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.765 — 2026-11-07
+
+- Chrome now runs a listing, update, delist, share or offer from the web only when Anteroom's server signed that exact action, so nothing else on the page can trigger one.
+- Chrome asks you to approve your Anteroom account again every 30 days.
+
+## 0.1.764 — 2026-11-07
+
+- A screen that fails to load now shows a Reload button instead of a blank window, and Anteroom reloads itself once when an update replaced its files.
+- Text you typed in a listing field is saved when you close or switch the listing, hide the app or reload, and Anteroom asks before leaving while an edit is still saving. Automatic update reloads wait until your edits are saved.
+- Typing in the inventory search no longer slows down the open listing and its chat.
+- Anteroom checks for changes less often while it is in the background or receiving live updates, and refreshes the inventory less often while a send is running.
+- Bulk Regenerate and bulk price changes read a few listings at a time instead of all at once.
+- Stopping a generation no longer puts an old chat message back in the message box, and cancelling discovery stops the request right away.
+- When Chrome fails partway through a marketplace action, Anteroom no longer says nothing reached the marketplace.
+
+## 0.1.763 — 2026-11-07
+
+- eBay and Etsy sales now fill in their own amounts: eBay records the sale price, shipping the buyer paid, eBay's fees, refunds and eBay shipping labels; Etsy records the sale price, shipping the buyer paid and refunds. Older sales without amounts are filled in a few at a time.
+- Amounts you entered yourself are never replaced, and your cost of goods is kept.
+
+## 0.1.762 — 2026-11-07
+
+- Keep a marketplace action running when another server checks on it, and let Cancel reach it from any server.
+
+## 0.1.761 — 2026-11-07
+
+- Listings on the web open again instead of showing "This listing didn't load" when they have blank fields or are sold out.
+
+## 0.1.760 — 2026-11-07
+
+- The Mac app and the web app now install the exact, verified package versions that were tested, so each update ships what was checked.
+
+## 0.1.759 — 2026-11-07
+
+- On myanteroom.com, Inventory's Date Sold (Newest) now puts your newest sales first, in the same order as Analytics.
+
+## 0.1.758 — 2026-11-07
+
+- Listing links in Assistant answers open the listing again, instead of a blank Inventory page in a new tab.
+
+## 0.1.757 — 2026-11-07
+
+- Keep the hosted app from switching off the check that catches database connections held while waiting on Chrome.
+
+## 0.1.756 — 2026-11-07
+
+- Listing, delisting, checking results and importing listings no longer tie up the cloud database while Chrome, eBay or Etsy answers, so other pages keep loading during those actions.
+
 ## 0.1.755 — 2026-11-07
 
 - On the web, one seller's slow image upload no longer holds up everyone else's chat messages.

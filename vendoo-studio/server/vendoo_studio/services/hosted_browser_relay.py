@@ -9,7 +9,8 @@ started it.
 Only the marketplace commands a seller starts go through here: an approved
 List, Update or Save draft (``marketplace.execute``), reading what one did
 (``marketplace.result``), a confirmed Delist (``marketplace.delete``), and
-cancelling one (``job.cancel``). Besides those, a few named commands do what
+cancelling one (``job.cancel``). Each write carries a signed approval
+(``bridge_approvals``) that the Bridge checks before it runs it. Besides those, a few named commands do what
 the Mac does outside its listing actions: reads that fill the seller's editor
 the sign-in status and Sign in of Settings → Connections, and the Chrome
 inventory import's reads of the seller's own active listings. Each is a fixed
@@ -26,6 +27,7 @@ import time
 import uuid
 from collections import deque
 
+from vendoo_studio.services import bridge_approvals
 from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, ReplyWaits
 
 # Each named read has its own Bridge capability, so a later read never changes
@@ -184,7 +186,8 @@ class BrowserRelay(ReplyWaits):
         command = self._outbox.popleft()
         if (sent := self._sent.get(str(command.get("message_id")))) is not None:
             sent["delivered"] = time.monotonic()
-        return command
+        # Signed as the page takes it, so the approval's few minutes start now.
+        return bridge_approvals.signed(self.owner, command, self._capabilities)
 
     async def read_local(self, command: str, payload: dict, timeout: float) -> dict:
         """One named command other than a marketplace action, run in the seller's Chrome,

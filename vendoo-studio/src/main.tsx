@@ -9,12 +9,17 @@ import { markMacApp } from "./lib/macApp";
 import { WorkspaceRuntimeProvider, desktopRuntime } from "./app/runtime";
 import { MacAccountButton } from "./app/MacAccountButton";
 import { applyTheme } from "./theme";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { installChunkReload } from "./lib/chunkReload";
+import { installUnsavedWorkGuard } from "./lib/unsavedWork";
 import "./styles/app.css";
 
 applyTheme();
 
 markMacApp();
 installSoftwareKeyboard(window);
+installChunkReload();
+installUnsavedWorkGuard(window);
 
 // Polls slow down while Studio sits behind another window (see pollMs), and the
 // desktop webview never reports itself hidden, so also refetch on window focus.
@@ -36,7 +41,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           <AnchoredToastProvider>
-            <App />
+            <ErrorBoundary label="Anteroom" className="h-dvh">
+              <App />
+            </ErrorBoundary>
           </AnchoredToastProvider>
         </ToastProvider>
       </QueryClientProvider>

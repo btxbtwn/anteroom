@@ -99,7 +99,7 @@ test('an expired Mercari session is read again from initialize and the refused r
   let refusals = 0;
   const { c, initializes, opsOf } = worker({
     session: n => reply(200, { ...SESSION, accessToken: `token-${n}` }),
-    http: (op, n) => (op === 'addDraftItemMutation' && refusals++ < 1 ? reply(200, { errors: [{ message: 'Unauthorized' }] }) : null),
+    http: op => (op === 'addDraftItemMutation' && refusals++ < 1 ? reply(200, { errors: [{ message: 'Unauthorized' }] }) : null),
   });
   const result = await c.runMercariNative(message());
   assert.equal(result.ok, true);
@@ -609,8 +609,8 @@ test('Mercari reads its own catalog over GraphQL without Vendoo or session expor
   assert.equal(prepared.form.sizes[0].name, 'XL (14-16)');
   assert.equal(c.mercariCatalogListing({ direct_category_ids: { mercari: '999999' } }, master).direct_category_ids.mercari, '999999');
   // Mercari's picker offers a category with subcategories ("All Girls tops & t-shirts"), but not a top-level one.
-  const parent = c.mercariCatalogListing({ direct_category_ids: { mercari: '1877' } }, master);
-  const top = c.mercariCatalogListing({ direct_category_ids: { mercari: '3' } }, master);
+  c.mercariCatalogListing({ direct_category_ids: { mercari: '1877' } }, master);
+  c.mercariCatalogListing({ direct_category_ids: { mercari: '3' } }, master);
 });
 
 test('native Mercari preparation replaces stale sizes and labels before uploading and verifies its result', async () => {

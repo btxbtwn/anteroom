@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BadgeDollarSignIcon } from "lucide-react";
 import { api } from "../api/client";
+import { pollMs } from "../api/polling";
 import { useListingSessionActive } from "./listingSession";
 import type { MarketplaceSale } from "../api/directConnections";
 import { marketplaceName } from "./marketplaceNames";
@@ -73,7 +74,7 @@ export function SoldElsewhereNotice({ convId }: { convId: string }) {
   const { data } = useQuery({
     queryKey: ["marketplace-sales", convId],
     queryFn: () => api.marketplaceSales.list({ conversationId: convId }),
-    refetchInterval: sessionActive ? SALES_POLL_MS : false,
+    refetchInterval: sessionActive ? () => pollMs(SALES_POLL_MS) : false,
   });
   const sales = data?.sales ?? [];
   if (!sales.length) return null;
