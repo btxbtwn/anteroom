@@ -33,7 +33,9 @@ in the sandbox.
   test an in-memory keyring and turns off the sourcing timer and category
   fills. To fake a model, install a provider like `FakeProvider` in
   `tests/test_listing_generate.py`, or set `ANTEROOM_SANDBOX=1` to get
-  `SandboxProvider`. Hosted-mode tests mint Supabase sessions themselves (see
+  `SandboxProvider`. A prompt or photo note containing `[sandbox:stall]` makes
+  it never answer, to check an action ends in a named error
+  (`tests/test_external_call_deadlines.py`). Hosted-mode tests mint Supabase sessions themselves (see
   `tests/test_seller_sessions.py`) and need Postgres (`ANTEROOM_TEST_DATABASE_URL`).
 - **Frontend logic:** Vitest, files next to the code (`src/**/*.test.ts(x)`).
   Tests run in Node with no DOM; components render with `renderToStaticMarkup`.

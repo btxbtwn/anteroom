@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from vendoo_studio.services import live_trace
+from vendoo_studio.services.provider_deadlines import unwrap
 from vendoo_studio.providers.cursor_agent import (
     CursorProvider,
     _flatten_messages,
@@ -555,7 +556,7 @@ class ListingProviderCursorTest(unittest.TestCase):
                 return_value="cursor_test",
             ),
         ):
-            provider = listing_provider.get_listing_provider()
+            provider = unwrap(listing_provider.get_listing_provider())
             self.assertIsInstance(provider, CursorProvider)
         from vendoo_studio.providers.cursor_agent import CursorProvider
         from vendoo_studio.services import listing_provider
@@ -572,7 +573,7 @@ class ListingProviderCursorTest(unittest.TestCase):
                 return_value="cursor_test",
             ),
         ):
-            provider = listing_provider.get_listing_provider()
+            provider = unwrap(listing_provider.get_listing_provider())
             self.assertIsInstance(provider, CursorProvider)
             self.assertTrue(listing_provider.provider_is_configured())
 
@@ -593,7 +594,7 @@ class ListingProviderCursorTest(unittest.TestCase):
                 return_value="cursor_test",
             ),
         ):
-            return listing_provider.get_listing_provider()
+            return unwrap(listing_provider.get_listing_provider())
 
     def test_uses_cursor_when_it_is_the_only_provider_set_up(self):
         from vendoo_studio.providers.cursor_agent import CursorProvider

@@ -13,6 +13,7 @@ from vendoo_studio import sandbox
 from vendoo_studio.main import app
 from vendoo_studio.providers.sandbox import LISTING, REPLY, SandboxProvider
 from vendoo_studio.services import listing_provider
+from vendoo_studio.services.provider_deadlines import unwrap
 
 SERVER = Path(__file__).resolve().parents[1]
 
@@ -85,8 +86,8 @@ def test_middleware_answers_403_only_in_sandbox_mode(monkeypatch):
 
 def test_sandbox_mode_uses_the_sandbox_provider(monkeypatch):
     monkeypatch.setenv(sandbox.ENV_VAR, "1")
-    assert isinstance(listing_provider.get_listing_provider(), SandboxProvider)
-    assert isinstance(listing_provider.get_photo_provider(), SandboxProvider)
+    assert isinstance(unwrap(listing_provider.get_listing_provider()), SandboxProvider)
+    assert isinstance(unwrap(listing_provider.get_photo_provider()), SandboxProvider)
     assert listing_provider.provider_is_configured() is True
 
 
