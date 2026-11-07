@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 import httpx
 from sqlalchemy.orm import Session
 
+from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_listing import UNSETTLED_STATES
 from vendoo_studio.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
@@ -154,7 +155,7 @@ def listings(db: Session, conv_id: str) -> dict:
     return known_listings(notes, native, _sold_on(db, conv_id, notes, native))
 
 
-def listings_for(db: Session, convs: list) -> dict[str, dict]:
+def listings_for(db: Session, convs: list[Conversation]) -> dict[str, dict]:
     """``listings`` for many loaded items, in a fixed number of queries.
 
     Only items with a paid sale read their sale records one by one, because
