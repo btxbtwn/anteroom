@@ -1,1 +1,0 @@
-- On myanteroom.com, Inventory's Date Sold (Newest) now puts your newest sales first, in the same order as Analytics.
