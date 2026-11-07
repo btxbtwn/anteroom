@@ -378,6 +378,12 @@ enum AutomationFormat {
         }.joined(separator: ", ")
     }
 
+    /// What the seller reads before Run now: what it does, now instead of on schedule.
+    static func runNowMessage(_ automation: Automation) -> String {
+        let what = automation.actions.isEmpty ? "It has no actions yet." : "It will \(actions(automation.actions)) on the listings it matches."
+        return "\(what) This runs once now instead of waiting for its schedule. Listing, relisting or delisting still waits for your approval."
+    }
+
     static func listedSource(_ source: String?) -> String {
         switch source {
         case "publish_job": "publish job"
@@ -525,6 +531,20 @@ struct EbayOffersForm: Equatable, Sendable {
         guard globalValid(status), let percent = Self.percent(globalDiscount(status)) else { return nil }
         let minimum = globalMinimum(status)
         return EbayOffersEnableAll(discountPercent: percent, minimumPrice: minimum.isEmpty ? nil : minimum)
+    }
+
+    /// The button that sends previewed offers, and the question it asks first.
+    static func sendButton(count: Int) -> String {
+        "Send \(count) \(count == 1 ? "offer" : "offers") now"
+    }
+
+    static func sendQuestion(count: Int) -> String {
+        "Send \(count) \(count == 1 ? "offer" : "offers") to buyers on eBay now?"
+    }
+
+    /// The question before automatic offers start for the previewed listings.
+    static func enableQuestion(count: Int) -> String {
+        "Turn on automatic offers for \(count) \(count == 1 ? "listing" : "listings")?"
     }
 
     /// What the seller reads before turning offers on for every listing.

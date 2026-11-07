@@ -22,15 +22,50 @@ updates:
           - minor
           - patch
 
-  - package-ecosystem: pip
+  # uv.lock pins every Python package the Mac app, the hosted image and CI
+  # install. The uv ecosystem updates the lock and pyproject.toml together.
+  - package-ecosystem: uv
     directory: /vendoo-studio
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      studio-pip:
+      studio-python:
         patterns:
           - "*"
         update-types:
           - minor
           - patch
+
+  - package-ecosystem: npm
+    directory: /webhook-relay
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      webhook-relay-npm:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # Base images in deploy/fly/Dockerfile are pinned by digest.
+  - package-ecosystem: docker
+    directory: /deploy/fly
+    schedule:
+      interval: weekly
+    # Digest refreshes only: moving Python or Node to a new release is a
+    # deliberate change, made together with CI and the Mac app.
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+    groups:
+      hosted-images:
+        patterns:
+          - "*"
+
+# anteroom-ios declares its Swift packages in XcodeGen's project.yml, which
+# Dependabot cannot read (it needs Package.swift or Package.resolved).

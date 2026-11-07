@@ -36,7 +36,9 @@ from vendoo_studio.models.marketplace_listing import BUSY_STATES, LIVE_STATES, U
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, listing_readiness, marketplace_media
-from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
+from vendoo_studio.services.api_job_lock import (
+    claim_api_job, job_cancel_requested, job_is_live, release_api_job, request_job_cancel, start_gate,
+)
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
 from vendoo_studio.services.seller_overrides import price_for
 log = logging.getLogger("vendoo_studio.native_marketplaces")
@@ -126,8 +128,8 @@ def _store(db: Session, conv_id: str, marketplace: str, values: dict) -> dict:
 _CLEARED_ERROR = {"error": None, "error_code": None, "error_fields": None, "marketplace_message": None, "retry_after": None}
 
 
-def _running(record: dict) -> bool:
-    return bool(record.get("job_id")) and api_job_is_live(record["job_id"])
+def _running(db: Session, record: dict) -> bool:
+    return bool(record.get("job_id")) and job_is_live(db, record["job_id"])
 
 
 # Listing steps that may run beside a listing step on another marketplace.
@@ -159,7 +161,7 @@ def _busy_message(job, marketplace: str) -> str:
 def running_marketplace(db: Session, conv_id: str) -> str | None:
     """The marketplace a direct action is running on for this item, if any."""
     for marketplace, record in MarketplaceListingRepo(db).for_conversation(conv_id).items():
-        if _running(record):
+        if _running(db, record):
             return NAMES.get(marketplace, marketplace)
     return None
 
@@ -170,7 +172,7 @@ def status(conv_id: str, db: Session) -> dict:
     records = MarketplaceListingRepo(db).for_conversation(conv_id)
     repo = JobRepo(db)
     for record in records.values():
-        record["running"] = _running(record)
+        record["running"] = _running(db, record)
         if record["running"]:
             event = repo.latest_event(record["job_id"], PROGRESS_EVENT)
             record["progress"] = event.payload if event else None
@@ -326,9 +328,6 @@ def _apply_result(db: Session, conv_id: str, marketplace: str, job_id: str, acti
 
 
 # --- the List / Update job ----------------------------------------------------
-
-_cancel_requested: set[str] = set()
-
 
 def _progress(db: Session, job_id: str, marketplace: str, step: str, index: int = 0, total: int = 1) -> None:
     JobRepo(db).add_event(job_id, PROGRESS_EVENT, f"native_{marketplace}_{step}", {
@@ -512,7 +511,7 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                 if previous_versions != current_versions:
                     steps = ["save_draft", "publish"]
             job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched", current_step=f"native_{marketplace}_{steps[0]}")
-            claim_api_job(job.id)
+            claim_api_job(db, job.id)
             record = _store(db, conv_id, marketplace, {
                 **extra, **_CLEARED_ERROR, "state": STEP_STATE[steps[0]], "action": steps[0], "job_id": job.id,
                 "operation_id": job.id, "previous_revision_id": record.get("revision_id"), "revision_id": body.revision_id,
@@ -582,8 +581,8 @@ def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:
     job = JobRepo(db).get(job_id)
     if job:
         db.refresh(job)
-    return (bool(job) and job.status in ACTIVE_JOB_STATUSES and job_id not in _cancel_requested
-            and _record(db, conv_id, marketplace).get("job_id") == job_id)
+    return (bool(job) and job.status in ACTIVE_JOB_STATUSES and not job.cancel_requested
+            and not job_cancel_requested(job_id) and _record(db, conv_id, marketplace).get("job_id") == job_id)
 
 
 def _for_chrome(snapshot: dict) -> dict:
@@ -655,7 +654,7 @@ async def _unless_cancelled(job_id: str, awaitable):
     """Await a Chrome call, giving up as soon as the seller presses Cancel."""
     task = asyncio.ensure_future(awaitable)
     while not task.done():
-        if job_id in _cancel_requested:
+        if job_cancel_requested(job_id):
             task.cancel()
             try:
                 await task
@@ -749,7 +748,7 @@ def _finish_job(db: Session, job_id: str, conv_id: str, marketplace: str) -> Non
         # The worker ended without an answer for the step it was on.
         record = _store(db, conv_id, marketplace, {**_CLEARED_ERROR, "state": "unknown", "error": UNKNOWN, "error_code": "uncertain"})
     live = record.get("state") in {"published", "pending_review"} and not record.get("error")
-    if job_id in _cancel_requested and not live:
+    if (job.cancel_requested or job_cancel_requested(job_id)) and not live:
         repo.update_status(job_id, "cancelled", job.current_step, error="Cancelled.")
         repo.add_event(job_id, "cancelled", job.current_step)
     elif record.get("job_id") == job_id and not record.get("error") and record.get("state") in {"published", "pending_review", "draft"}:
@@ -808,7 +807,6 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
             _finish_job(db, job_id, conv_id, marketplace)
         finally:
             release_api_job(job_id)
-            _cancel_requested.discard(job_id)
             db.close()
 
 
@@ -821,7 +819,7 @@ async def cancel(conv_id: str, marketplace: Marketplace) -> dict:
 
 def _running_record(db: Session, conv_id: str, marketplace: str) -> dict:
     record = _record(db, conv_id, marketplace)
-    if not _running(record):
+    if not _running(db, record):
         raise NativeMarketplaceError(409, f"No {NAMES[marketplace]} action is running.")
     return record
 
@@ -830,7 +828,7 @@ async def cancel_job(db: Session, job) -> None:
     """Cancel from the jobs list: stop a live direct job, or end one nothing runs any more."""
     marketplace = str(job.current_step or "").removeprefix("native_").split("_", 1)[0]
     record = _record(db, job.conversation_id, marketplace) if marketplace in NAMES else {}
-    if api_job_is_live(job.id):
+    if job_is_live(db, job.id):
         db.commit()
         await request_cancel(job.id, record)
         return
@@ -839,13 +837,18 @@ async def cancel_job(db: Session, job) -> None:
 
 
 async def request_cancel(job_id: str, record: dict) -> None:
-    if job_id in _cancel_requested:
+    # Recorded on the job: the Machine running it stops at its next safe point.
+    if not await in_worker_session(_record_cancel, job_id, record.get("marketplace")):
         return
-    _cancel_requested.add(job_id)
-    await in_worker_session(lambda db: JobRepo(db).add_event(
-        job_id, "native_cancel_requested", None, {"marketplace": record.get("marketplace")}))
     if record.get("operation_id"):
         await _send_cancel(record["operation_id"])
+
+
+def _record_cancel(db: Session, job_id: str, marketplace: str | None) -> bool:
+    if not request_job_cancel(db, job_id):
+        return False
+    JobRepo(db).add_event(job_id, "native_cancel_requested", None, {"marketplace": marketplace})
+    return True
 
 
 # --- Check, Reset and automatic reconcile --------------------------------------
@@ -900,7 +903,7 @@ def _open_check(db: Session, conv_id: str, marketplace: str, body: CheckRequest 
     record = _record(db, conv_id, marketplace)
     if not record.get("job_id"):
         raise NativeMarketplaceError(409, "No marketplace action to check.")
-    if _running(record):
+    if _running(db, record):
         raise NativeMarketplaceError(409, f"The {NAMES[marketplace]} action is still running. Wait for it to finish.")
     if marketplace not in API_MARKETPLACES and not current_extension().connected:
         raise NativeMarketplaceError(409, "Connect Chrome to check the result.")
@@ -918,7 +921,7 @@ def _open_check(db: Session, conv_id: str, marketplace: str, body: CheckRequest 
         # Reading Chrome's journal can open the marketplace tab: hold the slot like any other job.
         check_job = repo.create(conv_id, record.get("revision_id") or "", snapshot, status="dispatched",
                                 current_step=f"native_{marketplace}_check")
-        claim_api_job(check_job.id)
+        claim_api_job(db, check_job.id)
     return record, snapshot, candidate, context, check_job.id
 
 
@@ -959,7 +962,7 @@ def reset(conv_id: str, marketplace: Marketplace, db: Session) -> dict:
         record = _record(db, conv_id, marketplace)
         if record.get("state") not in UNSETTLED_STATES:
             raise NativeMarketplaceError(409, f"Nothing on {NAMES[marketplace]} is waiting to be confirmed.")
-        if _running(record):
+        if _running(db, record):
             raise NativeMarketplaceError(409, f"The {NAMES[marketplace]} action is still running. Cancel it first.")
         state = "published" if record.get("action") == "update" else _resting_state(marketplace, record)
         values = {**_CLEARED_ERROR, "state": state, "etsy_pending_write": None}
@@ -1002,7 +1005,7 @@ async def reconcile(*, chrome: bool) -> int:
 
 def _reconcile_targets(db: Session, chrome: bool) -> list[tuple[str, str]]:
     return [(row.conversation_id, row.marketplace) for row in MarketplaceListingRepo(db).unsettled()
-            if row.job_id and not api_job_is_live(row.job_id) and (row.marketplace in API_MARKETPLACES or chrome)]
+            if row.job_id and not job_is_live(db, row.job_id) and (row.marketplace in API_MARKETPLACES or chrome)]
 
 
 async def reconcile_after_reconnect() -> None:
@@ -1037,7 +1040,7 @@ def _open_inspection(db: Session, conv_id: str, marketplace: str) -> str:
         if repo.get_active():
             raise NativeMarketplaceError(409, "Wait for the current Chrome job to finish.")
         job = repo.create(conv_id, "", {}, status="dispatched", current_step=f"native_{marketplace}_inspect")
-        claim_api_job(job.id)
+        claim_api_job(db, job.id)
     return job.id
 
 

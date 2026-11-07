@@ -1,5 +1,9 @@
 // Shared build settings. Your own values go in Local.xcconfig (not tracked).
 PRODUCT_BUNDLE_IDENTIFIER = com.btxbtwn.anteroom
 SUPABASE_PUBLISHABLE_KEY =
+// The app version comes from vendoo-studio/VERSION; `xcodegen` writes it to Version.xcconfig.
+MARKETING_VERSION = 0.0.0
+CURRENT_PROJECT_VERSION = 1
 
+#include? "Version.xcconfig"
 #include? "Local.xcconfig"

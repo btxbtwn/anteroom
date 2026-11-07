@@ -274,7 +274,7 @@ async function mercariOrderHistory(settled) {
   // Both are reads; the label ending in "Query" tells mercariRequest so.
   const query = (operationName, sha256Hash, variables) => mercariRequest(
     { operationName, variables, extensions: { persistedQuery: { version: 1, sha256Hash } } },
-    { deadline, operationName: /Query$/.test(operationName) ? operationName : `${operationName}Query` });
+    { deadline, operationName: operationName.endsWith('Query') ? operationName : `${operationName}Query` });
   const orders = [];
   let unreadable = 0;
   let details = 0;

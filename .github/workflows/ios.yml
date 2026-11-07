@@ -21,6 +21,10 @@ concurrency:
 permissions:
   contents: read
 
+# The Xcode every job builds with. Change it on purpose, in its own PR.
+env:
+  XCODE_APP: /Applications/Xcode_26.6.app
+
 jobs:
   build:
     name: Build for Simulator
@@ -30,10 +34,26 @@ jobs:
         working-directory: anteroom-ios
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Generate the Xcode project
+      - name: Select Xcode
         run: |
-          brew install xcodegen
-          xcodegen
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+      - name: Install the pinned XcodeGen
+        run: ./tools/install-xcodegen.sh
+      - name: Generate the Xcode project
+        run: xcodegen
+      - name: Only the confirmation dialog makes seller confirmations
+        run: |
+          # Tests may make one directly; app code must go through the dialog.
+          if grep -rn "unitTestOnly" Sources --include='*.swift' | grep -v '^Sources/Editor/SellerConfirmation.swift:'; then
+            echo "App code must not call SellerConfirmation.unitTestOnly" >&2
+            exit 1
+          fi
+      - name: Restore Swift packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('anteroom-ios/Config/Package.resolved') }}
       - name: Test stream framing
         run: |
           xcrun swiftc Sources/API/StreamFrame.swift Tests/StreamFramesTests.swift -o "$RUNNER_TEMP/stream-tests"
@@ -101,19 +121,35 @@ jobs:
             -project Anteroom.xcodeproj \
             -scheme Anteroom \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
+            -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=NO
+      - name: Check the app's privacy manifest and version
+        run: |
+          app="$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator/Anteroom.app"
+          plutil -lint "$app/PrivacyInfo.xcprivacy"
+          built="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")"
+          expected="$(tr -d '[:space:]' < ../vendoo-studio/VERSION)"
+          echo "App version $built"
+          test "$built" = "$expected"
 
   sandbox-tests:
-    name: iPhone sandbox tests
+    name: iPhone unit and sandbox tests
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+      - name: Install the pinned XcodeGen
+        run: ./anteroom-ios/tools/install-xcodegen.sh
       - name: Prepare disposable hosted API and simulator project
         run: |
-          brew install xcodegen
           cd vendoo-studio
           python -m venv .venv
           .venv/bin/pip install -e ".[dev]"
@@ -123,7 +159,7 @@ jobs:
         run: xcrun simctl list
       - name: Install the iOS simulator runtime
         run: xcodebuild -downloadPlatform iOS
-      - name: Run the iPhone app against the hosted sandbox
+      - name: Boot the simulator
         run: |
           set -euxo pipefail
           SIMULATOR_ID="$(xcrun simctl create 'Anteroom sandbox tests' 'com.apple.CoreSimulator.SimDeviceType.iPhone-17')"
@@ -133,6 +169,23 @@ jobs:
           # The keyboard's swipe-typing introduction covers the first
           # keyboard and drops keys typed while it closes.
           xcrun simctl spawn "$SIMULATOR_ID" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true
+          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+      - name: Run unit tests
+        working-directory: anteroom-ios
+        run: |
+          set -o pipefail
+          xcodegen
+          xcodebuild test \
+            -project Anteroom.xcodeproj \
+            -scheme Anteroom \
+            -only-testing:AnteroomTests \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -resultBundlePath "$RUNNER_TEMP/unit.xcresult" \
+            -onlyUsePackageVersionsFromResolvedFile \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Run the iPhone app against the hosted sandbox
+        run: |
+          set -euxo pipefail
           ANTEROOM_TEST_DESTINATION="platform=iOS Simulator,id=$SIMULATOR_ID" \
             ANTEROOM_TEST_RESULTS="$RUNNER_TEMP/sandbox.xcresult" ./anteroom-ios/test-sandbox.sh
       - name: Export simulator screenshots
@@ -147,15 +200,17 @@ jobs:
         with:
           name: iphone-sandbox-results
           path: |
+            ${{ runner.temp }}/unit.xcresult
             ${{ runner.temp }}/sandbox.xcresult
             ${{ runner.temp }}/screenshots
             ${{ runner.temp }}/sandbox.log
 
   testflight:
     name: Upload to TestFlight
-    # Pull requests (including forks) never reach the signing key.
-    if: github.event_name != 'pull_request'
-    needs: build
+    # Only main uploads, and only after the build and every test pass. Pull
+    # requests (including forks) and other branches never reach the signing key.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [build, sandbox-tests]
     runs-on: macos-26
     defaults:
       run:
@@ -171,10 +226,14 @@ jobs:
         run: |
           umask 077
           printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc.p8"
-      - name: Generate the Xcode project
+      - name: Select Xcode
         run: |
-          brew install xcodegen
-          xcodegen
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+      - name: Install the pinned XcodeGen
+        run: ./tools/install-xcodegen.sh
+      - name: Generate the Xcode project
+        run: xcodegen
       # Archive unsigned: development signing would need a registered device.
       # The export below signs for App Store distribution with the API key.
       - name: Archive
@@ -185,7 +244,9 @@ jobs:
             -scheme Anteroom \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Anteroom.xcarchive" \
+            -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="$(tr -d '[:space:]' < ../vendoo-studio/VERSION)" \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             SUPABASE_PUBLISHABLE_KEY=${{ vars.SUPABASE_PUBLISHABLE_KEY }}
       - name: Upload

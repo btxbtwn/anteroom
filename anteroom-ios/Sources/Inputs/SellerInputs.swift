@@ -2,8 +2,8 @@ import Foundation
 
 /// The desktop ItemDetails notes contract. Keep the original document so
 /// editing a known field never drops agent-managed or future fields.
-struct SellerInputs: Equatable, Sendable {
-    enum Garment: String, CaseIterable, Identifiable, Sendable {
+struct SellerInputs: Equatable, Sendable, Codable {
+    enum Garment: String, CaseIterable, Identifiable, Sendable, Codable {
         case top, pants, skirt
         var id: String { rawValue }
         var label: String { rawValue.capitalized }

@@ -91,7 +91,7 @@ struct BulkRegenerateView: View {
 
     private func check() async {
         do {
-            async let capabilities = api.capabilities()
+            async let capabilities = api.runtime()
             async let status = api.workspaceStatus()
             let (features, workspace) = try await (capabilities, status)
             if !features.features.contains("generation") {

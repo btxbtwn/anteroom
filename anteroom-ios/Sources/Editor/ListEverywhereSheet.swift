@@ -2,13 +2,15 @@ import SwiftUI
 
 /// List everywhere's picker, as on the web: one card per marketplace with its
 /// state. Nothing starts selected and nothing is sent until the seller presses
-/// List, which names the marketplaces picked.
+/// List and confirms the dialog naming the marketplaces picked.
 struct ListEverywhereSheet: View {
     let model: ListingEditorModel
     @Environment(\.dismiss) private var dismiss
     @State private var picked: Set<String> = []
     @State private var sending = false
     @State private var failure: String?
+    @State private var confirming: SellerConfirmationRequest?
+    @State private var failures = 0
 
     private var selectable: [ListChoice] { model.choices.filter(\.selectable) }
     private var chosen: [String] { selectable.map(\.marketplace).filter(picked.contains) }
@@ -43,7 +45,7 @@ struct ListEverywhereSheet: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button {
-                    send()
+                    confirming = .listEverywhere(title: model.title, marketplaces: chosen)
                 } label: {
                     Group {
                         if sending { ProgressView() } else { Text(confirmLabel).fontWeight(.semibold) }
@@ -55,6 +57,8 @@ struct ListEverywhereSheet: View {
                 .padding(16)
                 .background(.bar)
             }
+            .sellerConfirmation($confirming) { confirmed in send(confirmed) }
+            .sensoryFeedback(.error, trigger: failures)
             .alert("Some listings didn't start", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
                 Button("OK", role: .cancel) { dismiss() }
             } message: {
@@ -108,14 +112,19 @@ struct ListEverywhereSheet: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    private func send() {
-        let marketplaces = chosen
-        guard !marketplaces.isEmpty else { return }
+    private func send(_ confirmed: SellerConfirmation) {
+        let marketplaces = confirmed.marketplaces
+        guard !marketplaces.isEmpty, !sending else { return }
         sending = true
         Task {
-            let error = await model.list(on: marketplaces)
+            let error = await model.list(on: marketplaces, confirmation: confirmed)
             sending = false
-            if let error { failure = error } else { dismiss() }
+            if let error {
+                failure = error
+                failures += 1
+            } else {
+                dismiss()
+            }
         }
     }
 }

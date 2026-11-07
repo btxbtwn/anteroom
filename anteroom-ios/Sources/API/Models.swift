@@ -194,7 +194,7 @@ struct ListingSaveResult: Decodable, Sendable {
 /// full listing. Only fields the seller changed are written, so values the
 /// phone does not edit (marketplace specifics, categories, tags) keep their
 /// exact type and content.
-struct GeneralFields: Equatable, Sendable {
+struct GeneralFields: Equatable, Sendable, Codable {
     var title = ""
     var description = ""
     var price: Double?

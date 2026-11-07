@@ -64,6 +64,19 @@ if n != 1:
     raise SystemExit("Could not update version in pyproject.toml")
 pyproject.write_text(updated, encoding="utf-8")
 
+# uv.lock records this project's own version; `uv lock --check` fails without it.
+uv_lock = root / "uv.lock"
+text = uv_lock.read_text(encoding="utf-8")
+updated, n = re.subn(
+    r'(?m)^(name = "vendoo-studio"\nversion = )"[^"]*"',
+    rf'\g<1>"{version}"',
+    text,
+    count=1,
+)
+if n != 1:
+    raise SystemExit("Could not update version in uv.lock")
+uv_lock.write_text(updated, encoding="utf-8")
+
 info = root / "desktop" / "build_info.json"
 if info.is_file():
     payload = json.loads(info.read_text(encoding="utf-8"))
