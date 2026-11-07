@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.775 — 2026-11-07
+
+- On iPhone, New listing opens a draft right away. You no longer type a title first; the AI writes it.
+
 ## 0.1.774 — 2026-11-07
 
 - On iPhone, the chat composer and tab bar use the system glass look, and the tab bar shrinks while you scroll.
