@@ -7,7 +7,7 @@ class DraftFields(BaseModel):
     description: str = Field(default='', max_length=20000)
     price: float | None = Field(default=None, ge=0, le=10000000)
     cost: float | None = Field(default=None, ge=0, le=10000000)
-    quantity: int | None = Field(default=None, ge=1, le=2147483647)
+    quantity: int | None = Field(default=None, ge=0, le=2147483647)
     brand: str = Field(default='', max_length=200)
     condition: str = Field(default='', max_length=200)
     primaryColor: str = Field(default='', max_length=200)

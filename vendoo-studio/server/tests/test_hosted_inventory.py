@@ -32,7 +32,7 @@ def test_edit_general_fields_as_a_private_revision(cloud, signing_keys):  # noqa
     path = '/api/drafts/' + draft['id']
     fields = {'description': 'Wool coat', 'price': 42.5, 'quantity': 2, 'brand': 'Pendleton', 'sku': 'COAT-1'}
     body = {'title': 'Coat 10%', 'notes': 'Measurements checked', 'fields': fields, 'expected_updated_at': draft['updated_at']}
-    for rejected in ({'user_id': BOB}, {'current_revision_id': 'foreign'}, {'ebay_specifics': {}}, {'quantity': 0}, {'quantity': 1.5}, {'price': -1}):
+    for rejected in ({'user_id': BOB}, {'current_revision_id': 'foreign'}, {'ebay_specifics': {}}, {'quantity': -1}, {'quantity': 1.5}, {'price': -1}):
         assert client.patch(path, headers=alice, json={**body, 'fields': {**fields, **rejected}}).status_code == 422
     assert client.patch(path, headers=bob, json=body).status_code == 404
     saved = client.patch(path, headers=alice, json=body)
@@ -179,6 +179,29 @@ def test_revision_pointer_cannot_expose_another_draft(cloud, signing_keys):  # n
     assert response.status_code == 200
     assert response.json()['fields']['description'] == ''
     assert 'must never return' not in response.text
+
+
+def test_saved_listing_with_blank_fields_and_sold_out_quantity_opens_and_saves(cloud, signing_keys):  # noqa: F811
+    client, engine = cloud
+    alice = headers(signing_keys)
+    draft = client.post('/api/drafts', headers=alice, json={'title': 'Shirt'}).json()
+    with Session(engine) as db:
+        # Generation and sale tracking store blanks as null and a sold-out item as 0.
+        revision = ListingRevision(user_id=USER_ID, conversation_id=draft['id'], source='generated',
+                                   listing_json={'title': 'Shirt', 'brand': 'Crazy Horse', 'sku': None,
+                                                 'secondaryColor': None, 'size': None, 'quantity': 0})
+        db.add(revision)
+        db.flush()
+        db.add(Listing(user_id=USER_ID, conversation_id=draft['id'], current_revision_id=revision.id))
+        db.commit()
+    path = f"/api/conversations/{draft['id']}/listing"
+    loaded = client.get(path, headers=alice)
+    assert loaded.status_code == 200, loaded.text
+    listing = loaded.json()['listing']
+    assert listing['sku'] == listing['secondaryColor'] == listing['size'] == ''
+    assert listing['quantity'] == 0
+    saved = client.put(path, headers=alice, json={'listing': listing, 'expected_revision_id': loaded.json()['current_revision_id']})
+    assert saved.status_code == 200, saved.text
 
 
 def test_failed_photo_commit_cleans_up_storage_without_leaking_diagnostics(cloud, signing_keys, monkeypatch):  # noqa: F811

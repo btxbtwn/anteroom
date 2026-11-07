@@ -15,6 +15,11 @@ BLOCKED = frozenset({'userid', 'conversationid', 'revisionid', 'parentrevisionid
 def stored_listing_fields(raw):
     """Project a server-generated revision onto the editable client contract."""
     payload = {key: value for key, value in raw.items() if key in ROOTS}
+    # Generation and imports store a blank text field as null; the editor
+    # edits it as an empty string.
+    for name, field in DraftFields.model_fields.items():
+        if payload.get(name, '') is None and field.default == '':
+            payload[name] = ''
     categories = payload.get('direct_category_ids')
     if isinstance(categories, dict):
         # Generation keeps its search query beside the chosen categories.
