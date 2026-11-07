@@ -21,6 +21,7 @@ import {
   notListedCount,
   notListedOnCounts,
   unsentCount,
+  missingSaleCount,
   staleCounts,
   statusCounts,
   type ListingFilters as Filters,
@@ -190,6 +191,7 @@ export function ListingSidebar({
   const staleThreshold = uiPrefs?.stale_listing_days;
   const filterStaleCounts = useMemo(() => staleCounts(facetSource, undefined, staleThreshold), [facetSource, staleThreshold]);
   const filterUnsentCount = useMemo(() => unsentCount(facetSource), [facetSource]);
+  const filterMissingSaleCount = useMemo(() => missingSaleCount(facetSource), [facetSource]);
   const labels = useMemo(() => labelOptions(conversations || []), [conversations]);
   const settingsSearch = useSettingsSearch(settingsMode, onSettingsSearchResult);
   const {
@@ -368,6 +370,7 @@ export function ListingSidebar({
             marketplaceCounts={filterMarketplaceCounts}
             notListedCount={filterNotListedCount}
             unsentCount={filterUnsentCount}
+            missingSaleCount={filterMissingSaleCount}
             staleCounts={filterStaleCounts}
             onChange={handleFiltersChange}
           />

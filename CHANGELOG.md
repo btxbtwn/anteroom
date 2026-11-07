@@ -6,6 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.771 — 2026-11-07
+
+- Filter your inventory to sold listings that are missing sale details, such as fees, the sale price or the sale date, from the Filters menu.
+
+## 0.1.770 — 2026-11-07
+
+- The iPhone's inventory Sort menu now has the same choices as the web app: Stalest, Freshest and Date Sold (Newest), which opens the Sold tab.
+
+## 0.1.769 — 2026-11-07
+
+- Listings on the web open again instead of showing "Operational fields cannot be supplied".
+
 ## 0.1.768 — 2026-11-07
 
 - Offers to likers and sharing no longer log "connect Chrome first" while Chrome is just reconnecting, such as right after an update. A scheduled round waits up to 10 minutes for Chrome instead of being used up; if Chrome stays disconnected longer, Activity still says so.
