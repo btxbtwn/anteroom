@@ -60,10 +60,13 @@ def _checkin(_dbapi_connection, record) -> None:
         _held.pop(task, None)
 
 
-def watch(engine) -> None:
-    if not event.contains(engine, "checkout", _checkout):
-        event.listen(engine, "checkout", _checkout)
-        event.listen(engine, "checkin", _checkin)
+def watch(engine) -> bool:
+    """Start watching ``engine``. False when something else already watches it and owns ``unwatch``."""
+    if event.contains(engine, "checkout", _checkout):
+        return False
+    event.listen(engine, "checkout", _checkout)
+    event.listen(engine, "checkin", _checkin)
+    return True
 
 
 def unwatch(engine) -> None:
