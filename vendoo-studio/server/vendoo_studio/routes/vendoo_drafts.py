@@ -19,11 +19,13 @@ def status(conv_id: str, db: Session = Depends(get_db, scope="function")):
     return vendoo_drafts.status(db, conv_id)
 
 
+# Send and Check wait on Chrome. They take no request session; the service runs each
+# database step on a worker thread with a short session of its own.
 @router.post("")
-async def send(conv_id: str, body: DraftRequest, db: Session = Depends(get_db, scope="function")):
-    return await vendoo_drafts.start(db, conv_id, body.revision_id)
+async def send(conv_id: str, body: DraftRequest):
+    return await vendoo_drafts.start(conv_id, body.revision_id)
 
 
 @router.post("/check")
-async def check(conv_id: str, db: Session = Depends(get_db, scope="function")):
-    return await vendoo_drafts.check(db, conv_id)
+async def check(conv_id: str):
+    return await vendoo_drafts.check(conv_id)

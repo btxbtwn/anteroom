@@ -6,6 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.759 — 2026-11-07
+
+- On myanteroom.com, Inventory's Date Sold (Newest) now puts your newest sales first, in the same order as Analytics.
+
+## 0.1.758 — 2026-11-07
+
+- Listing links in Assistant answers open the listing again, instead of a blank Inventory page in a new tab.
+
+## 0.1.757 — 2026-11-07
+
+- Keep the hosted app from switching off the check that catches database connections held while waiting on Chrome.
+
+## 0.1.756 — 2026-11-07
+
+- Listing, delisting, checking results and importing listings no longer tie up the cloud database while Chrome, eBay or Etsy answers, so other pages keep loading during those actions.
+
 ## 0.1.755 — 2026-11-07
 
 - On the web, one seller's slow image upload no longer holds up everyone else's chat messages.

@@ -137,6 +137,20 @@ the test suite. Tests that replace Chrome above `register_wait` with a mock do
 not exercise the check. Not yet measured after deploy: whether the pool stays
 clear with automations running alongside two sellers' editors.
 
+Async route handlers that took a request session were a second cause: 62
+`async def` handlers ran their queries on the event loop, where a pool wait
+stalls every other request, and several kept the transaction open across eBay,
+Etsy or Chrome calls (direct List/Update preflight, Check, Delist, imports).
+Those handlers now take no request session: each database step runs through
+`database.in_worker_session`, a short session on a worker thread that closes
+before the next external wait. Handlers that only read are plain `def`. Two
+backend tests stop this returning: one fails on any new `async def` handler that
+depends on `get_db`/`get_seller_db`, and an autouse fixture fails a test whose
+async handler checks out a connection on the event loop. Handlers not yet
+converted are listed in `server/tests/async_route_sessions_baseline.txt`, which
+may only shrink. A test holds eight concurrent slow external waits on a
+one-connection pool without a timeout. Not yet measured after deploy.
+
 Machines reach each other's `/internal/` routes at
 `http://[FLY_PRIVATE_IP]:8080` on the private network
 (`device_routes.local_base_url`), which does not pass through Fly's proxy. The

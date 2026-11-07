@@ -123,7 +123,7 @@ def _snapshot(item: dict, sku: str | None, quantity: int, price: float, properti
             "direct_category_ids": {"etsy": str(item["taxonomy_id"])}, "etsy_specifics": details}
 
 
-async def import_listing(client: EtsyClient, db: Session, listing_id: str) -> dict:
+async def import_listing(client: EtsyClient, listing_id: str) -> dict:
     item = await client.listing(listing_id)
     if str(item.get("listing_id")) != listing_id or str(item.get("shop_id")) != client.shop_id:
         raise EtsyFailure("This listing does not belong to the connected Etsy shop.", 409)
@@ -143,13 +143,13 @@ async def import_listing(client: EtsyClient, db: Session, listing_id: str) -> di
     urls = [image["url_fullxfull"] for _, image in ordered if isinstance(image.get("url_fullxfull"), str)]
     try:
         return await inventory_import.save_owned_listing(
-            db, "etsy", listing_id, snapshot, urls, client.assert_current, binding={"etsy_shop_id": client.shop_id},
+            "etsy", listing_id, snapshot, urls, client.assert_current, binding={"etsy_shop_id": client.shop_id},
         )
     except inventory_import.ImportConflict as exc:
         raise EtsyFailure(str(exc), 409) from exc
 
 
-async def link_listing(client: EtsyClient, db: Session, listing_id: str, conversation_id: str) -> dict:
+async def link_listing(client: EtsyClient, listing_id: str, conversation_id: str) -> dict:
     """Link an active Etsy listing to an item the seller chose. Reads Etsy only; the item is kept as it is."""
     async def verify() -> None:
         item = await client.listing(listing_id)
@@ -160,6 +160,6 @@ async def link_listing(client: EtsyClient, db: Session, listing_id: str, convers
         client.assert_current()
 
     try:
-        return await inventory_import.link_owned_listing(db, "etsy", listing_id, conversation_id, verify)
+        return await inventory_import.link_owned_listing("etsy", listing_id, conversation_id, verify)
     except inventory_import.LinkError as exc:
         raise EtsyFailure(str(exc), exc.status_code) from exc
