@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.cli.catalog import build_catalog_from_app
@@ -40,9 +39,9 @@ PROMPT = (
 
 
 @pytest.fixture
-def db(monkeypatch):
+def db(monkeypatch, tmp_path):
     load_models()
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(f"sqlite:///{tmp_path / 'automations.db'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     # Runs and approvals open their own short sessions (database.in_worker_session).
@@ -53,6 +52,13 @@ def db(monkeypatch):
     finally:
         session.close()
         engine.dispose()
+
+
+def test_concurrent_automation_sessions_have_separate_connections(db):
+    # Marketplace tasks query on different threads; sharing one SQLite handle can crash Python.
+    engine = db.get_bind()
+    with engine.connect() as first, engine.connect() as second:
+        assert first.connection.driver_connection is not second.connection.driver_connection
 
 
 @pytest.fixture
