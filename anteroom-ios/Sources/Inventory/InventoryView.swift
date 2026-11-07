@@ -222,7 +222,7 @@ struct InventoryView: View {
 
     private var sortMenu: some View {
         Menu {
-            Picker("Sort listings", selection: Binding(get: { model.filters.sort }, set: { model.filters.sort = $0 })) {
+            Picker("Sort listings", selection: Binding(get: { model.filters.sort }, set: { model.filters.choose($0) })) {
                 ForEach(ListingSort.allCases) { sort in Text(sort.label).tag(sort) }
             }
         } label: {
