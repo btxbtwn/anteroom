@@ -26,7 +26,7 @@ from vendoo_studio.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import browser_bridge, marketplace_accounts
-from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
+from vendoo_studio.services.api_job_lock import claim_api_job, job_is_live, release_api_job, start_gate
 from vendoo_studio.services.listing_result import scrub
 from vendoo_studio.services.marketplace_identity import listing_id, listing_reference
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
@@ -262,7 +262,7 @@ def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | No
         value.update(url=known.get("url"), listing_id=known.get("listing_id"))
     records = MarketplaceListingRepo(db)
     record = records.get(conv_id, marketplace)
-    if record.get("job_id") and api_job_is_live(record["job_id"]):
+    if record.get("job_id") and job_is_live(db, record["job_id"]):
         raise DelistError(409, f"The {marketplace.title()} action is still running. Wait for it to finish.")
     cleared = {"error": None, "error_code": None, "error_fields": None, "marketplace_message": None, "retry_after": None,
                "etsy_pending_write": None}
@@ -434,7 +434,7 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
             raise DelistError(409, "Another automation job is queued or running. Wait for it to finish.")
         job = repo.create(conv_id, listing.current_revision_id if listing else "", {"delist": names},
                           status="dispatched", current_step="native_delist")
-        claim_api_job(job.id)
+        claim_api_job(db, job.id)
     return names, known, job.id
 
 

@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -50,6 +52,12 @@ class Job(SellerOwned, Base):
     vendoo_url: Mapped[str | None] = mapped_column(String, nullable=True)
     attempt_count: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Where several Machines share the database: which one runs this job, and
+    # until when it counts as running unless renewed (services/api_job_lock.py).
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    leased_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The seller pressed Cancel. The job stops at its next safe point, wherever it runs.
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 

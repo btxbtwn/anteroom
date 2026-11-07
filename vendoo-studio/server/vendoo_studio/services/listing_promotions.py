@@ -343,10 +343,14 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
     with listing_mode.guard(db, "direct"):
         if repo.get_active():
             raise PromotionError(409, "Another automation job is queued or running. Wait for it to finish.", "busy")
+        # Again under the seller's lock (shared by every Machine on Postgres):
+        # a send another Machine finished since the check above stops this one.
+        if blocked := blocking(db, row.marketplace, row.listing_id, row.action, new_like_at=new_like_at):
+            raise PromotionError(409, blocked)
         job = repo.create(conv.id, listing.current_revision_id if listing else "",
                           {"promotion": {"id": row.id, "marketplace": row.marketplace, "action": row.action}},
                           status="dispatched", current_step=STEP)
-        claim_api_job(job.id)
+        claim_api_job(db, job.id)
     error_code = None
     try:
         if row.automation_id:
