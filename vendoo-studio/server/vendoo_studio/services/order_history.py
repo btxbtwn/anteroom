@@ -310,8 +310,11 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
         return {"ok": False, "error": "Sales are not read from this marketplace."}
     if not bridge_can_read():
         return {"ok": False, "error": "Update the Anteroom Chrome extension to read sales from this marketplace."}
-    with session_factory() as db:
-        settled = settled_orders(db, marketplace)
+    def read_settled() -> list:
+        with session_factory() as db:
+            return settled_orders(db, marketplace)
+
+    settled = await asyncio.to_thread(read_settled)
     try:
         from vendoo_studio.services.service_context import current
         from vendoo_studio.services.hosted_browser_relay import relay_for

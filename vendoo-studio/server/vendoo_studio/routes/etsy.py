@@ -82,12 +82,12 @@ async def import_candidates(response: Response, page: int = Query(1, ge=1, le=40
 
 
 @router.post("/import")
-async def import_item(body: ImportRequest, response: Response, db: Session = Depends(get_db)):
+async def import_item(body: ImportRequest, response: Response):
     """Read one owned Etsy listing into local inventory; never change Etsy."""
     if body.link_conversation_id:
         conversation_id = body.link_conversation_id
-        return await _read_workspace(lambda client: etsy_import.link_listing(client, db, body.listing_id, conversation_id), response)
-    return await _read_workspace(lambda client: etsy_import.import_listing(client, db, body.listing_id), response)
+        return await _read_workspace(lambda client: etsy_import.link_listing(client, body.listing_id, conversation_id), response)
+    return await _read_workspace(lambda client: etsy_import.import_listing(client, body.listing_id), response)
 
 
 class EtsyListingDefaults(BaseModel):

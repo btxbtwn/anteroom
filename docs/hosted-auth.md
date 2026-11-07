@@ -29,6 +29,9 @@ using the existing [PyJWT library](https://pyjwt.readthedocs.io/en/stable/usage.
 PyJWT's minimum version is 2.15.1 for its JWKS refresh cooldown, serialized key
 fetching and redirect protections.
 
+A seller can delete their account with `DELETE /api/account`; see
+[account deletion](account-deletion.md). It needs no service-role key either.
+
 Verification establishes the identity in the access token. It does not check
 session revocation on every request; a signed-out session's access token can
 remain valid until it expires. Configure the project's access-token lifetime

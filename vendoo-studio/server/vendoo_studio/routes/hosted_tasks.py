@@ -81,10 +81,17 @@ def submit(db, conv_id, kind, text='', uploads=None, request=None):
     if kind == 'generate' and not photos:
         raise HTTPException(400, 'Upload product photos before generating a listing.')
     queue.require_idle(db, conv_id)
-    attachments = store_uploads(uploads or [], collection_id=conv_id)
+    attachments = []
+    if uploads:
+        # Each Storage upload can take 20 s. Release the conversation lock and
+        # the pooled connection first, then check again under the lock.
+        db.rollback()
+        attachments = store_uploads(uploads, collection_id=conv_id)
     try:
         if request is not None and anyio.from_thread.run(request.is_disconnected):
             raise HTTPException(499, 'Message upload was cancelled')
+        if uploads:
+            queue.require_idle(db, conv_id)
         task = queue.enqueue(db, conv_id, kind, queue.draft_payload(db, conv_id, text, attachments))
     except Exception:
         db.rollback()
@@ -98,15 +105,24 @@ def submit(db, conv_id, kind, text='', uploads=None, request=None):
     return task_id
 
 
-def _seller_sessions():
+def _seller_context():
     context = current()
     if context is None:
         raise HTTPException(401, 'A verified seller session is required')
-    return context.session_factory
+    return context
+
+
+def _seller_sessions():
+    return _seller_context().session_factory
+
+
+def limit_submissions(request: Request):
+    """Abuse protection on new background work; see services/hosted_limits.py."""
+    request.app.state.submission_limit.take(_seller_context().seller_id)
 
 
 @router.post('/generate', dependencies=[Depends(require_worker)])
-def generate(conv_id: str, resume: bool = False):
+def generate(conv_id: str, request: Request, resume: bool = False):
     # Open and close the seller session before streaming. A Depends(get_seller_db)
     # session stays checked out until the SSE generator finishes, which drained
     # the five-connection hosted pool while waiting on a Mac.
@@ -120,6 +136,7 @@ def generate(conv_id: str, resume: bool = False):
         elif resume:
             return stream_finished()
         else:
+            limit_submissions(request)
             task_id = submit(db, conv_id, 'generate')
     return task_stream(task_id)
 
@@ -144,7 +161,9 @@ async def message(conv_id: str, request: Request):
             owned_conversation(db, conv_id)
 
     await run_in_threadpool(authorize)
-    async with request.app.state.chat_upload_slots:
+    limit_submissions(request)
+    # One upload per seller at a time, and a few across sellers to bound memory.
+    async with request.app.state.upload_slots.hold(_seller_context().seller_id):
         data = bytearray()
         try:
             async with asyncio.timeout(120):

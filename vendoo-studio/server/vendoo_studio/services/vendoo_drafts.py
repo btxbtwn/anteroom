@@ -11,7 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import load_only
 from starlette.concurrency import run_in_threadpool
 
-from vendoo_studio.database import SessionLocal
+from vendoo_studio.database import SessionLocal, in_worker_session
 from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import approved_photos, browser_bridge, listing_mode
@@ -74,8 +74,8 @@ def _result(reply: dict, op: str):
     return next(row for row in reply["results"] if row.get("op") == op)
 
 
-async def start(db, conv_id: str, revision_id: str) -> dict:
-    response = await run_in_threadpool(_prepare, db, conv_id, revision_id)
+async def start(conv_id: str, revision_id: str) -> dict:
+    response = await in_worker_session(_prepare, conv_id, revision_id)
     spawn(run(response["job_id"]))
     return response
 
@@ -201,7 +201,7 @@ def _verify(item: dict, remote: dict, updates: dict | None = None) -> None:
         raise ValueError("Vendoo returned different draft fields. Review the draft in Vendoo before sending again.")
 
 
-async def check(db, conv_id: str) -> dict:
+def _check_target(db, conv_id: str) -> tuple[str, str, dict]:
     listing_mode.require("vendoo", db)
     found = status(db, conv_id)
     job = JobRepo(db).get(found["job_id"]) if found["job_id"] else None
@@ -209,8 +209,21 @@ async def check(db, conv_id: str) -> dict:
         raise HTTPException(409, "There is no Vendoo draft to check.")
     if job.status in ACTIVE_JOB_STATUSES:
         raise HTTPException(409, "Wait for the current send to finish.")
-    job_id, item_id, snapshot = job.id, job.vendoo_item_id, job.listing_snapshot
+    return job.id, job.vendoo_item_id, job.listing_snapshot
+
+
+def _record_check(db, job_id: str, changes: dict) -> dict:
+    job = JobRepo(db).get(job_id)
+    for name, value in changes.items():
+        setattr(job, name, value)
     db.commit()
+    return _response(job)
+
+
+async def check(conv_id: str) -> dict:
+    """Read the draft back from Vendoo. No session is open while Chrome reads it."""
+    job_id, item_id, snapshot = await in_worker_session(_check_target, conv_id)
+    job = SimpleNamespace()
     try:
         reply = await _ops(job_id, [{"op": "session", "expected_uid": snapshot.get("_vendoo_uid")},
             {"op": "get_item", "item_id": item_id, "raw": True, "allow_missing": True}], active=False)
@@ -241,8 +254,7 @@ async def check(db, conv_id: str) -> dict:
         job.status, job.current_step, job.last_error = "completed", "vendoo_saved", None
     except (ValueError, browser_bridge.BrowserBridgeError) as exc:
         job.status, job.last_error = "failed", str(exc)[:400]
-    db.commit()
-    return _response(job)
+    return await in_worker_session(_record_check, job_id, vars(job))
 
 
 async def run(job_id: str) -> None:
