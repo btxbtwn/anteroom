@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.783 — 2026-11-07
+
+- Listings and pages no longer go blank or freeze while Anteroom waits on Chrome, eBay, Etsy or the AI.
+- Sending offers, promotions, automations, updates and photo uploads no longer tie up the app while they wait.
+
 ## 0.1.782 — 2026-11-07
 
 - The Mac app's sandbox mode no longer writes to your real log file or reads your Keychain.
