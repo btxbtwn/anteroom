@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.778 — 2026-11-07
+
+- Bulk listing on iPhone: choose photos for many items at once, group each item's photos, set the box, cost and labels every draft shares, and each item's SKU and measurements (typed or read from yardstick photos). Arrange and turn photos before creating, then create the drafts or create and generate them, the same as on desktop.
+
 ## 0.1.777 — 2026-11-07
 
 - Poshmark's Size now shows the size List will send: a tag such as Large (12/14) or Waist 32 lands on Poshmark's own spelling, a 3XL tee lands in Big & Tall, and a kids' size lands in the boys' or girls' group the listing names.
