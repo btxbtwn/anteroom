@@ -1,1 +1,0 @@
-- Keep the hosted app from switching off the check that catches database connections held while waiting on Chrome.
