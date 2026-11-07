@@ -65,6 +65,30 @@ extension View {
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).stroke(WorkspaceStyle.border, lineWidth: 1))
     }
 
+    /// The chat composer's surface. On iOS 26 it floats over the conversation
+    /// as Liquid Glass, as the system's own composers do; earlier versions keep
+    /// the web's panel. The shape stays the web composer's.
+    @ViewBuilder
+    func workspaceComposer() -> some View {
+        let shape = RoundedRectangle(cornerRadius: WorkspaceStyle.composerRadius, style: .continuous)
+        if #available(iOS 26, *) {
+            glassEffect(.regular.interactive(), in: shape)
+        } else {
+            workspacePanel(radius: WorkspaceStyle.composerRadius)
+        }
+    }
+
+    /// What sits behind the composer's row. Glass needs the conversation to
+    /// show through it; the panel needs the page color under it.
+    @ViewBuilder
+    func workspaceComposerBar() -> some View {
+        if #available(iOS 26, *) {
+            self
+        } else {
+            background(WorkspaceStyle.background)
+        }
+    }
+
     /// The web's text field: a filled box with the input outline.
     func workspaceInput() -> some View {
         background(WorkspaceStyle.inputBackground, in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius, style: .continuous))
