@@ -7,6 +7,7 @@ struct InventoryView: View {
     @State private var search = ""
     @State private var path: [ListingSummary] = []
     @State private var creatingListing = false
+    @State private var bulkListing = false
     @State private var renaming: ListingSummary?
     @State private var newTitle = ""
     @State private var deleting: ListingSummary?
@@ -128,6 +129,11 @@ struct InventoryView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button("Bulk listing", systemImage: "square.stack.3d.up") { bulkListing = true }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityHint("Make many drafts from one batch of photos")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("New listing", systemImage: "plus", action: newListing)
                         .disabled(creatingListing)
                         .frame(minWidth: 44, minHeight: 44)
@@ -156,6 +162,9 @@ struct InventoryView: View {
             }
             .sheet(item: $templating) { listing in
                 ListingTemplatesSheet(api: model.api, listingID: listing.id) { Task { await model.reload() } }
+            }
+            .sheet(isPresented: $bulkListing) {
+                BulkListingView(api: model.api) { Task { await model.reload() } }
             }
             .sheet(item: $bulk) { action in
                 switch action {
@@ -233,11 +242,13 @@ struct InventoryView: View {
                 ContentUnavailableView {
                     Label("Your inventory starts here", systemImage: "tag")
                 } description: {
-                    Text("Create a listing, add your photos, and keep your draft ready to edit.")
+                    Text("Create a listing, or make many drafts at once from one batch of photos.")
                 } actions: {
                     Button("New listing", action: newListing)
                         .disabled(creatingListing)
                         .workspaceProminentButton()
+                        .frame(minHeight: 44)
+                    Button("Bulk listing") { bulkListing = true }
                         .frame(minHeight: 44)
                 }
             } else if !search.isEmpty {
