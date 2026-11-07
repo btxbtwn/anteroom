@@ -1,3 +1,0 @@
-- Buttons, switches and charts use plain black and white instead of bright blue, on the web and iPhone.
-- Listing status shows as a small colored dot beside the word, so the inventory list is calmer.
-- The assistant's example questions are a simple list instead of floating bubbles.
