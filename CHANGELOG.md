@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.759 — 2026-11-07
+
+- On myanteroom.com, Inventory's Date Sold (Newest) now puts your newest sales first, in the same order as Analytics.
+
 ## 0.1.758 — 2026-11-07
 
 - Listing links in Assistant answers open the listing again, instead of a blank Inventory page in a new tab.
