@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.767 — 2026-11-07
+
+- The Listings section of an offers or sharing automation loads quickly instead of spinning when you have hundreds of items.
+
 ## 0.1.766 — 2026-11-07
 
 - myanteroom.com now tells you when Chrome is running an older Anteroom Bridge than the site, so fixes such as Depop offers on marked-down items reach your Chrome instead of failing quietly.
