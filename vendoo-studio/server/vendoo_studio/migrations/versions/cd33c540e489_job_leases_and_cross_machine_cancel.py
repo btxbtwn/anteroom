@@ -1,7 +1,7 @@
 """Job leases and cross-Machine cancel
 
 Revision ID: cd33c540e489
-Revises: e3bea75f1b9b
+Revises: 7f3a9c2e5d14
 Create Date: 2026-11-06 17:48:50.007490
 
 A running marketplace job records which Machine runs it and until when, and a
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 
 revision = 'cd33c540e489'
-down_revision = 'e3bea75f1b9b'
+down_revision = '7f3a9c2e5d14'
 branch_labels = None
 depends_on = None
 
