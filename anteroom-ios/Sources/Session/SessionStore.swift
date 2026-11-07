@@ -25,8 +25,14 @@ final class SessionStore {
     let api: AnteroomAPI?
     let changes = LiveChanges()
     private let client: SupabaseClient?
+    /// Lets the API client sign out once the store exists.
+    private let ended: SignInEndedRelay
+    /// The seller chose Sign out; requests refused meanwhile aren't an ended sign-in.
+    private var signingOut = false
 
     init() {
+        let ended = SignInEndedRelay()
+        self.ended = ended
         guard let key = AppConfig.supabasePublishableKey else {
             client = nil
             api = nil
@@ -45,9 +51,11 @@ final class SessionStore {
         client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key)
 #endif
         self.client = client
-        api = AnteroomAPI(baseURL: AppConfig.apiBaseURL) {
-            try await client.auth.session.accessToken
-        }
+        api = AnteroomAPI(baseURL: AppConfig.apiBaseURL, auth: APIAuthorization(
+            accessToken: { try await client.auth.session.accessToken },
+            refreshedToken: { try await client.auth.refreshSession().accessToken },
+            signedOut: { await ended.fire() }))
+        ended.handler = { [weak self] in await self?.sessionEnded() }
     }
 
     var email: String? {
@@ -188,9 +196,30 @@ final class SessionStore {
     }
 
     func signOut() async {
+        signingOut = true
+        defer { signingOut = false }
         try? await client?.auth.signOut()
         UserDefaults.standard.removeObject(forKey: Self.pendingResetKey)
+        await forgetSeller()
         state = .signedOut
+    }
+
+    /// The server refused the sign-in and it could not be renewed: back to the sign-in screen.
+    private func sessionEnded() async {
+        guard case .signedIn = state, !signingOut else { return }
+        signingOut = true
+        defer { signingOut = false }
+        try? await client?.auth.signOut(scope: .local)
+        await forgetSeller()
+        signInError = "Your sign-in has ended. Sign in again."
+        state = .signedOut
+    }
+
+    /// Nothing of this seller's stays on the phone after sign-out.
+    private func forgetSeller() async {
+        await api?.forgetSeller()
+        PhotoCache.images.removeAllObjects()
+        EditorDraftStore.removeAll()
     }
 
     /// After the server deleted the account: forget this iPhone's session and
@@ -198,13 +227,9 @@ final class SessionStore {
     /// the local session is cleared.
     func finishAccountDeletion() async {
         try? await client?.auth.signOut(scope: .local)
-        PhotoCache.images.removeAllObjects()
-        URLCache.shared.removeAllCachedResponses()
-        let files = FileManager.default
-        if let exports = try? files.contentsOfDirectory(at: files.temporaryDirectory, includingPropertiesForKeys: nil) {
-            for file in exports { try? files.removeItem(at: file) }
-        }
         UserDefaults.standard.removeObject(forKey: Self.pendingResetKey)
+        URLCache.shared.removeAllCachedResponses()
+        await forgetSeller()
         state = .signedOut
     }
 
@@ -215,6 +240,16 @@ final class SessionStore {
             return SignInFailure(message: SignInMessages.message(for: action, code: auth.errorCode.rawValue, serverMessage: serverMessage))
         }
         return SignInFailure(message: SignInMessages.message(for: action, code: nil, offline: error is URLError))
+    }
+}
+
+/// Created before the store, so the API client can reach it once it exists.
+@MainActor
+final class SignInEndedRelay {
+    var handler: (@MainActor () async -> Void)?
+
+    func fire() async {
+        await handler?()
     }
 }
 

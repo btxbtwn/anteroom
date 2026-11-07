@@ -74,13 +74,13 @@ async def import_candidates(page: int = Query(1, ge=1, le=10000), db: Session = 
 
 
 @router.post("/import")
-async def import_item(body: ImportRequest, db: Session = Depends(get_db)):
+async def import_item(body: ImportRequest):
     """Read an owned eBay listing into Anteroom. This never changes eBay."""
     try:
         client = await EbayClient.connect()
         if body.link_conversation_id:
-            return await ebay_import.link_listing(client, db, body.listing_id, body.link_conversation_id)
-        return await ebay_import.import_listing(client, db, body.listing_id)
+            return await ebay_import.link_listing(client, body.listing_id, body.link_conversation_id)
+        return await ebay_import.import_listing(client, body.listing_id)
     except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
         raise failure(exc) from exc
 

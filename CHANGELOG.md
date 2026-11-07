@@ -6,6 +6,39 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.763 — 2026-11-07
+
+- eBay and Etsy sales now fill in their own amounts: eBay records the sale price, shipping the buyer paid, eBay's fees, refunds and eBay shipping labels; Etsy records the sale price, shipping the buyer paid and refunds. Older sales without amounts are filled in a few at a time.
+- Amounts you entered yourself are never replaced, and your cost of goods is kept.
+
+## 0.1.762 — 2026-11-07
+
+- Keep a marketplace action running when another server checks on it, and let Cancel reach it from any server.
+
+## 0.1.761 — 2026-11-07
+
+- Listings on the web open again instead of showing "This listing didn't load" when they have blank fields or are sold out.
+
+## 0.1.760 — 2026-11-07
+
+- The Mac app and the web app now install the exact, verified package versions that were tested, so each update ships what was checked.
+
+## 0.1.759 — 2026-11-07
+
+- On myanteroom.com, Inventory's Date Sold (Newest) now puts your newest sales first, in the same order as Analytics.
+
+## 0.1.758 — 2026-11-07
+
+- Listing links in Assistant answers open the listing again, instead of a blank Inventory page in a new tab.
+
+## 0.1.757 — 2026-11-07
+
+- Keep the hosted app from switching off the check that catches database connections held while waiting on Chrome.
+
+## 0.1.756 — 2026-11-07
+
+- Listing, delisting, checking results and importing listings no longer tie up the cloud database while Chrome, eBay or Etsy answers, so other pages keep loading during those actions.
+
 ## 0.1.755 — 2026-11-07
 
 - On the web, one seller's slow image upload no longer holds up everyone else's chat messages.

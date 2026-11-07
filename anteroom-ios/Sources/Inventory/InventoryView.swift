@@ -79,14 +79,21 @@ struct InventoryView: View {
             .searchable(text: $search, prompt: "Search title or SKU")
             .refreshable { await model.reload() }
             .task { if !model.hasLoaded { await model.reload() } }
-            // Listings change on other devices; catch up when the app comes back.
+            // Listings change on other devices; catch up when the app comes back
+            // after a while (a quick switch away keeps what's on screen).
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active && model.hasLoaded { Task { await model.reload() } }
+                if phase == .active && model.hasLoaded && model.shouldReloadOnReturn() { Task { await model.reload() } }
             }
             // And live, while the app is open; a burst of changes reloads once.
             .task(id: live?.listings) {
                 guard model.hasLoaded, (live?.listings ?? 0) > 0 else { return }
-                try? await Task.sleep(for: .milliseconds(300))
+                try? await Task.sleep(for: .milliseconds(1500))
+                if !Task.isCancelled { await model.reload() }
+            }
+            // Marketplace work moves a row on only while it is listing, updating or generating.
+            .task(id: live?.jobs) {
+                guard model.hasLoaded, (live?.jobs ?? 0) > 0, model.hasWorkInProgress else { return }
+                try? await Task.sleep(for: .milliseconds(1500))
                 if !Task.isCancelled { await model.reload() }
             }
             .toolbar {

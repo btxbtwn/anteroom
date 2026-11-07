@@ -10,10 +10,13 @@ import Supabase
 @MainActor
 @Observable
 final class LiveChanges {
-    /// Advances when listings, their photos or marketplace work changed.
+    /// Advances when listings or their photos changed.
     private(set) var listings = 0
+    /// Advances when marketplace work (List, Update, Delist jobs) moved on.
+    /// The inventory only reloads for it while one of its rows is in progress.
+    private(set) var jobs = 0
 
-    private static let listingTopics: Set<String> = ["listings", "photos", "jobs"]
+    private static let listingTopics: Set<String> = ["listings", "photos"]
 
     /// Follows the seller's feed until the calling task is cancelled.
     func follow(client: SupabaseClient, userID: UUID) async {
@@ -24,7 +27,8 @@ final class LiveChanges {
         do {
             try await channel.subscribeWithError()
             for await change in changes {
-                if let topic = Self.topic(of: change), Self.listingTopics.contains(topic) { listings += 1 }
+                guard let topic = Self.topic(of: change) else { continue }
+                if Self.listingTopics.contains(topic) { listings += 1 } else if topic == "jobs" { jobs += 1 }
             }
         } catch {}
         await client.removeChannel(channel)

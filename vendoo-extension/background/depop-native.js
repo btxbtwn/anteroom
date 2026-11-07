@@ -431,7 +431,7 @@ function depopAttributeValues(listing, category, attributes) {
     const options = depopShownChoices(attribute, category);
     if (!options.length) continue;
     const labels = Object.hasOwn(specifics.attributes || {}, id) ? asList(specifics.attributes[id])
-      : wanted[id] || (/-type$/.test(id) ? asList(specifics.type) : []);
+      : wanted[id] || (id.endsWith('-type') ? asList(specifics.type) : []);
     const ids = [...new Set(labels.map(label => options.find(option => [depopPageName(option), depopName(option), option.id]
       .some(name => marketplaceNameKey(name) === marketplaceNameKey(label)))?.id).filter(Boolean))];
     const chosen = ids.slice(0, Math.max(1, Number(attribute.max_selection) || 1));
@@ -740,7 +740,7 @@ function depopCleanShipping(methods) {
 // Response objects from a previous draft (brand records, videos, repop
 // metadata) are not copied in.
 function depopDraftWriteBody(listing, fields, pictures, existing) {
-  const source = { ...depopFormFields(listing), ...(fields || {}) };
+  const source = { ...depopFormFields(listing), ...fields };
   const body = {
     description: depopDescription(listing),
     price_amount: String(depopPrice(listing) ?? ''),
@@ -1328,7 +1328,7 @@ async function depopApiAction(action, payload) {
           await marketplaceSleep(wait);
         }
         const docs = [];
-        for (const candidate of [...new Set([next, slug])]) {
+        for (const candidate of new Set([next, slug])) {
           for (const suffix of ['edit-listing/', '']) {
             try { docs.push(await request('GET', `/presentation/api/v1/products/by-slug/${candidate}/${suffix}`)); } catch { /* Try the other read. */ }
           }
