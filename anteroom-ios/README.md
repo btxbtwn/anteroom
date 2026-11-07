@@ -17,7 +17,7 @@ The native screens keep iOS's structure (tab bar, navigation stacks, grouped
 lists, swipe actions, segmented controls) and take the web app's look from
 `Sources/App/WorkspaceStyle.swift`, which copies the hosted workspace's color
 tokens: the neutral `#0A0A0A` page and `#111111` panels in dark mode, zinc
-surfaces in light mode, the web's blue accent and status colors, bordered text
+surfaces in light mode, the web's ink accent and status colors, bordered text
 fields, the web's status tabs and its chat composer. Grouped lists use
 `.workspaceGroupedList()` with `.listRowBackground(WorkspaceStyle.surface)`
 on their rows; a List does not pass a row background down by itself. Sign-in

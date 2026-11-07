@@ -270,7 +270,7 @@ struct MarketplaceActionsView: View {
                         Button(busy ? "Working…" : wait > 0 ? "Retry in \(wait)s" : "List…") {
                             confirming = .list(title: title, marketplace: row.marketplace)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .workspaceProminentButton()
                         .disabled(busy || wait > 0 || model.revisionID == nil)
                     }
                 }

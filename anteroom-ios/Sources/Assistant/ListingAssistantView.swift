@@ -83,7 +83,7 @@ struct ListingAssistantView: View {
         } else {
             HStack(spacing: 12) {
                 Button("Generate from photos", systemImage: "sparkles") { confirmGenerate = true }
-                    .buttonStyle(.borderedProminent)
+                    .workspaceProminentButton()
                 Button("Regenerate", systemImage: "arrow.triangle.2.circlepath") { confirmRegenerate = true }
                     .buttonStyle(.bordered)
             }

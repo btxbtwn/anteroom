@@ -25,8 +25,11 @@ enum WorkspaceStyle {
     static let selected = color(light: 0xF4F4F5, dark: 0x202020)
     /// --muted-foreground.
     static let mutedText = color(light: 0x71717B, dark: 0x818181)
-    /// --primary.
-    static let accent = color(light: 0x1B4ED8, dark: 0x346BF1)
+    /// --primary: ink, not a brand blue (zinc-900 / neutral-100). Color is
+    /// kept for status.
+    static let accent = color(light: 0x18181B, dark: 0xF5F5F5)
+    /// --primary-foreground: text and icons on a filled accent control.
+    static let accentForeground = color(light: 0xFFFFFF, dark: 0x0A0A0A)
     /// Status text: --success-foreground, --warning-foreground,
     /// --destructive-foreground and --info-foreground.
     static let success = color(light: 0x007A55, dark: 0x00D492)
@@ -96,6 +99,22 @@ extension View {
     }
 }
 
+extension View {
+    /// The primary action: a filled ink button whose label inverts with the
+    /// theme, so it reads in light and dark.
+    func workspaceProminentButton() -> some View {
+        buttonStyle(.borderedProminent).foregroundStyle(WorkspaceStyle.accentForeground)
+    }
+}
+
+/// Switches stay the system green: an ink track would hide the white knob in
+/// dark mode, and green is what an iPhone switch looks like everywhere else.
+struct WorkspaceSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(configuration).toggleStyle(.switch).tint(.green)
+    }
+}
+
 /// The chat composer's send button: a filled accent circle, as on the web.
 struct ComposerSendButton: View {
     let label: String
@@ -106,7 +125,7 @@ struct ComposerSendButton: View {
         Button(action: action) {
             Image(systemName: "arrow.up")
                 .font(.body.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(WorkspaceStyle.accentForeground)
                 .frame(width: 34, height: 34)
                 .background(WorkspaceStyle.accent.opacity(disabled ? 0.45 : 1), in: Circle())
         }
