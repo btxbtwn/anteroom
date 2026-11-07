@@ -15,12 +15,17 @@ def main() -> None:
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     package_lock = json.loads((ROOT / "package-lock.json").read_text(encoding="utf-8"))
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    uv_lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    locked_project = next(
+        (item for item in uv_lock.get("package", []) if item.get("name") == "vendoo-studio"), {}
+    )
     versions = {
         "VERSION": version,
         "package.json": package.get("version"),
         "package-lock.json": package_lock.get("version"),
         'package-lock.json packages[""]': package_lock.get("packages", {}).get("", {}).get("version"),
         "pyproject.toml": pyproject.get("project", {}).get("version"),
+        "uv.lock": locked_project.get("version"),
     }
 
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
