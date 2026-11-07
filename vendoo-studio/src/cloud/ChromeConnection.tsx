@@ -44,6 +44,9 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
   }
   const pending = connection?.ok && connection.state === "pending";
   const notice = chromeNotice(connection, attempted);
+  // An outdated Bridge keeps bugs the site already fixed; say so once without waiting for a click.
+  const outdated = connectedNow && notice.button === "Update Bridge";
+  useEffect(() => { if (outdated) setExpanded(true); }, [outdated]);
   return <div className="chrome-connection"><div ref={anchor} className="connection-controls">
     <button type="button" disabled={busy || pending} onClick={() => connectedNow ? setExpanded(value => !value) : void connect()}>
       {busy && !pending ? "Connecting…" : notice.button}

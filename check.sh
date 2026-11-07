@@ -72,6 +72,7 @@ if changed '^vendoo-extension/'; then
     git ls-files 'vendoo-extension/*.js' | grep -F -x -f <(printf '%s\n' \"\$CHANGED\") | xargs -r -n1 node --check
     node --test 'vendoo-extension/tests/*.test.js'
     '$PY' -m json.tool vendoo-extension/manifest.json >/dev/null
+    node vendoo-extension/tools/version-bump/check.js '$BASE'
   "
 fi
 

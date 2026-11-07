@@ -31,6 +31,10 @@ skills/list-this/*
 skills/list-this/references/*
 !skills/list-this/references/*.md
 !skills/list-this/references/*.json
+# The site compares Chrome's Anteroom Bridge with this version.
+!vendoo-extension/
+vendoo-extension/*
+!vendoo-extension/manifest.json
 # Keep private/runtime files excluded after every source allow rule.
 **/__pycache__/
 **/*.pyc

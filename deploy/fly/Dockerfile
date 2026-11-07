@@ -4,6 +4,8 @@ COPY vendoo-studio/package.json vendoo-studio/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY vendoo-studio/ ./
 COPY skills/list-this/references/listing-editor-fields.json /src/skills/list-this/references/listing-editor-fields.json
+# The site tells the seller when Chrome runs an older Anteroom Bridge than this one.
+COPY vendoo-extension/manifest.json /src/vendoo-extension/manifest.json
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_PUBLISHABLE_KEY
 RUN node -e 'if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_PUBLISHABLE_KEY) throw new Error("Cloud public configuration is required")' \
