@@ -1,1 +1,0 @@
-- Add photos from the Files app on iPhone, next to Camera and Library.

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.773 — 2026-11-07
+
+- Add photos from the Files app on iPhone, next to Camera and Library.
+
 ## 0.1.772 — 2026-11-07
 
 - On a phone, the listing editor now matches the iPhone app: the form uses the full screen width, and you switch between General and each marketplace from a picker at the top instead of a sidebar.
