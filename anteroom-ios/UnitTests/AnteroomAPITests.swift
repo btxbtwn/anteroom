@@ -50,6 +50,25 @@ final class AnteroomAPITests: XCTestCase {
         XCTAssertNil(withNotes.json?["title"])
     }
 
+    func testCreateListingCarriesTheBox() async throws {
+        StubProtocol.answer(.init(status: 200, body: #"{"id":"n","status":"draft"}"#))
+        _ = try await api.createListing(boxID: "box-1")
+        XCTAssertEqual(StubProtocol.requests.last?.json?["box_id"] as? String, "box-1")
+    }
+
+    func testReadMeasurementsSendsPhotosAndGarmentAsAForm() async throws {
+        StubProtocol.answer(.init(status: 200, body: #"{"photos_read":1,"measurements":{"waist":{"status":"accepted","value":16,"reads":[16,16]}}}"#))
+        let reading = try await api.readMeasurements(jpegs: [Data("one".utf8), Data("two".utf8)], garment: .pants)
+        XCTAssertEqual(reading.photosRead, 1)
+        XCTAssertEqual(reading.measurements["waist"]?.value, 16)
+        let sent = try XCTUnwrap(StubProtocol.requests.last)
+        XCTAssertEqual(sent.url?.path, "/api/measurements/read")
+        XCTAssertTrue(sent.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data; boundary=") == true)
+        let body = String(decoding: try XCTUnwrap(sent.httpBody), as: UTF8.self)
+        XCTAssertEqual(body.components(separatedBy: "name=\"files\"").count - 1, 2)
+        XCTAssertTrue(body.contains("name=\"garment\"\r\n\r\npants\r\n"))
+    }
+
     func testQueryItemsAreEncoded() async throws {
         StubProtocol.answer(.init(status: 200, body: #"{"rows":[]}"#))
         _ = try await api.searchEbayCategories("linen t-shirt")
