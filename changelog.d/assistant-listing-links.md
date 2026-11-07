@@ -1,0 +1,1 @@
+- Listing links in Assistant answers open the listing again, instead of a blank Inventory page in a new tab.
