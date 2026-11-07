@@ -1,9 +1,14 @@
 import SwiftUI
 
 /// Rewrite independent listings concurrently, keeping seller inputs and photos.
+/// Bulk listing uses `.generate` for drafts it just made: nothing to clear,
+/// and it starts on its own, like the web's Create & generate.
 struct BulkRegenerateView: View {
+    enum Mode { case rewrite, generate }
+
     let api: AnteroomAPI
     let listings: [ListingSummary]
+    var mode: Mode = .rewrite
     let onFinished: () -> Void
 
     private enum State_ { case waiting, working(String), done, failed(String), skipped }
@@ -21,7 +26,7 @@ struct BulkRegenerateView: View {
             List {
                 Group {
                     Section {
-                        Text(started ? summary : "Rewrites each listing from its photos and item details. Photos, measurements, flaws, cost, labels and notes stay. Results are saved as drafts; nothing is listed or sent.")
+                        Text(started ? summary : mode == .generate ? "Writes each draft from its photos and item details. Results are saved as drafts; nothing is listed or sent." : "Rewrites each listing from its photos and item details. Photos, measurements, flaws, cost, labels and notes stay. Results are saved as drafts; nothing is listed or sent.")
                             .font(.footnote).foregroundStyle(.secondary)
                         if let problem {
                             Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
@@ -43,7 +48,7 @@ struct BulkRegenerateView: View {
                 .listRowBackground(WorkspaceStyle.surface)
             }
             .workspaceGroupedList()
-            .navigationTitle("Regenerate \(listings.count)")
+            .navigationTitle(mode == .generate ? "Generate \(listings.count)" : "Regenerate \(listings.count)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -52,33 +57,37 @@ struct BulkRegenerateView: View {
                             .disabled(stopRequested)
                         Button("Close") { onFinished(); dismiss() }
                     } else {
-                        Button(started ? "Done" : "Cancel") {
-                            if started { onFinished() }
+                        // Bulk listing's drafts exist already, so closing still refreshes inventory.
+                        Button(started || mode == .generate ? "Done" : "Cancel") {
+                            if started || mode == .generate { onFinished() }
                             dismiss()
                         }
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if !started {
-                        Button("Regenerate") { start() }.fontWeight(.semibold).disabled(ready != true)
+                        Button(mode == .generate ? "Generate" : "Regenerate") { start() }.fontWeight(.semibold).disabled(ready != true)
                     }
                 }
             }
-            .task { await check() }
+            .task {
+                await check()
+                if mode == .generate, ready == true, !started { start() }
+            }
         }
     }
 
     private var summary: String {
         let done = states.values.filter { if case .done = $0 { return true } else { return false } }.count
         let failed = states.values.filter { if case .failed = $0 { return true } else { return false } }.count
-        return "\(done) rewritten · \(failed) need attention · \(listings.count - done - failed) remaining"
+        return "\(done) \(mode == .generate ? "generated" : "rewritten") · \(failed) need attention · \(listings.count - done - failed) remaining"
     }
 
     private func caption(_ listing: ListingSummary) -> String {
         switch states[listing.id] ?? .waiting {
-        case .waiting: return listing.coverPhotoID == nil ? "No photos; will be skipped" : (started ? "Waiting" : "Ready")
+        case .waiting: return mode == .rewrite && listing.coverPhotoID == nil ? "No photos; will be skipped" : (started ? "Waiting" : "Ready")
         case .working(let step): return step
-        case .done: return "Rewritten"
+        case .done: return mode == .generate ? "Generated" : "Rewritten"
         case .failed(let message): return message
         case .skipped: return "Skipped"
         }
@@ -98,7 +107,9 @@ struct BulkRegenerateView: View {
                 problem = "Listing generation isn't available on the server yet."
                 ready = false
             } else if !workspace.providerConfigured {
-                problem = "Add an AI provider in Settings → Providers before regenerating."
+                problem = mode == .generate
+                    ? "Add an AI provider in Settings → Providers to generate. Your drafts are saved."
+                    : "Add an AI provider in Settings → Providers before regenerating."
                 ready = false
             } else {
                 ready = true
@@ -122,13 +133,16 @@ struct BulkRegenerateView: View {
     @MainActor
     private func rewrite(_ listing: ListingSummary) async {
         if stopRequested { states[listing.id] = .skipped; return }
-        guard listing.coverPhotoID != nil, listing.settledAt == nil else {
+        // A new draft's summary predates its photos; bulk listing only passes drafts that have some.
+        guard mode == .generate || (listing.coverPhotoID != nil && listing.settledAt == nil) else {
             states[listing.id] = .skipped
             return
         }
         do {
-            states[listing.id] = .working("Clearing the generated listing…")
-            try await api.resetListing(listing.id, keepInputs: true)
+            if mode == .rewrite {
+                states[listing.id] = .working("Clearing the generated listing…")
+                try await api.resetListing(listing.id, keepInputs: true)
+            }
             states[listing.id] = .working("Generating…")
             try await api.runAssistant(listing.id, action: .generate) { frame in
                 if frame.event == "status" { states[listing.id] = .working(frame.data) }
