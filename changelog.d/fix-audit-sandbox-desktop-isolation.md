@@ -1,1 +1,0 @@
-- The Mac app's sandbox mode no longer writes to your real log file or reads your Keychain.
