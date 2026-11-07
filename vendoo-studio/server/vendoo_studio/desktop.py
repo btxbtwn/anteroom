@@ -25,6 +25,7 @@ from vendoo_studio.config import (
     is_frozen,
     resource_root,
 )
+from vendoo_studio import sandbox
 from vendoo_studio.version import app_version
 
 CHANNELS = {
@@ -71,7 +72,19 @@ MODERN_MACOS_SDK = 26
 MODERN_CHROME_ENV = "VENDOO_STUDIO_MODERN_CHROME"
 HEALTH_URL = f"http://{HOST}:{PORT}/api/health"
 APP_URL = f"http://{HOST}:{PORT}"
-LOG_PATH = Path.home() / "Library" / "Application Support" / CHANNEL["app_name"] / "logs" / CHANNEL["log"]
+
+
+def desktop_log_path() -> Path:
+    # VENDOO_STUDIO_DATA_DIR (set by sandbox mode and tests) keeps the log
+    # beside its data instead of in the seller's Application Support folder.
+    override = os.environ.get("VENDOO_STUDIO_DATA_DIR")
+    root = (
+        Path(override).expanduser().resolve()
+        if override
+        else Path.home() / "Library" / "Application Support" / CHANNEL["app_name"]
+    )
+    return root / "logs" / CHANNEL["log"]
+
 
 _server = None
 _server_thread: threading.Thread | None = None
@@ -153,8 +166,9 @@ def require_command(name: str) -> str:
 def setup_logging() -> None:
     if sys.stderr.isatty():
         return
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    handle = open(LOG_PATH, "a", encoding="utf-8")
+    log_path = desktop_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(log_path, "a", encoding="utf-8")
     sys.stdout = handle
     sys.stderr = handle
 
@@ -1365,6 +1379,11 @@ def run_window() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    # Sandbox mode swaps in the in-memory keyring and blocks outbound
+    # connections before the window warms the Keychain, not when the server
+    # starts later.
+    if sandbox.enabled():
+        sandbox.install()
     if is_frozen():
         os.environ.setdefault("VENDOO_STUDIO_PACKAGED", "1")
         setup_logging()
