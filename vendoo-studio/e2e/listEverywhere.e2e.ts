@@ -33,10 +33,17 @@ test("List everywhere lists only the marketplaces the seller picks, after they c
     if (phone) await page.getByRole("tab", { name: "Listing" }).click();
 
     const rail = page.getByRole("navigation", { name: "Marketplaces" });
-    await expect(rail.getByRole("listitem", { name: "eBay" })).toContainText("Ready", { timeout: 20_000 });
-    await expect(rail.getByRole("listitem", { name: "Depop" })).toContainText("1 to fill");
-
-    await rail.getByRole("button", { name: "List everywhere…" }).click();
+    if (phone) {
+      // A phone picks forms and listing-wide actions from the picker above the form.
+      await rail.getByRole("button", { name: /^Form, / }).click();
+      await expect(page.getByRole("menuitem", { name: /^eBay/ })).toContainText("Ready", { timeout: 20_000 });
+      await expect(page.getByRole("menuitem", { name: /^Depop/ })).toContainText("1 to fill");
+      await page.getByRole("menuitem", { name: "List everywhere…" }).click();
+    } else {
+      await expect(rail.getByRole("listitem", { name: "eBay" })).toContainText("Ready", { timeout: 20_000 });
+      await expect(rail.getByRole("listitem", { name: "Depop" })).toContainText("1 to fill");
+      await rail.getByRole("button", { name: "List everywhere…" }).click();
+    }
     const dialog = page.getByRole("dialog");
     const confirm = dialog.getByRole("button", { name: /^List/ });
     // Nothing is picked until the seller picks it.
