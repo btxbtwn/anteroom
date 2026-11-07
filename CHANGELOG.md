@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.781 — 2026-11-07
+
+- The database check no longer reports a false problem with a database from an earlier version: it now lists the updates Anteroom applies on its next start and only flags gaps those updates do not cover.
+
 ## 0.1.780 — 2026-11-07
 
 - The backup taken just before a database upgrade is no longer cleared out by newer backups from the same day, so going back to an earlier version restores your data from right before the upgrade.
