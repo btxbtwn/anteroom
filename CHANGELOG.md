@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.774 — 2026-11-07
+
+- On iPhone, the chat composer and tab bar use the system glass look, and the tab bar shrinks while you scroll.
+
 ## 0.1.773 — 2026-11-07
 
 - Add photos from the Files app on iPhone, next to Camera and Library.
