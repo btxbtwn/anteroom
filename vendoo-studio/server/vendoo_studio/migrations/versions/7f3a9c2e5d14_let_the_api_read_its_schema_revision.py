@@ -1,7 +1,7 @@
 """Let the hosted API read which schema revision its database is at.
 
 Revision ID: 7f3a9c2e5d14
-Revises: e3bea75f1b9b
+Revises: 7c3e9a1d5b20
 Create Date: 2026-11-06 12:00:00.000000
 
 ``alembic_version`` has row security with no policy, so the runtime login
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 
 revision = '7f3a9c2e5d14'
-down_revision = 'e3bea75f1b9b'
+down_revision = '7c3e9a1d5b20'
 branch_labels = None
 depends_on = None
 
