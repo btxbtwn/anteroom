@@ -64,6 +64,8 @@ export type FilterableListing = {
   vendoo_listed_dates?: Record<string, string>;
   vendoo_sold_dates?: Record<string, string>;
   unsent_edits?: boolean;
+  /** Sale details the sales records still lack, such as fees or the sale date. */
+  missing_sale_data?: string[];
 };
 
 export interface ListingFilters {
@@ -77,6 +79,8 @@ export interface ListingFilters {
   notListed: boolean;
   /** Keep only listings edited here since they were last sent to a marketplace. */
   unsent: boolean;
+  /** Keep only listings whose sale is missing details, such as fees or the sale date. */
+  missingSale: boolean;
   /** Keep only listings that went live at least this many days ago; 0 is off. */
   staleDays: number;
   sort: ListingSortId;
@@ -88,6 +92,7 @@ export const DEFAULT_LISTING_FILTERS: ListingFilters = {
   labels: [],
   notListed: false,
   unsent: false,
+  missingSale: false,
   staleDays: 0,
   sort: "recent",
 };
@@ -179,6 +184,7 @@ export function matchesFilters(
     if (!filters.labels.some((label) => own.has(lower(label)))) return false;
   }
   if (filters.unsent && !listing.unsent_edits) return false;
+  if (filters.missingSale && !listing.missing_sale_data?.length) return false;
   if (!isStale(listing, filters.staleDays, now)) return false;
   return true;
 }
@@ -330,6 +336,7 @@ export function activeFilterCount(filters: ListingFilters): number {
     Math.max(filters.marketplaces.length, filters.notListed ? 1 : 0) +
     filters.labels.length +
     (filters.unsent ? 1 : 0) +
+    (filters.missingSale ? 1 : 0) +
     (filters.staleDays ? 1 : 0)
   );
 }
@@ -393,6 +400,11 @@ export function staleCounts(
 /** Listings edited since they were last sent to a marketplace. */
 export function unsentCount(listings: FilterableListing[]): number {
   return listings.filter((listing) => Boolean(listing.unsent_edits)).length;
+}
+
+/** Listings whose sale is missing details. */
+export function missingSaleCount(listings: FilterableListing[]): number {
+  return listings.filter((listing) => Boolean(listing.missing_sale_data?.length)).length;
 }
 
 /** Listings no marketplace carries. */

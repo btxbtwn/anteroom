@@ -225,11 +225,11 @@ struct BusinessAssistantView: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 4)
             }
-            .workspacePanel(radius: WorkspaceStyle.composerRadius)
+            .workspaceComposer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(WorkspaceStyle.background)
+        .workspaceComposerBar()
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []

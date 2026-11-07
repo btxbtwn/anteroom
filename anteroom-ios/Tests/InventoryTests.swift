@@ -54,6 +54,33 @@ struct InventoryTests {
         precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "e", "b", "d"])
         filters.sort = .createdAsc
         precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "b", "d", "e"])
+
+        // The desktop's listing-date and sale-date sorts. An item is as stale as
+        // its oldest live marketplace; one never listed or never sold sorts last.
+        let dated = try JSONDecoder().decode([ListingSummary].self, from: Data(#"""
+        [
+          {"id":"p","title":"P","status":"active","vendoo_marketplaces":["ebay","etsy"],
+           "vendoo_listed_dates":{"ebay":"2026-09-01T00:00:00+00:00","etsy":"2026-06-01T00:00:00+00:00"},
+           "vendoo_sold_dates":{"etsy":"2026-07-01T00:00:00+00:00"}},
+          {"id":"q","title":"Q","status":"active","vendoo_listed_at":"2026-08-01T00:00:00Z"},
+          {"id":"r","title":"R","status":"draft"},
+          {"id":"s","title":"S","status":"sold","sold_at":"2026-10-05T00:00:00Z"},
+          {"id":"t","title":"T","status":"sold","sold_at":"2026-10-09T00:00:00.5Z"}
+        ]
+        """#.utf8))
+        filters = InventoryFilters(sort: .stalest)
+        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["q", "p", "r", "s", "t"])
+        filters.sort = .freshest
+        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["p", "q", "r", "s", "t"])
+        filters.choose(.soldDesc)
+        precondition(filters.status == .sold, "sorting by sale date opens Sold")
+        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["t", "s"])
+        filters.choose(.priceAsc)
+        precondition(filters.status == .sold, "other sorts keep the tab")
+        precondition(ListingSort.allCases.map(\.rawValue) == [
+            "recent", "created_desc", "created_asc", "modified_desc", "modified_asc", "title_asc", "title_desc",
+            "price_desc", "price_asc", "sku_asc", "sku_desc", "stalest", "freshest", "sold_desc",
+        ], "same sorts, same order as LISTING_SORTS on the desktop")
         precondition(InventoryQuery.compactCount(999) == "999" && InventoryQuery.compactCount(1121) == "1.1k"
                      && InventoryQuery.compactCount(2000) == "2k" && InventoryQuery.compactCount(150_000) == "150k")
 

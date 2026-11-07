@@ -1,6 +1,6 @@
 import { useWorkspaceRuntime } from "../app/runtime";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { pollMs } from "../api/polling";
@@ -8,6 +8,7 @@ import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, Market
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightCheck, PreflightGap } from "../api/nativeMarketplaces";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
+import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { confirmDialog } from "../ui/confirmDialog";
 import { ListEverywhereDialog, type ListChoice } from "./ListEverywhereDialog";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -208,6 +209,7 @@ export function MarketplacesLayout({
   children?: ReactNode;
 }) {
   const runtime = useWorkspaceRuntime();
+  const phone = usePhoneLayout();
   // Which marketplaces this app can act on: all of them on the Mac, eBay on the web.
   const canAct = (marketplace: string) => runtime.actionMarketplaces.has(marketplace);
   disabled = disabled || runtime.actionMarketplaces.size === 0;
@@ -647,21 +649,175 @@ export function MarketplacesLayout({
     ...(selectedMarketplace ? visiblePreflightGaps(selectedMarketplace).map((gap) => gap.message) : []),
   ]);
 
+  // A form's one-line state, under its name on the rail and in the phone's picker.
+  function formState(id: string): { status?: Status; check: PreflightCheck | null; line: ReactNode } {
+    const marketplace = MANAGED.has(id) ? id as Marketplace : null;
+    const status = marketplace ? statusById.get(marketplace) : undefined;
+    // "Not listed" is the ordinary state. Saying it on every row hides
+    // the few that actually need a look (unconfirmed, ineligible, live);
+    // a row not listed yet says whether its required fields are filled.
+    const quiet = status?.tone === "idle";
+    const check = marketplace && quiet ? preflightCheck(marketplace) : null;
+    const missing = check?.missing.length ?? 0;
+    const line = <>
+      {status && !quiet && (
+        <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground",
+          status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
+          status.tone === "sold" && "text-info-foreground")}>
+          {TONE_ICON[status.tone]}
+          <span className="truncate">{status.label}</span>
+        </span>
+      )}
+      {status && quiet && !check && <span className="sr-only">{status.label}</span>}
+      {check && (
+        <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground tabular-nums",
+          missing > 0 && "text-warning-foreground")}>
+          {missing > 0
+            ? <AlertTriangleIcon aria-hidden className="size-3.5 text-warning" />
+            : <CheckIcon aria-hidden className="size-3.5 text-success" />}
+          <span className="truncate">{missing > 0 ? `${missing} to fill` : "Ready"}</span>
+        </span>
+      )}
+    </>;
+    return { status, check, line };
+  }
+  const formIcon = (id: string) => MANAGED.has(id)
+    ? <MarketplaceLogo id={id as Marketplace} label={railLabel(id)} size={16} />
+    : <SquarePenIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />;
+  const showListEverywhere = readyToList.length > 1;
+  const showDelistEverywhere = removable.length > 1;
+
+  const pane = <>
+    {picking && <ListEverywhereDialog title={title} choices={choices} onClose={() => setPicking(false)}
+      onConfirm={(marketplaces) => { for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" }); }} />}
+    {/* Content stops at a readable line length; the pane still scrolls edge to edge. */}
+    <div ref={paneRef} onScroll={event => scrollPositions.current.set(selected, event.currentTarget.scrollTop)}
+      className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">
+      {paneError && (
+        <p role="alert" className="text-destructive-foreground text-xs">{paneError}</p>
+      )}
+      {selling && <MarkSoldForm key={selling.key} initial={selling.marketplace} pending={recordSale.isPending}
+        error={recordSale.error?.message} onSubmit={(sale) => recordSale.mutate(sale)} onCancel={() => setSelling(null)} />}
+      {selectedMarketplace && selectedStatus && (
+        <section data-marketplace-pane={selectedMarketplace} data-tone={selectedStatus.tone}
+          className={cn("flex flex-col gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs",
+            // The marketplace where the item sold stands apart from the ones still listed.
+            selectedStatus.tone === "sold" && "border border-info/32 bg-info/4")}>
+          {/* Name on the left, every action on the right. A listed item's state is
+              already on its rail row, so the bar only spells out the others. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <MarketplaceLogo id={selectedMarketplace} label={railLabel(selectedMarketplace)} size={16} />
+              <span className="truncate font-medium text-foreground text-sm">{railLabel(selectedMarketplace)}</span>
+              {selectedStatus.tone !== "live" && (
+                <span className={cn("flex min-w-0 items-center gap-1 text-muted-foreground", selectedStatus.tone === "failed" && "text-destructive-foreground", selectedStatus.tone === "attention" && "text-warning-foreground", selectedStatus.tone === "sold" && "font-medium text-info-foreground")}>
+                  {selectedStatus.tone !== "idle" && TONE_ICON[selectedStatus.tone]}
+                  <span className="truncate">{selectedStatus.tone === "idle" ? "Not listed yet" : selectedStatus.label}</span>
+                </span>
+              )}
+            </span>
+            <span className="ms-auto flex shrink-0 items-center gap-1.5">
+              {selectedStatus.href && (
+                <Button size="xs" variant="ghost" aria-label={`${selectedStatus.hrefLabel} on ${railLabel(selectedMarketplace)}`}
+                  render={<a href={selectedStatus.href} target="_blank" rel="noopener noreferrer" />}>
+                  {selectedStatus.hrefLabel}<ExternalLinkIcon aria-hidden />
+                </Button>
+              )}
+              {actions(selectedMarketplace, selectedStatus)}
+              {/* The phone has no rail, so the marketplace's own menu sits here. */}
+              {phone && rowMenu(selectedMarketplace, selectedStatus)}
+            </span>
+          </div>
+          {detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
+            role={selectedStatus.tone === "failed" ? "alert" : undefined}>{detail}</p>}
+          {said && <p className="whitespace-pre-wrap break-words text-muted-foreground" data-marketplace-message>{said}</p>}
+          {reconnectNotice(selectedMarketplace)}
+          {errorActions(selectedMarketplace)}
+          {preflightNotice(selectedMarketplace)}
+          {settings(selectedMarketplace)}
+          {linkForm(selectedMarketplace)}
+          {(() => {
+            const draft = drafts[selectedMarketplace];
+            const name = railLabel(selectedMarketplace);
+            if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "ebay") return null;
+            return (
+              <div className="flex items-center gap-2">
+                <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the link if one was created"
+                  value={draftLinks[selectedMarketplace as NativeMarketplace] || ""}
+                  onChange={(event) => setDraftLinks({ ...draftLinks, [selectedMarketplace]: event.target.value })} />
+                <Button size="xs" variant="outline" disabled={startingOn(selectedMarketplace) || !draftLinks[selectedMarketplace as NativeMarketplace]?.trim()}
+                  onClick={() => action.mutate({ marketplace: selectedMarketplace as NativeMarketplace, kind: "check", draftUrl: draftLinks[selectedMarketplace as NativeMarketplace]?.trim() })}>Check link</Button>
+              </div>
+            );
+          })()}
+        </section>
+      )}
+      <FieldsShownContext.Provider value={reportFields}>
+        <MarketplaceMessagesContext value={shownMessages}>{children}</MarketplaceMessagesContext>
+      </FieldsShownContext.Provider>
+    </div>
+  </>;
+
+  if (phone) {
+    // Like the iPhone app: one full-width form, chosen from a picker at the top,
+    // with the listing-wide actions in that picker and the overflow menu.
+    const current = formState(selected);
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <nav aria-label="Marketplaces" className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
+          <Menu>
+            <MenuTrigger render={<Button variant="outline" className="h-auto min-h-11 min-w-0 max-w-[65%] justify-start gap-2 px-3 py-1.5 text-start" aria-label={`Form, ${railLabel(selected)}`} />}>
+              {formIcon(selected)}
+              <span className="min-w-0">
+                <span className="block truncate font-medium text-foreground text-sm">{railLabel(selected)}</span>
+                {current.line}
+              </span>
+              <ChevronDownIcon aria-hidden className="ms-auto size-4 shrink-0 text-muted-foreground" />
+            </MenuTrigger>
+            <MenuPopup align="start" width="content">
+              {ids.map((id) => {
+                const state = formState(id);
+                return (
+                  <MenuItem key={id} aria-current={selected === id ? "true" : undefined} onClick={() => onSelect(id)}
+                    onFocus={() => onPrepare?.(id)} onPointerEnter={() => onPrepare?.(id)}
+                    className={cn("min-h-11 gap-2", selected === id && "bg-accent")}>
+                    {formIcon(id)}
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-foreground">{railLabel(id)}</span>
+                      {state.line}
+                    </span>
+                    {selected === id && <CheckIcon aria-hidden className="ms-auto size-4 shrink-0" />}
+                  </MenuItem>
+                );
+              })}
+              <MenuSeparator />
+              {showListEverywhere && <MenuItem disabled={busy} onClick={() => setPicking(true)}><SendIcon />List everywhere…</MenuItem>}
+              <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</MenuItem>
+              {showDelistEverywhere && <MenuItem variant="destructive" disabled={busy} onClick={() => void runDelist(removable)}>
+                <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
+              </MenuItem>}
+            </MenuPopup>
+          </Menu>
+          <span className="ms-auto flex shrink-0 items-center gap-1">
+            {railStatus}
+            {railActions}
+            {railMenu}
+          </span>
+        </nav>
+        {pane}
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <nav aria-label="Marketplaces" className="flex w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-e py-1.5 ps-1.5 pe-1">
         <ul className="flex flex-col gap-0.5 text-xs">
           {ids.map((id) => {
             const marketplace = MANAGED.has(id) ? id as Marketplace : null;
-            const status = marketplace ? statusById.get(marketplace) : undefined;
             const name = railLabel(id);
             const current = selected === id;
-            // "Not listed" is the ordinary state. Saying it on every row hides
-            // the few that actually need a look (unconfirmed, ineligible, live);
-            // a row not listed yet says whether its required fields are filled.
-            const quiet = status?.tone === "idle";
-            const check = marketplace && quiet ? preflightCheck(marketplace) : null;
-            const missing = check?.missing.length ?? 0;
+            const { status, check, line } = formState(id);
             return (
               <li key={id} aria-label={name} className="group relative flex items-start">
                 <button type="button" aria-current={current ? "true" : undefined} title={check ? missingDetail(check.missing) : status?.label} onClick={() => onSelect(id)}
@@ -671,24 +827,7 @@ export function MarketplacesLayout({
                   {marketplace ? <MarketplaceLogo id={marketplace} label={name} size={16} /> : <span aria-hidden className="size-4 shrink-0" />}
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-foreground">{name}</span>
-                    {status && !quiet && (
-                      <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground",
-                        status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
-                        status.tone === "sold" && "text-info-foreground")}>
-                        {TONE_ICON[status.tone]}
-                        <span className="truncate">{status.label}</span>
-                      </span>
-                    )}
-                    {status && quiet && !check && <span className="sr-only">{status.label}</span>}
-                    {check && (
-                      <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground tabular-nums",
-                        missing > 0 && "text-warning-foreground")}>
-                        {missing > 0
-                          ? <AlertTriangleIcon aria-hidden className="size-3.5 text-warning" />
-                          : <CheckIcon aria-hidden className="size-3.5 text-success" />}
-                        <span className="truncate">{missing > 0 ? `${missing} to fill` : "Ready"}</span>
-                      </span>
-                    )}
+                    {line}
                   </span>
                 </button>
                 {marketplace && status ? (
@@ -711,85 +850,20 @@ export function MarketplacesLayout({
           {railStatus && <div className="pointer-events-none absolute bottom-full end-1 mb-1 flex items-center gap-1.5">{railStatus}</div>}
           {railMenu && <span className="absolute end-0.5 top-1.5 z-10">{railMenu}</span>}
           {railActions}
-          {readyToList.length > 1 && (
+          {showListEverywhere && (
             <Button size="xs" variant="ghost" disabled={busy} title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
               onClick={() => setPicking(true)}><SendIcon />List everywhere…</Button>
           )}
           <Button size="xs" variant="ghost-muted" disabled={busy} title="A sale in person or anywhere off these marketplaces"
             onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>
-          {removable.length > 1 && (
+          {showDelistEverywhere && (
             <Button size="xs" variant="ghost-destructive" disabled={busy} onClick={() => void runDelist(removable)}>
               <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
             </Button>
           )}
         </div>
       </nav>
-      {picking && <ListEverywhereDialog title={title} choices={choices} onClose={() => setPicking(false)}
-        onConfirm={(marketplaces) => { for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" }); }} />}
-      {/* Content stops at a readable line length; the pane still scrolls edge to edge. */}
-      <div ref={paneRef} onScroll={event => scrollPositions.current.set(selected, event.currentTarget.scrollTop)}
-        className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">
-        {paneError && (
-          <p role="alert" className="text-destructive-foreground text-xs">{paneError}</p>
-        )}
-        {selling && <MarkSoldForm key={selling.key} initial={selling.marketplace} pending={recordSale.isPending}
-          error={recordSale.error?.message} onSubmit={(sale) => recordSale.mutate(sale)} onCancel={() => setSelling(null)} />}
-        {selectedMarketplace && selectedStatus && (
-          <section data-marketplace-pane={selectedMarketplace} data-tone={selectedStatus.tone}
-            className={cn("flex flex-col gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs",
-              // The marketplace where the item sold stands apart from the ones still listed.
-              selectedStatus.tone === "sold" && "border border-info/32 bg-info/4")}>
-            {/* Name on the left, every action on the right. A listed item's state is
-                already on its rail row, so the bar only spells out the others. */}
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="flex min-w-0 items-center gap-1.5">
-                <MarketplaceLogo id={selectedMarketplace} label={railLabel(selectedMarketplace)} size={16} />
-                <span className="truncate font-medium text-foreground text-sm">{railLabel(selectedMarketplace)}</span>
-                {selectedStatus.tone !== "live" && (
-                  <span className={cn("flex min-w-0 items-center gap-1 text-muted-foreground", selectedStatus.tone === "failed" && "text-destructive-foreground", selectedStatus.tone === "attention" && "text-warning-foreground", selectedStatus.tone === "sold" && "font-medium text-info-foreground")}>
-                    {selectedStatus.tone !== "idle" && TONE_ICON[selectedStatus.tone]}
-                    <span className="truncate">{selectedStatus.tone === "idle" ? "Not listed yet" : selectedStatus.label}</span>
-                  </span>
-                )}
-              </span>
-              <span className="ms-auto flex shrink-0 items-center gap-1.5">
-                {selectedStatus.href && (
-                  <Button size="xs" variant="ghost" aria-label={`${selectedStatus.hrefLabel} on ${railLabel(selectedMarketplace)}`}
-                    render={<a href={selectedStatus.href} target="_blank" rel="noopener noreferrer" />}>
-                    {selectedStatus.hrefLabel}<ExternalLinkIcon aria-hidden />
-                  </Button>
-                )}
-                {actions(selectedMarketplace, selectedStatus)}
-              </span>
-            </div>
-            {detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
-              role={selectedStatus.tone === "failed" ? "alert" : undefined}>{detail}</p>}
-            {said && <p className="whitespace-pre-wrap break-words text-muted-foreground" data-marketplace-message>{said}</p>}
-            {reconnectNotice(selectedMarketplace)}
-            {errorActions(selectedMarketplace)}
-            {preflightNotice(selectedMarketplace)}
-            {settings(selectedMarketplace)}
-            {linkForm(selectedMarketplace)}
-            {(() => {
-              const draft = drafts[selectedMarketplace];
-              const name = railLabel(selectedMarketplace);
-              if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "ebay") return null;
-              return (
-                <div className="flex items-center gap-2">
-                  <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the link if one was created"
-                    value={draftLinks[selectedMarketplace as NativeMarketplace] || ""}
-                    onChange={(event) => setDraftLinks({ ...draftLinks, [selectedMarketplace]: event.target.value })} />
-                  <Button size="xs" variant="outline" disabled={startingOn(selectedMarketplace) || !draftLinks[selectedMarketplace as NativeMarketplace]?.trim()}
-                    onClick={() => action.mutate({ marketplace: selectedMarketplace as NativeMarketplace, kind: "check", draftUrl: draftLinks[selectedMarketplace as NativeMarketplace]?.trim() })}>Check link</Button>
-                </div>
-              );
-            })()}
-          </section>
-        )}
-        <FieldsShownContext.Provider value={reportFields}>
-          <MarketplaceMessagesContext value={shownMessages}>{children}</MarketplaceMessagesContext>
-        </FieldsShownContext.Provider>
-      </div>
+      {pane}
     </div>
   );
 }

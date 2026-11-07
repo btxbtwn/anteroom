@@ -1,4 +1,4 @@
-import { createListing, expect, openListing, test, titleBox } from "./fixtures";
+import { createListing, expect, openListing, openForm, test, titleBox } from "./fixtures";
 
 const SAMPLES = [
   "Levi's M Blue Cotton Crew Neck T-Shirt",
@@ -51,8 +51,14 @@ test("a marketplace form can be filled in without generating", async ({ page, ph
   try {
     await openListing(page, phone, title);
     await expect(await titleBox(page, phone)).toBeVisible();
-    await page.getByRole("navigation", { name: "Marketplaces" }).getByRole("button", { name: /^Poshmark Poshmark/ }).click();
+    await openForm(page, phone, "Poshmark");
     const form = page.getByRole("group", { name: "Poshmark listing fields" });
+    if (phone) {
+      // Like the iPhone app, a phone gives the form the full width: no rail beside it.
+      const box = await form.boundingBox();
+      expect(box!.width).toBeGreaterThan(page.viewportSize()!.width * 0.85);
+      await expect(page.getByRole("navigation", { name: "Marketplaces" }).getByRole("button", { name: /^Form, Poshmark/ })).toBeVisible();
+    }
     const field = form.getByRole("textbox", { name: "Title *" });
     await field.fill("Hand typed tee");
     await field.blur();

@@ -24,6 +24,11 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
     var vendooListingURLs: [String: String]?
     var vendooSoldDates: [String: String]?
     var removedMarketplaces: [String]?
+    /// When the item last went live, overall and per marketplace, for the
+    /// staleness sorts; and when Anteroom's sales ledger last saw it sell.
+    var vendooListedAt: String?
+    var vendooListedDates: [String: String]?
+    var soldAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, sku, price, quantity
@@ -39,6 +44,9 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
         case vendooListingURLs = "vendoo_listing_urls"
         case vendooSoldDates = "vendoo_sold_dates"
         case removedMarketplaces = "removed_marketplaces"
+        case vendooListedAt = "vendoo_listed_at"
+        case vendooListedDates = "vendoo_listed_dates"
+        case soldAt = "sold_at"
     }
 
     var displayTitle: String {
