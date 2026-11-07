@@ -1,7 +1,0 @@
-- A screen that fails to load now shows a Reload button instead of a blank window, and Anteroom reloads itself once when an update replaced its files.
-- Text you typed in a listing field is saved when you close or switch the listing, hide the app or reload, and Anteroom asks before leaving while an edit is still saving. Automatic update reloads wait until your edits are saved.
-- Typing in the inventory search no longer slows down the open listing and its chat.
-- Anteroom checks for changes less often while it is in the background or receiving live updates, and refreshes the inventory less often while a send is running.
-- Bulk Regenerate and bulk price changes read a few listings at a time instead of all at once.
-- Stopping a generation no longer puts an old chat message back in the message box, and cancelling discovery stops the request right away.
-- When Chrome fails partway through a marketplace action, Anteroom no longer says nothing reached the marketplace.
