@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text, update
+from sqlalchemy import create_engine, event, text, update
 from sqlalchemy.sql.dml import Update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -392,6 +392,32 @@ class PromotionAutomationsTest(unittest.TestCase):
         JobRepo(self.db).create(self.items[0][0].id, "", {}, status="dispatched", current_step="native_delist")
         self.assertEqual(self.tick(), 0)
         self.bridge.assert_not_called()
+
+    def test_coverage_reads_the_same_number_of_queries_however_many_items_there_are(self):
+        saved = self.create(OFFER)
+
+        def queries() -> tuple[int, dict]:
+            count = [0]
+
+            def counted(*_args, **_kwargs):
+                count[0] += 1
+            engine = self.db.get_bind()
+            event.listen(engine, "before_cursor_execute", counted)
+            try:
+                self.db.expire_all()
+                body = self.client.get(f"/api/promotion-automations/{saved['id']}/coverage").json()
+            finally:
+                event.remove(engine, "before_cursor_execute", counted)
+            return count[0], body
+
+        few, _body = queries()
+        for index in range(200):
+            conv = ConversationRepo(self.db).create(title=f"More {index}")
+            conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"poshmark": f"https://poshmark.com/listing/More-{index + 100:024x}"}})
+        self.db.commit()
+        many, body = queries()
+        self.assertEqual(len(body["items"]), 203)
+        self.assertEqual(many, few)
 
     def test_offers_go_only_above_the_floor_to_new_likers_with_the_chosen_shipping(self):
         (first, first_post), (second, second_post), (third, _post) = self.items

@@ -44,6 +44,7 @@ from vendoo_studio.services.automation_schedule import (
 )
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_promotions import NAMES, STOP_CODES, PromotionError
+from vendoo_studio.services.marketplace_delist import listings_for
 
 log = logging.getLogger("vendoo_studio.promotion_automations")
 
@@ -235,11 +236,13 @@ def _covered(db: Session, row: PromotionAutomation, everything: bool = False) ->
     for listing_row in db.query(MarketplaceListing).filter_by(marketplace=row.marketplace).all():
         rows_by_item.setdefault(listing_row.conversation_id, []).append(listing_row)
     index = load_listed_index(db)
+    convs = [conv for conv in convs if conv.id not in excluded]
+    known = listings_for(db, [conv for conv in convs if conv.status != "sold"])
     result = []
     for conv in convs:
-        if conv.id in excluded:
+        if conv.status == "sold":
             continue
-        listing_id, reason = promotions.live_listing(db, conv, row.marketplace)
+        listing_id, reason = promotions.live_entry(known[conv.id].get(row.marketplace) or {}, row.marketplace)
         if reason:
             continue
         listed_at = resolve_listed_at(index, conv, rows_by_item.get(conv.id, []), {row.marketplace})[0]

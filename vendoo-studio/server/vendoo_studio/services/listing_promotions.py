@@ -93,7 +93,11 @@ def live_listing(db: Session, conv: Conversation, marketplace: str) -> tuple[str
 
     if conv.status == "sold":
         return None, "This item sold. Nothing is shared or offered."
-    entry = listings(db, conv.id).get(marketplace) or {}
+    return live_entry(listings(db, conv.id).get(marketplace) or {}, marketplace)
+
+
+def live_entry(entry: dict, marketplace: str) -> tuple[str | None, str | None]:
+    """``live_listing`` for an item whose listings are already read and which has not sold."""
     name = NAMES.get(marketplace, marketplace.title())
     if not entry.get("listing_id"):
         return None, f"Anteroom has no live {name} listing link for this item."

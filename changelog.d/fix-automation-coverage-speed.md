@@ -1,0 +1,1 @@
+- The Listings section of an offers or sharing automation loads quickly instead of spinning when you have hundreds of items.

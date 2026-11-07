@@ -154,6 +154,30 @@ def listings(db: Session, conv_id: str) -> dict:
     return known_listings(notes, native, _sold_on(db, conv_id, notes, native))
 
 
+def listings_for(db: Session, convs: list) -> dict[str, dict]:
+    """``listings`` for many loaded items, in a fixed number of queries.
+
+    Only items with a paid sale read their sale records one by one, because
+    whether that sale ended the listing depends on stock read per listing.
+    """
+    from vendoo_studio.models.marketplace_listing import MarketplaceListing
+    from vendoo_studio.repositories.marketplace_listings import as_dict
+
+    ids = [conv.id for conv in convs]
+    native: dict[str, dict[str, dict]] = {}
+    for row in db.query(MarketplaceListing).filter(MarketplaceListing.conversation_id.in_(ids)).populate_existing():
+        native.setdefault(row.conversation_id, {})[row.marketplace] = as_dict(row)
+    with_sales = {conv_id for (conv_id,) in db.query(MarketplaceSale.conversation_id).filter(
+        MarketplaceSale.conversation_id.in_(ids), MarketplaceSale.order_status.in_(PAID_STATUSES)).distinct()}
+    result = {}
+    for conv in convs:
+        notes = parse_notes(conv.notes)
+        bindings = native.get(conv.id, {})
+        sold = _sold_on(db, conv.id, notes, bindings) if conv.id in with_sales else reported_sales(notes)
+        result[conv.id] = known_listings(notes, bindings, sold)
+    return result
+
+
 def known_listings(notes: dict, native: dict, sold: dict) -> dict:
     """Interpret already-loaded listing links, removals and sale reports."""
     urls = _notes_dict(notes, "vendooListingUrls")
