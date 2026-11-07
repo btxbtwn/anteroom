@@ -27,9 +27,9 @@ def create_ad(body: ad_spend.AdSpendEntry, db: Session = Depends(get_db)):
 
 
 @router.post("/etsy-csv")
-async def upload_etsy_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload_etsy_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
-        return etsy_ads_csv.import_export(db, await file.read())
+        return etsy_ads_csv.import_export(db, file.file.read())
     except etsy_ads_csv.EtsyAdsFileError as exc:
         raise HTTPException(400, str(exc)) from exc
 

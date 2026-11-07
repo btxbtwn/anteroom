@@ -414,8 +414,7 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
                 text = "It isn't listed anywhere else."
             else:
                 try:
-                    with session_factory() as db:
-                        result = await delist(db, conv_id, live, confirm=True)
+                    result = await delist(conv_id, live, confirm=True)
                 except DelistError as exc:
                     text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
                 else:

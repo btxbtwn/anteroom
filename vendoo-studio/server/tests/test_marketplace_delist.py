@@ -32,6 +32,8 @@ class MarketplaceDelistTest(unittest.TestCase):
         Base.metadata.create_all(engine)
         self.db = sessionmaker(bind=engine)()
         app.dependency_overrides[get_db] = lambda: self.db
+        # Delist and Check sales open their own sessions on worker threads.
+        self.enterContext(patch("vendoo_studio.database.SessionLocal", sessionmaker(bind=engine)))
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title="Vintage tee")
         self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": URLS})
@@ -132,6 +134,7 @@ class MarketplaceDelistTest(unittest.TestCase):
 
     def test_a_newer_listing_after_a_delete_is_live_again(self):
         self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True})
+        self.db.expire_all()  # the delist wrote through its own session
         self.assertEqual(self.client.get(self.base).json()["mercari"]["state"], "deleted")
         notes = parse_notes(self.conv.notes)
         self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {**notes["vendooListingUrls"],
