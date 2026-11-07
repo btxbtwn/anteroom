@@ -189,7 +189,10 @@ def test_saved_listing_with_blank_fields_and_sold_out_quantity_opens_and_saves(c
         # Generation and sale tracking store blanks as null and a sold-out item as 0.
         revision = ListingRevision(user_id=USER_ID, conversation_id=draft['id'], source='generated',
                                    listing_json={'title': 'Shirt', 'brand': 'Crazy Horse', 'sku': None,
-                                                 'secondaryColor': None, 'size': None, 'quantity': 0})
+                                                 'secondaryColor': None, 'size': None, 'quantity': 0,
+                                                 # Imports kept each marketplace's live link beside its fields.
+                                                 'depop_specifics': {'listingURL': 'https://depop.com/x', 'style': ['Biker']},
+                                                 'ebay_specifics': {'listingUrl': '', '_internal': 1}})
         db.add(revision)
         db.flush()
         db.add(Listing(user_id=USER_ID, conversation_id=draft['id'], current_revision_id=revision.id))
@@ -200,6 +203,7 @@ def test_saved_listing_with_blank_fields_and_sold_out_quantity_opens_and_saves(c
     listing = loaded.json()['listing']
     assert listing['sku'] == listing['secondaryColor'] == listing['size'] == ''
     assert listing['quantity'] == 0
+    assert listing['depop_specifics'] == {'style': ['Biker']} and listing['ebay_specifics'] == {}
     saved = client.put(path, headers=alice, json={'listing': listing, 'expected_revision_id': loaded.json()['current_revision_id']})
     assert saved.status_code == 200, saved.text
 
