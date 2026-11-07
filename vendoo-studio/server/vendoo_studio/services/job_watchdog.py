@@ -4,9 +4,11 @@ A job left ``dispatched`` holds its marketplace's slot and keeps the editor's
 card on "Updating…". This sweep frees the slot, on startup and every
 ``SWEEP_INTERVAL_SEC``:
 
-- **interrupted** — a direct marketplace job this process is not running
-  (Studio quit or restarted mid-action). Failed once it is ``ORPHAN_GRACE``
-  old, which covers a job committed a moment before its worker claims it.
+- **interrupted** — a direct marketplace job no process is running (Studio
+  quit or restarted mid-action). A job another Machine holds an unexpired
+  lease on is running there (``services/api_job_lock.py``). Failed once it is
+  ``ORPHAN_GRACE`` old, which covers a job committed a moment before its
+  worker claims it.
 - **silent** — any dispatched job that has not been heard from for
   ``STALL_AFTER``. Every step writes the job or one of its events as it moves,
   so ten minutes of silence is a stuck job.
@@ -26,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.models.job import JobEvent
 from vendoo_studio.repositories.queries import JobRepo
-from vendoo_studio.services.api_job_lock import api_job_is_live
+from vendoo_studio.services.api_job_lock import JobLeases, process_leases
 
 log = logging.getLogger("vendoo_studio.job_watchdog")
 
@@ -75,13 +77,14 @@ def _stop_waiting_on(job_id: str) -> None:
     current_extension().cancel_waits_for_job(job_id)
 
 
-def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
+def fail_stalled_jobs(db: Session, *, now: datetime | None = None, leases: JobLeases | None = None) -> list[str]:
     """Fail dead and silent dispatched jobs. Returns the ids failed.
 
     Database work only, so ``sweep`` can run it off the event loop: a locked
     database must not freeze the server while this waits on it. Stopping what
     still waits on a failed job happens back on the loop, in ``sweep``.
     """
+    leases = leases or process_leases()
     repo = JobRepo(db)
     running = repo.get_running()
     if not running:
@@ -93,9 +96,9 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
         last = heard[job.id]
         quiet = moment - last if last else STALL_AFTER
         native = str(job.current_step or "").startswith("native_")
-        if native and api_job_is_live(job.id):
+        if native and leases.holds(job, moment):
             # A direct listing job keeps its own deadlines and must keep the slot
-            # until Chrome or the marketplace answers.
+            # until Chrome or the marketplace answers, on whichever Machine runs it.
             continue
         if native and quiet >= ORPHAN_GRACE:
             error, reason = "Marketplace action interrupted. Check its result before trying again.", "native_interrupted"
@@ -104,9 +107,15 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
         else:
             continue
         step = job.current_step
-        updated = repo.update_status(job.id, "failed", step, error=error)
-        if updated is None or updated.status != "failed" or updated.last_error != error:
-            continue
+        if native:
+            # Only if its owner has not renewed it meanwhile. Marked failed and
+            # unconfirmed below; never started again.
+            if not leases.interrupt(db, job.id, error, moment):
+                continue
+        else:
+            updated = repo.update_status(job.id, "failed", step, error=error)
+            if updated is None or updated.status != "failed" or updated.last_error != error:
+                continue
         repo.add_event(job.id, "watchdog_failed", step, {"reason": reason, "quiet_sec": int(quiet.total_seconds())})
         if native:
             from vendoo_studio.services.native_marketplaces import mark_interrupted

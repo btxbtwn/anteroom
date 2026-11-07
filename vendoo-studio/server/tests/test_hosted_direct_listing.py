@@ -104,6 +104,43 @@ def test_web_job_watchdog_frees_a_restarted_sellers_marketplace_slot(cloud):  # 
         assert JobRepo(db).get(job_id) is None
 
 
+def test_web_job_on_another_machine_keeps_its_slot_and_hears_its_cancel(cloud, monkeypatch):  # noqa: F811
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.models.conversation import Conversation, utcnow
+    from vendoo_studio.models.job import Job
+    from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+    from vendoo_studio.repositories.queries import JobRepo
+    from vendoo_studio.services import api_job_lock
+
+    machine_a = api_job_lock.JobLeases('machineA', heartbeat=False)
+    machine_b = api_job_lock.JobLeases('machineB', heartbeat=False)
+    # This test process is machine B: its watchdog and Cancel.
+    monkeypatch.setattr(api_job_lock, '_process', machine_b)
+    with use(for_seller(USER_ID)), SessionLocal() as db:
+        conv = Conversation(title='Vintage coat', status='draft')
+        db.add(conv)
+        db.commit()
+        job = JobRepo(db).create(conv.id, 'r1', {}, status='dispatched', current_step='native_ebay_publish')
+        MarketplaceListingRepo(db).save(conv.id, 'ebay', {'state': 'publishing', 'action': 'publish', 'job_id': job.id})
+        machine_a.claim(db, job.id)
+        db.execute(update(Job).where(Job.id == job.id).values(updated_at=utcnow() - timedelta(minutes=1)))
+        db.commit()
+        conv_id, job_id = conv.id, job.id
+
+    # A's heartbeat runs outside any request, in the seller's own row-secured session.
+    machine_a.renew()
+    assert asyncio.run(hosted_job_watchdog.sweep_owner(USER_ID, reconcile_all=False)) == []
+    with use(for_seller(USER_ID)), SessionLocal() as db:
+        assert JobRepo(db).get(job_id).status == 'dispatched'
+        assert MarketplaceListingRepo(db).get(conv_id, 'ebay')['state'] == 'publishing'
+        assert api_job_lock.job_is_live(db, job_id)
+        assert api_job_lock.request_job_cancel(db, job_id)
+    assert not machine_a.cancel_requested(job_id)
+    machine_a.renew()
+    assert machine_a.cancel_requested(job_id)
+    machine_a.release(job_id)
+
+
 def test_web_etsy_form_is_built_without_chrome(cloud, signing_keys, monkeypatch):  # noqa: F811
     client, _ = cloud
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
