@@ -1,0 +1,1 @@
+- The database check no longer reports a false problem with a database from an earlier version: it now lists the updates Anteroom applies on its next start and only flags gaps those updates do not cover.
