@@ -2,7 +2,6 @@ name: CI
 
 on:
   pull_request:
-  merge_group:
   push:
     branches: [main]
   workflow_dispatch:
@@ -27,16 +26,11 @@ jobs:
         with:
           python-version: "3.12"
       - name: Require a changelog entry for the version being shipped
-        env:
-          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             # checkout tests a merge; its first parent is the actual base.
             # The event's base SHA can predate a release already in that merge.
             python vendoo-studio/scripts/check-changelog.py --base "$(git rev-parse HEAD^1)"
-          elif [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
-            # The queue tests main plus every PR ahead of this one.
-            python vendoo-studio/scripts/check-changelog.py --base "$MERGE_GROUP_BASE"
           else
             python vendoo-studio/scripts/check-changelog.py
           fi
