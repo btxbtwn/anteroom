@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.760 — 2026-11-07
+
+- The Mac app and the web app now install the exact, verified package versions that were tested, so each update ships what was checked.
+
 ## 0.1.759 — 2026-11-07
 
 - On myanteroom.com, Inventory's Date Sold (Newest) now puts your newest sales first, in the same order as Analytics.

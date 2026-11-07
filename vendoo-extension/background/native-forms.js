@@ -279,7 +279,7 @@ function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
     const attr = (attributes.generic_attributes || []).find(row => row.id === id);
     const options = depopShownChoices(attr, category);
     if (!options.length) continue;
-    const legacy = id === 'material' ? specifics.material : id === 'occasion' ? specifics.occasion : /-type$/.test(id) ? specifics.type : [];
+    const legacy = id === 'material' ? specifics.material : id === 'occasion' ? specifics.occasion : id.endsWith('-type') ? specifics.type : [];
     const value = extraValues[id] ?? specifics.attributes?.[id] ?? legacy ?? [];
     fields.push(nativeEditorChoice(`depop_specifics.attributes.${id}`, depopPageName(attr) || id, value,
       options.map(row => ({ label: depopPageName(row), value: row.id })),

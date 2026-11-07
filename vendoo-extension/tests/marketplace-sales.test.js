@@ -98,7 +98,7 @@ test('Depop fails the check when no listing names the shop', async () => {
 });
 
 test('a removed listing is not a sale, and a check that cannot read the shop fails', async () => {
-  const { c } = worker({
+  worker({
     '/api/listings/105101406': [200, { success: true, listing: { id: '105101406', status: 1, user: { id: '99' } } }],
     '/api/search/listings': [200, { success: true, listings: [{ id: '105101406' }], hasMore: false }],
   });

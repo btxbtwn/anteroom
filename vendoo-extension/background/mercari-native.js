@@ -601,7 +601,7 @@ function mercariFailure(operationName, errors, write) {
 // also sent again when Mercari could not reach its own API. ``resend: false``
 // sends exactly once.
 async function mercariRequest(body, { multipart = null, deadline, operationName = body?.operationName, retry = false, resend = true }) {
-  const write = !/Query$/.test(operationName) && !/^\s*query\b/.test(body?.query || '');
+  const write = !operationName.endsWith('Query') && !/^\s*query\b/.test(body?.query || '');
   for (let attempt = 0; ; attempt += 1) {
     const headers = mercariHeaders(await mercariCurrentSession(deadline));
     if (!multipart) headers['content-type'] = 'application/json';
@@ -656,7 +656,7 @@ async function mercariUploadPhoto(jobId, photo, deadline) {
 }
 
 async function mercariUploadPhotos(jobId, photos, deadline) {
-  const ids = new Array(photos.length);
+  const ids = Array.from({ length: photos.length });
   let next = 0;
   let failed = false;
   const worker = async () => {
