@@ -13,6 +13,8 @@ FUNDING_TYPES = {"TRANSFER", "WITHDRAWAL", "PURCHASE", "LOAN_REPAYMENT"}
 class OrderFinancials:
     net: Decimal
     original_sale_fees: Decimal | None
+    # Label purchases less label refunds; None when the order has no eBay label.
+    shipping_labels: Decimal | None = None
 
 
 def _fee(value) -> Decimal | None:
@@ -34,6 +36,7 @@ async def order_financials(client: EbayClient, order_id: str) -> OrderFinancials
     """
     total = Decimal(0)
     sale_fees = []
+    labels: Decimal | None = None
     seen = {}
     offset = 0
     while offset < 10000:
@@ -69,6 +72,8 @@ async def order_financials(client: EbayClient, order_id: str) -> OrderFinancials
             if not value.is_finite() or value < 0:
                 return None
             total += value if transaction["bookingEntry"] == "CREDIT" else -value
+            if kind == "SHIPPING_LABEL":
+                labels = (labels or Decimal(0)) + (value if transaction["bookingEntry"] == "DEBIT" else -value)
             if kind == "SALE":
                 sale_fees.append(_fee(transaction.get("totalFeeAmount")) if transaction["bookingEntry"] == "CREDIT" else None)
         offset += len(transactions)
@@ -83,7 +88,7 @@ async def order_financials(client: EbayClient, order_id: str) -> OrderFinancials
             # totalFeeAmount is the order's fee total. Multiple SALE records
             # may repeat it; do not sum or guess an allocation across them.
             fees = sale_fees[0] if len(sale_fees) == 1 else None
-            return OrderFinancials(net=total, original_sale_fees=fees)
+            return OrderFinancials(net=total, original_sale_fees=fees, shipping_labels=labels)
         if not transactions:
             return None
     return None
