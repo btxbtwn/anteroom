@@ -121,3 +121,26 @@ def test_hosted_inventory_reports_where_imported_listings_are_live(migration_eng
     assert summary["vendoo_sold_dates"] == {"mercari": "2026-11-01T12:00:00Z"}
     assert summary["vendoo_listed_at"] == "2026-10-01T12:00:00Z"
     assert summary["vendoo_labels"] == ["Tees", "Summer"]
+
+
+def test_hosted_inventory_carries_the_sale_date_the_sold_tab_sorts_by(migration_engine):  # noqa: F811
+    """Date Sold (Newest) on the web sorts by each row's sale date, as the Mac list sends it."""
+    from datetime import datetime
+
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+
+    engine = migration_engine
+    schema_migrations.ensure_schema(engine)
+    with Session(engine) as db:
+        db.add_all([Conversation(id="coat", title="Coat"), Conversation(id="tee", title="Tee")])
+        db.flush()
+        db.add(MarketplaceSale(marketplace="ebay", order_id="o1", line_id="l1", listing_id="1", conversation_id="coat",
+                               order_status="paid", sold_at=datetime(2026, 11, 5, 21, 4, 48),
+                               received_at=datetime(2026, 11, 5, 21, 6)))
+        db.commit()
+        rows = {row["id"]: row for row in inventory_response(db)}
+    assert rows["coat"]["status"] == "sold"
+    assert rows["coat"]["sold_at"].startswith("2026-11-05T21:04:48")
+    assert rows["coat"]["units_sold"] == 1
+    assert rows["tee"]["sold_at"] is None
+    assert rows["tee"]["units_sold"] == 0
