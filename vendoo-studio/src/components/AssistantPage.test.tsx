@@ -87,6 +87,8 @@ describe("AssistantPage", () => {
     expect(linkedListingId("#listing-674fb62ea1fb")).toBe("674fb62ea1fb");
     expect(linkedListingId("https://example.com/#listing-abc")).toBeNull();
     expect(linkedListingId("#listing-")).toBeNull();
+    expect(linkedListingId("#0a398113547b")).toBe("0a398113547b");
+    expect(linkedListingId("#notes")).toBeNull();
     expect(linkedListingId(undefined)).toBeNull();
   });
 

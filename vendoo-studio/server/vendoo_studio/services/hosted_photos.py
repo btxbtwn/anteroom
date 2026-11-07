@@ -93,6 +93,24 @@ def storage_call(method: str, key: str, token: str, data: bytes | None = None) -
     return response.content
 
 
+def remove_objects(keys: list[str], token: str) -> None:
+    """Delete many objects with the seller's JWT; Storage takes up to 1,000 names per call."""
+    public_key = os.environ.get('SUPABASE_PUBLISHABLE_KEY', '')
+    origin = os.environ.get('SUPABASE_URL', '').rstrip('/')
+    if not public_key or not origin:
+        raise HTTPException(503, 'Photo storage is not configured')
+    for start in range(0, len(keys), 1000):
+        try:
+            response = httpx.request('DELETE', f'{origin}/storage/v1/object/{BUCKET}',
+                                     headers={'Authorization': f'Bearer {token}', 'apikey': public_key,
+                                              'Cache-Control': 'no-store'},
+                                     json={'prefixes': keys[start:start + 1000]}, timeout=60, follow_redirects=False)
+        except httpx.HTTPError:
+            raise HTTPException(503, 'Photo storage is temporarily unavailable') from None
+        if not response.is_success and response.status_code != 404:
+            raise HTTPException(503, 'Could not delete your photos. Please try again.')
+
+
 # Made thumbnails, newest last. Stored photos never change in place (an edit
 # writes a new key), so a kept thumbnail stays right. Covers are a few KB, so
 # this holds thousands while bounding memory on the shared API.

@@ -4,6 +4,13 @@
 
 Monorepo combining the `list-this` skill family, the Bridge Chrome extension, and Anteroom. The skills generate marketplace-ready listings from product photos; the extension fills five platforms from a single JSON payload; Anteroom provides a local interface for listing creation and automation.
 
+**Merging is a release.** A merge to `main` runs the **Version** workflow (one
+patch bump per merged PR with a `changelog.d/` note), the macOS release build,
+an iPhone TestFlight upload when `anteroom-ios/` changed, and `deploy-hosted.yml`,
+which runs `alembic upgrade head` on the production database and deploys the
+hosted API to Fly.io. Agents open PRs and get CI green; they merge only when the
+seller asks.
+
 **Invariant:** Automation must never publish listings. Generation, category
 resolution and draft creation run unattended and stop at a saved draft.
 Publishing and delisting happen only when the seller asks for them: the
@@ -22,7 +29,7 @@ a retry, or as a side effect of any other action.
 
 ## Code Search (Semble)
 
-**Cursor / coding agents:** Prefer `semble search` over broad grep+read when locating implementation. The index builds and caches on first use.
+**Coding agents (optional):** When `semble` is available, prefer `semble search` over broad grep+read when locating implementation. When it is not installed and `uvx` is unavailable, use `rg`/grep; do not stall on it. The index builds and caches on first use.
 
 ```bash
 semble search "verified category selection" . --max-snippet-lines 10
@@ -38,13 +45,13 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 ## Engineering Principles
 
 - Study how established products solve the problem before designing a solution. Adopt their proven patterns and conventions rather than inventing an approach from scratch.
-- Do not preserve backward compatibility in code. Remove obsolete paths instead of adding compatibility layers or fallbacks. This does not extend to the database: Anteroom runs on more than one machine, and a schema change has to reach a database nobody can afford to delete. Schema changes go through an Alembic revision (see **Database schema** below).
+- Do not preserve backward compatibility inside one deployable unit. Remove obsolete paths instead of adding compatibility layers or fallbacks. Contracts between separately deployed parts (the hosted API and the iPhone app, the Chrome extension, the Mac app, the webhook relay) are different: installed clients lag the server, so a change to such a contract may keep the old shape for a stated, dated transition window. Mark the old path with a removal note (what replaces it, and when it goes) and remove it when the window ends. This does not extend to the database either: Anteroom runs on more than one machine, and a schema change has to reach a database nobody can afford to delete. Schema changes go through an Alembic revision (see **Database schema** below).
 - Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
 - Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
 - Keep components modular and concerns clearly separated.
 - Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
-- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later. The one exception is a production incident: a minimal mitigation is allowed, labelled as such in the code and PR, followed by the root-cause fix.
 
 ## Responsiveness and concurrent work
 
@@ -185,7 +192,7 @@ mix it with a fix or a feature.
 ## Repository Structure
 
 - **`skills/`** — Agent skills for listing generation (`list-this`), sourcing (`box-scout`) and reading measurements from ruler photos (`measure-this`).
-- **`vendoo-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. Content scripts under `content-scripts/` handle direct marketplace forms. `background.js` routes messages and loads the worker modules in `background/`; the extension runs without its own interface, with review and confirmed marketplace actions handled in Anteroom. Node unit tests live in `tests/`.
+- **`vendoo-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. `background.js` routes messages and loads the worker modules in `background/`, which drive the marketplaces (`background/<marketplace>-native.js` and friends, injected with `chrome.scripting`). The extension has no editor of its own: listing review and marketplace actions are confirmed in Anteroom. Its only page, `cloud-connect.html`, asks the seller to approve connecting Chrome to their hosted account; the `myanteroom.com` content script carries hosted requests to the worker. Node unit tests live in `tests/`.
 - **`webhook-relay/`** — Cloudflare Worker that receives eBay and Etsy webhooks, verifies their signatures, keeps only IDs, and holds them in a per-device inbox until that Mac's Anteroom pulls them over an outbound connection. It also brokers eBay and Etsy sign-in and forwards Etsy API calls, so eBay's Cert ID and Etsy's shared secret never ship in the app. See its `README.md`.
 - **`vendoo-studio/`** — React + TypeScript frontend (`src/`) and FastAPI Python backend (`server/vendoo_studio/`). Frontend API clients live under `src/api/`. Backend routes live under `server/vendoo_studio/routes/`; domain behavior lives in `server/vendoo_studio/services/` and `server/vendoo_studio/repositories/`.
 - **`anteroom-ios/`** — Native SwiftUI iPhone app on the hosted API and Supabase. The Xcode project is generated from `project.yml` with XcodeGen and not tracked; it builds only on macOS.
@@ -206,7 +213,7 @@ mix it with a fix or a feature.
 - **Anteroom frontend lint and tests:** `cd vendoo-studio && npm run lint && npm test`
 - **Anteroom backend lint and tests:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
 - **Anteroom backend tests on Postgres:** set `ANTEROOM_TEST_DATABASE_URL` to any database on a Postgres 16 server (each test worker creates its own). Without a local server, `pip install pgserver` gives one. Mark tests that need the SQLite file `@pytest.mark.sqlite_only("why")`.
-- **iPhone app (macOS only):** `cd anteroom-ios && xcodegen && open Anteroom.xcodeproj`. CI builds it for the Simulator (`.github/workflows/ios.yml`).
+- **iPhone app (macOS only):** `cd anteroom-ios && xcodegen && open Anteroom.xcodeproj`; `./anteroom-ios/test-sandbox.sh` runs its XCUITest against the hosted sandbox. CI builds it for the Simulator (`.github/workflows/ios.yml`).
 - **Extension tests:** `node --test 'vendoo-extension/tests/*.test.js'`
 - **Webhook relay tests and deploy:** `cd webhook-relay && npm test`; `npx wrangler deploy` only when the seller asks.
 - **Extension:** **Connect Chrome** opens everyday Chrome. Load unpacked from `vendoo-extension/` in `chrome://extensions/` with Developer mode enabled.
@@ -215,7 +222,7 @@ mix it with a fix or a feature.
 
 - Follow the established style within each component. Do not refactor unrelated files.
 - Any visible change to the Anteroom web UI follows `DESIGN.md`: shared components, theme tokens, the type and spacing scales, and its pre-ship checklist.
-- Keep skill instructions in canonical `SKILL.md` files; keep browser-specific logic in the corresponding extension content script.
+- Keep skill instructions in canonical `SKILL.md` files; keep marketplace browser logic in that marketplace's extension module under `vendoo-extension/background/`.
 - Keep frontend API calls under `vendoo-studio/src/api/`; keep backend routes thin and place domain behavior in services and repositories.
 - A direct marketplace tab (eBay, Poshmark, Mercari, Depop) is a 1:1 replica of that marketplace's own listing form: the same fields, labels and order, no more and no fewer, under the same section headings and row layout (each native field carries the page's `section`, and `width: "half"` where the page puts fields side by side). Its rows come only from the native form the server or extension builds; the editor never adds reference, hand-kept or fallback rows to it. A field the marketplace has goes into that native form builder, not the editor.
 - Maintain the JSON listing contract across skills, Anteroom, and the extension. The extension expects the structure documented in `docs/json-contract.md`.
@@ -237,6 +244,7 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 - **Anteroom backend:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
 - **Anteroom code health:** knip (in the frontend job) and basedpyright, import-linter and the dead-code check (in **Studio code health**). Commands above; details in `vendoo-studio/AGENTS.md`.
 - **Anteroom browser tests:** `cd vendoo-studio && npx playwright install chromium && npm run e2e`. They run against the sandbox at desktop and phone sizes; on failure, the report, screenshots and traces are in `vendoo-studio/e2e/report` and `e2e/results`, and CI uploads them as an artifact.
+- **iPhone app:** `.github/workflows/ios.yml` runs on macOS only, for PRs touching `anteroom-ios/` or `vendoo-studio/server/`: the contract test scripts, a Simulator build, and XCUITest against the hosted sandbox (`./anteroom-ios/test-sandbox.sh`). On Linux, `./check.sh` skips these and CI is the check.
 - **Extension:** `node --check` on changed JS files, `node --test 'vendoo-extension/tests/*.test.js'`, and `python -m json.tool vendoo-extension/manifest.json`. Then reload the unpacked extension and test affected marketplace flows manually. Use platform-prefixed console logs (`[EBAY]`, `[POSHMARK]`, etc.), the marketplace form-sweep tools for live form structure, and Anteroom’s fill results for per-field outcomes.
 - **Skills:** Confirm `skills/list-this/SKILL.md` exists and `python -m json.tool skills/list-this/references/vendoo-dropdown-options.json` succeeds.
 - **Marketplace forms (not in CI, needs a signed-in browser):** after changing a native form builder, or to check whether a marketplace changed its sell page, run `vendoo-extension/tools/form-sweep/<marketplace>/sweep.js` on that marketplace's sell page (Depop, Mercari, Poshmark), then `node vendoo-extension/tools/form-sweep/<marketplace>/compare.js <downloads folder>`. Each script's header says how; the compare exits 1 on any difference.
@@ -244,13 +252,16 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 
 **Pull requests:** After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while required checks are pending or red. PRs never bump the version or edit `CHANGELOG.md`; do not run `bump-version.sh` in a PR. A PR that changes `vendoo-studio/` adds one note file, `changelog.d/<branch-slug>.md`, holding `- ` bullets in the seller's words (`<slug>.minor.md` or `<slug>.major.md` only when the seller asks for that bump; see `changelog.d/README.md`). After merge, the **Version** workflow turns each merged PR's notes into one patch bump and a `## <version> — <YYYY-MM-DD>` section at the top of `CHANGELOG.md`, which the app shows under Settings → General → About → What's new, and then starts the macOS release build. The UI reads the version from the API; never hardcode it. CI's **Changelog** job (`vendoo-studio/scripts/check-changelog.py`) fails when a PR changes `VERSION` or `CHANGELOG.md`, or when a note is malformed; run it locally with `python vendoo-studio/scripts/check-changelog.py`.
 
-When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduce the failure locally with the same command or `./check.sh`, and fix the cause before pushing again. Do not push guesses at CI. Several Anteroom PRs are often open at once. Because none of them touch `VERSION` or `CHANGELOG.md`, they do not conflict over versions; merge `origin/main` in only when CI or a real code conflict calls for it.
+When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduce the failure locally with the same command or `./check.sh`, and fix the cause before pushing again. Do not push guesses at CI. Several Anteroom PRs are often open at once. Because none of them touch `VERSION` or `CHANGELOG.md`, they do not conflict over versions; merge `origin/main` in only when CI or a real code conflict calls for it. `main` merges through GitHub's merge queue, which tests each PR on top of
+`main` and the PRs queued ahead of it, so a PR never needs updating just to
+merge. Queue one with `gh pr merge <n> --auto --merge` once it is ready; it merges
+when the queue's CI passes. Keep merge commits: release notes are grouped by them.
 
 ## Security and Product Invariants
 
 - Never commit API keys, OAuth credentials, listing photos, generated diagnostics, or private exports.
-- API keys and sign-in tokens never enter the database in plain text, logs, frontend responses, or extension messages. On the Mac they live in macOS Keychain. When the hosted API takes over generation (step 4 of `docs/cloud-architecture.md`), they move to Supabase Vault, encrypted at rest, and are never returned to any client.
-- On the Mac, bind Anteroom only to `127.0.0.1`. The hosted API on Fly.io is the only part that accepts connections from outside, and it requires a Supabase session on every request except health checks and marketplace webhooks. The Mac worker connects to it outbound and binds nothing. Optional private Tailscale Serve (Settings → Connections) may proxy Tailnet HTTPS to that loopback port; never Funnel and never bind to `0.0.0.0`.
+- API keys and sign-in tokens never enter the database in plain text, logs, frontend responses, or extension messages. On the Mac they live in macOS Keychain. For hosted accounts they live in Supabase Vault, encrypted at rest and referenced per seller, and are never returned to any client.
+- On the Mac, bind Anteroom only to `127.0.0.1`. The hosted API on Fly.io is the only part that accepts connections from outside. It requires a Supabase session on every request except health and readiness checks, `GET /api/auth-config`, the web app's static files and marketplace webhooks. Machine-to-machine `/internal/` routes skip the seller session and authenticate with the shared process token (`ANTEROOM_PROCESS_TOKEN`); they must not be reachable from the public edge. The Mac worker connects to it outbound and binds nothing. Optional private Tailscale Serve (Settings → Connections) may proxy Tailnet HTTPS to that loopback port; never Funnel and never bind to `0.0.0.0`.
 - Publishing and delisting require the seller to name the marketplaces explicitly and provide `confirm`. Automation stops at a saved draft.
 - Direct marketplace List, Update and Save draft actions may run side by side, one per marketplace, but never alongside a delist or a page inspection.
 - Do not introduce Redis, MongoDB, Celery, or provider substitutions unless explicitly requested.
@@ -260,13 +271,10 @@ When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduc
   - **`webhook-relay/` on Cloudflare Workers**, as below.
 - `webhook-relay/` on Cloudflare Workers It never calls Studio and never acts on a listing. It stores only device IDs, token hashes, linked marketplace account IDs and event IDs, plus sign-in tokens for at most 15 minutes until the device collects them: no buyer names, addresses, prices or listing text. Etsy API calls pass through it unstored. Studio reaches it outbound only, so the loopback-only rule still holds.
 
-## Cursor Cloud specific instructions
+## Linux and cloud agents
 
-- Run `./setup.sh`, then `./start.sh`. The UI is http://127.0.0.1:5173 and the API is http://127.0.0.1:4318 (`GET /api/health`). Both stay on loopback.
-- `./setup.sh` looks for Google Chrome at the macOS app path (`~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` or `/Applications/...`). On Linux, link the `chrome` binary there before setup. The Cloud Agent install does that.
-- Ubuntu has no `python` on `PATH`. After setup, `python` is a wrapper for `vendoo-studio/.venv/bin/python`, and `ruff`, `pytest`, `alembic`, `semble`, and `uvicorn` on `PATH` are that venv. Backend checks from `vendoo-studio/`: `ruff check server` and `VENDOO_STUDIO_DATA_DIR=$(mktemp -d) python -m pytest -q -n auto`.
-- An unpacked dev server stores data in `vendoo-studio/data/`. `scripts/doctor.sh` still looks for the macOS data folder and warns when that file is absent. On Linux, startup logs a keychain warning (`keyring` selects the macOS backend). Reads fail and provider secrets stay unset; the API still serves `/api/health` and drafts.
-- For trying changes, prefer `./sandbox.sh` (UI http://127.0.0.1:5174) over `./start.sh`: it needs no provider, keys or Chrome, and it cannot publish.
-- **Create a listing** on the empty inventory screen stays disabled until Settings has a provider. `POST /api/conversations` still creates a draft, and the sidebar shows it. Generating copy needs a provider. Do not publish.
-- Webhook relay: `cd webhook-relay && npm test`. Extension: `node --test 'vendoo-extension/tests/*.test.js'`.
-- `./setup.sh` redraws icon PNGs. The Cloud Agent install checks those tracked files back out so the worktree stays clean.
+- Prefer `./sandbox.sh` (UI http://127.0.0.1:5174, API 4319) for trying changes: it needs no provider, keys or Chrome, and it cannot publish. `./start.sh` runs the real app on 5173/4318, loopback only.
+- `./setup.sh` looks for Chrome (or Chromium, Brave, Edge) only at macOS app paths under `/Applications` or `~/Applications`. On Linux, link a Chrome binary to one of those paths before setup.
+- Ubuntu has no `python` on `PATH`. Use `vendoo-studio/.venv/bin/python` (or activate the venv). Backend checks from `vendoo-studio/`: `ruff check server` and `VENDOO_STUDIO_DATA_DIR=$(mktemp -d) .venv/bin/python -m pytest -q -n auto`.
+- A dev server stores data in `vendoo-studio/data/`. `scripts/doctor.sh` looks for the macOS data folder and warns when it is absent. On Linux there is no Keychain, so provider secrets stay unset; the API still serves `/api/health` and drafts. Generating copy needs a provider; use the sandbox instead. Do not publish.
+- `./setup.sh` redraws the app icon files. If `git status` then shows only icon files changed, restore them before committing.

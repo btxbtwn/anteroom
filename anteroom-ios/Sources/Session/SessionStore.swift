@@ -222,6 +222,17 @@ final class SessionStore {
         EditorDraftStore.removeAll()
     }
 
+    /// After the server deleted the account: forget this iPhone's session and
+    /// everything it kept of the seller's data. The account is gone, so only
+    /// the local session is cleared.
+    func finishAccountDeletion() async {
+        try? await client?.auth.signOut(scope: .local)
+        UserDefaults.standard.removeObject(forKey: Self.pendingResetKey)
+        URLCache.shared.removeAllCachedResponses()
+        await forgetSeller()
+        state = .signedOut
+    }
+
     private static func readable(_ error: Error, for action: SignInAction) -> SignInFailure {
         if let auth = error as? AuthError {
             var serverMessage: String?

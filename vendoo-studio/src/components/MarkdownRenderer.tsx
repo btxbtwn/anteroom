@@ -36,6 +36,8 @@ function MarkdownLink({ href, children }: MarkdownProps<"a">) {
   if (citation) {
     return <CitationChip citation={citation} onReveal={(cited) => reveal?.(cited)} />;
   }
+  // A link within the page (an answer's listing link) stays in this tab.
+  if (href?.startsWith("#")) return <a href={href}>{children}</a>;
   return (
     <a href={href} target="_blank" rel="noopener noreferrer">
       {children}

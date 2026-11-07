@@ -187,10 +187,15 @@ enum AssistantFormat {
             .joined(separator: " · ")
     }
 
-    /// The listing an answer's link opens (`[title](#listing-<id>)`), or nil for any other link.
+    /// The listing an answer's link opens (`[title](#listing-<id>)`, or `#<id>` in answers saved
+    /// before the server fixed that form), or nil for any other link.
     static func linkedListingID(_ link: String) -> String? {
         let fragment = link.split(separator: "#", omittingEmptySubsequences: false).last.map(String.init) ?? ""
-        guard link.contains("#"), fragment.hasPrefix("listing-") else { return nil }
+        guard link.contains("#") else { return nil }
+        if fragment.count == 12, fragment.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdef").contains($0) }) {
+            return fragment
+        }
+        guard fragment.hasPrefix("listing-") else { return nil }
         let id = String(fragment.dropFirst("listing-".count))
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
         guard !id.isEmpty, id.unicodeScalars.allSatisfy(allowed.contains) else { return nil }

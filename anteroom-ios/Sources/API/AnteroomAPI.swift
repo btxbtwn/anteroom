@@ -568,6 +568,15 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/errors"))
     }
 
+    // MARK: Account
+
+    /// Deletes the signed-in seller's Anteroom account: listings, photos, records,
+    /// settings and stored sign-ins. Live marketplace listings are left alone.
+    func deleteAccount() async throws {
+        struct Body: Encodable { let confirm: Bool }
+        _ = try await send(request("DELETE", "api/account", json: Body(confirm: true)))
+    }
+
     // MARK: Analytics
 
     func analytics(range: String, start: Date? = nil, end: Date? = nil) async throws -> InventoryAnalytics {

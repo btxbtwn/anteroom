@@ -50,3 +50,10 @@ def test_production_logs_each_place_once_instead_of_failing(monkeypatch, caplog)
     asyncio.run(wait_holding())
     warnings = [record for record in caplog.records if "held while waiting on Chrome" in record.getMessage()]
     assert len(warnings) == 1
+
+
+def test_watching_an_engine_already_watched_leaves_it_to_its_owner():
+    from vendoo_studio.database import engine
+
+    # The test session already watches the engine, as a host app may.
+    assert chrome_wait_connections.watch(engine) is False

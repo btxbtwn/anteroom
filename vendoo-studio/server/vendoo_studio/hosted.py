@@ -9,6 +9,7 @@ import os
 import asyncio
 import logging
 import threading
+import time
 import traceback
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -29,6 +30,58 @@ from vendoo_studio.version import app_version
 from vendoo_studio.services.background_loop import BackgroundLoop
 
 
+def from_public_edge(scope) -> bool:
+    """Whether Fly's edge proxy forwarded this request from the internet.
+
+    The proxy adds ``Fly-Client-IP`` to every request it forwards, and a client
+    cannot strip it. Machines call each other directly on the private network
+    (``device_routes.local_base_url``), which never passes through that proxy.
+    """
+    return any(name == b"fly-client-ip" for name, _value in scope.get("headers") or ())
+
+
+access_log = logging.getLogger("vendoo_studio.access")
+
+
+class AccessLogMiddleware:
+    """One line per request: method, route template, status and duration.
+
+    Uvicorn's own access log stays off because it prints the raw URL, and
+    sign-in callbacks carry one-time codes in it. This never logs the path as
+    sent, a query string, a header or a body.
+    """
+
+    def __init__(self, app):
+        self.app = app
+        if not access_log.handlers:
+            # Hosted logging is otherwise unconfigured; INFO would be dropped.
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            access_log.addHandler(handler)
+            access_log.setLevel(logging.INFO)
+            access_log.propagate = False
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started, status = time.perf_counter(), 0
+
+        async def record(message):
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, record)
+        finally:
+            route = scope.get("route")
+            template = getattr(route, "path", None) or "-"
+            access_log.info("%s %s %s %dms", scope["method"], template, status or 500,
+                            round((time.perf_counter() - started) * 1000))
+
+
 class SellerSessionMiddleware:
     def __init__(self, app):
         self.app = app
@@ -38,6 +91,10 @@ class SellerSessionMiddleware:
             # No hosted WebSocket protocol exists yet. Do not accidentally
             # expose the desktop extension bridge through this entry point.
             await send({"type": "websocket.close", "code": 1008})
+            return
+        if scope["type"] == "http" and scope["path"].startswith("/internal/") and from_public_edge(scope):
+            # Process-to-process routes answer only on the private network.
+            await JSONResponse({"detail": "Not Found"}, status_code=404)(scope, receive, send)
             return
         if scope["type"] != "http" or (
             (scope["path"] in {"/api/health", "/api/ready", "/api/auth-config"} and scope["method"] == "GET")
@@ -121,11 +178,13 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.state.session_verifier = session_verifier or SessionVerifier(
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
-        app.state.chat_upload_slots = asyncio.Semaphore(1)
+        from vendoo_studio.services.hosted_limits import SellerRateLimit, UploadSlots
+        app.state.upload_slots = UploadSlots()
+        app.state.submission_limit = SellerRateLimit()
         from vendoo_studio.database import engine as database_engine
         loop_checkouts = LoopCheckoutWarning(database_engine)
         from vendoo_studio.services import chrome_wait_connections
-        chrome_wait_connections.watch(database_engine)
+        watching_chrome_waits = chrome_wait_connections.watch(database_engine)
         worker = offers = watchdog = sale_checks = promotion_scheduler = None
         stopping = threading.Event()
         backgrounds = []
@@ -167,7 +226,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             yield
         finally:
             loop_checkouts.close()
-            chrome_wait_connections.unwatch(database_engine)
+            if watching_chrome_waits:
+                chrome_wait_connections.unwatch(database_engine)
             if backgrounds:
                 stopping.set()
                 try:
@@ -210,6 +270,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         )
         return response
+
+    # Outermost, so a refused session or an error still gets its line.
+    app.add_middleware(AccessLogMiddleware)
 
     from fastapi.exceptions import RequestValidationError
     from vendoo_studio.services.hosted_context import CredentialStorageUnavailable
@@ -286,6 +349,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(account_import_router)
     from vendoo_studio.routes.hosted_bulk_delete import router as bulk_delete_router
     app.include_router(bulk_delete_router)
+    from vendoo_studio.routes.hosted_account import router as account_router
+    app.include_router(account_router)
     from vendoo_studio.routes.listings import apply_price_drop
     app.add_api_route('/api/conversations/{conv_id}/price-drop', apply_price_drop, methods=['POST'])
     from vendoo_studio.routes.catalog import categories as catalog_categories, choice_list, dropdown_options, search as catalog_search
@@ -320,13 +385,19 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             "background_worker": bool(app.state.background_worker_enabled and worker is not None and not worker.done()),
         }
 
+    # Reading the revision scripts takes a while; they never change in a running build.
+    from functools import cache
+    from vendoo_studio.services.schema_migrations import head_revision
+    built_revision = cache(head_revision)
+
     @app.get("/api/ready")
     def ready():
-        """Whether this process can reach Postgres. Not the Fly routing check.
+        """Whether this process can reach Postgres at the schema it was built for.
 
-        With one machine, a database blip must not stop the proxy from routing
-        anywhere. ``/api/health`` stays the liveness check until a second
-        machine can take traffic.
+        Not the Fly routing check: with one machine, a database blip must not
+        stop the proxy from routing anywhere. ``/api/health`` stays the
+        liveness check until a second machine can take traffic. The deploy
+        workflow checks this after the new version is live.
         """
         from sqlalchemy import text
         from sqlalchemy.exc import SQLAlchemyError
@@ -338,9 +409,12 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             with engine.connect() as connection, connection.begin():
                 # LOCAL so a reused connection does not keep the one-second limit.
                 connection.execute(text("SET LOCAL statement_timeout = '1000'"))
-                connection.execute(text("SELECT 1"))
+                revision = connection.scalar(text("SELECT anteroom_private.schema_revision()"))
         except SQLAlchemyError:
             return JSONResponse({"status": "unavailable"}, status_code=503, headers={"Cache-Control": "no-store"})
+        if revision != built_revision():
+            # Revisions are not echoed: this route needs no session.
+            return JSONResponse({"status": "schema_mismatch"}, status_code=503, headers={"Cache-Control": "no-store"})
         return {"status": "ok"}
 
     @app.get("/api/account", response_model=AccountResponse)

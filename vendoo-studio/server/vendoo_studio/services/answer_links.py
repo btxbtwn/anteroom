@@ -24,6 +24,8 @@ _TRAILING = ".,;:!?"
 _OPEN_URL = re.compile(r"(?:https?://|www\.)[^\s<>\"'`)\]|]*$", re.IGNORECASE)
 _OPEN_LINK = re.compile(r"\[[^\[\]\n]{0,300}(?:\](?:\([^)\n]{0,2000})?)?$")
 _SCHEMES = ("https://", "http://", "www.")
+# A listing link the apps open is `(#listing-<id>)`; the model sometimes drops the hash or the prefix.
+_LISTING_LINK = re.compile(r"\]\(\s*#?(?:listing-)?([0-9a-f]{12})\s*\)")
 REMOVED = "(link removed: Anteroom did not return that address)"
 
 
@@ -81,7 +83,7 @@ class LinkGuard:
         return normal in self.allowed or _page(normal) in self._pages
 
     def clean(self, text: str) -> str:
-        """``text`` with every address Studio did not return taken out."""
+        """``text`` with every address Studio did not return taken out, and listing links in the form the apps open."""
 
         def link(match: re.Match[str]) -> str:
             label, url = match.group(1), match.group(2)
@@ -106,7 +108,7 @@ class LinkGuard:
             parts.append(link(match))
             last = match.end()
         parts.append(_URL.sub(bare, text[last:]))
-        return "".join(parts)
+        return _LISTING_LINK.sub(r"](#listing-\1)", "".join(parts))
 
 
 def safe_end(text: str, start: int = 0) -> int:
