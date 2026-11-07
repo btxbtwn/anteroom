@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -44,16 +45,16 @@ def client(db):
 
 
 @pytest.fixture
-def calls(monkeypatch):
+def calls(monkeypatch, db):
     seen = []
 
-    async def fake_delist(db, conv_id, marketplaces, confirm):
+    async def fake_delist(conv_id, marketplaces, confirm):
         seen.append(("delist", conv_id, tuple(marketplaces), confirm))
         for name in marketplaces:
             MarketplaceListingRepo(db).save(conv_id, name, {"state": "not_saved", "listing_id": None, "listing_url": None})
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(conv_id, name, body, db):
+    async def fake_list(conv_id, name, body):
         seen.append(("list", conv_id, name, body.confirm, body.revision_id))
         MarketplaceListingRepo(db).save(conv_id, name, {"state": "published", "listing_id": f"{name}-1",
                                                         "listing_url": EBAY_URL if name == "ebay" else None})
@@ -181,7 +182,7 @@ def test_list_and_relist_publish_only_the_named_marketplaces_once(db, client, ca
 def test_a_failed_marketplace_is_reported_and_not_retried(db, client, monkeypatch):
     seen = []
 
-    async def refuse(conv_id, name, body, db):
+    async def refuse(conv_id, name, body):
         seen.append(name)
         return {"ok": False, "state": "not_saved", "error": f"{name} refused"}
 
@@ -215,8 +216,8 @@ def test_delist_still_applies_to_other_marketplaces_after_a_sale(db, client, cal
 
 
 @pytest.fixture
-def updates(monkeypatch, calls):
-    async def fake_update(conv_id, name, body, db):
+def updates(monkeypatch, calls, db):
+    async def fake_update(conv_id, name, body):
         calls.append(("update", conv_id, name, body.confirm, body.revision_id))
         MarketplaceListingRepo(db).save(conv_id, name, {"state": "published", "revision_id": body.revision_id})
         return {"ok": True, "state": "published"}
@@ -268,7 +269,7 @@ def test_update_after_an_edit_needs_a_new_review(db, client, updates):
 def test_a_failed_update_is_reported_and_not_retried(db, client, monkeypatch, calls):
     seen = []
 
-    async def refuse(conv_id, name, body, db):
+    async def refuse(conv_id, name, body):
         seen.append(name)
         return {"ok": False, "state": "published", "error": "eBay refused"}
 
@@ -300,7 +301,7 @@ def test_list_starts_every_marketplace_at_once_and_takes_turns_on_each(db, monke
 
     events = []
 
-    async def fake_list(conv_id, name, _body, _db):
+    async def fake_list(conv_id, name, _body):
         events.append(("start", conv_id, name))
         await asyncio.sleep(0.01)
         events.append(("end", conv_id, name))
