@@ -27,6 +27,7 @@ def workspace(tmp_path, monkeypatch):
     sessions = sessionmaker(bind=engine)
     db = sessions()
     monkeypatch.setattr(vendoo_drafts, "SessionLocal", sessions)
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", sessions)
     monkeypatch.setattr("vendoo_studio.services.extension_connection.current_extension",
         lambda: SimpleNamespace(connected=True, capabilities={"vendoo.drafts"}))
     photos = LocalPhotoStore(tmp_path / "photos")

@@ -378,10 +378,11 @@ def _queued() -> bool:
 
 
 def _queue_question(request: Request, db: Session, question: str, body: AssistantQuestion):
-    from vendoo_studio.routes.hosted_tasks import require_worker
+    from vendoo_studio.routes.hosted_tasks import limit_submissions, require_worker
     from vendoo_studio.services.chat_attachments import delete_attachments
 
     require_worker(request)
+    limit_submissions(request)
     if background_tasks.active_answer(db) is not None:
         raise HTTPException(409, "The assistant is still answering your last question.")
     _require_provider()
@@ -390,22 +391,27 @@ def _queue_question(request: Request, db: Session, question: str, body: Assistan
     except business_assistant.UnknownThread:
         raise HTTPException(404, "That conversation is gone.") from None
     thread_id = thread.id
+    # Each Storage upload can take 20 s; do not hold a pooled connection meanwhile.
+    db.rollback()
     attachments = store_uploads(body.attachments, collection_id=thread_id)
-    task = background_tasks.add_answer(db, thread_id, {"question": question, "attachments": attachments})
     try:
+        task = background_tasks.add_answer(db, thread_id, {"question": question, "attachments": attachments})
         # The question and its task commit together.
         business_assistant.add_message(db, "user", question, attachments=attachments, thread_id=thread_id)
-    except IntegrityError:
+    except Exception as exc:
         db.rollback()
         delete_attachments(attachments)
-        raise HTTPException(409, "The assistant is still answering your last question.") from None
+        if isinstance(exc, IntegrityError):
+            raise HTTPException(409, "The assistant is still answering your last question.") from None
+        raise
     return _follow_task(db, task.id)
 
 
 def _queue_retry(request: Request, db: Session, thread_id: str):
-    from vendoo_studio.routes.hosted_tasks import require_worker
+    from vendoo_studio.routes.hosted_tasks import limit_submissions, require_worker
 
     require_worker(request)
+    limit_submissions(request)
     _require_provider()
     # Two Retry presses serialize on the thread's row.
     db.scalar(select(AssistantThread.id).where(AssistantThread.id == thread_id).with_for_update())

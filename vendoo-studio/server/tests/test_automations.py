@@ -517,11 +517,11 @@ def test_relist_continues_after_one_marketplace_fails_without_retrying(db, monke
 
     calls = []
 
-    async def fake_delist(_db, _conv_id, marketplaces, confirm):
+    async def fake_delist(_conv_id, marketplaces, confirm):
         calls.append(("delist", tuple(marketplaces), confirm))
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(_conv_id, name, _body, _db):
+    async def fake_list(_conv_id, name, _body):
         calls.append(("list", name))
         if name == "ebay":
             raise NativeMarketplaceError(502, "ebay refused")
@@ -553,10 +553,10 @@ def test_a_failed_relist_requires_a_new_seller_request_before_another_attempt(db
 
     attempts = {"ebay": 0}
 
-    async def fake_delist(_db, _conv_id, marketplaces, _confirm):
+    async def fake_delist(_conv_id, marketplaces, _confirm):
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(_conv_id, name, _body, _db):
+    async def fake_list(_conv_id, name, _body):
         if name == "ebay":
             attempts["ebay"] += 1
             if attempts["ebay"] == 1:
@@ -611,10 +611,10 @@ def test_a_mid_run_failure_stays_down_in_history_and_errors_and_the_run_continue
     _second_market(db, second, "poshmark")
     calls = []
 
-    async def fake_delist(_db, _conv_id, marketplaces, _confirm):
+    async def fake_delist(_conv_id, marketplaces, _confirm):
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(conv_id, name, _body, _db):
+    async def fake_list(conv_id, name, _body):
         calls.append((conv_id, name))
         if conv_id == first.id and name == "ebay":
             raise NativeMarketplaceError(502, "ebay refused")
@@ -667,7 +667,7 @@ def test_regenerate_waits_for_approval_and_approve_publishes(db, client, monkeyp
         published.append("delist")
         return {"ok": True}
 
-    async def fake_list(_conv_id, name, body, _db):
+    async def fake_list(_conv_id, name, body):
         published.append(("list", name, body.confirm))
         return {"ok": True, "state": "published"}
 
@@ -713,7 +713,7 @@ def test_approval_cannot_be_turned_off(db, client, monkeypatch):
     async def fake_regenerate(_conv_id):
         return {"ok": True}
 
-    async def fake_list(_conv_id, name, body, _db):
+    async def fake_list(_conv_id, name, body):
         published.append((name, body.confirm))
         return {"ok": True, "state": "published"}
 
@@ -771,11 +771,11 @@ def test_publishing_a_live_listing_requires_explicit_relist_instead_of_delisting
 
     calls = []
 
-    async def fake_delist(_db, _conv_id, marketplaces, confirm):
+    async def fake_delist(_conv_id, marketplaces, confirm):
         calls.append(("delist", tuple(marketplaces), confirm))
         return {name: {"state": "deleted"} for name in marketplaces}
 
-    async def fake_list(_conv_id, name, body, _db):
+    async def fake_list(_conv_id, name, body):
         calls.append(("list", name, body.confirm))
         return {"ok": True, "state": "published"}
 
@@ -800,7 +800,7 @@ def test_publishing_a_live_listing_requires_explicit_relist_instead_of_delisting
 def test_scheduled_delist_never_writes_until_the_exact_item_action_is_confirmed(db, client, monkeypatch):
     from vendoo_studio.services import automation_actions
     calls = []
-    async def remove(_db, key, markets, confirm):
+    async def remove(key, markets, confirm):
         calls.append((key, markets, confirm))
         return {name: {"state": "deleted"} for name in markets}
     monkeypatch.setattr("vendoo_studio.services.marketplace_delist.delist", remove)
@@ -909,7 +909,7 @@ def test_local_regeneration_without_marketplaces_stops_at_a_saved_draft(db, clie
 
 def test_shared_proposal_updates_every_run_history_once_and_is_not_replayed(db, client, monkeypatch):
     calls = []
-    async def remove(_db, _conv_id, marketplaces, _confirm):
+    async def remove(_conv_id, marketplaces, _confirm):
         calls.append(marketplaces)
         return {name: {"state": "deleted"} for name in marketplaces}
     monkeypatch.setattr("vendoo_studio.services.marketplace_delist.delist", remove)

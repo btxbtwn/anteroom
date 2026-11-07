@@ -571,23 +571,21 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
-async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay'],
-                              revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
-    from starlette.concurrency import run_in_threadpool
+def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay'],
+                        revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.choice_lists import share
     from vendoo_studio.services.native_editor import editor_form
     from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
-    def load():
-        # These canonical builders read verified catalogs and the owned
-        # snapshot. Mercari also reads anonymous public shipping quotes, and
-        # eBay reads its category schema and the seller's own policies with
-        # their connected account. No marketplace write runs.
-        try:
-            current = db.get(Listing, identity)
-            if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
-                raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
-            return share(asyncio.run(editor_form(identity, marketplace, revision_id, db)))
-        except NativeMarketplaceError as error:
-            raise HTTPException(error.status_code, str(error)) from None
-    return await run_in_threadpool(load)
+    # These canonical builders read verified catalogs and the owned snapshot.
+    # Mercari also reads anonymous public shipping quotes, and eBay reads its
+    # category schema and the seller's own policies with their connected
+    # account. No marketplace write runs. A plain function runs in FastAPI's
+    # threadpool, so none of it waits on the request loop.
+    try:
+        current = db.get(Listing, identity)
+        if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
+            raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
+        return share(asyncio.run(editor_form(identity, marketplace, revision_id, db)))
+    except NativeMarketplaceError as error:
+        raise HTTPException(error.status_code, str(error)) from None

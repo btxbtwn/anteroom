@@ -23,6 +23,7 @@ permissions:
 
 env:
   HEALTH_URL: https://myanteroom.com/api/health
+  READY_URL: https://myanteroom.com/api/ready
 
 jobs:
   deploy:
@@ -137,12 +138,13 @@ jobs:
         run: |
           for attempt in $(seq 1 30); do
             live="$(curl -fsS --max-time 10 "$HEALTH_URL" | python -c 'import json,sys; print(json.load(sys.stdin).get("version",""))' || true)"
-            if [ "$live" = "$VERSION" ]; then
-              echo "Production is serving $VERSION."
+            # Ready also means the database is at the schema this build expects.
+            if [ "$live" = "$VERSION" ] && curl -fsS --max-time 10 "$READY_URL" >/dev/null; then
+              echo "Production is serving $VERSION on the expected schema."
               exit 0
             fi
             echo "Live version '${live}', expecting $VERSION (attempt $attempt)."
             sleep 10
           done
-          echo "::error::Production did not report version $VERSION."
+          echo "::error::Production did not report version $VERSION as ready."
           exit 1

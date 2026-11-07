@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 from sqlalchemy import create_engine, event, inspect, text
@@ -118,6 +119,21 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+async def in_worker_session(work, /, *args):
+    """Run ``work(db, *args)`` on a worker thread, with a session of its own.
+
+    Async code uses this for each database step. A query on the event loop
+    stops every other request while it waits for a pooled connection, and a
+    session kept across an await holds its connection while Chrome, a
+    marketplace or a model answers. The session closes, rolling back whatever
+    ``work`` did not commit, before the result comes back.
+    """
+    def run():
+        with SessionLocal() as db:
+            return work(db, *args)
+    return await asyncio.to_thread(run)
 
 
 def load_models() -> None:
