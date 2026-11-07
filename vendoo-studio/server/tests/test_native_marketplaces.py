@@ -969,7 +969,8 @@ class NativeMarketplacesTest(unittest.TestCase):
         seen = []
 
         async def bridge(job, kind, payload, timeout=None):
-            seen.append(([j.current_step for j in JobRepo(self.sessions()).get_running()], kind))
+            running = await asyncio.to_thread(lambda: [j.current_step for j in JobRepo(self.sessions()).get_running()])
+            seen.append((running, kind))
             return {"ok": True, "fields": [], "scripts": []}
 
         self.bridge.side_effect = bridge

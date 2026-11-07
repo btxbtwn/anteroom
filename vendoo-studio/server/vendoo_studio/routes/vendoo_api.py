@@ -180,7 +180,7 @@ async def leaf_form(listing: dict, marketplace: str, category_id: str, specs: di
 
 
 @router.get("/api/conversations/{conv_id}/vendoo-api/fields")
-async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
+def listing_fields(conv_id: str, db: Session = Depends(get_db)):
     """Every field each marketplace can hold for this listing's categories.
 
     ``on_form`` is true for the fields that marketplace's listing form uses for
@@ -205,11 +205,16 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
     from vendoo_studio.models.listing_values import marketplace_dropdown_forms
 
     static_forms = marketplace_dropdown_forms()
-    out: list[dict] = []
-    leaves = sorted(listing_category_ids(listing).items())
-    fetched = await asyncio.gather(*(
-        leaf_specifics(marketplace, category_id) for marketplace, category_id in leaves
-    ))
-    for (marketplace, category_id), specs in zip(leaves, fetched, strict=True):
-        out.append(await leaf_form(listing, marketplace, category_id, specs, static_forms.get(marketplace) or {}))
-    return {"ok": True, "forms": out}
+
+    async def forms() -> list[dict]:
+        out: list[dict] = []
+        leaves = sorted(listing_category_ids(listing).items())
+        fetched = await asyncio.gather(*(
+            leaf_specifics(marketplace, category_id) for marketplace, category_id in leaves
+        ))
+        for (marketplace, category_id), specs in zip(leaves, fetched, strict=True):
+            out.append(await leaf_form(listing, marketplace, category_id, specs, static_forms.get(marketplace) or {}))
+        return out
+
+    # A plain function runs in FastAPI's threadpool; the fetches share this thread's own loop.
+    return {"ok": True, "forms": asyncio.run(forms())}
