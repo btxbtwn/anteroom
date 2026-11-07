@@ -1,3 +1,0 @@
-- A listing no longer stays stuck on Generating when the AI stops answering: after 5 quiet minutes Anteroom stops waiting, names the AI and the step that stalled, and the listing is ready to retry.
-- Chat and the business assistant end the same way when the AI goes quiet, instead of spinning until a restart.
-- A Keychain prompt nobody answers, or a Claude process that stops responding, no longer holds up Anteroom.
