@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.765 — 2026-11-07
+
+- Chrome now runs a listing, update, delist, share or offer from the web only when Anteroom's server signed that exact action, so nothing else on the page can trigger one.
+- Chrome asks you to approve your Anteroom account again every 30 days.
+
 ## 0.1.764 — 2026-11-07
 
 - A screen that fails to load now shows a Reload button instead of a blank window, and Anteroom reloads itself once when an update replaced its files.
