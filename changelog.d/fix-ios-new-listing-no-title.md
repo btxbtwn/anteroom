@@ -1,0 +1,1 @@
+- On iPhone, New listing opens a draft right away. You no longer type a title first; the AI writes it.

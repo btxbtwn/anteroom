@@ -60,8 +60,9 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/conversations"))
     }
 
-    func createListing(title: String) async throws -> ListingSummary {
-        try await decode(request("POST", "api/conversations", json: ["title": title]))
+    /// An untitled draft, like the web's New listing; generation names it.
+    func createListing() async throws -> ListingSummary {
+        try await decode(request("POST", "api/conversations", json: [String: String]()))
     }
 
     func conversation(_ id: String) async throws -> ConversationDetail {

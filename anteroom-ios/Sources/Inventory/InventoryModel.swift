@@ -122,9 +122,17 @@ final class InventoryModel {
         }
     }
 
-    func created(_ listing: ListingSummary) {
-        listings.removeAll { $0.id == listing.id }
-        listings.insert(listing, at: 0)
+    /// Creates an untitled draft and returns it for the editor to open.
+    func createListing() async -> ListingSummary? {
+        do {
+            let listing = try await api.createListing()
+            listings.removeAll { $0.id == listing.id }
+            listings.insert(listing, at: 0)
+            return listing
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
     }
 
     func rename(_ listing: ListingSummary, to title: String) async {

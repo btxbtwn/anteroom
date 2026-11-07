@@ -6,8 +6,7 @@ struct InventoryView: View {
     @State private var model: InventoryModel
     @State private var search = ""
     @State private var path: [ListingSummary] = []
-    @State private var showingNewListing = false
-    @State private var createdListing: ListingSummary?
+    @State private var creatingListing = false
     @State private var renaming: ListingSummary?
     @State private var newTitle = ""
     @State private var deleting: ListingSummary?
@@ -129,15 +128,10 @@ struct InventoryView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("New listing", systemImage: "plus") { showingNewListing = true }
+                    Button("New listing", systemImage: "plus", action: newListing)
+                        .disabled(creatingListing)
                         .frame(minWidth: 44, minHeight: 44)
                         .accessibilityHint("Create a draft, then add photos and item details")
-                }
-            }
-            .sheet(isPresented: $showingNewListing, onDismiss: openCreatedListing) {
-                NewListingView(api: model.api) { listing in
-                    model.created(listing)
-                    createdListing = listing
                 }
             }
             .alert("Rename listing", isPresented: renameShown) {
@@ -241,7 +235,8 @@ struct InventoryView: View {
                 } description: {
                     Text("Create a listing, add your photos, and keep your draft ready to edit.")
                 } actions: {
-                    Button("New listing") { showingNewListing = true }
+                    Button("New listing", action: newListing)
+                        .disabled(creatingListing)
                         .buttonStyle(.borderedProminent)
                         .frame(minHeight: 44)
                 }
@@ -300,10 +295,15 @@ struct InventoryView: View {
         Task { await model.reload() }
     }
 
-    private func openCreatedListing() {
-        guard let listing = createdListing else { return }
-        createdListing = nil
-        path.append(listing)
+    /// Like the web: one tap makes an untitled draft and opens it. The
+    /// seller adds photos there and generation writes the title.
+    private func newListing() {
+        guard !creatingListing else { return }
+        creatingListing = true
+        Task {
+            defer { creatingListing = false }
+            if let listing = await model.createListing() { path.append(listing) }
+        }
     }
 }
 
