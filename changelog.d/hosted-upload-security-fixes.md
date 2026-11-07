@@ -1,5 +1,0 @@
-- On the web, one seller's slow image upload no longer holds up everyone else's chat messages.
-- Sending a chat image no longer locks the draft while the image is being stored.
-- Very rapid repeated generate or chat requests now get a short "try again" instead of piling up, without limiting normal use.
-- Tighten private server-to-server access and add request logs that never include links, sign-in codes or message contents.
-- Database updates during a deploy now give up quickly instead of stalling the app, and a deploy checks the database is on the expected version.

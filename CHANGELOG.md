@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.755 — 2026-11-07
+
+- On the web, one seller's slow image upload no longer holds up everyone else's chat messages.
+- Sending a chat image no longer locks the draft while the image is being stored.
+- Very rapid repeated generate or chat requests now get a short "try again" instead of piling up, without limiting normal use.
+- Tighten private server-to-server access and add request logs that never include links, sign-in codes or message contents.
+- Database updates during a deploy now give up quickly instead of stalling the app, and a deploy checks the database is on the expected version.
+
 ## 0.1.754 — 2026-11-07
 
 - Delete your Anteroom account from the web app's account menu or the iPhone's Settings. Your listings, photos, records, settings and stored sign-ins are removed; listings that are live on marketplaces stay there.
