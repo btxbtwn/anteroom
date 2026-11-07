@@ -100,6 +100,7 @@ def listing_chat(store, monkeypatch):
 
     app.dependency_overrides[get_db] = override_get_db
     monkeypatch.setattr(chat_route, "SessionLocal", factory)
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", factory)
     with TestClient(app) as client:
         yield client, conv.id
     db.close()
@@ -172,6 +173,7 @@ def test_the_assistant_takes_an_image_without_a_question(store, monkeypatch, tmp
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(assistant_route, "SessionLocal", factory)
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", factory)
     monkeypatch.setattr("vendoo_studio.services.box_scout.state_path", lambda: tmp_path / "sourcing.json")
     provider = SeeingProvider()
     monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: provider)

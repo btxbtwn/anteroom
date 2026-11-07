@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import get_db
+from vendoo_studio.database import get_db, in_worker_session
 from vendoo_studio.repositories.queries import JobRepo, ConversationRepo
 from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.models.conversation import Photo
@@ -157,14 +157,11 @@ def get_job_events(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{job_id}/preview")
-async def stream_job_preview(job_id: str, db: Session = Depends(get_db)):
-    repo = JobRepo(db)
-    job = repo.get(job_id)
-    if not job:
+async def stream_job_preview(job_id: str):
+    # The stream outlives the request, so the lookup uses a session of its own
+    # that is closed before the first frame.
+    if not await in_worker_session(lambda db: JobRepo(db).get(job_id) is not None):
         raise HTTPException(404, "Job not found")
-    # The stream outlives the request; FastAPI would keep this session's pool
-    # connection checked out until the viewer disconnects.
-    db.close()
 
     from vendoo_studio.services.preview_hub import preview_hub
 
@@ -226,7 +223,20 @@ def get_job_fill_log(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{job_id}/cancel")
-async def cancel_job(job_id: str, db: Session = Depends(get_db)):
+async def cancel_job(job_id: str):
+    response, live = await in_worker_session(_cancel, job_id)
+    if live is None:
+        return response
+    from vendoo_studio.services import native_marketplaces
+
+    # A direct listing stops at its next safe point and keeps the slot until
+    # the marketplace or Chrome has answered; its own worker ends the job.
+    await native_marketplaces.request_cancel(job_id, live)
+    return await in_worker_session(lambda db: _job_response(JobRepo(db).get(job_id)))
+
+
+def _cancel(db: Session, job_id: str) -> tuple[JobResponse, dict | None]:
+    """The database part of Cancel. A live direct job's record comes back for ``request_cancel``."""
     repo = JobRepo(db)
     job = repo.get(job_id)
     if not job:
@@ -234,20 +244,18 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db)):
     # A job that finished while the seller was reaching for Cancel has nothing
     # left to stop. Answer with the job as it stands instead of an error.
     if job.status in {"completed", "cancelled"}:
-        return _job_response(job)
+        return _job_response(job), None
     if str(job.current_step or "").startswith("native_"):
         from vendoo_studio.services import native_marketplaces
 
-        # A direct listing stops at its next safe point and keeps the slot until
-        # the marketplace or Chrome has answered; its own worker ends the job.
-        await native_marketplaces.cancel_job(db, job)
-        return _job_response(job)
+        live = native_marketplaces.stop_job(db, job)
+        return _job_response(job), live
 
     job.status = "cancelled"
     job.current_step = None
     db.commit()
     repo.add_event(job_id, "cancelled")
-    return _job_response(job)
+    return _job_response(job), None
 
 
 def _job_response(job) -> JobResponse:

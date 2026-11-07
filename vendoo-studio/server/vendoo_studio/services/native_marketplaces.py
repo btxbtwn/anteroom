@@ -824,16 +824,17 @@ def _running_record(db: Session, conv_id: str, marketplace: str) -> dict:
     return record
 
 
-async def cancel_job(db: Session, job) -> None:
-    """Cancel from the jobs list: stop a live direct job, or end one nothing runs any more."""
+def stop_job(db: Session, job) -> dict | None:
+    """Cancel from the jobs list, database step: end a job nothing runs any more and return None, or
+    for a live direct job return its record for ``request_cancel``, which the caller awaits holding no session."""
     marketplace = str(job.current_step or "").removeprefix("native_").split("_", 1)[0]
     record = _record(db, job.conversation_id, marketplace) if marketplace in NAMES else {}
     if job_is_live(db, job.id):
         db.commit()
-        await request_cancel(job.id, record)
-        return
+        return record
     JobRepo(db).update_status(job.id, "cancelled", job.current_step, error="Cancelled.")
     mark_interrupted(db, job.id)
+    return None
 
 
 async def request_cancel(job_id: str, record: dict) -> None:

@@ -51,6 +51,7 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 - Keep components modular and concerns clearly separated.
 - Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+- Finish database reads and writes and release the connection before awaiting anything outside the app (Chrome, marketplaces, models, streams). Async routes never take a request database session (`get_db`, `get_seller_db`): they run each database step through `database.in_worker_session` (`hosted_database.in_seller_session` on hosted routes), or the route is a plain `def`.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later. The one exception is a production incident: a minimal mitigation is allowed, labelled as such in the code and PR, followed by the root-cause fix.
 
 ## Responsiveness and concurrent work

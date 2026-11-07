@@ -44,6 +44,7 @@ def workspace(monkeypatch, tmp_path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(assistant_route, "SessionLocal", factory)
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", factory)
     monkeypatch.setattr("vendoo_studio.services.box_scout.state_path", lambda: tmp_path / "sourcing.json")
     db = factory()
     app = FastAPI()
@@ -490,7 +491,7 @@ def test_stop_keeps_what_was_written_and_a_second_question_waits_its_turn(worksp
 
         run = await start_answer(db, SlowProvider())
         try:
-            await assistant_route.ask(assistant_route.AssistantQuestion(text="And yesterday?"), request=None, db=db)
+            await assistant_route.ask(assistant_route.AssistantQuestion(text="And yesterday?"), request=None)
         except HTTPException as refused:
             status = refused.status_code
         await assistant_route.stop()

@@ -66,26 +66,26 @@ def save_floors(body: SaveFloorsRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/preview")
-async def preview(body: PreviewRequest, db: Session = Depends(get_db)):
+async def preview(body: PreviewRequest):
     try:
-        return await listing_promotions.preview(db, body.conversation_ids, body.marketplace, body.action,
+        return await listing_promotions.preview(body.conversation_ids, body.marketplace, body.action,
                                                 body.discount_percent, body.floors)
     except PromotionError as exc:
         raise _error(exc) from exc
 
 
 @router.post("/{promotion_id}/perform")
-async def perform(promotion_id: str, body: PerformRequest, db: Session = Depends(get_db)):
+async def perform(promotion_id: str, body: PerformRequest):
     try:
-        return await listing_promotions.perform(db, promotion_id, body.shipping_discount_id)
+        return await listing_promotions.perform(promotion_id, body.shipping_discount_id)
     except PromotionError as exc:
         raise _error(exc) from exc
 
 
 @router.post("/{promotion_id}/check")
-async def check(promotion_id: str, db: Session = Depends(get_db)):
+async def check(promotion_id: str):
     try:
-        return await listing_promotions.check(db, promotion_id)
+        return await listing_promotions.check(promotion_id)
     except PromotionError as exc:
         raise _error(exc) from exc
 

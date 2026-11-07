@@ -130,14 +130,14 @@ class RecoverRequest(BaseModel):
 
 
 @router.post("/api/marketplace-sales/recover")
-async def recover_orders(body: RecoverRequest, db: Session = Depends(get_db)):
+async def recover_orders(body: RecoverRequest):
     """Read one page of changed orders into the local ledger. Never notify or delist."""
     from vendoo_studio.services import order_recovery
     from vendoo_studio.services.ebay_client import EbayFailure
     from vendoo_studio.services.etsy_workspace import EtsyFailure
 
     try:
-        return await order_recovery.recover(db, body.marketplace, body.start, body.end, body.page, body.connected_at, body.connection, body.through)
+        return await order_recovery.recover(body.marketplace, body.start, body.end, body.page, body.connected_at, body.connection, body.through)
     except (order_recovery.RecoveryError, EbayFailure, EtsyFailure) as exc:
         raise HTTPException(exc.status, str(exc)) from exc
     except marketplace_accounts.SignInRequired as exc:

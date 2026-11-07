@@ -58,7 +58,8 @@ def test_web_offer_timer_checks_each_seller_in_their_own_context(cloud, signing_
         task = asyncio.create_task(hosted_offer_scheduler.serve(engine))
         for _ in range(200):
             await asyncio.sleep(0.01)
-            if len(ebay_offers._checks) == 2:
+            # Each sweep reads the database on worker threads, so wait for Alice's to reach eBay too.
+            if len(ebay_offers._checks) == 2 and eligible_tokens:
                 break
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)

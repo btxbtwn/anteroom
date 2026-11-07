@@ -45,13 +45,15 @@ def test_private_images_survive_queue_reload_and_delete_without_leaking_to_anoth
     monkeypatch.setattr('vendoo_studio.services.hosted_storage.photo_call',
                         lambda method, key, data=None: storage(method, key, data=data))
 
-    async def chat(conv_id, body, db, *, stored_attachments=None):
+    async def chat(conv_id, body, *, stored_attachments=None):
         from vendoo_studio.repositories.queries import ConversationRepo
         from vendoo_studio.services.chat_attachments import image_parts
         assert len(stored_attachments) == 1
         parts = await asyncio.to_thread(image_parts, stored_attachments)
         assert parts[0]['image_url']['url'].startswith('data:image/jpeg;base64,')
-        ConversationRepo(db).add_message(conv_id, 'user', body.text, attachments=stored_attachments)
+        from vendoo_studio.database import in_worker_session
+        await in_worker_session(lambda db: ConversationRepo(db).add_message(
+            conv_id, 'user', body.text, attachments=stored_attachments))
 
         async def stream():
             yield 'event: status\ndata: Read the private image\n\n'

@@ -171,9 +171,10 @@ Those handlers now take no request session: each database step runs through
 before the next external wait. Handlers that only read are plain `def`. Two
 backend tests stop this returning: one fails on any new `async def` handler that
 depends on `get_db`/`get_seller_db`, and an autouse fixture fails a test whose
-async handler checks out a connection on the event loop. Handlers not yet
-converted are listed in `server/tests/async_route_sessions_baseline.txt`, which
-may only shrink. A test holds eight concurrent slow external waits on a
+async handler checks out a connection on the event loop. Neither check has
+exceptions: every handler has been converted. Async hosted routes that stream a
+request body use `hosted_database.in_seller_session`, which keeps
+`get_seller_db`'s checks on a worker-thread session. A test holds eight concurrent slow external waits on a
 one-connection pool without a timeout. Not yet measured after deploy.
 
 Machines reach each other's `/internal/` routes at

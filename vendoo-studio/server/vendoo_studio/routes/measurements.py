@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from vendoo_studio.config import MAX_PHOTO_SIZE_MB
-from vendoo_studio.database import get_db
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import measure_read
 from vendoo_studio.services.listing_provider import get_photo_provider
@@ -58,11 +59,16 @@ async def read_measurements(files: list[UploadFile] = File(...), garment: str = 
 
 
 @router.post("/api/conversations/{conv_id}/measurements/read")
-async def read_saved_measurements(conv_id: str, body: ReadSavedRequest, db: Session = Depends(get_db)):
+async def read_saved_measurements(conv_id: str, body: ReadSavedRequest):
     """Suggest a saved listing's measurements from its photos, in their order. Saves nothing."""
     provider = _provider(body.garment)
+    filenames = await in_worker_session(_photo_filenames, conv_id)
+    paths = await asyncio.to_thread(photo_store().local_paths, filenames)
+    return await _read(provider, paths, body.garment)
+
+
+def _photo_filenames(db: Session, conv_id: str) -> list[str]:
     repo = ConversationRepo(db)
     if not repo.get(conv_id):
         raise HTTPException(404, "Conversation not found")
-    paths = photo_store().local_paths([photo.stored_filename for photo in repo.get_photos(conv_id)])
-    return await _read(provider, paths, body.garment)
+    return [photo.stored_filename for photo in repo.get_photos(conv_id)]

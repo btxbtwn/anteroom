@@ -19,6 +19,8 @@ eBay names values by their text, so a value's ``id`` is its label there.
 """
 from __future__ import annotations
 
+import asyncio
+
 import re
 import time
 from typing import Literal, TypedDict
@@ -143,13 +145,14 @@ def aspect_options(field: dict, answers: dict[str, list[str]]) -> list[dict]:
 async def ebay_aspects(client, category_id: str) -> list[dict]:
     """The leaf's item aspects, under eBay's exact names."""
     category_id = _category(category_id)
-    cached = load_rows(EBAY_ASPECTS, category_id)
+    # The cache is in the database: read and write it off the event loop.
+    cached = await asyncio.to_thread(load_rows, EBAY_ASPECTS, category_id)
     if cached is not None:
         return cached
     body = await client.request("GET", "/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category",
                                 params={"category_id": category_id}, app=True)
     fields = [_ebay_field(aspect) for aspect in body.get("aspects") or [] if aspect.get("localizedAspectName")]
-    save_rows(EBAY_ASPECTS, category_id, fields)
+    await asyncio.to_thread(save_rows, EBAY_ASPECTS, category_id, fields)
     return fields
 
 

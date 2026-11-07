@@ -110,7 +110,7 @@ def test_image_upload_holds_no_draft_lock_and_does_not_block_other_sellers(
     monkeypatch.setattr('vendoo_studio.services.hosted_storage.photo_call',
                         lambda method, key, data=None: storage(method, key, data=data))
 
-    async def chat(conv_id, body, db, *, stored_attachments=None):
+    async def chat(conv_id, body, *, stored_attachments=None):
         async def stream():
             yield 'data: [DONE]\n\n'
         return StreamingResponse(stream(), media_type='text/event-stream')

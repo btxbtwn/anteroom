@@ -74,16 +74,46 @@ def apply_department(listing: dict, department: str) -> dict:
     return listing
 
 
-async def review_department(db: Session, conv_id: str, *, apply: bool = False) -> dict[str, Any]:
-    from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
-    from vendoo_studio.services.listing_generate import analyze_photos_with_tag_retry, current_photo_analysis
-    from vendoo_studio.services.listing_provider import get_listing_provider
+def _read_item(db: Session, conv_id: str) -> dict[str, Any] | None:
+    from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services.listing_generate import current_photo_analysis
 
     repo = ConversationRepo(db)
-    conv = repo.get(conv_id)
-    if not conv:
-        return {"ok": False, "error": "Conversation not found"}
+    if not repo.get(conv_id):
+        return None
     text = current_photo_analysis(repo, conv_id) or ""
+    filenames = [] if text else [photo.stored_filename for photo in repo.get_photos(conv_id)]
+    return {"text": text, "filenames": filenames}
+
+
+def _apply(db: Session, conv_id: str, department: str) -> str | None:
+    """Write the department onto the current draft. Returns the conflict message, if any."""
+    from vendoo_studio.repositories.queries import ListingRepo, RevisionConflict
+    from vendoo_studio.services.listing_editor import save_listing_edit
+
+    current = ListingRepo(db).get_current(conv_id)
+    revision = ListingRepo(db).get_revision(current.current_revision_id) if current and current.current_revision_id else None
+    listing = dict(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
+    apply_department(listing, department)
+    try:
+        save_listing_edit(conv_id, listing, db, expected_revision_id=revision.id if revision else "")
+    except RevisionConflict as exc:
+        return str(exc)
+    return None
+
+
+async def review_department(conv_id: str, *, apply: bool = False) -> dict[str, Any]:
+    """Each database step has its own short session; none is held while the model reads the photos."""
+    import asyncio
+
+    from vendoo_studio.database import in_worker_session
+    from vendoo_studio.services.listing_generate import analyze_photos_with_tag_retry
+    from vendoo_studio.services.listing_provider import get_listing_provider
+
+    item = await in_worker_session(_read_item, conv_id)
+    if item is None:
+        return {"ok": False, "error": "Conversation not found"}
+    text = item["text"]
     if not text:
         provider = get_listing_provider()
         if provider is None or not callable(getattr(provider, "analyze_photos", None)):
@@ -91,8 +121,7 @@ async def review_department(db: Session, conv_id: str, *, apply: bool = False) -
                 "ok": False,
                 "error": "Connect a model in Settings to re-read department from the photos.",
             }
-        photos = repo.get_photos(conv_id)
-        paths = [str(path) for path in photo_store().local_paths([photo.stored_filename for photo in photos])]
+        paths = [str(path) for path in await asyncio.to_thread(photo_store().local_paths, item["filenames"])]
         if not paths:
             return {"ok": False, "error": "Add photos before asking for a department."}
         result = await analyze_photos_with_tag_retry(provider, paths)
@@ -106,15 +135,8 @@ async def review_department(db: Session, conv_id: str, *, apply: bool = False) -
         return {"ok": False, "error": "The photos did not show whether this is men's, women's, or unisex.", **found}
     applied = False
     if apply:
-        from vendoo_studio.services.listing_editor import save_listing_edit
-
-        current = ListingRepo(db).get_current(conv_id)
-        revision = ListingRepo(db).get_revision(current.current_revision_id) if current and current.current_revision_id else None
-        listing = dict(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
-        apply_department(listing, found["department"])
-        try:
-            save_listing_edit(conv_id, listing, db, expected_revision_id=revision.id if revision else "")
-        except RevisionConflict as exc:
-            return {"ok": False, "error": str(exc), **found}
+        conflict = await in_worker_session(_apply, conv_id, found["department"])
+        if conflict is not None:
+            return {"ok": False, "error": conflict, **found}
         applied = True
     return {"ok": True, "applied": applied, **found}

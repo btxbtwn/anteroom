@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.dml import Update
 
 from vendoo_studio.database import Base, get_db, load_models
@@ -151,6 +151,8 @@ def offers(tmp_path, monkeypatch, ebay_server):
     accounts = {"ebay": {"accountId": "seller-1", "accessToken": "test-token"}}
     monkeypatch.setattr(ebay_offers, "get_marketplace_accounts", lambda: accounts)
     monkeypatch.setattr(ebay_offers, "SessionLocal", sessions)
+    # Preview and send open their own short sessions on worker threads.
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", sessions)
     monkeypatch.setattr(ebay_api, "access_token", AsyncMock(return_value="test-token"))
     monkeypatch.setattr(ebay_api, "API_URL", ebay_server[0])
     monkeypatch.setattr(ebay_offers, "_checks", {})
@@ -284,9 +286,8 @@ def test_two_simultaneous_sends_have_one_durable_reservation(offers):
     first, second = preview(offers), preview(offers)
 
     async def scenario():
-        with offers.sessions() as one, offers.sessions() as two:
-            return await asyncio.gather(ebay_offers.send_previews(one, [first["id"]]),
-                                        ebay_offers.send_previews(two, [second["id"]]))
+        return await asyncio.gather(ebay_offers.send_previews([first["id"]]),
+                                    ebay_offers.send_previews([second["id"]]))
 
     results = asyncio.run(scenario())
     assert sorted(row["offers"][0]["state"] for row in results) == ["sent", "skipped"]
@@ -390,8 +391,8 @@ def test_changes_during_final_token_refresh_prevent_the_send(offers, monkeypatch
     monkeypatch.setattr(ebay_api, "access_token", token)
 
     async def scenario():
-        with offers.sessions() as db, pytest.raises((ebay_offers.OfferConflict, marketplace_accounts.SignInRequired)):
-            await ebay_offers.send(db, row["id"], automatic=True)
+        with pytest.raises((ebay_offers.OfferConflict, marketplace_accounts.SignInRequired)):
+            await ebay_offers.send(row["id"], automatic=True)
 
     asyncio.run(scenario())
     assert offers.remote.sends == []
@@ -421,24 +422,23 @@ def test_atomic_reservation_honors_concurrent_controls(offers, monkeypatch, chan
     attempt = preview(offers)
 
     async def scenario():
-        with offers.sessions() as db:
-            execute = db.execute
-            changed = False
+        execute = Session.execute
+        changed = False
 
-            def intercept(statement, *args, **kwargs):
-                nonlocal changed
-                if isinstance(statement, Update) and statement.table.name == "ebay_offer_rules" and not changed:
-                    changed = True
-                    with offers.sessions() as control:
-                        values = {"enabled": False} if change == "pause" else {"minimum_price_cents": 4700}
-                        control.query(EbayOfferRule).update(values)
-                        control.commit()
-                return execute(statement, *args, **kwargs)
+        def intercept(session, statement, *args, **kwargs):
+            nonlocal changed
+            if isinstance(statement, Update) and statement.table.name == "ebay_offer_rules" and not changed:
+                changed = True
+                with offers.sessions() as control:
+                    values = {"enabled": False} if change == "pause" else {"minimum_price_cents": 4700}
+                    control.query(EbayOfferRule).update(values)
+                    control.commit()
+            return execute(session, statement, *args, **kwargs)
 
-            monkeypatch.setattr(db, "execute", intercept)
-            with pytest.raises(ebay_offers.OfferConflict):
-                await ebay_offers.send(db, attempt["id"], automatic=True)
-            assert changed
+        monkeypatch.setattr(Session, "execute", intercept)
+        with pytest.raises(ebay_offers.OfferConflict):
+            await ebay_offers.send(attempt["id"], automatic=True)
+        assert changed
 
     asyncio.run(scenario())
     assert offers.remote.sends == []
@@ -608,25 +608,24 @@ def test_all_listings_reservation_honors_concurrent_policy_changes(offers, monke
     row = preview(offers, floor="0.01")
 
     async def scenario():
-        with offers.sessions() as db:
-            execute = db.execute
-            changed = False
+        execute = Session.execute
+        changed = False
 
-            def intercept(statement, *args, **kwargs):
-                nonlocal changed
-                if isinstance(statement, Update) and statement.table.name == "ebay_offer_policies" and not changed:
-                    changed = True
-                    with offers.sessions() as control:
-                        if change == "pause":
-                            ebay_offers.pause(control)
-                        else:
-                            ebay_offers.enable_all(control, 20, None)
-                return execute(statement, *args, **kwargs)
+        def intercept(session, statement, *args, **kwargs):
+            nonlocal changed
+            if isinstance(statement, Update) and statement.table.name == "ebay_offer_policies" and not changed:
+                changed = True
+                with offers.sessions() as control:
+                    if change == "pause":
+                        ebay_offers.pause(control)
+                    else:
+                        ebay_offers.enable_all(control, 20, None)
+            return execute(session, statement, *args, **kwargs)
 
-            monkeypatch.setattr(db, "execute", intercept)
-            with pytest.raises(ebay_offers.OfferConflict, match="changed or was paused"):
-                await ebay_offers.send(db, row["id"], automatic=True, policy_approval=approval)
-            assert changed
+        monkeypatch.setattr(Session, "execute", intercept)
+        with pytest.raises(ebay_offers.OfferConflict, match="changed or was paused"):
+            await ebay_offers.send(row["id"], automatic=True, policy_approval=approval)
+        assert changed
 
     asyncio.run(scenario())
     assert not offers.remote.sends

@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.services import listing_persistence
-from vendoo_studio.database import Base, get_db, load_models
+from vendoo_studio.database import Base, get_db, in_worker_session, load_models
 from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import JobRepo, ListingRepo
@@ -23,11 +23,14 @@ EBAY_URL = "https://www.ebay.com/itm/123456789012"
 
 
 @pytest.fixture
-def db():
+def db(monkeypatch):
     load_models()
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
+    factory = sessionmaker(bind=engine)
+    # Perform opens its own short sessions (database.in_worker_session).
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", factory)
+    session = factory()
     try:
         yield session
     finally:
@@ -48,16 +51,20 @@ def client(db):
 def calls(monkeypatch, db):
     seen = []
 
+    # Like the real ones, the fakes keep their database writes off the event loop.
     async def fake_delist(conv_id, marketplaces, confirm):
         seen.append(("delist", conv_id, tuple(marketplaces), confirm))
-        for name in marketplaces:
-            MarketplaceListingRepo(db).save(conv_id, name, {"state": "not_saved", "listing_id": None, "listing_url": None})
+
+        def save(session):
+            for name in marketplaces:
+                MarketplaceListingRepo(session).save(conv_id, name, {"state": "not_saved", "listing_id": None, "listing_url": None})
+        await in_worker_session(save)
         return {name: {"state": "deleted"} for name in marketplaces}
 
     async def fake_list(conv_id, name, body):
         seen.append(("list", conv_id, name, body.confirm, body.revision_id))
-        MarketplaceListingRepo(db).save(conv_id, name, {"state": "published", "listing_id": f"{name}-1",
-                                                        "listing_url": EBAY_URL if name == "ebay" else None})
+        await in_worker_session(lambda session: MarketplaceListingRepo(session).save(
+            conv_id, name, {"state": "published", "listing_id": f"{name}-1", "listing_url": EBAY_URL if name == "ebay" else None}))
         return {"ok": True, "state": "published"}
 
     monkeypatch.setattr("vendoo_studio.services.marketplace_delist.delist", fake_delist)
@@ -193,7 +200,8 @@ def test_a_failed_marketplace_is_reported_and_not_retried(db, client, monkeypatc
     result = _perform(client, _body(row)).json()
 
     assert result["ok"] is False and set(result["errors"]) == {"ebay", "poshmark"}
-    assert seen == ["ebay", "poshmark"]
+    # Both start at once, each tried once.
+    assert sorted(seen) == ["ebay", "poshmark"]
 
 
 def test_busy_slot_refuses_without_sending(db, client, calls, monkeypatch):
@@ -315,12 +323,12 @@ def test_list_starts_every_marketplace_at_once_and_takes_turns_on_each(db, monke
         return ListingRepo(db).get_current(conv.id).current_revision_id
 
     async def both():
-        return await asyncio.gather(automation_actions._list_remaining(db, a.id, ["ebay", "poshmark"], revision(a)),
-                                    automation_actions._list_remaining(db, b.id, ["ebay"], revision(b)))
+        return await asyncio.gather(automation_actions._list_remaining(a.id, ["ebay", "poshmark"], revision(a)),
+                                    automation_actions._list_remaining(b.id, ["ebay"], revision(b)))
 
     assert all(result["ok"] for result in asyncio.run(both()))
     # One item's marketplaces run together.
-    assert events[:2] == [("start", a.id, "ebay"), ("start", a.id, "poshmark")]
+    assert set(events[:2]) == {("start", a.id, "ebay"), ("start", a.id, "poshmark")}
     # A second item waits for its turn on a marketplace already in use.
     assert events.index(("start", b.id, "ebay")) > events.index(("end", a.id, "ebay"))
 

@@ -222,21 +222,38 @@ async def recover_ebay_notification(order_id: str, *, session_factory) -> list[s
                     if row.id not in before and row.order_status in PAID_STATUSES]
 
     created = await asyncio.to_thread(store)
-    with session_factory() as db:
-        await _record_amounts(db, "ebay", [(order_id, detail)], observed, client)
+    await _record_amounts(session_factory, "ebay", [(order_id, detail)], observed, client)
     return created
 
 
-async def _record_amounts(db: Session, marketplace: str, orders: list[tuple[str, dict | None]], observed: datetime,
+async def _record_amounts(session_factory, marketplace: str, orders: list[tuple[str, dict | None]], observed: datetime,
                           client: EbayClient | None) -> None:
     """Add each order's money after its lines are saved. Amounts never fail the order read itself."""
     from vendoo_studio.services import order_amounts
 
     try:
-        await order_amounts.record(db, marketplace, orders, observed, client)
+        await order_amounts.record(session_factory, marketplace, orders, observed, client)
     except Exception:  # noqa: BLE001 - the sale stays recorded; its amounts are retried later
-        db.rollback()
         logging.getLogger(__name__).warning("%s order amounts could not be recorded; the next check will retry", marketplace)
+
+
+def _save_page(session_factory, marketplace: str, lines: list[OrderLine], observed: datetime, verify) -> tuple[dict, int]:
+    with session_factory() as db:
+        counts: dict[str, int] = {}
+        for attempt in range(2):
+            try:
+                with start_gate():
+                    verify()
+                    counts = _save(db, marketplace, lines, observed)
+                break
+            except IntegrityError:
+                db.rollback()
+                if attempt:
+                    raise RecoveryError("Orders changed during recovery. Retry this page.", 409) from None
+            except BaseException:
+                db.rollback()
+                raise
+        return counts, reconcile_unmatched(db, marketplace=marketplace)
 
 
 def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datetime) -> dict:
@@ -294,7 +311,9 @@ def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datet
     return counts
 
 
-async def recover(db: Session, marketplace: str, start: date, end: date, page: int, connected_at: str, connection: str | None = None, through: datetime | None = None) -> dict:
+async def recover(marketplace: str, start: date, end: date, page: int, connected_at: str, connection: str | None = None,
+                  through: datetime | None = None, *, session_factory=None) -> dict:
+    """Read one page of orders, then save it. No database connection is held while the marketplace answers."""
     today = datetime.now(UTC).date()
     if marketplace not in {"ebay", "etsy"} or not 1 <= page <= MAX_PAGES:
         raise RecoveryError("Choose eBay or Etsy and a valid recovery page.", 422)
@@ -315,22 +334,11 @@ async def recover(db: Session, marketplace: str, start: date, end: date, page: i
     read, more, verify, connection, client = await _read(marketplace, start_at, end_at, page, connection, connected_at)
     orders = [lines for lines, _ in read]
     lines = [line for order in orders for line in order]
-    counts: dict[str, int] = {}
-    for attempt in range(2):
-        try:
-            with start_gate():
-                verify()
-                counts = _save(db, marketplace, lines, observed)
-            break
-        except IntegrityError:
-            db.rollback()
-            if attempt:
-                raise RecoveryError("Orders changed during recovery. Retry this page.", 409) from None
-        except BaseException:
-            db.rollback()
-            raise
-    matched = reconcile_unmatched(db, marketplace=marketplace)
-    await _record_amounts(db, marketplace, [(order[0].order_id, source) for order, source in read if order], observed, client)
+    if session_factory is None:
+        from vendoo_studio import database
+        session_factory = database.SessionLocal
+    counts, matched = await asyncio.to_thread(_save_page, session_factory, marketplace, lines, observed, verify)
+    await _record_amounts(session_factory, marketplace, [(order[0].order_id, source) for order, source in read if order], observed, client)
     return {"marketplace": marketplace, "connection": connection, "through": end_at.replace(tzinfo=UTC).isoformat(), "page": page, "nextPage": page + 1 if more and page < MAX_PAGES else None,
             "ordersScanned": len(orders), "skippedOrders": sum(not order for order in orders), "matched": matched,
             "truncated": more and page == MAX_PAGES, **counts}

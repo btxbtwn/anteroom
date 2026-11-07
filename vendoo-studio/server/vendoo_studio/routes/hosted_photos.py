@@ -4,11 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from typing import Literal
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
-from starlette.concurrency import run_in_threadpool
 
 from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.services import hosted_photos as photos
-from vendoo_studio.services.hosted_database import get_seller_db
+from vendoo_studio.services.hosted_database import get_seller_db, in_seller_session
 
 router = APIRouter(prefix='/api/drafts/{draft_id}/photos')
 
@@ -82,20 +81,19 @@ def upload(db, draft_id, token, data, marketplace=None):
 
 
 @router.post('', response_model=PhotoResponse, status_code=201)
-async def upload_photo(draft_id: str, request: Request, marketplace: Literal['poshmark', 'mercari', 'depop', 'ebay', 'etsy'] | None = None, db=Depends(get_seller_db)):
+async def upload_photo(draft_id: str, request: Request, marketplace: Literal['poshmark', 'mercari', 'depop', 'ebay', 'etsy'] | None = None):
     # Check ownership before reading bytes. Read a raw body, avoiding an unbounded
     # multipart spool before the handler has an opportunity to enforce the limit.
-    await run_in_threadpool(require_draft, db, draft_id)
-    # The body and decoder can take time; retain no pooled transaction while
-    # waiting. Upload checks and locks the conversation again before saving.
-    await run_in_threadpool(db.rollback)
+    # The body and decoder can take time; no session is open while waiting.
+    # Upload checks and locks the conversation again before saving.
+    await in_seller_session(request, require_draft, draft_id)
     data = bytearray()
     async for chunk in request.stream():
         if len(data) + len(chunk) > photos.MAX_BYTES:
             raise HTTPException(413, f'Choose a photo of {photos.MAX_BYTES // (1024 * 1024)} MB or smaller')
         data.extend(chunk)
     token = request.headers['authorization'].partition(' ')[2]
-    return await run_in_threadpool(upload, db, draft_id, token, bytes(data), marketplace)
+    return await in_seller_session(request, upload, draft_id, token, bytes(data), marketplace)
 
 
 @router.get('/{photo_id}')

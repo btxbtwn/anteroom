@@ -93,9 +93,12 @@ class ConversationResetTest(unittest.TestCase):
             yield self.db
 
         app.dependency_overrides[get_db] = override_get_db
+        self.sessions = patch("vendoo_studio.database.SessionLocal", self.Session)
+        self.sessions.start()
         self.client = TestClient(app)
 
     def tearDown(self):
+        self.sessions.stop()
         app.dependency_overrides.clear()
         self.db.close()
         self.photos_tmp.cleanup()
@@ -290,6 +293,7 @@ class ConversationResetTest(unittest.TestCase):
             cleared = self.client.post(f"/api/conversations/{self.conv.id}/reset")
         self.assertEqual(cleared.json()["title"], "New Listing")
 
+        self.db.expire_all()  # the reset saved through its own session
         listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike Tee Mens M"}, "generate")
         self.db.expire_all()
         self.assertEqual(ConversationRepo(self.db).get(self.conv.id).title, "Nike Tee Mens M")

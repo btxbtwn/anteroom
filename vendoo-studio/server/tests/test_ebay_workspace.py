@@ -83,6 +83,8 @@ def workspace(tmp_path, monkeypatch):
             yield session
 
     app.dependency_overrides[get_db] = test_db
+    # eBay workspace handlers open their own short sessions on worker threads.
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", sessions)
     client = TestClient(app)
     try:
         yield SimpleNamespace(client=client, db=db, sessions=sessions, remote=state, accounts=accounts)
@@ -241,11 +243,10 @@ def test_two_previews_have_one_concurrent_send(workspace):
 
     async def scenario():
         async def attempt(review):
-            with workspace.sessions() as db:
-                try:
-                    return await ebay_actions.execute(db, review["id"], "message", payload)
-                except ebay_client.EbayFailure:
-                    return {"state": "blocked"}
+            try:
+                return await ebay_actions.execute(review["id"], "message", payload)
+            except ebay_client.EbayFailure:
+                return {"state": "blocked"}
         return await asyncio.gather(attempt(first), attempt(second))
 
     results = asyncio.run(scenario())

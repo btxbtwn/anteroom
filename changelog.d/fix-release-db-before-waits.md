@@ -1,0 +1,2 @@
+- Listings and pages no longer go blank or freeze while Anteroom waits on Chrome, eBay, Etsy or the AI.
+- Sending offers, promotions, automations, updates and photo uploads no longer tie up the app while they wait.

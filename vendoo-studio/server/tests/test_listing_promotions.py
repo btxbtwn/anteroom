@@ -29,6 +29,8 @@ class ListingPromotionsTest(unittest.TestCase):
         Base.metadata.create_all(engine)
         self.db = sessionmaker(bind=engine)()
         app.dependency_overrides[get_db] = lambda: self.db
+        # Promotion sends and reviews open their own short sessions on worker threads.
+        self.enterContext(patch("vendoo_studio.database.SessionLocal", sessionmaker(bind=engine)))
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title="Vintage tee")
         self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {"poshmark": URL}})

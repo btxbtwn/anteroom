@@ -56,13 +56,13 @@ async def _execute(task_id, token):
         # Release the lease lock before waiting for a provider. Every save
         # obtains it again through SellerDatabaseSession.before_flush.
         db.rollback()
-        if kind == 'generate':
-            response = await generate_listing(conversation_id, db=db)
-        elif kind == 'chat':
-            response = await run_message(conversation_id, ChatMessage(text=payload['text']), db=db,
-                                         stored_attachments=payload.get('attachments', []))
-        else:
-            raise ValueError('Unsupported draft task')
+    if kind == 'generate':
+        response = await generate_listing(conversation_id)
+    elif kind == 'chat':
+        response = await run_message(conversation_id, ChatMessage(text=payload['text']),
+                                     stored_attachments=payload.get('attachments', []))
+    else:
+        raise ValueError('Unsupported draft task')
     frames, flushed_at, failed = [], time.monotonic(), False
     async for frame in response.body_iterator:
         if isinstance(frame, (bytes, memoryview)):

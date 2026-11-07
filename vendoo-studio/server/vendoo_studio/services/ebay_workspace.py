@@ -11,6 +11,7 @@ import io
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.services import inventory_import
@@ -108,9 +109,9 @@ def traffic_bindings(db: Session) -> dict[str, str | None]:
             for identifier, matches in sorted(owners.items())}
 
 
-async def traffic(client: EbayClient, db: Session, start: date, end: date, offset: int) -> dict:
+async def traffic(client: EbayClient, start: date, end: date, offset: int) -> dict:
     dates(start, end)
-    titles = traffic_bindings(db)
+    titles = await in_worker_session(traffic_bindings)
     ids = list(titles)
     selected = ids[offset:offset + 25]
     if not selected:
@@ -133,16 +134,22 @@ async def traffic(client: EbayClient, db: Session, start: date, end: date, offse
     return page({"total": len(ids)}, rows, offset)
 
 
-async def finances(client: EbayClient, db: Session, start: date, end: date, offset: int) -> dict:
+async def finances(client: EbayClient, start: date, end: date, offset: int) -> dict:
     first, last = dates(start, end)
     body = await client.request("GET", "/sell/fulfillment/v1/order", params={
         "limit": 10, "offset": offset, "filter": f"creationdate:[{first}..{last}]",
     })
+    orders = body.get("orders", [])
+    reports = [await order_financials(client, order["orderId"]) for order in orders]
+    # eBay has answered: match its orders to inventory costs with a short session of their own.
+    return await in_worker_session(_finance_page, body, orders, reports, offset)
+
+
+def _finance_page(db: Session, body: dict, orders: list, reports: list, offset: int) -> dict:
     local = {item.conversation_id: item for item in load_rows(db)}
     bindings = {}
     rows = []
-    for order in body.get("orders", []):
-        financials = await order_financials(client, order["orderId"])
+    for order, financials in zip(orders, reports, strict=True):
         net = financials.net if financials else None
         costs = []
         issues = set()

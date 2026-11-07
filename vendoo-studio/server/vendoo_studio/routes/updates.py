@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import get_db
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
 from vendoo_studio.services import updates as update_service
 from vendoo_studio.services.chrome_bridge import ChromeBridgeError, install_bundled_extension, mark_extension_reload_pending
@@ -54,8 +54,8 @@ def update_status():
 
 
 @router.post("/apply")
-async def apply_update(db: Session = Depends(get_db)):
-    cancelled_jobs = _cancel_leftover_jobs(db)
+async def apply_update():
+    cancelled_jobs = await in_worker_session(_cancel_leftover_jobs)
     try:
         result = update_service.apply_update()
     except UpdateBlocked as exc:
@@ -81,10 +81,10 @@ async def download_update():
 
 
 @router.post("/restart")
-async def restart_with_update(db: Session = Depends(get_db)):
+async def restart_with_update():
     if update_service.update_progress().get("status") != "downloaded":
         raise HTTPException(409, "Download the update before restarting to install it.")
-    cancelled_jobs = _cancel_leftover_jobs(db)
+    cancelled_jobs = await in_worker_session(_cancel_leftover_jobs)
     try:
         result = update_service.install_prepared_update()
     except UpdateBlocked as exc:
@@ -95,8 +95,8 @@ async def restart_with_update(db: Session = Depends(get_db)):
 
 
 @router.post("/reinstall")
-async def reinstall_app(db: Session = Depends(get_db)):
-    cancelled_jobs = _cancel_leftover_jobs(db)
+async def reinstall_app():
+    cancelled_jobs = await in_worker_session(_cancel_leftover_jobs)
     try:
         result = update_service.reinstall_app()
     except UpdateBlocked as exc:
@@ -125,8 +125,8 @@ async def version_plan(tag: str):
 
 
 @router.post("/versions/install")
-async def install_version(payload: InstallVersionRequest, db: Session = Depends(get_db)):
-    cancelled_jobs = _cancel_leftover_jobs(db)
+async def install_version(payload: InstallVersionRequest):
+    cancelled_jobs = await in_worker_session(_cancel_leftover_jobs)
     try:
         result = await asyncio.to_thread(update_service.install_version, payload.tag, payload.snapshot)
     except UpdateBlocked as exc:

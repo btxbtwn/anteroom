@@ -4,12 +4,12 @@ import asyncio
 import functools
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import SessionLocal, get_db
+from vendoo_studio.database import SessionLocal, in_worker_session
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import activity
 from vendoo_studio.services.photo_store import photo_store
@@ -101,43 +101,45 @@ def _reset_status(conv_id: str, reason: str) -> None:
 
 
 @router.post("/api/conversations/{conv_id}/messages")
-async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(get_db)):
-    return await run_message(conv_id, body, db)
+async def send_message(conv_id: str, body: ChatMessage):
+    return await run_message(conv_id, body)
 
 
-async def run_message(conv_id: str, body: ChatMessage, db: Session, *, stored_attachments=None):
+def _no_provider(db: Session, conv_id: str) -> None:
     repo = ConversationRepo(db)
-    conv = repo.get(conv_id)
-    if not conv:
-        raise HTTPException(404, "Conversation not found")
+    repo.add_message(conv_id, "system",
+                     "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key, then retry this prompt.",
+                     provider="system", model="")
+    repo.update_status(conv_id, "draft")
 
-    attachments = stored_attachments if stored_attachments is not None else store_uploads(body.attachments, collection_id=conv_id)
-    repo.add_message(conv_id, "user", body.text, attachments=attachments)
-    provider = get_listing_provider()
-    if provider is None:
-        repo.add_message(
-            conv_id,
-            "system",
-            "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key, then retry this prompt.",
-            provider="system",
-            model="",
-        )
-        repo.update_status(conv_id, "draft")
-        raise HTTPException(
-            400,
-            "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key.",
-        )
-    provider_name, provider_model = _provider_meta(provider)
 
+def _start_answer(db: Session, conv_id: str) -> bool:
+    """Mark the chat answering; False when the seller is still answering generation's questions."""
+    repo = ConversationRepo(db)
     revisions = ListingRepo(db).get_revisions(conv_id)
     if repo.get_photos(conv_id) and (not revisions or revisions[0].source == "category_analysis"
                                    or not (revisions[0].listing_json or {}).get("title")):
+        return False
+    repo.update_status(conv_id, "in_progress")
+    return True
+
+
+async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=None):
+    await in_worker_session(_require_conversation, conv_id)
+    attachments = stored_attachments if stored_attachments is not None else await asyncio.to_thread(
+        store_uploads, body.attachments, collection_id=conv_id)
+    await in_worker_session(lambda db: ConversationRepo(db).add_message(conv_id, "user", body.text, attachments=attachments))
+    # Provider settings and credentials use their own short sessions.
+    provider = await asyncio.to_thread(get_listing_provider)
+    if provider is None:
+        await in_worker_session(_no_provider, conv_id)
+        raise HTTPException(400, "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key.")
+    provider_name, provider_model = _provider_meta(provider)
+
+    if not await in_worker_session(_start_answer, conv_id):
         # Seller answers during category discovery resume the same generation
         # pipeline; chat must not bypass the schema prerequisite.
-        return await generate_listing(conv_id, db=db)
-
-    repo.update_status(conv_id, "in_progress")
-    db.close()
+        return await generate_listing(conv_id)
 
     async def stream_response():
         full_text = ""
@@ -223,28 +225,37 @@ async def run_message(conv_id: str, body: ChatMessage, db: Session, *, stored_at
     return StreamingResponse(stream_response(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
-@router.post("/api/conversations/{conv_id}/analyze-photos")
-async def analyze_photos(conv_id: str, db: Session = Depends(get_db)):
-    repo = ConversationRepo(db)
-    conv = repo.get(conv_id)
+def _require_conversation(db: Session, conv_id: str) -> str:
+    conv = ConversationRepo(db).get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
+    return conv.notes or ""
 
-    _require_provider()
-    provider = get_photo_provider()
+
+def _photo_inputs(db: Session, conv_id: str) -> tuple[list[str], str | None]:
+    photos = ConversationRepo(db).get_photos(conv_id)
+    return [p.stored_filename for p in photos], photo_fingerprint(photos) if photos else None
+
+
+def _providers():
+    return _require_provider(), get_photo_provider()
+
+
+@router.post("/api/conversations/{conv_id}/analyze-photos")
+async def analyze_photos(conv_id: str):
+    notes = await in_worker_session(_require_conversation, conv_id)
+
+    _provider, provider = await asyncio.to_thread(_providers)
     vision_name, vision_model = _vision_meta(provider)
 
-    photos = repo.get_photos(conv_id)
-    if not photos:
+    filenames, analysis_fingerprint = await in_worker_session(_photo_inputs, conv_id)
+    if not filenames:
         raise HTTPException(400, "No photos to analyze")
 
-    paths = [str(path) for path in await asyncio.to_thread(
-        photo_store().local_paths, [p.stored_filename for p in photos],
-    )]
-    analysis_fingerprint = photo_fingerprint(photos)
+    paths = [str(path) for path in await asyncio.to_thread(photo_store().local_paths, filenames)]
 
     try:
-        result = await analyze_photos_with_tag_retry(provider, paths, notes=conv.notes or "")
+        result = await analyze_photos_with_tag_retry(provider, paths, notes=notes)
     except Exception as exc:
         raise HTTPException(502, str(photo_analysis_failure(exc))) from exc
     try:
@@ -256,39 +267,23 @@ async def analyze_photos(conv_id: str, db: Session = Depends(get_db)):
     # recent analysis in the conversation; a summary line is not one, so
     # re-analysing left the previous reading in place for good — a listing kept
     # being generated from photos that had since been read again.
-    repo.add_message(
+    await in_worker_session(lambda db: ConversationRepo(db).add_message(
         conv_id,
         "system",
         analysis_text,
         provider=vision_name,
         model=vision_model,
         photo_fingerprint=analysis_fingerprint,
-    )
+    ))
 
     return result
 
 
-@router.post("/api/conversations/{conv_id}/generate")
-async def generate_listing(conv_id: str, resume: bool = False, db: Session = Depends(get_db)):
+def _generation_inputs(db: Session, conv_id: str) -> dict:
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
-
-    # Provider settings and credentials use their own short sessions.
-    db.close()
-    existing = active_generation(conv_id)
-    if existing is not None:
-        return stream_generation(existing)
-    if resume:
-        # Reconnecting after the run ended must not start a second one: that
-        # posted a second photo analysis and comps card beside the first.
-        return stream_finished()
-
-    provider = _require_provider()
-    vision_provider = get_photo_provider()
-    vision_name, vision_model = _vision_meta(vision_provider)
-
     photos = repo.get_photos(conv_id)
     if not photos:
         raise HTTPException(400, "No photos to generate from. Upload product photos first.")
@@ -301,12 +296,30 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
     seller_answers = stored_seller_answers(repo, conv_id, item_details)
     if seller_answers:
         item_details += "\nSeller answers:\n" + seller_answers
-    filenames = [p.stored_filename for p in photos]
-    analysis_fingerprint = photo_fingerprint(photos)
-    photo_count = len(photos)
+    return {"notes": notes, "item_details": item_details, "seller_answers": seller_answers,
+            "filenames": [p.stored_filename for p in photos], "analysis_fingerprint": photo_fingerprint(photos),
+            "photo_count": len(photos)}
+
+
+@router.post("/api/conversations/{conv_id}/generate")
+async def generate_listing(conv_id: str, resume: bool = False):
+    await in_worker_session(_require_conversation, conv_id)
+
+    existing = active_generation(conv_id)
+    if existing is not None:
+        return stream_generation(existing)
+    if resume:
+        # Reconnecting after the run ended must not start a second one: that
+        # posted a second photo analysis and comps card beside the first.
+        return stream_finished()
+
+    # Provider settings and credentials use their own short sessions.
+    provider, vision_provider = await asyncio.to_thread(_providers)
+    vision_name, vision_model = _vision_meta(vision_provider)
+
+    inputs = await in_worker_session(_generation_inputs, conv_id)
     # Private photo downloads must not retain an inventory connection either.
-    db.close()
-    paths = [str(path) for path in await asyncio.to_thread(photo_store().local_paths, filenames)]
+    paths = [str(path) for path in await asyncio.to_thread(photo_store().local_paths, inputs["filenames"])]
 
     run = start_generation(conv_id, functools.partial(
         run_listing_generation,
@@ -315,12 +328,12 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
         vision_provider=vision_provider,
         vision_name=vision_name,
         vision_model=vision_model,
-        notes=notes,
-        item_details=item_details,
-        seller_answers=seller_answers,
+        notes=inputs["notes"],
+        item_details=inputs["item_details"],
+        seller_answers=inputs["seller_answers"],
         paths=paths,
-        photo_count=photo_count,
-        analysis_fingerprint=analysis_fingerprint,
+        photo_count=inputs["photo_count"],
+        analysis_fingerprint=inputs["analysis_fingerprint"],
     ))
     await asyncio.sleep(0)
     return stream_generation(run)
@@ -330,31 +343,27 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
 async def cancel_generate_listing(conv_id: str):
     stop_generation(conv_id)
 
-    def mark_draft() -> None:
-        with SessionLocal() as db:
-            ConversationRepo(db).update_status(conv_id, "draft")
-
-    await asyncio.to_thread(mark_draft)
+    await in_worker_session(_mark_draft, conv_id)
     return {"ok": True}
+
+
+def _mark_draft(db: Session, conv_id: str) -> None:
+    ConversationRepo(db).update_status(conv_id, "draft")
 
 
 @router.post("/api/conversations/{conv_id}/messages/cancel")
 async def cancel_chat_message(conv_id: str):
-    db = SessionLocal()
-    try:
-        ConversationRepo(db).update_status(conv_id, "draft")
-    finally:
-        db.close()
+    await in_worker_session(_mark_draft, conv_id)
     return {"ok": True}
 
 
 @router.post("/api/conversations/{conv_id}/stop")
-async def stop_everything(conv_id: str, db: Session = Depends(get_db)):
+async def stop_everything(conv_id: str):
     """Chat's Stop: end every piece of work that can still write to this listing."""
     from vendoo_studio.routes.conversations import cancel_conversation_jobs
 
     stop_generation(conv_id)
     activity.cancel(conv_id)
-    await cancel_conversation_jobs(db, conv_id)
-    ConversationRepo(db).update_status(conv_id, "draft")
+    await cancel_conversation_jobs(conv_id)
+    await in_worker_session(_mark_draft, conv_id)
     return {"ok": True}

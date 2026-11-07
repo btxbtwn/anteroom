@@ -99,8 +99,8 @@ def process_bytes(contents: bytes, filename: str | None, content_type: str | Non
     }
 
 
-async def process_upload(conv_id: str, file: UploadFile):
-    contents = await file.read()
+def process_upload(conv_id: str, file: UploadFile):
+    contents = file.file.read()
     return process_bytes(contents, file.filename, file.content_type, collection_id=conv_id)
 
 

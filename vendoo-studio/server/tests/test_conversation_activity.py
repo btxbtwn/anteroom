@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -67,9 +68,12 @@ class ConversationActivityRouteTest(unittest.TestCase):
             yield self.db
 
         app.dependency_overrides[get_db] = override_get_db
+        self.sessions = patch("vendoo_studio.database.SessionLocal", sessionmaker(bind=engine))
+        self.sessions.start()
         self.client = TestClient(app)
 
     def tearDown(self):
+        self.sessions.stop()
         app.dependency_overrides.clear()
         activity.reset()
         self.db.close()

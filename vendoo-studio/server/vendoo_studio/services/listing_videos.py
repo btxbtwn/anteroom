@@ -1,7 +1,6 @@
 """Local original videos, selected explicitly on a marketplace's listing form."""
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import math
 from pathlib import Path
@@ -61,20 +60,20 @@ def read_video_metadata(path: Path) -> dict:
     return {"duration_seconds": duration, "width": width, "height": height, "mime_type": mime}
 
 
-async def store_upload(db: Session, conv_id: str, upload: UploadFile) -> ListingVideo:
+def store_upload(db: Session, conv_id: str, upload: UploadFile) -> ListingVideo:
     VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
     stored = f"{uuid.uuid4().hex}.video"
     path = VIDEOS_DIR / stored
     digest, size = hashlib.sha256(), 0
     try:
         with path.open("xb") as stream:
-            while chunk := await upload.read(1024 * 1024):
+            while chunk := upload.file.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_VIDEO_BYTES:
                     raise ValueError("Videos uploaded to Anteroom must be 500 MB or smaller.")
                 digest.update(chunk)
                 stream.write(chunk)
-        metadata = await asyncio.to_thread(read_video_metadata, path)
+        metadata = read_video_metadata(path)
         row = ListingVideo(conversation_id=conv_id, stored_filename=stored, checksum=digest.hexdigest(),
                            original_filename=Path(upload.filename or "video").name, size_bytes=size, **metadata)
         db.add(row)

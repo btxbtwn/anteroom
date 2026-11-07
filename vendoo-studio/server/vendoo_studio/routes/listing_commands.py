@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import get_db
+from vendoo_studio.database import get_db, in_worker_session
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 
 router = APIRouter(tags=["conversations"])
@@ -69,15 +69,10 @@ def _save(conv_id: str, listing: dict, revision_id: str, db: Session) -> dict:
         raise HTTPException(409, str(exc)) from exc
 
 
-@router.post("/api/conversations/{conv_id}/set-price")
-async def set_price(conv_id: str, body: SetPriceBody, db: Session = Depends(get_db)):
-    """Set the item price. Unlocked marketplace prices follow it. Push writes a live listing."""
+def _save_price(db: Session, conv_id: str, body: SetPriceBody) -> dict:
+    """Save the new price. With push, also read what is live, in the same session."""
     from vendoo_studio.services.seller_overrides import CANONICAL_PRICE, locked_paths, price_number, set_path
 
-    if body.price <= 0:
-        raise HTTPException(400, "Enter a price greater than zero.")
-    if body.push and not body.confirmed:
-        raise HTTPException(400, "Pushing a price onto a live listing needs confirmed=true.")
     listing, revision_id = _listing(db, conv_id)
     listing["price"] = price_number(body.price)
     locks = locked_paths(listing)
@@ -95,33 +90,48 @@ async def set_price(conv_id: str, body: SetPriceBody, db: Session = Depends(get_
             locks.discard(CANONICAL_PRICE[market])
     listing["seller_fields"] = sorted(locks)
     saved = _save(conv_id, listing, revision_id, db)
-    pushed: list[str] = []
-    waiting: list[str] = []
+    result = {"market": market, "price": listing["price"], "revision_id": saved.get("revision_id")}
     if body.push:
-        from vendoo_studio.routes.native_marketplaces import ListRequest
         from vendoo_studio.services.marketplace_delist import listings as live_listings
-        from vendoo_studio.services.native_marketplaces import NativeMarketplaceError, update_live
 
         current = ListingRepo(db).get_current(conv_id)
         # The price was saved just above, so the listing has a current revision.
         assert current is not None and current.current_revision_id
-        current_revision_id = current.current_revision_id
-        live = live_listings(db, conv_id)
-        # End this read before the updates, which wait on Chrome or the marketplace.
-        db.commit()
+        result["current_revision_id"] = current.current_revision_id
+        result["live"] = live_listings(db, conv_id)
+    return result
+
+
+@router.post("/api/conversations/{conv_id}/set-price")
+async def set_price(conv_id: str, body: SetPriceBody):
+    """Set the item price. Unlocked marketplace prices follow it. Push writes a live listing."""
+    if body.price <= 0:
+        raise HTTPException(400, "Enter a price greater than zero.")
+    if body.push and not body.confirmed:
+        raise HTTPException(400, "Pushing a price onto a live listing needs confirmed=true.")
+    # The save ends its session before the updates, which wait on Chrome or the marketplace.
+    saved = await in_worker_session(_save_price, conv_id, body)
+    market = saved["market"]
+    pushed: list[str] = []
+    waiting: list[str] = []
+    if body.push:
+        from vendoo_studio.routes.native_marketplaces import ListRequest
+        from vendoo_studio.services.native_marketplaces import NativeMarketplaceError, update_live
+
+        live = saved["live"]
         targets = [market] if market else [name for name in _PUSHABLE if (live.get(name) or {}).get("state") == "live"]
         for name in targets:
             entry = live.get(name) or {}
             if entry.get("state") != "live" or not entry.get("listing_id"):
                 continue
             try:
-                await update_live(conv_id, name, ListRequest(revision_id=current_revision_id, confirm=True))
+                await update_live(conv_id, name, ListRequest(revision_id=saved["current_revision_id"], confirm=True))
                 pushed.append(name)
                 break
             except NativeMarketplaceError as exc:
                 waiting.append(f"{name}: {exc}")
         waiting.extend(name for name in targets if name not in pushed and not any(name in item for item in waiting))
-    return {"ok": True, "revision_id": saved.get("revision_id"), "price": listing["price"], "pushed": pushed, "waiting": waiting}
+    return {"ok": True, "revision_id": saved["revision_id"], "price": saved["price"], "pushed": pushed, "waiting": waiting}
 
 
 @router.post("/api/conversations/{conv_id}/fields")
@@ -166,11 +176,11 @@ def set_depop_measurements(conv_id: str, body: DepopMeasurementsBody, db: Sessio
 
 
 @router.post("/api/conversations/{conv_id}/department/review")
-async def department_review(conv_id: str, body: DepartmentBody, db: Session = Depends(get_db)):
+async def department_review(conv_id: str, body: DepartmentBody):
     """Recommend men's, women's, or unisex from the photos. apply writes it onto the draft."""
     from vendoo_studio.services.department_review import review_department
 
-    result = await review_department(db, conv_id, apply=body.apply)
+    result = await review_department(conv_id, apply=body.apply)
     if not result.get("ok") and result.get("error") == "Conversation not found":
         raise HTTPException(404, result["error"])
     return result

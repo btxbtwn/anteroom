@@ -16,7 +16,7 @@ import httpx
 from sqlalchemy import case, or_, update
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import SessionLocal
+from vendoo_studio.database import SessionLocal, claim_in_worker_session, in_worker_session
 from vendoo_studio.models.conversation import Conversation, new_id
 from vendoo_studio.models.ebay_offer import EbayOfferAttempt, EbayOfferPolicy, EbayOfferRule
 from vendoo_studio.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
@@ -147,55 +147,78 @@ def status(db: Session) -> dict:
             "checkIntervalMinutes": CHECK_INTERVAL_S // 60, "lastCheck": last_check, "lastError": last_error}
 
 
-async def preview(db: Session, selections: list[dict], discount_percent: int) -> dict:
+async def preview(selections: list[dict], discount_percent: int) -> dict:
+    """Price each selection on eBay. Every database step uses its own short session, released before eBay answers."""
     seller = account_id()
     eligible = await ebay_api.eligible_items()
     rows = []
-    seen = set()
+    seen: set[str] = set()
     for selection in selections:
-        conv = db.get(Conversation, selection["conversation_id"])
-        listing_id = _listing_id(db, conv) if conv else None
-        title = conv.title if conv else "Missing listing"
-        row = {"conversationId": selection["conversation_id"], "title": title, "listingId": listing_id}
+        row, minimum, skipped = await in_worker_session(_preview_target, seller, selection, discount_percent, seen)
+        if skipped is not None:
+            rows.append({**row, "state": "skipped", "note": skipped})
+            continue
         try:
-            minimum = ebay_api.money_cents(selection["minimum_price"])
-            if not listing_id or listing_id in seen:
-                raise OfferConflict("Select a distinct listing with an eBay link imported from Vendoo.")
-            assert conv is not None  # A listing ID was read from this conversation.
-            seen.add(listing_id)
-            rule = db.query(EbayOfferRule).filter_by(account_id=seller, listing_id=listing_id).first()
-            if not rule:
-                rule = EbayOfferRule(id=new_id(), account_id=seller, listing_id=listing_id, conversation_id=conv.id,
-                                     discount_percent=discount_percent, minimum_price_cents=minimum, enabled=False)
-            elif rule.conversation_id != conv.id:
-                rule.conversation_id = conv.id
-                rule.enabled = False
-            _local_check(db, rule)
-            price = await ebay_api.listing_price(listing_id)
+            price = await ebay_api.listing_price(row["listingId"])
             # Round up to the cent, so rounding never increases the requested discount.
             offer = (price * (100 - discount_percent) + 99) // 100
             if offer < minimum:
                 raise OfferConflict("This discount would go below your minimum price. Lower the discount or skip this item.")
             if offer * 100 > price * 95:
                 raise OfferConflict("This price is too low to offer at least 5% off after rounding.")
-            # Do not hold SQLite's writer lock across the live eBay request.
-            existing = db.query(EbayOfferRule).filter_by(account_id=seller, listing_id=listing_id).first()
-            if existing:
-                rule = existing
-            else:
-                db.add(rule)
-            _local_check(db, rule)
-            db.flush()
-            attempt = EbayOfferAttempt(rule_id=rule.id, current_price_cents=price, offer_price_cents=offer,
-                                       discount_percent=discount_percent, minimum_price_cents=minimum,
-                                       state="preview", expires_at=now() + PREVIEW_TTL)
-            db.add(attempt)
-            db.commit()
-            rows.append({**row, **attempt_out(attempt, rule, title), "eligible": listing_id in eligible})
+            saved = await in_worker_session(_save_preview, seller, row, discount_percent, minimum, price, offer)
+            rows.append({**row, **saved, "eligible": row["listingId"] in eligible})
         except (ValueError, ebay_api.EbayError) as exc:
-            db.rollback()
             rows.append({**row, "state": "skipped", "note": str(exc)})
     return {"offers": rows}
+
+
+def _offer_rule(db: Session, seller: str, conv: Conversation, listing_id: str, discount_percent: int,
+                minimum: int) -> EbayOfferRule:
+    rule = db.query(EbayOfferRule).filter_by(account_id=seller, listing_id=listing_id).first()
+    if not rule:
+        rule = EbayOfferRule(id=new_id(), account_id=seller, listing_id=listing_id, conversation_id=conv.id,
+                             discount_percent=discount_percent, minimum_price_cents=minimum, enabled=False)
+    elif rule.conversation_id != conv.id:
+        rule.conversation_id = conv.id
+        rule.enabled = False
+    _local_check(db, rule)
+    return rule
+
+
+def _preview_target(db: Session, seller: str, selection: dict, discount_percent: int,
+                    seen: set[str]) -> tuple[dict, int, str | None]:
+    """The selection's listing and minimum, or why it is skipped. Saves nothing."""
+    conv = db.get(Conversation, selection["conversation_id"])
+    listing_id = _listing_id(db, conv) if conv else None
+    title = conv.title if conv else "Missing listing"
+    row = {"conversationId": selection["conversation_id"], "title": title, "listingId": listing_id}
+    try:
+        minimum = ebay_api.money_cents(selection["minimum_price"])
+        if not listing_id or listing_id in seen:
+            raise OfferConflict("Select a distinct listing with an eBay link imported from Vendoo.")
+        assert conv is not None  # A listing ID was read from this conversation.
+        seen.add(listing_id)
+        _offer_rule(db, seller, conv, listing_id, discount_percent, minimum)
+    except (ValueError, ebay_api.EbayError) as exc:
+        return row, 0, str(exc)
+    return row, minimum, None
+
+
+def _save_preview(db: Session, seller: str, row: dict, discount_percent: int, minimum: int, price: int, offer: int) -> dict:
+    conv = db.get(Conversation, row["conversationId"])
+    if conv is None:
+        raise OfferConflict("This item sold or its eBay listing changed. Sync from Vendoo before making offers.")
+    rule = _offer_rule(db, seller, conv, row["listingId"], discount_percent, minimum)
+    if rule not in db:
+        db.add(rule)
+    db.flush()
+    attempt = EbayOfferAttempt(rule_id=rule.id, current_price_cents=price, offer_price_cents=offer,
+                               discount_percent=discount_percent, minimum_price_cents=minimum,
+                               state="preview", expires_at=now() + PREVIEW_TTL)
+    db.add(attempt)
+    db.commit()
+    return attempt_out(attempt, rule, row["title"])
 
 
 def _get_preview(db: Session, attempt_id: str) -> tuple[EbayOfferAttempt, EbayOfferRule]:
@@ -268,16 +291,45 @@ def resolve(db: Session, attempt_id: str) -> dict:
     return {"ok": True}
 
 
-async def send(db: Session, attempt_id: str, *, automatic: bool = False, policy_approval: str | None = None) -> dict:
-    attempt, rule = _get_preview(db, attempt_id)
-    rule_id = rule.id
+async def send(attempt_id: str, *, automatic: bool = False, policy_approval: str | None = None) -> dict:
+    """Send one previewed offer. The reservation is committed first; no connection is held while eBay answers."""
+    listing_id = await in_worker_session(_preview_listing, attempt_id)
     eligible = await ebay_api.eligible_items()
-    if rule.listing_id not in eligible:
+    if listing_id not in eligible:
         raise OfferConflict("This listing no longer has eligible buyers. Preview again later.")
-    live_price = await ebay_api.listing_price(rule.listing_id)
+    live_price = await ebay_api.listing_price(listing_id)
     token = await ebay_api.access_token("ebay")
     # Refresh after network waits so a sale, pause, or account switch takes effect.
-    db.expire_all()
+    # A request dropped while reserving sent nothing: the reservation is released and the rule's timer restored.
+    previous_attempt_at, offer_price = await claim_in_worker_session(
+        _reserve, lambda reserved: in_worker_session(_settle, attempt_id, {
+            "state": "failed", "note": "Stopped before eBay was asked. No offer was sent.", "restore": True,
+        }, reserved[0], None), attempt_id, token, live_price, automatic, policy_approval)
+    try:
+        count = await ebay_api.send_offer(listing_id, offer_price, token=token)
+    except (ebay_api.EbayError, SignInRequired) as exc:
+        outcome = {"state": "failed", "note": str(exc), "restore": True, "pause_rule": automatic}
+    except asyncio.CancelledError:
+        await asyncio.shield(in_worker_session(_settle, attempt_id, {"state": "unknown", "note": UNKNOWN_NOTE,
+                                                                     "pause_rule": True}, previous_attempt_at, policy_approval))
+        raise
+    except Exception:
+        # Any unexpected exception after reservation is ambiguous. Never retry.
+        outcome = {"state": "unknown", "note": UNKNOWN_NOTE, "pause_rule": True}
+    else:
+        outcome = {"state": "sent", "recipient_count": count,
+                   "note": f"eBay confirmed offers sent to {count} interested {'buyer' if count == 1 else 'buyers'}."}
+    return await asyncio.shield(in_worker_session(_settle, attempt_id, outcome, previous_attempt_at, policy_approval))
+
+
+def _preview_listing(db: Session, attempt_id: str) -> str:
+    _attempt, rule = _get_preview(db, attempt_id)
+    return rule.listing_id
+
+
+def _reserve(db: Session, attempt_id: str, token: str, live_price: int, automatic: bool,
+             policy_approval: str | None) -> tuple[datetime | None, int]:
+    """Check the preview again and reserve the send, committed before eBay is called."""
     attempt, rule = _get_preview(db, attempt_id)
     if (get_marketplace_accounts().get("ebay") or {}).get("accessToken") != token:
         raise OfferConflict("The eBay connection changed. Preview again before sending.")
@@ -290,7 +342,7 @@ async def send(db: Session, attempt_id: str, *, automatic: bool = False, policy_
         raise OfferConflict("The automatic offer rule changed or was paused.")
     previous_attempt_at = rule.last_attempt_at
     reservation = update(EbayOfferRule).where(
-        EbayOfferRule.id == rule_id,
+        EbayOfferRule.id == rule.id,
         or_(EbayOfferRule.last_attempt_at.is_(None), EbayOfferRule.last_attempt_at <= now() - SEND_COOLDOWN),
     )
     if policy_approval:
@@ -318,103 +370,106 @@ async def send(db: Session, attempt_id: str, *, automatic: bool = False, policy_
         db.rollback()
         raise OfferConflict("Another offer was already sent or started for this listing.")
     attempt.state = "sending"
+    offer_price = attempt.offer_price_cents
     # Crash or cancellation after this commit leaves a durable unresolved send.
     db.commit()
-    try:
-        count = await ebay_api.send_offer(rule.listing_id, attempt.offer_price_cents, token=token)
-    except (ebay_api.EbayError, SignInRequired) as exc:
-        attempt.state = "failed"
-        attempt.note = str(exc)
+    return previous_attempt_at, offer_price
+
+
+def _settle(db: Session, attempt_id: str, outcome: dict, previous_attempt_at: datetime | None,
+            policy_approval: str | None) -> dict:
+    """Record what eBay answered for a reserved send."""
+    attempt = db.get(EbayOfferAttempt, attempt_id)
+    assert attempt is not None  # Reserved above; attempts are never deleted.
+    rule = db.get(EbayOfferRule, attempt.rule_id)
+    assert rule is not None
+    attempt.state = outcome["state"]
+    attempt.note = outcome["note"]
+    if "recipient_count" in outcome:
+        attempt.recipient_count = outcome["recipient_count"]
+    if outcome.get("restore"):
         rule.last_attempt_at = previous_attempt_at
-        if automatic:
-            rule.enabled = False
-        if policy_approval:
-            _pause_policy(db, rule.account_id)
-        db.commit()
-    except asyncio.CancelledError:
-        attempt.state = "unknown"
-        attempt.note = UNKNOWN_NOTE
+    if outcome.get("pause_rule"):
         rule.enabled = False
-        if policy_approval:
-            _pause_policy(db, rule.account_id)
-        db.commit()
-        raise
-    except Exception:
-        # Any unexpected exception after reservation is ambiguous. Never retry.
-        attempt.state = "unknown"
-        attempt.note = UNKNOWN_NOTE
-        rule.enabled = False
-        if policy_approval:
-            _pause_policy(db, rule.account_id)
-        db.commit()
-    else:
-        attempt.state = "sent"
-        attempt.recipient_count = count
-        attempt.note = f"eBay confirmed offers sent to {count} interested {'buyer' if count == 1 else 'buyers'}."
-        db.commit()
+    if outcome["state"] != "sent" and policy_approval:
+        _pause_policy(db, rule.account_id)
+    db.commit()
     return attempt_out(attempt, rule)
 
 
-async def send_previews(db: Session, attempt_ids: list[str]) -> dict:
+async def send_previews(attempt_ids: list[str]) -> dict:
     rows = []
     for attempt_id in attempt_ids:
         try:
-            rows.append(await send(db, attempt_id))
+            rows.append(await send(attempt_id))
         except (OfferConflict, SignInRequired, ebay_api.EbayError, httpx.HTTPError) as exc:
-            db.rollback()
             note = "Can't reach eBay. No offer was sent." if isinstance(exc, httpx.HTTPError) else str(exc)
             rows.append({"id": attempt_id, "state": "skipped", "note": note})
     return {"offers": rows}
 
 
+def _policy(db: Session, seller: str) -> tuple[str | None, int, str] | None:
+    policy = db.query(EbayOfferPolicy).filter_by(account_id=seller).first()
+    if not policy or not policy.enabled:
+        return None
+    return policy.approval_id, policy.discount_percent, ebay_api.dollars(policy.minimum_price_cents)
+
+
+def _enabled_rules(db: Session, seller: str) -> list[str]:
+    return [rule.id for rule in db.query(EbayOfferRule).filter_by(account_id=seller, enabled=True).all()]
+
+
+def _rule_target(db: Session, rule_id: str, eligible: set[str]) -> tuple[str | None, str, int] | None:
+    rule = db.get(EbayOfferRule, rule_id)
+    if rule is None or not rule.enabled or rule.listing_id not in eligible:
+        return None
+    _local_check(db, rule)
+    return rule.conversation_id, ebay_api.dollars(rule.minimum_price_cents), rule.discount_percent
+
+
 async def run_automation() -> None:
+    """One automatic offer sweep. Each database step uses its own short session."""
     checked = now().isoformat() + "Z"
     _checks[_seller()] = (checked, None)
     try:
         seller = account_id()
-        with SessionLocal() as db:
-            policy = db.query(EbayOfferPolicy).filter_by(account_id=seller).first()
-            if policy and policy.enabled:
-                approval = policy.approval_id
-                discount, minimum = policy.discount_percent, ebay_api.dollars(policy.minimum_price_cents)
-                eligible = await ebay_api.eligible_items()
-                # Discover anew each round so future imports/listings need no manual selection.
-                for item in status(db)["listings"]:
-                    if item["listingId"] not in eligible:
-                        continue
-                    db.expire_all()
-                    policy = db.query(EbayOfferPolicy).filter_by(account_id=seller).first()
-                    if not policy or not policy.enabled or policy.approval_id != approval:
-                        break
-                    result = await preview(db, [{"conversation_id": item["conversationId"],
-                                                 "minimum_price": minimum}], discount)
-                    offer = result["offers"][0]
-                    if offer["state"] == "preview":
-                        try:
-                            await send(db, offer["id"], automatic=True, policy_approval=approval)
-                        except OfferConflict:
-                            db.rollback()
-                return
-            rules = db.query(EbayOfferRule).filter_by(account_id=seller, enabled=True).all()
-            if not rules:
-                return
-            # One eligibility read for the sweep; recheck immediately before each send.
+        policy = await in_worker_session(_policy, seller)
+        if policy is not None:
+            approval, discount, minimum = policy
             eligible = await ebay_api.eligible_items()
-            for rule in rules:
-                db.refresh(rule)
-                if not rule.enabled or rule.listing_id not in eligible:
+            # Discover anew each round so future imports/listings need no manual selection.
+            listings = (await in_worker_session(status))["listings"]
+            for item in listings:
+                if item["listingId"] not in eligible:
                     continue
-                try:
-                    _local_check(db, rule)
-                    result = await preview(db, [{"conversation_id": rule.conversation_id,
-                                                "minimum_price": ebay_api.dollars(rule.minimum_price_cents)}],
-                                           rule.discount_percent)
-                    offer = result["offers"][0]
-                    if offer["state"] == "preview":
-                        await send(db, offer["id"], automatic=True)
-                except OfferConflict:
-                    db.rollback()
+                current = await in_worker_session(_policy, seller)
+                if current is None or current[0] != approval:
+                    break
+                result = await preview([{"conversation_id": item["conversationId"], "minimum_price": minimum}], discount)
+                offer = result["offers"][0]
+                if offer["state"] == "preview":
+                    try:
+                        await send(offer["id"], automatic=True, policy_approval=approval)
+                    except OfferConflict:
+                        pass
+            return
+        rule_ids = await in_worker_session(_enabled_rules, seller)
+        if not rule_ids:
+            return
+        # One eligibility read for the sweep; recheck immediately before each send.
+        eligible = await ebay_api.eligible_items()
+        for rule_id in rule_ids:
+            try:
+                target = await in_worker_session(_rule_target, rule_id, eligible)
+                if target is None:
                     continue
+                conversation_id, rule_minimum, rule_discount = target
+                result = await preview([{"conversation_id": conversation_id, "minimum_price": rule_minimum}], rule_discount)
+                offer = result["offers"][0]
+                if offer["state"] == "preview":
+                    await send(offer["id"], automatic=True)
+            except OfferConflict:
+                continue
     except SignInRequired as exc:
         _checks[_seller()] = (checked, str(exc))
     except Exception:

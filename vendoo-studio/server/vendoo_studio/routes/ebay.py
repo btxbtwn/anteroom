@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import get_db
+from vendoo_studio.database import get_db, in_worker_session
 from vendoo_studio.models.ebay_action import EbayAction
 from vendoo_studio.services import ebay_actions, ebay_import, ebay_listings, ebay_workspace, user_settings
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, identity
@@ -33,17 +33,16 @@ def failure(exc: Exception) -> HTTPException:
 
 @router.get("/read/{section}")
 async def read(section: Section, offset: int = Query(0, ge=0, le=100000), target: str = Query("", max_length=200),
-               q: str = Query("", max_length=150), start: date | None = None, end: date | None = None,
-               db: Session = Depends(get_db)):
+               q: str = Query("", max_length=150), start: date | None = None, end: date | None = None):
     try:
         if section == "activity":
-            return ebay_actions.activity(db)
+            return await in_worker_session(ebay_actions.activity)
         client = await EbayClient.connect()
         today = datetime.now(UTC).date()
         if section == "traffic":
-            return await ebay_workspace.traffic(client, db, start or today - timedelta(days=29), end or today, offset)
+            return await ebay_workspace.traffic(client, start or today - timedelta(days=29), end or today, offset)
         if section == "finances":
-            return await ebay_workspace.finances(client, db, start or today - timedelta(days=29), end or today, offset)
+            return await ebay_workspace.finances(client, start or today - timedelta(days=29), end or today, offset)
         if section in ("research", "categories") and not q.strip():
             raise EbayFailure("Enter search words first.", 422)
         return await ebay_workspace.read(client, section, offset, target, q)
@@ -66,9 +65,9 @@ class ImportRequest(BaseModel):
 
 
 @router.get("/import/active")
-async def import_candidates(page: int = Query(1, ge=1, le=10000), db: Session = Depends(get_db)):
+async def import_candidates(page: int = Query(1, ge=1, le=10000)):
     try:
-        return await ebay_import.active_listings(await EbayClient.connect(), db, page)
+        return await ebay_import.active_listings(await EbayClient.connect(), page)
     except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
         raise failure(exc) from exc
 
@@ -160,17 +159,17 @@ class ConfirmAction(ActionRequest):
 
 
 @router.post("/actions/preview")
-async def preview(body: ActionRequest, db: Session = Depends(get_db)):
+async def preview(body: ActionRequest):
     try:
-        return await ebay_actions.review(db, body.kind, body.payload)
+        return await ebay_actions.review(body.kind, body.payload)
     except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
         raise failure(exc) from exc
 
 
 @router.post("/actions/confirm")
-async def confirm(body: ConfirmAction, db: Session = Depends(get_db)):
+async def confirm(body: ConfirmAction):
     try:
-        return await ebay_actions.execute(db, body.id, body.kind, body.payload)
+        return await ebay_actions.execute(body.id, body.kind, body.payload)
     except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
         raise failure(exc) from exc
 

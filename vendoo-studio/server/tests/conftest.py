@@ -95,13 +95,10 @@ def _no_database_work_on_the_event_loop(_endpoint_checkouts):
     """Fail a test whose request ran a query on the event loop from an async route handler.
 
     The production counterpart is ``LoopCheckoutWarning`` in ``hosted.py``, which only logs.
-    Handlers recorded in ``async_route_sessions_baseline.txt`` are still being fixed.
     """
-    from loop_checkouts import recorded
-
     _endpoint_checkouts.found.clear()
     yield
-    found = {name: site for name, site in _endpoint_checkouts.found.items() if name not in recorded()}
+    found = dict(_endpoint_checkouts.found)
     _endpoint_checkouts.found.clear()
     assert not found, ("An async route handler took a database connection on the event loop. Make it a "
                        f"plain def, or run its database steps through database.in_worker_session: {found}")

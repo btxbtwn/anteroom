@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.cli.catalog import build_catalog_from_app
-from vendoo_studio.database import Base, get_db, load_models
+from vendoo_studio.database import Base, get_db, in_worker_session, load_models
 from vendoo_studio.models.automation import AutomationRun, ItemPriceBaseline
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.job import Job, JobEvent
@@ -40,11 +40,13 @@ PROMPT = (
 
 
 @pytest.fixture
-def db():
+def db(monkeypatch):
     load_models()
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
+    # Runs and approvals open their own short sessions (database.in_worker_session).
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", factory)
     session = factory()
     try:
         yield session
@@ -302,7 +304,7 @@ def test_a_run_drops_from_the_stored_original_and_a_second_pass_does_not(db):
     conv = _item(db, title="Nike Men's Tee", price=100, department="Men", category="T-Shirts", marketplace="ebay", days=70)
     calls = []
 
-    async def executor(_db, item, action, marketplaces, revision_id):
+    async def executor(item, action, marketplaces, revision_id):
         calls.append((item["conversation_id"], action["type"], marketplaces, revision_id))
         return {"ok": True}
 
@@ -532,7 +534,7 @@ def test_relist_continues_after_one_marketplace_fails_without_retrying(db, monke
     conv = _item(db, title="Nike Men's Tee", price=40, department="Men", category="T-Shirts", marketplace="ebay", days=70)
     revision_id = ListingRepo(db).get_current(conv.id).current_revision_id
 
-    result = asyncio.run(automation_actions._relist(db, conv.id, ["ebay", "poshmark"], revision_id))
+    result = asyncio.run(automation_actions._relist(conv.id, ["ebay", "poshmark"], revision_id))
 
     assert result["ok"] is False
     assert result["state"] == "down, needs relist"
@@ -543,8 +545,8 @@ def test_relist_continues_after_one_marketplace_fails_without_retrying(db, monke
     assert listed.count("ebay") == 1
     assert listed.count("poshmark") == 1
     assert calls[0][0] == "delist"
-    assert calls[1] == ("list", "ebay")
-    assert calls[2] == ("list", "poshmark")
+    # Both marketplaces start at once after the delist.
+    assert sorted(calls[1:]) == [("list", "ebay"), ("list", "poshmark")]
 
 
 def test_a_failed_relist_requires_a_new_seller_request_before_another_attempt(db, monkeypatch):
@@ -568,12 +570,12 @@ def test_a_failed_relist_requires_a_new_seller_request_before_another_attempt(db
     conv = _item(db, title="Nike Men's Tee", price=40, department="Men", category="T-Shirts", marketplace="ebay", days=70)
     revision_id = ListingRepo(db).get_current(conv.id).current_revision_id
 
-    result = asyncio.run(automation_actions._relist(db, conv.id, ["ebay", "poshmark"], revision_id))
+    result = asyncio.run(automation_actions._relist(conv.id, ["ebay", "poshmark"], revision_id))
 
     assert result["ok"] is False
     assert result["down"] == ["ebay"] and attempts["ebay"] == 1
     # A separately requested retry names only the marketplace that failed.
-    retried = asyncio.run(automation_actions._list_remaining(db, conv.id, ["ebay"], revision_id))
+    retried = asyncio.run(automation_actions._list_remaining(conv.id, ["ebay"], revision_id))
     assert retried["ok"] is True and attempts["ebay"] == 2
 
 
@@ -593,7 +595,7 @@ def test_a_failed_delist_does_not_mark_the_item_down(db, monkeypatch):
     conv = _item(db, title="Nike Men's Tee", price=40, department="Men", category="T-Shirts", marketplace="ebay", days=70)
     revision_id = ListingRepo(db).get_current(conv.id).current_revision_id
 
-    result = asyncio.run(automation_actions._relist(db, conv.id, ["ebay"], revision_id))
+    result = asyncio.run(automation_actions._relist(conv.id, ["ebay"], revision_id))
 
     assert result["ok"] is False
     assert result.get("state") is None
@@ -791,7 +793,7 @@ def test_publishing_a_live_listing_requires_explicit_relist_instead_of_delisting
     conv = _item(db, title="Nike Men's Tee", price=40, department="Men", category="T-Shirts", marketplace="ebay", days=70)
     revision_id = ListingRepo(db).get_current(conv.id).current_revision_id
 
-    result = asyncio.run(automation_actions.publish_revision(db, conv.id, ["ebay", "poshmark"], revision_id))
+    result = asyncio.run(automation_actions.publish_revision(conv.id, ["ebay", "poshmark"], revision_id))
 
     assert result["ok"] is False and "Relist explicitly" in result["error"]
     assert calls == []
@@ -819,7 +821,7 @@ def test_scheduled_delist_never_writes_until_the_exact_item_action_is_confirmed(
     assert calls == [(conv.id,["ebay"],True)]
     assert client.post(path,json=_approval_body(approval)).status_code == 409
     assert len(calls) == 1
-    denied = asyncio.run(automation_actions.perform(db,{"conversation_id":conv.id},{"type":"delist"},["ebay"],None))
+    denied = asyncio.run(automation_actions.perform({"conversation_id":conv.id},{"type":"delist"},["ebay"],None))
     assert denied["ok"] is False and len(calls) == 1
 
 
@@ -895,7 +897,8 @@ def test_local_regeneration_without_marketplaces_stops_at_a_saved_draft(db, clie
     calls = []
     async def regenerate(conv_id):
         calls.append(conv_id)
-        listing_persistence.save_revision(db, conv_id, {"title": "New draft", "price": 45}, "generated")
+        await in_worker_session(lambda session: listing_persistence.save_revision(
+            session, conv_id, {"title": "New draft", "price": 45}, "generated"))
         return {"ok": True}
     monkeypatch.setattr("vendoo_studio.services.automation_actions._regenerate", regenerate)
     conv = _item(db, title="Coat", price=40, department="Men", category="Coats", marketplace="ebay", days=70)
@@ -939,7 +942,7 @@ def test_failed_delete_response_cannot_start_republication(db, monkeypatch, part
         pytest.fail("No publish after an unconfirmed delete")
     monkeypatch.setattr("vendoo_studio.services.marketplace_delist.delist", remove)
     monkeypatch.setattr("vendoo_studio.services.native_marketplaces.list_now", publish)
-    result = asyncio.run(automation_actions._relist(db, "item", ["ebay", "poshmark"], "revision"))
+    result = asyncio.run(automation_actions._relist("item", ["ebay", "poshmark"], "revision"))
     assert result["ok"] is False and "Delete refused" in result["error"]
     assert result.get("down", []) == (["poshmark"] if partial else [])
 
@@ -954,6 +957,6 @@ def test_failed_background_publish_is_not_reported_as_a_success(db, monkeypatch)
     async def publish(*_args):
         return {"job_id": job.id, "state": "publishing", "running": True}
     monkeypatch.setattr("vendoo_studio.services.native_marketplaces.list_now", publish)
-    result = asyncio.run(automation_actions._list_remaining(db, conv.id, ["ebay"], revision))
+    result = asyncio.run(automation_actions._list_remaining(conv.id, ["ebay"], revision))
     assert result["ok"] is False and result["down"] == ["ebay"]
     assert result["errors"]["ebay"] == "Marketplace refused"

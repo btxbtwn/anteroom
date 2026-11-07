@@ -1,7 +1,10 @@
 """Postgres sessions for verified sellers, including explicitly scoped workers."""
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from uuid import UUID
 
 from fastapi import HTTPException, Request
@@ -34,8 +37,9 @@ class SellerDatabaseSession(Session):
         return self._seller_id
 
 
-def get_seller_db(request: Request):
-    """Hosted route dependency: trust only the middleware's verified identity."""
+@contextmanager
+def seller_session(request: Request) -> Iterator[SellerDatabaseSession]:
+    """A session for the request's verified seller; database failures answer 503."""
     identity = getattr(request.state, "seller", None)
     if not isinstance(identity, SellerIdentity):
         raise HTTPException(status_code=401, detail="A verified seller session is required")
@@ -57,6 +61,25 @@ def get_seller_db(request: Request):
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Cloud data is temporarily unavailable",
                             headers={"Retry-After": "5"}) from None
+
+
+def get_seller_db(request: Request):
+    """Hosted route dependency: trust only the middleware's verified identity."""
+    with seller_session(request) as db:
+        yield db
+
+
+async def in_seller_session(request: Request, work, /, *args):
+    """Run ``work(db, *args)`` on a worker thread in a ``seller_session`` of its own.
+
+    For async hosted routes, which never take ``get_seller_db``: the session
+    closes before the result comes back, so nothing holds a pooled connection
+    while the route awaits a request body or another service.
+    """
+    def run():
+        with seller_session(request) as db:
+            return work(db, *args)
+    return await asyncio.to_thread(run)
 
 
 @event.listens_for(SellerDatabaseSession, "after_begin")

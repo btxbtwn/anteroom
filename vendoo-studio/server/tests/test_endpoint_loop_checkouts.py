@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import Pool, QueuePool
 
 from loop_checkouts import EndpointCheckouts
-from vendoo_studio.database import in_worker_session
+from vendoo_studio.database import claim_in_worker_session, in_worker_session
 
 SLOW_EXTERNAL_S = 0.3
 
@@ -85,3 +85,35 @@ def test_the_suite_notices_a_query_on_the_event_loop(tmp_path, path, flagged):
         event.remove(Pool, "checkout", watcher.checkout)
         engine.dispose()
     assert bool(watcher.found) is flagged
+
+
+def test_a_claim_cancelled_midway_still_lands_and_is_undone(tmp_path):
+    """A dropped request must not leave a job or a ``sending`` mark claimed with nobody settling it."""
+    import threading
+
+    engine = _one_connection_pool(tmp_path)
+    sessions = sessionmaker(bind=engine)
+    started, release, undone = threading.Event(), threading.Event(), []
+
+    def claim(db):
+        db.execute(text("SELECT 1"))
+        started.set()
+        assert release.wait(5)
+        return "claimed"
+
+    async def undo(claimed):
+        undone.append(claimed)
+
+    async def scenario():
+        caller = asyncio.ensure_future(claim_in_worker_session(claim, undo))
+        await asyncio.to_thread(started.wait, 5)
+        caller.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+
+    with patch("vendoo_studio.database.SessionLocal", sessions):
+        asyncio.run(scenario())
+    assert undone == ["claimed"]
+    engine.dispose()
