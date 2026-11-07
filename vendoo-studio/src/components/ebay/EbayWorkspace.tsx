@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, Settings2Icon } from "lucide-react";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { api } from "../../api/client";
+import { BUSY_POLL_MS, pollMs } from "../../api/polling";
 import { PageError, PageNote } from "../WorkspacePage";
 import { SaleCalendar } from "../SaleCalendar";
 import { Button } from "../ui/button";
@@ -40,7 +41,7 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
   const [features, setFeatures] = useState(FEATURES.map((feature) => feature.id));
   const queryClient = useQueryClient();
   const connection = useQuery({ queryKey: ["direct-connections"], queryFn: api.directConnections.status,
-    refetchInterval: (query) => query.state.data?.accounts.ebay.pending ? 2000 : 15000 });
+    refetchInterval: (query) => pollMs(query.state.data?.accounts.ebay.pending ? BUSY_POLL_MS : 15000) });
   const grant = useMutation({ mutationFn: () => api.ebay.grant(features), retry: false,
     onSuccess: (result) => {
       if (runtime.hosted) window.open(result.authorizeUrl, "_blank", "noopener,noreferrer");

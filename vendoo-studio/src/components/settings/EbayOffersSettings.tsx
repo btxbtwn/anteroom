@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
+import { pollMs } from "../../api/polling";
 import type { EbayOffer, EbayOfferSelection } from "../../api/ebayOffers";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
@@ -14,7 +15,7 @@ import { useWorkspaceRuntime } from "../../app/runtime";
 export function EbayOffersSettings() {
   const queryClient = useQueryClient();
   const { hosted } = useWorkspaceRuntime();
-  const status = useQuery({ queryKey: ["ebay-offers"], queryFn: api.ebayOffers.status, refetchInterval: 15000 });
+  const status = useQuery({ queryKey: ["ebay-offers"], queryFn: api.ebayOffers.status, refetchInterval: () => pollMs(15000) });
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [minimums, setMinimums] = useState<Record<string, string>>({});
   const [discount, setDiscount] = useState("10");

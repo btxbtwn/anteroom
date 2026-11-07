@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
+import { pollMs } from "../../api/polling";
 import type { EtsyListingState, EtsyMoney, EtsyOrder, EtsyOrderStatus, EtsyShop } from "../../api/etsy";
 import { Stat, StatGrid } from "../AnalyticsStat";
 import { EtsyNotAllowed } from "../EtsyNotAllowed";
@@ -96,7 +97,7 @@ export function EtsyOrders({ scope, period }: { scope: string; period: OrderPeri
 export function EtsySaleAlerts({ onOpenListing }: { onOpenListing: (id: string) => void }) {
   const queryClient = useQueryClient();
   const sales = useQuery({ queryKey: ["marketplace-sales", "new"], queryFn: () => api.marketplaceSales.list(),
-    refetchInterval: 15000 });
+    refetchInterval: () => pollMs(15000) });
   const refresh = useMutation({
     mutationFn: () => api.marketplaceSales.reconcile("etsy"),
     retry: false,

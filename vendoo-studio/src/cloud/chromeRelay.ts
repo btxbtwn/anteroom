@@ -41,17 +41,20 @@ async function answer(bridge: RelayBridge, command: RelayedCommand): Promise<voi
   let reply: Record<string, unknown>;
   // Where a command's time went in this tab, kept on the job so a slow listing can be read later.
   const timing = { photos_ms: 0, photo_bytes: 0, chrome_ms: 0 };
+  let sent = false;
   try {
     const started = performance.now();
     const photos = await Promise.all(approvedPhotos(command).map((photo) => photoData(String(command.job_id), photo)));
     timing.photos_ms = Math.round(performance.now() - started);
     timing.photo_bytes = photos.reduce((total, photo) => total + photo.base64.length, 0);
     const running = performance.now();
+    sent = true;
     reply = await bridge.runMarketplaceCommand(command, photos);
     timing.chrome_ms = Math.round(performance.now() - running);
   } catch {
-    // Nothing reached the marketplace: the photos never got to Chrome.
-    reply = { ok: false, safe_to_retry: true, error: "Could not read the listing photos. Try again." };
+    // Before Chrome had the command nothing reached the marketplace; after, the outcome is unknown.
+    reply = sent ? { ok: false, safe_to_retry: false, error: "Chrome did not finish this action.", error_code: "uncertain" }
+      : { ok: false, safe_to_retry: true, error: "Could not read the listing photos. Try again." };
   }
   await studioFetch("/api/browser-relay/replies", {
     method: "POST", headers: { "Content-Type": "application/json" },

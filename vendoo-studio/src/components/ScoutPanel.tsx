@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { pollMs } from "../api/polling";
 import type { ScoutCheck, ScoutState } from "../api/types";
 import { toastManager } from "./ui/toast";
 import { formatMoney } from "./analyticsFormat";
@@ -31,7 +32,7 @@ export function ScoutPanel({ onOpenListing }: Props) {
   const query = useQuery({
     queryKey: SCOUT_QUERY_KEY,
     queryFn: api.scout.list,
-    refetchInterval: (current) => (isChecking(current.state.data) ? 3000 : false),
+    refetchInterval: (current) => (isChecking(current.state.data) ? pollMs(3000) : false),
   });
   const [openId, setOpenId] = useState<string | null>(null);
   const checks = query.data?.checks ?? [];

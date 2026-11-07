@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 
 const STORAGE_PREFIX = "vendoo-studio.panel-width.";
 const COLLAPSE_PREFIX = "vendoo-studio.panel-collapsed.";
@@ -91,8 +91,21 @@ export function PanelResizeHandle({
   maxVw,
 }: PanelResizeHandleProps) {
   const drag = useRef<{ startX: number; startWidth: number; max: number } | null>(null);
+  const handleRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
+  // A focusable separator must report its value, including while the panel
+  // sits at its CSS default width.
+  const [renderedWidth, setRenderedWidth] = useState<number | null>(null);
   const direction = panel === "before" ? 1 : -1;
+
+  useEffect(() => {
+    const handle = handleRef.current;
+    const target = panel === "before" ? handle?.previousElementSibling : handle?.nextElementSibling;
+    if (!target) return;
+    const observer = new ResizeObserver(() => setRenderedWidth(Math.round(target.getBoundingClientRect().width)));
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [panel]);
 
   const measure = (handle: HTMLElement) => {
     const target = panel === "before" ? handle.previousElementSibling : handle.nextElementSibling;
@@ -140,13 +153,14 @@ export function PanelResizeHandle({
 
   return (
     <div
+      ref={handleRef}
       className={`panel-resize-handle${dragging ? " is-dragging" : ""}`}
       role="separator"
       aria-orientation="vertical"
       aria-label={label}
       aria-valuemin={min}
       aria-valuemax={max}
-      aria-valuenow={width ?? undefined}
+      aria-valuenow={renderedWidth ?? width ?? min}
       tabIndex={0}
       title="Drag to resize · double-click to reset"
       onPointerDown={onPointerDown}

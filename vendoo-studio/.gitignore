@@ -22,3 +22,4 @@ desktop/build_info.json
 *.egg-info/
 e2e/results/
 e2e/report/
+coverage/

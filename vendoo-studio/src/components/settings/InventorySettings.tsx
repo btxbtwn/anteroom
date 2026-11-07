@@ -12,7 +12,7 @@ const NONE = "none";
 export function InventorySettings() {
   const queryClient = useQueryClient();
   const { data, isPending } = useQuery({ queryKey: ["settings-ui"], queryFn: api.settings.ui });
-  const { data: conversations } = useQuery({ queryKey: ["conversations"], queryFn: api.conversations.list });
+  const { data: conversations } = useQuery({ queryKey: ["conversations"], queryFn: ({ signal }) => api.conversations.list({ signal }) });
   const [draft, setDraft] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState("");
   const [error, setError] = useState<string | null>(null);

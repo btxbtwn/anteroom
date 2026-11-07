@@ -170,7 +170,7 @@ describe("marketplaces section", () => {
 
   it("puts the selected marketplace's actions beside its form, and lists Poshmark in one step", () => {
     const html = render({}, {}, { selected: "poshmark" });
-    expect(row(html, "Poshmark")).toContain('aria-selected="true"');
+    expect(row(html, "Poshmark")).toContain('aria-current="true"');
     expect(enabledButton(html, "List…")).toBe(true);
     expect(enabledButton(html, "Save draft")).toBe(true);
     expect(html).not.toContain("Publish…");

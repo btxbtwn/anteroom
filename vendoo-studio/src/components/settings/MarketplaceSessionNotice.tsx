@@ -68,7 +68,7 @@ export function MarketplaceSessionNotice() {
     queryFn: api.marketplaceSessions.status,
     enabled: chromeReady,
     retry: false,
-    refetchInterval: chromeReady ? 60_000 : false,
+    refetchInterval: chromeReady ? () => pollMs(60_000) : false,
   });
 
   useEffect(() => {
