@@ -1,0 +1,1 @@
+- Bulk listing on iPhone: choose photos for many items at once, group each item's photos, set shared cost and labels and each item's SKU, then create the drafts or create and generate them, the same as on desktop.

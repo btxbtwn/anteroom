@@ -35,6 +35,21 @@ final class AnteroomAPITests: XCTestCase {
         XCTAssertEqual((sent.json?["listing"] as? [String: Any])?["title"] as? String, "New")
     }
 
+    func testCreateListingSendsNoTitleAndOptionalNotes() async throws {
+        StubProtocol.answer(.init(status: 200, body: #"{"id":"n","status":"draft"}"#))
+        _ = try await api.createListing()
+        let plain = try XCTUnwrap(StubProtocol.requests.last)
+        XCTAssertEqual(plain.httpMethod, "POST")
+        XCTAssertEqual(plain.url?.path, "/api/conversations")
+        XCTAssertEqual(plain.json?.count, 0)
+
+        StubProtocol.answer(.init(status: 200, body: #"{"id":"m","status":"draft"}"#))
+        _ = try await api.createListing(notes: #"{"sku":"BX-1"}"#)
+        let withNotes = try XCTUnwrap(StubProtocol.requests.last)
+        XCTAssertEqual(withNotes.json?["notes"] as? String, #"{"sku":"BX-1"}"#)
+        XCTAssertNil(withNotes.json?["title"])
+    }
+
     func testQueryItemsAreEncoded() async throws {
         StubProtocol.answer(.init(status: 200, body: #"{"rows":[]}"#))
         _ = try await api.searchEbayCategories("linen t-shirt")
