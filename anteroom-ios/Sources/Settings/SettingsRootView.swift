@@ -4,9 +4,14 @@ import SwiftUI
 /// Providers (SettingsSidebarNav.tsx), then the account.
 struct SettingsRootView: View {
     let api: AnteroomAPI
+    /// The server offers account deletion (`account_deletion` in `/api/runtime`).
+    let canDeleteAccount: Bool
     @Environment(SessionStore.self) private var session
     @State private var confirmSignOut = false
     @State private var signingOut = false
+    @State private var confirmDelete = false
+    @State private var deleting = false
+    @State private var deleteError: String?
 
     var body: some View {
         NavigationStack {
@@ -23,7 +28,7 @@ struct SettingsRootView: View {
                             Label("Providers", systemImage: "sparkles")
                         }
                     }
-                    Section("Account") {
+                    Section {
                         if let email = session.email {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Signed in as").font(.footnote).foregroundStyle(.secondary)
@@ -32,7 +37,24 @@ struct SettingsRootView: View {
                             .padding(.vertical, 4)
                         }
                         Button("Sign out", role: .destructive) { confirmSignOut = true }
-                            .disabled(signingOut)
+                            .disabled(signingOut || deleting)
+                        if canDeleteAccount {
+                            Button(role: .destructive) { confirmDelete = true } label: {
+                                if deleting {
+                                    HStack { ProgressView(); Text("Deleting account…") }
+                                } else {
+                                    Text("Delete account…")
+                                }
+                            }
+                            .disabled(signingOut || deleting)
+                            .accessibilityIdentifier("delete-account")
+                        }
+                    } header: {
+                        Text("Account")
+                    } footer: {
+                        if canDeleteAccount {
+                            Text("Deleting your account removes your Anteroom data. Listings that are live on marketplaces stay there.")
+                        }
                     }
                 }
                 .listRowBackground(WorkspaceStyle.surface)
@@ -49,8 +71,37 @@ struct SettingsRootView: View {
             } message: {
                 Text("Save any edits in Inventory first. Unsaved changes will be lost.")
             }
+            .alert("Delete your Anteroom account?", isPresented: $confirmDelete) {
+                Button("Delete account", role: .destructive) { Task { await deleteAccount() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(AccountDeletion.message)
+            }
+            .alert("Could not delete your account", isPresented: Binding(
+                get: { deleteError != nil }, set: { if !$0 { deleteError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(deleteError ?? "")
+            }
         }
     }
+
+    private func deleteAccount() async {
+        deleting = true
+        do {
+            try await api.deleteAccount()
+            await session.finishAccountDeletion()
+        } catch {
+            deleteError = error.localizedDescription
+        }
+        deleting = false
+    }
+}
+
+/// What deleting the account does, shown before the seller confirms (the web says the same).
+enum AccountDeletion {
+    static let message = "This permanently deletes your listings, photos, sales records, automations, assistant chats, settings, AI keys and eBay and Etsy sign-ins from Anteroom, and signs you out on every device. It can't be undone.\n\nListings that are live on eBay, Poshmark, Mercari, Depop or Etsy stay there. Anteroom does not delist them; end them on each marketplace if you want them taken down."
 }
 
 /// General: Appearance and About (GeneralSettings.tsx, hosted rows).

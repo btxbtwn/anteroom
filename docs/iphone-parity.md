@@ -68,7 +68,8 @@ Anteroom's terminology and identity while following iOS navigation conventions.
 | Settings / Logs: diagnostics and fill results | Desktop diagnostics and fill logs; hosted coverage incomplete | Missing | Seller-safe diagnostics with no secrets or private exports in logs |
 | Settings / Help: onboarding, help, changelog and support | Hosted changelog mounted; other coverage needs audit | Missing | Native onboarding/help routes, support links and app-store readiness |
 | App lifecycle: foreground refresh, interrupted work, push/deep links | Durable tasks exist; no complete iOS lifecycle integration | Partial | Inventory and an open listing (without unsaved edits) reload when the app returns; appearance refreshes too. Generation reconnects explicitly. Push notifications and deep links to a listing remain |
-| Public release: privacy, account deletion, permission descriptions and distribution | Not covered by existing TestFlight flow | Missing | Complete before a public App Store release; TestFlight is not release readiness |
+| Account deletion (App Store 5.1.1(v)) | Hosted `DELETE /api/account` | Implemented in current work | Settings → Account → Delete account… explains what is deleted and that live marketplace listings stay, then signs out and clears this iPhone's photo cache, cached responses and exports. Shown when `/api/runtime` lists `account_deletion`. Refused while a marketplace action runs. See [account deletion](account-deletion.md). Needs a check against a real Supabase project before release |
+| Public release: privacy, permission descriptions and distribution | Not covered by existing TestFlight flow | Missing | Complete before a public App Store release; TestFlight is not release readiness |
 
 ## Core visual alignment
 
