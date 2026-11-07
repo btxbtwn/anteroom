@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.780 — 2026-11-07
+
+- The backup taken just before a database upgrade is no longer cleared out by newer backups from the same day, so going back to an earlier version restores your data from right before the upgrade.
+
 ## 0.1.779 — 2026-11-07
 
 - A listing no longer stays stuck on Generating when the AI stops answering: after 5 quiet minutes Anteroom stops waiting, names the AI and the step that stalled, and the listing is ready to retry.
