@@ -241,6 +241,27 @@ def test_storage_status_reports_the_low_disk_warning(source_db, backups_dir, mon
     assert status["database_bytes"] > 0
 
 
+def test_prune_keeps_the_newest_pre_migration_snapshot(backups_dir):
+    """A rollback restores the snapshot taken just before a migration, so pruning keeps it.
+
+    Six-hourly timer snapshots fill the day it was taken, and the newest of
+    them would otherwise win that day and push it out.
+    """
+    now = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    for quarter in range(45 * 4):
+        _stub(backups_dir, quarter / 4, "timer", now)
+    older_pre_migration = _stub(backups_dir, 10, "pre-migration", now)
+    pre_migration = _stub(backups_dir, 20 / 24, "pre-migration", now)
+
+    prune_snapshots(backups_dir, now=now)
+
+    kept = {snapshot.path.name for snapshot in list_snapshots(backups_dir)}
+    assert pre_migration.path.name in kept
+    # Only the newest one is held back, and it takes a slot under the count cap.
+    assert older_pre_migration.path.name not in kept
+    assert len(kept) == backups.MAX_SNAPSHOT_COUNT
+
+
 def test_prune_never_empties_an_old_install(backups_dir):
     now = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
     for days in (400, 401, 402, 403):
