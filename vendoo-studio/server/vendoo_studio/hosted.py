@@ -348,6 +348,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(account_import_router)
     from vendoo_studio.routes.hosted_bulk_delete import router as bulk_delete_router
     app.include_router(bulk_delete_router)
+    from vendoo_studio.routes.hosted_account import router as account_router
+    app.include_router(account_router)
     from vendoo_studio.routes.listings import apply_price_drop
     app.add_api_route('/api/conversations/{conv_id}/price-drop', apply_price_drop, methods=['POST'])
     from vendoo_studio.routes.catalog import categories as catalog_categories, choice_list, dropdown_options, search as catalog_search

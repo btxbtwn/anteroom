@@ -55,7 +55,7 @@ struct WorkspaceView: View {
                                 showsPromotions: features.contains("marketplace_sessions"))
                     .tabItem { Label("Automations", systemImage: "calendar.badge.clock") }
             }
-            SettingsRootView(api: api)
+            SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
     }

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.754 — 2026-11-07
+
+- Delete your Anteroom account from the web app's account menu or the iPhone's Settings. Your listings, photos, records, settings and stored sign-ins are removed; listings that are live on marketplaces stay there.
+
 ## 0.1.753 — 2026-11-06
 
 - Add a landing page at myanteroom.com for visitors who are not signed in, showing how one listing fills eBay, Poshmark, Mercari, Depop and Etsy.

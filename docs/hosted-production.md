@@ -64,9 +64,11 @@ with prepared statements still disabled. Desktop and test processes keep
 `NullPool`.
 
 The same sample reported `max_connections` 60 and 40 rows in
-`pg_stat_activity`. Live two-seller generate traffic exhausted a 5-connection
+`pg_stat_activity`. Live two-seller generate traffic exhausted the earlier 5-connection
 budget (`4` plus `1` overflow, 1s wait) with QueuePool timeouts. The hosted
-process now budgets 8 plus 4 overflow and waits up to 3s. Generate/assistant
+process now budgets 8 plus 4 overflow and waits up to 3s (`database.py`;
+`ANTEROOM_DB_POOL_SIZE`, `ANTEROOM_DB_MAX_OVERFLOW` and
+`ANTEROOM_DB_POOL_TIMEOUT` override them). Generate/assistant
 SSE open a short session only to enqueue, then stream. A second process needs
 its own budget inside the remainder. Do not raise the pool to one connection
 per seller.
