@@ -16,6 +16,7 @@ from vendoo_studio.providers.openai_api import OpenAIAPIProvider
 from vendoo_studio.providers.xiaomi_mimo import StreamChunk
 from vendoo_studio.services import keychain, openrouter_oauth, user_settings
 from vendoo_studio.services.ai_key_catalog import KEY_PROVIDERS
+from vendoo_studio.services.provider_deadlines import unwrap
 
 
 @pytest.fixture
@@ -84,7 +85,7 @@ def test_listing_provider_uses_the_seller_key(clean_settings):
 
     keychain.set_ai_key("anthropic", "sk-ant-x")
     user_settings.set_listing_provider_order("anthropic", "none")
-    provider = get_listing_provider()
+    provider = unwrap(get_listing_provider())
     assert isinstance(provider, AnthropicAPIProvider)
     assert provider.listing_model == KEY_PROVIDERS["anthropic"].listing_model
     assert provider_is_configured()
@@ -97,7 +98,7 @@ def test_any_saved_key_is_used_when_the_order_is_not_ready(clean_settings):
     from vendoo_studio.services.listing_provider import get_listing_provider
 
     keychain.set_ai_key("mistral", "m-key")
-    provider = get_listing_provider()
+    provider = unwrap(get_listing_provider())
     assert isinstance(provider, ChatCompletionsProvider)
     assert provider.name == "mistral"
 

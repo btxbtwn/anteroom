@@ -8,6 +8,7 @@ from vendoo_studio.services.ai_key_catalog import KEY_PROVIDER_IDS, KEY_PROVIDER
 from vendoo_studio.services.chatgpt_oauth import chatgpt_signed_in
 from vendoo_studio.services.claude_auth import claude_signed_in
 from vendoo_studio.services.keychain import get_ai_key, get_ai_keys, get_api_key, get_cursor_api_key
+from vendoo_studio.services.provider_deadlines import with_deadlines
 from vendoo_studio.services.user_settings import (
     get_listing_provider_order,
     get_photo_provider_choice,
@@ -68,6 +69,11 @@ def _key_provider(provider_id: str):
 
 
 def _provider_for(choice: str):
+    """The provider for ``choice``, with a deadline on every call it makes."""
+    return with_deadlines(_ready_provider(choice))
+
+
+def _ready_provider(choice: str):
     from vendoo_studio import sandbox
     from vendoo_studio.services.service_context import current
     if sandbox.enabled():

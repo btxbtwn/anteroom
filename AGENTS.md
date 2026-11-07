@@ -51,6 +51,7 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 - Keep components modular and concerns clearly separated.
 - Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+- Every await on something outside the app (an AI provider, Chrome, the Keychain, a marketplace) has a deadline: an idle timeout for streams, an overall one for single calls. When it fails, times out or is cancelled, the draft or job's busy status is cleared in a `finally` path and the seller sees which provider or step stalled. AI providers get theirs from `services/provider_deadlines.py`.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later. The one exception is a production incident: a minimal mitigation is allowed, labelled as such in the code and PR, followed by the root-cause fix.
 
 ## Responsiveness and concurrent work

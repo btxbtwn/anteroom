@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from vendoo_studio.services import listing_provider, user_settings
+from vendoo_studio.services.provider_deadlines import unwrap
 
 
 class PhotoProviderChoiceTest(unittest.TestCase):
@@ -42,7 +43,7 @@ class GetPhotoProviderTest(unittest.TestCase):
             patch.object(listing_provider, "_chatgpt_provider", return_value=self.CHATGPT if chatgpt else None),
             patch.object(listing_provider, "_cursor_provider", return_value=self.CURSOR),
         ):
-            return listing_provider.get_photo_provider()
+            return unwrap(listing_provider.get_photo_provider())
 
     def test_same_uses_the_listing_provider(self):
         self.assertIs(self.provider("same", chatgpt=True), self.CURSOR)
