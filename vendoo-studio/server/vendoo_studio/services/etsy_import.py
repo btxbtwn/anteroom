@@ -7,6 +7,7 @@ import math
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.services import etsy_workspace, inventory_import
 from vendoo_studio.services.etsy_workspace import EtsyClient, EtsyFailure
 
@@ -37,8 +38,13 @@ def _count(value) -> int:
     return value
 
 
-async def active_listings(client: EtsyClient, db: Session, page_number: int) -> dict:
+async def active_listings(client: EtsyClient, page_number: int) -> dict:
     page = await etsy_workspace.listings(client, "active", (page_number - 1) * PAGE_SIZE)
+    # Etsy has answered: match its rows against inventory with a short session of their own.
+    return await in_worker_session(_candidate_page, page, page_number)
+
+
+def _candidate_page(db: Session, page: dict, page_number: int) -> dict:
     from vendoo_studio.services.chrome_import import match_candidates, suggested_match
 
     items = match_candidates(db)

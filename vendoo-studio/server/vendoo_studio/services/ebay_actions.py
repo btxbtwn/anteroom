@@ -21,6 +21,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import claim_in_worker_session, in_worker_session
 from vendoo_studio.models.ebay_action import EbayAction
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, NS, assert_identity, digest, identity, segment, trading_xml
@@ -495,51 +496,44 @@ def clock():
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-async def review(db: Session, kind: str, payload: dict) -> dict:
+def _repeatable(kind: str) -> tuple[str, ...]:
+    return ("sending", "unknown") if kind in ("campaign_control", "promotion_control", "mark_read") else ("sending", "unknown", "sent")
+
+
+async def review(kind: str, payload: dict) -> dict:
     client = await EbayClient.connect()
     plan = await prepare(client, kind, payload)
-    fingerprint = digest(plan)
-    if db.query(EbayAction.id).filter_by(account_id=client.seller[0], kind=kind, resource_id=plan["target"]).filter(
+    # eBay has answered; record the review with a short session of its own.
+    return await in_worker_session(_open_review, client.seller[0], kind, plan, digest(plan))
+
+
+def _open_review(db: Session, account_id: str, kind: str, plan: dict, fingerprint: str) -> dict:
+    if db.query(EbayAction.id).filter_by(account_id=account_id, kind=kind, resource_id=plan["target"]).filter(
         EbayAction.state.in_(("sending", "unknown")),
     ).first():
         raise EbayFailure("An earlier action for this item has an uncertain result. Check eBay and mark it checked in Activity first.", 409)
-    if db.query(EbayAction.id).filter_by(account_id=client.seller[0], fingerprint=fingerprint).filter(
-        EbayAction.state.in_(("sending", "unknown") if kind in ("campaign_control", "promotion_control", "mark_read") else ("sending", "unknown", "sent")),
+    if db.query(EbayAction.id).filter_by(account_id=account_id, fingerprint=fingerprint).filter(
+        EbayAction.state.in_(_repeatable(kind)),
     ).first():
         raise EbayFailure("This action was already sent or has an uncertain result. Check eBay before repeating it.", 409)
-    action = EbayAction(account_id=client.seller[0], kind=kind, resource_id=plan["target"], fingerprint=fingerprint,
+    action = EbayAction(account_id=account_id, kind=kind, resource_id=plan["target"], fingerprint=fingerprint,
                         expires_at=clock() + timedelta(minutes=10), state="preview")
     db.add(action)
     db.commit()
     return {"id": action.id, "summary": plan["summary"], "images": plan.get("images", []), "expiresAt": action.expires_at.isoformat() + "Z"}
 
 
-async def execute(db: Session, action_id: str, kind: str, payload: dict) -> dict:
+async def execute(action_id: str, kind: str, payload: dict) -> dict:
+    """Send one reviewed action. No database connection is held while eBay answers."""
     client = await EbayClient.connect()
-    action = db.get(EbayAction, action_id)
-    if not action or action.account_id != client.seller[0] or action.kind != kind or action.state != "preview" or action.expires_at < clock():
-        raise EbayFailure("This review expired or was already used. Review the action again.", 409)
+    account_id, fingerprint = await in_worker_session(_reviewed, action_id, client.seller[0], kind)
     plan = await prepare(client, kind, payload)
-    if digest(plan) != action.fingerprint:
+    if digest(plan) != fingerprint:
         raise EbayFailure("The input, listing, order, or account changed. Review the action again.", 409)
     assert_identity(client.seller)
-    if db.query(EbayAction.id).filter(EbayAction.account_id == action.account_id, EbayAction.kind == kind,
-                                     EbayAction.resource_id == plan["target"], EbayAction.state.in_(("sending", "unknown")),
-                                     EbayAction.id != action.id).first():
-        raise EbayFailure("An earlier action for this item needs a result check in Activity.", 409)
-    if db.query(EbayAction.id).filter(EbayAction.account_id == action.account_id, EbayAction.fingerprint == action.fingerprint,
-                                     EbayAction.state.in_(("sending", "unknown") if kind in ("campaign_control", "promotion_control", "mark_read") else ("sending", "unknown", "sent")), EbayAction.id != action.id).first():
-        raise EbayFailure("This action was already sent or has an uncertain result.", 409)
-    try:
-        claimed = db.execute(update(EbayAction).where(EbayAction.id == action_id, EbayAction.state == "preview").values(state="sending"))
-        if type_cast(CursorResult, claimed).rowcount != 1:
-            raise EbayFailure("This action already started.", 409)
-        db.execute(update(EbayAction).where(EbayAction.account_id == action.account_id, EbayAction.fingerprint == action.fingerprint,
-                                           EbayAction.state == "preview", EbayAction.id != action.id).values(state="superseded"))
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise EbayFailure("Another eBay action is running. Wait for its result.", 409) from exc
+    # Nothing has reached eBay if the request drops while claiming, so the claim ends as failed.
+    await claim_in_worker_session(_claim, lambda _claimed: in_worker_session(_settle, action_id, "failed", None),
+                                  action_id, account_id, fingerprint, kind, plan["target"])
     completed = 0
     result = {}
     try:
@@ -553,18 +547,52 @@ async def execute(db: Session, action_id: str, kind: str, payload: dict) -> dict
             completed += 1
     except BaseException as exc:
         definite = isinstance(exc, EbayFailure) and exc.status in (400, 401, 403, 404, 409, 422, 429) and completed == 0
-        action.state = "failed" if definite else "unknown"
-        db.commit()
+        # Shielded: a dropped request must not leave the action marked as sending.
+        await asyncio.shield(in_worker_session(_settle, action_id, "failed" if definite else "unknown", None))
         if isinstance(exc, asyncio.CancelledError):
             raise
         if definite:
             raise
-        return {"state": "unknown", "id": action.id, "message": "The result is uncertain or only part finished. Check eBay before repeating. Nothing will retry automatically."}
-    action.state = "sent"
-    action.receipt_id = str(result.get("receiptId") or result.get("offerId") or result.get("listingId") or result.get("emailCampaignId") or result.get("refundId") or result.get("fileId") or "")[:200]
-    db.commit()
-    return {"state": "sent", "id": action.id, "receiptId": action.receipt_id,
+        return {"state": "unknown", "id": action_id, "message": "The result is uncertain or only part finished. Check eBay before repeating. Nothing will retry automatically."}
+    receipt_id = str(result.get("receiptId") or result.get("offerId") or result.get("listingId") or result.get("emailCampaignId") or result.get("refundId") or result.get("fileId") or "")[:200]
+    await asyncio.shield(in_worker_session(_settle, action_id, "sent", receipt_id))
+    return {"state": "sent", "id": action_id, "receiptId": receipt_id,
             "message": "eBay accepted the refund; payment is pending. Check the order for its final status." if kind == "refund" and result.get("refundStatus") == "PENDING" else "eBay confirmed the action."}
+
+
+def _reviewed(db: Session, action_id: str, account_id: str, kind: str) -> tuple[str, str]:
+    action = db.get(EbayAction, action_id)
+    if not action or action.account_id != account_id or action.kind != kind or action.state != "preview" or action.expires_at < clock():
+        raise EbayFailure("This review expired or was already used. Review the action again.", 409)
+    return action.account_id, action.fingerprint
+
+
+def _claim(db: Session, action_id: str, account_id: str, fingerprint: str, kind: str, target: str) -> None:
+    if db.query(EbayAction.id).filter(EbayAction.account_id == account_id, EbayAction.kind == kind,
+                                     EbayAction.resource_id == target, EbayAction.state.in_(("sending", "unknown")),
+                                     EbayAction.id != action_id).first():
+        raise EbayFailure("An earlier action for this item needs a result check in Activity.", 409)
+    if db.query(EbayAction.id).filter(EbayAction.account_id == account_id, EbayAction.fingerprint == fingerprint,
+                                     EbayAction.state.in_(_repeatable(kind)), EbayAction.id != action_id).first():
+        raise EbayFailure("This action was already sent or has an uncertain result.", 409)
+    try:
+        claimed = db.execute(update(EbayAction).where(EbayAction.id == action_id, EbayAction.state == "preview").values(state="sending"))
+        if type_cast(CursorResult, claimed).rowcount != 1:
+            raise EbayFailure("This action already started.", 409)
+        db.execute(update(EbayAction).where(EbayAction.account_id == account_id, EbayAction.fingerprint == fingerprint,
+                                           EbayAction.state == "preview", EbayAction.id != action_id).values(state="superseded"))
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise EbayFailure("Another eBay action is running. Wait for its result.", 409) from exc
+
+
+def _settle(db: Session, action_id: str, state: str, receipt_id: str | None) -> None:
+    values: dict = {"state": state}
+    if receipt_id is not None:
+        values["receipt_id"] = receipt_id
+    db.execute(update(EbayAction).where(EbayAction.id == action_id).values(**values))
+    db.commit()
 
 
 def activity(db: Session) -> dict:

@@ -18,9 +18,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from starlette.concurrency import run_in_threadpool
 
-from vendoo_studio.database import SessionLocal, get_db
+from vendoo_studio.database import SessionLocal, get_db, in_worker_session
 from vendoo_studio.models.assistant import AssistantMessage, AssistantThread
 from vendoo_studio.routes.attachments import AttachmentUpload, store_uploads
 from vendoo_studio.services import assistant_changes, assistant_memory, background_tasks, business_assistant
@@ -269,16 +268,22 @@ def _save_answer(
 
 
 @router.post("/messages")
-async def ask(body: AssistantQuestion, request: Request, db: Session = Depends(get_db)):
+async def ask(body: AssistantQuestion, request: Request):
     question = body.text.strip()
     if not question and not body.attachments:
         raise HTTPException(422, "Ask a question first.")
     if _queued():
-        return await run_in_threadpool(_queue_question, request, db, question, body)
+        return await in_worker_session(_queue_question, request, question, body)
     key = _answer_run()
     if active_generation(key) is not None:
         raise HTTPException(409, "The assistant is still answering your last question.")
     provider = _require_provider()
+    # The question is saved, and its session closed, before the answer starts.
+    thread_id, attachments = await in_worker_session(_save_question, question, body)
+    return await _start_answer(key, provider, question, attachments, thread_id)
+
+
+def _save_question(db: Session, question: str, body: AssistantQuestion) -> tuple[str, list[dict]]:
     try:
         thread = business_assistant.resolve_thread(db, body.thread_id)
     except business_assistant.UnknownThread:
@@ -286,10 +291,7 @@ async def ask(body: AssistantQuestion, request: Request, db: Session = Depends(g
     # On the web, images are stored under the seller's own conversation.
     attachments = store_uploads(body.attachments, collection_id=thread.id)
     business_assistant.add_message(db, "user", question, attachments=attachments, thread_id=thread.id)
-    thread_id = thread.id
-    # Release the request-scoped session before background work opens its own.
-    db.close()
-    return await _start_answer(key, provider, question, attachments, thread_id)
+    return thread.id, attachments
 
 
 async def _start_answer(key: str, provider, question: str, attachments: list[dict] | None, thread_id: str):
@@ -319,33 +321,36 @@ def _unanswered(db: Session, thread_id: str) -> AssistantMessage:
     return turns[-1]
 
 
+def _unanswered_question(db: Session, thread_id: str) -> tuple[str, list[dict] | None]:
+    turn = _unanswered(db, thread_id)
+    return turn.text, turn.attachments or None
+
+
 @router.post("/messages/retry")
-async def retry(thread_id: str, request: Request, db: Session = Depends(get_db)):
+async def retry(thread_id: str, request: Request):
     """Answer the thread's last question again, after an answer was interrupted or failed.
 
     The question is not asked twice: it is already saved, and only a thread
     whose last turn is still unanswered can be retried.
     """
     if _queued():
-        return await run_in_threadpool(_queue_retry, request, db, thread_id)
+        return await in_worker_session(_queue_retry, request, thread_id)
     key = _answer_run()
     if active_generation(key) is not None:
         raise HTTPException(409, "The assistant is still answering your last question.")
     provider = _require_provider()
-    turn = _unanswered(db, thread_id)
-    question, attachments = turn.text, turn.attachments or None
-    db.close()
+    question, attachments = await in_worker_session(_unanswered_question, thread_id)
     return await _start_answer(key, provider, question, attachments, thread_id)
 
 
 @router.post("/messages/resume")
-async def resume(thread_id: str | None = None, db: Session = Depends(get_db)):
+async def resume(thread_id: str | None = None):
     """Follow the answer in progress from its start, or finish at once when there is none.
 
     A thread only hears the answer that was asked in it.
     """
     if _queued():
-        return await run_in_threadpool(_follow_queued, db, thread_id)
+        return await in_worker_session(_follow_queued, thread_id)
     run = active_generation(_answer_run())
     if run is None or (thread_id and thread_id != _answering_thread_ids.get(_answer_run())):
         return stream_finished()
@@ -353,9 +358,9 @@ async def resume(thread_id: str | None = None, db: Session = Depends(get_db)):
 
 
 @router.post("/messages/stop")
-async def stop(db: Session = Depends(get_db)):
+async def stop():
     if _queued():
-        await run_in_threadpool(_stop_queued, db)
+        await in_worker_session(_stop_queued)
         return {"ok": True}
     stop_generation(_answer_run())
     # What was written so far is saved as the run unwinds; answer once it is there to read.
@@ -377,7 +382,7 @@ def _queued() -> bool:
     return current() is not None
 
 
-def _queue_question(request: Request, db: Session, question: str, body: AssistantQuestion):
+def _queue_question(db: Session, request: Request, question: str, body: AssistantQuestion):
     from vendoo_studio.routes.hosted_tasks import limit_submissions, require_worker
     from vendoo_studio.services.chat_attachments import delete_attachments
 
@@ -407,7 +412,7 @@ def _queue_question(request: Request, db: Session, question: str, body: Assistan
     return _follow_task(db, task.id)
 
 
-def _queue_retry(request: Request, db: Session, thread_id: str):
+def _queue_retry(db: Session, request: Request, thread_id: str):
     from vendoo_studio.routes.hosted_tasks import limit_submissions, require_worker
 
     require_worker(request)

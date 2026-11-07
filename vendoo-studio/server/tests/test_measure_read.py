@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.photo_store import LocalPhotoStore
-from vendoo_studio.database import Base, get_db
+from vendoo_studio.database import Base
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.routes import measurements as route
@@ -154,7 +154,11 @@ class ReadSavedMeasurementsRouteTest(unittest.TestCase):
     def setUp(self):
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         Base.metadata.create_all(engine)
-        self.db = sessionmaker(bind=engine)()
+        Session = sessionmaker(bind=engine)
+        self.db = Session()
+        sessions = patch("vendoo_studio.database.SessionLocal", Session)
+        sessions.start()
+        self.addCleanup(sessions.stop)
         photos = tempfile.TemporaryDirectory()
         self.addCleanup(photos.cleanup)
         folder = Path(photos.name)
@@ -166,12 +170,6 @@ class ReadSavedMeasurementsRouteTest(unittest.TestCase):
         for name, body in (("tag.jpg", _plain_photo()), ("ruler.jpg", _ruler_photo())):
             (folder / name).write_bytes(body)
             listing_persistence.add_photo(repo.db, self.conv.id, name, name, "image/jpeg", len(body), checksum=name * 8, width=1, height=1)
-
-        def override_get_db():
-            yield self.db
-
-        app.dependency_overrides[get_db] = override_get_db
-        self.addCleanup(app.dependency_overrides.clear)
 
     def post(self, provider, conv_id, garment="top"):
         with patch.object(route, "get_photo_provider", return_value=provider):

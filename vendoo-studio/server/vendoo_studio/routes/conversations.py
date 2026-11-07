@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.services import inventory_facets
 from vendoo_studio.services import listing_persistence
-from vendoo_studio.database import get_db
+from vendoo_studio.database import get_db, in_worker_session
 from vendoo_studio.repositories.queries import (
     BUSY_LISTING_STATUSES,
     ConversationRepo,
@@ -362,24 +363,36 @@ def get_generation_timings(conv_id: str, limit: int = 20, db: Session = Depends(
     return for_conversation(db, conv_id, limit=max(1, min(limit, 100)))
 
 
-async def cancel_conversation_jobs(db: Session, conv_id: str) -> int:
+async def cancel_conversation_jobs(conv_id: str) -> int:
     """Cancel this listing's running direct marketplace jobs."""
+    from vendoo_studio.services import native_marketplaces
+
+    live = await in_worker_session(_stop_conversation_jobs, conv_id)
+    for job_id, record in live["requests"]:
+        # Stops at its next safe point; the record says what happened.
+        await native_marketplaces.request_cancel(job_id, record)
+    return live["count"]
+
+
+def _stop_conversation_jobs(db: Session, conv_id: str) -> dict:
+    """End the jobs nothing runs any more; return the live direct jobs that still need a cancel request."""
     from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
     from vendoo_studio.repositories.queries import JobRepo
+    from vendoo_studio.services import native_marketplaces
 
     jobs = db.query(Job).filter(Job.conversation_id == conv_id, Job.status.in_(ACTIVE_JOB_STATUSES)).all()
+    requests: list[tuple[str, dict]] = []
     for job in jobs:
         if str(job.current_step or "").startswith("native_"):
-            from vendoo_studio.services import native_marketplaces
-
-            # Stops at its next safe point; the record says what happened.
-            await native_marketplaces.cancel_job(db, job)
+            job_id = job.id
+            if (record := native_marketplaces.stop_job(db, job)) is not None:
+                requests.append((job_id, record))
             continue
         job.status = "cancelled"
         job.current_step = None
         db.commit()
         JobRepo(db).add_event(job.id, "cancelled")
-    return len(jobs)
+    return {"count": len(jobs), "requests": requests}
 
 
 @router.get("/{conv_id}/photos")
@@ -411,12 +424,32 @@ class ResetRequest(BaseModel):
 
 
 @router.post("/{conv_id}/reset", response_model=ConversationResponse)
-async def reset_conversation(
-    conv_id: str, body: ResetRequest | None = None, db: Session = Depends(get_db)
-):
+async def reset_conversation(conv_id: str, body: ResetRequest | None = None):
     keep_inputs = bool(body and body.keep_inputs)
-    repo = ConversationRepo(db)
-    conv = repo.get(conv_id)
+    notes = await in_worker_session(_reset_check, conv_id)
+
+    from vendoo_studio.services.streaming import stop_generation
+    from vendoo_studio.services.hidden_fields import clear_listing_hidden_fields
+
+    from vendoo_studio.services import activity
+
+    stop_generation(conv_id, discard=True)
+    # Post-generate field fills would otherwise write into the cleared chat.
+    activity.cancel(conv_id)
+
+    if keep_inputs:
+        notes = await in_worker_session(_carried_notes, conv_id, notes)
+
+    # Stop running marketplace jobs before the wipe.
+    await cancel_conversation_jobs(conv_id)
+
+    await in_worker_session(_wipe, conv_id, keep_inputs, notes)
+    await asyncio.to_thread(clear_listing_hidden_fields, conv_id)
+    return await in_worker_session(_conversation_view, conv_id)
+
+
+def _reset_check(db: Session, conv_id: str) -> str | None:
+    conv = ConversationRepo(db).get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
     from vendoo_studio.services.native_marketplaces import running_marketplace
@@ -425,38 +458,28 @@ async def reset_conversation(
     if busy:
         # The marketplace record outlives Clear; the action writing it has to finish first.
         raise HTTPException(409, f"Wait for the {busy} listing to finish, or cancel it, before clearing.")
+    return conv.notes
 
-    from vendoo_studio.repositories.queries import ListingRepo
-    from vendoo_studio.services.streaming import stop_generation
-    from vendoo_studio.services.hidden_fields import clear_listing_hidden_fields
+
+def _carried_notes(db: Session, conv_id: str, notes: str | None) -> str | None:
+    """Regenerate starts from Item Details, so the facts that only lived on the listing (cost of
+    goods, labels, internal notes, and the measurements and flaws in the description) move there first."""
     from vendoo_studio.services.listing_carryover import carryover_updates
     from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
-    from vendoo_studio.services import activity
+    revisions = ListingRepo(db).get_revisions(conv_id)
+    latest = dict(revisions[0].listing_json) if revisions else None
+    carried = carryover_updates(latest, parse_notes(notes))
+    return merge_notes(notes, carried) if carried else notes
 
-    stop_generation(conv_id, discard=True)
-    # Post-generate field fills would otherwise write into the cleared chat.
-    activity.cancel(conv_id)
 
-    notes = conv.notes
-
-    if keep_inputs:
-        # Regenerate starts from Item Details, so the facts that only lived on
-        # the listing — cost of goods, labels, internal notes, and the
-        # measurements and flaws in the description — move there first.
-        revisions = ListingRepo(db).get_revisions(conv_id)
-        latest = dict(revisions[0].listing_json) if revisions else None
-        carried = carryover_updates(latest, parse_notes(notes))
-        if carried:
-            notes = merge_notes(notes, carried)
-
-    # Stop running marketplace jobs before the wipe.
-    await cancel_conversation_jobs(db, conv_id)
+def _wipe(db: Session, conv_id: str, keep_inputs: bool, notes: str | None) -> None:
+    from vendoo_studio.services.vendoo_import import parse_notes
 
     # Marketplace records survive Clear and Regenerate, with the jobs they name.
     wipe_contents(db, conv_id, keep_photos=keep_inputs, keep_marketplace_listings=True)
     db.expire_all()
-    conv = repo.get(conv_id)
+    conv = ConversationRepo(db).get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
     # A name the seller gave the listing outlives Regenerate; Clear drops it.
@@ -476,8 +499,12 @@ async def reset_conversation(
     conv.unsettled_at = None
     conv.updated_at = utcnow()
     db.commit()
-    db.refresh(conv)
-    clear_listing_hidden_fields(conv_id)
+
+
+def _conversation_view(db: Session, conv_id: str) -> ConversationResponse:
+    conv = ConversationRepo(db).get(conv_id)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
     return _conv_response(conv, _extras_for(db, conv_id))
 
 

@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import get_db
+from vendoo_studio.database import get_db, in_worker_session
 from vendoo_studio.models.scout import ScoutCheck
 from vendoo_studio.services import scout
 from vendoo_studio.services.photo_store import photo_store
@@ -80,7 +80,6 @@ def list_checks(db: Session = Depends(get_db)):
 async def create_check(
     files: list[UploadFile] = File(...),
     asking_price: float | None = Form(None, ge=0),
-    db: Session = Depends(get_db),
 ):
     if len(files) > scout.MAX_PHOTOS:
         raise HTTPException(400, f"Up to {scout.MAX_PHOTOS} photos per check")
@@ -92,9 +91,14 @@ async def create_check(
             photos.append(process_bytes(await upload.read(), upload.filename, upload.content_type, collection_id=collection_id))
         except ValueError as exc:
             raise HTTPException(400, f"{upload.filename or 'Photo'}: {exc}") from exc
+    check_id, response = await in_worker_session(_create, photos, asking_price)
+    scout.start(check_id)
+    return response
+
+
+def _create(db: Session, photos: list[dict], asking_price: float | None) -> tuple[str, ScoutCheckResponse]:
     check = scout.create_check(db, photos, asking_price)
-    scout.start(check.id)
-    return _response(db, check)
+    return check.id, _response(db, check)
 
 
 @router.get("/{check_id}", response_model=ScoutCheckResponse)

@@ -20,6 +20,7 @@ def workspace(monkeypatch):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(assistant_route, "SessionLocal", factory)
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", factory)
     db = factory()
     app = FastAPI()
     app.include_router(assistant_route.router)

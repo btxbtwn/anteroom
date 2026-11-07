@@ -27,10 +27,10 @@ def library(conv_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/api/conversations/{conv_id}/videos")
-async def upload(conv_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload(conv_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
     _conversation(db, conv_id)
     try:
-        row = await videos.store_upload(db, conv_id, file)
+        row = videos.store_upload(db, conv_id, file)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return videos.video_view(row)

@@ -29,7 +29,7 @@ def marketplace_media_rules():
 
 
 @router.post("/api/conversations/{conv_id}/photos")
-async def upload_photos(
+def upload_photos(
     conv_id: str,
     files: list[UploadFile] = File(...),
     marketplace: str | None = Form(None),
@@ -56,7 +56,7 @@ async def upload_photos(
     failures: list[str] = []
     for f in files:
         try:
-            meta = await process_upload(conv_id, f)
+            meta = process_upload(conv_id, f)
         except ValueError as e:
             failures.append(f"{f.filename or 'file'}: {e}")
             continue

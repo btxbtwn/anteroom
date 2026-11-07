@@ -22,6 +22,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_listing import LIVE_STATES, UNSETTLED_STATES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
@@ -136,10 +137,9 @@ def preview(db: Session, body: PreviewRequest) -> dict:
             "rows": [review_row(db, conv_id, body.action, marketplaces) for conv_id in dict.fromkeys(body.conversation_ids)]}
 
 
-async def perform(db: Session, body: PerformRequest) -> dict:
+async def perform(body: PerformRequest) -> dict:
     """One reviewed item. Every marketplace named is tried once; nothing retries."""
     from vendoo_studio.services.automations import AutomationBusy
-    from vendoo_studio.services.native_marketplaces import blocking_job
 
     if body.confirm is not True:
         raise HTTPException(400, "Review and confirm this marketplace action first.")
@@ -149,20 +149,9 @@ async def perform(db: Session, body: PerformRequest) -> dict:
     key = body.conversation_id if side_by_side else "*"
     _running.add(key)
     try:
-        with start_gate():
-            db.expire_all()
-            repo = JobRepo(db)
-            if blocking_job(repo, None) if side_by_side else repo.get_active():
-                raise HTTPException(409, "A marketplace job is running. Wait for it to finish.")
-            current = review_row(db, body.conversation_id, body.action, list(body.marketplaces))
-            if current["skip_reason"] or current["skipped"]:
-                reasons = [current["skip_reason"]] if current["skip_reason"] else [entry["reason"] for entry in current["skipped"]]
-                raise HTTPException(409, " ".join(reasons) + " Review again.")
-            if (current["marketplaces"] != list(body.marketplaces) or current["revision_id"] != body.revision_id
-                    or current["review_token"] != body.review_token):
-                raise HTTPException(409, "The item, its photos or marketplace links changed since the review. Review again.")
+        await in_worker_session(_check_reviewed, body, side_by_side)
         try:
-            result = await _dispatch(db, body)
+            result = await _dispatch(body)
         except AutomationBusy as exc:
             raise HTTPException(409, str(exc) or "A marketplace job is running. Wait for it to finish.") from exc
     finally:
@@ -172,18 +161,35 @@ async def perform(db: Session, body: PerformRequest) -> dict:
             "errors": result.get("errors") or {}, "down": list(result.get("down") or [])}
 
 
-async def _dispatch(db: Session, body: PerformRequest) -> dict:
+def _check_reviewed(db: Session, body: PerformRequest, side_by_side: bool) -> None:
+    """The item still matches what the seller reviewed, and nothing blocks the action."""
+    from vendoo_studio.services.native_marketplaces import blocking_job
+
+    with start_gate():
+        repo = JobRepo(db)
+        if blocking_job(repo, None) if side_by_side else repo.get_active():
+            raise HTTPException(409, "A marketplace job is running. Wait for it to finish.")
+        current = review_row(db, body.conversation_id, body.action, list(body.marketplaces))
+        if current["skip_reason"] or current["skipped"]:
+            reasons = [current["skip_reason"]] if current["skip_reason"] else [entry["reason"] for entry in current["skipped"]]
+            raise HTTPException(409, " ".join(reasons) + " Review again.")
+        if (current["marketplaces"] != list(body.marketplaces) or current["revision_id"] != body.revision_id
+                or current["review_token"] != body.review_token):
+            raise HTTPException(409, "The item, its photos or marketplace links changed since the review. Review again.")
+
+
+async def _dispatch(body: PerformRequest) -> dict:
     from vendoo_studio.services import automation_actions
 
     marketplaces: list[str] = [*body.marketplaces]
     if body.action == "list":
-        return await automation_actions.publish_revision(db, body.conversation_id, marketplaces, body.revision_id)
+        return await automation_actions.publish_revision(body.conversation_id, marketplaces, body.revision_id)
     if body.action == "update":
-        return await automation_actions.update_revision(db, body.conversation_id, marketplaces, body.revision_id)
+        return await automation_actions.update_revision(body.conversation_id, marketplaces, body.revision_id)
     if body.action == "not_listed":
-        return _mark_not_listed(db, body.conversation_id, marketplaces)
+        return await in_worker_session(_mark_not_listed, body.conversation_id, marketplaces)
     item = {"conversation_id": body.conversation_id}
-    return await automation_actions.perform(db, item, {"type": body.action}, marketplaces, body.revision_id, confirm=True)
+    return await automation_actions.perform(item, {"type": body.action}, marketplaces, body.revision_id, confirm=True)
 
 
 def _mark_not_listed(db: Session, conv_id: str, marketplaces: list[str]) -> dict:

@@ -275,13 +275,13 @@ class DepartmentAndLogsTest(unittest.TestCase):
         self.assertIn("buttons", found["reasoning"])
 
     def test_department_review_asks_for_a_model_when_none_is_connected(self):
-        db = MagicMock()
-        with patch("vendoo_studio.repositories.queries.ConversationRepo") as repo, \
+        with patch("vendoo_studio.database.SessionLocal", MagicMock()), \
+             patch("vendoo_studio.repositories.queries.ConversationRepo") as repo, \
              patch("vendoo_studio.services.listing_generate.latest_photo_analysis", return_value=""), \
              patch("vendoo_studio.services.listing_provider.get_listing_provider", return_value=None):
             repo.return_value.get.return_value = object()
             repo.return_value.get_messages.return_value = []
-            result = asyncio.run(review_department(db, "conv"))
+            result = asyncio.run(review_department("conv"))
         self.assertFalse(result["ok"])
         self.assertIn("Connect a model", result["error"])
 

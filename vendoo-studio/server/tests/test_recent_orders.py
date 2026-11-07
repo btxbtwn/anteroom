@@ -31,10 +31,10 @@ def test_catch_up_reuses_read_only_recovery_and_throttles(setup_sync):
     asyncio.run(sync.refresh())
     assert recover.await_count == 1
     args = recover.call_args.args
-    assert args[0] is factory.return_value.__enter__.return_value
-    assert args[1] == "ebay"
-    assert (args[3] - args[2]).days == 6
-    assert args[4:] == (1, "123", None, None)
+    assert recover.call_args.kwargs == {"session_factory": factory}
+    assert args[0] == "ebay"
+    assert (args[2] - args[1]).days == 6
+    assert args[3:] == (1, "123", None, None)
 
 
 def test_catch_up_walks_pages_with_fixed_connection_and_boundary(setup_sync):
@@ -43,7 +43,7 @@ def test_catch_up_walks_pages_with_fixed_connection_and_boundary(setup_sync):
     recover.side_effect = [{"nextPage": 2, "connection": "fingerprint", "through": through}, {"nextPage": None}]
     asyncio.run(sync.refresh())
     assert recover.await_count == 2
-    assert recover.call_args.args[4:] == (2, "123", "fingerprint", datetime.fromisoformat(through))
+    assert recover.call_args.args[3:] == (2, "123", "fingerprint", datetime.fromisoformat(through))
 
 
 def test_failed_catch_up_retries_after_interval(setup_sync):
@@ -66,9 +66,9 @@ def test_etsy_orders_are_caught_up_with_the_same_read_only_recovery(setup_sync, 
     asyncio.run(sync.refresh())
     assert recover.await_count == 1
     args = recover.call_args.args
-    assert args[1] == "etsy"
-    assert (args[3] - args[2]).days == 6
-    assert args[4:] == (1, "456", None, None)
+    assert args[0] == "etsy"
+    assert (args[2] - args[1]).days == 6
+    assert args[3:] == (1, "456", None, None)
 
 
 def test_failed_ebay_catch_up_does_not_stop_etsy(setup_sync, monkeypatch):
@@ -84,7 +84,7 @@ def test_failed_ebay_catch_up_does_not_stop_etsy(setup_sync, monkeypatch):
 
     recover.side_effect = read
     asyncio.run(sync.refresh())
-    assert [call.args[1] for call in recover.call_args_list] == ["ebay", "etsy"]
+    assert [call.args[0] for call in recover.call_args_list] == ["ebay", "etsy"]
 
 
 def test_marketplaces_have_independent_throttles(setup_sync, monkeypatch):
@@ -94,7 +94,7 @@ def test_marketplaces_have_independent_throttles(setup_sync, monkeypatch):
                         lambda: {"ebay": {"accountId": "seller", "connectedAt": 123},
                                  "etsy": {"accountId": "shop", "connectedAt": 456}})
     asyncio.run(sync.refresh())
-    assert [call.args[1] for call in recover.call_args_list] == ["ebay", "etsy"]
+    assert [call.args[0] for call in recover.call_args_list] == ["ebay", "etsy"]
 
 
 def test_disabled_etsy_detection_makes_no_etsy_read(setup_sync, monkeypatch):
@@ -104,7 +104,7 @@ def test_disabled_etsy_detection_makes_no_etsy_read(setup_sync, monkeypatch):
                         lambda: {"ebay": {"accountId": "seller", "connectedAt": 123},
                                  "etsy": {"accountId": "shop", "connectedAt": 456}})
     asyncio.run(sync.refresh())
-    assert [call.args[1] for call in recover.call_args_list] == ["ebay"]
+    assert [call.args[0] for call in recover.call_args_list] == ["ebay"]
 
 
 def test_disabled_detection_makes_no_remote_read(setup_sync, monkeypatch):
@@ -128,7 +128,7 @@ def test_overlapping_refreshes_do_not_duplicate_reads(setup_sync):
     async def check():
         entered, release = asyncio.Event(), asyncio.Event()
 
-        async def read(*_args):
+        async def read(*_args, **_kwargs):
             entered.set()
             await release.wait()
             return {"nextPage": None}

@@ -8,8 +8,7 @@ plain ``def`` functions (FastAPI runs them in its threadpool), or async function
 that take no request session and run each database step through
 ``database.in_worker_session``.
 
-``async_route_sessions_baseline.txt`` records the handlers that did this before
-the check existed. It may only shrink: fix a handler, then remove its line.
+There are no exceptions: a new case fails where it is introduced.
 """
 from __future__ import annotations
 
@@ -20,13 +19,7 @@ from pathlib import Path
 
 SERVER = Path(__file__).resolve().parents[1]
 PACKAGE = SERVER / "vendoo_studio"
-BASELINE = Path(__file__).with_name("async_route_sessions_baseline.txt")
 SESSION_DEPENDENCIES = {"get_db", "get_seller_db"}
-
-
-def recorded() -> set[str]:
-    lines = BASELINE.read_text().splitlines()
-    return {line.strip() for line in lines if line.strip() and not line.startswith("#")}
 
 
 def _name(node: ast.AST, path: Path) -> str:

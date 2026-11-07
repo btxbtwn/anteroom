@@ -58,9 +58,8 @@ async def _refresh(marketplace: str) -> None:
     page, connection, through = 1, None, None
     try:
         while True:
-            with factory() as db:
-                result = await order_recovery.recover(db, marketplace, today - timedelta(days=6), today,
-                                                     page, str(connected), connection, through)
+            result = await order_recovery.recover(marketplace, today - timedelta(days=6), today, page, str(connected),
+                                                  connection, through, session_factory=factory)
             if result.get("truncated"):
                 log.warning("Recent %s orders exceed the recovery limit; use a narrower manual recovery range", name)
             if result.get("nextPage") is None:

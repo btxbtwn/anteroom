@@ -87,6 +87,7 @@ class SendMessageStreamTest(unittest.TestCase):
         try:
             with patch("vendoo_studio.routes.chat.get_listing_provider", return_value=provider), \
                  patch("vendoo_studio.routes.chat.SessionLocal", self.Session), \
+                 patch("vendoo_studio.database.SessionLocal", self.Session), \
                  patch("vendoo_studio.routes.chat.build_chat_messages", new=build), \
                  patch("vendoo_studio.routes.chat.persist_chat_result", new=AsyncMock(return_value=(None, False))):
                 return TestClient(app).post(f"/api/conversations/{self.conv_id}/messages", json={"text": "Make it blue"})

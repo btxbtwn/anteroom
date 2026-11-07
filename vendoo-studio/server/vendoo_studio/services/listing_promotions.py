@@ -16,12 +16,16 @@ from __future__ import annotations
 from typing import cast as type_cast
 from sqlalchemy.engine import CursorResult
 
+import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from types import SimpleNamespace
 
 from sqlalchemy import or_, update
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import claim_in_worker_session, in_worker_session
 from vendoo_studio.models.conversation import Conversation, new_id
 from vendoo_studio.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
 from vendoo_studio.models.promotion_automation import PromotionAutomation
@@ -207,12 +211,21 @@ def offer_floor(db: Session, row: ListingPromotion) -> int:
 async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_price: str | None = None,
                  *, new_like_at: datetime | None = None) -> None:
     """Read one listing now and fill in what would be sent. Raises PromotionError when it would not be."""
+    listing_id = _review_local(db, row, conv, floor_price, new_like_at=new_like_at)
+    # Only reads are open here. End them before Chrome answers, which can take
+    # minutes: a held connection is one the seller's own pages cannot use.
+    db.commit()
+    await _review_remote(row, listing_id)
+
+
+def _review_local(db: Session, row: ListingPromotion, conv: Conversation, floor_price: str | None,
+                  *, new_like_at: datetime | None) -> str:
+    """The checks ``review`` makes before asking Chrome. Returns the listing ID to read."""
     listing_id, reason = live_listing(db, conv, row.marketplace)
     row.listing_id = listing_id or ""
     if reason:
         raise PromotionError(409, reason)
     assert listing_id is not None
-    name = NAMES.get(row.marketplace, row.marketplace)
     if row.action == "offer":
         if floor_price not in (None, ""):
             try:
@@ -222,9 +235,12 @@ async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_p
         row.floor_cents = offer_floor(db, row)
     if blocked := blocking(db, row.marketplace, listing_id, row.action, new_like_at=new_like_at):
         raise PromotionError(409, blocked)
-    # Only reads are open here. End them before Chrome answers, which can take
-    # minutes: a held connection is one the seller's own pages cannot use.
-    db.commit()
+    return listing_id
+
+
+async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
+    """Ask Chrome for the listing's live facts and fill them in. Uses no database session."""
+    name = NAMES.get(row.marketplace, row.marketplace)
     try:
         facts = await browser_bridge.request(SimpleNamespace(id=f"promotion-{row.batch_id}"), "marketplace.promotion_check", {
             "marketplace": row.marketplace, "action": row.action, "listing_id": listing_id,
@@ -257,9 +273,12 @@ async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_p
                                   f"of ${dollars(row.floor_cents)}. Lower the discount or skip this item.")
 
 
-async def preview(db: Session, conversation_ids: list[str], marketplace: str, action: str,
+async def preview(conversation_ids: list[str], marketplace: str, action: str,
                   discount_percent: int | None = None, floor_prices: dict[str, str] | None = None) -> dict:
-    """Read each listing now and record what would be sent. Sends nothing."""
+    """Read each listing now and record what would be sent. Sends nothing.
+
+    Each database step runs with its own short session; none is held while Chrome reads the listing.
+    """
     if action not in SUPPORTED.get(marketplace, frozenset()):
         raise PromotionError(400, "Anteroom cannot do this on that marketplace.")
     if not available(marketplace, action):
@@ -274,19 +293,42 @@ async def preview(db: Session, conversation_ids: list[str], marketplace: str, ac
     batch = new_id()
     rows = []
     for conv_id in ids:
-        conv = db.get(Conversation, conv_id)
-        if not conv:
+        started = await in_worker_session(_preview_local, conv_id, marketplace, action, batch, discount_percent,
+                                          (floor_prices or {}).get(conv_id))
+        if started is None:
             continue
-        row = new_row(conv, marketplace, action, batch, discount_percent)
-        try:
-            await review(db, row, conv, (floor_prices or {}).get(conv_id))
-        except PromotionError as exc:
-            db.rollback()
-            row.state, row.note = "skipped", str(exc)[:300]
-        db.add(row)
-        db.commit()
-        rows.append(out(row))
+        row, listing_id, saved = started
+        if saved is None:
+            try:
+                await _review_remote(row, listing_id)
+            except PromotionError as exc:
+                row.state, row.note = "skipped", str(exc)[:300]
+            saved = await in_worker_session(_save_row, row)
+        rows.append(saved)
     return {"batch_id": batch, "marketplace": marketplace, "action": action, "rows": rows}
+
+
+def _preview_local(db: Session, conv_id: str, marketplace: str, action: str, batch: str, discount_percent: int | None,
+                   floor_price: str | None) -> tuple[ListingPromotion, str, dict | None] | None:
+    """A new review row and its listing, or the saved row when it is already skipped. None for a missing item."""
+    conv = db.get(Conversation, conv_id)
+    if not conv:
+        return None
+    row = new_row(conv, marketplace, action, batch, discount_percent)
+    try:
+        listing_id = _review_local(db, row, conv, floor_price, new_like_at=None)
+    except PromotionError as exc:
+        db.rollback()
+        row.state, row.note = "skipped", str(exc)[:300]
+        return row, "", _save_row(db, row)
+    db.commit()
+    return row, listing_id, None
+
+
+def _save_row(db: Session, row: ListingPromotion) -> dict:
+    db.add(row)
+    db.commit()
+    return out(row)
 
 
 def _get(db: Session, promotion_id: str) -> ListingPromotion:
@@ -315,10 +357,51 @@ def _choose_shipping(row: ListingPromotion, shipping_discount_id: str | None) ->
     row.shipping_discount_id, row.shipping_discount_label = shipping_discount_id, option.get("label")
 
 
-async def perform(db: Session, promotion_id: str, shipping_discount_id: str | None = None, *, gap_ms: int | None = None,
+async def perform(promotion_id: str, shipping_discount_id: str | None = None, *, gap_ms: int | None = None,
                   new_like_at: datetime | None = None) -> dict:
-    """Send one reviewed row, once. The caller has the seller's explicit confirmation or enabled automation."""
+    """Send one reviewed row, once. The caller has the seller's explicit confirmation or enabled automation.
 
+    The checks, the job claim and the durable ``sending`` mark are committed before Chrome is asked;
+    no database connection is held while Chrome sends.
+    """
+    # A request dropped while claiming sent nothing: the row fails as safe to retry and the job is released.
+    job_id, payload = await claim_in_worker_session(
+        _start_send, partial(_abandon_send, promotion_id), promotion_id, shipping_discount_id, new_like_at)
+    if gap_ms and payload["action"] == "share":
+        payload["gap_ms"] = gap_ms
+    finish: asyncio.Future | None = None
+    try:
+        try:
+            result = await browser_bridge.request(SimpleNamespace(id=job_id), "marketplace.promote", payload, timeout=150)
+        except browser_bridge.BrowserBridgeError:
+            result = None
+        # Shielded: a dropped request must not leave the send recorded as in progress.
+        finish = asyncio.ensure_future(in_worker_session(_finish_send, promotion_id, job_id, result))
+        return await asyncio.shield(finish)
+    except BaseException:
+        if finish is not None:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(finish)
+            if not finish.cancelled() and finish.exception() is None:
+                raise
+        await asyncio.shield(in_worker_session(_interrupted_send, promotion_id, job_id))
+        raise
+    finally:
+        release_api_job(job_id)
+
+
+async def _abandon_send(promotion_id: str, started: tuple[str, dict]) -> None:
+    job_id = started[0]
+    try:
+        await in_worker_session(_finish_send, promotion_id, job_id, {
+            "ok": False, "safe_to_retry": True, "error": "Stopped before it was sent. Nothing was sent."})
+    finally:
+        release_api_job(job_id)
+
+
+def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None,
+                new_like_at: datetime | None) -> tuple[str, dict]:
+    """Check the reviewed row, claim the job and mark the row ``sending``. Returns the job and Chrome's payload."""
     row = _get(db, promotion_id)
     if row.state != "preview":
         raise PromotionError(409, "This item was already sent or skipped. Review it again to act on it.")
@@ -355,7 +438,7 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
                           {"promotion": {"id": row.id, "marketplace": row.marketplace, "action": row.action}},
                           status="dispatched", current_step=STEP)
         claim_api_job(db, job.id)
-    error_code = None
+    job_id = job.id
     try:
         if row.automation_id:
             # Committed with ``sending`` below, so a pause either lands first and stops this send or waits for it.
@@ -371,40 +454,45 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
             still_on = db.execute(approval.values(enabled=True))
             if type_cast(CursorResult, still_on).rowcount != 1:
                 db.rollback()
-                repo.update_status(job.id, "failed", STEP, error="The automation changed or was turned off before this was sent.")
+                repo.update_status(job_id, "failed", STEP, error="The automation changed or was turned off before this was sent.")
                 raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
         # Durable before Chrome is asked: a crash from here on is unknown, never resent.
-        row.state, row.job_id, row.sent_at = "sending", job.id, _now()
+        row.state, row.job_id, row.sent_at = "sending", job_id, _now()
+        payload = {"action_id": row.id, "marketplace": row.marketplace, "action": row.action, "listing_id": row.listing_id,
+                   "confirm": True, "price_cents": row.price_cents, "offer_price_cents": row.offer_price_cents,
+                   "floor_cents": row.floor_cents, "shipping_discount_id": row.shipping_discount_id}
         db.commit()
-        repo.add_event(job.id, "native_progress", STEP, {"marketplace": row.marketplace, "step": row.action,
-                                                         "label": "Sharing" if row.action == "share" else "Sending offer"})
-        try:
-            result = await browser_bridge.request(job, "marketplace.promote", {
-                "action_id": row.id, "marketplace": row.marketplace, "action": row.action, "listing_id": row.listing_id,
-                "confirm": True, "price_cents": row.price_cents, "offer_price_cents": row.offer_price_cents,
-                "floor_cents": row.floor_cents, "shipping_discount_id": row.shipping_discount_id,
-                **({"gap_ms": gap_ms} if gap_ms and row.action == "share" else {}),
-            }, timeout=150)
-        except browser_bridge.BrowserBridgeError:
-            result = None
-        _settle(row, result)
-        error_code = (result or {}).get("error_code")
-        db.commit()
-        repo.update_status(job.id, "completed" if row.state == "done" else "failed", STEP,
-                           error=None if row.state == "done" else (row.note or "")[:300])
+        repo.add_event(job_id, "native_progress", STEP, {"marketplace": payload["marketplace"], "step": payload["action"],
+                                                         "label": "Sharing" if payload["action"] == "share" else "Sending offer"})
     except PromotionError:
+        release_api_job(job_id)
         raise
     except BaseException:
-        db.rollback()
-        fresh = db.get(ListingPromotion, row.id)
-        if fresh and fresh.state == "sending":
-            fresh.state, fresh.note = "unknown", UNKNOWN_NOTE
-            db.commit()
-        repo.update_status(job.id, "failed", STEP, error="The action stopped before it finished.")
+        try:
+            _interrupted_send(db, promotion_id, job_id)
+        finally:
+            release_api_job(job_id)
         raise
-    finally:
-        release_api_job(job.id)
+    return job_id, payload
+
+
+def _finish_send(db: Session, promotion_id: str, job_id: str, result: dict | None) -> dict:
+    row = _get(db, promotion_id)
+    _settle(row, result)
+    error_code = (result or {}).get("error_code")
+    db.commit()
+    JobRepo(db).update_status(job_id, "completed" if row.state == "done" else "failed", STEP,
+                              error=None if row.state == "done" else (row.note or "")[:300])
     return {**out(row), "error_code": error_code, "stop": error_code in STOP_CODES}
+
+
+def _interrupted_send(db: Session, promotion_id: str, job_id: str) -> None:
+    db.rollback()
+    fresh = db.get(ListingPromotion, promotion_id)
+    if fresh and fresh.state == "sending":
+        fresh.state, fresh.note = "unknown", UNKNOWN_NOTE
+        db.commit()
+    JobRepo(db).update_status(job_id, "failed", STEP, error="The action stopped before it finished.")
 
 
 def _settle(row: ListingPromotion, result: dict | None) -> None:
@@ -426,17 +514,29 @@ def _settle(row: ListingPromotion, result: dict | None) -> None:
         row.marketplace_message = scrub(result.get("marketplace_message"))
 
 
-async def check(db: Session, promotion_id: str) -> dict:
-    """Read the extension's journal for an unknown row. Never sends anything."""
-    row = _get(db, promotion_id)
-    if row.state != "unknown":
-        return out(row)
+async def check(promotion_id: str) -> dict:
+    """Read the extension's journal for an unknown row. Never sends anything, and holds no connection while Chrome answers."""
+    settled, job_key = await in_worker_session(_check_target, promotion_id)
+    if settled is not None:
+        return settled
     require_chrome()
     try:
-        answer = await browser_bridge.request(SimpleNamespace(id=row.job_id or f"promotion-{row.id}"),
-                                              "marketplace.promotion_result", {"action_id": row.id}, timeout=20)
+        answer = await browser_bridge.request(SimpleNamespace(id=job_key), "marketplace.promotion_result",
+                                              {"action_id": promotion_id}, timeout=20)
     except browser_bridge.BrowserBridgeError as exc:
         raise PromotionError(502, str(exc)) from exc
+    return await in_worker_session(_record_check, promotion_id, answer)
+
+
+def _check_target(db: Session, promotion_id: str) -> tuple[dict | None, str]:
+    row = _get(db, promotion_id)
+    if row.state != "unknown":
+        return out(row), ""
+    return None, row.job_id or f"promotion-{row.id}"
+
+
+def _record_check(db: Session, promotion_id: str, answer: dict) -> dict:
+    row = _get(db, promotion_id)
     if answer.get("finished") and isinstance(answer.get("result"), dict):
         _settle(row, answer["result"])
     else:

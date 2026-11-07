@@ -77,8 +77,8 @@ class ImportRequest(BaseModel):
 
 
 @router.get("/import/active")
-async def import_candidates(response: Response, page: int = Query(1, ge=1, le=4001), db: Session = Depends(get_db)):
-    return await _read_workspace(lambda client: etsy_import.active_listings(client, db, page), response)
+async def import_candidates(response: Response, page: int = Query(1, ge=1, le=4001)):
+    return await _read_workspace(lambda client: etsy_import.active_listings(client, page), response)
 
 
 @router.post("/import")

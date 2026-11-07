@@ -378,9 +378,12 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 reasons[_skip_reason(exc, send)] += 1
                 continue
             db.add(send)
+            db.flush()
+            send_id = send.id
+            # Committed, and nothing reloaded: perform holds no connection while Chrome sends, and neither does this.
             db.commit()
             try:
-                result = await promotions.perform(db, send.id, shipping,
+                result = await promotions.perform(send_id, shipping,
                                                   new_like_at=new_like_at,
                                                   gap_ms=SHARE_SPEEDS.get(row.speed or "") if row.action == "share" else None)
             except PromotionError as exc:

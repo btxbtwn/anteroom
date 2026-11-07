@@ -2,17 +2,24 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
-from starlette.concurrency import run_in_threadpool
 
 from vendoo_studio.services import account_import, hosted_photos
-from vendoo_studio.services.hosted_database import get_seller_db
+from vendoo_studio.services.hosted_database import get_seller_db, in_seller_session
 
 router = APIRouter(prefix='/api/account-import')
 
 
 def get_import_db(db=Depends(get_seller_db)):
+    return _quiet(db)
+
+
+def _quiet(db):
     db.info['quiet_changes'] = True
     return db
+
+
+def _import_photo(db, photo_id, field, data, token):
+    return account_import.import_photo(_quiet(db), photo_id, field, data, token)
 
 
 class Rows(BaseModel):
@@ -39,14 +46,14 @@ def pending_photos(db=Depends(get_import_db)):
 
 
 @router.post('/photos/{photo_id}/{field}')
-async def photo(photo_id: str, field: str, request: Request, db=Depends(get_import_db)):
+async def photo(photo_id: str, field: str, request: Request):
     data = bytearray()
     async for chunk in request.stream():
         if len(data) + len(chunk) > hosted_photos.MAX_BYTES:
             raise HTTPException(413, f'Choose a photo of {hosted_photos.MAX_BYTES // (1024 * 1024)} MB or smaller')
         data.extend(chunk)
     token = request.headers['authorization'].partition(' ')[2]
-    return await run_in_threadpool(account_import.import_photo, db, photo_id, field, bytes(data), token)
+    return await in_seller_session(request, _import_photo, photo_id, field, bytes(data), token)
 
 
 @router.post('/finish')

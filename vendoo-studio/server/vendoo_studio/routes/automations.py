@@ -5,6 +5,7 @@ wait for a separate confirmation of each item, action and named marketplace.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -12,7 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import get_db
+from vendoo_studio.database import claim_in_worker_session, get_db, in_worker_session
+from vendoo_studio.models.automation import AutomationApproval
 from vendoo_studio.repositories.queries import JobRepo
 from vendoo_studio.services import automations
 from vendoo_studio.services.automation_scheduler import _execute
@@ -116,43 +118,71 @@ def list_approvals(db: Session = Depends(get_db)):
     return automations.list_pending_approvals(db)
 
 
+def _claim_approval(db: Session, approval_id: str, body: ConfirmBody) -> dict:
+    """Check the reviewed action still matches and nothing else runs, then claim it. One session."""
+    from vendoo_studio.services.api_job_lock import start_gate
+
+    with start_gate():
+        row = automations.get_approval(db, approval_id)
+        if JobRepo(db).get_active():
+            raise AutomationError("A marketplace job is running. Wait for it to finish.", 409)
+        automations.claim_approval(db, row, review_token=body.review_token, action=body.action,
+                                  marketplaces=body.marketplaces, revision_id=body.revision_id)
+        return {"automation_id": row.automation_id, "run_id": row.run_id, "conversation_id": row.conversation_id,
+                "title": row.title, "action": row.action, "marketplaces": list(row.marketplaces),
+                "revision_id": row.revision_id}
+
+
+def _settle_approval(db: Session, approval_id: str, claimed: dict, item: dict, result: dict) -> dict:
+    row = db.get(AutomationApproval, approval_id)
+    assert row is not None
+    try:
+        automations.note_relist_result(db, claimed["automation_id"], claimed["run_id"], item, result)
+        view = automations.mark_approval(db, row, "approved" if result.get("ok") else "failed")
+        automations.record_approval_result(db, row, result)
+    except BaseException:
+        db.rollback()
+        _fail_executing(db, approval_id)
+        raise
+    view["result"] = result
+    return view
+
+
+def _fail_executing(db: Session, approval_id: str) -> None:
+    row = db.get(AutomationApproval, approval_id)
+    if row is not None and row.status == "executing":
+        automations.mark_approval(db, row, "failed")
+
+
 @router.post("/approvals/{approval_id}/approve")
-async def approve_listing(approval_id: str, body: ConfirmBody, db: Session = Depends(get_db)):
+async def approve_listing(approval_id: str, body: ConfirmBody):
     """Perform the one item/action/revision/marketplace set the seller reviewed."""
     from vendoo_studio.services.automation_actions import perform, publish_revision
-    from vendoo_studio.services.api_job_lock import start_gate
 
     if body.confirm is not True:
         raise HTTPException(400, "Confirm this item's marketplace action.")
-    row = None
     try:
-        with start_gate():
-            db.expire_all()
-            row = automations.get_approval(db, approval_id)
-            if JobRepo(db).get_active():
-                raise AutomationError("A marketplace job is running. Wait for it to finish.", 409)
-            automations.claim_approval(db, row, review_token=body.review_token, action=body.action,
-                                      marketplaces=body.marketplaces, revision_id=body.revision_id)
-        item = {"conversation_id": row.conversation_id, "title": row.title}
-        if row.action == "publish":
-            result = await publish_revision(db, row.conversation_id, list(row.marketplaces), row.revision_id)
+        # A request dropped while claiming ends the claimed approval as failed rather than executing.
+        claimed = await claim_in_worker_session(
+            _claim_approval, lambda _claimed: in_worker_session(_fail_executing, approval_id), approval_id, body)
+    except AutomationError as exc:
+        raise _fail(exc) from exc
+    # Claimed: each database step below has its own short session, none held while the marketplaces answer.
+    try:
+        item = {"conversation_id": claimed["conversation_id"], "title": claimed["title"]}
+        if claimed["action"] == "publish":
+            result = await publish_revision(claimed["conversation_id"], claimed["marketplaces"], claimed["revision_id"])
         else:
-            result = await perform(db, item, {"type": row.action}, list(row.marketplaces), row.revision_id, confirm=True)
-        automations.note_relist_result(db, row.automation_id, row.run_id, item, result)
-        view = automations.mark_approval(db, row, "approved" if result.get("ok") else "failed")
-        automations.record_approval_result(db, row, result)
-        view["result"] = result
-        return view
+            result = await perform(item, {"type": claimed["action"]}, claimed["marketplaces"], claimed["revision_id"], confirm=True)
     except AutomationBusy as exc:
-        if row is not None and row.status == "executing":
-            automations.mark_approval(db, row, "failed")
+        await asyncio.shield(in_worker_session(_fail_executing, approval_id))
         raise HTTPException(409, str(exc) or "A marketplace job is running. Review a new action after it finishes.") from exc
     except AutomationError as exc:
         raise _fail(exc) from exc
     except BaseException:
-        if row is not None and row.status == "executing":
-            automations.mark_approval(db, row, "failed")
+        await asyncio.shield(in_worker_session(_fail_executing, approval_id))
         raise
+    return await asyncio.shield(in_worker_session(_settle_approval, approval_id, claimed, item, result))
 
 
 @router.post("")
@@ -200,26 +230,37 @@ def delete_automation(automation_id: str, db: Session = Depends(get_db)):
         raise _fail(exc) from exc
 
 
-@router.post("/{automation_id}/run")
-async def run_automation(automation_id: str, body: RunBody | None = None, db: Session = Depends(get_db)):
-    """Run a confirmed automation now. A dry run only records what would change."""
+def _open_run(db: Session, automation_id: str, dry_run: bool) -> str:
     from vendoo_studio.models.automation import AutomationRun
 
+    row = automations.get_automation(db, automation_id)
+    if db.query(AutomationRun).filter(AutomationRun.status.in_(("running", "waiting"))).first():
+        raise AutomationError("Another automation is already running.", 409)
+    if JobRepo(db).get_active() and not dry_run:
+        raise AutomationError("A marketplace job is running. Wait for it to finish.", 409)
+    return automations.open_manual_run(db, row, dry_run=dry_run, now=datetime.now(UTC)).id
+
+
+def _run_view(db: Session, run_id: str) -> dict:
+    from vendoo_studio.models.automation import AutomationRun
+
+    run = db.get(AutomationRun, run_id)
+    assert run is not None
+    return automations.run_view(run)
+
+
+@router.post("/{automation_id}/run")
+async def run_automation(automation_id: str, body: RunBody | None = None):
+    """Run a confirmed automation now. A dry run only records what would change."""
+    dry_run = bool(body.dry_run) if body else False
     try:
-        row = automations.get_automation(db, automation_id)
-        if db.query(AutomationRun).filter(AutomationRun.status.in_(("running", "waiting"))).first():
-            raise AutomationError("Another automation is already running.", 409)
-        if JobRepo(db).get_active() and not (body and body.dry_run):
-            raise AutomationError("A marketplace job is running. Wait for it to finish.", 409)
-        dry_run = bool(body.dry_run) if body else False
-        run = automations.open_manual_run(db, row, dry_run=dry_run, now=datetime.now(UTC))
-        await _execute(db, run, row, datetime.now(UTC), None if not dry_run else _dry_executor)
+        run_id = await in_worker_session(_open_run, automation_id, dry_run)
+        await _execute(run_id, automation_id, datetime.now(UTC), None if not dry_run else _dry_executor)
     except AutomationBusy as exc:
         raise HTTPException(409, str(exc) or "A marketplace job is running. Wait for it to finish.") from exc
     except AutomationError as exc:
         raise _fail(exc) from exc
-    db.refresh(run)
-    return automations.run_view(run)
+    return await in_worker_session(_run_view, run_id)
 
 
 async def _dry_executor(*_args, **_kwargs):

@@ -47,6 +47,9 @@ class CancelJobRouteTest(unittest.TestCase):
                 pass
 
         app.dependency_overrides[get_db] = override_get_db
+        sessions = patch("vendoo_studio.database.SessionLocal", Session)
+        sessions.start()
+        self.addCleanup(sessions.stop)
         self.client = TestClient(app)
         extension_manager.connection = None
         extension_manager.paired = False

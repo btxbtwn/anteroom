@@ -15,6 +15,6 @@ def preview(body: bulk_marketplace.PreviewRequest, db: Session = Depends(get_db)
 
 
 @router.post("/perform")
-async def perform(body: bulk_marketplace.PerformRequest, db: Session = Depends(get_db)):
+async def perform(body: bulk_marketplace.PerformRequest):
     """Perform one reviewed item's action on its named marketplaces. Requires confirm."""
-    return await bulk_marketplace.perform(db, body)
+    return await bulk_marketplace.perform(body)

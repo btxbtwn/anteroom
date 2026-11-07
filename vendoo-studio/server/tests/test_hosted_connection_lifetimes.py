@@ -237,13 +237,14 @@ def test_generation_provider_lookup_does_not_hold_the_draft_connection(single_co
 
     monkeypatch.setattr(chat, '_require_provider', configured_provider)
     monkeypatch.setattr(chat, 'get_photo_provider', lambda: provider)
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
     with single_connection() as db:
         db.add(Conversation(id='draft', title='Tee'))
         db.commit()
-        with pytest.raises(HTTPException) as error:
-            asyncio.run(chat.generate_listing('draft', db=db))
-        assert error.value.status_code == 400
-        assert 'No photos' in error.value.detail
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(chat.generate_listing('draft'))
+    assert error.value.status_code == 400
+    assert 'No photos' in error.value.detail
 
 
 @pytest.mark.parametrize('running', [True, False])
@@ -259,12 +260,13 @@ def test_generation_resume_does_not_reconfigure_the_provider(single_connection, 
     monkeypatch.setattr(chat, 'active_generation', lambda _id: run)
     monkeypatch.setattr(chat, 'stream_generation', lambda _run: 'running')
     monkeypatch.setattr(chat, 'stream_finished', lambda: 'finished')
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
     with single_connection() as db:
         db.add(Conversation(id='draft', title='Tee'))
         db.commit()
-        assert asyncio.run(chat.generate_listing('draft', resume=True, db=db)) == (
-            'running' if running else 'finished'
-        )
+    assert asyncio.run(chat.generate_listing('draft', resume=True)) == (
+        'running' if running else 'finished'
+    )
 
 
 def test_generation_downloads_photos_without_a_draft_connection(single_connection, monkeypatch):
@@ -285,13 +287,14 @@ def test_generation_downloads_photos_without_a_draft_connection(single_connectio
     monkeypatch.setattr(chat, 'photo_store', lambda: SimpleNamespace(local_paths=local_paths))
     monkeypatch.setattr(chat, 'start_generation', lambda *_args: object())
     monkeypatch.setattr(chat, 'stream_generation', lambda _run: 'started')
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
     with single_connection() as db:
         db.add(Conversation(id='draft', title='Tee'))
         db.commit()
         db.add(Photo(conversation_id='draft', original_filename='tee.jpg', stored_filename='tee.jpg',
                      mime_type='image/jpeg', size_bytes=1))
         db.commit()
-        assert asyncio.run(chat.generate_listing('draft', db=db)) == 'started'
+    assert asyncio.run(chat.generate_listing('draft')) == 'started'
     assert downloaded == ['tee.jpg']
 
 

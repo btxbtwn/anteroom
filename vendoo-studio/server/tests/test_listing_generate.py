@@ -1277,6 +1277,9 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.conv_id = conv.id
         db.close()
 
+        from vendoo_studio import database
+
+        self.app_sessions = database.SessionLocal
         self.patches = [
             patch("vendoo_studio.routes.chat.get_listing_provider", return_value=self.provider),
             patch("vendoo_studio.routes.chat.get_photo_provider", return_value=self.provider),
@@ -1284,6 +1287,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
             patch("vendoo_studio.services.listing_generation.research_sold_comps", new=AsyncMock(return_value="")),
             patch("vendoo_studio.services.listing_generation.comps_search_available", return_value=False),
             patch("vendoo_studio.services.listing_generation.prepare_generation_schema", new=AsyncMock(return_value={})),
+            patch("vendoo_studio.database.SessionLocal", self.Session),
         ]
         for p in self.patches:
             p.start()
@@ -1352,7 +1356,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(finishing), 1)
         await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
         # Every run's stage timings are saved.
-        from vendoo_studio.database import SessionLocal as AppSession
+        AppSession = self.app_sessions  # timings are saved in the app database
         from vendoo_studio.services.generation_timing import for_conversation
 
         db = AppSession()
@@ -1364,7 +1368,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue({"photo_analysis", "categories", "listing_stream"} <= set(timing["stages"]))
 
     async def test_a_failure_after_the_run_finished_records_one_timing(self):
-        from vendoo_studio.database import SessionLocal as AppSession
+        AppSession = self.app_sessions  # timings are saved in the app database
         from vendoo_studio.services import listing_generation
         from vendoo_studio.services.generation_timing import for_conversation
 
@@ -1438,7 +1442,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
     async def test_generation_persists_reported_model_usage(self):
         from vendoo_studio.services import model_usage
         from vendoo_studio.services.generation_timing import for_conversation
-        from vendoo_studio.database import SessionLocal as AppSession
+        AppSession = self.app_sessions  # timings are saved in the app database
 
         original = self.provider.chat
         async def measured(messages, stream=True):

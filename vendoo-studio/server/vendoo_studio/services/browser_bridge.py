@@ -29,7 +29,8 @@ async def request(job, message_type: str, payload: dict[str, Any] | None = None,
     if message_type in {"job.vendoo_api", "marketplace.execute", "marketplace.delete", "marketplace.promote"}:
         from vendoo_studio.services import listing_mode
 
-        listing_mode.require("vendoo" if message_type == "job.vendoo_api" else "direct")
+        # A hosted seller's mode is read from the database: keep that off the event loop.
+        await asyncio.to_thread(listing_mode.require, "vendoo" if message_type == "job.vendoo_api" else "direct")
     manager = _manager()
     if not manager.connected:
         raise BrowserBridgeError("Connect Chrome first.")

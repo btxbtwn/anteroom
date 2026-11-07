@@ -51,16 +51,16 @@ def status(db: Session = Depends(get_db)):
 
 
 @router.post("/preview")
-async def preview(body: PreviewRequest, db: Session = Depends(get_db)):
+async def preview(body: PreviewRequest):
     try:
-        return await ebay_offers.preview(db, [item.model_dump() for item in body.selections], body.discount_percent)
+        return await ebay_offers.preview([item.model_dump() for item in body.selections], body.discount_percent)
     except (ValueError, SignInRequired, ebay_api.EbayError, httpx.HTTPError) as exc:
         raise _error(exc) from exc
 
 
 @router.post("/send")
-async def send(body: Approval, db: Session = Depends(get_db)):
-    return await ebay_offers.send_previews(db, list(dict.fromkeys(body.attempt_ids)))
+async def send(body: Approval):
+    return await ebay_offers.send_previews(list(dict.fromkeys(body.attempt_ids)))
 
 
 @router.post("/enable")

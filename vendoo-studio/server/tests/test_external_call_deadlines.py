@@ -127,6 +127,7 @@ class _Workspace(unittest.IsolatedAsyncioTestCase):
         db.close()
         patches = [
             *_deadlines(),
+            patch("vendoo_studio.database.SessionLocal", self.Session),
             patch.object(chat_routes, "SessionLocal", self.Session),
             patch.object(listing_generation, "SessionLocal", self.Session),
             patch.object(listing_generation, "load_skill_rules", return_value="rules"),
@@ -253,6 +254,7 @@ def assistant(monkeypatch, tmp_path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(assistant_route, "SessionLocal", factory)
+    monkeypatch.setattr("vendoo_studio.database.SessionLocal", factory)
     monkeypatch.setattr("vendoo_studio.services.box_scout.state_path", lambda: tmp_path / "sourcing.json")
     monkeypatch.setenv(sandbox.ENV_VAR, "1")
     monkeypatch.setattr(provider_deadlines, "STREAM_IDLE_SEC", SHORT)

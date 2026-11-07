@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.models.schema import ListingSchema
 from vendoo_studio.services import ebay_actions, inventory_import
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, NS, assert_identity, trading_xml
@@ -22,7 +23,7 @@ def _number(value: str | None) -> int | None:
         return None
 
 
-async def active_listings(client: EbayClient, db: Session, page_number: int) -> dict:
+async def active_listings(client: EbayClient, page_number: int) -> dict:
     root = ET.Element("GetMyeBaySellingRequest", xmlns=NS["e"])
     active = ET.SubElement(root, "ActiveList")
     ET.SubElement(active, "Include").text = "true"
@@ -35,6 +36,11 @@ async def active_listings(client: EbayClient, db: Session, page_number: int) -> 
     active = result["xml"].find("e:ActiveList", NS)
     if active is None:
         return {"rows": [], "page": page_number, "total": 0, "has_more": False}
+    # eBay has answered: match its rows against inventory with a short session of their own.
+    return await in_worker_session(_candidate_page, active, page_number)
+
+
+def _candidate_page(db: Session, active: ET.Element, page_number: int) -> dict:
     from vendoo_studio.services.chrome_import import match_candidates, suggested_match
 
     items = match_candidates(db)

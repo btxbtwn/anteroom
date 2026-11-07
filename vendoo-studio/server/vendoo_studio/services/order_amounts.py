@@ -16,6 +16,7 @@ Nothing on any marketplace changes.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable
@@ -241,19 +242,20 @@ async def _ebay_detail(client, order_id: str) -> dict | None:
     return detail if isinstance(detail, dict) and detail.get("orderId") == order_id else None
 
 
-async def record(db: Session, marketplace: str, orders: list[tuple[str, dict | None]], observed: datetime, client=None) -> int:
+async def record(session_factory: Callable[[], Session], marketplace: str, orders: list[tuple[str, dict | None]],
+                 observed: datetime, client=None) -> int:
     """Record amounts for orders just read, using the order record already fetched with them.
 
     ``orders`` are (order ID, Fulfillment order or Etsy receipt). eBay label
     charges are one more read per order, made only when amounts are missing.
+    Each database step runs on a worker thread with its own short session, so
+    no connection is held while eBay answers.
     """
     changed = 0
     for order_id, source in orders:
-        rows = db.query(MarketplaceSale).filter_by(marketplace=marketplace, order_id=order_id).all()
-        # Marked checked even when unreadable, so a bad order is not read again every catch-up.
-        if not needs_amounts(marketplace, rows) or not _due(marketplace, order_id) or not source:
+        lines = await asyncio.to_thread(_lines_needing_amounts, session_factory, marketplace, order_id, bool(source))
+        if lines is None or not source:
             continue
-        lines = [(row.line_id, row.listing_id) for row in rows if row.source == "marketplace"]
         try:
             if marketplace == "ebay":
                 money = ebay_money(source, lines, None)
@@ -262,11 +264,28 @@ async def record(db: Session, marketplace: str, orders: list[tuple[str, dict | N
             else:
                 money = etsy_money(source, lines)
             if money is not None:
-                changed += store(db, marketplace, order_id, money, observed)
+                changed += await asyncio.to_thread(_store, session_factory, marketplace, order_id, money, observed)
         except Exception:  # noqa: BLE001 - one unreadable order must not stop the others
-            db.rollback()
             log.warning("%s amounts could not be recorded for one order", marketplace)
     return changed
+
+
+def _lines_needing_amounts(session_factory, marketplace: str, order_id: str, readable: bool) -> list[tuple[str, str | None]] | None:
+    with session_factory() as db:
+        rows = db.query(MarketplaceSale).filter_by(marketplace=marketplace, order_id=order_id).all()
+        # Marked checked even when unreadable, so a bad order is not read again every catch-up.
+        if not needs_amounts(marketplace, rows) or not _due(marketplace, order_id) or not readable:
+            return None
+        return [(row.line_id, row.listing_id) for row in rows if row.source == "marketplace"]
+
+
+def _store(session_factory, marketplace: str, order_id: str, money: OrderMoney, observed: datetime) -> int:
+    with session_factory() as db:
+        try:
+            return store(db, marketplace, order_id, money, observed)
+        except Exception:
+            db.rollback()
+            raise
 
 
 def _backlog(db: Session, marketplace: str, limit: int) -> list[str]:
@@ -309,5 +328,4 @@ async def backfill(marketplace: str, session_factory: Callable[[], Session], lim
             _checked[(_seller(), marketplace, order_id)] = time.monotonic()
             continue
         sources.append((order_id, source))
-    with session_factory() as db:
-        return await record(db, marketplace, sources, observed, ebay)
+    return await record(session_factory, marketplace, sources, observed, ebay)

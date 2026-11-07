@@ -136,6 +136,32 @@ async def in_worker_session(work, /, *args):
     return await asyncio.to_thread(run)
 
 
+async def claim_in_worker_session(work, undo, /, *args):
+    """Run a step that claims something (a job, a ``sending`` mark) through ``in_worker_session``.
+
+    Before, such a step ran on the event loop and nothing could interrupt it
+    between the claim and the code that settles it. On a worker thread a
+    dropped request could cancel the caller after the claim committed. So the
+    step is shielded, and if the caller is cancelled, ``undo(result)`` (an
+    async callable) runs once the claim lands, so nothing stays claimed with
+    nobody working on it.
+    """
+    step = asyncio.ensure_future(in_worker_session(work, *args))
+    try:
+        return await asyncio.shield(step)
+    except asyncio.CancelledError:
+        await asyncio.shield(_undo_once_claimed(step, undo))
+        raise
+
+
+async def _undo_once_claimed(step, undo) -> None:
+    try:
+        claimed = await step
+    except Exception:  # noqa: BLE001 - the step failed, so nothing was claimed
+        return
+    await undo(claimed)
+
+
 def load_models() -> None:
     """Import every model so ``Base.metadata`` describes the whole schema."""
     from vendoo_studio.models.background_task import BackgroundTask, BackgroundTaskEvent  # noqa: F401
