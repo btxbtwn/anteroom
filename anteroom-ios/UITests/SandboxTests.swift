@@ -395,11 +395,16 @@ fileprivate extension XCTestCase {
         for _ in 0..<12 where !field.isHittable { app.scrollViews.firstMatch.swipeUp() }
         XCTAssertTrue(field.isHittable)
         // A tap during a scroll can miss focus; tap until the field has it.
+        // Tapping the right end puts the cursor after any existing text.
         for _ in 0..<3 {
-            field.tap()
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
             dismissKeyboardIntroduction(app)
             if app.keyboards.firstMatch.waitForExistence(timeout: 3),
                (field.value(forKey: "hasKeyboardFocus") as? Bool) == true { break }
+        }
+        // The hosted API names a new draft "New Listing"; replace that.
+        if let current = field.value as? String, !current.isEmpty, current != "Title" {
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
         }
         field.typeText(text)
         let done = app.buttons["Done"].firstMatch
@@ -424,8 +429,9 @@ fileprivate extension XCTestCase {
         XCTAssertTrue(create.waitForExistence(timeout: 30))
         XCTAssertTrue(create.isHittable)
         create.tap()
-        XCTAssertTrue(app.navigationBars["Listing"].waitForExistence(timeout: 15),
-                      "New listing must open the untitled draft in the editor")
+        // The editor shows the draft's title, or "Listing" while it has none.
+        let editor = app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["Listing", "New Listing"])).firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 15), "New listing must open the untitled draft in the editor")
     }
 
     @MainActor
