@@ -242,7 +242,7 @@ struct InventoryView: View {
                     Text("Create a listing, add your photos, and keep your draft ready to edit.")
                 } actions: {
                     Button("New listing") { showingNewListing = true }
-                        .buttonStyle(.borderedProminent)
+                        .workspaceProminentButton()
                         .frame(minHeight: 44)
                 }
             } else if !search.isEmpty {
@@ -265,7 +265,7 @@ struct InventoryView: View {
             } actions: {
                 Button("Try again") { Task { await model.reload() } }
                     .disabled(model.isLoading)
-                    .buttonStyle(.borderedProminent)
+                    .workspaceProminentButton()
                     .frame(minHeight: 44)
             }
         } else if !model.hasLoaded && model.isLoading {
@@ -406,7 +406,11 @@ struct ListingRowContent<Thumbnail: View>: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).font(.subheadline.weight(.medium)).lineLimit(2)
                 HStack(spacing: 6) {
-                    Text(listing.statusLabel).fontWeight(.medium).foregroundStyle(statusColor)
+                    HStack(spacing: 5) {
+                        Circle().fill(statusColor).frame(width: 6, height: 6).accessibilityHidden(true)
+                        Text(listing.statusLabel).fontWeight(.medium)
+                            .foregroundStyle(listing.inventoryStatus == "failed" ? WorkspaceStyle.destructive : WorkspaceStyle.mutedText)
+                    }
                     if let price = listing.price {
                         Text(price, format: .currency(code: "USD")).foregroundStyle(.secondary)
                     }
@@ -440,7 +444,7 @@ struct ListingRowContent<Thumbnail: View>: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The web's status tones (ListingBits.tsx): a draft stays muted.
+    /// The web's status dots (ListingBits.tsx): the word stays muted.
     private var statusColor: Color {
         switch listing.inventoryStatus {
         case "draft": WorkspaceStyle.mutedText
