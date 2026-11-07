@@ -1,0 +1,1 @@
+- Delete your Anteroom account from the web app's account menu or the iPhone's Settings. Your listings, photos, records, settings and stored sign-ins are removed; listings that are live on marketplaces stay there.

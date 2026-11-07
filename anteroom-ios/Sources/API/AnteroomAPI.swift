@@ -535,6 +535,15 @@ final class AnteroomAPI: Sendable {
     }
 
     /// Views and features the hosted workspace offers (`/api/runtime`).
+    // MARK: Account
+
+    /// Deletes the signed-in seller's Anteroom account: listings, photos, records,
+    /// settings and stored sign-ins. Live marketplace listings are left alone.
+    func deleteAccount() async throws {
+        struct Body: Encodable { let confirm: Bool }
+        _ = try await send(request("DELETE", "api/account", json: Body(confirm: true)))
+    }
+
     func runtime() async throws -> (views: [String], features: [String]) {
         struct Payload: Decodable { let views: [String]?; let features: [String] }
         let payload: Payload = try await decode(request("GET", "api/runtime"))
