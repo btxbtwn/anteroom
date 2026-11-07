@@ -435,7 +435,7 @@ def test_generate_releases_the_seller_session_before_streaming(monkeypatch):
 
     monkeypatch.setattr(hosted_tasks, 'task_stream', lambda task_id: f'stream:{task_id}')
     with use(ServiceContext(USER_ID, lambda: DB(), MagicMock(), MagicMock(), MagicMock())):
-        assert hosted_tasks.generate('draft') == 'stream:task1'
+        assert hosted_tasks.generate('draft', MagicMock()) == 'stream:task1'
     assert closed == ['closed']
 
 
