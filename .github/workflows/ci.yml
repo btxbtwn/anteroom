@@ -387,6 +387,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Include the tested merge's parents for the version comparison.
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -413,6 +415,10 @@ jobs:
               done
       - name: Unit tests
         run: node --test 'vendoo-extension/tests/*.test.js'
+      - name: Require a version bump for changed Bridge code
+        if: github.event_name == 'pull_request'
+        # checkout tests a merge; its first parent is the actual base.
+        run: node vendoo-extension/tools/version-bump/check.js "$(git rev-parse HEAD^1)"
 
   webhook-relay:
     name: Webhook relay

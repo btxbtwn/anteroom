@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
+
+// The simulated Bridge is current; an older one makes the site ask for an update.
+const BRIDGE_VERSION: string = JSON.parse(readFileSync(new URL("../../vendoo-extension/manifest.json", import.meta.url), "utf8")).version;
 
 test("an approved Chrome recovers from a missing Bridge without another Connect click", async ({ page, baseURL }, info) => {
   test.setTimeout(60000);
@@ -26,7 +30,7 @@ test("an approved Chrome recovers from a missing Bridge without another Connect 
   await page.route("**/api/browser-relay/next?**", route => route.abort());
   // The simulated Bridge must not leave presence behind for other tests.
   await page.route("**/api/browser-relay/heartbeat", route => route.abort());
-  await page.addInitScript(() => {
+  await page.addInitScript((bridgeVersion: string) => {
     const state = window as Window & { bridgeReady: boolean; connectClicks: number; onBridgeDisconnect: () => Promise<void> };
     state.bridgeReady = false;
     state.connectClicks = 0;
@@ -37,14 +41,14 @@ test("an approved Chrome recovers from a missing Bridge without another Connect 
       if (!state.bridgeReady) return;
       if (data.action === "disconnect") {
         void state.onBridgeDisconnect().then(() => window.postMessage({ source: "anteroom-extension", version: 1,
-          requestId: data.requestId, ok: true, state: "disconnected", extensionVersion: "0.2.51" }, location.origin));
+          requestId: data.requestId, ok: true, state: "disconnected", extensionVersion: bridgeVersion }, location.origin));
         return;
       }
       window.postMessage({ source: "anteroom-extension", version: 1, requestId: data.requestId,
-        ok: true, state: "connected", extensionVersion: "0.2.51",
+        ok: true, state: "connected", extensionVersion: bridgeVersion,
         supportedActions: ["marketplace.actions", "marketplace.sessions", "marketplace.sales_history"] }, location.origin);
     });
-  });
+  }, BRIDGE_VERSION);
   // Bob, not Alice: the server keeps a Bridge present for 90 seconds, and the tests that
   // follow expect Alice's Chrome never to have connected.
   await page.clock.install();
