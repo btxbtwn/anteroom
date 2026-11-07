@@ -4,6 +4,7 @@
 !vendoo-studio/
 vendoo-studio/*
 !vendoo-studio/pyproject.toml
+!vendoo-studio/uv.lock
 !vendoo-studio/VERSION
 !vendoo-studio/server/
 vendoo-studio/server/*
