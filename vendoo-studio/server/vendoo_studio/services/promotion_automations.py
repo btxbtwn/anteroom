@@ -59,6 +59,9 @@ OFFER_INTERVAL = timedelta(minutes=15)
 OFFER_READS = 60
 READ_GAP_S = 2.0
 TICK_S = 60.0
+# How long a due round waits for Chrome to reconnect, e.g. after a restart,
+# before it is recorded as unable to run.
+CHROME_GRACE = timedelta(minutes=10)
 INTERRUPTED = "Anteroom stopped during this round."
 _task: asyncio.Task | None = None
 
@@ -434,9 +437,20 @@ async def tick(db: Session, *, now: datetime | None = None, sleep=asyncio.sleep)
     for row in due:
         if JobRepo(db).get_active():
             break
+        if _awaiting_chrome(row, moment):
+            continue
         await run_round(db, row, sleep=sleep)
         ran += 1
     return ran
+
+
+def _awaiting_chrome(row: PromotionAutomation, moment: datetime) -> bool:
+    """Whether a due round should wait for Chrome to reconnect rather than record a round that cannot run."""
+    try:
+        promotions.require_chrome()
+    except PromotionError as exc:
+        return exc.code == "chrome" and row.next_run_at is not None and moment - row.next_run_at < CHROME_GRACE
+    return False
 
 
 async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:

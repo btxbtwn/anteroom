@@ -586,10 +586,26 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertIn("not confirmed", automation.paused_reason)
         self.assertEqual(self.db.query(PromotionRun).one().note, promotion_automations.INTERRUPTED)
 
-    def test_chrome_not_connected_records_the_round_and_sends_nothing(self):
+    def test_a_round_waits_quietly_while_chrome_reconnects(self):
+        # After a restart Chrome takes a moment to reconnect: no empty round, and the slot is kept.
         saved = self.create(SHARE)
         self.enable(saved["id"])
         self.due(saved["id"])
+        due_at = self.db.get(PromotionAutomation, saved["id"]).next_run_at
+        with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
+            self.tick()
+        self.assertEqual(self.db.query(PromotionRun).count(), 0)
+        self.assertEqual(self.db.get(PromotionAutomation, saved["id"]).next_run_at, due_at)
+        self.bridge.assert_not_called()
+        self.tick()
+        self.assertEqual(self.db.query(PromotionRun).count(), 1)
+
+    def test_chrome_disconnected_for_long_records_the_round_and_sends_nothing(self):
+        saved = self.create(SHARE)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.next_run_at = _now() - promotion_automations.CHROME_GRACE - timedelta(minutes=1)
+        self.db.commit()
         with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
             self.tick()
         self.assertIn("Connect Chrome", self.db.query(PromotionRun).one().note)
