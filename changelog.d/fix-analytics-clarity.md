@@ -1,0 +1,5 @@
+- Analytics uses the same names on both tabs: Revenue, Profit, Items sold, Median days to sell and Sell-through, with the period shown next to the figures.
+- Amounts on Analytics always show cents and the currency symbol ($68.00, not "USD 68").
+- Analytics says exactly which amounts are missing, such as "shipping you paid (8)", once, with a button to show those sales, instead of a yellow warning on every sale.
+- On a phone, Analytics shows the figures first: period, Filters and Export sit on one row.
+- Analytics no longer repeats its title under the tabs.

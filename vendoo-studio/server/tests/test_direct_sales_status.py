@@ -589,3 +589,22 @@ def test_a_sale_whose_date_the_seller_cleared_has_no_sale_date(env):
     assert row["status"] == "sold"
     assert row["sold_at"] is None
     assert _analytics_sale_dates(env.db, "coat") == []
+
+
+def test_sales_records_and_analytics_name_the_same_missing_amounts(env):
+    """Both pages say which amounts are missing, counted per sale, from one source."""
+    from datetime import date
+
+    from vendoo_studio.services.sales_ledger import list_sales
+
+    item(env.db, "coat")
+    # Price, fees and cost recorded; both shipping amounts left blank.
+    line(env.db, "coat", financials={"item_revenue": "40", "fees": "5", "item_cost": "5", "refunds": "0"})
+    item(env.db, "boots")
+    line(env.db, "boots", order="o2", financials={"item_revenue": "40", "fees": "5", "shipping_cost": "3",
+                                                  "shipping_credit": "2", "refunds": "0", "item_cost": "5"})
+    summary = list_sales(env.db, date(1970, 1, 1), datetime.now(UTC).date())["summary"]
+    expected = [{"label": "shipping the buyer paid", "count": 1}, {"label": "shipping you paid", "count": 1}]
+    assert summary["missing_records"] == 1
+    assert summary["missing_counts"] == expected
+    assert inventory_analytics(env.db, range_id="30d")["missing_counts"] == expected

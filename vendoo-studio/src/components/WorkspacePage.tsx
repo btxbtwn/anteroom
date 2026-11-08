@@ -51,17 +51,20 @@ export function PageHeader({
   actions,
   children,
 }: {
-  title: ReactNode;
+  /** Leave out when the breadcrumb already names the page; the page keeps an sr-only h1. */
+  title?: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <header className="flex flex-col gap-3">
-      <div className="flex min-h-8 flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1>
-        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-      </div>
+      {title || actions ? (
+        <div className="flex min-h-8 flex-wrap items-center justify-between gap-3">
+          {title ? <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1> : null}
+          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        </div>
+      ) : null}
       {description ? <p className="max-w-2xl text-sm text-muted-foreground">{description}</p> : null}
       {children}
     </header>

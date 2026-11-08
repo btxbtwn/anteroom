@@ -1,22 +1,25 @@
 import { SalesLedger } from "./SalesLedger";
 import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
 import "./ebay/ebay.css";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, RefreshCwIcon } from "lucide-react";
 import { api } from "../api/client";
-import type { AnalyticsGroup, AnalyticsRange, AnalyticsSales, InventoryAnalytics } from "../api/types";
+import type { AnalyticsGroup, AnalyticsRange, InventoryAnalytics } from "../api/types";
 import { labelDotClass, type LabelColor } from "../labelColors";
 import { cn } from "../lib/utils";
-import { ANALYTICS_RANGES, formatChange, formatDays, formatMoney } from "./analyticsFormat";
+import {
+  ANALYTICS_RANGES, compactMoney, compareChange, dayRange, daysHint, formatChange, formatCurrency, formatDays,
+  profitHint, revenueHint, SELL_THROUGH_HINT,
+} from "./analyticsFormat";
+import { MissingAmountsNotice } from "./MissingAmounts";
 import { marketplaceName } from "./marketplaceNames";
 import { Stat, StatGrid } from "./AnalyticsStat";
 import { DiscountSuggestions } from "./DiscountSuggestions";
 import { EtsyNotAllowed } from "./EtsyNotAllowed";
 import { Input } from "./ui/input";
-import { Button, buttonVariants } from "./ui/button";
+import { Button } from "./ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
-import { Spinner } from "./ui/spinner";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import {
   EmptyRow,
@@ -45,7 +48,7 @@ export function AnalyticsPage({ onOpenListing }: Props) {
   const [view, setView] = useState("Sales records");
   const [missingOnly, setMissingOnly] = useState(false);
   const changeView = (next: string) => { setView(next); setMissingOnly(false); };
-  return <WorkspacePage width="expanded"><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics"]} value={view} onChange={changeView}>
+  return <WorkspacePage width="expanded"><h1 className="sr-only">Analytics</h1><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics"]} value={view} onChange={changeView}>
     {view === "Sales records"
       ? <SalesLedger key={String(missingOnly)} onOpenListing={onOpenListing} missingOnly={missingOnly} />
       : <InventoryAnalyticsView onOpenListing={onOpenListing} onOpenSalesRecords={() => { setView("Sales records"); setMissingOnly(true); }} />}
@@ -73,30 +76,19 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
 
   return (
     <>
-      <PageHeader
-        title="Analytics"
-        description="Track sales performance and find inventory that needs attention."
-      >
-        {data ? (
-          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            <InventoryStrip inventory={data.inventory} />
-          </div>
-        ) : null}
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="block space-y-1 text-xs"><span className="block">Sales period</span>
-            <Select value={range} onValueChange={value => { if (value) setRange(value as AnalyticsRange); }}>
-              <SelectTrigger aria-label="Sales period" className="w-48"><SelectValue>{PERIODS.find(item => item.id === range)?.label}</SelectValue></SelectTrigger>
-              <SelectPopup>{PERIODS.map(item => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectPopup>
-            </Select>
-          </label>
-          <Button size="sm" variant="ghost" disabled={query.isFetching || (custom && !customValid)} onClick={() => void query.refetch()}>Refresh analytics</Button>
-          {data ? <a href="#inventory-today" className={buttonVariants({ size: "sm", variant: "ghost" })}>Review inventory today</a> : null}
-          {query.isFetching && data ? (
-            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
-              <Spinner size="xs" aria-hidden role={undefined} />
-              Updating analytics…
-            </span>
-          ) : null}
+      <PageHeader>
+        {data ? <InventoryStrip inventory={data.inventory} /> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={range} onValueChange={value => { if (value) setRange(value as AnalyticsRange); }}>
+            <SelectTrigger aria-label="Sales period" className="w-40"><SelectValue>{PERIODS.find(item => item.id === range)?.label}</SelectValue></SelectTrigger>
+            <SelectPopup>{PERIODS.map(item => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectPopup>
+          </Select>
+          <Button size="icon-sm" variant="ghost" aria-label="Refresh analytics" title="Refresh analytics"
+            disabled={query.isFetching || (custom && !customValid)} onClick={() => void query.refetch()}>
+            <RefreshCwIcon aria-hidden className={cn(query.isFetching && "animate-spin")} />
+          </Button>
+          {query.isFetching && data ? <span className="sr-only" role="status">Updating analytics…</span> : null}
+          {data ? <a href="#inventory-today" className="ml-auto text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Review inventory today</a> : null}
         </div>
         {custom ? (
           <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -132,58 +124,23 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
 
       {data && (!custom || customValid) ? (
         <>
-          {data.incomplete_sales.length > 0 ? (
-            <PageSection
-              aria-label="Missing sales data"
-              className="rounded-xl border border-warning/32 bg-warning-surface p-4"
-              title={`${data.incomplete_sales.length} ${data.incomplete_sales.length === 1 ? "sale needs" : "sales need"} sales data`}
-              description={<>
-                Across all time. Add missing amounts in Sales records. Missing prices, costs, or fees leave revenue and profit incomplete.
-              </>}
-            >
-              {onOpenSalesRecords ? <Button size="sm" variant="outline" onClick={onOpenSalesRecords}>Open sales records</Button> : null}
-              <Disclosure summary="Review sales with missing data">
-                <RowList className="max-h-80 overflow-y-auto">
-                    {data.incomplete_sales.map(({ id, conversation_id: listing, title, missing }) => (
-                      <ListRow
-                        key={id}
-                        title={title}
-                        meta={`Missing ${missing.join(", ")}`}
-                        onClick={listing ? () => onOpenListing(listing) : onOpenSalesRecords}
-                      />
-                    ))}
-                </RowList>
-              </Disclosure>
-            </PageSection>
-          ) : null}
-
           <PageSection aria-label={heading} title={heading}>
             <SalesStats data={data} />
-            {data.previous ? (
-              <PageNote>
-                Compared with {formatSold(data.previous.start)} – {formatSold(data.previous.end)}
-                {" (previous period, same length)."}
-              </PageNote>
-            ) : null}
-            {data.sales.revenue_known < data.sales.count ? (
-              <PageNote>
-                {data.sales.count - data.sales.revenue_known} {data.sales.count - data.sales.revenue_known === 1 ? "sale has" : "sales have"} no recorded price.
-                Revenue, averages, and breakdowns include recorded amounts only.
-              </PageNote>
-            ) : null}
+            {data.previous ? <PageNote>Compared with {dayRange(data.previous.start, previousEnd(data.previous.end))}.</PageNote> : null}
             {data.undated_sales > 0 ? (
               <PageNote>
-                {data.undated_sales} {data.undated_sales === 1 ? "sale has" : "sales have"} no date.
-                {data.range === "all"
-                  ? " Included in totals, but excluded from the chart."
-                  : " Excluded from this period; included in All time."}
+                {data.undated_sales} {data.undated_sales === 1 ? "sale has" : "sales have"} no date
+                {data.range === "all" ? " and isn't charted." : " and only count in All time."}
               </PageNote>
             ) : null}
             {data.periods_truncated ? <PageNote>The chart shows the latest 18 months.</PageNote> : null}
             <SalesChart periods={data.periods} />
           </PageSection>
 
-          <PageSection title="Sales breakdowns" description="Search names across marketplaces, categories, brands and labels. Each list shows its top six matches for the selected sales period.">
+          <MissingAmountsNotice records={data.incomplete_sales.length} counts={data.missing_counts} scope="across all time"
+            action={onOpenSalesRecords ? <Button size="sm" variant="outline" onClick={onOpenSalesRecords}>Show these sales</Button> : null} />
+
+          <PageSection title="Sales breakdowns" description="Top six of each for this period.">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block space-y-1 text-xs">Search breakdowns<Input type="search" placeholder="Marketplace, category, brand or label" value={breakdownSearch} onChange={event => setBreakdownSearch(event.target.value)} /></label>
               <label className="block space-y-1 text-xs">Rank breakdowns by<Select value={rankMetric} onValueChange={value => { if (value) setRankMetric(value as RankMetric); }}>
@@ -211,9 +168,9 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
           >
             <StatGrid className="grid-cols-2">
               <Stat label="Active listings" value={String(data.inventory.active)} />
-              <Stat label="Asking value" value={formatMoney(data.inventory.asking_value)} hint="Total asking prices; potential revenue" />
-              <Stat label="Recorded inventory cost" value={data.inventory.cost_known ? formatMoney(data.inventory.cost_value) : "—"} hint={`Cost recorded on ${data.inventory.cost_known} of ${data.inventory.active} active listings`} />
-              <Stat label="Listed 90+ days" value={String(data.inventory.stale_count)} hint={`${formatMoney(data.inventory.stale_value)} at asking prices`} />
+              <Stat label="Asking value" value={formatCurrency(data.inventory.asking_value)} hint="Total asking prices; potential revenue" />
+              <Stat label="Recorded inventory cost" value={data.inventory.cost_known ? formatCurrency(data.inventory.cost_value) : "—"} hint={`Cost recorded on ${data.inventory.cost_known} of ${data.inventory.active} active listings`} />
+              <Stat label="Listed 90+ days" value={String(data.inventory.stale_count)} hint={`${formatCurrency(data.inventory.stale_value)} at asking prices`} />
             </StatGrid>
             {data.inventory.undated_count > 0 ? <PageNote>{data.inventory.undated_count} active {data.inventory.undated_count === 1 ? "listing has" : "listings have"} no list date and cannot be aged.</PageNote> : null}
           </PageSection>
@@ -235,7 +192,7 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
                       <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open/age:rotate-90" />
                       <span className="min-w-0 flex-1 truncate text-foreground">{row.label}</span>
                       <span className="text-xs text-muted-foreground tabular-nums">{row.count} listings</span>
-                      <span className="w-28 text-right text-foreground tabular-nums">{formatMoney(row.asking_value)} asking</span>
+                      <span className="w-28 text-right text-foreground tabular-nums">{formatCurrency(row.asking_value)} asking</span>
                     </summary>
                     <ul className="divide-y divide-border/50 border-t border-border/50 bg-background/40">
                       {row.listings.map((listing) => (
@@ -243,7 +200,7 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
                           key={listing.conversation_id}
                           title={listing.title}
                           meta={listing.days_listed == null ? "No list date" : formatDays(listing.days_listed)}
-                          value={formatMoney(listing.price)}
+                          value={formatCurrency(listing.price)}
                           onClick={() => onOpenListing(listing.conversation_id)}
                         />
                       ))}
@@ -268,7 +225,7 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
                     key={item.conversation_id}
                     title={item.title}
                     meta={`${formatDays(item.days_listed)} listed`}
-                    value={formatMoney(item.price)}
+                    value={formatCurrency(item.price)}
                     onClick={() => onOpenListing(item.conversation_id)}
                   />
                 ))}
@@ -291,8 +248,8 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
                       {sale.days_listed != null ? ` · ${formatDays(sale.days_listed)}` : ""}
                       {sale.event ? ` · ${sale.event}` : ""}
                     </>}
-                    value={sale.price == null ? "Price unknown" : formatMoney(sale.price)}
-                    valueHint={sale.profit == null ? "Profit unavailable" : `${formatMoney(sale.profit)} profit`}
+                    value={sale.price == null ? "Price unknown" : formatCurrency(sale.price)}
+                    valueHint={sale.profit == null ? "Profit unavailable" : `${formatCurrency(sale.profit)} profit`}
                     onClick={() => onOpenListing(sale.conversation_id)}
                   />
                 ))}
@@ -305,79 +262,58 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
   );
 }
 
-function Disclosure({ summary, children }: { summary: string; children: ReactNode }) {
-  return (
-    <details className="group/disclosure flex flex-col">
-      <summary className="inline-flex w-fit cursor-pointer list-none items-center gap-1 rounded-md text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-        <ChevronRightIcon aria-hidden className="size-3.5 transition-transform group-open/disclosure:rotate-90" />
-        {summary}
-      </summary>
-      <div className="mt-3">{children}</div>
-    </details>
-  );
-}
-
 function InventoryStrip({ inventory }: { inventory: InventoryAnalytics["inventory"] }) {
   const parts = [
     `${inventory.active} active`,
-    `${formatMoney(inventory.asking_value)} asking`,
+    `${formatCurrency(inventory.asking_value)} asking`,
   ];
   if (inventory.draft) parts.push(`${inventory.draft} draft${inventory.draft === 1 ? "" : "s"}`);
   if (inventory.sold) parts.push(`${inventory.sold} sold`);
   if (inventory.failed) parts.push(`${inventory.failed} failed`);
   if (inventory.working) parts.push(`${inventory.working} in progress`);
-  return <p className="text-foreground tabular-nums">Current inventory: {parts.join(" · ")}</p>;
+  return <p className="text-xs text-muted-foreground tabular-nums">Current inventory: {parts.join(" · ")}</p>;
 }
 
-function profitHint(sales: AnalyticsSales): string {
-  if (sales.profit_known === 0) return "Record sale prices and costs to see profit";
-  const scope =
-    sales.profit_known === sales.count ? "" : ` on ${sales.profit_known} of ${sales.count} sales`;
-  if (sales.fees_known === 0) return `After recorded costs and shipping${scope}. Fees missing`;
-  if (sales.fees_known === sales.profit_known) return `After recorded cost, fees and shipping${scope}`;
-  return `After recorded cost, fees and shipping${scope}. Fees recorded on ${sales.fees_known} of ${sales.profit_known}`;
-}
-
+/** Same names, order and wording as the figures on Sales records. */
 function SalesStats({ data }: { data: InventoryAnalytics }) {
   const sales = data.sales;
-  const profit = sales.profit;
-  const previous = data.previous?.sales;
-  const revenueComplete = previous && sales.revenue_known === sales.count && previous.revenue_known === previous.count;
-  const profitComplete = previous && sales.profit_known === sales.count && previous.profit_known === previous.count
-    && sales.fees_known === sales.count && previous.fees_known === previous.count;
+  const previous = data.previous?.sales ?? null;
   return (
     <StatGrid className="grid-cols-2">
-      <Stat label="Revenue" value={formatMoney(sales.revenue)}
-        hint={`${sales.revenue_known} of ${sales.count} sales with recorded prices`}
-        change={previous ? (revenueComplete ? formatChange(sales.revenue, previous.revenue, formatMoney) : "Comparison unavailable: missing prices") : undefined}
-      />
-      <Stat
-        label="Sold"
-        change={previous ? formatChange(sales.count, previous.count, String) : undefined}
-        value={String(sales.count)}
-        hint={sales.average_price == null ? undefined : `${formatMoney(sales.average_price)} average`}
-      />
-      <Stat
-        label="Sell-through rate"
-        value={data.sell_through_rate == null ? "—" : `${data.sell_through_rate}%`}
-        hint="Sales in this period ÷ (sales in this period + active listings today)"
-      />
+      <Stat label="Revenue" value={sales.count > 0 && sales.revenue_known === 0 ? null : formatCurrency(sales.revenue)} hint={revenueHint(sales)}
+        change={compareChange(sales, previous, "revenue", sales.revenue, previous?.revenue ?? null, formatCurrency)} />
       <Stat
         label="Profit"
-        value={profit == null ? "—" : formatMoney(profit)}
-        negative={profit != null && profit < 0}
+        value={sales.profit == null ? null : formatCurrency(sales.profit)}
+        negative={sales.profit != null && sales.profit < 0}
         hint={profitHint(sales)}
-        change={previous ? (profitComplete ? formatChange(profit, previous.profit, formatMoney) : "Comparison unavailable: missing costs or fees") : undefined}
+        change={compareChange(sales, previous, "profit", sales.profit, previous?.profit ?? null, formatCurrency)}
       />
-      <Stat label="Profit margin" value={sales.margin == null ? "—" : `${sales.margin}%`} hint="Profit ÷ revenue on sales with recorded cost" negative={sales.margin != null && sales.margin < 0} />
       <Stat
-        label="Median time to sell"
-        value={sales.median_days == null ? "—" : formatDays(sales.median_days)}
-        hint={`Based on ${sales.days_known} of ${sales.count} sales`}
-        change={previous ? formatChange(sales.median_days, previous.median_days, formatDays) : undefined}
+        label="Items sold"
+        value={String(sales.count)}
+        change={previous ? formatChange(sales.count, previous.count, String) : undefined}
+        hint={sales.average_price == null ? undefined : `${formatCurrency(sales.average_price)} average sale`}
       />
+      <Stat
+        label="Median days to sell"
+        value={sales.median_days == null ? null : formatDays(sales.median_days)}
+        hint={daysHint(sales)}
+        change={previous && sales.median_days != null && previous.median_days != null
+          ? formatChange(sales.median_days, previous.median_days, formatDays) : undefined}
+      />
+      <Stat label="Sell-through" value={data.sell_through_rate == null ? null : `${data.sell_through_rate}%`} hint={SELL_THROUGH_HINT} />
+      <Stat label="Profit margin" value={sales.margin == null ? null : `${sales.margin}%`} hint="Profit ÷ revenue, on sales with a cost"
+        negative={sales.margin != null && sales.margin < 0} />
     </StatGrid>
   );
+}
+
+/** The API's previous period ends where this one starts; name its last whole day. */
+function previousEnd(iso: string): string {
+  const end = new Date(iso);
+  end.setUTCMilliseconds(end.getUTCMilliseconds() - 1);
+  return end.toISOString();
 }
 
 type ChartMetric = "revenue" | "count" | "profit";
@@ -388,7 +324,7 @@ function SalesChart({ periods }: { periods: InventoryAnalytics["periods"] }) {
   const hasLoss = periods.some((period) => (period[metric] ?? 0) < 0);
   const baseline = hasLoss ? 110 : 0;
   const available = hasLoss ? 110 : 220;
-  const metricName = metric === "count" ? "Sales" : metric === "profit" ? "Profit" : "Revenue";
+  const metricName = metric === "count" ? "Items sold" : metric === "profit" ? "Profit" : "Revenue";
   const peakCount = Math.max(...periods.map((period) => period.count), 0);
   if (periods.length === 0 || peakCount === 0) {
     return <EmptyRow>No dated sales in this period.</EmptyRow>;
@@ -407,19 +343,19 @@ function SalesChart({ periods }: { periods: InventoryAnalytics["periods"] }) {
         >
           {(["revenue", "count", "profit"] as const).map((value) => (
             <Toggle key={value} value={value}>
-              {value === "revenue" ? "Revenue" : value === "profit" ? "Profit" : "Sales"}
+              {value === "revenue" ? "Revenue" : value === "profit" ? "Profit" : "Items sold"}
             </Toggle>
           ))}
         </ToggleGroup>
       </div>
-      {metric === "profit" ? <PageNote>Profit uses sales with recorded cost and deducts recorded fees and shipping. Missing costs appear as —; loss bars extend below zero.</PageNote> : null}
+      {metric === "profit" ? <PageNote>Counts sales with a recorded cost; losses go below the line.</PageNote> : null}
       <div className="flex items-end gap-1 overflow-x-auto pb-1" role="list" aria-label={`${metricName} over time`}>
         {periods.map((period, index) => {
           const value = period[metric];
           const share = peak > 0 ? Math.abs(value ?? 0) / peak : 0;
           const height = share > 0 ? Math.max(Math.round(share * available), 2) : 0;
           const negative = (value ?? 0) < 0;
-          const detail = `${period.label}: ${formatMoney(period.revenue)}, ${saleCount(period.count)}, ${period.profit == null ? "profit unavailable" : `${formatMoney(period.profit)} profit`}. Cost on ${period.profit_known} of ${period.count}; fees on ${period.fees_known} of ${period.profit_known}.`;
+          const detail = `${period.label}: ${formatCurrency(period.revenue)}, ${saleCount(period.count)}, ${period.profit == null ? "profit unavailable" : `${formatCurrency(period.profit)} profit`}. Cost on ${period.profit_known} of ${period.count}; fees on ${period.fees_known} of ${period.profit_known}.`;
           return (
             <div
               key={`${period.label}-${index}`}
@@ -430,7 +366,7 @@ function SalesChart({ periods }: { periods: InventoryAnalytics["periods"] }) {
               title={detail}
             >
               <span className="text-2xs text-muted-foreground tabular-nums" aria-hidden="true">
-                {value == null ? "—" : metric === "count" ? value : formatMoney(value)}
+                {value == null ? "—" : metric === "count" ? value : compactMoney(value)}
               </span>
               <div className="relative h-[220px] w-full" aria-hidden="true">
                 <div className="absolute inset-x-0 border-t border-border" style={{ bottom: baseline }} />
@@ -455,7 +391,7 @@ type RankMetric = "revenue" | "profit" | "count";
 const RANK_METRICS: { value: RankMetric; label: string }[] = [
   { value: "revenue", label: "Revenue" },
   { value: "profit", label: "Profit" },
-  { value: "count", label: "Sales" },
+  { value: "count", label: "Items sold" },
 ];
 
 function PerformanceList({ title, rows, marketplace = false, metric, search }: {
@@ -489,7 +425,7 @@ function PerformanceList({ title, rows, marketplace = false, metric, search }: {
                 </span>
               ) : row.label}
               meta={`${saleCount(row.count)}${row.median_days != null ? ` · ${formatDays(row.median_days)} median` : ""}`}
-              value={metric === "count" ? row.count : row[metric] == null ? "—" : formatMoney(row[metric])}
+              value={metric === "count" ? row.count : row[metric] == null ? "—" : formatCurrency(row[metric])}
               valueHint={metric === "profit" ? (row.profit_known === 0 ? "Cost missing" : `Cost on ${row.profit_known}/${row.count} · fees on ${row.fees_known}/${row.profit_known}`) : undefined}
             />
           ))}
@@ -519,13 +455,13 @@ function PriceTiers({ tiers }: { tiers: AnalyticsGroup[] }) {
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="truncate text-foreground">{tier.label}</span>
                   <span className="text-xs text-muted-foreground">
-                    {saleCount(tier.count)} · {Math.round((tier.count / total) * 100)}% of sales
+                    {saleCount(tier.count)} · {Math.round((tier.count / total) * 100)}%
                     {tier.median_days != null ? ` · ${formatDays(tier.median_days)} median` : ""}
                   </span>
                 </span>
                 <span className="flex shrink-0 flex-col items-end gap-0.5 text-right">
-                  <span className="text-foreground tabular-nums">{formatMoney(tier.revenue)}</span>
-                  <span className="text-xs text-muted-foreground">{tier.profit == null ? "Profit unavailable" : `${formatMoney(tier.profit)} profit`}</span>
+                  <span className="text-foreground tabular-nums">{formatCurrency(tier.revenue)}</span>
+                  <span className="text-xs text-muted-foreground">{tier.profit == null ? "Profit unavailable" : `${formatCurrency(tier.profit)} profit`}</span>
                 </span>
               </div>
               <div aria-hidden="true" className="h-1 overflow-hidden rounded-full bg-muted-foreground/12">
@@ -540,7 +476,7 @@ function PriceTiers({ tiers }: { tiers: AnalyticsGroup[] }) {
 }
 
 function saleCount(count: number): string {
-  return count === 1 ? "1 sale" : `${count} sales`;
+  return `${count} sold`;
 }
 
 function formatSold(iso: string): string {

@@ -50,6 +50,15 @@ def _amount(value) -> str | None:
     return format(amount.normalize() if amount == amount.to_integral() else amount, "f") if amount.is_finite() else None
 
 
+def missing_counts(missing: list[list[str]]) -> list[dict]:
+    """How many sales lack each amount, in form order, so every page names the same gaps."""
+    counts = {label: 0 for label in [*FIELD_LABELS.values(), "sale date"]}
+    for labels in missing:
+        for label in labels:
+            counts[label] += 1
+    return [{"label": label, "count": count} for label, count in counts.items() if count]
+
+
 def incomplete_sales(db: Session, rows: list[AnalyticsItem] | None = None) -> list[dict]:
     """Every sale record, across all time, that Sales records' Missing sale data filter shows."""
     return sorted(
