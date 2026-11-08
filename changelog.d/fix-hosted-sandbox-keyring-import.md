@@ -1,0 +1,1 @@
+- The iPhone Assistant answers again instead of failing with "Something went wrong (500)".
