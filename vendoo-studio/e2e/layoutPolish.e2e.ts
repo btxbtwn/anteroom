@@ -39,17 +39,18 @@ test.describe("layout", () => {
   });
 
   test("the inventory table gives titles the free width and leaves search to the sidebar", async ({ page, request }) => {
-    await createListing(request, LONG_TITLE);
+    const titleText = `${LONG_TITLE} ${crypto.randomUUID()}`;
+    await createListing(request, titleText);
     await page.goto("/");
     await page.getByRole("button", { name: "Inventory table" }).click();
     const table = page.getByRole("table", { name: "Inventory" });
-    const title = table.getByRole("rowheader").filter({ hasText: LONG_TITLE }).getByText(LONG_TITLE, { exact: true });
+    const title = table.getByRole("rowheader").filter({ hasText: titleText }).getByText(titleText, { exact: true });
     await expect(title).toBeVisible();
     // Two lines hold the whole title at 1440px; nothing is clipped.
     expect(await title.evaluate((element) => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
     // The sidebar's search box filters the table, so the page shows only that one.
     await expect(page.getByRole("searchbox", { name: /Search listings/ })).toHaveCount(1);
-    await page.getByRole("searchbox", { name: /Search listings/ }).fill("Madewell 28 Black High Rise Skinny");
+    await page.getByRole("searchbox", { name: /Search listings/ }).fill(titleText);
     await expect(table.getByRole("rowheader")).toHaveCount(1);
     await page.getByRole("searchbox", { name: /Search listings/ }).fill("");
     await page.screenshot({ path: "e2e/results/layout/inventory-table-desktop.png" });
@@ -70,8 +71,8 @@ test.describe("layout", () => {
     const panel = page.getByRole("tabpanel");
     await expect(panel.getByRole("button", { name: "Connect eBay", exact: true })).toHaveCount(1);
     // The tab names the marketplace; the panel's own heading is for screen readers only.
-    await expect(panel.getByRole("heading", { name: "eBay", exact: true })).toBeAttached();
-    await expect(panel.getByRole("heading", { name: "eBay", exact: true })).toHaveClass(/sr-only/);
+    await expect(panel.getByRole("heading", { name: "eBay", exact: true, level: 2 })).toBeAttached();
+    await expect(panel.getByRole("heading", { name: "eBay", exact: true, level: 2 })).toHaveClass(/sr-only/);
     await page.screenshot({ path: "e2e/results/layout/marketplaces-desktop.png" });
   });
 
