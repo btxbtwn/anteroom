@@ -1,0 +1,1 @@
+- Settings now opens General by default on the web.
