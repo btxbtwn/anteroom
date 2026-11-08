@@ -546,11 +546,20 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("POST", "api/ebay-offers/attempts/\(attemptID)/checked", json: ["confirm": true]))
     }
 
-    /// Starts eBay sign-in; the seller finishes it on the page this returns.
+    /// Starts eBay sign-in. The seller approves on the page this returns, and
+    /// Safari comes back to the app, which finishes with `finishMarketplaceSignIn`.
     func connectEbay() async throws -> URL {
         struct Payload: Decodable { let authorizeUrl: URL }
-        let payload: Payload = try await decode(request("POST", "api/marketplace-accounts/ebay/connect"))
+        let payload: Payload = try await decode(request("POST", "api/marketplace-accounts/ebay/connect", json: ["client": "app"]))
         return payload.authorizeUrl
+    }
+
+    /// Hands over the one-time claim Safari came back with. Returns the account name.
+    func finishMarketplaceSignIn(_ signIn: MarketplaceSignInReturn) async throws -> String? {
+        struct Payload: Decodable { let label: String? }
+        let payload: Payload = try await decode(request("POST", "api/marketplace-accounts/\(signIn.marketplace)/finish",
+                                                        json: ["state": signIn.state, "claim": signIn.claim]))
+        return payload.label
     }
 
     // MARK: Sharing and offers to likers (saved off; on only with `confirm`)

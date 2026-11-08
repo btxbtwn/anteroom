@@ -12,7 +12,11 @@ struct AnteroomApp: App {
                 .toggleStyle(WorkspaceSwitchStyle())
                 .task { await session.start() }
                 .onOpenURL { url in
-                    Task { await session.completeSignIn(from: url) }
+                    if let signIn = MarketplaceSignInReturn(url: url) {
+                        Task { await session.completeMarketplaceSignIn(signIn) }
+                    } else {
+                        Task { await session.completeSignIn(from: url) }
+                    }
                 }
         }
     }
@@ -22,6 +26,16 @@ struct RootView: View {
     @Environment(SessionStore.self) private var session
 
     var body: some View {
+        content
+            .alert(session.marketplaceSignInMessage ?? "", isPresented: Binding(
+                get: { session.marketplaceSignInMessage != nil },
+                set: { if !$0 { session.marketplaceSignInMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            }
+    }
+
+    @ViewBuilder private var content: some View {
         switch session.state {
         case .loading:
             StartingView()

@@ -14,6 +14,7 @@ for path, handler, methods in (
     ('/api/marketplace-accounts', marketplace_accounts.get_status, ['GET']),
     ('/api/marketplace-accounts/{marketplace}/connect', marketplace_accounts.connect, ['POST']),
     ('/api/marketplace-accounts/{marketplace}/connect', marketplace_accounts.cancel_connect, ['DELETE']),
+    ('/api/marketplace-accounts/{marketplace}/finish', marketplace_accounts.finish, ['POST']),
     ('/api/marketplace-accounts/{marketplace}', marketplace_accounts.disconnect, ['DELETE']),
     ('/api/ebay/listing-profiles', ebay.listing_profiles, ['GET']),
     ('/api/ebay/listing-defaults', ebay.get_listing_defaults, ['GET']),
