@@ -6,6 +6,7 @@ import { IDLE_POLL_MS, pollMs } from "../api/polling";
 import type { SettingsSearchItem, SettingsSectionId } from "./settingsNav";
 import { ListingFilters } from "./ListingFilters";
 import { suggestionHint } from "./SuggestionsPanel";
+import { SuggestionsButton } from "./SuggestionsButton";
 import type { BulkRegenerate } from "./useBulkRegenerate";
 import { MobileNavButton } from "./MobileNav";
 import type { WorkspaceView } from "./workspaceCrumbs";
@@ -359,6 +360,12 @@ export function ListingSidebar({
               <PlusIcon />
             </button>
           </div>
+
+          {runtime.features.has("suggestions") && (
+            <div className="shrink-0 px-(--sidebar-content-inset)">
+              <SuggestionsButton onSelect={onSelect} />
+            </div>
+          )}
 
           <ListingFilters
             filters={filters}
