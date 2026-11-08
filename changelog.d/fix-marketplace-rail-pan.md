@@ -1,0 +1,1 @@
+- The marketplace list beside a listing's form no longer slides around when dragged on an iPad.
