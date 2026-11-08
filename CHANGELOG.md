@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.841 — 2026-11-08
+
+- The Etsy tab now follows Etsy's own listing form: Photo & video, Category, Item details, Item options, Pricing & shipping, How it's made and Settings, with your category's Etsy attributes.
+- Pick the Etsy category on the Etsy tab. Your pick stays put when the listing is generated again.
+- A price or tags you change on the Etsy tab are now what Etsy gets, without changing General.
+
 ## 0.1.840 — 2026-11-08
 
 - A category set on General now fills the closest Poshmark, Mercari and Depop category when no exact match exists, instead of leaving it blank. That marketplace tab shows "Suggested: check it" until you pick a category or press Looks right.
