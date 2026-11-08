@@ -324,6 +324,9 @@ def _apply_result(db: Session, conv_id: str, marketplace: str, job_id: str, acti
         # Confirmed live: the marketplace has the price this action sent.
         job = JobRepo(db).get(job_id)
         values["listed_price"] = price_for(job.listing_snapshot if job else None, marketplace)
+        if action in {"publish", "list"}:
+            # A new listing went up, so its age starts over. An Update keeps the date.
+            values["listed_at"] = datetime.now(UTC).replace(tzinfo=None)
     stored = _store(db, conv_id, marketplace, values)
     JobRepo(db).add_event(job_id, "native_result", f"native_{marketplace}_{action}", {
         "marketplace": marketplace, "action": action, "ok": result.get("ok") is True, "state": stored["state"],

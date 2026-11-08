@@ -365,11 +365,9 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
                     busy={busy === view.key}
                     onOpen={() => openPanel({ kind: "ebay_offers" })}
                     onToggle={setEbayOffers}
-                    control={ebayStatus.connected ? undefined : (
-                      <Button size="xs" variant="outline" disabled={busy === view.key} onClick={connectEbay}>Connect eBay</Button>
-                    )}
                     menu={(
                       <>
+                        {ebayStatus.connected ? null : <MenuItem disabled={busy === view.key} onClick={connectEbay}>Connect eBay</MenuItem>}
                         <MenuItem onClick={() => openPanel({ kind: "ebay_offers" })}>Edit</MenuItem>
                         <MenuItem disabled={!view.on} onClick={() => setEbayOffers(false)}>Pause all</MenuItem>
                       </>
@@ -384,7 +382,6 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
                     key={view.key}
                     view={view}
                     busy={busy === view.key}
-                    toggleDisabled={!row.enabled && !row.available}
                     onOpen={() => openPanel({ kind: "promotion", form: formFromAutomation(row) })}
                     onToggle={(on) => setPromotion(row, on)}
                     menu={(
@@ -462,12 +459,9 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
 }
 
 /** One automation of any kind: name and when, type, last and next run, a switch and a menu. */
-function AutomationRow({ view, busy, toggleDisabled, control, onOpen, onToggle, menu }: {
+function AutomationRow({ view, busy, onOpen, onToggle, menu }: {
   view: AutomationRowView;
   busy: boolean;
-  toggleDisabled?: boolean;
-  /** Replaces the switch, as Connect eBay does while eBay is not connected. */
-  control?: ReactNode;
   onOpen: () => void;
   onToggle: (on: boolean) => void;
   menu: ReactNode;
@@ -480,29 +474,28 @@ function AutomationRow({ view, busy, toggleDisabled, control, onOpen, onToggle, 
         onClick={onOpen}
       >
         <span className="truncate font-medium text-foreground">{view.name}</span>
-        <span className="text-xs text-muted-foreground @2xl/page:truncate">
+        {/* Up to two lines, never cut short without a way to read the rest. */}
+        <span className="text-xs text-muted-foreground @2xl/page:line-clamp-2" title={view.when}>
           {view.type !== view.name ? <span className="@2xl/page:hidden">{view.type} · </span> : null}
           {view.when}
           <span className="@2xl/page:hidden">{view.on ? ` · next ${view.nextRun}` : ""}</span>
         </span>
-        {view.detail ? <span className="text-xs text-muted-foreground @2xl/page:truncate">{view.detail}</span> : null}
+        {view.detail ? <span className="text-xs text-muted-foreground @2xl/page:line-clamp-2" title={view.detail}>{view.detail}</span> : null}
         {view.note ? <span className="text-xs text-muted-foreground">{view.note}</span> : null}
       </button>
       <span className="hidden w-36 truncate text-xs text-muted-foreground @2xl/page:block">{view.type}</span>
       <span className="hidden w-28 text-xs text-muted-foreground tabular-nums @2xl/page:block">{view.lastRun}</span>
       <span className="hidden w-28 text-xs text-muted-foreground tabular-nums @2xl/page:block">{view.nextRun}</span>
-      <span className="flex justify-center @2xl/page:w-24">
-        {control ?? (view.on === null ? (
-          <span className="text-xs text-muted-foreground">{view.state}</span>
-        ) : (
-          <Switch
-            size="sm"
-            checked={view.on}
-            disabled={busy || toggleDisabled}
-            aria-label={view.on ? `Pause ${view.name}` : `Turn on ${view.name}`}
-            onCheckedChange={onToggle}
-          />
-        ))}
+      {/* The switch on every row; a locked one says why underneath. */}
+      <span className="flex flex-col items-center gap-0.5 @2xl/page:w-24">
+        <Switch
+          size="sm"
+          checked={view.on}
+          disabled={busy || !view.toggleable}
+          aria-label={view.on ? `Pause ${view.name}` : `Turn on ${view.name}`}
+          onCheckedChange={onToggle}
+        />
+        {view.state ? <span className="text-2xs text-muted-foreground">{view.state}</span> : null}
       </span>
       <Menu>
         <MenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`More for ${view.name}`} />}>

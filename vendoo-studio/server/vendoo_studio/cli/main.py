@@ -242,7 +242,7 @@ def _add_set_price(sub: argparse._SubParsersAction, common: argparse.ArgumentPar
     command.add_argument("--all-marketplaces", action="store_true", help="Clear per-marketplace price overrides")
     command.add_argument("--marketplace", default="", help="Also set this marketplace's price")
     command.add_argument("--marketplace-price", type=float, default=None, help="Override amount for --marketplace")
-    command.add_argument("--push", action="store_true", help="Update a live eBay, Poshmark, Etsy, or Depop listing")
+    command.add_argument("--push", action="store_true", help="Update the live listing on --marketplace")
     command.set_defaults(handler=_cmd_set_price)
 
 
@@ -290,6 +290,8 @@ def _print_logs(args: argparse.Namespace, *, level: str) -> int:
 
 def _cmd_set_price(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     del catalog
+    if args.push and not args.marketplace:
+        raise UsageError("--push needs --marketplace: name the live listing to update")
     if args.push and not args.confirm:
         raise ConfirmRequired("pushing a price updates a live listing")
     client = _client(args)
@@ -297,7 +299,7 @@ def _cmd_set_price(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
         "price": args.price,
         "all_marketplaces": bool(args.all_marketplaces),
         "push": bool(args.push),
-        "confirmed": bool(args.confirm),
+        "confirm": bool(args.confirm),
     }
     if args.marketplace:
         body["marketplace"] = args.marketplace

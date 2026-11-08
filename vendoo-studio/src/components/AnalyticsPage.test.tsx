@@ -69,24 +69,13 @@ describe("InventoryAnalyticsView", () => {
     expect(html).not.toContain("Last updated on");
   });
 
-  it("reminds the seller to complete missing sales details across all time", () => {
+  it("leaves missing sales details to Sales records", () => {
     const html = render({ ...data, incomplete_sales: [
       { id: "s1", conversation_id: "undated", title: "Undated jacket", missing: ["sale date", "sale price", "fees"] },
-      { id: "s2", conversation_id: null, title: "Old boots", missing: ["item cost"] },
     ] });
-    expect(html).toContain("2 sales need sales data");
-    expect(html).toContain("Across all time");
-    expect(html).toContain("Add missing amounts in Sales records");
-    expect(render(data)).toContain("Track sales performance and find inventory that needs attention.");
-
-    expect(html).toContain("Undated jacket");
-    expect(html).toContain("Missing sale date, sale price, fees");
-    expect(html).toContain("Old boots");
-    expect(html).not.toContain("undefined");
-    expect(render(data)).not.toContain('aria-label="Missing sales data"');
-    expect(render({ ...data, incomplete_sales: [
-      { id: "s3", conversation_id: "one", title: "Single sale", missing: ["fees"] },
-    ] })).toContain("1 sale needs sales data");
+    expect(html).not.toContain("need sales data");
+    expect(html).not.toContain('aria-label="Missing sales data"');
+    expect(html).not.toContain("Undated jacket");
   });
 
   it("shows the weekly view and explains the sell-through percentage", () => {

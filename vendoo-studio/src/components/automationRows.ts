@@ -30,8 +30,11 @@ export interface AutomationRowView {
   detail: string;
   lastRun: string;
   nextRun: string;
-  /** The switch position, or null when the row shows `state` instead. */
-  on: boolean | null;
+  /** The switch position. Every row shows its switch, so the column reads the same down the list. */
+  on: boolean;
+  /** False when the switch is locked, as for a draft or while eBay is not connected. */
+  toggleable: boolean;
+  /** A word under the switch when it is locked ("Draft", "Needs eBay"). */
   state: string;
   /** Why the switch can't be turned on, shown under the row. */
   note: string;
@@ -60,7 +63,8 @@ export function scheduledRow(task: Automation): AutomationRowView {
     detail: task.actions.some((action) => action.type === "price") ? describeActions(task.actions) : "",
     lastRun: formatRunTime(task.last_run_at, task.timezone),
     nextRun: task.status === "active" ? formatRunTime(task.next_run_at, task.timezone) : "—",
-    on: togglable ? task.status === "active" : null,
+    on: task.status === "active",
+    toggleable: togglable,
     state: togglable ? "" : STATUS_WORD[task.status] ?? task.status,
     note: "",
   };
@@ -73,7 +77,8 @@ export function ebayOffersRow(status: EbayOffersStatus, timezone = browserTimezo
   const on = all.enabled || picked.length > 0;
   const scope = all.enabled
     ? `All listings, ${all.discountPercent}% off${all.minimumPrice ? `, minimum $${all.minimumPrice}` : ""}`
-    : picked.length ? `${picked.length} listing${picked.length === 1 ? "" : "s"}` : "No listings yet";
+    // Counts listings picked for offers, not the seller's eBay listings.
+    : picked.length ? `${picked.length} listing${picked.length === 1 ? "" : "s"}` : "No listings chosen";
   const every = `Every ${status.checkIntervalMinutes || 15} minutes`;
   const next = on && status.connected && status.lastCheck
     ? new Date(new Date(status.lastCheck).getTime() + (status.checkIntervalMinutes || 15) * 60_000).toISOString()
@@ -87,9 +92,10 @@ export function ebayOffersRow(status: EbayOffersStatus, timezone = browserTimezo
     detail: "",
     lastRun: formatRunTime(status.lastCheck, timezone),
     nextRun: on && status.connected ? (next ? formatRunTime(next, timezone) : `Within ${status.checkIntervalMinutes || 15} min`) : "—",
-    on: status.connected ? on : null,
-    state: status.connected ? "" : "Not connected",
-    note: status.lastError || "",
+    on: status.connected && on,
+    toggleable: status.connected,
+    state: status.connected ? "" : "Needs eBay",
+    note: status.connected ? status.lastError || "" : "Connect eBay to turn this on.",
   };
 }
 
@@ -118,6 +124,7 @@ export function promotionRow(row: PromotionAutomation): AutomationRowView {
     lastRun: formatRunTime(row.last_run?.started_at, timezone),
     nextRun: row.enabled ? formatRunTime(row.next_run_at, timezone) : "—",
     on: row.enabled,
+    toggleable: row.enabled || row.available,
     state: "",
     note: row.enabled ? "" : row.paused_reason || (row.available ? "" : `${marketplaceName(row.marketplace)} offers are not available in Anteroom yet`),
   };

@@ -468,3 +468,34 @@ def test_mcp_lists_tools_and_calls_health(catalog_file, config_dir):
     stdout = StringIO()
     assert serve(stdin, stdout) == 0
     assert json.loads(stdout.getvalue())["result"] == {}
+
+
+def test_set_price_push_names_a_marketplace_and_needs_confirm(catalog_file, config_dir, capsys):
+    del catalog_file, config_dir
+    called = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        called["n"] += 1
+        called["body"] = json.loads(request.content.decode() or "null")
+        return httpx.Response(200, json={"ok": True})
+
+    # Through the raw API, a body that pushes a price needs --confirm like any live-listing write.
+    code = main(["api", "request", "POST", "/api/conversations/c1/set-price", "--body",
+                 '{"price": 10, "push": true, "marketplace": "ebay", "confirm": true}', "--json"],
+                transport=_transport(handler))
+    capsys.readouterr()
+    assert code == 4
+    # --push without a marketplace is refused before anything is sent.
+    code = main(["set-price", "--conversation", "c1", "--price", "10", "--push", "--confirm", "--json"],
+                transport=_transport(handler))
+    capsys.readouterr()
+    assert code != 0
+    assert called["n"] == 0
+
+    code = main(["set-price", "--conversation", "c1", "--price", "10", "--push", "--confirm",
+                 "--marketplace", "ebay", "--json"], transport=_transport(handler))
+    capsys.readouterr()
+    assert code == 0
+    assert called["body"]["confirm"] is True
+    assert called["body"]["marketplace"] == "ebay"
+    assert "confirmed" not in called["body"]
