@@ -257,6 +257,23 @@ describe("marketplaces section", () => {
     expect(/<button[^>]*disabled=""[^>]*>Retry in \d+s<\/button>/.test(limited)).toBe(true);
   });
 
+  it("keeps the marketplace's raw words under Details and offers chat only for what chat can fix", () => {
+    const refused = render({ etsy: { state: "not_saved", error: "Etsy needs to know who made this item.", error_code: "missing_fields",
+      error_fields: [{ field: "etsy_specifics.who_made", message: "Etsy needs to know who made this item." }],
+      marketplace_message: "Invalid value () for enum(i_did, someone_else, collective)" } }, {}, { selected: "etsy", etsyReady: true, onAskChat: vi.fn() });
+    expect(refused).toMatch(/<details[^>]*>.*<summary[^>]*>.*Details.*<\/summary>.*Etsy said: Invalid value/s);
+    expect(refused.indexOf("<details")).toBeLessThan(refused.indexOf("Etsy said:"));
+    expect(refused.match(/Etsy said:/g)).toHaveLength(1);
+    expect(enabledButton(refused, "Ask chat")).toBe(true);
+    for (const error_code of ["network", "signed_out", "rate_limited", "uncertain"] as const) {
+      const html = render({ etsy: { state: "not_saved", error: "Etsy is having trouble right now.", error_code } }, {},
+        { selected: "etsy", etsyReady: true, onAskChat: vi.fn() });
+      expect(html, String(error_code)).not.toContain(">Ask chat</button>");
+    }
+    const prompt = askChatPrompt("etsy", { state: "not_saved", error: "Etsy needs to know who made this item.", error_code: "missing_fields" });
+    expect(prompt).toContain("plain words");
+  });
+
   it("says what a reconnect found instead of leaving the last refusal as the answer", () => {
     expect(reconnectText("Mercari", { ok: true, signed_in: true, state: "signed_in", label: "betwixtandbetween" }))
       .toBe("Mercari is connected as betwixtandbetween. Press List… again to list this item.");

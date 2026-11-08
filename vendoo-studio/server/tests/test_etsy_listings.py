@@ -588,12 +588,44 @@ class EtsyListingsTest(unittest.TestCase):
                                   request=httpx.Request("POST", "https://api.etsy.com/"))
         error = httpx.HTTPStatusError("never-expose", request=response.request, response=response)
         message = etsy_listings._error_text(error)
-        self.assertIn("shipping_profile_id", message)
+        self.assertIn("shipping profile", message)
         self.assertNotIn("never-expose", message)
         result = etsy_listings._failure(error, safe=True)
         self.assertEqual(result["error_code"], "missing_fields")
         self.assertEqual(result["fields"][0]["field"], "etsy_specifics.shipping_profile_id")
         self.assertEqual(result["marketplace_message"], "shipping_profile_id is required; token=[redacted]")
+
+
+    def refusal(self, status, body):
+        response = httpx.Response(status, json=body, request=httpx.Request("POST", "https://api.etsy.com/"))
+        return httpx.HTTPStatusError("refused", request=response.request, response=response)
+
+    def test_an_empty_choice_is_explained_in_plain_words_and_names_its_field(self):
+        error = self.refusal(400, {"error": "Invalid value () for enum(i_did, someone_else, collective)"})
+        result = etsy_listings._failure(error, safe=True)
+        self.assertTrue(result["error"].startswith("Etsy needs to know who made this item."), result["error"])
+        self.assertEqual(result["error_code"], "missing_fields")
+        self.assertEqual([item["field"] for item in result["fields"]], ["etsy_specifics.who_made"])
+        self.assertEqual(result["marketplace_message"], "Invalid value () for enum(i_did, someone_else, collective)")
+
+    def test_refusals_never_show_status_codes(self):
+        for status, body in ((400, {"error": "Something odd"}), (404, {"error": "Not found"}), (503, {"error": "Down"})):
+            self.assertNotIn("HTTP", etsy_listings._failure(self.refusal(status, body), safe=True)["error"])
+
+    def test_an_etsy_outage_is_not_a_listing_problem(self):
+        result = etsy_listings._failure(self.refusal(503, {"error": "Down"}), safe=True)
+        self.assertEqual(result["error_code"], "network")
+        self.assertIn("try again", result["error"].lower())
+
+    def test_codes_and_other_spellings_of_who_made_reach_etsy(self):
+        for details in ({"who_made": "someone_else"}, {"Who Made It?": "Another company or person"}, {"whoMadeIt": "I did"}):
+            spec = {key: value for key, value in LISTING["etsy_specifics"].items() if key not in ("who_made", "whoMade")}
+            self.assertTrue(etsy_listings.draft_fields({**LISTING, "etsy_specifics": {**spec, **details}}, creating=True)["who_made"], details)
+
+    def test_a_missing_who_made_is_flagged_before_listing(self):
+        details = {key: value for key, value in LISTING["etsy_specifics"].items() if key not in ("who_made", "whoMade")}
+        fields = [item["field"] for item in etsy_listings.requirements({**LISTING, "etsy_specifics": details}, etsy_listings.Context(self.db))]
+        self.assertIn("etsy_specifics.who_made", fields)
 
 
 class RelayMultipartTest(unittest.IsolatedAsyncioTestCase):

@@ -18,6 +18,8 @@ struct MarketplaceRow: Equatable, Sendable {
     var linkLabel: String?
     var detail: String?
     var said: String?
+    /// What Ask chat sends when chat can fix the refusal by changing the listing.
+    var chatPrompt: String?
     /// A List, Update or Delist is running there now.
     var running = false
     /// The last action's outcome is not known yet; Check result before acting again.
@@ -88,6 +90,20 @@ enum MarketplaceActions {
         }
     }
 
+    /// Problems outside the listing: chat cannot sign in, wait out a limit, fix an outage or check a result.
+    static let notForChat: Set<String> = ["signed_out", "challenge", "rate_limited", "network", "uncertain"]
+
+    /// The words chat gets for a refused List, as the web's askChatPrompt; nil when chat cannot fix it.
+    static func chatPrompt(_ marketplace: String, draft: NativeDraftState) -> String? {
+        guard draft.error != nil, !notForChat.contains(draft.errorCode ?? "") else { return nil }
+        let name = Marketplaces.name(marketplace)
+        var lines = ["Listing this item on \(name) failed. Anteroom said: \(draft.error ?? "the listing was refused.")"]
+        if let said = draft.marketplaceMessage { lines.append("\(name) said: \(said)") }
+        lines.append("Fill or fix those fields in this listing so \(name) accepts it. Do not list it; I will press List again.")
+        lines.append("Then tell me in plain words what you changed, naming fields as the form labels them. No codes or field keys.")
+        return lines.joined(separator: "\n")
+    }
+
     /// One status per marketplace. A live listing wins; anything else is not listed.
     static func status(_ marketplace: String, live: MarketplaceLiveListing?, draft: NativeDraftState?, revisionID: String?) -> MarketplaceRow {
         let name = Marketplaces.name(marketplace)
@@ -124,10 +140,18 @@ enum MarketplaceActions {
                 return row(.live, "Listed", link: draft.listingURL, linkLabel: "View listing", detail: draft.error ?? behind)
             }
             if state == "pending_review" { return row(.attention, "In review", link: draft.listingURL, linkLabel: "View") }
-            if let error = draft.error { return row(.failed, "Not listed", detail: error, said: said) }
+            if let error = draft.error {
+                var failed = row(.failed, "Not listed", detail: error, said: said)
+                failed.chatPrompt = chatPrompt(marketplace, draft: draft)
+                return failed
+            }
         }
         if let draft, draft.state == "draft" {
-            if let error = draft.error { return row(.failed, "Not listed", detail: error, said: said) }
+            if let error = draft.error {
+                var failed = row(.failed, "Not listed", detail: error, said: said)
+                failed.chatPrompt = chatPrompt(marketplace, draft: draft)
+                return failed
+            }
             if draft.draftURL != nil {
                 return row(.neutral, "Draft", link: draft.draftURL, linkLabel: "View draft",
                            detail: draft.revisionID != revisionID ? "Changes in Anteroom have not been saved to this draft." : nil)
