@@ -781,6 +781,9 @@ export function MarketplacesLayout({
               <p className="mt-1 whitespace-pre-wrap break-words" data-marketplace-message>{said}</p>
             </details>
           )}
+          {EXTENSION_SESSION_MARKETS.includes(selectedMarketplace as ExtensionSessionMarket) && (
+            <p className="text-xs text-muted-foreground">Requires desktop Chrome with the Bridge extension connected and an Anteroom tab open. You can edit this draft without Chrome.</p>
+          )}
           {reconnectNotice(selectedMarketplace)}
           {errorActions(selectedMarketplace)}
           {preflightNotice(selectedMarketplace)}
