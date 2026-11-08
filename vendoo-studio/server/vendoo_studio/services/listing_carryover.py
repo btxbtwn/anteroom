@@ -180,3 +180,11 @@ def carryover_updates(listing: dict | None, notes: dict) -> dict[str, str]:
         updates["knownFlaws"] = flaws
 
     return updates
+
+
+def notes_with_carryover(notes: str | None, listing: dict | None) -> str | None:
+    """``notes`` as Regenerate leaves them: the listing's seller facts merged into Item Details."""
+    from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
+
+    carried = carryover_updates(listing, parse_notes(notes))
+    return merge_notes(notes, carried) if carried else notes

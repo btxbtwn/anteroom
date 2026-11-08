@@ -11,6 +11,7 @@ import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMe
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { StudioImage } from "./StudioImage";
 
 interface Props {
   groups: PhotoFolderGroup[];
@@ -487,7 +488,7 @@ export function PhotoZoom({
           ‹
         </button>
       )}
-      <img
+      <StudioImage
         className={`photo-lightbox-image${turns % 2 ? " is-quarter-turned" : ""}`}
         style={turns ? { transform: `rotate(${turns * 90}deg)` } : undefined}
         src={urls[index]}

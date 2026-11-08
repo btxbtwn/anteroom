@@ -14,6 +14,21 @@ final class InventoryModel {
     private(set) var loadedAt: Date?
     var filters = InventoryFilters()
     var error: String?
+    /// Counts changes to `listings`; the cached queries recompute when it moves.
+    private var revision = 0
+    @ObservationIgnored private var rowsMemo = QueryMemo<RowsKey, [ListingSummary]>()
+    @ObservationIgnored private var countsMemo = QueryMemo<CountsKey, [StatusTab: Int]>()
+
+    private struct RowsKey: Equatable {
+        let revision: Int
+        let search: String
+        let filters: InventoryFilters
+    }
+
+    private struct CountsKey: Equatable {
+        let revision: Int
+        let search: String
+    }
 
     init(api: AnteroomAPI) {
         self.api = api
@@ -25,7 +40,7 @@ final class InventoryModel {
         do {
             let rows = try await api.listings()
             try Task.checkCancellation()
-            listings = rows
+            changeListings { $0 = rows }
             hasLoaded = true
             loadedAt = Date()
             error = nil
@@ -91,12 +106,23 @@ final class InventoryModel {
         }
     }
 
+    /// Every change to the rows goes through here, so the cached queries recompute.
+    private func changeListings(_ change: (inout [ListingSummary]) -> Void) {
+        change(&listings)
+        revision += 1
+    }
+
+    /// Cached: the screen redraws on every selection tap and readiness update.
     func rows(search: String) -> [ListingSummary] {
-        InventoryQuery.rows(listings, search: search, filters: filters)
+        rowsMemo.value(for: RowsKey(revision: revision, search: search, filters: filters)) {
+            InventoryQuery.rows(listings, search: search, filters: filters)
+        }
     }
 
     func counts(search: String) -> [StatusTab: Int] {
-        InventoryQuery.counts(listings, search: search)
+        countsMemo.value(for: CountsKey(revision: revision, search: search)) {
+            InventoryQuery.counts(listings, search: search)
+        }
     }
 
     /// Tabs in desktop order; Failed only appears while something failed.
@@ -126,8 +152,10 @@ final class InventoryModel {
     func createListing() async -> ListingSummary? {
         do {
             let listing = try await api.createListing()
-            listings.removeAll { $0.id == listing.id }
-            listings.insert(listing, at: 0)
+            changeListings { rows in
+                rows.removeAll { $0.id == listing.id }
+                rows.insert(listing, at: 0)
+            }
             return listing
         } catch {
             self.error = error.localizedDescription
@@ -147,7 +175,7 @@ final class InventoryModel {
     func delete(_ listing: ListingSummary) async {
         do {
             try await api.deleteListing(listing.id)
-            listings.removeAll { $0.id == listing.id }
+            changeListings { rows in rows.removeAll { $0.id == listing.id } }
         } catch {
             self.error = error.localizedDescription
         }

@@ -252,6 +252,29 @@ class ConversationResetTest(unittest.TestCase):
         self.db.expire_all()
         self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id), [])
 
+    def test_regenerate_details_shows_carried_facts_without_saving_them(self):
+        self.conv.notes = json.dumps({"condition": "Good", "sku": "TYPED-1"})
+        listing_persistence.save_revision(self.db,
+            self.conv.id,
+            {"title": "Jean shorts", "description": 'Measurements: Waist 16"; Inseam 5"',
+             "cost": 2, "sku": "A23", "labels": ["To List", "Bin 4"]},
+            "generate",
+        )
+        self.db.commit()
+
+        response = self.client.get(f"/api/conversations/{self.conv.id}/regenerate-details")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        notes = json.loads(response.json()["notes"])
+        self.assertEqual(notes["sku"], "TYPED-1")  # What the seller typed wins.
+        self.assertEqual(notes["cog"], "2.00")
+        self.assertEqual(notes["vendooLabels"], "To List, Bin 4")
+        self.assertEqual(notes["descriptionMeasurements"], 'Waist 16"; Inseam 5"')
+        self.db.expire_all()
+        self.assertEqual(json.loads(self.db.get(type(self.conv), self.conv.id).notes),
+                         {"condition": "Good", "sku": "TYPED-1"})
+        self.assertEqual(self.client.get("/api/conversations/missing/regenerate-details").status_code, 404)
+
     def test_reset_without_keep_inputs_carries_nothing(self):
         listing_persistence.save_revision(self.db,
             self.conv.id,

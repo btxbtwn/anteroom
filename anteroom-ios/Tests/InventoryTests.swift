@@ -188,6 +188,19 @@ struct InventoryTests {
         precondition(InventoryQuery.isStale(loadedAt: nil, now: loaded))
         precondition(!InventoryQuery.isStale(loadedAt: loaded, now: loaded.addingTimeInterval(29)))
         precondition(InventoryQuery.isStale(loadedAt: loaded, now: loaded.addingTimeInterval(30)))
+        // A redraw with the same inputs reuses the last rows; a change to any input recomputes.
+        var memo = QueryMemo<String, [String]>()
+        var computed = 0
+        func searched(_ text: String) -> [String] {
+            memo.value(for: text) {
+                computed += 1
+                return ids(InventoryQuery.rows(rows, search: text, filters: InventoryFilters()))
+            }
+        }
+        precondition(searched("") == ["d", "a", "b", "e"] && computed == 1)
+        precondition(searched("") == ["d", "a", "b", "e"] && computed == 1, "same inputs: no recompute")
+        precondition(searched("coat") == ["c"] && computed == 2)
+        precondition(searched("") == ["d", "a", "b", "e"] && computed == 3)
         print("Inventory tests passed")
     }
 
