@@ -1,1 +1,0 @@
-- Selecting listings on iPhone responds right away instead of lagging behind each tap, even with a large inventory.

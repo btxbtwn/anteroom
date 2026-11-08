@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.789 — 2026-11-08
+
+- Selecting listings on iPhone responds right away instead of lagging behind each tap, even with a large inventory.
+
 ## 0.1.788 — 2026-11-08
 
 - Read from photos works again on myanteroom.com: the web app now ships the measuring tool instead of saying the measure-this skill is missing. Box Scout's sourcing refresh gets its files there too.
