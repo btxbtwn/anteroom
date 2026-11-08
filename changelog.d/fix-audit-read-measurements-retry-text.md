@@ -1,1 +1,0 @@
-- When the server restarts mid-read, the message now points to the Read measurements button by its current name.

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.821 — 2026-11-08
+
+- When the server restarts mid-read, the message now points to the Read measurements button by its current name.
+
 ## 0.1.820 — 2026-11-08
 
 - A relisted item that sold more than once keeps its earlier sale. When a marketplace order arrives, Anteroom now replaces only the Vendoo or Mark as sold record from within a week of it, instead of the nearest one no matter how old.
