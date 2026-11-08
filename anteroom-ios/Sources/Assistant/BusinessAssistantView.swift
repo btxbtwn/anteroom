@@ -6,6 +6,7 @@ import SwiftUI
 struct BusinessAssistantView: View {
     let attachmentsAvailable: Bool
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var model: BusinessAssistantModel
     @State private var path = NavigationPath()
     @State private var showingChats = false
@@ -30,8 +31,11 @@ struct BusinessAssistantView: View {
             .navigationTitle(model.threadTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Chats", systemImage: "list.bullet") { showingChats = true }
+                // History appears once there is a chat to go back to.
+                if !model.threads.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Chats", systemImage: "clock.arrow.circlepath") { showingChats = true }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("New chat", systemImage: "square.and.pencil") { Task { await model.open(nil) } }
@@ -64,31 +68,78 @@ struct BusinessAssistantView: View {
     // MARK: Empty conversation
 
     private var starters: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                VStack(spacing: 8) {
-                    Text("Ask about your business").font(.title3.weight(.semibold))
-                    Text("You review every change before it is saved, and nothing here publishes a listing.")
-                        .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                }
-                .padding(.top, 40)
-                VStack(spacing: 8) {
-                    ForEach(AssistantFormat.starters, id: \.self) { starter in
-                        Button { model.ask(starter) } label: {
-                            Text(starter)
+        // The greeting and questions sit centered in the space above the
+        // composer, which stays docked at the bottom within thumb reach.
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(AssistantFormat.greeting())
+                        .font(.title2.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
+                        .padding(.bottom, 8)
+                    // A plain list with dividers, as on the web (DESIGN.md).
+                    VStack(spacing: 0) {
+                        ForEach(Array(AssistantFormat.starters.enumerated()), id: \.offset) { index, starter in
+                            if index > 0 { Divider() }
+                            Button { model.ask(starter.text) } label: {
+                                Label {
+                                    Text(starter.text).multilineTextAlignment(.leading)
+                                } icon: {
+                                    Image(systemName: starter.systemImage).foregroundStyle(.secondary)
+                                }
                                 .font(.subheadline)
-                                .multilineTextAlignment(.leading)
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, 14)
-                                .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(WorkspaceStyle.border, lineWidth: 1))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(starter.text)
                         }
-                        .buttonStyle(.plain)
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Example questions")
+                    recentChats
+                    errorRow
+                }
+                .padding(16)
+                .frame(minHeight: geometry.size.height)
+            }
+        }
+    }
+
+    /// The latest chats to pick back up (Gemini's "Recent"); Show all opens Chats.
+    /// iPhone keeps its home to the greeting and questions; the Chats button holds the history.
+    @ViewBuilder
+    private var recentChats: some View {
+        let recent = sizeClass == .regular ? Array(model.threads.prefix(AssistantFormat.recentChats)) : []
+        if !recent.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Recent chats").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    Spacer()
+                    if model.threads.count > recent.count {
+                        Button("Show all") { showingChats = true }.font(.caption)
                     }
                 }
-                errorRow
+                .padding(.bottom, 4)
+                ForEach(Array(recent.enumerated()), id: \.element.id) { index, thread in
+                    if index > 0 { Divider() }
+                    Button { Task { await model.open(thread.id) } } label: {
+                        HStack(spacing: 12) {
+                            Text(thread.title).lineLimit(1).foregroundStyle(.primary)
+                            Spacer(minLength: 8)
+                            Text(AssistantFormat.chatTime(thread.updatedAt)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .padding(16)
+            .padding(.top, 8)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Recent chats")
         }
     }
 
@@ -193,7 +244,7 @@ struct BusinessAssistantView: View {
             }
             // The web's composer: the message on top, its tools along the bottom.
             VStack(alignment: .leading, spacing: 0) {
-                TextField("Ask anything about the shop…", text: $model.text, axis: .vertical)
+                TextField("Ask about sales, inventory or listings…", text: $model.text, axis: .vertical)
                     .lineLimit(1...6)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 14)
@@ -411,27 +462,35 @@ private struct AssistantChatsSheet: View {
                         Task { await model.open(nil) }
                         dismiss()
                     }
-                    Section {
-                        if !model.threadsLoaded {
-                            ProgressView()
-                        } else if shown.isEmpty {
+                    if !model.threadsLoaded {
+                        Section { ProgressView() }
+                    } else if shown.isEmpty {
+                        Section {
                             Text(model.threads.isEmpty ? "No chats yet" : "No matching chats").foregroundStyle(.secondary)
                         }
-                        ForEach(shown) { thread in
-                            Button {
-                                Task { await model.open(thread.id) }
-                                dismiss()
-                            } label: {
-                                HStack {
-                                    Text(thread.title).foregroundStyle(.primary).lineLimit(2)
-                                    Spacer()
-                                    if thread.id == model.threadID {
-                                        Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
+                    }
+                    // Grouped by day, newest first, as ChatGPT and Claude list their history.
+                    ForEach(AssistantFormat.groupChats(shown), id: \.group) { section in
+                        Section(section.group) {
+                            ForEach(section.threads) { thread in
+                                Button {
+                                    Task { await model.open(thread.id) }
+                                    dismiss()
+                                } label: {
+                                    HStack {
+                                        Text(thread.title).foregroundStyle(.primary).lineLimit(2)
+                                        Spacer()
+                                        if thread.id == model.threadID {
+                                            Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
+                                        } else {
+                                            Text(AssistantFormat.chatTime(thread.updatedAt))
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
-                            }
-                            .swipeActions {
-                                Button("Delete", role: .destructive) { deleting = thread }
+                                .swipeActions {
+                                    Button("Delete", role: .destructive) { deleting = thread }
+                                }
                             }
                         }
                     }
