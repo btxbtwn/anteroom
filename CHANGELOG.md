@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.826 — 2026-11-08
+
+- A saved cost of goods of $0 now counts as recorded in missing sale data, even before the other sale amounts are entered.
+
 ## 0.1.825 — 2026-11-08
 
 - Pushing a new price onto a live listing from the command line now names the one marketplace to update and carries the same confirmation as every other live-listing change. It no longer picks the live marketplaces by itself.

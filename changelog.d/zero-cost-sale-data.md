@@ -1,1 +1,0 @@
-- A saved cost of goods of $0 now counts as recorded in missing sale data, even before the other sale amounts are entered.
