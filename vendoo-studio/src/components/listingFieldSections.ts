@@ -11,6 +11,8 @@ export interface SectionField {
   key: string;
   label: string;
   required?: boolean;
+  /** The label is read by screen readers only. */
+  labelHidden?: boolean;
 }
 
 export interface FieldSection<T extends SectionField> {
@@ -136,20 +138,26 @@ export function groupFieldsIntoSections<T extends SectionField>(fields: T[]): Fi
 }
 
 /**
- * The General tab's own order. It reads the way a seller describes an item:
- * what it is, how it is presented, its condition, then price, shipping and
- * stock. Category comes first because it is the one required field and it
- * decides the category each marketplace form uses. Rows sit in pairs only
- * when they belong together (price and cost, weight and dimensions).
+ * The General tab's own order: the order a seller fills it in by hand, as
+ * eBay's and Shopify's listing forms do. Category comes first because it is
+ * the one required field and decides each marketplace's form. Then what a
+ * buyer scans first (title, condition, size, brand), the price, the
+ * description, the remaining item details and shipping. Cost, SKU and
+ * quantity are the seller's own records, so they wait under More details,
+ * folded until the seller opens it.
  */
 const GENERAL_SECTIONS: { id: string; title: string; keys: string[] }[] = [
-  { id: "item", title: "Item", keys: ["category_path", "department", "brand"] },
-  { id: "listing", title: "Listing", keys: ["title", "description"] },
-  { id: "details", title: "Condition & details", keys: ["condition", "size", "primaryColor", "secondaryColor"] },
-  { id: "pricing", title: "Pricing", keys: ["price", "cost"] },
+  { id: "item", title: "Item", keys: ["category_path", "title"] },
+  { id: "details", title: "Condition & details", keys: ["condition", "size", "brand"] },
+  { id: "pricing", title: "Pricing", keys: ["price"] },
+  { id: "description", title: "Description", keys: ["description"] },
+  { id: "appearance", title: "Color & department", keys: ["primaryColor", "secondaryColor", "department"] },
   { id: "shipping", title: "Shipping", keys: ["weight_oz", "package_dimensions_in", "zipCode"] },
-  { id: "inventory", title: "Inventory", keys: ["quantity", "sku"] },
+  { id: "other", title: "More details", keys: ["cost", "sku", "quantity"] },
 ];
+
+/** The General section that starts folded. */
+export const GENERAL_FOLDED_SECTION = "other";
 
 export function generalFormSections<T extends SectionField>(fields: T[]): FieldSection<T>[] {
   const byKey = new Map(fields.map((field) => [field.key, field]));
@@ -161,8 +169,15 @@ export function generalFormSections<T extends SectionField>(fields: T[]): FieldS
       placed.add(key);
       return [field];
     });
-    return rows.length ? [{ id: section.id, title: section.title, fields: rows }] : [];
+    if (!rows.length) return [];
+    // A lone field the heading already names keeps its label for screen readers only.
+    const named = rows.length === 1 && rows[0]!.label === section.title;
+    return [{ id: section.id, title: section.title, fields: named ? [{ ...rows[0]!, labelHidden: true }] : rows }];
   });
+  // A field the order does not name joins More details, after its own rows.
   const rest = fields.filter((field) => !placed.has(field.key));
-  return rest.length ? [...sections, { ...OTHER, fields: rest }] : sections;
+  if (!rest.length) return sections;
+  const more = sections.find((section) => section.id === OTHER.id);
+  return more ? sections.map((section) => section === more ? { ...more, fields: [...more.fields, ...rest] } : section)
+    : [...sections, { ...OTHER, fields: rest }];
 }
