@@ -1,6 +1,6 @@
 import { listingScreenRead } from "./listingScreen";
 import type { VendooDraft } from "./vendooDraft";
-import { studioFetch, hasHostedApiSession } from "./transport";
+import { ApiRequestError, retryAfterMs, studioFetch, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
@@ -126,14 +126,30 @@ function read<T>(path: string, options?: ReadOptions): Promise<T> {
   return listingScreenRead<T>(path, (readPath, signal) => rawRequest(readPath, signal ? { signal } : undefined), options?.signal);
 }
 
+/** What a proxy answers while the server behind it is down or restarting, such as during a deploy. */
+const UNAVAILABLE_STATUSES = new Set([502, 503, 504]);
+
 async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await studioFetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
-  });
+  const isRead = (options?.method ?? "GET").toUpperCase() === "GET";
+  let res: Response;
+  try {
+    res = await studioFetch(`${BASE}${path}`, {
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      ...options,
+    });
+  } catch (error) {
+    // fetch rejects with a TypeError when the connection fails or drops.
+    if (isRead && error instanceof TypeError) throw new ApiRequestError(error.message, 0, true);
+    throw error;
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(errorMessage(body, `Request failed: ${res.status}`));
+    throw new ApiRequestError(
+      errorMessage(body, `Request failed: ${res.status}`),
+      res.status,
+      isRead && UNAVAILABLE_STATUSES.has(res.status),
+      retryAfterMs(res.headers.get("Retry-After")),
+    );
   }
   return res.json();
 }
@@ -635,6 +651,8 @@ export const api = {
     list: (filters: SalesLedgerFilters, page = 1) => request<SalesLedgerPage>(`/sales-ledger?${salesLedgerParams(filters, page)}`),
     get: (saleId: string) => request<SalesLedgerRow>(`/sales-ledger/${encodeURIComponent(saleId)}`),
     save: (saleId: string, body: FinancialSave) => request<SalesLedgerRow>(`/sales-ledger/${encodeURIComponent(saleId)}/financials`, { method: "PUT", body: JSON.stringify(body) }),
+    remove: (saleId: string, expectedRevision: number) => request<{ deleted: string }>(
+      `/sales-ledger/${encodeURIComponent(saleId)}?${new URLSearchParams({ expected_revision: String(expectedRevision) })}`, { method: "DELETE" }),
     salesCsv: (filters: SalesLedgerFilters) => `${BASE}/sales-ledger/export/sales.csv?${salesLedgerParams(filters)}`,
     inventoryCsv: () => `${BASE}/sales-ledger/export/inventory.csv`,
   },

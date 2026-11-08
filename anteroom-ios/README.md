@@ -36,6 +36,18 @@ once while the sheet is busy, and success opens the new draft after dismissal.
 Settings shows the signed-in account and installed version, with confirmation
 before signing out. Inventory keeps its search and open listing across tabs.
 
+## iPad
+
+The same app runs on iPad (iOS 18 or later). The tabs use
+`.sidebarAdaptable`: a tab bar that also opens as a sidebar. In a
+regular-width window, Inventory is a `NavigationSplitView` with the list on
+the left and the open listing on the right. In a narrow window (Split View,
+Stage Manager) it falls back to the iPhone's push navigation, and the open
+listing stays open across the switch. An editor that closes without Save or
+Discard (another listing opened, a layout switch, a tab switch) keeps its
+unsaved edits on the device, and they come back when that listing reopens.
+CI runs `IPadSandboxTests` on an iPad simulator.
+
 Fields expose their labels to VoiceOver; price/cost and photo controls stack
 at accessibility text sizes. Photo deletion is a visible action with
 confirmation, rather than a long-press-only gesture. Photos save immediately;
@@ -246,6 +258,17 @@ When the sign-in can't be renewed, the app signs out to the sign-in screen. A
 401 that names a marketplace (eBay signed Anteroom out) keeps its own message
 and the sign-in. Signing out also deletes exported CSVs, cached photos and kept
 editor edits from the phone.
+
+## When the server is briefly unavailable
+
+The hosted API restarts on every deploy, and Fly's proxy answers 503 for a
+while. `ReadRetry` (`Sources/API/ReadRetry.swift`) sends a read (GET) again
+after a 502, 503 or 504 or a failed connection, with waits that double up to
+8 seconds plus jitter, following `Retry-After`, for at most 90 seconds; the
+screen keeps its loading state meanwhile. Leaving the screen cancels the wait.
+Nothing else is ever sent twice: saves, generation, chat and every marketplace
+action fail once and show their error. A screen still showing a load error
+loads again when the app returns to the foreground (`reloadingOnReturn`).
 
 ## Kept edits and uploads
 
