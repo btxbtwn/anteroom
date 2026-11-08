@@ -1,0 +1,1 @@
+- Anteroom now shows a loading screen as soon as you open it, with a reload option if your workspace takes longer to open or cannot load.
