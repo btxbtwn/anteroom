@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.787 — 2026-11-08
+
+- Show only icons in the iPhone app's tab bar.
+
 ## 0.1.786 — 2026-11-08
 
 - The iPhone Assistant answers again instead of failing with "Something went wrong (500)".

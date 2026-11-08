@@ -1,1 +1,0 @@
-- Show only icons in the iPhone app's tab bar.
