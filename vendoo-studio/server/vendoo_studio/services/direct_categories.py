@@ -67,12 +67,17 @@ def _tokens(text: str) -> list[str]:
 
 # Branches for a narrower kind of buyer. A leaf in one needs the category or title to say so.
 _NICHE = {"pet", "dog", "cat", "wedding", "bridal", "bride"}
+# General roots that hold clothing. A category from any other root never lands in
+# Etsy's Clothing or Shoes because of a shared word: a boiler's "Expansion Tanks" are not tank tops.
+_APPAREL_ROOTS = {"clothing, shoes & accessories", "baby", "clothing", "shoes"}
+_ETSY_APPAREL = {"clothing", "shoes"}
 
 
 def pick_etsy_leaf(leaves: list[dict], query: str) -> dict[str, str] | None:
     """Match the product type at the leaf first, then its department and ancestors."""
     # General's apparel root names every kind of item, so its words choose nothing.
     parts = [part.strip() for part in query.split(">")]
+    outside_apparel = len(parts) > 1 and parts[0].casefold() not in _APPAREL_ROOTS
     if len(parts) > 2 and parts[0].casefold() == "clothing, shoes & accessories":
         query = " > ".join(parts[1:])
     tokens = {word.rstrip("s") for word in _tokens(query)}
@@ -85,6 +90,8 @@ def pick_etsy_leaf(leaves: list[dict], query: str) -> dict[str, str] | None:
         words = {word.rstrip("s") for word in _tokens(path)}
         # Pet clothing is for a pet, and a wedding hat for a wedding, only when the query says so.
         if (words & _NICHE) - tokens:
+            continue
+        if outside_apparel and path.split(">")[0].strip().casefold() in _ETSY_APPAREL:
             continue
         leaf_words = {word.rstrip("s") for word in _tokens(path.split(">")[-1])}
         score = len(tokens & words)

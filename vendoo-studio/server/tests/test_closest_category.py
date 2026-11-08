@@ -160,3 +160,19 @@ def test_the_hosted_contract_round_trips_the_flag():
         editable_listing({"direct_category_ids": {"poshmark_suggested": "yes"}})
     with pytest.raises(HTTPException):
         editable_listing({"direct_category_ids": {"shop_suggested": True}})
+
+
+def test_etsy_keeps_items_from_outside_clothing_out_of_its_clothing_and_shoes():
+    from vendoo_studio.services.direct_categories import pick_etsy_leaf
+
+    leaves = [
+        {"id": "tank", "path": "Clothing > Women's Clothing > Tops & Tees > Tank Tops"},
+        {"id": "boiler", "path": "Home & Living > Home Improvement > Plumbing > Tanks"},
+    ]
+    boiler = "Business & Industrial > HVAC & Refrigeration > Boilers > Boiler Expansion Tanks"
+    assert pick_etsy_leaf(leaves, boiler)["id"] == "boiler"
+    assert pick_etsy_leaf(leaves[:1], boiler) is None
+    women = "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops > Tank Tops"
+    assert pick_etsy_leaf(leaves, women)["id"] == "tank"
+    # A plain search with no General root still reaches clothing.
+    assert pick_etsy_leaf(leaves, "tank top")["id"] == "tank"
