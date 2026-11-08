@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.835 — 2026-11-08
+
+- Sourcing retries brief supplier rate limits and avoids unnecessary catalog requests.
+
 ## 0.1.834 — 2026-11-08
 
 - Inventory on phones scrolls to the screen edge behind Safari's floating controls, with the profile button beside the header actions.
