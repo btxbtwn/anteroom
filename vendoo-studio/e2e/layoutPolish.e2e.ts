@@ -39,7 +39,7 @@ test.describe("layout", () => {
   });
 
   test("the inventory table gives titles the free width and leaves search to the sidebar", async ({ page, request }) => {
-    const titleText = `${LONG_TITLE} ${crypto.randomUUID()}`;
+    const titleText = `${LONG_TITLE} ${crypto.randomUUID().slice(0, 6)}`;
     await createListing(request, titleText);
     await page.goto("/");
     await page.getByRole("button", { name: "Inventory table" }).click();
