@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.848 — 2026-11-08
+
+- Fix sourcing refreshes failing because a required provider dependency was missing from the hosted app.
+
 ## 0.1.847 — 2026-11-08
 
 - Reject incomplete photo-analysis responses instead of losing tag text and uncertainty details.

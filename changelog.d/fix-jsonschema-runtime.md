@@ -1,1 +1,0 @@
-- Fix sourcing refreshes failing because a required provider dependency was missing from the hosted app.
