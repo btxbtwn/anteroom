@@ -398,10 +398,32 @@ def lock_seller_edits(previous: dict, submitted: dict) -> None:
         return
     locks = locked_paths(previous) | locked_paths(submitted)
     for path in _changed_paths(previous if isinstance(previous, dict) else {}, submitted):
+        if _suggestion_path(path):
+            # "Looks right" on a suggested category makes it the seller's own.
+            if get_path(submitted, path) is None and get_path(submitted, path.removesuffix("_suggested")):
+                locks.add(path.removesuffix("_suggested"))
+            continue
         if is_price_path(path):
             continue
         locks.add(path)
     _write_locks(submitted, locks)
+
+
+def _suggestion_path(path: str) -> bool:
+    return path.startswith("direct_category_ids.") and path.endswith("_suggested")
+
+
+def settle_category_suggestions(previous: dict, submitted: dict) -> None:
+    """A category the seller picks on a marketplace tab is theirs, no longer a suggestion."""
+    after = submitted.get("direct_category_ids")
+    if not isinstance(after, dict):
+        return
+    before = previous.get("direct_category_ids")
+    before = before if isinstance(before, dict) else {}
+    for key in [key for key in after if key.endswith("_suggested")]:
+        market = key.removesuffix("_suggested")
+        if _stable(before.get(market)) != _stable(after.get(market)):
+            after.pop(key)
 
 
 def lock_native_edits(previous: dict, submitted: dict, markets) -> None:
@@ -621,6 +643,7 @@ def prepare_user_listing(previous: dict | None, submitted: dict, *, notes: dict 
         return submitted
     expand_depop_multi(previous)
     expand_depop_multi(submitted)
+    settle_category_suggestions(previous, submitted)
     lock_seller_edits(previous, submitted)
     apply_price_policy(previous, submitted)
     reconcile_followed_fields(previous, submitted)

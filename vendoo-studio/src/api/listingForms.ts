@@ -4,7 +4,7 @@ import type { ChoiceList, ListingData, MarketplaceForm } from "./types";
 import { getListingEditorValue } from "../listingPaths";
 import { nativeFormStructureKey } from "../components/nativeFormStability";
 
-export const DIRECT_FORM_MARKETS = new Set(["ebay", "poshmark", "mercari", "depop"]);
+export const DIRECT_FORM_MARKETS = new Set(["ebay", "poshmark", "mercari", "depop", "etsy"]);
 
 // Shared marketplace lists (Mercari's 28,000 brands) are the same for every listing.
 // Keep each version for the page's lifetime; a failed download is tried again next time.

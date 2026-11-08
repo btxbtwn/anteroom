@@ -1,6 +1,6 @@
 import { useWorkspaceRuntime } from "../../app/runtime";
 import type { ComponentType } from "react";
-import { BotIcon, CircleHelpIcon, DatabaseIcon, Link2Icon, MessageSquareTextIcon, ScrollTextIcon, Settings2Icon, TagIcon, TerminalIcon } from "lucide-react";
+import { BotIcon, CircleHelpIcon, DatabaseIcon, FlaskConicalIcon, Link2Icon, MessageSquareTextIcon, ScrollTextIcon, Settings2Icon, TagIcon, TerminalIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { HOSTED_SETTINGS_SECTIONS, SETTINGS_NAV_ITEMS, SETTINGS_SECTION_LABELS, type SettingsSectionId } from "../settingsNav";
 import { SIDEBAR_ROW } from "./sidebarStyles";
@@ -17,6 +17,7 @@ const SECTION_ICONS: Record<SettingsSectionId, ComponentType<{ className?: strin
   agents: TerminalIcon,
   data: DatabaseIcon,
   logs: ScrollTextIcon,
+  experimental: FlaskConicalIcon,
   help: CircleHelpIcon,
 };
 

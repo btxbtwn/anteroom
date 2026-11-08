@@ -53,19 +53,16 @@ import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSess
 
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
 import { initialOpenListing, openListingReducer } from "./openListing";
-import { loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode } from "./pageLoaders";
+import {
+  AnalyticsPage, AssistantPage, AutomationsPage, InventoryTablePage, MarketplacesPage, SettingsPage, SourcingPage,
+  loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode,
+} from "./pageLoaders";
 import { ListingChatPane, ListingEditorPane, pageLoading, type ListingPaneActions } from "./ListingPanes";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { setListingSearch, useListingSearch } from "../components/sidebar/listingSearch";
 import { prefetchListingReads } from "../api/navigationQueries";
+import { prefetchPageReads } from "../api/pageQueries";
 
-const SettingsPage = lazy(pageLoaders.settings);
-const AnalyticsPage = lazy(pageLoaders.analytics);
-const AssistantPage = lazy(pageLoaders.assistant);
-const MarketplacesPage = lazy(pageLoaders.marketplaces);
-const AutomationsPage = lazy(pageLoaders.automations);
-const SourcingPage = lazy(pageLoaders.sourcing);
-const InventoryTablePage = lazy(pageLoaders.inventory);
 // A page's code is fetched the first time it is opened. Fetching it once the
 // app has settled means a tap does not wait on the network for it.
 const PAGE_LOADERS = [...Object.values(pageLoaders), loadListingEditor, loadChatPanel];
@@ -170,12 +167,18 @@ export function App() {
       pollMs(hasOpenJob(query.state.data?.jobs) || query.state.data?.work.length ? BUSY_POLL_MS : IDLE_POLL_MS),
   });
   const inventoryLoaded = conversations !== undefined;
+  // The runtime object is rebuilt on every render; its names are what matter here.
+  const pageViews = [...runtime.views].join(" ");
+  const pageFeatures = [...runtime.features].join(" ");
   useEffect(() => {
     if (!inventoryLoaded) return;
     let cancelled = false;
     let idleId: number | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const remaining = [...PAGE_LOADERS];
+    // The pages' first reads go first, so their data is in before a tap
+    // opens them; the page code then loads behind them.
+    const readPages = () => { void prefetchPageReads(queryClient, { views: new Set(pageViews.split(" ")), features: new Set(pageFeatures.split(" ")) }).catch(() => {}); return Promise.resolve(); };
+    const remaining = [readPages, ...PAGE_LOADERS];
     const schedule = () => {
       if (cancelled || !remaining.length) return;
       const next = () => {
@@ -197,7 +200,7 @@ export function App() {
       if (idleId !== undefined) window.cancelIdleCallback(idleId);
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [inventoryLoaded]);
+  }, [inventoryLoaded, queryClient, pageViews, pageFeatures]);
   const previousQueueJobs = useRef<Map<string, string> | null>(null);
   useEffect(() => {
     if (!queue.data) return;

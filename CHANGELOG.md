@@ -6,6 +6,33 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.845 — 2026-11-08
+
+- On the web and iPhone browser, reopening Anteroom shows your inventory and pages right away from your last visit, then refreshes them. Signing out erases what was kept on the device.
+
+## 0.1.844 — 2026-11-08
+
+- Find the Vendoo switch under Settings → Experimental, alongside a coming-soon hosted marketplace browser option.
+
+## 0.1.843 — 2026-11-08
+
+- Use Liquid Glass pills for the iPhone inventory status filters, with a clear selected state and room for larger text.
+
+## 0.1.842 — 2026-11-08
+
+- Sourcing, Automations, Marketplaces, Analytics and Settings open with their data already loaded, with no spinner or placeholder first.
+
+## 0.1.841 — 2026-11-08
+
+- The Etsy tab now follows Etsy's own listing form: Photo & video, Category, Item details, Item options, Pricing & shipping, How it's made and Settings, with your category's Etsy attributes.
+- Pick the Etsy category on the Etsy tab. Your pick stays put when the listing is generated again.
+- A price or tags you change on the Etsy tab are now what Etsy gets, without changing General.
+
+## 0.1.840 — 2026-11-08
+
+- A category set on General now fills the closest Poshmark, Mercari and Depop category when no exact match exists, instead of leaving it blank. That marketplace tab shows "Suggested: check it" until you pick a category or press Looks right.
+- Kids' sets and gloves no longer land in Mercari's Fragrance or Cleaning categories, and Etsy no longer picks Pet Supplies for women's tops, dresses or men's hats.
+
 ## 0.1.839 — 2026-11-08
 
 - The General form now follows the order you fill it in: category, then title, condition, size and brand, then price, description, colors and department, and shipping.
