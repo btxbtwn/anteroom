@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.842 — 2026-11-08
+
+- Sourcing, Automations, Marketplaces, Analytics and Settings open with their data already loaded, with no spinner or placeholder first.
+
 ## 0.1.841 — 2026-11-08
 
 - The Etsy tab now follows Etsy's own listing form: Photo & video, Category, Item details, Item options, Pricing & shipping, How it's made and Settings, with your category's Etsy attributes.
