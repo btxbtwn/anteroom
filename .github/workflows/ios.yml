@@ -196,13 +196,16 @@ jobs:
         run: |
           set -euxo pipefail
           xcrun simctl shutdown "$SIMULATOR_ID" || true
-          # Device type names change between Xcode releases; take an iPad Air, or any iPad.
-          IPAD_TYPE="$(xcrun simctl list devicetypes -j | python3 -c '
+          # Device type names change between Xcode releases, and old iPads lack
+          # the installed runtime: take an iPad Air the newest iOS runtime supports.
+          read -r IPAD_TYPE IPAD_RUNTIME < <(xcrun simctl list runtimes -j | python3 -c '
           import json, sys
-          ids = [d["identifier"] for d in json.load(sys.stdin)["devicetypes"]]
-          print(([i for i in ids if "iPad-Air" in i] or [i for i in ids if ".iPad" in i])[-1])
-          ')"
-          IPAD_ID="$(xcrun simctl create 'Anteroom iPad sandbox tests' "$IPAD_TYPE")"
+          runtimes = [r for r in json.load(sys.stdin)["runtimes"] if r["platform"] == "iOS" and r["isAvailable"]]
+          runtime = max(runtimes, key=lambda r: [int(n) for n in r["version"].split(".")])
+          ipads = [d["identifier"] for d in runtime["supportedDeviceTypes"] if d["productFamily"] == "iPad"]
+          print(([i for i in ipads if "iPad-Air" in i] or ipads)[-1], runtime["identifier"])
+          ')
+          IPAD_ID="$(xcrun simctl create 'Anteroom iPad sandbox tests' "$IPAD_TYPE" "$IPAD_RUNTIME")"
           xcrun simctl bootstatus "$IPAD_ID" -b
           xcrun simctl spawn "$IPAD_ID" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true
           echo "IPAD_ID=$IPAD_ID" >> "$GITHUB_ENV"
