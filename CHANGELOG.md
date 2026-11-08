@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.820 — 2026-11-08
+
+- A relisted item that sold more than once keeps its earlier sale. When a marketplace order arrives, Anteroom now replaces only the Vendoo or Mark as sold record from within a week of it, instead of the nearest one no matter how old.
+
 ## 0.1.819 — 2026-11-08
 
 - Keep the web app from freezing and showing "Cloud data is temporarily unavailable" when Chrome is slow to answer.
