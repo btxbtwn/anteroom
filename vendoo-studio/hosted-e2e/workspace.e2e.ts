@@ -24,8 +24,12 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  // Signed in, the assistant is home.
+  await expect(page.getByRole("heading", { level: 1, name: /^Good (morning|afternoon|evening)$/ })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Example questions" })).toBeVisible();
   if (info.project.name === "phone") {
-    await page.getByRole("button", { name: "Inventory", exact: true }).click();
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
   await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
   await page.getByRole("button", { name: "Account", exact: true }).click();
@@ -248,7 +252,8 @@ test("a listing the server briefly cannot answer keeps loading and fills in its 
       body: JSON.stringify({ detail: "Cloud data is temporarily unavailable" }) });
   });
   if (info.project.name === "phone") {
-    await page.getByRole("button", { name: "Inventory", exact: true }).click();
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
     await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: draft.title, exact: true }).click();
     await page.getByRole("tab", { name: "Listing", exact: true }).click();
   } else {
