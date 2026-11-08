@@ -167,9 +167,8 @@ def repeated_lines(lines: list[MarketplaceSale]) -> set[str]:
                         key=lambda line: (line.sold_at or line.received_at, line.id)):
         moment = sale_moment(order)
         match = matching_sale_index(copies, order.marketplace, moment)
-        copy = copies[match] if match is not None else None
         # A copy from an earlier sale of a relisted item is a sale of its own.
-        if copy is not None and _within_days(sale_moment(copy), moment, SAME_SALE_DAYS):
+        if match is not None and _within_days(sale_moment(copies[match]), moment, SAME_SALE_DAYS):
             repeated.add(copies.pop(match).id)
     return repeated
 
