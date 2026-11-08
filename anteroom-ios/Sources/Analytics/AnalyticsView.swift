@@ -18,7 +18,7 @@ struct InventoryAnalyticsView: View {
             VStack(alignment: .leading, spacing: 24) {
                 header
                 if let error {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive)
                 }
                 if let data, range != "custom" || customStart <= customEnd {
                     content(data)
@@ -97,8 +97,8 @@ struct InventoryAnalyticsView: View {
     @ViewBuilder
     private func content(_ data: InventoryAnalytics) -> some View {
         if !data.incompleteSales.isEmpty {
-            AnalyticsSection(data.incompleteSales.count == 1 ? "1 sale needs sales data" : "\(data.incompleteSales.count) sales need sales data",
-                             note: "Across all time. Add the missing details on the listing to update your analytics. Missing prices, costs, or fees leave revenue and profit incomplete.") {
+            AnalyticsSection(AnalyticsFormat.incompleteHeading(data.incompleteSales.map(\.missing)),
+                             note: "Across all time. Profit leaves these sales out until you add what's missing on each listing.") {
                 DisclosureGroup("Review sales with missing data") {
                     ForEach(data.incompleteSales) { sale in
                         if let listingID = sale.conversationID {
@@ -114,10 +114,10 @@ struct InventoryAnalyticsView: View {
                 .font(.footnote)
             }
             .padding(12)
-            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            .background(WorkspaceStyle.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         }
 
-        AnalyticsSection(heading) {
+        AnalyticsSection(range == "custom" ? "Sales, \(heading)" : "Sales") {
             salesStats(data)
             if let previous = data.previous {
                 Note("Compared with \(AnalyticsFormat.soldDate(previous.start)) – \(AnalyticsFormat.soldDate(previous.end)) (previous period, same length).")
@@ -230,19 +230,20 @@ struct InventoryAnalyticsView: View {
         return StatGrid {
             Stat(label: "Revenue", value: AnalyticsFormat.money(sales.revenue),
                  hint: "\(sales.revenueKnown) of \(sales.count) sales with recorded prices",
-                 change: previous.map { revenueComplete ? AnalyticsFormat.change(sales.revenue, $0.revenue, AnalyticsFormat.money) : "Comparison unavailable: missing prices" })
-            Stat(label: "Sold", value: "\(sales.count)", hint: sales.averagePrice.map { "\(AnalyticsFormat.money($0)) average" },
-                 change: previous.map { AnalyticsFormat.change(Double(sales.count), Double($0.count)) { String(Int($0)) } })
-            Stat(label: "Sell-through rate", value: data.sellThroughRate.map { "\(GeneralFields.text($0))%" } ?? "—",
-                 hint: "Sales in this period ÷ (sales in this period + active listings today)")
+                 change: previous.map { revenueComplete ? AnalyticsFormat.change(sales.revenue, $0.revenue, AnalyticsFormat.money) : "No comparison: missing prices" })
+            // The same names, in the same order, as Sales records.
             Stat(label: "Profit", value: sales.profit.map(AnalyticsFormat.money) ?? "—", hint: AnalyticsFormat.profitHint(sales),
-                 change: previous.map { profitComplete ? AnalyticsFormat.change(sales.profit, $0.profit, AnalyticsFormat.money) : "Comparison unavailable: missing costs or fees" },
+                 change: previous.map { profitComplete ? AnalyticsFormat.change(sales.profit, $0.profit, AnalyticsFormat.money) : "No comparison: missing costs or fees" },
                  negative: (sales.profit ?? 0) < 0)
-            Stat(label: "Profit margin", value: sales.margin.map { "\(GeneralFields.text($0))%" } ?? "—",
-                 hint: "Profit ÷ revenue on sales with recorded cost", negative: (sales.margin ?? 0) < 0)
-            Stat(label: "Median time to sell", value: sales.medianDays.map(AnalyticsFormat.days) ?? "—",
+            Stat(label: "Items sold", value: "\(sales.count)", hint: sales.averagePrice.map { "\(AnalyticsFormat.money($0)) average" },
+                 change: previous.map { AnalyticsFormat.change(Double(sales.count), Double($0.count)) { String(Int($0)) } })
+            Stat(label: "Median days to sell", value: sales.medianDays.map(AnalyticsFormat.days) ?? "—",
                  hint: "Based on \(sales.daysKnown) of \(sales.count) sales",
                  change: previous.map { AnalyticsFormat.change(sales.medianDays.map(Double.init), $0.medianDays.map(Double.init)) { AnalyticsFormat.days(Int($0)) } })
+            Stat(label: "Sell-through", value: data.sellThroughRate.map { "\(GeneralFields.text($0))%" } ?? "—",
+                 hint: "Sold ÷ (sold + still listed)")
+            Stat(label: "Profit margin", value: sales.margin.map { "\(GeneralFields.text($0))%" } ?? "—",
+                 hint: "Profit ÷ revenue on sales with recorded cost", negative: (sales.margin ?? 0) < 0)
         }
     }
 
@@ -310,7 +311,7 @@ struct Stat: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
             if let value {
                 Text(value).font(.title3.weight(.semibold)).monospacedDigit()
-                    .foregroundStyle(negative ? .red : .primary)
+                    .foregroundStyle(negative ? WorkspaceStyle.destructive : .primary)
                     .lineLimit(1).minimumScaleFactor(0.7)
             } else {
                 Text("Not enough data").font(.subheadline).foregroundStyle(.secondary)

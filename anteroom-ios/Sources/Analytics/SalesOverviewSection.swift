@@ -55,13 +55,17 @@ struct SalesOverviewSection: View {
                         if let amount = value.as(Double.self), metric != "count" || amount == amount.rounded() {
                             AxisGridLine()
                             AxisValueLabel {
-                                Text(metric == "count" ? String(Int(amount)) : AnalyticsFormat.money(amount))
+                                Text(metric == "count" ? String(Int(amount)) : AnalyticsFormat.axisMoney(amount))
+                                    .font(.caption2).monospacedDigit()
                             }
                         }
                     }
                 }
                 .chartXAxis {
-                    AxisMarks(values: labelledWeeks) { _ in AxisValueLabel(centered: true) }
+                    // Fewer, larger labels that never collide.
+                    AxisMarks(values: labelledWeeks) { _ in
+                        AxisValueLabel(centered: true, collisionResolution: .greedy).font(.caption2)
+                    }
                 }
                 .frame(height: 180)
             }
@@ -88,7 +92,7 @@ struct SalesOverviewSection: View {
 
     /// About five labels along the axis, always including the latest week.
     private var labelledWeeks: [String] {
-        let every = max(1, Int((Double(overview.weeks.count) / 5).rounded(.up)))
+        let every = max(1, Int((Double(overview.weeks.count) / 4).rounded(.up)))
         return overview.weeks.enumerated()
             .filter { (overview.weeks.count - 1 - $0.offset) % every == 0 }
             .map { Self.day($0.element.start) }

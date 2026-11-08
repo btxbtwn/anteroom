@@ -89,7 +89,7 @@ final class InventoryModel {
     /// Facet counts are taken over the tab in front of the seller.
     func facetSource(search: String) -> [ListingSummary] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return listings.filter { InventoryQuery.matchesSearch($0, needle) && InventoryQuery.inTab($0, filters.status) }
+        return listings.filter { InventoryQuery.matchesSearch($0, needle) && InventoryQuery.inTab($0, filters.status, searching: !needle.isEmpty) }
     }
 
     func marketplaceOptions() -> [String] {

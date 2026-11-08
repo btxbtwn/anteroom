@@ -156,12 +156,33 @@ enum AnalyticsFormat {
         ("30d", "Last 30 days"), ("90d", "Last 90 days"), ("12m", "Last 12 months"), ("all", "All time"),
     ]
 
-    /// Whole dollars stay whole; a cent keeps two places.
+    /// Always with cents, so figures side by side line up ($650.00 beside $54.17).
     static func money(_ value: Double) -> String {
+        guard value.isFinite else { return "$0.00" }
+        return value.formatted(.currency(code: "USD").precision(.fractionLength(2)).locale(Locale(identifier: "en_US")))
+    }
+
+    /// A chart axis label: whole dollars, thousands shortened ($1.2K).
+    static func axisMoney(_ value: Double) -> String {
         guard value.isFinite else { return "$0" }
-        let cents = (abs(value) * 100).rounded()
-        let digits = cents.truncatingRemainder(dividingBy: 100) == 0 ? 0 : 2
-        return value.formatted(.currency(code: "USD").precision(.fractionLength(digits)).locale(Locale(identifier: "en_US")))
+        if abs(value) >= 1000 {
+            return "$" + (value / 1000).formatted(.number.precision(.fractionLength(0...1)).locale(Locale(identifier: "en_US"))) + "K"
+        }
+        return value.formatted(.currency(code: "USD").precision(.fractionLength(0)).locale(Locale(identifier: "en_US")))
+    }
+
+    /// The incomplete-sales heading names what is missing, so it never reads
+    /// as a contradiction of "12 of 12 sales with recorded prices".
+    static func incompleteHeading(_ missing: [[String]]) -> String {
+        var words: [String] = []
+        for field in missing.flatMap({ $0 }) {
+            let word = ["price": "sale price", "item_revenue": "sale price", "item_cost": "cost",
+                        "shipping_cost": "shipping cost"][field] ?? field.replacingOccurrences(of: "_", with: " ")
+            if !words.contains(word) { words.append(word) }
+        }
+        let what = words.isEmpty ? "details"
+            : words.count == 1 ? words[0] : words.dropLast().joined(separator: ", ") + " or " + words.last!
+        return missing.count == 1 ? "1 sale is missing \(what)" : "\(missing.count) sales are missing \(what)"
     }
 
     static func days(_ days: Int) -> String { days == 1 ? "1 day" : "\(days) days" }

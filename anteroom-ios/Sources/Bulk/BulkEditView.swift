@@ -46,7 +46,7 @@ struct BulkEditView: View {
                     case .done: doneSections
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                 }
                 .listRowBackground(WorkspaceStyle.surface)

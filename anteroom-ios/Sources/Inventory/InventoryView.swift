@@ -156,7 +156,7 @@ struct InventoryView: View {
         }
         .overlay { emptyState(rows: rows) }
         .navigationTitle("Inventory")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(sideBySide ? .inline : .large)
         .scrollContentBackground(.hidden)
         .background(WorkspaceStyle.sidebar)
         .toolbarBackground(WorkspaceStyle.sidebar, for: .navigationBar)
@@ -269,15 +269,23 @@ struct InventoryView: View {
     }
 
     private var sortMenu: some View {
-        Menu {
-            Picker("Sort listings", selection: Binding(get: { model.filters.sort }, set: { model.filters.choose($0) })) {
-                ForEach(ListingSort.allCases) { sort in Text(sort.label).tag(sort) }
+        let sort = model.filters.sort
+        return Menu {
+            Picker("Sort by", selection: Binding(get: { sort.field }, set: { model.filters.choose(sort.switching(to: $0)) })) {
+                ForEach(ListingSort.Field.allCases) { field in Text(field.label).tag(field) }
+            }
+            .pickerStyle(.inline)
+            if sort.field.orders.count > 1 {
+                Picker("Order", selection: Binding(get: { sort }, set: { model.filters.choose($0) })) {
+                    ForEach(sort.field.orders, id: \.sort) { order in Text(order.label).tag(order.sort) }
+                }
+                .pickerStyle(.inline)
             }
         } label: {
             Label("Sort", systemImage: "arrow.up.arrow.down")
         }
         .frame(minWidth: 44, minHeight: 44)
-        .accessibilityLabel("Sort listings, \(model.filters.sort.label)")
+        .accessibilityLabel("Sort listings, \(sort.field.label)\(sort.field.orders.count > 1 ? ", " + (sort.field.orders.first { $0.sort == sort }?.label ?? "") : "")")
     }
 
     @ViewBuilder
@@ -302,7 +310,7 @@ struct InventoryView: View {
                 ContentUnavailableView {
                     Label("No matching listings", systemImage: "line.3.horizontal.decrease.circle")
                 } actions: {
-                    if model.filters.activeCount > 0 || model.filters.status != .all {
+                    if model.filters.activeCount > 0 || model.filters.status != .open {
                         Button("Show all listings") { model.filters = InventoryFilters(sort: model.filters.sort) }
                             .frame(minHeight: 44)
                     }
@@ -375,20 +383,24 @@ private struct InventoryFilterMenu: View {
         let counts = InventoryQuery.marketplaceCounts(source, options: options, notListed: model.filters.notListed)
         return Menu {
             Section(model.filters.notListed ? "Not listed on" : "Marketplaces") {
+                // Checkmarked rows, not switches: a Toggle in a menu drew with
+                // blank gaps and pushed the last marketplace off screen.
                 ForEach(options, id: \.self) { id in
-                    Toggle(isOn: Binding(get: { model.filters.marketplaces.contains(id) },
-                                         set: { _ in model.toggleMarketplace(id) })) {
-                        Text("\(Marketplaces.name(id))  \(counts[id] ?? 0)")
+                    let on = model.filters.marketplaces.contains(id)
+                    Button { model.toggleMarketplace(id) } label: {
+                        CheckedLabel(title: "\(Marketplaces.name(id))  \(counts[id] ?? 0)", on: on)
                     }
+                    .accessibilityAddTraits(on ? .isSelected : [])
                 }
                 if options.isEmpty {
                     Text("No listing is live on a marketplace yet")
                 }
             }
             Section {
-                Toggle(isOn: Binding(get: { model.filters.notListed }, set: { model.filters.notListed = $0 })) {
-                    Text("Not listed  \(InventoryQuery.notListedCount(source))")
+                Button { model.filters.notListed.toggle() } label: {
+                    CheckedLabel(title: "Not listed  \(InventoryQuery.notListedCount(source))", on: model.filters.notListed)
                 }
+                .accessibilityAddTraits(model.filters.notListed ? .isSelected : [])
             }
             if model.filters.activeCount > 0 {
                 Button("Clear filters", role: .destructive) {
@@ -407,15 +419,37 @@ private struct InventoryFilterMenu: View {
     }
 }
 
-/// All / Draft / Active / Sold (and Failed while anything failed), with counts.
+/// A menu row with a checkmark when it is on, as a menu shows a picked option.
+private struct CheckedLabel: View {
+    let title: String
+    let on: Bool
+
+    var body: some View {
+        if on { Label(title, systemImage: "checkmark") } else { Text(title) }
+    }
+}
+
+/// Open / Draft / Active / Sold (and Failed while anything failed), with counts.
 private struct StatusTabs: View {
     let tabs: [StatusTab]
     let counts: [StatusTab: Int]
     @Binding var selection: StatusTab
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        // The web's status tabs (ListingFilters.tsx): one bordered track
-        // with the selected tab raised inside it.
+        // At accessibility text sizes the tabs keep their whole names and
+        // scroll sideways instead of truncating ("Act… 3").
+        if dynamicTypeSize.isAccessibilitySize {
+            ScrollView(.horizontal, showsIndicators: false) { track(fill: false) }
+                .background(WorkspaceStyle.sidebar)
+        } else {
+            track(fill: true)
+        }
+    }
+
+    // The web's status tabs (ListingFilters.tsx): one bordered track
+    // with the selected tab raised inside it.
+    private func track(fill: Bool) -> some View {
         HStack(spacing: 2) {
             ForEach(tabs) { tab in
                 let count = counts[tab] ?? 0
@@ -427,17 +461,27 @@ private struct StatusTabs: View {
                         Text(tab.label).lineLimit(1)
                         Text(InventoryQuery.compactCount(count)).foregroundStyle(WorkspaceStyle.mutedText).monospacedDigit()
                     }
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline.weight(isSelected ? .semibold : .medium))
                     .foregroundStyle(isSelected ? Color.primary : WorkspaceStyle.mutedText)
+                    .padding(.horizontal, fill ? 0 : 12)
                     // The highlight fills the tab, 2 points in from the track on every side, as on the web.
                     // With the track's padding the tab bar stays 44 points tall.
-                    .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(isSelected ? WorkspaceStyle.selected : .clear,
-                                in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius - 2, style: .continuous))
+                    .frame(maxWidth: fill ? .infinity : nil, minHeight: 40)
+                    // Raised: the panel color with an outline, so the choice shows
+                    // in light mode too, where the track is the same gray.
+                    .background {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius - 2, style: .continuous)
+                                .fill(WorkspaceStyle.surface)
+                                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius - 2, style: .continuous)
+                                    .stroke(WorkspaceStyle.inputBorder, lineWidth: 1))
+                                .shadow(color: .black.opacity(0.08), radius: 1, y: 1)
+                        }
+                    }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(tab.label), \(count) listings")
+                .accessibilityLabel("\(tab.label), \(count) \(count == 1 ? "listing" : "listings")")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
@@ -480,6 +524,7 @@ struct ListingRowContent<Thumbnail: View>: View {
     /// The marketplaces the seller sells on; the logos show only these.
     var selling: [String] = []
     let thumbnail: Thumbnail
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(listing: ListingSummary, bySKU: Bool = false, hint: String? = nil, selling: [String] = [],
          @ViewBuilder thumbnail: () -> Thumbnail) {
@@ -506,8 +551,11 @@ struct ListingRowContent<Thumbnail: View>: View {
                 .opacity(listing.settledAt == nil ? 1 : 0.55)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text(name).font(.body.weight(.medium)).lineLimit(1)
-                HStack(spacing: 8) {
+                // At accessibility sizes the name wraps and the status stacks, rather than truncating.
+                Text(name).font(.body.weight(.medium)).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                let statusLayout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 8))
+                statusLayout {
                     HStack(spacing: 6) {
                         Circle().fill(statusColor).frame(width: 6, height: 6).accessibilityHidden(true)
                         Text(listing.statusLabel)

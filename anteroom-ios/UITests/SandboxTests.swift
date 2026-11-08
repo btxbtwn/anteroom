@@ -186,7 +186,7 @@ final class DestinationSandboxTests: XCTestCase {
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
 
-        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'All,'")).firstMatch
+        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch
         XCTAssertTrue(allTab.waitForExistence(timeout: 30), "Inventory shows its status tabs")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Draft,'")).firstMatch.exists)
         keep(app, "Inventory with status tabs")
@@ -220,7 +220,7 @@ final class DestinationSandboxTests: XCTestCase {
                       "Where you list shows the marketplaces")
         keep(app, "Settings Listings")
         app.navigationBars.buttons.firstMatch.tap()
-        app.buttons["Providers"].firstMatch.tap()
+        app.buttons["AI providers"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Xiaomi MiMo"].waitForExistence(timeout: 20))
         keep(app, "Settings Providers")
     }
@@ -270,7 +270,7 @@ final class AnalyticsSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'All,'")).firstMatch
+        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch
         XCTAssertTrue(allTab.waitForExistence(timeout: 30), "Inventory has loaded")
         let analytics = app.tabBars.buttons["Analytics"]
         analytics.tap()

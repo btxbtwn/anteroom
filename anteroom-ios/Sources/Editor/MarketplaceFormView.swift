@@ -9,11 +9,58 @@ struct MarketplaceFormView: View {
     let marketplace: String
     /// The seller's open or closed choice for "Show more" and "See … options", per section.
     @State private var revealOverride: [String: Bool] = [:]
+    @State private var retrying = false
+
+    /// Help text that says a choice list could not be loaded. The server puts it
+    /// under each field the list feeds (eBay's policies); the tab says it once.
+    static func loadNotes(_ form: NativeForm) -> Set<String> {
+        Set(form.fields.compactMap(\.help).filter { $0.contains("could not be loaded") })
+    }
+
+    /// The note without its "reopen to try again" advice: the banner has Retry.
+    static func bannerText(_ note: String) -> String {
+        note.replacingOccurrences(of: #"\s*(Reopen the listing|Reload choices) to try again\."#, with: "", options: .regularExpression)
+    }
+
+    /// A listing live on this marketplace with no category saved here, as when
+    /// it was listed outside Anteroom: say so rather than show a bare Select.
+    private func missingCategoryNote(_ form: NativeForm) -> String? {
+        guard model.choice(marketplace)?.tone == .listed,
+              let field = form.fields.first(where: { $0.path == "direct_category_ids.\(marketplace)" }),
+              (model.value(field)?.text ?? "").isEmpty else { return nil }
+        let name = Marketplaces.name(marketplace)
+        return "This item is listed on \(name), but its \(name) category isn't saved in Anteroom. Choose the category it's listed under before you update it."
+    }
 
     var body: some View {
         Group {
             if let loaded = model.forms[marketplace] {
                 let form = presented(loaded)
+                let notes = Self.loadNotes(form)
+                // A choice list that didn't load is said once, with Retry, not under every field.
+                if !notes.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(notes).sorted(), id: \.self) { note in
+                            Label(Self.bannerText(note), systemImage: "exclamationmark.triangle")
+                                .font(.footnote).foregroundStyle(WorkspaceStyle.warning)
+                        }
+                        Button("Retry", systemImage: "arrow.clockwise") {
+                            retrying = true
+                            Task {
+                                await model.loadForm(marketplace)
+                                retrying = false
+                            }
+                        }
+                        .buttonStyle(.bordered).frame(minHeight: 44).disabled(retrying)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(WorkspaceStyle.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius))
+                }
+                if let note = missingCategoryNote(form) {
+                    Label(note, systemImage: "info.circle")
+                        .font(.footnote).foregroundStyle(WorkspaceStyle.mutedText)
+                }
                 if marketplace == "ebay" {
                     ForEach(EbayFormRules.notes(varied: ebayVaried(form)), id: \.self) { note in
                         Text(note).font(.footnote).foregroundStyle(.secondary)
@@ -27,11 +74,11 @@ struct MarketplaceFormView: View {
                         ForEach(rows(section.fields.filter { revealed($0, section: section) }), id: \.first!.key) { row in
                             if row.count == 2 {
                                 HStack(alignment: .top, spacing: 12) {
-                                    NativeFieldControl(model: model, marketplace: marketplace, field: row[0], form: form)
-                                    NativeFieldControl(model: model, marketplace: marketplace, field: row[1], form: form)
+                                    NativeFieldControl(model: model, marketplace: marketplace, field: row[0], form: form, hiddenHelp: notes)
+                                    NativeFieldControl(model: model, marketplace: marketplace, field: row[1], form: form, hiddenHelp: notes)
                                 }
                             } else {
-                                NativeFieldControl(model: model, marketplace: marketplace, field: row[0], form: form)
+                                NativeFieldControl(model: model, marketplace: marketplace, field: row[0], form: form, hiddenHelp: notes)
                             }
                         }
                         ForEach(links.bottom, id: \.self) { revealLink($0, section: section) }
@@ -109,10 +156,15 @@ struct MarketplaceFormView: View {
 
     private func revealLink(_ reveal: String, section: FormSection) -> some View {
         let open = revealOpen(reveal, section: section)
-        return Button(NativeReveal.title(reveal, open: open)) {
+        // A link reads as one: tinted, with a chevron that turns when open (HIG, Disclosure controls).
+        return Button {
             revealOverride["\(section.title)|\(reveal)"] = !open
+        } label: {
+            Label(NativeReveal.title(reveal, open: open), systemImage: open ? "chevron.up" : "chevron.down")
+                .labelStyle(TrailingIconLabel())
         }
-        .font(.subheadline)
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(WorkspaceStyle.info)
         .frame(minHeight: 44)
         .accessibilityValue(open ? "Expanded" : "Collapsed")
     }
@@ -178,13 +230,15 @@ private struct NativeFieldControl: View {
     let marketplace: String
     let field: NativeField
     let form: NativeForm
+    /// Help said once at the top of the tab instead.
+    var hiddenHelp: Set<String> = []
     @State private var picking = false
     @State private var editingDate = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             control
-            if let help = field.help, !help.isEmpty, field.inputType != "note" {
+            if let help = field.help, !help.isEmpty, field.inputType != "note", !hiddenHelp.contains(help) {
                 Text(help).font(.footnote).foregroundStyle(.secondary)
             }
         }
@@ -744,5 +798,15 @@ struct NativeInventoryEditor: View {
         }
         model.setValue(.string(next), at: "poshmark_specifics.sizeSystem")
         commit(remapped)
+    }
+}
+
+/// Title, then icon: a disclosure link's chevron follows its words.
+private struct TrailingIconLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.title
+            configuration.icon.font(.caption.weight(.semibold))
+        }
     }
 }

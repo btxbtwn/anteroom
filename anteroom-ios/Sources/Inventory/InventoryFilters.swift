@@ -41,15 +41,61 @@ enum ListingSort: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// The Sort menu in two parts, as Files and Mail do: what to sort by, then
+/// which way. Each sort belongs to one field; fields with one way have no Order.
+extension ListingSort {
+    enum Field: String, CaseIterable, Identifiable, Sendable {
+        case recent, created, modified, title, price, sku, listed, sold
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .recent: "Recent activity"
+            case .created: "Date created"
+            case .modified: "Date modified"
+            case .title: "Title"
+            case .price: "Price"
+            case .sku: "SKU"
+            case .listed: "Date listed"
+            case .sold: "Date sold"
+            }
+        }
+
+        /// Its sorts, each with the Order menu's words for it, the default first.
+        var orders: [(sort: ListingSort, label: String)] {
+            switch self {
+            case .recent: [(.recent, "Newest first")]
+            case .created: [(.createdDesc, "Newest first"), (.createdAsc, "Oldest first")]
+            case .modified: [(.modifiedDesc, "Newest first"), (.modifiedAsc, "Oldest first")]
+            case .title: [(.titleAsc, "A to Z"), (.titleDesc, "Z to A")]
+            case .price: [(.priceDesc, "Highest first"), (.priceAsc, "Lowest first")]
+            case .sku: [(.skuAsc, "A to Z"), (.skuDesc, "Z to A")]
+            case .listed: [(.freshest, "Newest first"), (.stalest, "Oldest first")]
+            case .sold: [(.soldDesc, "Newest first")]
+            }
+        }
+    }
+
+    var field: Field { Field.allCases.first { $0.orders.contains { $0.sort == self } } ?? .recent }
+
+    /// The same order on another field: Oldest first stays oldest first.
+    func switching(to field: Field) -> ListingSort {
+        let index = self.field.orders.firstIndex { $0.sort == self } ?? 0
+        return field.orders[min(index, field.orders.count - 1)].sort
+    }
+}
+
 enum StatusTab: String, CaseIterable, Identifiable, Sendable {
-    case all, draft, active, sold, failed
+    /// Open: everything not sold (drafts, in progress, active, failed).
+    case open, draft, active, sold, failed
 
     var id: String { rawValue }
     var label: String { rawValue.capitalized }
 }
 
 struct InventoryFilters: Equatable, Sendable {
-    var status: StatusTab = .all
+    var status: StatusTab = .open
     var marketplaces: [String] = []
     /// Turns the marketplace picks around: keep listings missing from one of
     /// them, or, with none picked, the listings no marketplace carries.
@@ -256,12 +302,14 @@ enum InventoryQuery {
         return listing.displayTitle.lowercased().contains(needle) || (listing.sku ?? "").lowercased().contains(needle)
     }
 
-    static func inTab(_ listing: ListingSummary, _ tab: StatusTab) -> Bool {
-        tab == .all || listing.statusTab == tab.rawValue
+    /// Open holds what is still for sale. A search there spans the whole
+    /// inventory, so a sold item is still found by its title or SKU.
+    static func inTab(_ listing: ListingSummary, _ tab: StatusTab, searching: Bool = false) -> Bool {
+        tab == .open ? searching || listing.statusTab != "sold" : listing.statusTab == tab.rawValue
     }
 
-    static func matchesFilters(_ listing: ListingSummary, _ filters: InventoryFilters) -> Bool {
-        guard inTab(listing, filters.status) else { return false }
+    static func matchesFilters(_ listing: ListingSummary, _ filters: InventoryFilters, searching: Bool = false) -> Bool {
+        guard inTab(listing, filters.status, searching: searching) else { return false }
         let listed = listing.liveMarketplaces
         if filters.notListed {
             if filters.marketplaces.isEmpty { return listed.isEmpty }
@@ -280,7 +328,7 @@ enum InventoryQuery {
     static func rows(_ listings: [ListingSummary], search: String, filters: InventoryFilters) -> [ListingSummary] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let matching = listings
-            .filter { matchesSearch($0, needle) && matchesFilters($0, filters) }
+            .filter { matchesSearch($0, needle) && matchesFilters($0, filters, searching: !needle.isEmpty) }
             .filter { visible($0, tab: filters.status, searching: !needle.isEmpty) }
             .map(SortKeys.init)
         let working = stableSorted(matching.filter { $0.listing.settledAt == nil }) { $0.active > $1.active }
@@ -293,9 +341,11 @@ enum InventoryQuery {
     /// Tab counts over the searched inventory.
     static func counts(_ listings: [ListingSummary], search: String) -> [StatusTab: Int] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        var counts: [StatusTab: Int] = [.all: 0]
+        var counts: [StatusTab: Int] = [.open: 0]
         for listing in listings where matchesSearch(listing, needle) {
-            if visible(listing, tab: .all, searching: !needle.isEmpty) { counts[.all, default: 0] += 1 }
+            if inTab(listing, .open, searching: !needle.isEmpty), visible(listing, tab: .open, searching: !needle.isEmpty) {
+                counts[.open, default: 0] += 1
+            }
             if let tab = StatusTab(rawValue: listing.statusTab), visible(listing, tab: tab, searching: !needle.isEmpty) {
                 counts[tab, default: 0] += 1
             }

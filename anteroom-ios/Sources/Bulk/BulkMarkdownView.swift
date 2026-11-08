@@ -47,7 +47,7 @@ struct BulkMarkdownView: View {
                         ForEach(rows) { row in markdownSection(row) }
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                 }
                 .listRowBackground(WorkspaceStyle.surface)
@@ -110,7 +110,7 @@ struct BulkMarkdownView: View {
                     Text(reason).font(.footnote).foregroundStyle(.secondary)
                 }
                 if price(row) == nil {
-                    Text("Enter a whole-dollar price of 1 or more.").font(.footnote).foregroundStyle(.red)
+                    Text("Enter a whole-dollar price of 1 or more.").font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
                 }
             }
         }

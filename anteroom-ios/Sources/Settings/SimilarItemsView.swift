@@ -56,7 +56,7 @@ struct SimilarItemsView: View {
                     }
                 }
                 if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                 }
                 if let pairs {
                     if pairs.isEmpty {

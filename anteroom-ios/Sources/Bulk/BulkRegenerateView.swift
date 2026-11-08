@@ -29,7 +29,7 @@ struct BulkRegenerateView: View {
                         Text(started ? summary : mode == .generate ? "Writes each draft from its photos and item details. Results are saved as drafts; nothing is listed or sent." : "Rewrites each listing from its photos and item details. Photos, measurements, flaws, cost, labels and notes stay. Results are saved as drafts; nothing is listed or sent.")
                             .font(.footnote).foregroundStyle(.secondary)
                         if let problem {
-                            Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
+                            Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive).font(.footnote)
                         }
                     }
                     Section {

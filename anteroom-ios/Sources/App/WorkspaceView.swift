@@ -8,7 +8,6 @@ struct WorkspaceView: View {
     let api: AnteroomAPI
     @Environment(SessionStore.self) private var session
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var appearance: AppearanceModel
     /// What this server offers, read once per session; nil until then.
     @State private var runtime: WorkspaceRuntime?
@@ -42,62 +41,32 @@ struct WorkspaceView: View {
 
     /// A tab bar on iPhone; on iPad the same tabs also open as a sidebar.
     private func tabs(views: [String], features: [String]) -> some View {
-        let wide = sizeClass == .regular
-        return TabView {
+        TabView {
             Tab {
                 InventoryView(api: api)
-            } label: { TabIcon(title: "Inventory", systemImage: "tag.fill", showsTitle: wide) }
+            } label: { Label("Inventory", systemImage: "tag.fill") }
             if views.contains("assistant") {
                 Tab {
                     BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
-                } label: { TabIcon(title: "Assistant", systemImage: "bubble.left.and.text.bubble.right.fill", showsTitle: wide) }
+                } label: { Label("Assistant", systemImage: "bubble.left.and.text.bubble.right.fill") }
             }
             Tab {
                 AnalyticsDestination(api: api)
-            } label: { TabIcon(title: "Analytics", systemImage: "chart.bar.fill", showsTitle: wide) }
+            } label: { Label("Analytics", systemImage: "chart.bar.fill") }
             if views.contains("automations") {
                 Tab {
                     AutomationsView(api: api, canApprove: features.contains("marketplace_actions"),
                                     showsEbayOffers: features.contains("ebay_offers"),
                                     showsPromotions: features.contains("marketplace_sessions"))
-                } label: { TabIcon(title: "Automations", systemImage: "calendar.badge.clock", showsTitle: wide) }
+                } label: { Label("Automations", systemImage: "calendar.badge.clock") }
             }
             Tab {
                 SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
-            } label: { TabIcon(title: "Settings", systemImage: "gearshape.fill", showsTitle: wide) }
+            } label: { Label("Settings", systemImage: "gearshape.fill") }
         }
+        // Tabs keep their names and the bar stays full size (HIG, Tab bars):
+        // a bar minimized on scroll stayed collapsed after leaving the editor.
         .tabViewStyle(.sidebarAdaptable)
-        .minimizingTabBarOnScroll()
-    }
-}
-
-/// iPhone tabs show only their icon; the name stays for VoiceOver and UI
-/// tests. On iPad the tabs also form a sidebar, which needs the names.
-private struct TabIcon: View {
-    let title: String
-    let systemImage: String
-    let showsTitle: Bool
-
-    var body: some View {
-        if showsTitle {
-            Label(title, systemImage: systemImage)
-        } else {
-            Image(systemName: systemImage)
-                .accessibilityLabel(Text(title))
-        }
-    }
-}
-
-private extension View {
-    /// On iOS 26 the tab bar shrinks while the seller scrolls down a list and
-    /// comes back on scroll up, leaving more room for listings.
-    @ViewBuilder
-    func minimizingTabBarOnScroll() -> some View {
-        if #available(iOS 26, *) {
-            tabBarMinimizeBehavior(.onScrollDown)
-        } else {
-            self
-        }
     }
 }
 

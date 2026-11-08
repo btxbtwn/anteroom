@@ -156,7 +156,7 @@ struct BusinessAssistantView: View {
     private var errorRow: some View {
         if let error = model.error {
             VStack(alignment: .leading, spacing: 8) {
-                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive)
                 if model.needsProvider {
                     NavigationLink("Open provider settings", value: ProvidersDestination())
                 }
@@ -271,9 +271,7 @@ private struct AnswerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(Self.markdown(turn.text))
-                .textSelection(.enabled)
-                .tint(WorkspaceStyle.accent)
+            MarkdownText(turn.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let changes = turn.changes {
                 ChangesCard(turn: turn, changes: changes, model: model)
@@ -284,8 +282,60 @@ private struct AnswerView: View {
         }
     }
 
-    /// Bold, links and line breaks as the answer wrote them.
-    static func markdown(_ text: String) -> AttributedString {
+}
+
+/// An answer's Markdown with its blocks kept apart: paragraphs, headings,
+/// bullet and numbered lists, quotes and code, each with bold and links inside.
+struct MarkdownText: View {
+    let blocks: [MarkdownBlock]
+
+    init(_ text: String) { blocks = MarkdownBlock.parse(text) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                view(block)
+            }
+        }
+        .textSelection(.enabled)
+        .tint(WorkspaceStyle.info)
+    }
+
+    @ViewBuilder
+    private func view(_ block: MarkdownBlock) -> some View {
+        switch block {
+        case .paragraph(let text):
+            Text(Self.inline(text))
+        case .heading(let level, let text):
+            Text(Self.inline(text)).font(level <= 2 ? .headline : .subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+        case .bullet(let text):
+            item("•", text)
+        case .numbered(let number, let text):
+            item("\(number).", text)
+        case .quote(let text):
+            Text(Self.inline(text))
+                .foregroundStyle(WorkspaceStyle.mutedText)
+                .padding(.leading, 10)
+                .overlay(alignment: .leading) { WorkspaceStyle.border.frame(width: 3) }
+        case .code(let code):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code).font(.footnote.monospaced()).padding(10)
+            }
+            .background(WorkspaceStyle.groupedBackground, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
+        }
+    }
+
+    private func item(_ marker: String, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(marker).monospacedDigit().foregroundStyle(WorkspaceStyle.mutedText).accessibilityHidden(true)
+            Text(Self.inline(text))
+        }
+    }
+
+    /// Bold, italics, code spans and links inside a block.
+    static func inline(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
     }
@@ -321,7 +371,7 @@ private struct ChangesCard: View {
                         .accessibilityElement(children: .combine)
                     }
                     if let skipped = item.skipped {
-                        Text("Not changed. \(skipped)").font(.footnote).foregroundStyle(.orange)
+                        Text("Not changed. \(skipped)").font(.footnote).foregroundStyle(WorkspaceStyle.warning)
                     }
                 }
             }
@@ -389,7 +439,7 @@ private struct CardFailure: View {
 
     var body: some View {
         if let failure = model.cardError, failure.id == turn.id {
-            Text(failure.message).font(.footnote).foregroundStyle(.red)
+            Text(failure.message).font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
         }
     }
 }
