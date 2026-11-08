@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.804 — 2026-11-08
+
+- The Anteroom logo has new sunset colors, from violet to amber, on the sidebar, browser tab, Mac app, iPhone app and Chrome extension.
+- The logo's arches now fade softly at the bottom instead of ending in a hard line.
+
 ## 0.1.803 — 2026-11-08
 
 - Listing generation no longer stops with "HTTP 500" when Anteroom restarts for an update mid-generation; it keeps reconnecting until the draft finishes.
