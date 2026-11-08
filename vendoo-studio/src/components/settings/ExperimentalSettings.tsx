@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
+import { settingsUiQuery } from "../../api/pageQueries";
 import { Switch } from "../ui/switch";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
 export function ExperimentalSettings() {
   const client = useQueryClient();
-  const prefs = useQuery({ queryKey: ["settings-ui"], queryFn: api.settings.ui });
+  const prefs = useQuery(settingsUiQuery);
   const save = useMutation({
     mutationFn: (enabled: boolean) => api.settings.setUi({ listing_mode: enabled ? "vendoo" : "direct" }),
     onSuccess: result => {

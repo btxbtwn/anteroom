@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { EbayRow } from "../../api/ebay";
 import { api } from "../../api/client";
+import { ebayFinancesQuery, lastThirtyDays } from "../../api/pageQueries";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageNote, PageSection } from "../WorkspacePage";
 import { Input } from "../ui/input";
@@ -11,11 +12,12 @@ import { displayMoney, summarizeDisplayedEarnings } from "./dashboardSummary";
 import { WorkspaceTabs } from "./WorkspaceTabs";
 
 export function DashboardPanel() {
-  const [today] = useState(() => new Date().toISOString().slice(0, 10));
-  const [start, setStart] = useState(() => new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
-  const [end, setEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [initial] = useState(() => lastThirtyDays());
+  const today = initial.end;
+  const [start, setStart] = useState(initial.start);
+  const [end, setEnd] = useState(initial.end);
   const valid = Boolean(start && end && start <= end);
-  const finance = useQuery({ queryKey: ["ebay", "finances", { start, end }, 0], queryFn: () => api.ebay.read("finances", { start, end, offset: 0 }), enabled: valid, retry: false, staleTime: 30000 });
+  const finance = useQuery({ ...ebayFinancesQuery(start, end), enabled: valid });
   const summary = summarizeDisplayedEarnings(valid ? finance.data?.rows || [] : []);
   const coverage = finance.data ? `First ${finance.data.rows.length}${finance.data.total != null ? ` of ${finance.data.total}` : ""} ${finance.data.total === 1 ? "order" : "orders"} · totals cover these orders only` : "Totals appear when order transactions are available.";
   return <>

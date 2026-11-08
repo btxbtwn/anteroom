@@ -70,13 +70,18 @@ export async function createListing(request: APIRequestContext, title: string): 
   return conversation.id;
 }
 
-/** Open a listing from the inventory; on a phone the inventory sits behind the navigation menu. */
+/**
+ * Open a listing from the inventory; on a phone the inventory sits behind the
+ * navigation menu. The list only draws the rows near the screen, and earlier
+ * tests add listings above the samples, so search for it as a seller would.
+ */
 export async function openListing(page: Page, phone: boolean, title: string): Promise<void> {
   await page.goto("/");
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
+  await page.getByRole("searchbox", { name: /^Search listings/ }).fill(title);
   await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
 }
 

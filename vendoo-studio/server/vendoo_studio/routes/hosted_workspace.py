@@ -581,7 +581,7 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
-def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay'],
+def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
                         revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.choice_lists import share
     from vendoo_studio.services.native_editor import editor_form
