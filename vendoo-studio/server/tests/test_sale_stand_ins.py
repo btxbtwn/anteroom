@@ -140,3 +140,26 @@ def test_one_vendoo_copy_is_replaced_once_and_both_etsy_orders_stay(db):
     assert set(rows) == {"111", ORDER}
     assert rows[ORDER].financials["item_cost"] == "4"
     assert rows["111"].financials is None
+
+
+def test_a_vendoo_copy_of_an_earlier_sale_of_a_relisted_item_is_kept(db):
+    # Sold in January (only Vendoo's copy records it), relisted, sold again in June.
+    vendoo_copy(db, sold_at=datetime(2026, 1, 5))
+    relay_sales.record_sale(db, marketplace="etsy", order_id=ORDER, line_id="t1", listing_id=LISTING,
+                            quantity=1, sold_at=datetime(2026, 6, 1))
+    db.expire_all()
+    rows = {row.source: row for row in db.query(MarketplaceSale).all()}
+    assert set(rows) == {"marketplace", "vendoo"}
+    assert rows["vendoo"].sold_at == datetime(2026, 1, 5)
+    assert rows["marketplace"].financials is None or rows["marketplace"].financials.get("item_cost") != "4"
+
+
+def test_a_mark_as_sold_from_an_earlier_sale_is_kept(db):
+    db.add(MarketplaceSale(marketplace="etsy", order_id="seller-" + "b" * 32, line_id="1", quantity=1, order_status="paid",
+                           conversation_id="blouse", source="seller", state="dismissed", sold_at=datetime(2026, 1, 5),
+                           financials={"currency": "USD", "item_revenue": "30", "item_cost": "4", "source": "seller"}))
+    db.commit()
+    line = order_recovery.OrderLine(ORDER, "t1", LISTING, 1, "paid", SOLD, SOLD)
+    order_recovery._save(db, "etsy", [line], datetime(2026, 3, 4))
+    db.expire_all()
+    assert sorted(row.source for row in db.query(MarketplaceSale).all()) == ["marketplace", "seller"]

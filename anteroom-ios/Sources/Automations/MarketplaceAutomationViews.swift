@@ -616,6 +616,13 @@ struct PromotionDetailsView: View {
                     .disabled(working != nil)
                 }
             }
+            ForEach((activity?.sends ?? []).filter { $0.state == "skipped" }) { send in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(send.title ?? send.listingID) · skipped").font(.subheadline)
+                    Text(send.listingID).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    if let note = send.note { Text(note).font(.caption).foregroundStyle(.secondary) }
+                }
+            }
             ForEach(activity?.runs ?? []) { run in
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(AutomationFormat.runTime(run.startedAt, timezone: automation.timezone ?? TimeZone.current.identifier)) · \(run.sent) sent · \(run.skipped) skipped · \(run.failed) not done")
