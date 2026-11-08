@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.844 — 2026-11-08
+
+- Find the Vendoo switch under Settings → Experimental, alongside a coming-soon hosted marketplace browser option.
+
 ## 0.1.843 — 2026-11-08
 
 - Use Liquid Glass pills for the iPhone inventory status filters, with a clear selected state and room for larger text.
