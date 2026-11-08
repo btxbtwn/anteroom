@@ -39,8 +39,6 @@ jobs:
           sudo xcode-select -s "$XCODE_APP"
           xcodebuild -version
       - name: Install the pinned XcodeGen
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: ./tools/install-xcodegen.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -159,8 +157,6 @@ jobs:
           sudo xcode-select -s "$XCODE_APP"
           xcodebuild -version
       - name: Install the pinned XcodeGen
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: ./anteroom-ios/tools/install-xcodegen.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -280,8 +276,6 @@ jobs:
           sudo xcode-select -s "$XCODE_APP"
           xcodebuild -version
       - name: Install the pinned XcodeGen
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: ./tools/install-xcodegen.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}

@@ -20,7 +20,7 @@ def test_ci_passes_job_token_to_every_xcodegen_install():
                        workflow.read_text(), re.DOTALL)
     assert len(steps) == 3
     for step in steps:
-        assert "GITHUB_TOKEN: ${{ github.token }}" in step
+        assert step.count("GITHUB_TOKEN: ${{ github.token }}") == 1
 
 
 def install(tmp_path, *, fail_download=False, fail_checksum=False, github_token: str | None = None):
