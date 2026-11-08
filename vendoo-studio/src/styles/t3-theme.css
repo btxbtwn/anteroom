@@ -656,7 +656,9 @@
   --secondary: var(--color-zinc-50);
   --secondary-foreground: var(--color-zinc-800);
   --muted: var(--color-zinc-50);
-  --muted-foreground: var(--color-zinc-500);
+  /* Halfway from zinc-500 to zinc-600: zinc-500 is 4.4:1 on zinc-100 controls, under
+     WCAG's 4.5:1 for small text; this is 5.5:1. */
+  --muted-foreground: color-mix(in srgb, var(--color-zinc-500) 50%, var(--color-zinc-600));
   --placeholder: var(--muted-foreground);
   --secondary-label: var(--muted-foreground);
   --icon-muted: var(--muted-foreground);
@@ -690,8 +692,9 @@
      portaled mobile sheets and settings navigation outside the app sidebar. */
   --sidebar: var(--color-zinc-50);
   --sidebar-foreground: var(--foreground);
-  /* One step darker than body muted text: zinc-500 on the zinc-50 sidebar reads too faint. */
-  --sidebar-muted-foreground: var(--color-zinc-600);
+  /* Sidebar rows draw this at 80%: zinc-700 keeps them at 5.4:1 on the zinc-50/100
+     sidebar, where zinc-600 was 4.3–4.5:1 (WCAG asks 4.5:1). */
+  --sidebar-muted-foreground: var(--color-zinc-700);
   --sidebar-control-surface: var(--color-zinc-100);
   /* zinc-25 on zinc-50 was nearly invisible; hover uses the shared hover gray. */
   --sidebar-row-hover: var(--color-zinc-100);
@@ -762,12 +765,12 @@
   --accent-foreground: var(--color-zinc-900);
   /* One step off the zinc-50 sidebar, so chips like the "/" shortcut keep their shape. */
   --muted: var(--color-zinc-100);
-  --muted-foreground: var(--color-zinc-500);
+  --muted-foreground: color-mix(in srgb, var(--color-zinc-500) 50%, var(--color-zinc-600));
   --border: var(--color-zinc-200);
   --input: var(--color-zinc-300);
   --sidebar: var(--color-zinc-50);
   --sidebar-foreground: var(--color-zinc-800);
-  --sidebar-muted-foreground: var(--color-zinc-600);
+  --sidebar-muted-foreground: var(--color-zinc-700);
   --sidebar-control-surface: var(--color-zinc-100);
   --sidebar-row-hover: var(--color-zinc-100);
   --sidebar-row-active: var(--color-white);
