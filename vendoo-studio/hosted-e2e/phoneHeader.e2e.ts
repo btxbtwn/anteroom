@@ -17,7 +17,9 @@ test("on a phone the account button ends the page header row instead of a band a
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByRole("button", { name: "Inventory", exact: true }).click();
+  // Signed in, the assistant is home; the inventory sits behind the navigation menu.
+  await page.getByRole("button", { name: "Open navigation" }).filter({ visible: true }).click();
+  await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   const account = page.getByRole("button", { name: "Account", exact: true });
   const menu = page.getByRole("button", { name: "Open navigation" }).first();
   const select = page.getByRole("button", { name: "Select listings" });
