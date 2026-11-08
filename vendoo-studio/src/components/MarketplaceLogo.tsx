@@ -55,46 +55,65 @@ function remapFill(fill: string | undefined, prefix: string): string | undefined
   return `url(#${prefix}-${m[1]})`;
 }
 
+/**
+ * The box a logo is drawn in. "square" fits every logo in size×size. "wordmark"
+ * draws a wide wordmark (eBay, Etsy, Depop) at its own proportions with about
+ * the same area as the others (1.2 × size²), so a short word is not dwarfed by
+ * a long one at row size; square marks keep size×size.
+ */
+export function marketplaceLogoBox(id: string, size: number, fit: "square" | "wordmark" = "square"): { width: number; height: number } {
+  const logo = OFFICIAL_LOGOS[id];
+  if (fit === "wordmark" && logo) {
+    const [, , w, h] = logo.viewBox.split(/\s+/).map(Number);
+    const aspect = w / h;
+    if (aspect >= 1.5) {
+      const height = Math.round(Math.sqrt((1.2 * size * size) / aspect));
+      return { width: Math.round(height * aspect), height };
+    }
+  }
+  return { width: size, height: size };
+}
+
 export function MarketplaceLogo({
   id,
   label,
   size = 16,
+  fit = "square",
 }: {
   id: string;
   label: string;
   size?: number;
+  fit?: "square" | "wordmark";
 }) {
   const reactId = useId().replace(/:/g, "");
   const prefix = `mpl-${reactId}`;
   const logo = OFFICIAL_LOGOS[id];
+  // In a square, Etsy and Depop draw their one-letter marks (the letters on their
+  // app icons): their wordmarks squeezed into 14-20px were a few pixels tall.
+  // eBay has no such mark, so its wordmark keeps its own proportions instead.
+  const mark = logo && fit === "square" ? logo.compact : undefined;
+  const box = marketplaceLogoBox(id, size, fit === "square" && !mark ? "wordmark" : fit);
+  const wide = box.width !== size || box.height !== size;
 
   if (logo) {
-    // Small logos read best as the brand's one-letter mark. A wordmark without
-    // one (eBay) keeps its own proportions, as tall as a square mark, rather than
-    // shrinking into the square.
-    const mark = logo.compact ?? logo;
-    const [, , boxWidth, boxHeight] = mark.viewBox.split(/\s+/).map(Number);
-    const ratio = boxWidth / boxHeight;
-    const wide = !logo.compact && ratio > 1.5;
-    const height = wide ? Math.round(size * 0.8) : size - 2;
-    const width = wide ? Math.round(height * ratio) : size - 2;
+    const drawn = mark ?? logo;
     return (
       <span
         className="marketplace-logo inline-flex shrink-0 items-center justify-center"
         role="img"
         title={label}
         aria-label={label}
-        style={{ width: wide ? width : size, height: size }}
+        style={{ width: wide ? box.width : size, height: size }}
       >
         <svg
-          width={width}
-          height={height}
-          viewBox={mark.viewBox}
+          width={wide ? box.width : size - 2}
+          height={wide ? box.height : size - 2}
+          viewBox={drawn.viewBox}
           preserveAspectRatio="xMidYMid meet"
           aria-hidden="true"
         >
           <GradientDefs logo={logo} prefix={prefix} />
-          {mark.paths.map((path, index) => (
+          {drawn.paths.map((path, index) => (
             <path
               key={index}
               d={path.d}

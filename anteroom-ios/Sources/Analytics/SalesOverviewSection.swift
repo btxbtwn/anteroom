@@ -69,7 +69,8 @@ struct SalesOverviewSection: View {
             if !overview.marketplaces.isEmpty {
                 Divider()
                 Text("By marketplace").font(.subheadline.weight(.medium))
-                ForEach(overview.marketplaces) { row in
+                // Follows the weekly chart's switch, so the order matches what it shows.
+                ForEach(AnalyticsFormat.rankBreakdown(overview.marketplaces, by: metric)) { row in
                     HStack {
                         Text(Marketplaces.name(row.id)).font(.subheadline)
                         Spacer()

@@ -116,6 +116,18 @@ class ConfigPathTest(unittest.TestCase):
         self.assertEqual(Image.open(favicon).convert("RGBA").tobytes(), make_icon.render_icon(32).tobytes())
         app = Image.open(make_icon.APP_ICON_PNG).convert("RGBA")
         self.assertEqual(app.tobytes(), make_icon.render_icon(1024).tobytes())
+        ios = Image.open(make_icon.IOS_APP_ICON)
+        self.assertEqual(ios.mode, "RGB")
+        self.assertEqual(ios.tobytes(), make_icon.render_ios_icon().tobytes())
+
+    def test_icon_arches_fade_out_at_the_floor(self):
+        make_icon = _load_make_icon()
+        icon = make_icon.render_icon(1024)
+        door = (512, make_icon.FADE_TOP - 40)
+        floor = (512, make_icon.FLOOR - 4)
+        self.assertEqual(icon.getpixel(door)[:3], make_icon.DOOR[:3])
+        # Just above the floor the doorway has almost faded into the tile.
+        self.assertLess(icon.getpixel(floor)[0], 40)
 
     def test_app_icon_stays_inside_apples_tile(self):
         # macOS 26 shrinks icons that do not fit its tile onto a grey backing.

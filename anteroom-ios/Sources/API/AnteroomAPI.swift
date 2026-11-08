@@ -165,14 +165,6 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/preflight"))
     }
 
-    /// The fields each listing still needs per marketplace; the inventory asks for the rows on screen.
-    func listingReadiness(_ ids: [String]) async throws -> [String: ListingReadiness] {
-        struct Payload: Decodable { let listings: [String: ListingReadiness] }
-        let payload: Payload = try await decode(request("GET", "api/listing-readiness",
-                                                        query: ids.map { URLQueryItem(name: "ids", value: $0) }))
-        return payload.listings
-    }
-
     func nativeMarketplaceStates(_ id: String) async throws -> [String: NativeDraftState] {
         let states: [String: NativeDraftState?] = try await decode(request("GET", "api/conversations/\(id)/native-marketplaces"))
         return states.compactMapValues { $0 }

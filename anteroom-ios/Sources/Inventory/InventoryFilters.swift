@@ -176,8 +176,16 @@ extension ListingSummary {
         }
     }
 
-    /// Changes when a saved edit or a List result could change what is missing.
-    var readinessKey: String { "\(updatedAt ?? "")|\(directRecords ?? [:])" }
+    /// The row's logo strip, as the web's (sidebar/ListingRow.tsx): each
+    /// marketplace it is listed or sold on, of those the seller sells on
+    /// (Settings → Marketplaces; none chosen shows all). A sale shows dimmed.
+    func rowLogos(selling: [String] = []) -> [(marketplace: String, sold: Bool)] {
+        marketplaceBadges().compactMap { badge in
+            if !selling.isEmpty, !selling.contains(badge.marketplace) { return nil }
+            if badge.tone == .good { return (badge.marketplace, false) }
+            return badge.label == "Sold" ? (badge.marketplace, true) : nil
+        }
+    }
 
     /// Where the listing is live: the imported history plus Anteroom's own
     /// publishes, less what Anteroom delisted.
@@ -401,8 +409,8 @@ enum InventoryQuery {
 }
 
 /// The last answer to one inventory query, kept until its inputs change, so a
-/// redraw that changes none of them (a selection tap, a readiness update)
-/// does not filter and sort the whole inventory again.
+/// redraw that changes none of them (a selection tap) does not filter and sort
+/// the whole inventory again.
 struct QueryMemo<Key: Equatable, Value> {
     private var last: (key: Key, value: Value)?
 

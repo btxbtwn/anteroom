@@ -6,6 +6,75 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.816 — 2026-11-08
+
+- Make the Anteroom logo at the top of the sidebar larger.
+
+## 0.1.815 — 2026-11-08
+
+- Order the By marketplace list in Analytics by whatever the chart shows, items sold or revenue.
+
+## 0.1.814 — 2026-11-08
+
+- The marketplace list beside a listing's form no longer slides around when dragged on an iPad.
+
+## 0.1.813 — 2026-11-08
+
+- Mercari's Shipping label list loads again when the listing answered the shoebox question with "Yes".
+- Depop's Age is always filled in: Modern unless the listing names a decade.
+- On iPad and iPhone, press and hold a photo, then drag it to reorder; the photo viewer can also move a photo or leave it off a marketplace.
+
+## 0.1.812 — 2026-11-08
+
+- The Anteroom icon now shows on the browser tab for myanteroom.com.
+
+## 0.1.811 — 2026-11-08
+
+- Listing rows in the sidebar show the asking price and how many units are on hand.
+- eBay, Etsy and Depop logos in listing rows are now large enough to read.
+
+## 0.1.810 — 2026-11-08
+
+- Let iPads and other touch screens delete, rename and copy a listing from the sidebar with the ⋯ button.
+
+## 0.1.809 — 2026-11-08
+
+- Read from photos in bulk upload reads every item at once instead of two at a time, so a box of items finishes in minutes instead of half an hour.
+- A photo reading cut off by an app update or restart is tried once more instead of showing "Reading failed: 500".
+- Each item's note now names the AI model that read its yardstick photos, so you can tell when a different photo model would read them better.
+
+## 0.1.808 — 2026-11-08
+
+- Let DeepSeek and other OpenRouter listing models search repeatedly for sold comparisons during listing generation.
+
+## 0.1.807 — 2026-11-08
+
+- On the web, listing photos you've already seen appear right away when you scroll your inventory, even after reloading the page or after an Anteroom update.
+
+## 0.1.806 — 2026-11-08
+
+- Anteroom now shows a Beta tag next to its name.
+
+## 0.1.805 — 2026-11-08
+
+- Marketplace refusals now explain the problem in plain words, like "Etsy needs to know who made this item", with the marketplace's own reply tucked under Details.
+- Ask chat appears on a refusal only when chat can fix it by changing the listing, and it now works while chat is busy by joining the queue. It is on iPhone too.
+- Anteroom now warns before you list on Etsy when Who made it? or When was it made? is empty, and reads every way those answers are saved.
+- Chat names fields the way the form labels them and no longer answers in codes or field keys.
+
+## 0.1.804 — 2026-11-08
+
+- The Anteroom logo has new sunset colors, from violet to amber, on the sidebar, browser tab, Mac app, iPhone app and Chrome extension.
+- The logo's arches now fade softly at the bottom instead of ending in a hard line.
+
+## 0.1.803 — 2026-11-08
+
+- Listing generation no longer stops with "HTTP 500" when Anteroom restarts for an update mid-generation; it keeps reconnecting until the draft finishes.
+
+## 0.1.802 — 2026-11-08
+
+- Etsy's eligibility note now shows once instead of twice with different wording.
+
 ## 0.1.801 — 2026-11-08
 
 - **Read from photos** is now called **Read measurements** in bulk upload, Regenerate review and the iPhone app.
