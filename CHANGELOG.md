@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.823 — 2026-11-08
+
+- Analytics no longer shows a box for sales missing data; find them in Sales records instead.
+
 ## 0.1.822 — 2026-11-08
 
 - When a marketplace is busy listing another item, List, Update and Save draft now wait their turn and start on their own, instead of showing "Another action is running". The marketplace shows "Waiting for …" with a Cancel button.
