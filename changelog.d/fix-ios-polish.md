@@ -1,5 +1,5 @@
 - iPhone: the tab bar shows each tab's name and no longer stays shrunk after you leave a listing.
-- iPhone: Inventory has a large title, and its first tab is now "Open" (everything not sold), as on the web; VoiceOver says "1 listing" instead of "1 listings".
+- iPhone: Inventory's first tab is now "Open" (everything not sold), as on the web; VoiceOver says "1 listing" instead of "1 listings".
 - iPhone: the Filters menu lists marketplaces as checkmarked rows without blank gaps, and Sort is split into "Sort by" and "Order" so the whole menu fits.
 - iPhone: status text, warnings and the selected inventory tab are easier to read in light mode, and the inventory tabs and rows keep their full words at the largest text sizes.
 - iPhone: on marketplace forms, "Show more", "See title options" and "Add custom item specific" look like links, a choice list that didn't load (such as eBay's policies) shows one message with Retry instead of repeating under every field, and an item listed on a marketplace without a saved category says so.

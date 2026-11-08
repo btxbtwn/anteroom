@@ -156,7 +156,7 @@ struct InventoryView: View {
         }
         .overlay { emptyState(rows: rows) }
         .navigationTitle("Inventory")
-        .navigationBarTitleDisplayMode(sideBySide ? .inline : .large)
+        .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
         .background(WorkspaceStyle.sidebar)
         .toolbarBackground(WorkspaceStyle.sidebar, for: .navigationBar)
