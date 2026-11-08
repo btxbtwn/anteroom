@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.793 — 2026-11-08
+
+- The Anteroom logo now shows at the top of the sidebar.
+- The Anteroom logo now shows on the browser tab at myanteroom.com.
+
 ## 0.1.792 — 2026-11-08
 
 - Sales records no longer lists a sold item a second or third time when clearing its other marketplace listings reported them as sold, so its count matches Analytics.
