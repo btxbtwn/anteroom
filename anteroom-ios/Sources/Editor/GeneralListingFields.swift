@@ -27,14 +27,14 @@ struct GeneralListingFields: View {
             }
             .fieldAnchor("description")
             pair {
-                NumberField("Price", text: $form.price, prefix: "$").fieldAnchor("price")
-                NumberField("Cost", text: $form.cost, prefix: "$").fieldAnchor("cost")
+                NumberField("Price", text: $form.price, prefix: "$", placeholder: "Asking price").fieldAnchor("price")
+                NumberField("Cost", text: $form.cost, prefix: "$", placeholder: "What you paid").fieldAnchor("cost")
             }
         }
         ListingInspectorSection("Item") {
             GeneralCategoryField(path: $form.fields.categoryPath, api: api).fieldAnchor("category_path")
-            TextRow("Brand", text: $form.fields.brand).fieldAnchor("brand")
-            TextRow("Department", text: $form.fields.department).fieldAnchor("department")
+            TextRow("Brand", text: $form.fields.brand, placeholder: "e.g. Levi's").fieldAnchor("brand")
+            TextRow("Department", text: $form.fields.department, placeholder: "e.g. Women, Men, Kids").fieldAnchor("department")
         }
         ListingInspectorSection("Condition & details") {
             OptionField("Condition", value: $form.fields.condition, options: options.condition).fieldAnchor("condition")
@@ -44,16 +44,16 @@ struct GeneralListingFields: View {
         }
         SellerMeasurementFields(inputs: $form.sellerInputs)
         ListingInspectorSection("Shipping") {
-            pair {
-                NumberField("Package Weight (oz)", text: $form.weightOz).fieldAnchor("weight_oz")
-                TextRow("Package Dimensions (LxWxH in)", text: $form.fields.packageDimensionsIn).fieldAnchor("package_dimensions_in")
-            }
-            TextRow("Inventory location", text: $form.fields.zipCode).fieldAnchor("zipCode")
+            // One per row: the long labels wrapped side by side and pushed the boxes out of line.
+            NumberField("Package Weight (oz)", text: $form.weightOz, placeholder: "Ounces").fieldAnchor("weight_oz")
+            TextRow("Package Dimensions (LxWxH in)", text: $form.fields.packageDimensionsIn, placeholder: "L × W × H")
+                .fieldAnchor("package_dimensions_in")
+            TextRow("Inventory location", text: $form.fields.zipCode, placeholder: "ZIP code").fieldAnchor("zipCode")
         }
         ListingInspectorSection("Inventory") {
             pair {
                 WorkspaceField("Quantity") { TextField("1", text: $form.quantity).keyboardType(.numberPad) }.fieldAnchor("quantity")
-                TextRow("SKU", text: $form.fields.sku).fieldAnchor("sku")
+                TextRow("SKU", text: $form.fields.sku, placeholder: "Your stock code").fieldAnchor("sku")
             }
         }
         SellerNoteFields(inputs: $form.sellerInputs)

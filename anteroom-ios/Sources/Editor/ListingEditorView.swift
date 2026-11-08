@@ -20,8 +20,6 @@ struct ListingEditorView: View {
     @State private var photoCount = 0
     /// A field to scroll to once its tab is on screen.
     @State private var focusPath: String?
-    /// Saved in this visit and not edited since; "Saved" shows only then.
-    @State private var justSaved = false
     @State private var saves = 0
     @State private var saveFailures = 0
     private let onSaved: () -> Void
@@ -106,6 +104,8 @@ struct ListingEditorView: View {
             }
         }
         }
+        // Room below the last field, clear of the tab bar.
+        .contentMargins(.bottom, 32, for: .scrollContent)
         .background(WorkspaceStyle.background)
         .toolbarBackground(WorkspaceStyle.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -279,12 +279,12 @@ struct ListingEditorView: View {
 
     private var formName: String { tab == "general" ? "General" : Marketplaces.name(tab) }
 
-    /// "Unsaved changes" while editing, "Saved" right after a save, otherwise nothing.
+    /// "Unsaved changes" while editing, otherwise nothing: a disabled Save
+    /// already says everything is saved, so a "Saved" label only repeated it.
     private var saveStatus: String? {
         if model.isLoading && model.hasLoaded { return nil }
         if model.loadError != nil && model.hasLoaded { return "Not loaded" }
-        if model.hasChanges { return "Unsaved changes" }
-        return justSaved ? "Saved" : nil
+        return model.hasChanges ? "Unsaved changes" : nil
     }
 
     /// Generate listing under the photos of a draft with photos and no description
@@ -345,7 +345,6 @@ struct ListingEditorView: View {
         hideKeyboard()
         Task {
             if await model.save() {
-                justSaved = true
                 saves += 1
                 onSaved()
             } else {
@@ -359,18 +358,22 @@ struct ListingEditorView: View {
     }
 }
 
+/// A labeled text field. The label sits above the box, so the placeholder
+/// gives an example rather than repeating the label.
 struct TextRow: View {
     let label: String
     @Binding var text: String
+    var placeholder = ""
 
-    init(_ label: String, text: Binding<String>) {
+    init(_ label: String, text: Binding<String>, placeholder: String = "") {
         self.label = label
         _text = text
+        self.placeholder = placeholder
     }
 
     var body: some View {
         WorkspaceField(label) {
-            TextField(label, text: $text, axis: .vertical).lineLimit(1...4)
+            TextField(placeholder, text: $text, axis: .vertical).lineLimit(1...4)
         }
     }
 }
@@ -379,11 +382,14 @@ struct NumberField: View {
     let label: String
     @Binding var text: String
     var prefix: String?
+    /// Words, not a "0" that reads as a value already entered.
+    var placeholder = ""
 
-    init(_ label: String, text: Binding<String>, prefix: String? = nil) {
+    init(_ label: String, text: Binding<String>, prefix: String? = nil, placeholder: String = "") {
         self.label = label
         _text = text
         self.prefix = prefix
+        self.placeholder = placeholder
     }
 
     var body: some View {
@@ -392,7 +398,7 @@ struct NumberField: View {
                 if let prefix, !text.isEmpty {
                     Text(prefix).foregroundStyle(.secondary)
                 }
-                TextField("0", text: $text)
+                TextField(placeholder, text: $text)
                     .accessibilityLabel(label)
                     .keyboardType(.decimalPad)
             }

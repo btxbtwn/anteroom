@@ -92,7 +92,7 @@ struct PhotoStrip: View {
             }
             .disabled(remaining == 0)
             } else {
-                Text("New photos can be added while this listing is a draft.")
+                Text("Photos can be added only while a listing is a draft.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
