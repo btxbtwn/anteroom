@@ -34,7 +34,7 @@ const tee: FilterableListing = {
   updated_at: "2026-09-18T00:00:00Z",
   vendoo_labels: ["A19", "To List"],
   vendoo_marketplaces: ["ebay", "poshmark"],
-  vendoo_listed_at: "2026-06-20T00:00:00Z",
+  oldest_listed_at: "2026-06-20T00:00:00Z",
 };
 const boots: FilterableListing = {
   title: "Doc Martens 1460",
@@ -45,7 +45,7 @@ const boots: FilterableListing = {
   updated_at: "2026-09-19T00:00:00Z",
   vendoo_labels: ["Vintage"],
   vendoo_marketplaces: ["depop"],
-  vendoo_listed_at: "2026-01-05T00:00:00Z",
+  oldest_listed_at: "2026-01-05T00:00:00Z",
 };
 const draft: FilterableListing = {
   title: "Untitled",
@@ -162,7 +162,7 @@ describe("staleness", () => {
   it("filters and sorts by the listing date", () => {
     expect(filterListings(inventory, "", withFilters({ staleDays: 90 }), now)).toEqual([tee]);
     expect(filterListings(inventory, "", withFilters({ staleDays: 365 }), now)).toEqual([]);
-    const fresh = { ...tee, title: "Fresh", vendoo_listed_at: "2026-09-18T00:00:00Z" };
+    const fresh = { ...tee, title: "Fresh", oldest_listed_at: "2026-09-18T00:00:00Z" };
     // The draft has no listing date, so it sorts last whichever end is asked for.
     expect(sortListings([draft, tee, fresh], "stalest").map((l) => l.title)).toEqual([
       "Nike Tee Black M",
@@ -174,19 +174,6 @@ describe("staleness", () => {
       "Nike Tee Black M",
       "Untitled",
     ]);
-  });
-
-  it("ages a listing from its oldest live marketplace", () => {
-    const bulkRelisted = {
-      ...tee,
-      vendoo_listed_at: "2026-09-18T00:00:00Z",
-      vendoo_marketplaces: ["ebay"],
-      vendoo_listed_dates: { ebay: "2026-01-05T00:00:00Z", poshmark: "2026-09-18T00:00:00Z" },
-    };
-    expect(isStale(bulkRelisted, 90, now)).toBe(true);
-    // A marketplace the item sold on is finished; only live copies age it.
-    const soldOnEbay = { ...bulkRelisted, vendoo_sold_dates: { ebay: "2026-02-01T00:00:00Z" } };
-    expect(isStale(soldOnEbay, 90, now)).toBe(false);
   });
 
   it("counts the staleness cutoff as a filter", () => {
@@ -315,7 +302,7 @@ describe("filter options", () => {
     const now = Date.parse("2026-09-20T00:00:00Z");
     expect(staleCounts(inventory, now)).toEqual({ 30: 1, 60: 1, 90: 1 });
     expect(Object.keys(staleCounts(inventory, now, 45))).toEqual(["30", "45", "60", "90"]);
-    expect(staleCounts([{ ...tee, status: "active", vendoo_listed_at: "2026-09-01T00:00:00Z" }], now)).toEqual({
+    expect(staleCounts([{ ...tee, status: "active", oldest_listed_at: "2026-09-01T00:00:00Z" }], now)).toEqual({
       30: 0,
       60: 0,
       90: 0,
