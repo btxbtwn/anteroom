@@ -25,13 +25,12 @@ export function WorkspacePage({
   width = "readable",
   className,
   children,
-}: {
+  ...props
+}: ComponentProps<"div"> & {
   width?: keyof typeof PAGE_WIDTH;
-  className?: string;
-  children: ReactNode;
 }) {
   return (
-    <div className="@container/page min-h-0 flex-1 overflow-y-auto bg-background text-foreground">
+    <div {...props} className="@container/page min-h-0 flex-1 overflow-y-auto bg-background text-foreground">
       <div
         className={cn(
           "mx-auto flex w-full flex-col gap-8 px-5 pt-6 pb-12 sm:px-6",
