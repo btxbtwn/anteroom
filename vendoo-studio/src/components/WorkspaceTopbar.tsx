@@ -30,6 +30,10 @@ export interface RightPanel {
   /** The panel element's id. */
   controls: string;
   onToggle: () => void;
+  /** Drawn in place of the panel icon, as the clock for the assistant's history. */
+  icon?: ReactElement;
+  /** The view's own buttons, before the toggle. */
+  actions?: ReactNode;
 }
 
 /** A ghost panel toggle with a tooltip, as T3 Code's PanelLayoutControls. */
@@ -120,13 +124,14 @@ export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPan
       </div>
       {rightPanel === null ? null : (
         <div className="relative ml-auto flex min-w-0 items-center gap-1">
+          {rightPanel.actions}
           <PanelToggle
             pressed={rightPanel.open}
             label={`${rightPanel.open ? "Hide" : "Show"} ${rightPanel.name}`}
             controls={rightPanel.controls}
             onToggle={rightPanel.onToggle}
           >
-            {rightPanel.open ? <PanelRightCloseIcon className="size-4" /> : <PanelRightIcon className="size-4" />}
+            {rightPanel.icon ?? (rightPanel.open ? <PanelRightCloseIcon className="size-4" /> : <PanelRightIcon className="size-4" />)}
           </PanelToggle>
         </div>
       )}

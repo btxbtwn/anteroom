@@ -6,7 +6,7 @@ there is no required number of sources or prescribed tour through the list.
 
 ## Start with the existing guidance
 
-- [DESIGN.md](../DESIGN.md) owns Anteroom's visual and interaction rules,
+- [DESIGN.md](../DESIGN.md) owns Anteroom's web UI visual and interaction rules,
   shared components, research workflow and review checklist. Its
   [sources](../DESIGN.md#sources) hold the design-system and accessibility
   references; they are not duplicated here.
@@ -14,8 +14,11 @@ there is no required number of sources or prescribed tour through the list.
   [the product specification](../VENDOO_STUDIO_SPEC.md) describes the product
   and architecture. For current web styling, follow `DESIGN.md`, not older
   visual descriptions in the specification or audit snapshots.
-- [Responsiveness](responsiveness.md) holds the McMaster-Carr/NextMaster
-  observations, measurements and remaining performance work.
+- [Performance goals](performance.md) applies McMaster-Carr/NextMaster's speed
+  and responsiveness aspirations to every change across web, Mac and iPhone;
+  these are performance references, not visual templates.
+  [Responsiveness](responsiveness.md) holds the observations, measurements and
+  remaining performance work.
 - [Desktop UI reference](desktop-ui-reference.md) records a versioned audit
   for the native port, while [iPhone parity](iphone-parity.md) tracks that
   port's coverage. Consult them for Anteroom-specific context, not as an
@@ -57,6 +60,7 @@ that a site is dead. Note an access limitation when useful and choose another
 accessible source for the current task.
 
 Keep durable rules in `DESIGN.md`, feature requirements in the product spec,
-performance evidence in `responsiveness.md`, and port status in the parity
-tracker. Link to those documents instead of copying their contents here.
+performance goals in `performance.md`, evidence in `responsiveness.md`, and
+port status in the parity tracker. Link to those documents instead of copying
+their contents here.
 Changes to this directory alone do not change those requirements.
