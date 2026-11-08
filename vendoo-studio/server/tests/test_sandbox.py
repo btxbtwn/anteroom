@@ -128,3 +128,26 @@ import keyring; print(type(keyring.get_keyring()).__name__)
         env={"PYTHONPATH": str(SERVER), "PATH": "/usr/bin:/bin"},
     )
     assert result.stdout.split() == ["blocked", "blocked", "loopback", "MemoryKeyring"], result.stderr
+
+
+def test_hosted_image_can_import_sandbox_without_desktop_packages():
+    # The hosted image installs the `hosted` extra, not `desktop`, so keyring and
+    # its jaraco helpers are missing there. Choosing a provider for an Assistant
+    # question imports this module on every request.
+    script = """
+import sys
+for name in ("keyring", "jaraco", "webview", "cursor_sdk", "claude_agent_sdk"):
+    sys.modules[name] = None
+import vendoo_studio.hosted
+from vendoo_studio import sandbox
+from vendoo_studio.services import listing_provider
+print(sandbox.enabled())
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={"PYTHONPATH": str(SERVER), "PATH": "/usr/bin:/bin"},
+    )
+    assert result.stdout.split() == ["False"], result.stderr

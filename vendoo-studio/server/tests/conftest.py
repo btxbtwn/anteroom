@@ -233,7 +233,7 @@ def _no_real_keychain():
     """
     import keyring
 
-    from vendoo_studio.sandbox import MemoryKeyring
+    from vendoo_studio.memory_keyring import MemoryKeyring
 
     original = keyring.get_keyring()
     keyring.set_keyring(MemoryKeyring())
