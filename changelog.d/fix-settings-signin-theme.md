@@ -7,3 +7,4 @@
 - On phones, settings switches sit at the end of their row.
 - The empty listing pane says what to do next in one line.
 - Sourcing shows an error with Try again when your buy list can't be built, instead of loading forever.
+- Gray labels in light mode are a little darker, so they're easier to read.
