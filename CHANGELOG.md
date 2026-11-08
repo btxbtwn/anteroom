@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.845 — 2026-11-08
+
+- On the web and iPhone browser, reopening Anteroom shows your inventory and pages right away from your last visit, then refreshes them. Signing out erases what was kept on the device.
+
 ## 0.1.844 — 2026-11-08
 
 - Find the Vendoo switch under Settings → Experimental, alongside a coming-soon hosted marketplace browser option.

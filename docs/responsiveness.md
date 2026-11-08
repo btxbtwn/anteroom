@@ -151,8 +151,39 @@ renders directly instead of going through `React.lazy`. Opening a page shows
 the cached data and refreshes it in the background.
 `e2e/instantPages.e2e.ts` fails if Sourcing, Automations, Marketplaces or
 Settings shows a page spinner or skeleton when opened; it fails on the
-previous code. Data is still read fresh after a full reload: the cache is in
-memory, not stored on the device.
+previous code. This cache is in memory; the hosted app also keeps part of it
+on the device across reloads (next section).
+
+## Hosted reloads open on the kept workspace
+
+iOS Safari often reloads a backgrounded tab, and each reload used to wait on
+`/api/runtime` behind a startup screen, then on every read. The hosted app now
+keeps the workspace's features and an allowlist of account-wide reads
+(`src/cloud/deviceCache.ts`: inventory, display settings and the sidebar pages'
+reads) in IndexedDB through TanStack Query's persister. A reload shows them at
+once and refreshes them from the server. Chats, photos (they have their own
+device cache), jobs and listing details are always read fresh.
+
+Only one seller's data is kept. Another seller signing in, sign-out, an expired
+session and account deletion erase it; a new build or 24 hours discard it.
+Browser storage has a one-second deadline, so a stalled store cannot hold the
+workspace closed. `hosted-e2e/deviceCache.e2e.ts` reloads with every `/api`
+request held unanswered and still finds the seller's listing, then checks that
+sign-out leaves nothing kept and that the next seller sees none of it.
+
+Measured on 2026-11-08 with a production build against the hosted sandbox,
+every API answer delayed 500 ms to stand in for a phone network, three runs
+each (Chromium; desktop and iPhone 15 sizes):
+
+| | Before | After |
+|---|---|---|
+| Workspace shown after reload | 1,155–1,219 ms | 462–563 ms |
+| Inventory rows, desktop | 2,086–2,182 ms | 556–587 ms |
+| Inventory rows, phone (includes ~400 ms of menu taps) | 1,727–1,814 ms | 1,173–1,286 ms |
+
+These are sandbox measurements with a simulated network, not production or
+native-device results. Real hosted reads have taken longer than 500 ms (see
+above), which would widen the difference.
 
 ## Marketplace form loading
 
