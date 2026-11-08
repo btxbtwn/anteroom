@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.803 — 2026-11-08
+
+- Listing generation no longer stops with "HTTP 500" when Anteroom restarts for an update mid-generation; it keeps reconnecting until the draft finishes.
+
 ## 0.1.802 — 2026-11-08
 
 - Etsy's eligibility note now shows once instead of twice with different wording.
