@@ -364,6 +364,8 @@ test('Mercari package typed on its tab sets the weight and box the labels are re
   const typed = pack => ({ ...listing, mercari_specifics: { package: pack } });
   assert.equal(c.mercariWeightOz(typed({ pounds: 1, ounces: 8 })), 24);
   assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'yes' }))), { unit: 'INCH', length: 14, width: 10, height: 5 });
+  // A saved radio label reads the same as its value.
+  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'Yes' }))), { unit: 'INCH', length: 14, width: 10, height: 5 });
   assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no', length: 16, width: 12, height: 6 }))),
     { unit: 'INCH', length: 16, width: 12, height: 6 });
   // No, with the inputs still showing Item Details, sends those sides. Skip sends 0 x 0 x 0.
