@@ -103,6 +103,9 @@ class MarketplaceListing(SellerOwned, Base):
     # sent, a verified read of the marketplace, or the imported listing's own.
     # Null when unknown, such as a listing the seller linked by hand.
     listed_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # When Anteroom's last confirmed List put this listing up. An Update keeps
+    # it; a relist replaces it. Null for a listing the seller linked by hand.
+    listed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Latest verified direct inventory read; listing identity and read-start time
     # keep a later sale or replacement link from reusing stale stock.

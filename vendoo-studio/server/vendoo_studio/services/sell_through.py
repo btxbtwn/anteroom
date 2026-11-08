@@ -245,11 +245,12 @@ def _days_between(listed: str, sold: str) -> int | None:
     return days if days >= 0 else None
 
 
-def listing_age_days(notes: str | None, *, now: datetime | None = None) -> int | None:
-    """Days the oldest live marketplace listing has been up."""
-    from vendoo_studio.services.vendoo_import import oldest_live_listed_at, parse_notes
+def listing_age_days(notes: str | None, direct: dict[str, dict], *, now: datetime | None = None) -> int | None:
+    """Days the oldest live marketplace listing has been up. ``direct`` is Anteroom's own listings by marketplace."""
+    from vendoo_studio.services.imported_listing import oldest_live_listed_at
+    from vendoo_studio.services.vendoo_import import parse_notes
 
-    listed = oldest_live_listed_at(parse_notes(notes))
+    listed = oldest_live_listed_at(parse_notes(notes), direct)
     if not listed:
         return None
     clock = (now or datetime.now(UTC)).isoformat()

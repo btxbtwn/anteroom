@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 import unittest
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
@@ -554,6 +554,21 @@ class NativeMarketplacesTest(unittest.TestCase):
         record = self.record("poshmark")
         self.assertEqual(record["state"], "published")
         self.assertNotIn("listed_price", record)
+
+    def test_a_confirmed_list_records_when_it_went_up_and_an_update_keeps_it(self):
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
+        before = datetime.now(UTC)
+        self.list("poshmark")
+        listed = datetime.fromisoformat(self.record("poshmark")["listed_at"])
+        self.assertGreaterEqual(listed, before - timedelta(seconds=1))
+        self.assertEqual(MarketplaceListingRepo(self.db).summaries(self.conv.id)[self.conv.id]["poshmark"]["listed_at"],
+                         listed.isoformat())
+
+        revised = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
+        self.client.post(f"{self.base}/poshmark/update", json={"revision_id": revised.id, "confirm": True})
+        self.run_jobs()
+        # An Update changes the live listing; it does not put up a new one.
+        self.assertEqual(datetime.fromisoformat(self.record("poshmark")["listed_at"]), listed)
 
     def live_on(self, platform, listing_id, url, **record):
         MarketplaceListingRepo(self.db).save(self.conv.id, platform, {

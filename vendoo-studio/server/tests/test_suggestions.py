@@ -16,6 +16,7 @@ from vendoo_studio.database import Base, load_models
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.models.listing_values import ValidationResult
+from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.suggestions import list_suggestions
 
@@ -139,6 +140,32 @@ class SuggestionsTest(unittest.TestCase):
         self.db.commit()
         cards = [card for card in list_suggestions(self.db, now=NOW) if card["kind"] == "stale_active"]
         self.assertEqual([card["age_days"] for card in cards], [90])
+
+    def test_a_relist_through_anteroom_starts_that_marketplace_over(self):
+        conv = self.convs.create(title="Relisted")
+        conv.notes = json.dumps({
+            "vendooMarketplaces": ["ebay", "poshmark"],
+            "vendooDates": {"listedByMarketplace": {
+                "ebay": "2026-06-22T00:00:00Z",
+                "poshmark": "2026-06-02T00:00:00Z",
+            }},
+        })
+        self.convs.update_status(conv.id, "active")
+        self.db.commit()
+        records = MarketplaceListingRepo(self.db)
+
+        def stale_ages() -> list[int]:
+            return [card["age_days"] for card in list_suggestions(self.db, now=NOW) if card["kind"] == "stale_active"]
+
+        self.assertEqual(stale_ages(), [110])
+        records.save(conv.id, "poshmark", {"state": "published", "listed_at": datetime(2026, 9, 19)})
+        # eBay still carries the copy from June.
+        self.assertEqual(stale_ages(), [90])
+        records.save(conv.id, "ebay", {"state": "published", "listed_at": datetime(2026, 9, 19)})
+        self.assertEqual(stale_ages(), [])
+        # A record that is no longer live does not vouch for the marketplace.
+        records.save(conv.id, "ebay", {"state": "draft"})
+        self.assertEqual(stale_ages(), [90])
 
     def test_stale_starts_at_sixty_days_and_older_ranks_first(self):
         thirty = self.convs.create(title="Thirty")
