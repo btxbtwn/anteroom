@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasMarketplaceLogo, marketplaceLogoColor } from "./MarketplaceLogo";
+import { hasMarketplaceLogo, marketplaceLogoBox, marketplaceLogoColor } from "./MarketplaceLogo";
 import { OFFICIAL_LOGOS } from "./marketplaceLogos";
 
 describe("MarketplaceLogo", () => {
@@ -20,5 +20,17 @@ describe("MarketplaceLogo", () => {
   it("falls back for unknown marketplaces", () => {
     expect(hasMarketplaceLogo("unknown-market")).toBe(false);
     expect(marketplaceLogoColor("unknown-market")).toBe("#5C6578");
+  });
+
+  it("keeps square boxes by default", () => {
+    expect(marketplaceLogoBox("ebay", 20)).toEqual({ width: 20, height: 20 });
+  });
+
+  it("draws wordmarks at their own proportions and one shared height when asked", () => {
+    expect(marketplaceLogoBox("ebay", 20, "wordmark")).toEqual({ width: 30, height: 12 });
+    expect(marketplaceLogoBox("depop", 20, "wordmark")).toEqual({ width: 45, height: 12 });
+    // Square-ish marks stay square so they keep their size.
+    expect(marketplaceLogoBox("poshmark", 20, "wordmark")).toEqual({ width: 20, height: 20 });
+    expect(marketplaceLogoBox("unknown-market", 20, "wordmark")).toEqual({ width: 20, height: 20 });
   });
 });

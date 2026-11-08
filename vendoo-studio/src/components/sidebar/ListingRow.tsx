@@ -11,7 +11,7 @@ import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
 import { displayCoverUrl } from "./coverSrc";
 import { statusIsListed } from "../fillLog/marketplaces";
-import { inventoryStatus, listedFromImport, partialSale, statusHint, withDirectListings } from "./listingStatus";
+import { inventoryStatus, listedFromImport, listingRowPrice, partialSale, quantityLabel, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
 import { prefetchListingReads } from "../../api/navigationQueries";
 import { preloadListingCode } from "../../app/pageLoaders";
@@ -59,6 +59,8 @@ export const ListingRow = memo(function ListingRow({
   const coverUrl = displayCoverUrl(listing.cover_photo_url || listing.vendoo_cover_url);
   const status = inventoryStatus(listing);
   const partial = partialSale(listing, status);
+  const quantity = quantityLabel(listing, status);
+  const price = listingRowPrice(listing, status);
   const queryClient = useQueryClient();
   const navigationIntent = useNavigationIntent(() => {
     if (selecting) return;
@@ -231,17 +233,19 @@ export const ListingRow = memo(function ListingRow({
               </ListingTag>
             ) : null}
             {partial ? <span className="truncate text-xs text-sidebar-muted-foreground">{partial}</span> : null}
+            {quantity ? <span className="shrink-0 text-xs tabular-nums text-sidebar-muted-foreground">· {quantity}</span> : null}
             {hint ? <span className="min-w-0 truncate text-xs text-sidebar-muted-foreground" title={hint}>· {hint}</span> : null}
             {settledAt ? <span className="text-xs font-medium text-sidebar-muted-foreground">{settledAt}</span> : null}
+            {price ? <span className="ml-auto shrink-0 pl-1 text-xs font-medium tabular-nums text-sidebar-foreground/80">{price}</span> : null}
           </div>
           {listedMarketplaces.length ? (
             <div
-              className="mt-2 flex flex-wrap gap-2"
+              className="mt-2 flex flex-wrap items-center gap-2.5"
               aria-label={`Listed on ${listedMarketplaces.map((row) => row.label).join(", ")}`}
             >
               {listedMarketplaces.map((row) => (
                 <span key={row.id} className={cn("inline-flex", row.status === "SOLD" && "opacity-55")}>
-                  <MarketplaceLogo id={row.id} label={`${row.label} · ${row.status.toLowerCase()}`} size={20} />
+                  <MarketplaceLogo id={row.id} label={`${row.label} · ${row.status.toLowerCase()}`} size={20} fit="wordmark" />
                 </span>
               ))}
             </div>
