@@ -155,7 +155,7 @@ class BrowserRelay(ReplyWaits):
             return True
         from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
         try:
-            target = forward_target(self.owner, 'chrome')
+            target = await forward_target(self.owner, 'chrome')
         except RoutingUnavailable:
             return False
         if target is None:
@@ -240,7 +240,7 @@ class BrowserRelay(ReplyWaits):
         except ChromeReadError as local_error:
             from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
             try:
-                target = forward_target(self.owner, 'chrome')
+                target = await forward_target(self.owner, 'chrome')
             except RoutingUnavailable:
                 raise local_error from None
             if target is None:

@@ -6,6 +6,7 @@ failed forward fails the call; it is not tried again on a different machine.
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
@@ -122,12 +123,16 @@ def replay_instance(route: DeviceRoute | None) -> str | None:
     return route.machine_id
 
 
-def forward_target(owner: str | None, device: str) -> str | None:
-    """Private URL of the process holding this device, or None to handle it here."""
+async def forward_target(owner: str | None, device: str) -> str | None:
+    """Private URL of the process holding this device, or None to handle it here.
+
+    The route lookup takes a pooled connection, so it runs on a worker thread:
+    on the request loop, a full pool would stall every request while it waits.
+    """
     if not owner or not routing_enabled():
         return None
     try:
-        route = lookup(owner, device)
+        route = await asyncio.to_thread(lookup, owner, device)
     except SQLAlchemyError as exc:
         _warn_route('Device route could not be read', exc)
         if os.environ.get('ANTEROOM_PROCESS_ROLE') == 'worker':

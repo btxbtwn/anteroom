@@ -1,5 +1,6 @@
 """Mac and Chrome commands stay on the process the device is polling."""
 import asyncio
+import threading
 import uuid
 from types import SimpleNamespace
 
@@ -14,10 +15,14 @@ from vendoo_studio.database import make_engine
 from vendoo_studio.hosted import create_app
 from vendoo_studio.services import browser_bridge, device_routes
 from vendoo_studio.services.device_routes import RoutingUnavailable, claim
-from vendoo_studio.services.hosted_browser_relay import BrowserRelay
+from vendoo_studio.services.hosted_browser_relay import BrowserRelay, ChromeReadError
 from vendoo_studio.services.mac_inference import MacInference, MacUnavailable, relay_for
 
 OWNER = 'c7a5ee16-9850-49ba-b5bd-83b8be54df46'
+
+
+async def _forward_to_peer(owner, device):
+    return 'http://127.0.0.1:8081'
 
 
 def test_hosted_process_reuses_a_few_postgres_connections(monkeypatch):
@@ -78,7 +83,7 @@ def test_forwarded_inference_does_not_queue_on_the_wrong_process(monkeypatch):
         calls.append(path)
         raise RoutingUnavailable
 
-    monkeypatch.setattr(device_routes, 'forward_target', lambda owner, device: 'http://127.0.0.1:8081')
+    monkeypatch.setattr(device_routes, 'forward_target', _forward_to_peer)
     monkeypatch.setattr(device_routes, 'post', fail)
     with pytest.raises(MacUnavailable):
         asyncio.run(relay.invoke('quick_chat', [1], {}))
@@ -137,7 +142,7 @@ def test_chrome_read_forwards_once_and_a_marketplace_request_is_not_retried(monk
             return {'ok': False, 'error': 'Chrome did not answer in time. Try again.'}
         return {'ok': True, 'reply': {'signed_in': True}}
 
-    monkeypatch.setattr(device_routes, 'forward_target', lambda owner, device: 'http://127.0.0.1:8081')
+    monkeypatch.setattr(device_routes, 'forward_target', _forward_to_peer)
     monkeypatch.setattr(device_routes, 'post', once)
     assert asyncio.run(relay.read('marketplace.sessions', {}, 5)) == {'signed_in': True}
     relay.note_seen({'marketplace.actions'})
@@ -146,3 +151,26 @@ def test_chrome_read_forwards_once_and_a_marketplace_request_is_not_retried(monk
         asyncio.run(browser_bridge.request(SimpleNamespace(id='job-1'), 'marketplace.result', {'operation_id': 'op'}))
     assert calls == ['/internal/browser-relay/read', '/internal/browser-relay/request']
     assert not relay._outbox
+
+
+def test_chrome_read_looks_up_the_device_route_off_the_event_loop(monkeypatch):
+    # A full pool makes a route lookup wait for a connection. On the request
+    # loop that wait froze every request and kept the pool full.
+    monkeypatch.setenv('FLY_MACHINE_ID', 'machinea')
+    relay = BrowserRelay(OWNER)
+    threads = []
+
+    def lookup(owner, device):
+        threads.append(threading.get_ident())
+        return None
+
+    monkeypatch.setattr(device_routes, 'lookup', lookup)
+
+    async def run():
+        loop_thread = threading.get_ident()
+        with pytest.raises(ChromeReadError):
+            await relay.read('marketplace.sessions', {}, 1)
+        return loop_thread
+
+    loop_thread = asyncio.run(run())
+    assert threads and loop_thread not in threads
