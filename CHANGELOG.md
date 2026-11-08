@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.796 — 2026-11-08
+
+- The iPhone app now runs on iPad too: the tabs open as a sidebar, and Inventory keeps your listings beside the one you're editing.
+- Unsaved edits now stay when you open another listing or switch tabs, and come back when you return to that listing.
+
 ## 0.1.795 — 2026-11-08
 
 - Keep the web app and iPhone app answering while Anteroom updates, instead of showing errors for up to a few minutes.

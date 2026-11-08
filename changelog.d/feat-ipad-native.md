@@ -1,2 +1,0 @@
-- The iPhone app now runs on iPad too: the tabs open as a sidebar, and Inventory keeps your listings beside the one you're editing.
-- Unsaved edits now stay when you open another listing or switch tabs, and come back when you return to that listing.
