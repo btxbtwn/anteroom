@@ -1,7 +1,7 @@
 """Remove Vendoo and Mark as sold copies of sales a marketplace order records
 
 Revision ID: a7d3e5c1b9f4
-Revises: cd33c540e489
+Revises: e5b81d27c4a6
 Create Date: 2026-11-08 12:00:00.000000
 
 Until now only the Chrome order history replaced the Vendoo sale or the
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 
 
 revision = 'a7d3e5c1b9f4'
-down_revision = 'cd33c540e489'
+down_revision = 'e5b81d27c4a6'
 branch_labels = None
 depends_on = None
 

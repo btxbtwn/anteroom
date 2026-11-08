@@ -22,7 +22,7 @@ def _sale(row_id, item, marketplace, source, sold_at, user=LOCAL_USER_ID, financ
 def test_upgrade_keeps_the_marketplace_record_with_the_sellers_amounts(migration_engine):  # noqa: F811
     engine = migration_engine
     config = migration_config(engine)
-    command.upgrade(config, "cd33c540e489")
+    command.upgrade(config, "e5b81d27c4a6")
     vendoo = {"currency": "USD", "item_revenue": "30", "fees": "3.5", "item_cost": "4", "order_basis": "x", "source": "vendoo"}
     typed = {**vendoo, "source": "seller", "item_revenue": "28", "sold_on": "2026-03-01"}
     etsy = {"currency": "USD", "item_revenue": "32", "shipping_credit": "6", "refunds": "0", "fees": None,
