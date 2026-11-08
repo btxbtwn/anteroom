@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.831 — 2026-11-08
+
+- Settings now opens General by default on the web.
+
+## 0.1.830 — 2026-11-08
+
+- Open "Mark down prices" in a fraction of the time: it reads only the small price fields it needs, in a few queries, instead of every saved version of every sold item.
+- Load photo tiles faster in the iPhone editor: their size is now kept after it is first made, so it is not rebuilt from the full photo after each update.
+- Download marketplace forms and brand lists compressed, and reuse connections to photo storage.
+
 ## 0.1.829 — 2026-11-08
 
 - On iPhone, listings open faster: the cover photo shows at once, and photos are kept on the phone between launches.
