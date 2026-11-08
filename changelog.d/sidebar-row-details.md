@@ -1,2 +1,0 @@
-- Listing rows in the sidebar show the asking price and how many units are on hand.
-- eBay, Etsy and Depop logos in listing rows are now large enough to read.
