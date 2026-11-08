@@ -43,7 +43,7 @@ test("hosted Chrome imports, saved-off rules and sale switches are available", a
   const sheet = page.getByRole("dialog");
   await sheet.getByRole("button", { name: /^Poshmark sharing/ }).click();
   await expect(sheet.getByRole("heading", { name: "New sharing schedule", exact: true })).toBeVisible();
-  await expect(sheet.getByText("Saved off. Turn it on from the list; any edit turns it off again.", { exact: true })).toBeVisible();
+  await expect(sheet.getByText("Saving leaves this automation off. Turn it on from the list when you’re ready. Editing turns it off again.", { exact: true })).toBeVisible();
   const ruleName = `Web sharing ${info.project.name} ${Date.now()}`;
   await sheet.getByRole("textbox", { name: "Name", exact: true }).fill(ruleName);
   const ruleSaved = page.waitForResponse(response => response.url().endsWith("/api/promotion-automations") && response.request().method() === "POST");

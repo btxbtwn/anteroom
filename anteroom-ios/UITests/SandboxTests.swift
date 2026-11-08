@@ -387,6 +387,77 @@ final class EbayFormSandboxTests: XCTestCase {
     }
 }
 
+/// Actual automation views with sandbox-only terminal history. These tests
+/// never toggle a rule, send an offer, or check a live marketplace result.
+@MainActor
+final class AutomationOffersSandboxTests: XCTestCase {
+    func testOfferOverviewAndEvidence() {
+        reviewOffers(accessibilityText: false)
+    }
+
+    func testOfferOverviewAndEvidenceWithAccessibilityText() {
+        reviewOffers(accessibilityText: true)
+    }
+
+    private func reviewOffers(accessibilityText: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        if accessibilityText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName",
+                                    UIContentSizeCategory.accessibilityExtraExtraExtraLarge.rawValue]
+        }
+        launchSandbox(app)
+        let tab = app.tabBars.buttons["Automations"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 30))
+        tab.tap()
+        XCTAssertTrue(app.navigationBars["Automations"].waitForExistence(timeout: 15))
+
+        let menu = app.buttons["More for Likers get 10% off"]
+        reveal(menu, app: app)
+        let size = accessibilityText ? "Accessibility text" : "Default text"
+        keep(app, "Offer automation overview - \(size)")
+        menu.tap()
+        let details = app.buttons["Listings and activity"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        details.tap()
+        XCTAssertTrue(app.navigationBars["Likers get 10% off"].waitForExistence(timeout: 15))
+
+        let accepted = app.staticTexts["Request accepted · delivery unverified"]
+        reveal(accepted, app: app)
+        XCTAssertTrue(app.staticTexts["sandbox-offer-1"].exists, "The sample listing ID remains visible to accessibility")
+        keep(app, "Accepted offer evidence - \(size)")
+
+        let legacy = app.staticTexts["Completed · delivery unverified"]
+        reveal(legacy, app: app)
+        XCTAssertTrue(app.staticTexts["sandbox-offer-2"].exists)
+        keep(app, "Legacy offer evidence - \(size)")
+
+        let totals = app.staticTexts["2 actions completed · 0 skipped · 0 not completed"]
+        reveal(totals, app: app)
+        keep(app, "Offer action totals - \(size)")
+        app.navigationBars["Likers get 10% off"].buttons["Done"].tap()
+        XCTAssertTrue(app.navigationBars["Automations"].waitForExistence(timeout: 10), "Done returns to the overview")
+    }
+
+    private func reveal(_ element: XCUIElement, app: XCUIApplication) {
+        // List/Form virtualizes offscreen rows. Scroll until the semantic
+        // target is visible rather than depending on fixed coordinates.
+        for _ in 0..<16 {
+            if element.waitForExistence(timeout: 1), element.isHittable { return }
+            app.swipeUp()
+        }
+        XCTAssertTrue(element.isHittable, "Expected offer content must be reachable without horizontal scrolling")
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
 /// iPad only: the inventory list stays beside the open listing, and unsaved
 /// edits come back after the seller opens another listing. CI runs this on an
 /// iPad simulator; on iPhone it is skipped.

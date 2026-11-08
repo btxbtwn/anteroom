@@ -287,7 +287,7 @@ def test_analytics_missing_sales_data_lists_what_sales_records_flags(env):
     listed = inventory_analytics(env.db, range_id="30d")["incomplete_sales"]
     assert [row["id"] for row in listed] == [row["id"] for row in flagged]
     assert listed == [{"id": flagged[0]["id"], "conversation_id": "coat", "title": "Coat",
-                       "missing": ["sale price", "shipping the buyer paid", "fees", "shipping you paid", "cost of goods"]}]
+                       "missing": ["sale price", "shipping the buyer paid", "fees", "shipping you paid"]}]
 
 
 def test_the_same_order_in_vendoo_and_the_ledger_counts_once(env):
