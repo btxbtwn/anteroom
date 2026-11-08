@@ -417,6 +417,15 @@ def delete_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.get("/{conv_id}/regenerate-details")
+def regenerate_details(conv_id: str, db: Session = Depends(get_db)):
+    """The Item Details Regenerate will start from, for the bulk review. Nothing is saved."""
+    conv = ConversationRepo(db).get(conv_id)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+    return {"notes": _carried_notes(db, conv_id, conv.notes)}
+
+
 class ResetRequest(BaseModel):
     # Regenerate: drop chat, jobs and generated fields but keep photos and item
     # details, so the next generate starts from the same inputs as a new listing.
@@ -464,13 +473,10 @@ def _reset_check(db: Session, conv_id: str) -> str | None:
 def _carried_notes(db: Session, conv_id: str, notes: str | None) -> str | None:
     """Regenerate starts from Item Details, so the facts that only lived on the listing (cost of
     goods, labels, internal notes, and the measurements and flaws in the description) move there first."""
-    from vendoo_studio.services.listing_carryover import carryover_updates
-    from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
+    from vendoo_studio.services.listing_carryover import notes_with_carryover
 
     revisions = ListingRepo(db).get_revisions(conv_id)
-    latest = dict(revisions[0].listing_json) if revisions else None
-    carried = carryover_updates(latest, parse_notes(notes))
-    return merge_notes(notes, carried) if carried else notes
+    return notes_with_carryover(notes, dict(revisions[0].listing_json) if revisions else None)
 
 
 def _wipe(db: Session, conv_id: str, keep_inputs: bool, notes: str | None) -> None:
