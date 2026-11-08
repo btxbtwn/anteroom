@@ -127,6 +127,15 @@ class PairingTokenTest(unittest.TestCase):
 
 
 class ValidationCasesTest(unittest.TestCase):
+    def test_empty_physical_description_still_requires_repair(self):
+        result = validate_listing({**VALID_LISTING, "description": ""}, 5, selected_marketplaces=[])
+        self.assertTrue(any(err["field"] == "description" for err in result.errors))
+
+    def test_short_physical_title_requires_repair_even_when_brand_is_unknown(self):
+        result = validate_listing({**VALID_LISTING, "brand": "", "title": "Blouse"}, 5,
+                                  selected_marketplaces=[])
+        self.assertTrue(any(err["field"] == "title" and "Brand Size" in err["message"] for err in result.errors))
+
     def test_general_category_is_required_even_when_no_marketplaces_are_selected(self):
         for blank in (None, "", "   "):
             listing = {**VALID_LISTING, "category_path": blank}

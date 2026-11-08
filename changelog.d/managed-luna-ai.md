@@ -1,2 +1,4 @@
 - Use Anteroom-provided AI to create drafts and read product photos without connecting a personal API key on the web.
 - Keep your own AI provider when you have already selected one, and never switch to charging your personal account when Anteroom AI is unavailable.
+- Keep verified categories and waist-only sizes when AI omits category details or repairs a draft.
+- Flag incomplete listing titles for review even when the brand is unknown.

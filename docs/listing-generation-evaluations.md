@@ -119,3 +119,18 @@ choosing a production model. Compare total calls, retries, billed tokens, seller
 corrections and p50/p95 latency, including concurrent sellers. OpenRouter routing
 and pricing can vary by endpoint; record the actual route in the evaluation notes.
 No live paid evaluation is implied by the mocked test suite.
+
+### Luna trial findings (2026-11-08)
+
+The first isolated Luna run saved all eight synthetic drafts but passed only five
+quality cases. Live follow-ups at low, medium and high reasoning did not establish
+reliable all-case quality. Higher effort alone is not a verified fix. Keep the
+company credential out of production until further evaluation passes; no model
+substitution or automatic paid fallback was enabled.
+
+The trials exposed application gaps covered by regression tests: restore saved
+verified category context before deterministic normalization; recognize a men's
+branch in a complete category path; normalize validation-repair output without
+overwriting locked seller fields; and validate short titles even when the brand
+is unknown. These safeguards do not prove model accuracy or real-photo quality.
+Private outputs and credentials are not checked in.

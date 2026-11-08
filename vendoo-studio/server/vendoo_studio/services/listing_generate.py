@@ -686,7 +686,7 @@ def _is_mens_bottoms(listing: dict) -> bool:
     # "women" also contains "men", so only a leading "men" counts as menswear.
     department = str(listing.get("department") or ebay.get("department") or "").strip().lower()
     category = str(listing.get("category_path") or "").strip().lower()
-    if not department.startswith("men") and not category.startswith("men"):
+    if not department.startswith("men") and not any(part.strip().startswith("men") for part in category.split(">")):
         return False
     haystack = " ".join(
         str(value or "")
@@ -1089,6 +1089,13 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
         log.warning("discarding validation repair outside allowed fields")
         return None
     updated = await asyncio.to_thread(apply_json_patch, listing, patches)
+    # Normalize generated copy/size only within the authorized repair paths.
+    # Normalization can derive other fields, which this scoped repair must not save.
+    normalized = copy.deepcopy(updated)
+    await asyncio.to_thread(apply_send_readiness_fixes, normalized)
+    for field in ("size", "title", "description"):
+        if f"/{field}" in allowed and field in normalized:
+            updated[field] = normalized[field]
     if "/description" in allowed:
         from vendoo_studio.services.vendoo_import import parse_notes
 
@@ -1420,12 +1427,13 @@ def persist_generated_listing(
         listing["zipCode"] = location
     elif str(listing.get("zipCode") or "") == "70125":
         listing.pop("zipCode", None)
+    # Categories were resolved before writing. Restore that authoritative
+    # context before normalizing sizes/copy; a model may omit these fields.
+    for field in ("category_path", "category_id", "marketplace_categories", "marketplace_category_ids",
+                  "marketplace_category_objects", "direct_category_ids"):
+        if seed.get(field):
+            listing[field] = copy.deepcopy(seed[field])
     apply_send_readiness_fixes(listing)
-    if revisions:
-        selected = revisions[0].listing_json
-        if selected.get("marketplace_categories"):
-            listing["category_path"] = selected["category_path"]
-            listing["marketplace_categories"] = dict(selected["marketplace_categories"])
     # Regenerate carries the seller's SKU, package size, confirmed price,
     # measurements and flaws into notes; keep them on the new listing even if
     # the model invents others. The SKU is the seller's alone: none is made up.

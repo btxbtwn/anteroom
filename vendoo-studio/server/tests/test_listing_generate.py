@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -370,6 +371,20 @@ class PersistListingTest(unittest.TestCase):
         })
         self.assertEqual(parsed["category_path"], "Clothing > Women's Tops")
         self.assertEqual(parsed["marketplace_categories"], {"ebay": "Fashion > Shirts"})
+
+    def test_generation_restores_saved_category_context_before_size_normalization(self):
+        category = "Clothing, Shoes & Accessories > Men > Men's Clothing > Jeans"
+        ids = {"ebay": "ebay-jeans", "poshmark": "poshmark-jeans"}
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            "category_path": category, "direct_category_ids": ids,
+        }, source="verified_categories")
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "title": "34x32 Classic Denim Jeans", "size": "34x32",
+            "ebay_specifics": {"department": "Men", "inseam": "32"},
+        })
+        self.assertEqual(parsed["category_path"], category)
+        self.assertEqual(parsed["direct_category_ids"], ids)
+        self.assertEqual(parsed["size"], "34")
 
     def test_carried_price_wins_over_a_reinvented_one(self):
         """Regenerate rewrites the copy, not the price the seller confirmed."""
@@ -1249,11 +1264,16 @@ class PersistListingTest(unittest.TestCase):
 
 
 class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
+    async def test_concurrent_generation_sessions_have_independent_connections(self):
+        engine = self.Session.kw["bind"]
+        with engine.connect() as first, engine.connect() as second:
+            self.assertIsNot(first.connection.driver_connection, second.connection.driver_connection)
+
     async def asyncSetUp(self):
-        engine = create_engine(
-            "sqlite://",
+        self._database_dir = tempfile.TemporaryDirectory(prefix="anteroom-generation-test-")
+        engine = self.engine = create_engine(
+            f"sqlite:///{self._database_dir.name}/drafts.db",
             connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
         )
         Base.metadata.create_all(engine)
         self.Session = sessionmaker(bind=engine)
@@ -1299,6 +1319,8 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides.pop(get_db, None)
         chat_routes.SessionLocal = self._orig_session
         listing_generation.SessionLocal = self._orig_session
+        self.engine.dispose()
+        self._database_dir.cleanup()
 
     async def test_skill_retrieval_keeps_the_api_responsive(self):
         import threading

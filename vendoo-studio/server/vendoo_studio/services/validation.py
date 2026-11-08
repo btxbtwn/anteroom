@@ -585,7 +585,7 @@ def validate_listing(
     if title and len(title) > 80 and not any(err["field"] == "title" for err in result.errors):
         add_issue(result, "title", "Title must be 80 characters or less")
     if not digital_listing:
-        if title and brand and not _title_follows_formula(title, brand, size):
+        if title and not _title_follows_formula(title, brand, size):
             add_issue(result, "title", "Title must follow Brand Size Vibe Item Color Fit")
         if description and not _description_follows_formula(description):
             add_issue(
