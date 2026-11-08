@@ -20,11 +20,10 @@ import { InspectorSection } from "./ListingFormControls";
 import { marketplaceName } from "./marketplaceNames";
 import { PhotoEditor } from "./PhotoEditor";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
+import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
 import { photoThumbUrl } from "../photoThumb";
 import { Button } from "./ui/button";
-
-const DRAG_TYPE = "application/x-vendoo-form-photo-id";
 
 export function MarketplaceMedia({ convId, marketplace, listing, disabled, onChange, warnings = [], page }: {
   convId: string;
@@ -40,12 +39,9 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const runtime = useWorkspaceRuntime();
   const queryClient = useQueryClient();
   const input = React.useRef<HTMLInputElement>(null);
-  const dragRef = React.useRef<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [dropping, setDropping] = React.useState(false);
-  const [dragId, setDragId] = React.useState<string | null>(null);
-  const [dropId, setDropId] = React.useState<string | null>(null);
   const [previewId, setPreviewId] = React.useState<string | null>(null);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const name = marketplaceName(marketplace);
@@ -178,12 +174,6 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     }
   };
 
-  const resetDrag = () => {
-    dragRef.current = null;
-    setDragId(null);
-    setDropId(null);
-  };
-
   const onStripDragOver = (event: React.DragEvent) => {
     if (!dragHasFiles(event.dataTransfer) || locked) return;
     event.preventDefault();
@@ -199,56 +189,41 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     void addFiles(Array.from(event.dataTransfer.files || []));
   };
 
+  const reorderable = !locked && picked.length > 1;
+  // A phone cannot drop files.
+  const touchScreen = typeof window !== "undefined" && Boolean(window.matchMedia?.("(hover: none)").matches);
+  const leaveOff = (photo: Photo, index: number) => (custom || late.includes(index) ? dropPick(photo.id) : setPick(ids.filter((id) => id !== photo.id)));
+  const movePick = (from: number, to: number) => {
+    const next = moveItem(ids, from, to);
+    if (next !== ids) setPick(next);
+  };
   const thumbs = picked.map((photo, index) => {
     const overLimit = limit !== undefined && index >= limit;
     const slot = page?.slots?.[index];
-    const thumb = <PhotoThumb
-      key={photo.id}
-      url={photoThumbUrl(photo)}
-      index={index}
-      reorderable={!locked && picked.length > 1}
-      draggable={!locked && picked.length > 1}
-      dragging={dragId === photo.id}
-      dropTarget={dropId === photo.id}
-      className={cn(overLimit && "opacity-50")}
-      badge={overLimit ? "Not sent" : photo.marketplace ? name : undefined}
-      title={overLimit
-        ? `${name} keeps ${limit} photos; this one is not sent.`
-        : late.includes(index)
-          ? `Not on ${name}'s page anywhere: drag it into one of its slots.`
-          : "Drag to set the order on this form"}
-      onDragStart={(event) => {
-        dragRef.current = photo.id;
-        setDragId(photo.id);
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData(DRAG_TYPE, photo.id);
-      }}
-      onDragOver={(event) => {
-        if (!dragRef.current || dragRef.current === photo.id) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (dropId !== photo.id) setDropId(photo.id);
-      }}
-      onDrop={(event) => {
-        if (dragHasFiles(event.dataTransfer)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const source = dragRef.current;
-        resetDrag();
-        if (!source) return;
-        const next = moveItem(ids, ids.indexOf(source), index);
-        if (next !== ids) setPick(next);
-      }}
-      onDragEnd={resetDrag}
-      onOpen={() => setPreviewId(photo.id)}
-      // The pick only holds the photos the seller chose, so leaving one of the
-      // item's own photos off this form says so, for the photo or for the last slots.
-      onRemove={locked ? undefined : () => (custom || late.includes(index) ? dropPick(photo.id) : setPick(ids.filter((id) => id !== photo.id)))}
-      removeLabel={`Leave photo ${index + 1} off ${name}`}
-      controlsInViewerOnTouch
-    />;
+    const thumb = <SortablePhoto key={photo.id} id={photo.id} disabled={!reorderable}>
+      {(dragging) => <PhotoThumb
+        url={photoThumbUrl(photo)}
+        index={index}
+        reorderable={reorderable}
+        dragging={dragging}
+        className={cn(overLimit && "opacity-50")}
+        badge={overLimit ? "Not sent" : photo.marketplace ? name : undefined}
+        title={overLimit
+          ? `${name} keeps ${limit} photos; this one is not sent.`
+          : late.includes(index)
+            ? `Not on ${name}'s page anywhere: drag it into one of its slots.`
+            : touchScreen ? "Press and hold, then drag to set the order on this form" : "Drag to set the order on this form"}
+        onOpen={() => setPreviewId(photo.id)}
+        // The pick only holds the photos the seller chose, so leaving one of the
+        // item's own photos off this form says so, for the photo or for the last slots.
+        onRemove={locked ? undefined : () => leaveOff(photo, index)}
+        removeLabel={`Leave photo ${index + 1} off ${name}`}
+        controlsInViewerOnTouch
+      />}
+    </SortablePhoto>;
     return slot ? <SlotCaption key={photo.id} caption={slot}>{thumb}</SlotCaption> : thumb;
   });
+  const sortedThumbs = <SortablePhotos ids={ids} onMove={movePick}>{thumbs}</SortablePhotos>;
   // The page's empty slots keep their captions after the photos, up to its limit.
   const emptySlots = (page?.slots ?? []).slice(picked.length);
   const notes = <>
@@ -307,10 +282,13 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       onRotate={runtime.features.has("photo_edits") ? (degrees) => void rotate(all[previewIndex].id, degrees) : undefined}
       edited={Boolean(all[previewIndex].edits)}
       onEdit={runtime.features.has("photo_edits") ? () => { setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
-      onMove={previewIndex < picked.length && !locked ? (delta) => {
-        const next = moveItem(ids, previewIndex, previewIndex + delta);
-        if (next !== ids) setPick(next);
+      onMove={previewIndex < picked.length && !locked ? (delta) => movePick(previewIndex, previewIndex + delta) : undefined}
+      // A touch screen hides the tiles' remove buttons; the viewer offers it instead.
+      onRemove={previewIndex < picked.length && !locked ? () => {
+        leaveOff(picked[previewIndex], previewIndex);
+        setPreviewId(null);
       } : undefined}
+      removeLabel={`Leave off ${name}`}
       onClose={() => setPreviewId(null)}
     />}
     {editing && <PhotoEditor key={editing.id} convId={convId} photo={editing} index={all.indexOf(editing)}
@@ -327,7 +305,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
         <PhotoStrip>
           {video && <VideoTile video={video} label={`${name} video`} problem={videoProblem(video, videoRules)}
             onRemove={locked ? undefined : () => onChange(withVideo(listing, ""))} />}
-          {thumbs}
+          {sortedThumbs}
           {emptySlots.length
             ? emptySlots.map((caption, index) => <SlotCaption key={caption} caption={caption}>{index === 0 ? addTile : <EmptySlot />}</SlotCaption>)
             : addTile}
@@ -369,7 +347,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
           {video && <VideoTile video={video} label={`${name} video`} problem={videoProblem(video, videoRules)}
             onRemove={locked ? undefined : () => onChange(withVideo(listing, ""))} />}
           {videoId && library && !video && <p role="alert" className="text-xs text-destructive-foreground">The selected video is missing. Add another video or remove it.</p>}
-          {thumbs}
+          {sortedThumbs}
           {addTile}
         </PhotoStrip>
         {(unticked.length > 0 || otherVideos.length > 0) && <div className="space-y-1">

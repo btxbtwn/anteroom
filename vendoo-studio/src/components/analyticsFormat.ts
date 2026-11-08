@@ -209,3 +209,11 @@ export function axisTicks(peak: number, whole = false): number[] {
 export function weekLabel(isoDay: string): string {
   return new Date(`${isoDay}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
+
+export type BreakdownMetric = "count" | "revenue";
+
+/** Largest first by the figure the weekly chart shows, then by the other one. */
+export function rankBreakdown<T extends { count: number; revenue: number }>(rows: T[], metric: BreakdownMetric): T[] {
+  const other: BreakdownMetric = metric === "count" ? "revenue" : "count";
+  return [...rows].sort((a, b) => b[metric] - a[metric] || b[other] - a[other]);
+}

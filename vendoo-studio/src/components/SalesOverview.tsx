@@ -1,7 +1,9 @@
 import { useState } from "react";
 import type { SalesOverview as Overview } from "../api/salesLedger";
 import { cn } from "../lib/utils";
-import { axisTicks, compactMoney, dayRange, formatCurrency, overviewFigures, weekLabel } from "./analyticsFormat";
+import {
+  axisTicks, type BreakdownMetric, compactMoney, dayRange, formatCurrency, overviewFigures, rankBreakdown, weekLabel,
+} from "./analyticsFormat";
 import { Stat } from "./AnalyticsStat";
 import { marketplaceName } from "./marketplaceNames";
 import { PageNote, Panel } from "./WorkspacePage";
@@ -9,6 +11,8 @@ import { Toggle, ToggleGroup } from "./ui/toggle-group";
 
 /** The figures and charts above Sales records, for the toolbar's period and marketplace. */
 export function SalesOverview({ data, period, marketplaceChosen }: { data: Overview; period: string; marketplaceChosen: boolean }) {
+  // The weekly chart's switch also orders and scales the marketplace breakdown beside it.
+  const [metric, setMetric] = useState<BreakdownMetric>("count");
   return (
     <section aria-label="Sales overview" className="flex flex-col gap-3">
       {/* The period sits by the figures: Inventory analytics may show another one. */}
@@ -22,17 +26,16 @@ export function SalesOverview({ data, period, marketplaceChosen }: { data: Overv
         <PageNote>Compared with {dayRange(data.previous.start, data.previous.end)}.</PageNote>
       ) : null}
       <div className="grid gap-3 @3xl/page:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <WeeklyChart weeks={data.weeks} truncated={data.weeks_truncated} undated={data.undated_sales} />
-        <MarketplaceBreakdown rows={data.marketplaces} />
+        <WeeklyChart weeks={data.weeks} truncated={data.weeks_truncated} undated={data.undated_sales} metric={metric} onMetricChange={setMetric} />
+        <MarketplaceBreakdown rows={data.marketplaces} metric={metric} />
       </div>
     </section>
   );
 }
 
-type WeekMetric = "count" | "revenue";
-
-function WeeklyChart({ weeks, truncated, undated }: { weeks: Overview["weeks"]; truncated: boolean; undated: number }) {
-  const [metric, setMetric] = useState<WeekMetric>("count");
+function WeeklyChart({ weeks, truncated, undated, metric, onMetricChange }: {
+  weeks: Overview["weeks"]; truncated: boolean; undated: number; metric: BreakdownMetric; onMetricChange: (metric: BreakdownMetric) => void;
+}) {
   const [active, setActive] = useState<number | null>(null);
   const peak = Math.max(0, ...weeks.map((week) => week[metric]));
   const ticks = axisTicks(peak, metric === "count");
@@ -49,8 +52,8 @@ function WeeklyChart({ weeks, truncated, undated }: { weeks: Overview["weeks"]; 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium text-foreground">{metric === "count" ? "Items sold" : "Revenue"} per week</h2>
         <ToggleGroup aria-label="Weekly chart shows" value={[metric]} onValueChange={(next) => {
-          const value = next[0] as WeekMetric | undefined;
-          if (value) setMetric(value);
+          const value = next[0] as BreakdownMetric | undefined;
+          if (value) onMetricChange(value);
         }}>
           <Toggle value="count">Items sold</Toggle>
           <Toggle value="revenue">Revenue</Toggle>
@@ -108,8 +111,9 @@ function WeeklyChart({ weeks, truncated, undated }: { weeks: Overview["weeks"]; 
   );
 }
 
-function MarketplaceBreakdown({ rows }: { rows: Overview["marketplaces"] }) {
-  const peak = Math.max(0, ...rows.map((row) => row.revenue));
+function MarketplaceBreakdown({ rows, metric }: { rows: Overview["marketplaces"]; metric: BreakdownMetric }) {
+  const ranked = rankBreakdown(rows, metric);
+  const peak = Math.max(0, ...rows.map((row) => row[metric]));
   return (
     <Panel divided={false} className="flex flex-col gap-3 p-4">
       <h2 className="text-sm font-medium text-foreground">By marketplace</h2>
@@ -125,12 +129,12 @@ function MarketplaceBreakdown({ rows }: { rows: Overview["marketplaces"] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-border/50">
-            {rows.map((row) => (
+            {ranked.map((row) => (
               <tr key={row.id}>
                 <th scope="row" className="py-2 pr-3 text-left font-normal">
                   <span className="block truncate text-foreground">{marketplaceName(row.id)}</span>
                   <span aria-hidden className="mt-1.5 block h-1 overflow-hidden rounded-full bg-muted-foreground/12">
-                    <span className="block h-full rounded-full bg-primary/70" style={{ width: peak > 0 ? `${(row.revenue / peak) * 100}%` : 0 }} />
+                    <span className="block h-full rounded-full bg-primary/70" style={{ width: peak > 0 ? `${(row[metric] / peak) * 100}%` : 0 }} />
                   </span>
                 </th>
                 <td className="py-2 text-right align-top tabular-nums text-foreground">{row.count}</td>

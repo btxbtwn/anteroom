@@ -5,7 +5,7 @@ import { api } from "../api/client";
 import { BULK_READ_CONCURRENCY, mapWithConcurrency } from "../lib/concurrency";
 import type { Photo } from "../api/types";
 import { moveItem } from "../photoDrop";
-import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
+import { applyReading, readEach } from "../measurementReading";
 import { toastManager } from "./ui/toast";
 import { PhotoZoom } from "./BulkUploadDialog";
 import { photoThumbUrl } from "../photoThumb";
@@ -94,7 +94,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
   const readMeasurements = async () => {
     if (!rows) return;
     setReading({ done: 0, total: listings.length });
-    await readEach(listings, READ_CONCURRENCY, async (listing) => {
+    await readEach(listings, async (listing) => {
       const garment = rows[listing.id]!.garment;
       setReadNotes((current) => ({ ...current, [listing.id]: "Reading the yardstick…" }));
       try {

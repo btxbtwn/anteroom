@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SalesOverviewFigures } from "../api/salesLedger";
-import { axisTicks, overviewFigures, weekLabel } from "./analyticsFormat";
+import { axisTicks, overviewFigures, rankBreakdown, weekLabel } from "./analyticsFormat";
 
 const figures = (overrides: Partial<SalesOverviewFigures> = {}): SalesOverviewFigures => ({
   count: 4, revenue: 200, revenue_known: 4, profit: 120, profit_known: 4, fees_known: 4,
@@ -68,5 +68,29 @@ describe("axisTicks", () => {
 describe("weekLabel", () => {
   it("names the Monday a week starts on", () => {
     expect(weekLabel("2026-10-26")).toBe("Oct 26");
+  });
+});
+
+describe("rankBreakdown", () => {
+  // The screenshot's period: sorted by revenue, the Sold column read 19, 9, 11, 8, 3.
+  const rows = [
+    { id: "etsy", count: 19, revenue: 220.65, revenue_known: 19 },
+    { id: "ebay", count: 9, revenue: 122.78, revenue_known: 9 },
+    { id: "depop", count: 11, revenue: 112.6, revenue_known: 11 },
+    { id: "poshmark", count: 8, revenue: 85, revenue_known: 8 },
+    { id: "mercari", count: 3, revenue: 51.25, revenue_known: 3 },
+  ];
+
+  it("ranks by items sold when the chart shows items sold", () => {
+    expect(rankBreakdown(rows, "count").map((row) => row.id)).toEqual(["etsy", "depop", "ebay", "poshmark", "mercari"]);
+  });
+
+  it("ranks by revenue when the chart shows revenue", () => {
+    expect(rankBreakdown(rows, "revenue").map((row) => row.id)).toEqual(["etsy", "ebay", "depop", "poshmark", "mercari"]);
+  });
+
+  it("breaks a tie on the other figure", () => {
+    const tied = [{ id: "a", count: 2, revenue: 10, revenue_known: 2 }, { id: "b", count: 2, revenue: 30, revenue_known: 2 }];
+    expect(rankBreakdown(tied, "count").map((row) => row.id)).toEqual(["b", "a"]);
   });
 });

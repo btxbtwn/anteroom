@@ -228,7 +228,9 @@ def test_shared_photo_contract_remains_private(cloud, signing_keys, monkeypatch)
         if method == 'POST':
             stored[key] = data
         if method == 'DELETE':
-            stored.pop(key, None)
+            # Storage deletes a photo together with its kept thumbnails.
+            for name in hosted_photos.with_renditions(key):
+                stored.pop(name, None)
         return stored.get(key, b'')
     monkeypatch.setattr(hosted_photos, 'storage_call', storage)
     image = io.BytesIO()
@@ -374,7 +376,7 @@ def test_cover_thumbnails_are_made_once(cloud, signing_keys, monkeypatch):  # no
     def storage(method, key, _token, data=None):
         if method == 'POST':
             stored[key] = data
-        if method == 'GET':
+        if method == 'GET' and not key.endswith(('.t96.jpg', '.t192.jpg')):
             reads.append(key)
         return stored.get(key, b'')
     monkeypatch.setattr(hosted_photos, 'storage_call', storage)
@@ -395,6 +397,48 @@ def test_cover_thumbnails_are_made_once(cloud, signing_keys, monkeypatch):  # no
     assert client.get(cover_url, headers=bob).status_code == 404
     assert client.get('/api/photos/' + photo + '/thumb?size=192', headers=alice).status_code == 200
     assert len(reads) == 2
+
+
+
+def test_cover_thumbnails_survive_a_new_server_process(cloud, signing_keys, monkeypatch):  # noqa: F811
+    # Every deploy starts a new process with an empty memory cache. A cover made
+    # before must come from Storage, not be remade from the full photo.
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    stored, reads, deletes = {}, [], []
+
+    def storage(method, key, _token, data=None):
+        if method == 'POST':
+            stored[key] = data
+        if method == 'GET':
+            reads.append(key)
+        if method == 'DELETE':
+            # Storage deletes a photo together with its kept thumbnails.
+            deletes.extend(hosted_photos.with_renditions(key))
+            for name in hosted_photos.with_renditions(key):
+                stored.pop(name, None)
+        return stored.get(key, b'')
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    image = io.BytesIO()
+    Image.new('RGB', (2400, 1200), 'red').save(image, 'JPEG')
+    photo = client.post('/api/drafts/' + identity + '/photos', headers=alice, content=image.getvalue()).json()['id']
+    original = next(key for key in stored if not key.endswith('.t96.jpg'))
+    cover_url = client.get('/api/conversations', headers=alice).json()[0]['cover_photo_url']
+
+    first = client.get(cover_url, headers=alice)
+    assert hosted_photos.rendition_key(original, 96) in stored
+    hosted_photos._thumbs.clear()
+    reads.clear()
+    after_deploy = client.get(cover_url, headers=alice)
+
+    assert after_deploy.status_code == 200
+    assert after_deploy.content == first.content
+    assert reads == [hosted_photos.rendition_key(original, 96)]
+    # Deleting the photo deletes its kept thumbnails with it.
+    assert client.delete('/api/drafts/' + identity + '/photos/' + photo, headers=alice).status_code == 204
+    assert hosted_photos.rendition_key(original, 96) in deletes
+    assert not stored
 
 
 def test_job_list_skips_the_listing_snapshot(cloud, signing_keys):  # noqa: F811
