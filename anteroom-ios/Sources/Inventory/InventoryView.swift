@@ -417,9 +417,22 @@ private struct StatusTabs: View {
     @Binding var selection: StatusTab
 
     var body: some View {
-        // The web's status tabs (ListingFilters.tsx): one bordered track
-        // with the selected tab raised inside it.
-        HStack(spacing: 2) {
+        ScrollView(.horizontal) {
+            if #available(iOS 26, *) {
+                GlassEffectContainer(spacing: 8) {
+                    pills
+                }
+            } else {
+                pills
+            }
+        }
+        .scrollIndicators(.hidden)
+        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .padding(.vertical, 6)
+    }
+
+    private var pills: some View {
+        HStack(spacing: 8) {
             ForEach(tabs) { tab in
                 let count = counts[tab] ?? 0
                 let isSelected = selection == tab
@@ -428,28 +441,38 @@ private struct StatusTabs: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(tab.label).lineLimit(1)
-                        Text(InventoryQuery.compactCount(count)).foregroundStyle(WorkspaceStyle.mutedText).monospacedDigit()
+                        Text(InventoryQuery.compactCount(count)).opacity(0.7).monospacedDigit()
                     }
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(isSelected ? Color.primary : WorkspaceStyle.mutedText)
-                    // The highlight fills the tab, 2 points in from the track on every side, as on the web.
-                    // With the track's padding the tab bar stays 44 points tall.
-                    .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(isSelected ? WorkspaceStyle.selected : .clear,
-                                in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius - 2, style: .continuous))
-                    .contentShape(Rectangle())
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
-                .buttonStyle(.plain)
+                .modifier(StatusPillStyle(selected: isSelected))
                 .accessibilityLabel("\(tab.label), \(count) listings")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
-        .padding(2)
-        .background(WorkspaceStyle.groupedBackground, in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius, style: .continuous).stroke(WorkspaceStyle.border, lineWidth: 1))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .background(WorkspaceStyle.sidebar)
+    }
+}
+
+private struct StatusPillStyle: ViewModifier {
+    let selected: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            if selected {
+                content.buttonStyle(.glassProminent).buttonBorderShape(.capsule)
+            } else {
+                content.buttonStyle(.glass).buttonBorderShape(.capsule)
+            }
+        } else {
+            content
+                .buttonStyle(.plain)
+                .foregroundStyle(selected ? Color.primary : Color.secondary)
+                .background(selected ? WorkspaceStyle.selected : WorkspaceStyle.surface, in: Capsule())
+        }
     }
 }
 

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.843 — 2026-11-08
+
+- Use Liquid Glass pills for the iPhone inventory status filters, with a clear selected state and room for larger text.
+
 ## 0.1.842 — 2026-11-08
 
 - Sourcing, Automations, Marketplaces, Analytics and Settings open with their data already loaded, with no spinner or placeholder first.
