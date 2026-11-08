@@ -1,1 +1,0 @@
-- Regenerate on the web now rewrites listings that are already live on marketplaces, instead of failing with "Only an unsent draft can be removed from this workspace". Their marketplace links are kept.
