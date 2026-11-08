@@ -24,6 +24,7 @@ export const EFFORT_LABELS: Record<string, string> = {
 };
 
 export const PROVIDER_LABELS: Record<ListingProviderId, string> = {
+  anteroom: "Anteroom AI",
   chatgpt: "ChatGPT",
   claude: "Claude",
   cursor: "Cursor",
@@ -69,6 +70,7 @@ export function providerOrderFor(
   next: ListingProviderId,
   status: Pick<ProviderStatus, "primary" | "fallback">,
 ): { primary: ListingProviderId; fallback: ListingProviderId | "none" } {
+  if (next === "anteroom") return { primary: next, fallback: "none" };
   if (status.primary === next) return { primary: next, fallback: status.fallback };
   const fallback = status.fallback === next ? status.primary : status.fallback;
   return { primary: next, fallback };
@@ -185,6 +187,12 @@ export function useComposerModel() {
   const active = activeProviderId(status.data);
 
   const entries: ProviderInstanceEntry[] = [
+    ...(status.data?.managed_ai_available || active === "anteroom" ? [{
+      instanceId: "anteroom" as const,
+      displayName: PROVIDER_LABELS.anteroom,
+      ready: Boolean(status.data?.managed_ai_available),
+      message: status.data?.managed_ai_available ? null : "Anteroom AI is unavailable.",
+    }] : []),
     {
       instanceId: "chatgpt",
       displayName: PROVIDER_LABELS.chatgpt,
@@ -228,6 +236,7 @@ export function useComposerModel() {
   ];
 
   const savedModel: Record<ListingProviderId, string> = {
+    anteroom: "gpt-6-luna",
     chatgpt: chatgpt.data?.listing_model ?? "",
     claude: claude.data?.listing_model ?? "",
     cursor: cursor.data?.listing_model ?? "",
@@ -239,6 +248,7 @@ export function useComposerModel() {
   };
 
   const modelOptionsByInstance = new Map<ListingProviderId, ModelEsque[]>([
+    ["anteroom", status.data?.managed_ai_available ? [{ slug: "gpt-6-luna", name: "Luna" }] : []],
     [
       "chatgpt",
       chatgptReady

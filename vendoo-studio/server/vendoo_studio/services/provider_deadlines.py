@@ -43,6 +43,7 @@ _CALL_STEPS = {
     "list_model_entries": "listing its models",
 }
 _LABELS = {
+    "anteroom": "Anteroom AI",
     "chatgpt": "ChatGPT",
     "claude": "Claude",
     "cursor": "Cursor",

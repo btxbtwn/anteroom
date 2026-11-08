@@ -32,11 +32,11 @@ LISTING_NAME_CHOICES = frozenset({"title", "sku"})
 MAX_RECENT_LABELS = 12
 MAX_HIDDEN_LABELS = 200
 SIGN_IN_PROVIDER_CHOICES = ("chatgpt", "claude", "mimo", "cursor")
-LISTING_PROVIDER_CHOICES = frozenset({*SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS})
+LISTING_PROVIDER_CHOICES = frozenset({"anteroom", *SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS})
 LISTING_FALLBACK_CHOICES = frozenset({*LISTING_PROVIDER_CHOICES, "none"})
 # "same" reads photos with whichever provider writes the listing.
 PHOTO_PROVIDER_CHOICES = frozenset({"same", *LISTING_PROVIDER_CHOICES})
-_PROVIDER_NAMES = ", ".join(f'"{choice}"' for choice in (*SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS))
+_PROVIDER_NAMES = ", ".join(f'"{choice}"' for choice in ("anteroom", *SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS))
 THEME_CHOICES = frozenset({"dark", "light", "system"})
 DEFAULT_LISTING_PROVIDER = "chatgpt"
 DEFAULT_LISTING_FALLBACK = "mimo"
@@ -388,6 +388,8 @@ def normalize_listing_fallback(value: object, *, primary: ListingProviderChoice)
 
 
 def _other_provider(primary: ListingProviderChoice) -> ListingProviderChoice:
+    if primary == "anteroom":
+        return "none"
     if primary == "chatgpt":
         return "mimo"
     if primary == "mimo":
@@ -397,6 +399,17 @@ def _other_provider(primary: ListingProviderChoice) -> ListingProviderChoice:
 
 def get_listing_provider_order() -> tuple[ListingProviderChoice, ListingFallbackChoice]:
     raw = read_settings().get(LISTING_PROVIDER_KEY)
+    if raw is None:
+        from vendoo_studio.services.managed_ai import available
+        from vendoo_studio.services.keychain import get_ai_keys, get_api_key
+        # A seller with keys but no explicit order already used automatic
+        # provider selection before managed AI existed. Preserve that choice.
+        if available() and not get_ai_keys() and not get_api_key():
+            from vendoo_studio.services.mac_inference import relay_for
+            from vendoo_studio.services.service_context import current
+            context = current()
+            if context is not None and not relay_for(context.seller_id).connected:
+                return "anteroom", "none"
     if isinstance(raw, dict):
         primary = normalize_listing_provider(raw.get("primary"))
         fallback = normalize_listing_fallback(raw.get("fallback"), primary=primary)
@@ -428,6 +441,9 @@ def set_listing_provider_order(
             raise ValueError(f'Fallback must be one of {_PROVIDER_NAMES}, or "none".')
     else:
         raise ValueError(f'Fallback must be one of {_PROVIDER_NAMES}, or "none".')
+
+    if primary_choice == "anteroom":
+        fallback_choice = "none"
 
     def mutator(payload: dict) -> None:
         payload[LISTING_PROVIDER_KEY] = {

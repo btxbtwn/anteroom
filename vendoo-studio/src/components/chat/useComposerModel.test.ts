@@ -109,6 +109,11 @@ describe("picker keyboard", () => {
 });
 
 describe("provider settings", () => {
+  it("does not retain a personal billing fallback when selecting included AI", () => {
+    expect(providerOrderFor("anteroom", { primary: "openai", fallback: "anthropic" })).toEqual({
+      primary: "anteroom", fallback: "none",
+    });
+  });
   it("reads the provider in use from the status, falling back to the primary", () => {
     expect(activeProviderId({ provider: "xiaomi-mimo", primary: "chatgpt" })).toBe("mimo");
     expect(activeProviderId({ provider: "none", primary: "cursor" })).toBe("cursor");

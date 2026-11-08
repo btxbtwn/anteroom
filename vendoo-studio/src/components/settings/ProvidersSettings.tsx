@@ -36,6 +36,7 @@ type StatusTone = "ready" | "idle" | "warning" | "error";
 const PROVIDER_IDS = LISTING_PROVIDER_IDS;
 
 const PROVIDER_LABELS: Record<ListingProviderId, { short: string; full: string }> = {
+  anteroom: { short: "Anteroom AI", full: "Anteroom AI" },
   chatgpt: { short: "ChatGPT", full: "ChatGPT" },
   claude: { short: "Claude", full: "Claude" },
   mimo: { short: "MiMo", full: "Xiaomi MiMo" },
@@ -350,6 +351,11 @@ function summarizeProvider(
       : { tone: "idle", headline: keyProvider.sign_in ? "Not connected" : "No API key" };
   }
   if (!provider) return { tone: "idle", headline: "Checking" };
+  if (id === "anteroom") {
+    return provider.managed_ai_available
+      ? { tone: "ready", headline: "Ready", detail: "Included AI" }
+      : { tone: "idle", headline: "Unavailable" };
+  }
   if (id === "chatgpt") {
     const chatgpt = provider.chatgpt;
     if (chatgpt?.signed_in) return { tone: "ready", headline: "Signed in", detail: chatgpt.email ?? undefined };
@@ -618,7 +624,9 @@ function KeyProviderEditor({
 
 export function ProvidersSettings() {
   const { hosted } = useWorkspaceRuntime();
-  const providerIds = hosted ? PROVIDER_IDS.filter((id) => isKeyProviderId(id) || id === "mimo" || id === "chatgpt") : PROVIDER_IDS;
+  const providerIds: readonly ListingProviderId[] = hosted
+    ? PROVIDER_IDS.filter((id) => isKeyProviderId(id) || id === "mimo" || id === "chatgpt" || id === "anteroom")
+    : PROVIDER_IDS.filter((id) => id !== "anteroom");
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<ListingProviderId | null>(null);
   const [claudeTerminalOpen, setClaudeTerminalOpen] = useState(false);
@@ -749,7 +757,9 @@ export function ProvidersSettings() {
         : "chatgpt";
   const activeChoice = resolveProviderId(provider?.provider);
   const choiceReady = (choice: ListingFallbackId) =>
-    isKeyProviderId(choice)
+    choice === "anteroom"
+      ? Boolean(provider?.managed_ai_available)
+      : isKeyProviderId(choice)
       ? Boolean(keyEntries.get(choice)?.masked_key)
       : choice === "chatgpt"
       ? chatgptSignedIn
@@ -768,7 +778,7 @@ export function ProvidersSettings() {
   const saveOrder = (nextPrimary: ListingProviderId, nextFallback: ListingFallbackId) => {
     setPreferredMutation.mutate({
       primary: nextPrimary,
-      fallback: nextFallback === nextPrimary ? "none" : nextFallback,
+      fallback: nextPrimary === "anteroom" || nextFallback === nextPrimary ? "none" : nextFallback,
     });
   };
 
@@ -816,6 +826,16 @@ export function ProvidersSettings() {
     activeTest.result && provider?.provider === id ? <TestResult result={activeTest.result} /> : null;
 
   const editors: Record<ListingProviderId, ReactNode> = {
+    anteroom: (
+      <SettingsSection title="Included AI">
+        <SettingsRow
+          title="Anteroom AI"
+          description={provider?.managed_ai_available
+            ? "Generates listings and reads product photos with AI provided by Anteroom. No personal API key is needed."
+            : "Anteroom AI is not available on this server yet."}
+        />
+      </SettingsSection>
+    ),
     ...(Object.fromEntries(
       KEY_PROVIDER_IDS.map((id) => [
         id,
@@ -1165,12 +1185,12 @@ export function ProvidersSettings() {
         />
         <SettingsRow
           title="Fallback"
-          description="Used only when the primary provider is not ready."
+          description={primary === "anteroom" ? "Anteroom AI stops if unavailable; personal API accounts are never charged automatically." : "Used only when the primary provider is not ready."}
           control={
             <SettingsSelect<ListingFallbackId>
               aria-label="Fallback listing AI"
               value={fallback === primary ? "none" : fallback}
-              disabled={setPreferredMutation.isPending}
+              disabled={setPreferredMutation.isPending || primary === "anteroom"}
               onChange={(value) => saveOrder(primary, value)}
               options={fallbackOptions}
             />

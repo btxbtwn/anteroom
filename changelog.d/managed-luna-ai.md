@@ -1,0 +1,2 @@
+- Use Anteroom-provided AI to create drafts and read product photos without connecting a personal API key on the web.
+- Keep your own AI provider when you have already selected one, and never switch to charging your personal account when Anteroom AI is unavailable.

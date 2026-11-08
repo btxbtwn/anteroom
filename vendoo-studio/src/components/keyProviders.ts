@@ -13,7 +13,7 @@ export const KEY_PROVIDER_LABELS: Record<KeyProviderId, string> = {
 };
 
 /** Every listing provider: sign-ins first, then API keys, then the SDK and MiMo keys. */
-export const LISTING_PROVIDER_IDS: readonly ListingProviderId[] = ["chatgpt", "claude", ...KEY_PROVIDER_IDS, "cursor", "mimo"];
+export const LISTING_PROVIDER_IDS: readonly ListingProviderId[] = ["anteroom", "chatgpt", "claude", ...KEY_PROVIDER_IDS, "cursor", "mimo"];
 
 export function isKeyProviderId(value: unknown): value is KeyProviderId {
   return typeof value === "string" && (KEY_PROVIDER_IDS as readonly string[]).includes(value);

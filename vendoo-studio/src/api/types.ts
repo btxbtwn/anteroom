@@ -366,7 +366,7 @@ export interface ClaudeStatus {
 /** Providers the seller connects with their own API key (server: ai_key_catalog.py). */
 export type KeyProviderId = "openai" | "anthropic" | "gemini" | "xai" | "mistral" | "openrouter";
 
-export type ListingProviderId = "chatgpt" | "claude" | "mimo" | "cursor" | KeyProviderId;
+export type ListingProviderId = "anteroom" | "chatgpt" | "claude" | "mimo" | "cursor" | KeyProviderId;
 
 /** One API-key provider as Settings lists it. The key itself never leaves the server. */
 export interface AIKeyProvider {
@@ -433,6 +433,7 @@ export type PhotoProviderChoice = "same" | ListingProviderId;
 export type ListingNames = "title" | "sku";
 
 export interface ProviderStatus {
+  managed_ai_available?: boolean;
   provider: string;
   primary: ListingProviderId;
   fallback: ListingProviderId | "none";

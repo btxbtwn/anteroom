@@ -101,3 +101,21 @@ References:
 - [Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
 - [Claude SDK structured outputs](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
 - [Claude SDK cost and usage accounting](https://code.claude.com/docs/en/agent-sdk/cost-tracking)
+
+## Comparing Luna and DeepSeek without changing app settings
+
+Use the same cases and separate new output directories. Supply credentials through
+private files (outside the repository) or `OPENAI_API_KEY` / `OPENROUTER_API_KEY`.
+Never put literal keys in commands or checked-in files.
+
+```bash
+python scripts/evaluate-generation.py --run --provider openai --model gpt-6-luna --api-key-file /private/openai-key --output-dir /private/evaluations/luna
+python scripts/evaluate-generation.py --run --provider openrouter --model deepseek/deepseek-v4.1-flash-1017 --api-key-file /private/openrouter-key --output-dir /private/evaluations/deepseek
+```
+
+These synthetic cases test evidence-to-listing generation, not real photo reading.
+Review real-photo tag transcription, flaws and unsupported claims separately before
+choosing a production model. Compare total calls, retries, billed tokens, seller
+corrections and p50/p95 latency, including concurrent sellers. OpenRouter routing
+and pricing can vary by endpoint; record the actual route in the evaluation notes.
+No live paid evaluation is implied by the mocked test suite.

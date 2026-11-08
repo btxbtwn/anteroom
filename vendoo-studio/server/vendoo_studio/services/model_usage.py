@@ -64,6 +64,8 @@ class Call:
         details = raw.get("input_tokens_details") or raw.get("prompt_tokens_details") or {}
         if isinstance(details, dict) and _number(details.get("cached_tokens")) is not None:
             cached = details["cached_tokens"]
+        if isinstance(details, dict) and _number(details.get("cache_write_tokens")) is not None:
+            written = details["cache_write_tokens"]
         if anthropic and input_count is not None:
             input_count += (cached or 0) + (written or 0)
         for key, value in (("input_tokens", input_count), ("output_tokens", source.get("output_tokens", source.get("completion_tokens"))),
@@ -78,6 +80,19 @@ class Call:
             self.record.update(cost_usd=float(sdk_price), cost_source="sdk_estimate")
         elif "cost" in source:
             self.record.update(cost_usd=source["cost"], cost_source="provider_reported")
+        elif (self.record["provider"] == "anteroom" and self.record["model"] == "gpt-6-luna"
+              and self.record["input_tokens"] is not None and self.record["output_tokens"] is not None):
+            # Standard USD rates checked 2026-11-08. Token-only estimate:
+            # search/tool fees are additional; output already includes reasoning.
+            count = self.record["input_tokens"]
+            cached_count = self.record["cached_input_tokens"] or 0
+            written_count = self.record["cache_write_input_tokens"] or 0
+            uncached = max(0, count - cached_count - written_count)
+            long_prompt = count > 272_000
+            input_multiplier, output_multiplier = (2, 1.5) if long_prompt else (1, 1)
+            cost = ((uncached * 0.10 + cached_count * 0.01 + written_count * 0.125) * input_multiplier
+                    + self.record["output_tokens"] * 0.50 * output_multiplier) / 1_000_000
+            self.record.update(cost_usd=cost, cost_source="token_rate_estimate")
 
 
 @contextmanager

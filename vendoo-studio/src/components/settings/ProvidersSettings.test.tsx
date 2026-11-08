@@ -5,9 +5,9 @@ import { WorkspaceRuntimeProvider } from "../../app/runtime";
 import { SettingsPage } from "../SettingsPage";
 import { ProvidersSettings } from "./ProvidersSettings";
 
-function render(hosted: boolean, primary = "openai") {
+function render(hosted: boolean, primary = "openai", managed = false) {
   const client = new QueryClient();
-  client.setQueryData(["settings-provider"], { primary, fallback: "none", photo_provider: "same" });
+  client.setQueryData(["settings-provider"], { primary, fallback: "none", photo_provider: "same", managed_ai_available: managed });
   client.setQueryData(["ai-keys"], { providers: [{ id: primary, sign_in: true }] });
   return renderToStaticMarkup(
     <WorkspaceRuntimeProvider value={{ hosted, features: new Set(), views: new Set(["settings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
@@ -33,4 +33,12 @@ it("preserves a desktop provider preference without offering a local sign-in on 
 
 it("keeps desktop provider setup and Keychain guidance", () => {
   expect(render(false)).toContain("macOS Keychain");
+});
+
+it("offers included AI on hosted accounts without a personal key form", () => {
+  const html = render(true, "anteroom", true);
+  expect(html).toContain("Anteroom AI");
+  expect(html).toContain("No personal API key is needed");
+  expect(html).toContain("personal API accounts are never charged automatically");
+  expect(html).not.toContain("Save key");
 });

@@ -114,6 +114,9 @@ def get_listing_provider():
     provider = _provider_for(primary)
     if provider is not None:
         return provider
+    # Managed inference never silently switches the party paying for a request.
+    if primary == "anteroom":
+        return None
     if fallback == "none":
         return None
     provider = _provider_for(fallback)
@@ -136,6 +139,8 @@ def get_photo_provider():
     choice = get_photo_provider_choice()
     if choice != "same":
         provider = _provider_for(choice)
+        if choice == "anteroom":
+            return provider
         if provider is not None:
             return provider
     return get_listing_provider()
@@ -147,7 +152,7 @@ def provider_is_configured() -> bool:
     if sandbox.enabled():
         return True
     if current() is not None:
-        return any(_provider_for(choice) is not None for choice in PROVIDER_CHOICES)
+        return get_listing_provider() is not None
     return (
         chatgpt_signed_in()
         or bool(get_api_key())

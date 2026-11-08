@@ -21,7 +21,7 @@ from vendoo_studio.services.user_settings import SIGN_IN_PROVIDER_CHOICES
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
-_PROVIDER_IDS = (*SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS)
+_PROVIDER_IDS = ("anteroom", *SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS)
 ProviderChoice = Annotated[str, Field(pattern="^(?:" + "|".join(_PROVIDER_IDS) + ")$", json_schema_extra={"enum": list(_PROVIDER_IDS)})]
 FallbackChoice = Annotated[str, Field(pattern="^(?:" + "|".join((*_PROVIDER_IDS, "none")) + ")$", json_schema_extra={"enum": [*_PROVIDER_IDS, "none"]})]
 PhotoChoice = Annotated[str, Field(pattern="^(?:" + "|".join(("same", *_PROVIDER_IDS)) + ")$", json_schema_extra={"enum": ["same", *_PROVIDER_IDS]})]
@@ -103,6 +103,7 @@ class ProviderStatus(BaseModel):
     fallback: FallbackChoice
     photo_provider: PhotoChoice = "same"
     configured: bool
+    managed_ai_available: bool = False
     masked_key: str | None
     masked_cursor_key: str | None = None
     vision_model: str
@@ -160,6 +161,18 @@ def get_provider():
     active = get_listing_provider()
     active_name = getattr(active, "name", None)
 
+    from vendoo_studio.services.managed_ai import available
+    managed_ready = available()
+    if active_name == "anteroom" or primary == "anteroom":
+        from vendoo_studio.services.managed_ai import MODEL
+        return ProviderStatus(
+            provider="anteroom", primary=primary, fallback=fallback,
+            photo_provider=photo_provider, configured=active is not None,
+            managed_ai_available=managed_ready, masked_key=masked,
+            masked_cursor_key=masked_cursor, vision_model=MODEL, listing_model=MODEL,
+            base_url="https://api.openai.com/v1", chatgpt=chatgpt, claude=claude,
+        )
+
     if active_name == "chatgpt" and active is not None:
         from vendoo_studio.providers.chatgpt_codex import resolved_chatgpt_models
 
@@ -173,6 +186,7 @@ def get_provider():
             fallback=fallback,
             photo_provider=photo_provider,
             configured=True,
+            managed_ai_available=managed_ready,
             masked_key=masked,
             masked_cursor_key=masked_cursor,
             vision_model=vision_model,
@@ -189,6 +203,7 @@ def get_provider():
             fallback=fallback,
             photo_provider=photo_provider,
             configured=True,
+            managed_ai_available=managed_ready,
             masked_key=masked,
             masked_cursor_key=masked_cursor,
             vision_model=active.vision_model,
@@ -208,6 +223,7 @@ def get_provider():
             fallback=fallback,
             photo_provider=photo_provider,
             configured=True,
+            managed_ai_available=managed_ready,
             masked_key=masked,
             masked_cursor_key=masked_cursor,
             vision_model=vision_model,
@@ -224,6 +240,7 @@ def get_provider():
             fallback=fallback,
             photo_provider=photo_provider,
             configured=True,
+            managed_ai_available=managed_ready,
             masked_key=masked,
             masked_cursor_key=masked_cursor,
             vision_model=active.vision_model,
@@ -239,6 +256,7 @@ def get_provider():
         fallback=fallback,
         photo_provider=photo_provider,
         configured=bool(active),
+        managed_ai_available=managed_ready,
         masked_key=masked,
         masked_cursor_key=masked_cursor,
         vision_model="mimo-v2.5",

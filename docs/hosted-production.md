@@ -352,3 +352,29 @@ current Bridge refuses.
 | 3: Tune database access | Hosted pool is 8 plus 4 overflow, 3 s wait. SSE and inventory list release before long waits/bodies. On 0.1.708: inventory list ~2.1 s; idle draft GET p50/p95 571/698 ms; under two generates, overlapping draft GET p50/p95 1.8/5.8 s; QueuePool still timed out once—stack was suggestions nested settings while native form refreshes held checkouts across eBay/Chrome waits. Native `editor_form` now rollbacks before those waits. | Re-measure two concurrent generates after deploy; expect no QueuePool errors. Do not raise the pool further. |
 | 4: Operational readiness | Request concurrency is explicit. Readiness exists and is not the only Machine's routing check. Seller asked to keep the existing database password (no rotation). | Dashboard review of plan, backups, Auth delivery, and storage egress. |
 | 5: Release load | Partial on 0.1.702. Seller A Mac ChatGPT connected (`gpt-6.1-sol`). Two generate streams returned keepalives while draft reads continued. QueuePool still timed out under that overlap. One Mac worker still serves one hosted account. | Second seller ChatGPT on another Mac. Sustained session with zero QueuePool errors. Only then add a Machine (token + migration first). |
+
+## Managed Anteroom AI
+
+`ANTEROOM_AI_API_KEY` is the company OpenAI API credential, installed only as a
+hosted server secret. It must never be put in a frontend build variable, bundled
+Mac/iPhone app, seller settings, logs or repository. Managed inference uses
+`gpt-6-luna` for photos and writing, with Responses storage disabled. A verified
+seller execution is required before the credential can be used.
+
+When configured, hosted sellers with neither a saved provider order nor personal
+API keys use Anteroom AI by default. Explicit provider choices remain unchanged.
+Select Anteroom AI in Settings → Providers to opt in an existing account. It stops
+when unavailable, without switching to a seller's personal API account. Personal
+providers never automatically switch to the company credential.
+
+Calls are attributed to `anteroom` in the existing per-draft call metrics; `openai`
+continues to mean a seller-owned key. `token_rate_estimate` is an estimate of model
+token charges at the published 2026-11-08 standard Luna rates, including reported
+cache counters and long-prompt multipliers. Search/tool fees are excluded; it is
+not an invoice or a billing ledger. No product quota is introduced.
+
+This integration changes no Machine, worker or database capacity. A production
+rollout still requires private credential installation, real-photo evaluations,
+and concurrent-seller latency/error measurements. Existing iPhone clients can
+generate with the new default; their provider picker does not yet label managed
+AI. Mac-local inference continues to use its own configured providers.

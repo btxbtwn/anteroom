@@ -60,6 +60,10 @@ def provider_for(choice):
     from vendoo_studio.services.keychain import get_ai_key, get_api_key
     from vendoo_studio.services.listing_provider import key_provider_instance
 
+    if choice == 'anteroom':
+        from vendoo_studio.services.managed_ai import provider
+        return provider()
+
     if choice == 'chatgpt':
         from vendoo_studio.services.mac_inference import MacChatGPTProvider, relay_for
         from vendoo_studio.services.service_context import current
