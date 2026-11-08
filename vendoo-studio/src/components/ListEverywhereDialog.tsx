@@ -87,11 +87,11 @@ export function ListEverywhereDialog({ title, choices, onConfirm, onClose, onEdi
                       onCheckedChange={(value) => toggle(choice.marketplace, value === true)} />
                   </label>
                   {choice.missing?.length ? (
-                    <ul aria-label={`${name} needs`} className="flex flex-col gap-1 ps-11 text-xs">
+                    <ul aria-label={`${name} needs`} className="flex flex-col gap-1 ps-11 text-xs pointer-coarse:gap-0">
                       {choice.missing.map((item) => (
                         <li key={item.field} className="min-w-0">
                           {onEditField ? (
-                            <InlineButton className="break-words font-normal underline decoration-muted-foreground/50 [--inline-button-text-align:start] [--inline-button-white-space:normal]" title={item.message || undefined}
+                            <InlineButton className="break-words font-normal pointer-coarse:min-h-11 pointer-coarse:after:inset-y-0 underline decoration-muted-foreground/50 [--inline-button-text-align:start] [--inline-button-white-space:normal]" title={item.message || undefined}
                               onClick={() => { onClose(); onEditField(item.field, choice.marketplace); }}>
                               {item.label}
                             </InlineButton>

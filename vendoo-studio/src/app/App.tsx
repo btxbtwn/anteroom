@@ -113,6 +113,8 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(runtime.hosted ? "providers" : DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<"workspace" | "editor">(runtime.hosted ? "editor" : "workspace");
+  /** Counts pane choices, so a listing that finishes loading never overrides a tab the seller picked since. */
+  const paneChoice = useRef(0);
   // On mobile the listings start open only when a listing link opened the app; home is the assistant.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => listingFromUrl && window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
   const [mobileThreadsOpen, setMobileThreadsOpen] = useState(false);
@@ -368,10 +370,19 @@ export function App() {
     void prefetchListingReads(queryClient, id);
     dispatchOpenListing({ type: "open", id, tab });
     goListings();
-    setMobilePane(runtime.hosted ? "editor" : phonePaneOnOpen(
-      conversations?.find((row) => row.id === id),
-      queryClient.getQueryData<ListingResponse>(["listing", id]),
-    ));
+    const row = conversations?.find((item) => item.id === id);
+    const cached = queryClient.getQueryData<ListingResponse>(["listing", id]);
+    const pane = runtime.hosted ? "editor" : phonePaneOnOpen(row, cached);
+    const choice = ++paneChoice.current;
+    setMobilePane(pane);
+    // A draft not read yet may already have copy: once its listing loads, move
+    // to the form, unless the seller picked a tab or another listing first.
+    if (pane === "workspace" && !cached) {
+      void queryClient.fetchQuery({ queryKey: ["listing", id], queryFn: ({ signal }) => api.listings.get(id, { signal }), retry: false })
+        .then((listing) => {
+          if (paneChoice.current === choice && phonePaneOnOpen(row, listing) === "editor") setMobilePane("editor");
+        }, () => {});
+    }
     closeMobileSidebar();
   }, [goListings, closeMobileSidebar, queryClient, runtime.hosted, conversations]);
 
@@ -715,7 +726,7 @@ export function App() {
                   role="tab"
                   aria-selected={mobilePane === "workspace"}
                   className={mobilePane === "workspace" ? "selected" : ""}
-                  onClick={() => setMobilePane("workspace")}
+                  onClick={() => { paneChoice.current++; setMobilePane("workspace"); }}
                 >
                   Chat
                 </button></>}
@@ -724,7 +735,7 @@ export function App() {
                   role="tab"
                   aria-selected={mobilePane === "editor"}
                   className={mobilePane === "editor" ? "selected" : ""}
-                  onClick={() => setMobilePane("editor")}
+                  onClick={() => { paneChoice.current++; setMobilePane("editor"); }}
                 >
                   Listing
                 </button>
