@@ -1,0 +1,1 @@
+- Use Liquid Glass pills for the iPhone inventory status filters, with a clear selected state and room for larger text.
