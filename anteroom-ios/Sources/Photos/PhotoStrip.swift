@@ -5,12 +5,17 @@ import UniformTypeIdentifiers
 /// The listing's photos, with buttons to add from the camera, library or Files.
 /// Photos save as soon as they upload, separately from Save. Like the hosted
 /// web app, new photos can be added while the listing is a draft.
+///
+/// The editor reads the photos with the listing and hands them in. Until they
+/// arrive, the inventory row's cover stands in for them.
 struct PhotoStrip: View {
     let api: AnteroomAPI
     let listingID: String
+    @Binding var photos: [ListingPhoto]
+    var loaded = true
+    var cover: (id: String, version: String?)? = nil
     var canAdd = true
 
-    @State private var photos: [ListingPhoto] = []
     @State private var picked: [PhotosPickerItem] = []
     @State private var uploading = 0
     @State private var showingCamera = false
@@ -29,7 +34,20 @@ struct PhotoStrip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if photos.isEmpty && uploading == 0 {
+            if !loaded {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                    if let cover {
+                        RemotePhoto(api: api, photoID: cover.id, maxPixels: 384, version: cover.version)
+                            .frame(height: 136)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .accessibilityLabel("Cover photo")
+                    } else {
+                        ProgressView().frame(maxWidth: .infinity, minHeight: 136)
+                            .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            } else if photos.isEmpty && uploading == 0 {
                 VStack(spacing: 10) {
                     Image(systemName: "photo.on.rectangle.angled").font(.title2)
                     Text(canAdd ? "Add photos of your item" : "No photos").font(.subheadline.weight(.medium))
@@ -47,7 +65,7 @@ struct PhotoStrip: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
                     ForEach(showAll ? photos : Array(photos.prefix(6))) { photo in
                         Button { viewing = photo.id } label: {
-                            RemotePhoto(api: api, photoID: photo.id, maxPixels: 400, version: photo.version)
+                            RemotePhoto(api: api, photoID: photo.id, maxPixels: 384, version: photo.version)
                                 .frame(height: 136)
                                 .clipped()
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -134,7 +152,6 @@ struct PhotoStrip: View {
         .sheet(isPresented: $arranging) {
             ArrangePhotosSheet(api: api, listingID: listingID, photos: $photos)
         }
-        .task { await load() }
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []
@@ -184,14 +201,6 @@ struct PhotoStrip: View {
     }
 
     private var remaining: Int { max(0, Self.limit - photos.count - uploading - failedUploads.count) }
-
-    private func load() async {
-        do {
-            photos = try await api.photos(listingID: listingID)
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
 
     private func upload(_ items: [PhotosPickerItem]) async {
         await send(items) { item in
@@ -255,11 +264,15 @@ struct PhotoStrip: View {
 }
 
 /// Loads a photo with the seller's token; the photo URLs are not public.
+/// It asks for the nearest size the server keeps, shows a larger copy already
+/// in memory at once, and shows a smaller one while the right size loads.
+/// `urgent` is for the open listing, whose photos go ahead of inventory covers.
 struct RemotePhoto: View {
     let api: AnteroomAPI
     let photoID: String
     let maxPixels: Int
     var version: String? = nil
+    var urgent = true
 
     @State private var image: UIImage?
     @State private var failed = false
@@ -281,36 +294,64 @@ struct RemotePhoto: View {
     }
 
     private func load() async {
-        let key = "\(photoID)@\(maxPixels)@\(version ?? "")" as NSString
-        if let cached = PhotoCache.images.object(forKey: key) {
+        if let cached = PhotoCache.image(photoID: photoID, version: version, pixels: maxPixels) {
             image = cached
             return
         }
+        // A smaller copy is better than a spinner while this size downloads.
+        if let smaller = PhotoCache.placeholder(photoID: photoID, version: version, pixels: maxPixels) { image = smaller }
+        failed = false
+        let size = ThumbnailSize.snapped(maxPixels)
         do {
-            let data = try await api.photoThumbnailData(photoID: photoID, size: min(512, maxPixels))
-            let size = maxPixels
+            let data = try await api.photoThumbnailData(photoID: photoID, size: size, version: version, urgent: urgent)
             let decoded = await Task.detached(priority: .userInitiated) {
                 PhotoPreparer.thumbnail(from: data, maxPixels: size)
             }.value
             if let decoded {
-                PhotoCache.images.setObject(decoded, forKey: key)
+                PhotoCache.store(decoded, photoID: photoID, version: version, size: size)
                 image = decoded
-            } else {
+            } else if image == nil {
                 failed = true
             }
         } catch {
-            failed = true
+            // Leaving the screen is not a failure; anything else shows the broken-photo mark.
+            if !error.isCancellation && image == nil { failed = true }
         }
     }
 }
 
+/// Decoded thumbnails by photo, version and stored size, for this sign-in.
 @MainActor
 enum PhotoCache {
     static let images: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 200
+        cache.countLimit = 300
         return cache
     }()
+
+    /// The image at the requested size, or a larger one, which only scales down.
+    static func image(photoID: String, version: String?, pixels: Int) -> UIImage? {
+        for size in ThumbnailSize.reusable(for: pixels) {
+            if let image = images.object(forKey: key(photoID, version, size)) { return image }
+        }
+        return nil
+    }
+
+    /// The largest smaller copy, to show while the requested size loads.
+    static func placeholder(photoID: String, version: String?, pixels: Int) -> UIImage? {
+        for size in ThumbnailSize.placeholders(for: pixels) {
+            if let image = images.object(forKey: key(photoID, version, size)) { return image }
+        }
+        return nil
+    }
+
+    static func store(_ image: UIImage, photoID: String, version: String?, size: Int) {
+        images.setObject(image, forKey: key(photoID, version, size))
+    }
+
+    private static func key(_ photoID: String, _ version: String?, _ size: Int) -> NSString {
+        ThumbnailSize.key(photoID: photoID, version: version, size: size) as NSString
+    }
 }
 
 /// A camera photo on its way to `PhotoPreparer`; UIKit images are safe to read from any thread.

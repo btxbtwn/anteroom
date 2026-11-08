@@ -70,6 +70,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/API/MarketplaceReadiness.swift Sources/Inventory/InventoryFilters.swift Sources/Inventory/Suggestions.swift Tests/InventoryTests.swift -o "$RUNNER_TEMP/inventory-tests"
           "$RUNNER_TEMP/inventory-tests"
+      - name: Test thumbnail sizes and cache keys
+        run: |
+          xcrun swiftc Sources/Photos/ThumbnailSize.swift Tests/ThumbnailSizeTests.swift -o "$RUNNER_TEMP/thumbnail-size-tests"
+          "$RUNNER_TEMP/thumbnail-size-tests"
       - name: Test native marketplace forms
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/API/NativeFormModels.swift Sources/API/EbayFormModels.swift Tests/NativeFormTests.swift -o "$RUNNER_TEMP/native-form-tests"
