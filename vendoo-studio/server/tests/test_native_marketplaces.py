@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 import unittest
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
@@ -555,6 +555,21 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(record["state"], "published")
         self.assertNotIn("listed_price", record)
 
+    def test_a_confirmed_list_records_when_it_went_up_and_an_update_keeps_it(self):
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
+        before = datetime.now(UTC)
+        self.list("poshmark")
+        listed = datetime.fromisoformat(self.record("poshmark")["listed_at"])
+        self.assertGreaterEqual(listed, before - timedelta(seconds=1))
+        self.assertEqual(MarketplaceListingRepo(self.db).summaries(self.conv.id)[self.conv.id]["poshmark"]["listed_at"],
+                         listed.isoformat())
+
+        revised = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
+        self.client.post(f"{self.base}/poshmark/update", json={"revision_id": revised.id, "confirm": True})
+        self.run_jobs()
+        # An Update changes the live listing; it does not put up a new one.
+        self.assertEqual(datetime.fromisoformat(self.record("poshmark")["listed_at"]), listed)
+
     def live_on(self, platform, listing_id, url, **record):
         MarketplaceListingRepo(self.db).save(self.conv.id, platform, {
             "state": "published", "listing_id": listing_id, "listing_url": url, "revision_id": self.rev.id, **record})
@@ -1008,6 +1023,14 @@ class NativeMarketplacesTest(unittest.TestCase):
         refused = self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(refused.status_code, 409)
         self.assertIn("Another Poshmark action", refused.json()["detail"])
+        # The app reads this to let the seller's confirmed List wait its turn.
+        self.assertEqual(refused.headers.get("X-Anteroom-Reason"), "marketplace_busy")
+
+    def test_only_a_busy_marketplace_is_marked_as_waiting(self):
+        JobRepo(self.db).create(self.conv.id, self.rev.id, LISTING)
+        refused = self.client.post(f"{self.base}/mercari/update", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(refused.status_code, 409)
+        self.assertIsNone(refused.headers.get("X-Anteroom-Reason"))
 
     def test_delist_and_inspection_still_hold_every_marketplace(self):
         for step in ("native_delist", "native_poshmark_inspect"):

@@ -45,6 +45,7 @@ from vendoo_studio.services.automation_schedule import (
 )
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_promotions import NAMES, STOP_CODES, PromotionError
+from vendoo_studio.services.listing_result import scrub
 from vendoo_studio.services.marketplace_delist import listings_for
 
 log = logging.getLogger("vendoo_studio.promotion_automations")
@@ -295,15 +296,15 @@ def _order(row: PromotionAutomation, targets: list) -> list:
 
 def _skip_reason(exc: PromotionError, send: ListingPromotion) -> str:
     """The skip text, with the marketplace's own words when it gave them."""
-    text = str(exc)
-    own = (send.marketplace_message or "").strip()
+    text = scrub(str(exc)) or "The marketplace did not answer."
+    own = scrub(send.marketplace_message) or ""
     if own and own not in text:
         text = f"{text.rstrip('.')}: {own}"
-    return text[:120]
+    return text[:1000]
 
 
 def _skip_note(reasons: Counter) -> str:
-    return "; ".join(f"{text} ({count})" for text, count in reasons.most_common(3))
+    return "; ".join(f"{text[:120]} ({count})" for text, count in reasons.most_common(3))
 
 
 async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.sleep,
@@ -369,6 +370,18 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
             except PromotionError as exc:
                 db.rollback()
                 counts["skipped"] += 1
+                # Review only reads, but its refusal still belongs in the
+                # per-listing activity journal. No send timestamp or retry gate.
+                send.listing_id = send.listing_id or listing_id
+                send.state, send.note = "skipped", _skip_reason(exc, send)
+                send.marketplace_message = scrub(send.marketplace_message)
+                send.finished_at = _now()
+                # The draft may have been deleted while Chrome was reading.
+                # Keep the listing identity, without a dangling draft reference.
+                if send.conversation_id and db.get(Conversation, send.conversation_id) is None:
+                    send.conversation_id = None
+                db.add(send)
+                db.commit()
                 if exc.code in STOP_CODES:
                     stop_note = _pause(db, row, str(exc))
                     break

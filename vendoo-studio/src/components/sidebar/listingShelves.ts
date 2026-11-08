@@ -25,6 +25,8 @@ export type Listing = {
   quantity?: number | null;
   vendoo_listed_dates?: Record<string, string>;
   vendoo_sold_dates?: Record<string, string>;
+  /** When the longest-standing live listing went up, counting Anteroom's own listings. */
+  oldest_listed_at?: string | null;
   vendoo_form_updated_at?: string | null;
   vendoo_relist_pending?: string[];
   unsent_edits?: boolean;

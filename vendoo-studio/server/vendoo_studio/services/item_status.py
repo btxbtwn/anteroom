@@ -139,7 +139,7 @@ def _read_sold_out(observations: dict[str, dict], lines: list[MarketplaceSale]) 
 SAME_SALE_DAYS = 7
 
 
-def _within_days(first: datetime | None, second: datetime | None, days: int) -> bool:
+def within_days(first: datetime | None, second: datetime | None, days: int) -> bool:
     return first is not None and second is not None and abs((first - second).total_seconds()) <= days * 86400
 
 
@@ -168,7 +168,7 @@ def repeated_lines(lines: list[MarketplaceSale]) -> set[str]:
         moment = sale_moment(order)
         match = matching_sale_index(copies, order.marketplace, moment)
         # A copy from an earlier sale of a relisted item is a sale of its own.
-        if match is not None and _within_days(sale_moment(copies[match]), moment, SAME_SALE_DAYS):
+        if match is not None and within_days(sale_moment(copies[match]), moment, SAME_SALE_DAYS):
             repeated.add(copies.pop(match).id)
     return repeated
 

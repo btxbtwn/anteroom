@@ -218,15 +218,9 @@ extension ListingSummary {
         return settled > 0 ? settled : Self.stamp(updatedAt)
     }
 
-    /// When the longest-standing live listing went up. An item is only as fresh
-    /// as its stalest live marketplace, so a new listing elsewhere does not
-    /// reset it. Falls back to the item-wide listing date. 0 when never listed.
-    fileprivate var oldestLiveListed: Double {
-        let sold = vendooSoldDates ?? [:]
-        let stamps = (vendooMarketplaces ?? []).filter { sold[$0] == nil }
-            .map { Self.stamp(vendooListedDates?[$0]) }.filter { $0 > 0 }
-        return stamps.min() ?? Self.stamp(vendooListedAt)
-    }
+    /// When the longest-standing live listing went up, as the server works it
+    /// out (a relist starts its marketplace over). 0 when never listed.
+    fileprivate var oldestLiveListed: Double { Self.stamp(oldestListedAt) }
 
     fileprivate static func stamp(_ value: String?) -> Double {
         ServerDate.parse(value)?.timeIntervalSince1970 ?? 0

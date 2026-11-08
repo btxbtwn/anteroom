@@ -314,12 +314,14 @@ function requireDepopOfferCurrency(product, preview = {}) {
   if (!currencies.length) throw depopOfferDrift('listing currency');
 }
 
-// Depop answers a listing nobody can get an offer on with HTTP 400 code 1003
-// (no likes), or with a preview that names no recipient (no eligible liker).
-const DEPOP_NO_LIKERS = 'Nobody who liked this Depop listing can get an offer right now.';
+// Neither code 1003 nor an omitted recipient proves that a listing has no
+// eligible likers. Preserve the observed refusal, not an inferred cause.
 
 function depopOfferPreview(body, product) {
-  if (String(body?.product_id) === String(product.id) && body?.offer_recipient_id == null) throw marketplaceError(DEPOP_NO_LIKERS);
+  if (String(body?.product_id) === String(product.id) && body?.offer_recipient_id == null) {
+    throw marketplaceError('Depop returned a send-all preview (HTTP 200) without offer_recipient_id. No offer was sent; eligibility could not be confirmed.',
+      { code: 'schema_drift' });
+  }
   const recipient = Number(body?.offer_recipient_id);
   // A listing with one eligible liker leaves the additional count out.
   const others = String(body?.offer_additional_recipients_count ?? '0');
@@ -352,7 +354,10 @@ async function depopOfferState(requests, slug, deadline) {
   try {
     reply = await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview');
   } catch (error) {
-    if (error?.status === 400 && error.response_data?.code === 1003) throw marketplaceError(DEPOP_NO_LIKERS);
+    if (error?.status === 400 && error.response_data?.code === 1003) {
+      throw marketplaceError('Depop refused this listing’s send-all preview (HTTP 400, code 1003). No offer was sent.',
+        { status: 400, marketplace_message: error.marketplace_message });
+    }
     throw error;
   }
   const preview = requests.preview.read(reply.data, product);
