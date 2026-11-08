@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 @MainActor
@@ -383,6 +384,52 @@ final class EbayFormSandboxTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+}
+
+/// iPad only: the inventory list stays beside the open listing, and unsaved
+/// edits come back after the seller opens another listing. CI runs this on an
+/// iPad simulator; on iPhone it is skipped.
+@MainActor
+final class IPadSandboxTests: XCTestCase {
+    func testListStaysBesideEditorAndKeepsUnsavedEdits() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "Runs on iPad")
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        app.launch()
+        // On iPad the tabs may draw as a sidebar, so wait for Inventory itself.
+        XCTAssertTrue(app.buttons["New listing"].firstMatch.waitForExistence(timeout: 90),
+                      "Sandbox sign-in must finish before interacting with the workspace")
+        XCTAssertTrue(app.staticTexts["No listing open"].waitForExistence(timeout: 15),
+                      "With nothing open, the editor column says so")
+
+        openNewListing(app)
+        XCTAssertTrue(app.navigationBars["Inventory"].exists, "The list stays on screen beside the editor")
+        let name = "iPad draft \(UUID().uuidString.prefix(8))"
+        enterListingTitle(name, app: app)
+        XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 15))
+        app.navigationBars[name].buttons["Save"].tap()
+        expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: app.navigationBars[name].buttons["Save"])
+        waitForExpectations(timeout: 30)
+
+        // Edit without saving, then open another listing.
+        let edited = "\(name) edited"
+        enterListingTitle(edited, app: app)
+        XCTAssertTrue(app.navigationBars[edited].waitForExistence(timeout: 15))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "iPad editor beside the list"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        openNewListing(app)
+
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 30))
+        row.tap()
+        let notice = app.alerts["Unsaved changes"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 30), "Reopening says the unsaved edits came back")
+        notice.buttons["OK"].tap()
+        XCTAssertTrue(app.navigationBars[edited].waitForExistence(timeout: 15), "The unsaved title is back")
     }
 }
 

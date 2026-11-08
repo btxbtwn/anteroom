@@ -8,6 +8,7 @@ struct WorkspaceView: View {
     let api: AnteroomAPI
     @Environment(SessionStore.self) private var session
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var appearance: AppearanceModel
     /// What this server offers, read once per session; nil until then.
     @State private var runtime: WorkspaceRuntime?
@@ -39,37 +40,51 @@ struct WorkspaceView: View {
         }
     }
 
+    /// A tab bar on iPhone; on iPad the same tabs also open as a sidebar.
     private func tabs(views: [String], features: [String]) -> some View {
-        TabView {
-            InventoryView(api: api)
-                .tabItem { TabIcon(title: "Inventory", systemImage: "tag.fill") }
+        let wide = sizeClass == .regular
+        return TabView {
+            Tab {
+                InventoryView(api: api)
+            } label: { TabIcon(title: "Inventory", systemImage: "tag.fill", showsTitle: wide) }
             if views.contains("assistant") {
-                BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
-                    .tabItem { TabIcon(title: "Assistant", systemImage: "bubble.left.and.text.bubble.right.fill") }
+                Tab {
+                    BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
+                } label: { TabIcon(title: "Assistant", systemImage: "bubble.left.and.text.bubble.right.fill", showsTitle: wide) }
             }
-            AnalyticsDestination(api: api)
-                .tabItem { TabIcon(title: "Analytics", systemImage: "chart.bar.fill") }
+            Tab {
+                AnalyticsDestination(api: api)
+            } label: { TabIcon(title: "Analytics", systemImage: "chart.bar.fill", showsTitle: wide) }
             if views.contains("automations") {
-                AutomationsView(api: api, canApprove: features.contains("marketplace_actions"),
-                                showsEbayOffers: features.contains("ebay_offers"),
-                                showsPromotions: features.contains("marketplace_sessions"))
-                    .tabItem { TabIcon(title: "Automations", systemImage: "calendar.badge.clock") }
+                Tab {
+                    AutomationsView(api: api, canApprove: features.contains("marketplace_actions"),
+                                    showsEbayOffers: features.contains("ebay_offers"),
+                                    showsPromotions: features.contains("marketplace_sessions"))
+                } label: { TabIcon(title: "Automations", systemImage: "calendar.badge.clock", showsTitle: wide) }
             }
-            SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
-                .tabItem { TabIcon(title: "Settings", systemImage: "gearshape.fill") }
+            Tab {
+                SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
+            } label: { TabIcon(title: "Settings", systemImage: "gearshape.fill", showsTitle: wide) }
         }
+        .tabViewStyle(.sidebarAdaptable)
         .minimizingTabBarOnScroll()
     }
 }
 
-/// Tabs show only their icon; the name stays for VoiceOver and UI tests.
+/// iPhone tabs show only their icon; the name stays for VoiceOver and UI
+/// tests. On iPad the tabs also form a sidebar, which needs the names.
 private struct TabIcon: View {
     let title: String
     let systemImage: String
+    let showsTitle: Bool
 
     var body: some View {
-        Image(systemName: systemImage)
-            .accessibilityLabel(Text(title))
+        if showsTitle {
+            Label(title, systemImage: systemImage)
+        } else {
+            Image(systemName: systemImage)
+                .accessibilityLabel(Text(title))
+        }
     }
 }
 
