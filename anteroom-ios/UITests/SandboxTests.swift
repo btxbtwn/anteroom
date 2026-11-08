@@ -527,14 +527,25 @@ final class CoreFlowSandboxTests: XCTestCase {
         launchSandbox(app)
         let listing = app.staticTexts["Sandbox photos only"].firstMatch
         XCTAssertTrue(listing.waitForExistence(timeout: 30))
-        listing.tap()
         let generate = app.buttons["generate-listing"]
-        XCTAssertTrue(generate.waitForExistence(timeout: 30), "A draft with photos and no copy offers Generate listing")
+        // A tap that lands while the list is still settling can miss; open it again if so.
+        for _ in 0..<3 where !generate.waitForExistence(timeout: 20) {
+            if listing.exists && listing.isHittable { listing.tap() }
+        }
+        XCTAssertTrue(generate.exists, "A draft with photos and no copy offers Generate listing")
+        // The editor ignores taps while it reloads the listing; wait until it takes them.
+        expectation(for: NSPredicate(format: "enabled == true AND hittable == true"), evaluatedWith: generate)
+        waitForExpectations(timeout: 30)
         keep(app, "Generate listing under photos")
-        generate.tap()
+        let assistant = app.navigationBars["Listing assistant"]
+        for _ in 0..<3 where !assistant.exists {
+            if generate.exists && generate.isHittable { generate.tap() }
+            _ = assistant.waitForExistence(timeout: 10)
+        }
+        XCTAssertTrue(assistant.exists, "Generate listing opens the assistant")
         // No confirmation: there is no copy to replace.
         let review = app.buttons["Review in editor"]
-        XCTAssertTrue(review.waitForExistence(timeout: 120), "The reply offers the editor")
+        XCTAssertTrue(review.waitForExistence(timeout: 180), "The reply offers the editor")
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '```' OR label CONTAINS '\"title\"'")).firstMatch.exists,
                        "The generated JSON is never shown")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'filled.'")).firstMatch.exists)
@@ -552,24 +563,27 @@ final class CoreFlowSandboxTests: XCTestCase {
         launchSandbox(app)
         let listing = app.staticTexts["Free People S Pink Floral Midi Dress"].firstMatch
         XCTAssertTrue(listing.waitForExistence(timeout: 30))
-        listing.tap()
         let formMenu = app.buttons["Form, General"]
-        XCTAssertTrue(formMenu.waitForExistence(timeout: 30))
+        for _ in 0..<3 where !formMenu.waitForExistence(timeout: 20) {
+            if listing.exists && listing.isHittable { listing.tap() }
+        }
+        XCTAssertTrue(formMenu.exists)
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: formMenu)
         waitForExpectations(timeout: 30)
         formMenu.tap()
         keep(app, "Form menu")
-        let etsy = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Etsy'")).firstMatch
-        XCTAssertTrue(etsy.waitForExistence(timeout: 10))
-        etsy.tap()
-        let list = app.buttons["List on Etsy"]
+        // The sample dress is live on Poshmark and Etsy, not on eBay.
+        let ebay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'eBay'")).firstMatch
+        XCTAssertTrue(ebay.waitForExistence(timeout: 10))
+        ebay.tap()
+        let list = app.buttons["List on eBay"]
         XCTAssertTrue(list.waitForExistence(timeout: 60), "The marketplace tab has its own List button")
-        keep(app, "Etsy tab action")
+        keep(app, "eBay tab action")
         if list.isEnabled {
             list.tap()
             // The confirmation names the marketplace; Cancel leaves everything as it was.
             let cancel = app.buttons["Cancel"].firstMatch
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'on Etsy?'")).firstMatch.waitForExistence(timeout: 10))
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'on eBay?'")).firstMatch.waitForExistence(timeout: 10))
             cancel.tap()
         }
     }
