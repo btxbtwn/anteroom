@@ -22,6 +22,28 @@ describe("applyReading", () => {
     expect(outcome.measurements).toEqual({});
     expect(outcome.note).toBe("No yardstick photo found.");
   });
+
+  it("names the model when it could not read anything", () => {
+    const outcome = applyReading("top", {}, {
+      photos_read: 1,
+      reader: "OpenRouter (openrouter/auto)",
+      measurements: { pitToPit: { status: "cannot_read", reads: ["cannot read", "cannot read"] } },
+    });
+    expect(outcome.note).toBe(
+      "OpenRouter (openrouter/auto) could not read the yardstick. Measure by hand: Pit to Pit, Length, Sleeve.",
+    );
+  });
+
+  it("names the model that filled fields", () => {
+    const outcome = applyReading("top", {}, {
+      photos_read: 1,
+      reader: "OpenRouter (openrouter/auto)",
+      measurements: { pitToPit: { status: "accepted", value: 20.5, reads: [20.5, 20.5] } },
+    });
+    expect(outcome.note).toBe(
+      "Filled from the photos by OpenRouter (openrouter/auto). Check them. Measure by hand: Length, Sleeve.",
+    );
+  });
 });
 
 describe("readingSuggestion", () => {

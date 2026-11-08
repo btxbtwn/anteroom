@@ -73,6 +73,69 @@ export async function loadPrivateImage(src: string, signal?: AbortSignal): Promi
   });
 }
 
+/**
+ * Thumbnails are also kept on this device, per seller, so a reload or a new
+ * sign-in token shows them at once. The browser's own cache cannot: hosted
+ * responses vary by the sign-in token, which changes every hour. Only versioned
+ * thumbnails are kept; the URL changes when the photo does.
+ */
+const DEVICE_CACHE_PREFIX = "anteroom-thumbnails:";
+const DEVICE_LIMIT = 5000;
+let devicePuts = 0;
+
+function keptOnDevice(src: string): boolean {
+  return /\/thumb\?/.test(src) && /[?&]v=/.test(src);
+}
+
+async function deviceCache(): Promise<Cache | null> {
+  const seller = currentHostedSession()?.seller;
+  if (!seller || typeof caches === "undefined") return null;
+  try {
+    return await caches.open(DEVICE_CACHE_PREFIX + seller);
+  } catch {
+    // Private browsing or blocked site data: download as before.
+    return null;
+  }
+}
+
+async function readFromDevice(src: string): Promise<Blob | null> {
+  if (!keptOnDevice(src)) return null;
+  try {
+    const cache = await deviceCache();
+    const response = await cache?.match(src);
+    return response ? await response.blob() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function keepOnDevice(src: string, blob: Blob): Promise<void> {
+  if (!keptOnDevice(src)) return;
+  try {
+    const cache = await deviceCache();
+    if (!cache) return;
+    await cache.put(src, new Response(blob, { headers: { "Content-Type": blob.type || "image/jpeg" } }));
+    // Old versions of edited photos are never asked for again; drop the oldest now and then.
+    if (++devicePuts % 200 === 0) {
+      const keys = await cache.keys();
+      for (const request of keys.slice(0, Math.max(0, keys.length - DEVICE_LIMIT))) await cache.delete(request);
+    }
+  } catch {
+    // A full or blocked store only means the next visit downloads it again.
+  }
+}
+
+/** Forget every seller's thumbnails kept on this device, as signing out does. */
+export async function forgetDeviceImages(): Promise<void> {
+  if (typeof caches === "undefined") return;
+  try {
+    const names = await caches.keys();
+    await Promise.all(names.filter(name => name.startsWith(DEVICE_CACHE_PREFIX)).map(name => caches.delete(name)));
+  } catch {
+    // Nothing kept, or the store is blocked.
+  }
+}
+
 /** A dropped connection or a busy server is tried again; a missing photo is not. */
 const RETRY_DELAYS_MS = [500, 2000];
 
@@ -100,7 +163,10 @@ async function fetchImageBlob(src: string, signal: AbortSignal): Promise<Blob> {
 
 async function fetchPrivateImage(src: string, signal: AbortSignal): Promise<string> {
   const session = currentHostedSession();
-  const blob = await fetchImageBlob(src, signal);
+  const kept = await readFromDevice(src);
+  signal.throwIfAborted();
+  const blob = kept ?? await fetchImageBlob(src, signal);
+  if (!kept && currentHostedSession() === session) void keepOnDevice(src, blob);
   if (currentHostedSession() !== session) throw new Error("Your account changed.");
   const cache = forCurrentSession();
   const raced = cache.get(src);
