@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.812 — 2026-11-08
+
+- The Anteroom icon now shows on the browser tab for myanteroom.com.
+
 ## 0.1.811 — 2026-11-08
 
 - Listing rows in the sidebar show the asking price and how many units are on hand.
