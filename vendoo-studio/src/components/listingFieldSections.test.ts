@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { generalFormSections, groupFieldsIntoSections } from "./listingFieldSections";
+import { GENERAL_LISTING_FIELDS } from "../generalListingFields";
+import { generalFormSections, groupFieldsIntoSections, type SectionField } from "./listingFieldSections";
 
 const titles = (fields: { key: string; label: string; required?: boolean }[]) =>
   Object.fromEntries(groupFieldsIntoSections(fields).map((s) => [s.title, s.fields.map((f) => f.label)]));
@@ -61,22 +62,41 @@ describe("groupFieldsIntoSections", () => {
 });
 
 describe("generalFormSections", () => {
-  it("leads with the category and follows the seller's order", () => {
+  it("follows the order a seller fills it in, category first", () => {
     const keys = ["title", "description", "price", "cost", "quantity", "brand", "condition", "primaryColor",
       "secondaryColor", "size", "sku", "zipCode", "category_path", "department", "weight_oz", "package_dimensions_in"];
     const sections = generalFormSections(keys.map((key) => ({ key, label: key })));
     expect(sections.map((s) => [s.title, s.fields.map((f) => f.key)])).toEqual([
-      ["Item", ["category_path", "department", "brand"]],
-      ["Listing", ["title", "description"]],
-      ["Condition & details", ["condition", "size", "primaryColor", "secondaryColor"]],
-      ["Pricing", ["price", "cost"]],
+      ["Item", ["category_path", "title"]],
+      ["Condition & details", ["condition", "size", "brand"]],
+      ["Pricing", ["price"]],
+      ["Description", ["description"]],
+      ["Color & department", ["primaryColor", "secondaryColor", "department"]],
       ["Shipping", ["weight_oz", "package_dimensions_in", "zipCode"]],
-      ["Inventory", ["quantity", "sku"]],
+      ["More details", ["cost", "sku", "quantity"]],
     ]);
   });
 
-  it("keeps a field it does not place under More details", () => {
+  it("shows the Description label to screen readers only, under its own heading", () => {
+    const sections = generalFormSections<SectionField>(GENERAL_LISTING_FIELDS);
+    expect(sections.flatMap((s) => s.fields.filter((f) => f.labelHidden).map((f) => f.key))).toEqual(["description"]);
+  });
+
+  it("matches the shared General field order used by chat and the iPhone app", () => {
+    const sections = generalFormSections(GENERAL_LISTING_FIELDS);
+    expect(sections.flatMap((s) => s.fields.map((f) => f.key))).toEqual(GENERAL_LISTING_FIELDS.map((f) => f.key));
+  });
+
+  it("keeps a field it does not place under More details, after cost, SKU and quantity", () => {
+    const sections = generalFormSections(["title", "tags", "sku"].map((key) => ({ key, label: key })));
+    expect(sections.map((s) => [s.title, s.fields.map((f) => f.key)])).toEqual([
+      ["Item", ["title"]],
+      ["More details", ["sku", "tags"]],
+    ]);
+  });
+
+  it("adds More details for unplaced fields when cost, SKU and quantity are absent", () => {
     const sections = generalFormSections([{ key: "title", label: "Title" }, { key: "tags", label: "Tags" }]);
-    expect(sections.map((s) => s.title)).toEqual(["Listing", "More details"]);
+    expect(sections.map((s) => s.title)).toEqual(["Item", "More details"]);
   });
 });

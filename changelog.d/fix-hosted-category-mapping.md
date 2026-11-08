@@ -1,1 +1,0 @@
-- Choosing a category on the General form on iPhone or the web app now fills the matching category on eBay, Poshmark, Mercari, Depop and Etsy, as it already did on the Mac.
