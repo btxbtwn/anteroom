@@ -43,7 +43,7 @@ struct MarketplaceFormView: View {
                 }
             } else if let error = model.formErrors[marketplace] {
                 WorkspaceSection("Couldn't load the \(Marketplaces.name(marketplace)) form") {
-                    Text(error).foregroundStyle(.red)
+                    Text(error).foregroundStyle(WorkspaceStyle.destructive)
                     Button("Try again") { Task { await model.loadForm(marketplace) } }
                 }
             } else {
@@ -256,7 +256,7 @@ private struct NativeFieldControl: View {
                 }
                 if let max = field.maxLength, (current?.text.count ?? 0) > max * 9 / 10 {
                     Text("\(current?.text.count ?? 0)/\(max)").font(.caption).monospacedDigit()
-                        .foregroundStyle((current?.text.count ?? 0) > max ? .red : .secondary)
+                        .foregroundStyle((current?.text.count ?? 0) > max ? WorkspaceStyle.destructive : WorkspaceStyle.mutedText)
                 }
             }
         }
@@ -426,7 +426,7 @@ private struct MarketplacePhotoPicker: View {
                 }
                 if let uploadError {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(uploadError).font(.footnote).foregroundStyle(.red)
+                        Text(uploadError).font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
                         Spacer(minLength: 0)
                         if !failedUploads.isEmpty {
                             Button("Retry") { Task { await retryFailed() } }
@@ -438,7 +438,7 @@ private struct MarketplacePhotoPicker: View {
                 }
                 HStack {
                     Text("\(sent.count) of \(limit) photos sent")
-                        .font(.footnote).foregroundStyle(sent.count > limit ? .red : .secondary)
+                        .font(.footnote).foregroundStyle(sent.count > limit ? WorkspaceStyle.destructive : WorkspaceStyle.mutedText)
                     Spacer()
                     if !pick.isEmpty {
                         Button("Use item photos") { model.setValue(.array([]), for: field) }

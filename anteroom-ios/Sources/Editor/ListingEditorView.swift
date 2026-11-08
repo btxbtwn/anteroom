@@ -61,7 +61,7 @@ struct ListingEditorView: View {
                 if let loadError = model.loadError {
                     WorkspaceSection("Couldn't load listing") {
                         Text("Your saved details weren't changed. Try again in a moment.")
-                        Text(loadError).font(.footnote).foregroundStyle(.red)
+                        Text(loadError).font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
                         Button("Try again") { Task { await model.load() } }
                     }
                 }

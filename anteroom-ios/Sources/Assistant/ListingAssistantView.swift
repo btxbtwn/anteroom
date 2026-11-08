@@ -133,7 +133,7 @@ struct ListingAssistantView: View {
         }
         if let error = model.error {
             Label(error, systemImage: "exclamationmark.triangle")
-                .font(.footnote).foregroundStyle(.red)
+                .font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
         }
         if model.ready && model.messages.isEmpty && !model.isWorking {
             Text(Self.emptyText(photoCount: photoCount, hasCopy: hasCopy))

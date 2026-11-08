@@ -101,7 +101,7 @@ struct PhotoStrip: View {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(uploadMessage)
                         .font(.footnote)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(WorkspaceStyle.destructive)
                     Spacer(minLength: 0)
                     if !failedUploads.isEmpty {
                         Button("Retry") { Task { await retryFailed() } }
@@ -115,7 +115,7 @@ struct PhotoStrip: View {
             if let error {
                 Text(error)
                     .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(WorkspaceStyle.destructive)
             }
         }
         .sensoryFeedback(.error, trigger: uploadFailures)
