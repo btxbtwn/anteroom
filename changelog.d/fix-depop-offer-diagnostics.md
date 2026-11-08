@@ -1,2 +1,0 @@
-- Show skipped automatic offer attempts by listing in Activity, with Depop’s sanitized response and distinct explanations for refused previews and missing recipients instead of assuming there are no eligible likers.
-- Retry interrupted downloads of pinned build and security-check tools without bypassing their checksums or any tests.
