@@ -1,0 +1,1 @@
+- Let DeepSeek and other OpenRouter listing models search repeatedly for sold comparisons during listing generation.
