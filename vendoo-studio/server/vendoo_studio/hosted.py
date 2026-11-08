@@ -11,6 +11,7 @@ import logging
 import threading
 import time
 import traceback
+import uuid
 from pathlib import Path
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -43,6 +44,7 @@ def from_public_edge(scope) -> bool:
 
 
 access_log = logging.getLogger("vendoo_studio.access")
+http_log = logging.getLogger("vendoo_studio.http")
 
 
 class AccessLogMiddleware:
@@ -75,11 +77,23 @@ class AccessLogMiddleware:
                 status = message["status"]
             await send(message)
 
+        from vendoo_studio.services.error_alerts import request_context
+
+        request_id = Headers(scope=scope).get("fly-request-id") or uuid.uuid4().hex
+        context = request_context.set({"scope": scope, "request_id": request_id})
         try:
             await self.app(scope, receive, record)
+        except Exception:
+            # The route template, never the raw path: it can carry one-time codes.
+            http_log.exception("Unhandled exception in %s %s",
+                               scope["method"], getattr(scope.get("route"), "path", None) or "-")
+            raise
         finally:
             route = scope.get("route")
             template = getattr(route, "path", None) or "-"
+            if status >= 500:
+                http_log.error("%s %s answered %s", scope["method"], template, status)
+            request_context.reset(context)
             access_log.info("%s %s %s %dms", scope["method"], template, status or 500,
                             round((time.perf_counter() - started) * 1000))
 
@@ -169,6 +183,8 @@ class AccountResponse(BaseModel):
 def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, session_verifier: SessionVerifier | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        from vendoo_studio.services.error_alerts import install_alerts, uninstall_alerts
+        install_alerts()
         # ORM relationship names must resolve before a route constructs its
         # first query, which happens before the session's after_begin hook.
         from vendoo_studio.database import load_models
@@ -274,6 +290,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
             finally:
                 await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
+                await asyncio.to_thread(uninstall_alerts)
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,
@@ -286,6 +303,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.state.background_worker_enabled = (
         os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1' and app.state.process_role != 'web'
     )
+    from vendoo_studio.routes.error_reports import router as error_reports_router
+    app.include_router(error_reports_router)
     app.add_middleware(SellerSessionMiddleware)
     # JSON forms and choice lists (Depop's brands are about 300 KB) shrink several
     # times over a phone connection. Event streams and images are left alone.

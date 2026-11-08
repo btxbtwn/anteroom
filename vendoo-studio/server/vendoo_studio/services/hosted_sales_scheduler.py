@@ -63,5 +63,5 @@ async def serve(engine) -> None:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.warning('Hosted sales check failed for one seller; continuing with the others')
+                log.error('Hosted sales check failed for one seller; continuing with the others')
         await asyncio.sleep(INTERVAL_S)

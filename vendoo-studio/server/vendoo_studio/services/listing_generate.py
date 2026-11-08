@@ -35,7 +35,7 @@ def photo_analysis_failure(reason: object) -> PhotoAnalysisError:
     detail = " ".join(str(reason or "").split())[:240].strip()
     if not detail:
         return PhotoAnalysisError(PHOTO_ANALYSIS_RETRY_MESSAGE)
-    log.warning("photo analysis failed: %s", detail)
+    log.error("photo analysis failed: %s", detail)
     stop = "" if detail.endswith((".", "!", "?", '"')) else "."
     return PhotoAnalysisError(f"Photo analysis failed: {detail}{stop} Retry to analyze the photos again.")
 

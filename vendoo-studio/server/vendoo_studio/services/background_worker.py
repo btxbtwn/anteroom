@@ -116,7 +116,7 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
             # SQL parameters. Record only the type and source locations.
             locations = ' > '.join(f'{frame.filename.rsplit("/", 1)[-1]}:{frame.lineno}:{frame.name}'
                                    for frame in traceback.extract_tb(exc.__traceback__))
-            logging.getLogger(__name__).warning('Draft task failed (%s at %s)', type(exc).__name__, locations)
+            logging.getLogger(__name__).error('Draft task failed (%s at %s)', type(exc).__name__, locations)
             try:
                 await asyncio.to_thread(queue.finish, task_id, token,
                                         error='The draft task stopped. Review the saved draft and try again.')
@@ -139,7 +139,7 @@ async def serve(engine, stopping):
         active.discard(task)
         if not task.cancelled() and task.exception() is not None:
             # Exception text can contain private database parameters.
-            logging.getLogger(__name__).warning('Draft task worker stopped unexpectedly')
+            logging.getLogger(__name__).error('Draft task worker stopped unexpectedly')
 
     try:
         while not stopping.is_set():
