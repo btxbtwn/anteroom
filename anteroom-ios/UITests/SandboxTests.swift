@@ -398,8 +398,13 @@ final class IPadSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         app.launch()
-        // On iPad the tabs may draw as a sidebar, so wait for Inventory itself.
-        XCTAssertTrue(app.buttons["New listing"].firstMatch.waitForExistence(timeout: 90),
+        // The app opens on the Assistant. On iPad the tabs may draw as a
+        // sidebar, so find the Inventory tab wherever it is, then wait for Inventory itself.
+        let inventoryTab = app.buttons["Inventory"].firstMatch
+        XCTAssertTrue(inventoryTab.waitForExistence(timeout: 90),
+                      "Sandbox sign-in must finish before interacting with the workspace")
+        inventoryTab.tap()
+        XCTAssertTrue(app.buttons["New listing"].firstMatch.waitForExistence(timeout: 30),
                       "Sandbox sign-in must finish before interacting with the workspace")
         XCTAssertTrue(app.staticTexts["No listing open"].waitForExistence(timeout: 15),
                       "With nothing open, the editor column says so")
