@@ -1,1 +1,0 @@
-- The Anteroom icon now shows on the browser tab for myanteroom.com.
