@@ -28,10 +28,12 @@ from vendoo_studio.services.ebay_fields import (
     exact_ebay_season,
 )
 from vendoo_studio.models.listing import Listing, ListingRevision
+from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import BUSY_LISTING_STATUSES, ConversationRepo
 from vendoo_studio.services.photos import cover_thumb_url
 from vendoo_studio.services.sell_through import _parse_moment
-from vendoo_studio.services.vendoo_import import oldest_live_listed_at, parse_notes
+from vendoo_studio.services.imported_listing import oldest_live_listed_at
+from vendoo_studio.services.vendoo_import import parse_notes
 
 MAX_SUGGESTIONS = 20
 # Sales this recent say what buyers want right now.
@@ -109,6 +111,7 @@ def list_suggestions(
     covers = repo.cover_photos()
     photo_counts = _photo_counts(db)
     listing_rows = _listing_rows(db)
+    direct = MarketplaceListingRepo(db).summaries()
     conversations = repo.list_all()
     from vendoo_studio.models.background_task import BackgroundTask
 
@@ -133,6 +136,7 @@ def list_suggestions(
             status=status,
             photo_count=photo_counts.get(conv.id, 0),
             listing=listings.get(conv.id),
+            direct=direct.get(conv.id, {}),
             cover_photo=covers.get(conv.id),
             now=when,
             selling=selling,
@@ -298,6 +302,7 @@ def _card_for(
     selling: list[dict[str, str]] | None = None,
     in_demand: tuple[str, ...] = (),
     stale_days: int = 60,
+    direct: dict[str, dict] | None = None,
 ) -> dict[str, Any] | None:
     notes = parse_notes(conv.notes)
     marketplaces = _marketplaces(notes)
@@ -322,7 +327,7 @@ def _card_for(
         reason = "Listing fields need to be fixed before listing"
         score = KIND_BASE_SCORE[KIND_FIX_VALIDATION]
     elif status == "active":
-        days = _listed_days_ago(notes, now)
+        days = _listed_days_ago(notes, direct or {}, now)
         if days is not None and days >= stale_days:
             kind = KIND_STALE_ACTIVE
             similar_sold, selling_points = _selling_like(listing, selling or [])
@@ -368,8 +373,8 @@ def _marketplaces(notes: dict[str, Any]) -> list[str]:
     return [str(item) for item in raw if str(item).strip()]
 
 
-def _listed_days_ago(notes: dict[str, Any], now: datetime) -> int | None:
-    text = oldest_live_listed_at(notes).strip()
+def _listed_days_ago(notes: dict[str, Any], direct: dict[str, dict], now: datetime) -> int | None:
+    text = oldest_live_listed_at(notes, direct).strip()
     if not text:
         return None
     try:
