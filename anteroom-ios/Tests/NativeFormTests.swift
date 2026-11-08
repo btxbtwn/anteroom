@@ -36,6 +36,19 @@ struct NativeFormTests {
         let brand = named.filled(with: [ref: ChoiceList(options: ["Nike", "Adidas"], optionValues: ["Nike": "Nike"])]).fields[0]
         precondition(brand.options == ["Nike", "Adidas"] && brand.stored(for: "Nike") == "Nike" && brand.choiceList == nil)
 
+        // A long list is looked up by stored value without searching it: the first
+        // label in the list's order names a value, and `known` holds labels and values.
+        var big = named.fields[0]
+        let labels = (0..<21_700).map { "Brand \($0)" }
+        big.setChoices(labels, Dictionary(uniqueKeysWithValues: labels.map { ($0, "id-" + $0) }))
+        precondition(big.label(for: "id-Brand 21699") == "Brand 21699" && big.label(for: "unknown") == "unknown")
+        precondition(big.choices.known.contains("Brand 5") && big.choices.known.contains("id-Brand 5"))
+        precondition(!big.choices.known.contains("Nike"))
+        let shared = ChoiceIndex(options: ["Navy", "Blue"], optionValues: ["Navy": "blue", "Blue": "blue"])
+        precondition(shared.labels["blue"] == "Navy")
+        // Filling a named list keeps the lookup in step with the new choices.
+        precondition(brand.choices.known == ["Nike", "Adidas"] && brand.label(for: "Nike") == "Nike")
+
         // Dotted paths create objects on the way and keep every sibling.
         var listing: [String: JSONValue] = ["poshmark_specifics": .object(["brand": .string("Levi's")]), "price": .int(40)]
         listing.set(.bool(true), at: "poshmark_specifics.smartSell.enabled")

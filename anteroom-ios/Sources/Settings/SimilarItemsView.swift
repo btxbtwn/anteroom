@@ -70,7 +70,7 @@ struct SimilarItemsView: View {
                                         HStack(spacing: 12) {
                                             Group {
                                                 if let cover = item.listing.coverPhotoID {
-                                                    RemotePhoto(api: api, photoID: cover, maxPixels: 120)
+                                                    RemotePhoto(api: api, photoID: cover, maxPixels: 192, version: item.listing.coverPhotoVersion, urgent: false)
                                                 } else {
                                                     Image(systemName: "photo").foregroundStyle(.secondary)
                                                 }
