@@ -11,6 +11,7 @@ import {
   StoreIcon,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { Badge } from "./ui/badge";
 import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
 import type { WorkspaceView } from "./workspaceCrumbs";
 import { pageLoaders } from "../app/pageLoaders";
@@ -62,10 +63,13 @@ export function MobileNav({
         showCloseButton={false}
         className="max-w-80 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)]"
       >
-        <div className="flex h-14 shrink-0 items-center gap-1 px-5">
+        <div className="flex h-14 shrink-0 items-center gap-2 px-5">
           <SheetTitle className="text-[17px] font-semibold tracking-tight">
             Anteroom
           </SheetTitle>
+          <Badge variant="secondary" size="sm" className="font-normal text-muted-foreground">
+            Beta
+          </Badge>
         </div>
         <nav aria-label="Pages" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-3">
           {ITEMS.map(({ id, label, icon: Icon }) => {
