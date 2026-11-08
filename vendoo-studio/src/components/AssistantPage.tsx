@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type MouseEvent } from "react";
 import { ArrowUpRightIcon, CircleAlertIcon, HourglassIcon, PercentIcon, TagIcon, TrendingUpIcon, type LucideIcon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage } from "../api/assistant";
+import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage, type AssistantThread } from "../api/assistant";
 import type { ChatAttachment, ChatAttachmentUpload } from "../api/types";
 import { addToast } from "../ui/toast";
 import { AssistantAutomationCard } from "./AssistantAutomationCard";
@@ -14,6 +14,7 @@ import { stableStreamingText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
 import { useComposerImages } from "./chat/ComposerAttachments";
 import { ChatComposer } from "./chat/ChatComposer";
+import { chatTime } from "./chat/chatHistory";
 import { foldSseEvent } from "./chat/chatStream";
 import { ChatTranscript } from "./chat/ChatTranscript";
 import { FoldedTurnRow, LiveWork } from "./chat/LiveWork";
@@ -40,6 +41,9 @@ export function greeting(now = new Date()): string {
   if (hour >= 12 && hour < 18) return "Good afternoon";
   return "Good evening";
 }
+
+/** How many past chats the home screen offers to pick back up, as Gemini's "Recent". */
+export const RECENT_CHATS = 3;
 
 /** A mouse or trackpad: put the cursor in the box. On a phone the keyboard would cover the questions. */
 function finePointer(): boolean {
@@ -80,8 +84,10 @@ interface Props {
   onOpenListing: (id: string) => void;
   /** The open conversation. Null on a home screen that has not started one yet. */
   threadId?: string | null;
-  /** A question started a conversation; the sidebar should select it. */
+  /** A question started a conversation, or the seller picked a recent one; open it. */
   onThreadReady?: (id: string) => void;
+  /** Open the full chat history. */
+  onShowHistory?: () => void;
 }
 
 /** A follow-up asked while an answer is still being written, with the images sent along. */
@@ -126,12 +132,16 @@ function foldsFor(threadId: string): FoldedTurn[] {
  * question is answered from all of Studio's data. An answer can propose
  * changes to listings; they are written only when the seller applies them.
  */
-export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null, onThreadReady }: Props) {
+export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null, onThreadReady, onShowHistory }: Props) {
   const queryClient = useQueryClient();
   const messages = useQuery({
     queryKey: messagesKey(threadId ?? ""),
     queryFn: ({ signal }) => api.assistant.messages(threadId!, { signal }),
     enabled: Boolean(threadId),
+  });
+  const threads = useQuery({
+    queryKey: THREADS_KEY,
+    queryFn: ({ signal }) => api.assistant.threads({ signal }),
   });
   const [input, setInput] = useState("");
   const [live, setLive] = useState<LiveTurn | null>(null);
@@ -431,15 +441,15 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     </div>
   );
 
+  // The server lists chats newest first.
+  const recent: AssistantThread[] = (threads.data ?? []).slice(0, RECENT_CHATS);
+
   if (empty) {
     return (
       <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-y-auto px-4">
         {/* Centered a little above the middle, as wide as the composer's surface so the heading and questions line up with it. */}
         <div className="my-auto flex w-full max-w-[calc(var(--chat-content-max-width)+2rem)] flex-col pt-8 pb-[12vh] max-[900px]:pb-8">
-          <h1 className="mx-3 mb-1 font-semibold sm:mx-4 text-xl tracking-tight text-foreground">{greeting()}</h1>
-          <p className="mx-3 mb-3 text-muted-foreground text-sm sm:mx-4">
-            Ask about your shop. You review every change before it is saved, and nothing here publishes a listing.
-          </p>
+          <h1 className="mx-3 mb-3 font-semibold sm:mx-4 text-xl tracking-tight text-foreground">{greeting()}</h1>
           {composer}
           <ul aria-label="Example questions" className="mx-3 mt-2 list-none divide-y sm:mx-4 divide-border/60 p-0">
             {ASSISTANT_STARTERS.map(({ text, icon: Icon }) => (
@@ -456,6 +466,32 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
               </li>
             ))}
           </ul>
+          {recent.length ? (
+            <section aria-labelledby="assistant-recent" className="mx-3 mt-6 sm:mx-4">
+              <div className="flex items-center justify-between">
+                <h2 id="assistant-recent" className="font-medium text-muted-foreground text-xs">Recent chats</h2>
+                {onShowHistory && (threads.data?.length ?? 0) > RECENT_CHATS ? (
+                  <Button type="button" size="xs" variant="ghost-muted" className="-me-2" onClick={onShowHistory}>
+                    Show all
+                  </Button>
+                ) : null}
+              </div>
+              <ul aria-label="Recent chats" className="mt-1 list-none divide-y divide-border/60 p-0">
+                {recent.map((thread) => (
+                  <li key={thread.id}>
+                    <button
+                      type="button"
+                      className="flex min-h-10 w-full cursor-pointer items-center gap-3 py-2 text-left text-sm text-foreground transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:underline max-[900px]:min-h-11"
+                      onClick={() => onThreadReady?.(thread.id)}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+                      <span className="shrink-0 text-muted-foreground text-xs tabular-nums">{chatTime(thread)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </div>
       </div>
     );

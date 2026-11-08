@@ -1,2 +1,3 @@
 - Signed in, Anteroom now opens on the assistant, on the web and on iPhone.
-- The assistant's home screen greets you by time of day, puts the message box in the middle with the cursor ready on desktop, and offers four example questions.
+- The assistant's home screen greets you by time of day, puts the message box in the middle with the cursor ready on desktop, offers four example questions and lists your three most recent chats.
+- Chat history now opens from a History button beside New chat instead of always taking a column, and groups chats under Today, Yesterday, Previous 7 days and Older.

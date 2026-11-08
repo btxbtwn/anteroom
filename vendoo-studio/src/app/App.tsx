@@ -10,7 +10,7 @@ import { SetupChecklist } from "../components/SetupChecklist";
 import { ListingSidebar } from "../components/ListingSidebar";
 import { AssistantThreadPanel } from "../components/sidebar/AssistantThreadPanel";
 import { SIDEBAR_FOOTER_WIDTH } from "../components/sidebar/SidebarFooter";
-import { ArrowLeftIcon, MessagesSquareIcon, PlusIcon, SearchIcon, SquarePenIcon } from "lucide-react";
+import { ArrowLeftIcon, HistoryIcon, PlusIcon, SearchIcon, SquarePenIcon } from "lucide-react";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTION_LABELS,
@@ -23,7 +23,7 @@ import { BulkUploadDialog } from "../components/BulkUploadDialog";
 import { useBulkRegenerate } from "../components/useBulkRegenerate";
 import { bulkRegenerateToast } from "../bulkRegenerate";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "../components/PanelResizeHandle";
-import { WorkspaceTopbar } from "../components/WorkspaceTopbar";
+import { WorkspaceTopbar, stopTitlebarDrag } from "../components/WorkspaceTopbar";
 import { workspaceCrumbs, type WorkspaceView } from "../components/workspaceCrumbs";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
@@ -127,7 +127,8 @@ export function App() {
   // On desktop the listing's chat is a column beside the form, or a pop-up over it when narrow; minimized, it is a pill.
   const [chatMinimized, setChatMinimized] = usePanelCollapsed("listing-chat");
   const setChatOpen = useCallback((open: boolean) => setChatMinimized(!open), [setChatMinimized]);
-  const [threadsCollapsed, setThreadsCollapsed] = usePanelCollapsed("threads");
+  // Chat history opens from the History button and starts closed, as a side sheet does.
+  const [threadsCollapsed, setThreadsCollapsed] = usePanelCollapsed("assistant-history", true);
   const panelWidthStyle = {
     // A width the seller dragged to wins, unless it would clip the footer buttons.
     "--sidebar-width": `${Math.max(sidebarWidth ?? 340, SIDEBAR_WIDTH.min)}px`,
@@ -287,7 +288,10 @@ export function App() {
   // The sidebar overlays the workspace on mobile and the editor is its own pane
   // there, so the desktop collapse states only apply to the desktop layout.
   const sidebarHidden = !isMobile && sidebarCollapsed;
-  const threadsHidden = !isMobile && threadsCollapsed;
+  // Nothing to show until the first chat: no button, no empty column.
+  const hasChats = Boolean(assistantThreads.data?.length);
+  const threadsHidden = !isMobile && (threadsCollapsed || !hasChats);
+  const showHistory = () => (isMobile ? setMobileThreadsOpen(true) : setThreadsCollapsed(false));
 
   const closeMobileSidebar = useCallback(() => setMobileSidebarOpen(false), []);
 
@@ -624,12 +628,27 @@ export function App() {
         sidebarOpen={!sidebarHidden}
         onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
         rightPanel={
-          activeView === "assistant"
+          activeView === "assistant" && hasChats
             ? {
                 open: !threadsHidden,
-                name: "chats",
+                name: "chat history",
                 controls: "assistant-threads",
                 onToggle: () => setThreadsCollapsed(!threadsCollapsed),
+                icon: <HistoryIcon className="size-4" />,
+                actions: (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="[-webkit-app-region:no-drag]"
+                    disabled={!assistantThreadId}
+                    onMouseDown={stopTitlebarDrag}
+                    onClick={() => setPickedThreadId(null)}
+                  >
+                    <SquarePenIcon />
+                    New chat
+                  </Button>
+                ),
               }
             : null
         }
@@ -692,17 +711,17 @@ export function App() {
               <MobileNavButton onClick={() => setMobileNavOpen(true)} />
             )}
             <div className="mobile-workspace-title" data-mobile-title>{workspaceTitle}</div>
-            {activeView === "assistant" ? (
+            {activeView === "assistant" && hasChats ? (
               <button
                 type="button"
                 className="sidebar-icon-btn mobile-workspace-settings"
-                title="Chats"
-                aria-label={mobileThreadsOpen ? "Hide chats" : "Show chats"}
+                title="Chat history"
+                aria-label={mobileThreadsOpen ? "Hide chat history" : "Show chat history"}
                 aria-expanded={mobileThreadsOpen}
                 aria-controls="assistant-threads"
                 onClick={() => setMobileThreadsOpen((open) => !open)}
               >
-                <MessagesSquareIcon className="size-4.5" />
+                <HistoryIcon className="size-4.5" />
               </button>
             ) : null}
             {activeView === "listings" && selectedConvId ? (
@@ -761,6 +780,7 @@ export function App() {
                       onOpenListing={openListing}
                       threadId={assistantThreadId}
                       onThreadReady={setPickedThreadId}
+                      onShowHistory={showHistory}
                     />
                   </Suspense>
                 ) : activeView === "sourcing" ? (

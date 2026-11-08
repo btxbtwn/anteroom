@@ -69,6 +69,22 @@ struct BusinessAssistantTests {
             "Good evening", "Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening",
         ])
         precondition(AssistantFormat.starters.count == 4)
+
+        // History groups by local day, newest first, and leaves empty groups out.
+        let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 8, hour: 15))!
+        let stamp = { (day: Int, hour: Int) in
+            String(ISO8601DateFormatter().string(from: calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour))!).dropLast())
+        }
+        precondition([8, 7, 6, 2, 1].map { AssistantFormat.chatGroup(stamp($0, 10), now: now, calendar: calendar) }
+                     == ["Today", "Yesterday", "Previous 7 days", "Previous 7 days", "Older"])
+        precondition(AssistantFormat.chatGroup(nil, now: now, calendar: calendar) == "Older")
+        precondition(AssistantFormat.chatTime(stamp(7, 10), now: now, calendar: calendar) == "Yesterday")
+        precondition(AssistantFormat.chatTime(nil, now: now, calendar: calendar) == "")
+        let chats = [("old", stamp(1, 10)), ("early", stamp(8, 8)), ("late", stamp(8, 14)), ("yesterday", stamp(7, 10))]
+            .map { AssistantThread(id: $0.0, title: $0.0, updatedAt: $0.1) }
+        let grouped = AssistantFormat.groupChats(chats, now: now, calendar: calendar)
+        precondition(grouped.map(\.group) == ["Today", "Yesterday", "Older"])
+        precondition(grouped[0].threads.map(\.id) == ["late", "early"])
         print("Business assistant tests passed")
     }
 

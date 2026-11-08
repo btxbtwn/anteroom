@@ -24,10 +24,29 @@ describe("AssistantPage", () => {
   it("opens with what it reads and questions to start from", () => {
     const html = render([]);
     expect(html).toContain(`>${greeting()}</h1>`);
-    expect(html).toContain("You review every change before it is saved");
+    // Just the greeting above the box; the change cards say what is reviewed.
+    expect(html).not.toContain("You review every change");
+    expect(html).not.toContain("Recent chats");
     for (const starter of ASSISTANT_STARTERS) expect(html).toContain(starter.text);
     // The business note and the memory list live in Settings → Assistant now.
     expect(html).not.toContain("About your business");
+  });
+
+  it("offers the latest chats to pick back up, and the full history when there are more", () => {
+    const threads = Array.from({ length: 4 }, (_, index) => ({
+      id: `t${index}`, title: `Chat ${index}`, created_at: null, updated_at: null,
+    }));
+    useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) => ({
+      data: queryKey[1] === "threads" ? threads : [], isLoading: false, isError: false, error: null,
+    }));
+    const html = renderToStaticMarkup(
+      <AssistantPage onOpenProviders={vi.fn()} onOpenListing={vi.fn()} onShowHistory={vi.fn()} />,
+    );
+    useQuery.mockReset();
+    expect(html).toContain('aria-label="Recent chats"');
+    for (const title of ["Chat 0", "Chat 1", "Chat 2"]) expect(html).toContain(title);
+    expect(html).not.toContain("Chat 3");
+    expect(html).toContain(">Show all</button>");
   });
 
   it("greets by the time of day", () => {

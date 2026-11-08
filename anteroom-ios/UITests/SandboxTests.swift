@@ -316,6 +316,7 @@ final class AssistantSandboxTests: XCTestCase {
         waitForExpectations(timeout: 60)
         keep(app, "Assistant answer")
 
+        XCTAssertTrue(app.buttons["Chats"].waitForExistence(timeout: 30), "History shows once there is a chat")
         app.buttons["Chats"].tap()
         // The starter with this same title remains in the background after a
         // relaunch. Only a row in the Chats list is a saved conversation.
@@ -326,6 +327,7 @@ final class AssistantSandboxTests: XCTestCase {
 
         app.terminate()
         launchSandbox(app, tab: "Assistant")
+        XCTAssertTrue(app.buttons["Chats"].waitForExistence(timeout: 30), "History shows once there is a chat")
         app.buttons["Chats"].tap()
         XCTAssertTrue(thread.waitForExistence(timeout: 60), "Chats finishes loading the saved conversation")
         thread.tap()

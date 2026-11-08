@@ -44,25 +44,26 @@ export function usePanelWidth(key: string): [number | null, (width: number | nul
 }
 
 /** Whether the seller has a panel collapsed, remembered across launches. */
-export function usePanelCollapsed(key: string): [boolean, (collapsed: boolean) => void] {
+export function usePanelCollapsed(key: string, collapsedByDefault = false): [boolean, (collapsed: boolean) => void] {
   const [collapsed, setCollapsedState] = useState(() => {
     try {
-      return localStorage.getItem(COLLAPSE_PREFIX + key) === "1";
+      const saved = localStorage.getItem(COLLAPSE_PREFIX + key);
+      return saved === null ? collapsedByDefault : saved === "1";
     } catch {
-      return false;
+      return collapsedByDefault;
     }
   });
   const setCollapsed = useCallback(
     (next: boolean) => {
       setCollapsedState(next);
       try {
-        if (next) localStorage.setItem(COLLAPSE_PREFIX + key, "1");
-        else localStorage.removeItem(COLLAPSE_PREFIX + key);
+        if (next === collapsedByDefault) localStorage.removeItem(COLLAPSE_PREFIX + key);
+        else localStorage.setItem(COLLAPSE_PREFIX + key, next ? "1" : "0");
       } catch {
         /* ignore quota / private-mode failures */
       }
     },
-    [key],
+    [key, collapsedByDefault],
   );
   return [collapsed, setCollapsed];
 }

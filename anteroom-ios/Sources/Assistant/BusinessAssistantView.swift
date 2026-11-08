@@ -30,8 +30,11 @@ struct BusinessAssistantView: View {
             .navigationTitle(model.threadTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Chats", systemImage: "list.bullet") { showingChats = true }
+                // History appears once there is a chat to go back to.
+                if !model.threads.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Chats", systemImage: "clock.arrow.circlepath") { showingChats = true }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("New chat", systemImage: "square.and.pencil") { Task { await model.open(nil) } }
@@ -66,11 +69,7 @@ struct BusinessAssistantView: View {
     private var starters: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(AssistantFormat.greeting()).font(.title3.weight(.semibold))
-                    Text("Ask about your shop. You review every change before it is saved, and nothing here publishes a listing.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
+                Text(AssistantFormat.greeting()).font(.title3.weight(.semibold))
                 // A plain list with dividers, as on the web (DESIGN.md).
                 VStack(spacing: 0) {
                     ForEach(Array(AssistantFormat.starters.enumerated()), id: \.offset) { index, starter in
@@ -91,10 +90,46 @@ struct BusinessAssistantView: View {
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Example questions")
+                recentChats
                 errorRow
             }
             .padding(16)
             .padding(.top, 24)
+        }
+    }
+
+    /// The latest chats to pick back up (Gemini's "Recent"); Show all opens Chats.
+    @ViewBuilder
+    private var recentChats: some View {
+        let recent = Array(model.threads.prefix(AssistantFormat.recentChats))
+        if !recent.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Recent chats").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    Spacer()
+                    if model.threads.count > recent.count {
+                        Button("Show all") { showingChats = true }.font(.caption)
+                    }
+                }
+                .padding(.bottom, 4)
+                ForEach(Array(recent.enumerated()), id: \.element.id) { index, thread in
+                    if index > 0 { Divider() }
+                    Button { Task { await model.open(thread.id) } } label: {
+                        HStack(spacing: 12) {
+                            Text(thread.title).lineLimit(1).foregroundStyle(.primary)
+                            Spacer(minLength: 8)
+                            Text(AssistantFormat.chatTime(thread.updatedAt)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 8)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Recent chats")
         }
     }
 
@@ -417,27 +452,35 @@ private struct AssistantChatsSheet: View {
                         Task { await model.open(nil) }
                         dismiss()
                     }
-                    Section {
-                        if !model.threadsLoaded {
-                            ProgressView()
-                        } else if shown.isEmpty {
+                    if !model.threadsLoaded {
+                        Section { ProgressView() }
+                    } else if shown.isEmpty {
+                        Section {
                             Text(model.threads.isEmpty ? "No chats yet" : "No matching chats").foregroundStyle(.secondary)
                         }
-                        ForEach(shown) { thread in
-                            Button {
-                                Task { await model.open(thread.id) }
-                                dismiss()
-                            } label: {
-                                HStack {
-                                    Text(thread.title).foregroundStyle(.primary).lineLimit(2)
-                                    Spacer()
-                                    if thread.id == model.threadID {
-                                        Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
+                    }
+                    // Grouped by day, newest first, as ChatGPT and Claude list their history.
+                    ForEach(AssistantFormat.groupChats(shown), id: \.group) { section in
+                        Section(section.group) {
+                            ForEach(section.threads) { thread in
+                                Button {
+                                    Task { await model.open(thread.id) }
+                                    dismiss()
+                                } label: {
+                                    HStack {
+                                        Text(thread.title).foregroundStyle(.primary).lineLimit(2)
+                                        Spacer()
+                                        if thread.id == model.threadID {
+                                            Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent)
+                                        } else {
+                                            Text(AssistantFormat.chatTime(thread.updatedAt))
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
-                            }
-                            .swipeActions {
-                                Button("Delete", role: .destructive) { deleting = thread }
+                                .swipeActions {
+                                    Button("Delete", role: .destructive) { deleting = thread }
+                                }
                             }
                         }
                     }
