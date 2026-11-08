@@ -18,7 +18,7 @@
       "key": "category_path",
       "label": "Category *",
       "required": true,
-      "help": "Choose the most specific category. Each marketplace form then picks its own matching category."
+      "help": "Pick the most specific one. Each marketplace maps from it."
     },
     {
       "key": "department",

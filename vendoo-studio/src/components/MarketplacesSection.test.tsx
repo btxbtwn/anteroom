@@ -212,7 +212,9 @@ describe("marketplaces section", () => {
 
   it("warns about Etsy eligibility without disabling List", () => {
     const html = render({}, {}, { etsyEligible: false, etsyReady: true, selected: "etsy" });
-    expect(row(html, "Etsy")).toContain("Review eligibility");
+    // Short enough for the rail; the full reason is the row's tooltip.
+    expect(row(html, "Etsy")).toContain(">May not qualify<");
+    expect(row(html, "Etsy")).toContain('title="May not qualify: Etsy generally requires vintage');
     expect(html).toContain("Etsy generally requires vintage (20+ years), handmade or craft supplies.");
     expect(enabledButton(html, "List…")).toBe(true);
     expect(html).not.toContain("Ask chat");

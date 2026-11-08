@@ -136,17 +136,17 @@ export function groupFieldsIntoSections<T extends SectionField>(fields: T[]): Fi
 }
 
 /**
- * The General tab's own order. It reads the way a seller describes an item:
- * what it is, how it is presented, its condition, then price, shipping and
- * stock. Category comes first because it is the one required field and it
- * decides the category each marketplace form uses. Rows sit in pairs only
- * when they belong together (price and cost, weight and dimensions).
+ * The General tab's own order: what buyers see first (title, description and
+ * price), then what the item is, its condition, and the logistics. The seller's
+ * measurements and private notes are placed around these by the editor.
+ * Rows sit in pairs only when they belong together (price and cost, weight and
+ * dimensions). Generation and readiness read fields by key, never by position.
  */
 const GENERAL_SECTIONS: { id: string; title: string; keys: string[] }[] = [
-  { id: "item", title: "Item", keys: ["category_path", "department", "brand"] },
   { id: "listing", title: "Listing", keys: ["title", "description"] },
-  { id: "details", title: "Condition & details", keys: ["condition", "size", "primaryColor", "secondaryColor"] },
   { id: "pricing", title: "Pricing", keys: ["price", "cost"] },
+  { id: "item", title: "Item", keys: ["category_path", "brand", "department"] },
+  { id: "details", title: "Condition & details", keys: ["condition", "size", "primaryColor", "secondaryColor"] },
   { id: "shipping", title: "Shipping", keys: ["weight_oz", "package_dimensions_in", "zipCode"] },
   { id: "inventory", title: "Inventory", keys: ["quantity", "sku"] },
 ];

@@ -122,7 +122,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   // eBay keeps a saved draft as an unpublished offer, which has no page to open.
   if (draft?.state === "draft" && marketplace === "ebay") return { tone: "neutral", label: "Saved on eBay",
     detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to eBay." : "Not listed. Buyers cannot see it until you List." };
-  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Review eligibility", detail: ETSY_NOT_ELIGIBLE };
+  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "May not qualify", detail: ETSY_NOT_ELIGIBLE };
   return { tone: "idle", label: "Not listed" };
 }
 
@@ -661,11 +661,12 @@ export function MarketplacesLayout({
     const missing = check?.missing.length ?? 0;
     const line = <>
       {status && !quiet && (
-        <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground",
+        // A narrow rail wraps a status instead of cutting it off; the row's tooltip carries the reason.
+        <span role="status" className={cn("flex items-start gap-1 text-xs text-muted-foreground",
           status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
           status.tone === "sold" && "text-info-foreground")}>
           {TONE_ICON[status.tone]}
-          <span className="truncate">{status.label}</span>
+          <span className="min-w-0 text-pretty">{status.label}</span>
         </span>
       )}
       {status && quiet && !check && <span className="sr-only">{status.label}</span>}
@@ -820,7 +821,7 @@ export function MarketplacesLayout({
             const { status, check, line } = formState(id);
             return (
               <li key={id} aria-label={name} className="group relative flex items-start">
-                <button type="button" aria-current={current ? "true" : undefined} title={check ? missingDetail(check.missing) : status?.label} onClick={() => onSelect(id)}
+                <button type="button" aria-current={current ? "true" : undefined} title={check ? missingDetail(check.missing) : status && (status.detail ? `${status.label}: ${status.detail}` : status.label)} onClick={() => onSelect(id)}
                   onPointerEnter={() => onPrepare?.(id)} onFocus={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
                   className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent",
                     current && "bg-accent text-foreground")}>

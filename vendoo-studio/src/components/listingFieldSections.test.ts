@@ -61,15 +61,15 @@ describe("groupFieldsIntoSections", () => {
 });
 
 describe("generalFormSections", () => {
-  it("leads with the category and follows the seller's order", () => {
+  it("leads with what buyers see first: title, description and price", () => {
     const keys = ["title", "description", "price", "cost", "quantity", "brand", "condition", "primaryColor",
       "secondaryColor", "size", "sku", "zipCode", "category_path", "department", "weight_oz", "package_dimensions_in"];
     const sections = generalFormSections(keys.map((key) => ({ key, label: key })));
     expect(sections.map((s) => [s.title, s.fields.map((f) => f.key)])).toEqual([
-      ["Item", ["category_path", "department", "brand"]],
       ["Listing", ["title", "description"]],
-      ["Condition & details", ["condition", "size", "primaryColor", "secondaryColor"]],
       ["Pricing", ["price", "cost"]],
+      ["Item", ["category_path", "brand", "department"]],
+      ["Condition & details", ["condition", "size", "primaryColor", "secondaryColor"]],
       ["Shipping", ["weight_oz", "package_dimensions_in", "zipCode"]],
       ["Inventory", ["quantity", "sku"]],
     ]);
