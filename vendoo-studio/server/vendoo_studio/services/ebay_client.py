@@ -67,6 +67,10 @@ def ebay_message(response) -> str | None:
     return scrub(" | ".join(parts))
 
 
+# What an eBay outage says, so a caller can tell it from a failure raised by hand.
+EBAY_DOWN = "eBay is having trouble right now. Try again in a few minutes."
+
+
 def _failure_for(response) -> EbayFailure:
     from vendoo_studio.services.listing_result import retry_after_seconds
 
@@ -81,14 +85,12 @@ def _failure_for(response) -> EbayFailure:
     if status == 429:
         return EbayFailure("eBay is limiting requests right now. Try again in a little while.", 429, code="rate_limited",
                            marketplace_message=message, retry_after_s=retry_after_seconds(response.headers.get("retry-after")))
-    codes = []
-    try:
-        codes = [str(e["errorId"]) for e in response.json().get("errors", []) if isinstance(e.get("errorId"), int)]
-    except (ValueError, TypeError, KeyError, AttributeError):
-        pass
-    suffix = f" Error code: {', '.join(codes)}." if codes else ""
-    return EbayFailure(f"eBay returned HTTP {status}.{suffix}", status,
-                       code="rejected" if 400 <= status < 500 else None, marketplace_message=message)
+    # Plain words for the seller; eBay's own reason, codes included, goes beside them.
+    if status >= 500:
+        return EbayFailure(EBAY_DOWN, status, marketplace_message=message)
+    text = "eBay could not find this listing. It may have ended or been removed in eBay." if status == 404 \
+        else "eBay did not accept some of this listing's details."
+    return EbayFailure(text, status, code="rejected" if 400 <= status < 500 else None, marketplace_message=message)
 
 
 def segment(value: str) -> str:

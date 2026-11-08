@@ -14,7 +14,7 @@ describe("shared desktop and cloud API transport", () => {
   it("gets a current token for each call and preserves multipart/binary/SSE request options", async () => {
     const request = vi.fn(async (_input: string, _options?: RequestInit) => new Response("{}")); vi.stubGlobal("fetch", request);
     const accessToken = vi.fn().mockResolvedValueOnce("first").mockResolvedValueOnce("refreshed");
-    dispose = installHostedApiSession({ origin: ORIGIN, accessToken, unauthorized: vi.fn() });
+    dispose = installHostedApiSession({ seller: "seller", origin: ORIGIN, accessToken, unauthorized: vi.fn() });
     const form = new FormData(); form.append("files", new Blob(["image"]), "coat.jpg");
     await studioFetch("/api/conversations/draft/photos", { method: "POST", body: form });
     await studioFetch("/api/conversations/draft/chat", { method: "POST", headers: { Accept: "text/event-stream" } });
@@ -29,18 +29,18 @@ describe("shared desktop and cloud API transport", () => {
   it("refuses foreign URLs, missing identity and requests whose account changed during token retrieval", async () => {
     const request = vi.fn(); vi.stubGlobal("fetch", request);
     let resolve!: (value: string | null) => void;
-    dispose = installHostedApiSession({ origin: ORIGIN, accessToken: () => new Promise(done => { resolve = done; }), unauthorized: vi.fn() });
+    dispose = installHostedApiSession({ seller: "seller", origin: ORIGIN, accessToken: () => new Promise(done => { resolve = done; }), unauthorized: vi.fn() });
     await expect(studioFetch("https://elsewhere.example/api/secret")).rejects.toThrow("origin");
     const pending = studioFetch("/api/conversations");
     dispose(); resolve("old-account");
     await expect(pending).rejects.toThrow("Sign in");
-    dispose = installHostedApiSession({ origin: ORIGIN, accessToken: async () => null, unauthorized: vi.fn() });
+    dispose = installHostedApiSession({ seller: "seller", origin: ORIGIN, accessToken: async () => null, unauthorized: vi.fn() });
     await expect(studioFetch("/api/conversations")).rejects.toThrow("Sign in");
     expect(request).not.toHaveBeenCalled();
   });
   it("reports expired sessions without retrying a mutation", async () => {
     const unauthorized = vi.fn(); const request = vi.fn(async () => new Response("{}", { status: 401 })); vi.stubGlobal("fetch", request);
-    dispose = installHostedApiSession({ origin: ORIGIN, accessToken: async () => "expired", unauthorized });
+    dispose = installHostedApiSession({ seller: "seller", origin: ORIGIN, accessToken: async () => "expired", unauthorized });
     await studioFetch("/api/conversations", { method: "POST" });
     expect(request).toHaveBeenCalledTimes(1); expect(unauthorized).toHaveBeenCalledOnce();
   });
@@ -50,7 +50,7 @@ describe("shared desktop and cloud API transport", () => {
     const reading = vi.fn(() => blob);
     const request = vi.fn(async () => ({ ok: true, status: 200, blob: reading }));
     vi.stubGlobal("fetch", request);
-    dispose = installHostedApiSession({ origin: ORIGIN, accessToken: async () => "alice", unauthorized: vi.fn() });
+    dispose = installHostedApiSession({ seller: "seller", origin: ORIGIN, accessToken: async () => "alice", unauthorized: vi.fn() });
     const pending = studioBlob("/api/sales-ledger/export/inventory.csv");
     await vi.waitFor(() => expect(reading).toHaveBeenCalledOnce());
     const [url, options] = request.mock.calls[0] as unknown as [string, RequestInit];

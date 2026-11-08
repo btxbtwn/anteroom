@@ -6,6 +6,21 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.807 — 2026-11-08
+
+- On the web, listing photos you've already seen appear right away when you scroll your inventory, even after reloading the page or after an Anteroom update.
+
+## 0.1.806 — 2026-11-08
+
+- Anteroom now shows a Beta tag next to its name.
+
+## 0.1.805 — 2026-11-08
+
+- Marketplace refusals now explain the problem in plain words, like "Etsy needs to know who made this item", with the marketplace's own reply tucked under Details.
+- Ask chat appears on a refusal only when chat can fix it by changing the listing, and it now works while chat is busy by joining the queue. It is on iPhone too.
+- Anteroom now warns before you list on Etsy when Who made it? or When was it made? is empty, and reads every way those answers are saved.
+- Chat names fields the way the form labels them and no longer answers in codes or field keys.
+
 ## 0.1.804 — 2026-11-08
 
 - The Anteroom logo has new sunset colors, from violet to amber, on the sidebar, browser tab, Mac app, iPhone app and Chrome extension.

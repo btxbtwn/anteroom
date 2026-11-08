@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.services import ebay_listings
-from vendoo_studio.services.ebay_client import EbayFailure, NS
+from vendoo_studio.services.ebay_client import EBAY_DOWN, EbayFailure, NS
 
 LISTING = {
     "title": "Abercrombie tee",
@@ -79,7 +79,7 @@ class Client:
                 if self.location_fault == "saved":
                     self.locations = [{"merchantLocationKey": key, "name": key, "merchantLocationStatus": "ENABLED"}]
                     self.location_fault = None
-                raise EbayFailure("eBay returned HTTP 503.", 503, marketplace_message="HTTP 503 Service Unavailable")
+                raise EbayFailure(EBAY_DOWN, 503, marketplace_message="HTTP 503 Service Unavailable")
             self.locations = [{"merchantLocationKey": key, "name": key, "merchantLocationStatus": "ENABLED"}]
             return {}
         if path.endswith("create_image_from_file"):
@@ -665,7 +665,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
             async def request(self, method, path, **kwargs):
                 if path.startswith("/sell/inventory/v1/inventory_item/") and method == "PUT":
                     self.calls.append((method, path, kwargs))
-                    raise EbayFailure("eBay returned HTTP 500.", 500)
+                    raise EbayFailure(EBAY_DOWN, 500)
                 return await super().request(method, path, **kwargs)
 
         client = Failing()

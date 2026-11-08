@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cachedPrivateImage, loadPrivateImage } from "./privateImages";
+import { cachedPrivateImage, forgetDeviceImages, loadPrivateImage } from "./privateImages";
 import { installHostedApiSession } from "./transport";
 
 let uninstall: () => void = () => {};
 let created = 0;
 const fetchMock = vi.fn(async () => new Response(new Blob(["jpeg"]), { status: 200 }));
 
-function signIn() {
+function signIn(seller = "alice") {
   uninstall();
   uninstall = installHostedApiSession({
-    origin: "https://anteroom.test", accessToken: async () => "token", unauthorized: () => {},
+    seller, origin: "https://anteroom.test", accessToken: async () => "token", unauthorized: () => {},
   });
 }
 
@@ -24,6 +24,57 @@ beforeEach(() => {
 });
 
 afterEach(() => { uninstall(); vi.unstubAllGlobals(); });
+
+/** Cache Storage as the browser has it: named caches of request URL to response. */
+function deviceCaches() {
+  const stores = new Map<string, Map<string, Response>>();
+  const open = async (name: string) => {
+    if (!stores.has(name)) stores.set(name, new Map());
+    const store = stores.get(name)!;
+    return {
+      match: async (url: string) => store.get(url)?.clone(),
+      put: async (url: string, response: Response) => { store.set(url, response); },
+      keys: async () => [...store.keys()].map(url => new Request(new URL(url, "https://anteroom.test"))),
+      delete: async (url: string) => store.delete(url),
+    };
+  };
+  return { stores, api: { open, keys: async () => [...stores.keys()], delete: async (name: string) => stores.delete(name) } };
+}
+
+it("shows a thumbnail seen before without downloading it after a reload", async () => {
+  const device = deviceCaches();
+  vi.stubGlobal("caches", device.api);
+  const src = "/api/photos/kept/thumb?size=96&v=abc";
+  await loadPrivateImage(src);
+  await vi.waitFor(() => expect(device.stores.get("anteroom-thumbnails:alice")?.has(src)).toBe(true));
+  // A reload starts with an empty page cache and a new sign-in token.
+  signIn("bob");
+  signIn("alice");
+  expect(cachedPrivateImage(src)).toBeUndefined();
+  expect(await loadPrivateImage(src)).toMatch(/^blob:/);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("keeps each seller's thumbnails apart and forgets them on sign-out", async () => {
+  const device = deviceCaches();
+  vi.stubGlobal("caches", device.api);
+  const src = "/api/photos/private/thumb?size=96&v=abc";
+  await loadPrivateImage(src);
+  await vi.waitFor(() => expect(device.stores.get("anteroom-thumbnails:alice")?.has(src)).toBe(true));
+  signIn("bob");
+  await loadPrivateImage(src);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await forgetDeviceImages();
+  expect([...device.stores.keys()]).toEqual([]);
+});
+
+it("does not keep full-size photos on the device", async () => {
+  const device = deviceCaches();
+  vi.stubGlobal("caches", device.api);
+  await loadPrivateImage("/api/photos/full?v=abc");
+  await Promise.resolve();
+  expect(device.stores.size).toBe(0);
+});
 
 it("loads a cover once and shows it again without downloading it", async () => {
   const src = "/api/photos/p1/thumb?size=96&v=abc";
@@ -70,7 +121,7 @@ it("stops a download once its only viewer scrolls away", async () => {
   })) as never);
   const viewer = new AbortController();
   const shown = loadPrivateImage(src, viewer.signal);
-  await Promise.resolve();
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
   viewer.abort();
   await expect(shown).rejects.toThrow();
   await vi.waitFor(() => expect(aborted).toBe(true));
