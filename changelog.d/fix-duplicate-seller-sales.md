@@ -1,2 +1,0 @@
-- Recording a sale on an item that has already sold is refused, so the same sale can no longer be saved twice.
-- Sales you recorded yourself can now be deleted from Sales records.
