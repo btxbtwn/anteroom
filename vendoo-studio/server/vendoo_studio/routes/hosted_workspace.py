@@ -276,9 +276,12 @@ def save_listing(identity: str, body: ListingInput, db=Depends(get_seller_db, sc
         raise HTTPException(409, 'This listing changed on another device. Reload before saving again.')
     if current and expected and before is None:
         raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
+    from vendoo_studio.services.agent_categories import match_general_category
     from vendoo_studio.services.seller_overrides import prepare_user_listing
 
-    prepare_user_listing(before.listing_json if before else {}, payload)
+    previous = before.listing_json if before else {}
+    prepare_user_listing(previous, payload)
+    match_general_category(db, previous, payload)
     revision = ListingRevision(conversation_id=identity, listing_json=payload, source='user_form',
                                parent_revision_id=before.id if before else None)
     db.add(revision)
@@ -578,7 +581,7 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
-def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay'],
+def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
                         revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.choice_lists import share
     from vendoo_studio.services.native_editor import editor_form

@@ -6,6 +6,35 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.841 — 2026-11-08
+
+- The Etsy tab now follows Etsy's own listing form: Photo & video, Category, Item details, Item options, Pricing & shipping, How it's made and Settings, with your category's Etsy attributes.
+- Pick the Etsy category on the Etsy tab. Your pick stays put when the listing is generated again.
+- A price or tags you change on the Etsy tab are now what Etsy gets, without changing General.
+
+## 0.1.840 — 2026-11-08
+
+- A category set on General now fills the closest Poshmark, Mercari and Depop category when no exact match exists, instead of leaving it blank. That marketplace tab shows "Suggested: check it" until you pick a category or press Looks right.
+- Kids' sets and gloves no longer land in Mercari's Fragrance or Cleaning categories, and Etsy no longer picks Pet Supplies for women's tops, dresses or men's hats.
+
+## 0.1.839 — 2026-11-08
+
+- The General form now follows the order you fill it in: category, then title, condition, size and brand, then price, description, colors and department, and shipping.
+- Cost, SKU and quantity sit under More details at the bottom, folded until you open it. Its heading still shows how many are filled.
+- The iPhone app's General form uses the same order.
+
+## 0.1.838 — 2026-11-08
+
+- Choosing a category on the General form on iPhone or the web app now fills the matching category on eBay, Poshmark, Mercari, Depop and Etsy, as it already did on the Mac.
+
+## 0.1.837 — 2026-11-08
+
+- See which marketplaces need the Chrome extension during setup and beside marketplace actions. Create and generate drafts without connecting Chrome.
+
+## 0.1.836 — 2026-11-08
+
+- Fixed Scout an item showing “Not Found” on the web.
+
 ## 0.1.835 — 2026-11-08
 
 - Sourcing retries brief supplier rate limits and avoids unnecessary catalog requests.

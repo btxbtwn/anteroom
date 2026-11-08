@@ -102,13 +102,20 @@ def _remote_price(remote: dict) -> Decimal:
     return Decimal(str(money["amount"])) / Decimal(str(money["divisor"]))
 
 
+def etsy_price(snapshot: dict):
+    """The price Etsy is sent: the Etsy tab's own price, else the item price."""
+    from vendoo_studio.services.seller_overrides import price_for
+
+    return price_for(snapshot, "etsy")
+
+
 def _matches(remote: dict, snapshot: dict) -> bool:
     try:
         from vendoo_studio.services.seller_overrides import marketplace_text
 
         return (html.unescape(str(remote.get("title") or "")) == etsy_title(snapshot)
                 and html.unescape(str(remote.get("description") or "")) == marketplace_text(snapshot, "etsy", "description")
-                and _remote_price(remote) == _price(snapshot.get("price")))
+                and _remote_price(remote) == _price(etsy_price(snapshot)))
     except (KeyError, InvalidOperation, ValueError, ZeroDivisionError):
         return False
 
@@ -172,7 +179,11 @@ def list_fields(snapshot: dict) -> dict[str, list[str]]:
     if not isinstance(details, dict):
         details = {}
     specifics = _form(snapshot).get("specifics") or {}
-    tags = sanitize_etsy_tags(specifics.get("tags") or details.get("tags") or snapshot.get("tags"))
+    from vendoo_studio.services.seller_overrides import is_locked
+
+    # Tags the seller set on the Etsy tab are Etsy's; otherwise the Vendoo path's tags.
+    own = details.get("tags") if is_locked(snapshot, "etsy_specifics.tags") else None
+    tags = sanitize_etsy_tags(own if own is not None else (specifics.get("tags") or details.get("tags") or snapshot.get("tags")))
     materials = _words(details.get("materials") or snapshot.get("material"), *_ETSY_LIST_LIMITS["materials"])
     styles = _words(details.get("styles") or details.get("style") or snapshot.get("style"), *_ETSY_LIST_LIMITS["styles"])
     return {key: value for key, value in (("tags", tags), ("materials", materials), ("styles", styles)) if value}
@@ -207,7 +218,7 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     from vendoo_studio.services.seller_overrides import marketplace_text
 
     title, description = etsy_title(snapshot), marketplace_text(snapshot, "etsy", "description")
-    raw_price = snapshot.get("price")
+    raw_price = etsy_price(snapshot)
     try:
         price = str(_price(raw_price))
     except (ValueError, InvalidOperation):
@@ -747,8 +758,8 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                 raise ValueError("This Etsy listing is not live. Check it in Etsy before updating it.")
             fields = draft_fields(snapshot, creating=False)
             inventory = remote.get("_inventory") or {}
-            if _remote_price(remote) != _price(snapshot["price"]):
-                await write("PUT", f"listings/{item_id}/inventory", "price", json_body=_inventory_price(inventory, _price(snapshot["price"])))
+            if _remote_price(remote) != _price(etsy_price(snapshot)):
+                await write("PUT", f"listings/{item_id}/inventory", "price", json_body=_inventory_price(inventory, _price(etsy_price(snapshot))))
                 record({"etsy_pending_write": None})
             await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "update", data={key: value for key, value in fields.items() if key != "price"})
             record({"etsy_pending_write": None})
@@ -817,9 +828,9 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             # updateListing has no price parameter. Price is an inventory write;
             # preserve quantity, SKU, properties and processing for this product.
             inventory = remote.get("_inventory") or {}
-            price_changed = _remote_price(remote) != _price(snapshot["price"])
+            price_changed = _remote_price(remote) != _price(etsy_price(snapshot))
             if price_changed:
-                inventory_body = _inventory_price(inventory, _price(snapshot["price"]))
+                inventory_body = _inventory_price(inventory, _price(etsy_price(snapshot)))
                 await write("PUT", f"listings/{item_id}/inventory", "price", json_body=inventory_body)
                 record({"etsy_pending_write": None})
             await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "update", data={key: value for key, value in fields.items() if key != "price"})
