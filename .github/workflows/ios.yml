@@ -196,16 +196,18 @@ jobs:
         run: |
           set -euxo pipefail
           xcrun simctl shutdown "$SIMULATOR_ID" || true
-          # Device type names change between Xcode releases, and old iPads lack
-          # the installed runtime: take an iPad Air the newest iOS runtime supports.
-          read -r IPAD_TYPE IPAD_RUNTIME < <(xcrun simctl list runtimes -j | python3 -c '
-          import json, sys
-          runtimes = [r for r in json.load(sys.stdin)["runtimes"] if r["platform"] == "iOS" and r["isAvailable"]]
-          runtime = max(runtimes, key=lambda r: [int(n) for n in r["version"].split(".")])
-          ipads = [d["identifier"] for d in runtime["supportedDeviceTypes"] if d["productFamily"] == "iPad"]
-          print(([i for i in ipads if "iPad-Air" in i] or ipads)[-1], runtime["identifier"])
-          ')
-          IPAD_ID="$(xcrun simctl create 'Anteroom iPad sandbox tests' "$IPAD_TYPE" "$IPAD_RUNTIME")"
+          # Device type names change between Xcode releases, and xcodebuild
+          # does not offer older iPads as test destinations: take the newest
+          # M-chip iPad Air (or iPad Pro), created like the iPhone above.
+          IPAD_TYPE="$(xcrun simctl list devicetypes -j | python3 -c '
+          import json, re, sys
+          ids = [d["identifier"] for d in json.load(sys.stdin)["devicetypes"]]
+          def newest(kind):
+              found = [(int(m.group(1)), i) for i in ids if (m := re.search(kind + r".*-M(\d+)", i))]
+              return max(found)[1] if found else None
+          print(newest("iPad-Air") or newest("iPad-Pro"))
+          ')"
+          IPAD_ID="$(xcrun simctl create 'Anteroom iPad sandbox tests' "$IPAD_TYPE")"
           xcrun simctl bootstatus "$IPAD_ID" -b
           xcrun simctl spawn "$IPAD_ID" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true
           echo "IPAD_ID=$IPAD_ID" >> "$GITHUB_ENV"
@@ -214,7 +216,10 @@ jobs:
           set -euxo pipefail
           ANTEROOM_TEST_DESTINATION="platform=iOS Simulator,id=$IPAD_ID" \
             ANTEROOM_TEST_ONLY=AnteroomUITests/IPadSandboxTests \
-            ANTEROOM_TEST_RESULTS="$RUNNER_TEMP/sandbox-ipad.xcresult" ./anteroom-ios/test-sandbox.sh
+            ANTEROOM_TEST_RESULTS="$RUNNER_TEMP/sandbox-ipad.xcresult" ./anteroom-ios/test-sandbox.sh || {
+              xcrun simctl list devices available
+              exit 1
+            }
       - name: Export simulator screenshots
         if: always()
         run: |
