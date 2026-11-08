@@ -18,7 +18,7 @@ import re
 from typing import Any
 
 from vendoo_studio.services.direct_categories import direct_category_id
-from vendoo_studio.services.native_category_match import evidence, match_row, native_rows
+from vendoo_studio.services.native_category_match import closest_row, evidence, match_row, native_rows
 from vendoo_studio.services.seller_overrides import is_locked
 
 log = logging.getLogger("vendoo_studio.agent_categories")
@@ -88,7 +88,7 @@ def _direct(listing: dict) -> dict:
     return _mapping(listing.get("direct_category_ids"))
 
 
-def _set_direct(listing: dict, key: str, value: str) -> None:
+def _set_direct(listing: dict, key: str, value: Any) -> None:
     raw = listing.get("direct_category_ids")
     if not isinstance(raw, dict):
         raw = {}
@@ -147,7 +147,11 @@ def _rows(rows: Any) -> list[dict]:
 
 
 def _choose(rows: list[dict], listing: dict, requested: dict, market: str, *, explicit: str) -> dict | None:
-    """The form's own option for this market: a named id or path when the form lists it, else the best match."""
+    """The form's own option for this market: a named id or path when the form lists it, else the best match.
+
+    Poshmark, Mercari and Depop take the closest option when none matches
+    exactly; that choice carries "suggested" so the seller checks it.
+    """
     if explicit:
         by_id = next((row for row in rows if _text(row.get("id")) == explicit), None)
         by_path = next((row for row in rows if _path_key(row.get("path")) == _path_key(explicit)), None)
@@ -158,12 +162,17 @@ def _choose(rows: list[dict], listing: dict, requested: dict, market: str, *, ex
             return {"id": explicit, "path": _text(_mapping(requested.get("paths")).get("ebay"))}
         return None
     hint = evidence(listing)
-    for path in _search_paths(listing, requested, market):
-        if _NUMERIC.fullmatch(path):
-            continue
+    paths = [path for path in _search_paths(listing, requested, market) if not _NUMERIC.fullmatch(path)]
+    for path in paths:
         hit = match_row(rows, path, hint)
         if hit:
             return hit
+    if market == "ebay":
+        return None
+    for path in paths:
+        found = closest_row(rows, path, hint)
+        if found:
+            return {**found[0], "suggested": True}
     return None
 
 
@@ -183,6 +192,10 @@ def _store(listing: dict, market: str, choice: dict | None) -> bool:
         if path or not value:
             _set_direct(listing, "ebay_path", path)
         changed = changed or _text(_direct(listing).get("ebay_path")) != before_path
+    suggested = bool(value) and bool((choice or {}).get("suggested"))
+    if suggested != bool(_direct(listing).get(f"{market}_suggested")):
+        changed = True
+    _set_direct(listing, f"{market}_suggested", True if suggested else "")
     if value != before:
         _clear_dependents(listing, market)
     return changed

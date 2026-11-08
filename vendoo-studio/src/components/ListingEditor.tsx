@@ -1016,6 +1016,14 @@ export function StructuredEditor({
                     </div>
                   ))}
                   <div className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f)}</div>
+                  {suggestedCategory(listing, tab, f.key) && <p role="status" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-warning-foreground">
+                    <span>Suggested: check it. No exact {marketplaceName(tab)} match.</span>
+                    {!disabled && !f.locked && <InlineButton type="button" className="text-xs" onClick={() => {
+                      const updated = cloneListing(listing);
+                      setListingEditorValue(updated, `direct_category_ids.${tab}_suggested`, undefined);
+                      emitChange(updated);
+                    }}>Looks right</InlineButton>}
+                  </p>}
                   {onAskChat && !f.locked && <InlineButton type="button" className="mt-1 text-xs" onClick={() => onAskChat(
                     `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
                   )}>Ask chat</InlineButton>}
@@ -1460,6 +1468,15 @@ export function nativeEditorDependencies(fields: EditorField[], listing: Listing
       });
     }),
   });
+}
+
+/** Anteroom filled this tab's category with the closest option, not an exact match, and the seller has not checked it. */
+export function suggestedCategory(listing: ListingData | undefined, tab: string, key: string): boolean {
+  if (key !== `direct_category_ids.${tab}`) return false;
+  const ids = listing?.direct_category_ids;
+  if (!ids || typeof ids !== "object" || Array.isArray(ids)) return false;
+  const direct = ids as Record<string, unknown>;
+  return direct[`${tab}_suggested`] === true && Boolean(direct[tab]);
 }
 
 function liveCategoryFields(listing: ListingData | undefined, marketplace: "ebay" | "etsy"): EditorField[] {

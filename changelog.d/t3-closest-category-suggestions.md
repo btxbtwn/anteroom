@@ -1,0 +1,2 @@
+- A category set on General now fills the closest Poshmark, Mercari and Depop category when no exact match exists, instead of leaving it blank. That marketplace tab shows "Suggested: check it" until you pick a category or press Looks right.
+- Kids' sets and gloves no longer land in Mercari's Fragrance or Cleaning categories, and Etsy no longer picks Pet Supplies for women's tops, dresses or men's hats.
