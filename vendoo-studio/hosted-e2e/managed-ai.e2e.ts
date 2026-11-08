@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 
+test.setTimeout(90_000);
+
 test("included AI needs no personal key and disables personal billing fallback", async ({ page }, info) => {
-  test.setTimeout(90_000);
   // The real hosted sandbox handles sessions; managed readiness is simulated
   // because it intentionally cannot hold or use a company API credential.
   await page.route("**/api/settings/provider", async route => {
