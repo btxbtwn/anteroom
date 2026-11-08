@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.811 — 2026-11-08
+
+- Listing rows in the sidebar show the asking price and how many units are on hand.
+- eBay, Etsy and Depop logos in listing rows are now large enough to read.
+
 ## 0.1.810 — 2026-11-08
 
 - Let iPads and other touch screens delete, rename and copy a listing from the sidebar with the ⋯ button.
