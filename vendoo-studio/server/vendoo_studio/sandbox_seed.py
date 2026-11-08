@@ -163,12 +163,15 @@ def _seed_offer_activity(automation_id: str) -> None:
     from sqlalchemy.orm import Session
 
     from vendoo_studio import sandbox
-    from vendoo_studio.database import engine
+    from vendoo_studio.database import engine, load_models
     from vendoo_studio.models.listing_promotion import ListingPromotion
     from vendoo_studio.models.promotion_automation import PromotionAutomation, PromotionRun
 
     if not sandbox.enabled():
         raise RuntimeError("Offer activity fixtures require sandbox mode")
+    # The CLI seed runs separately from the API, which normally registers the
+    # complete mapper graph. Register it here without migrating or starting it.
+    load_models()
     with Session(engine) as db:
         rule = db.get(PromotionAutomation, automation_id)
         if rule is None or rule.enabled or rule.marketplace != "poshmark" or rule.action != "offer":
