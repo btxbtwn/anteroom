@@ -123,7 +123,9 @@ struct InventoryView: View {
         let rows = model.rows(search: search)
         let hints = Suggestion.hints(model.suggestions)
         let stale = model.staleListingIDs
-        return List(selection: $selected) {
+        return VStack(spacing: 0) {
+            StatusTabs(tabs: model.tabs(counts: counts), counts: counts, selection: $model.filters.status)
+            List(selection: $selected) {
             // Suggestions show on each listing's own row; only the batch markdown needs a place of its own.
             if !selecting && !stale.isEmpty {
                 Button(stale.count == 1 ? "Mark down 1 stale listing" : "Mark down \(stale.count) stale listings",
@@ -151,9 +153,7 @@ struct InventoryView: View {
         }
         .listStyle(.plain)
         .environment(\.editMode, .constant(selecting ? .active : .inactive))
-        .safeAreaInset(edge: .top, spacing: 0) {
-            StatusTabs(tabs: model.tabs(counts: counts), counts: counts, selection: $model.filters.status)
-        }
+
         .overlay { emptyState(rows: rows) }
         .navigationTitle("Inventory")
         .navigationBarTitleDisplayMode(.inline)
@@ -163,6 +163,7 @@ struct InventoryView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .searchable(text: $search, prompt: "Search title or SKU")
         .refreshable { await model.reload() }
+        }
         .task { if !model.hasLoaded { await model.reload() } }
         .reloadingOnReturn(when: !model.hasLoaded && model.error != nil) { await model.reload() }
         // Listings change on other devices; catch up when the app comes back
@@ -444,11 +445,13 @@ private struct StatusTabs: View {
                         Text(InventoryQuery.compactCount(count)).opacity(0.7).monospacedDigit()
                     }
                     .font(.subheadline.weight(.medium))
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 44)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 32)
                     .fixedSize(horizontal: true, vertical: false)
                 }
                 .modifier(StatusPillStyle(selected: isSelected))
+                .controlSize(.small)
+                .frame(minHeight: 44)
                 .accessibilityLabel("\(tab.label), \(count) listings")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
