@@ -164,7 +164,7 @@ struct InventoryView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {
-                filterMenu
+                InventoryFilterMenu(model: model, search: search)
                 sortMenu
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -246,43 +246,6 @@ struct InventoryView: View {
                 BulkRegenerateView(api: model.api, listings: ids.compactMap { id in model.listings.first { $0.id == id } }) { finishBulk() }
             }
         }
-    }
-
-    private var filterMenu: some View {
-        let source = model.facetSource(search: search)
-        let options = model.marketplaceOptions()
-        let counts = InventoryQuery.marketplaceCounts(source, options: options, notListed: model.filters.notListed)
-        return Menu {
-            Section(model.filters.notListed ? "Not listed on" : "Marketplaces") {
-                ForEach(options, id: \.self) { id in
-                    Toggle(isOn: Binding(get: { model.filters.marketplaces.contains(id) },
-                                         set: { _ in model.toggleMarketplace(id) })) {
-                        Text("\(Marketplaces.name(id))  \(counts[id] ?? 0)")
-                    }
-                }
-                if options.isEmpty {
-                    Text("No listing is live on a marketplace yet")
-                }
-            }
-            Section {
-                Toggle(isOn: Binding(get: { model.filters.notListed }, set: { model.filters.notListed = $0 })) {
-                    Text("Not listed  \(InventoryQuery.notListedCount(source))")
-                }
-            }
-            if model.filters.activeCount > 0 {
-                Button("Clear filters", role: .destructive) {
-                    model.filters.marketplaces = []
-                    model.filters.notListed = false
-                }
-            }
-        } label: {
-            Label(model.filters.activeCount > 0 ? "Filters (\(model.filters.activeCount))" : "Filters",
-                  systemImage: model.filters.activeCount > 0
-                      ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-        }
-        .menuActionDismissBehavior(.disabled)
-        .frame(minWidth: 44, minHeight: 44)
-        .accessibilityLabel(model.filters.activeCount > 0 ? "Filters, \(model.filters.activeCount) on" : "Filters")
     }
 
     private var sortMenu: some View {
@@ -377,6 +340,50 @@ struct InventoryView: View {
             defer { creatingListing = false }
             if let listing = await model.createListing() { show(listing) }
         }
+    }
+}
+
+/// Its own view so a redraw of the list (a selection tap) does not recount
+/// the marketplace facets over the whole inventory.
+private struct InventoryFilterMenu: View {
+    let model: InventoryModel
+    let search: String
+
+    var body: some View {
+        let source = model.facetSource(search: search)
+        let options = model.marketplaceOptions()
+        let counts = InventoryQuery.marketplaceCounts(source, options: options, notListed: model.filters.notListed)
+        return Menu {
+            Section(model.filters.notListed ? "Not listed on" : "Marketplaces") {
+                ForEach(options, id: \.self) { id in
+                    Toggle(isOn: Binding(get: { model.filters.marketplaces.contains(id) },
+                                         set: { _ in model.toggleMarketplace(id) })) {
+                        Text("\(Marketplaces.name(id))  \(counts[id] ?? 0)")
+                    }
+                }
+                if options.isEmpty {
+                    Text("No listing is live on a marketplace yet")
+                }
+            }
+            Section {
+                Toggle(isOn: Binding(get: { model.filters.notListed }, set: { model.filters.notListed = $0 })) {
+                    Text("Not listed  \(InventoryQuery.notListedCount(source))")
+                }
+            }
+            if model.filters.activeCount > 0 {
+                Button("Clear filters", role: .destructive) {
+                    model.filters.marketplaces = []
+                    model.filters.notListed = false
+                }
+            }
+        } label: {
+            Label(model.filters.activeCount > 0 ? "Filters (\(model.filters.activeCount))" : "Filters",
+                  systemImage: model.filters.activeCount > 0
+                      ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        }
+        .menuActionDismissBehavior(.disabled)
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel(model.filters.activeCount > 0 ? "Filters, \(model.filters.activeCount) on" : "Filters")
     }
 }
 
