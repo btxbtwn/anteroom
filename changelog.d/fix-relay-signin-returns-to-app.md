@@ -1,1 +1,0 @@
-- Connecting eBay or Etsy now finishes back in the Anteroom that started it, so a sign-in link someone else sends you can't hand them your account. Update Anteroom to connect eBay or Etsy.
