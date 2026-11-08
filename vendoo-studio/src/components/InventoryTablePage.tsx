@@ -33,8 +33,9 @@ import { setListingSearch, useListingSearch } from "./sidebar/listingSearch";
 const ROW_HEIGHT = 56;
 // Narrow enough on a phone that the first marketplace column shows beside it.
 const ITEM_MIN = "min(13rem, 42vw)";
-// Room for a status badge and the live price beside it.
-const CELL_MIN = "9.5rem";
+// Room for a status badge and the live price beside it. Marketplace columns
+// stay this wide; the item column takes whatever the page has left.
+const CELL_WIDTH = "9.5rem";
 const STATUS_LABELS: Record<ListingStatusFilter, string> = { all: "All", draft: "Draft", active: "Active", sold: "Sold", failed: "Failed" };
 const BADGE_VARIANT: Record<MarketplaceCellKind, "success" | "info" | "warning" | "error" | "outline" | null> = {
   listed: "success",
@@ -50,8 +51,11 @@ const BADGE_VARIANT: Record<MarketplaceCellKind, "success" | "info" | "warning" 
 export function InventoryTablePage({
   conversations,
   onOpenListing,
+  sidebarSearch = false,
 }: {
   conversations: Listing[] | undefined;
+  /** The listings sidebar is open beside the table; its search box already filters the table. */
+  sidebarSearch?: boolean;
   /** Opens the listing's editor, on a marketplace's tab when one is named. */
   onOpenListing: (id: string, tab?: string) => void;
 }) {
@@ -86,25 +90,28 @@ export function InventoryTablePage({
   });
   const visible = virtualizer.getVirtualItems();
   const readiness = useInventoryReadiness(rows, visible[0]?.index ?? 0, visible[visible.length - 1]?.index ?? -1);
-  const columns = { gridTemplateColumns: `minmax(${ITEM_MIN}, 2fr) 5.5rem repeat(${marketplaces.length}, minmax(${CELL_MIN}, 1fr))` } as CSSProperties;
+  const columns = { gridTemplateColumns: `minmax(${ITEM_MIN}, 1fr) 5.5rem repeat(${marketplaces.length}, ${CELL_WIDTH})` } as CSSProperties;
   // The table's own minimum, so a long title cannot widen the item column past it.
-  const tableWidth = { minWidth: `calc(${ITEM_MIN} + 5.5rem + ${marketplaces.length} * ${CELL_MIN})` } as CSSProperties;
+  const tableWidth = { minWidth: `calc(${ITEM_MIN} + 5.5rem + ${marketplaces.length} * ${CELL_WIDTH})` } as CSSProperties;
 
   return (
     <WorkspacePage width="expanded" className="h-full min-h-0 gap-4 pb-6">
       {/* The breadcrumb and the phone title bar already name the page. */}
       <h1 className="sr-only">Inventory</h1>
       <div className="flex flex-wrap items-center gap-2">
-        <InputGroup className="w-full sm:w-64">
-          <InputGroupAddon><SearchIcon /></InputGroupAddon>
-          <InputGroupInput
-            type="search"
-            value={query}
-            onChange={(event) => setListingSearch(event.target.value)}
-            placeholder="Search title, SKU or label"
-            aria-label="Search listings by title, SKU or label"
-          />
-        </InputGroup>
+        {/* One search box on screen: the sidebar's shares this text. */}
+        {sidebarSearch ? null : (
+          <InputGroup className="w-full sm:w-64">
+            <InputGroupAddon><SearchIcon /></InputGroupAddon>
+            <InputGroupInput
+              type="search"
+              value={query}
+              onChange={(event) => setListingSearch(event.target.value)}
+              placeholder="Search title, SKU or label"
+              aria-label="Search listings by title, SKU or label"
+            />
+          </InputGroup>
+        )}
         <ToggleGroup
           aria-label="Listing status"
           value={[status]}
@@ -172,7 +179,8 @@ export function InventoryTablePage({
                         >
                           <ListingThumb src={displayCoverUrl(listing.cover_photo_url || listing.vendoo_cover_url)} className="size-9" />
                           <span className="flex min-w-0 flex-col gap-0.5">
-                            <span className="truncate text-sm font-medium text-foreground">{name}</span>
+                            {/* Two lines fit the row; the button's tooltip has the whole title. */}
+                            <span className={cn("text-sm font-medium text-foreground", listing.sku && !nameBySku ? "truncate" : "line-clamp-2 leading-tight")}>{name}</span>
                             {listing.sku && !nameBySku ? <span className="truncate font-mono text-2xs text-muted-foreground">{listing.sku}</span> : null}
                           </span>
                         </button>
