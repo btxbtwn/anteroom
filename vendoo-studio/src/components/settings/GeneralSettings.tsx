@@ -8,7 +8,6 @@ import { useStudioUpdate } from "../UpdateButton";
 import { ChangelogDialog } from "../ChangelogDialog";
 import { PreviousVersionsDialog } from "../PreviousVersionsDialog";
 import { applyTheme, normalizeTheme, type ThemePreference } from "../../theme";
-import { Switch } from "../ui/switch";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection, SettingsSelect } from "./SettingsLayout";
@@ -71,26 +70,6 @@ function AppearanceSection() {
       ) : null}
     </SettingsSection>
   );
-}
-
-function ListingModeSection() {
-  const client = useQueryClient();
-  const prefs = useQuery(settingsUiQuery);
-  const save = useMutation({
-    mutationFn: (enabled: boolean) => api.settings.setUi({ listing_mode: enabled ? "vendoo" : "direct" }),
-    onSuccess: result => {
-      client.setQueryData(["settings-ui"], result);
-      void client.invalidateQueries({ queryKey: ["listing-fields"] });
-      void client.invalidateQueries({ queryKey: ["native-editor-form"] });
-    },
-  });
-  return <SettingsSection id="listing-mode" title="Listing workflow">
-    <SettingsRow title="Use Vendoo"
-      description="On uses Vendoo for draft review and listing. Off uses direct marketplace forms and actions."
-      control={<Switch aria-label="Use Vendoo" checked={prefs.data?.listing_mode === "vendoo"}
-        disabled={prefs.isPending || save.isPending} onCheckedChange={value => save.mutate(value)} />} />
-    {save.error && <SettingsNote tone="error">{save.error.message}</SettingsNote>}
-  </SettingsSection>;
 }
 
 function DesktopAboutVersionRow({ version }: { version: string }) {
@@ -182,7 +161,6 @@ export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () =>
   return (
     <>
       <AppearanceSection />
-      <ListingModeSection />
       {!hosted ? <SettingsSection id="setup-guide" title="Setup guide">
         <SettingsRow
           title="First-run tutorial"

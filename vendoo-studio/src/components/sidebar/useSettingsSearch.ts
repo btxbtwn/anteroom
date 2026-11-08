@@ -18,7 +18,7 @@ export function useSettingsSearch(
   const settingsSearchRef = useRef<HTMLInputElement>(null);
   const { hosted } = useWorkspaceRuntime();
   const settingsResults = useMemo(
-    () => searchSettings(settingsQuery, SETTINGS_SEARCH_ITEMS.filter((item) => !hosted || (item.section === "general" && item.id !== "setup-guide") || item.section === "listings" || (item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)) || (item.section === "connections" && ["accounts", "direct-ebay", "ebay-inventory-location", "direct-etsy"].includes(item.id)))),
+    () => searchSettings(settingsQuery, SETTINGS_SEARCH_ITEMS.filter((item) => !hosted || (item.section === "general" && item.id !== "setup-guide") || item.section === "listings" || item.section === "experimental" || (item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)) || (item.section === "connections" && ["accounts", "direct-ebay", "ebay-inventory-location", "direct-etsy"].includes(item.id)))),
     [settingsQuery, hosted],
   );
   const isSettingsSearching = settingsQuery.trim().length > 0;
