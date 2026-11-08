@@ -20,6 +20,12 @@ describe("WorkspaceTopbar", () => {
     expect(html).toContain("Anteroom");
   });
 
+  it("fades the logo's arches out at the floor instead of cutting them off", () => {
+    const html = render(true);
+    expect(html).toMatch(/<g mask="url\(#[^)]+-mask\)">/);
+    expect(html).toContain('stop-opacity="0"');
+  });
+
   it("drops the logo when the sidebar is hidden", () => {
     expect(render(false)).not.toContain("Anteroom");
   });
