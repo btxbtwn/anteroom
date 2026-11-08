@@ -16,7 +16,10 @@ test("included AI needs no personal key and disables personal billing fallback",
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  if (info.project.name === "phone") await page.getByRole("button", { name: "Open navigation" }).click();
+  if (info.project.name === "phone") {
+    await page.getByRole("button", { name: "Inventory", exact: true }).click();
+    await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  }
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Providers", exact: true }).click();
   const close = page.getByRole("button", { name: "Close navigation" });
