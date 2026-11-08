@@ -202,9 +202,9 @@ export const ListingRow = memo(function ListingRow({
                 "block w-full cursor-pointer truncate text-left text-base font-medium leading-snug text-inherit no-underline outline-none",
                 // Stretch the link over the row so right-click anywhere offers "Open in new tab".
                 !selecting && "after:absolute after:inset-0 after:content-['']",
-                // Hover actions float over the title; fade it under them.
-                !selecting &&
-                  "group-hover/row:[mask-image:linear-gradient(to_right,#000_calc(100%-108px),transparent_calc(100%-88px))] group-focus-within/row:[mask-image:linear-gradient(to_right,#000_calc(100%-108px),transparent_calc(100%-88px))]",
+                // The four hover actions (4 x 24px, 8px from the edge) sit over the
+                // title's end; make room so it ends in an ellipsis before them.
+                !selecting && "min-[901px]:group-hover/row:pr-24 min-[901px]:group-focus-within/row:pr-24",
               )}
               title={name === title ? title : `${name} · ${title}`}
               onClick={(e) => {

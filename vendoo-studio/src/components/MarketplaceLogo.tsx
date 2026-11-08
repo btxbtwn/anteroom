@@ -69,23 +69,32 @@ export function MarketplaceLogo({
   const logo = OFFICIAL_LOGOS[id];
 
   if (logo) {
+    // Small logos read best as the brand's one-letter mark. A wordmark without
+    // one (eBay) keeps its own proportions, as tall as a square mark, rather than
+    // shrinking into the square.
+    const mark = logo.compact ?? logo;
+    const [, , boxWidth, boxHeight] = mark.viewBox.split(/\s+/).map(Number);
+    const ratio = boxWidth / boxHeight;
+    const wide = !logo.compact && ratio > 1.5;
+    const height = wide ? Math.round(size * 0.8) : size - 2;
+    const width = wide ? Math.round(height * ratio) : size - 2;
     return (
       <span
-        className="marketplace-logo"
+        className="marketplace-logo inline-flex shrink-0 items-center justify-center"
         role="img"
         title={label}
         aria-label={label}
-        style={{ width: size, height: size }}
+        style={{ width: wide ? width : size, height: size }}
       >
         <svg
-          width={size - 2}
-          height={size - 2}
-          viewBox={logo.viewBox}
+          width={width}
+          height={height}
+          viewBox={mark.viewBox}
           preserveAspectRatio="xMidYMid meet"
           aria-hidden="true"
         >
           <GradientDefs logo={logo} prefix={prefix} />
-          {logo.paths.map((path, index) => (
+          {mark.paths.map((path, index) => (
             <path
               key={index}
               d={path.d}

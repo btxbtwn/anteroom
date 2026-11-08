@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, RefreshCwIcon, Settings2Icon } from "lucide-react";
 import { api } from "../../api/client";
 import { BUSY_POLL_MS, pollMs } from "../../api/polling";
-import { MarketplaceLogo } from "../MarketplaceLogo";
 import { WorkspaceTabs } from "../ebay/WorkspaceTabs";
 import "../ebay/ebay.css";
 import { DirectConnectionRow } from "../settings/ConnectionsSettings";
@@ -42,13 +41,15 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
   return <div className="ebay-workspace" data-marketplace="etsy">
     <header className="ebay-page-heading">
       <div>
-        <div className="flex items-center gap-2"><MarketplaceLogo id="etsy" label="Etsy" size={18} /><h2>Etsy</h2></div>
+        {/* The tab above names the marketplace; the heading is for screen readers. */}
+        <h2 className="sr-only">Etsy</h2>
         <p>Your shop, orders, and listings.</p></div>
-      <div className="ebay-connection">
-        {connected ? <span className="ebay-status"><CheckCircle2Icon aria-hidden="true" />{account?.label || "Connected"}</span> : null}
-        {connected ? <Button variant="ghost" aria-label="Refresh Etsy" onClick={() => void queryClient.invalidateQueries({ queryKey: ["etsy-workspace"] })}><RefreshCwIcon />Refresh</Button> : null}
-        <Button variant="outline" onClick={() => setConnectionOpen(true)}><Settings2Icon />{connected ? "Connection" : account?.pending ? "Finish sign-in" : "Connect Etsy"}</Button>
-      </div>
+      {/* Until Etsy is connected, the panel below holds the one Connect Etsy button. */}
+      {connected ? <div className="ebay-connection">
+        <span className="ebay-status"><CheckCircle2Icon aria-hidden="true" />{account?.label || "Connected"}</span>
+        <Button variant="ghost" aria-label="Refresh Etsy" onClick={() => void queryClient.invalidateQueries({ queryKey: ["etsy-workspace"] })}><RefreshCwIcon />Refresh</Button>
+        <Button variant="outline" onClick={() => setConnectionOpen(true)}><Settings2Icon />Connection</Button>
+      </div> : null}
     </header>
     {connection.error ? <PageError message={connection.error.message} /> : null}
     <WorkspaceTabs label="Etsy workspace" main items={TABS} value={tab} onChange={(value) => setTab(value as Tab)}
@@ -58,7 +59,7 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
           <div className="ebay-data-panel space-y-4">
             <h2>{connection.isPending ? "Checking your connection…" : "Connect your Etsy shop"}</h2>
             <p className="text-muted-foreground">Connect Etsy to see live shop details, orders, and listings.</p>
-            {!connection.isPending ? <Button onClick={() => setConnectionOpen(true)}>Connect Etsy</Button> : null}
+            {!connection.isPending ? <Button onClick={() => setConnectionOpen(true)}>{account?.pending ? "Finish sign-in" : "Connect Etsy"}</Button> : null}
           </div>
         ) : <>
           {tab !== "Listings" ? <>

@@ -4,8 +4,15 @@
 .cloud-auth button,.cloud-account button{padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer}.cloud-auth button{margin-top:20px;width:100%}
 .cloud-account{display:flex;align-items:center;gap:8px;font-size:12px}.cloud-account button:disabled{opacity:.5}
 .chrome-connection{position:relative}.connection-controls{display:flex;align-items:center;gap:8px}.connection-controls button{font-size:13px;white-space:nowrap}.connection-controls .subtle{border-color:transparent;background:transparent;color:#aaa;padding:8px}.connection-help{display:grid;gap:8px}.connection-help p{margin:0;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
-@media(max-width:899px){.cloud-mobile-account{display:flex;padding:8px 12px;justify-content:flex-end}}
-@media(min-width:900px){.cloud-mobile-account{display:none}}
+/* Phones: the avatar ends the page header row (as in Mail and the App Store) instead of a band above it.
+   It lines up with the header's 44px buttons; the headers keep 60px free on the right for it. */
+@media(max-width:900px){
+.app-shell:has(>.cloud-mobile-account){position:relative}
+.cloud-mobile-account{position:absolute;top:max(8px,env(safe-area-inset-top,0px));right:max(8px,env(safe-area-inset-right,0px));z-index:6;display:flex;align-items:center;height:44px}
+.cloud-mobile-account .cloud-profile{width:44px;height:44px;font-size:15px}
+.app-shell:has(>.cloud-mobile-account) :is(.sidebar-header,.mobile-workspace-bar){padding-right:60px}}
+@media(max-width:900px) and (max-height:500px){.cloud-mobile-account{top:max(4px,env(safe-area-inset-top,0px))}}
+@media(min-width:901px){.cloud-mobile-account{display:none}}
 .cloud-auth .hint{font-size:13px;margin:6px 0 0}.cloud-auth code{font-family:var(--font-mono)}
 .sign-in-links{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;margin-top:16px}
 .cloud-auth .sign-in-links button.link,.cloud-auth .sign-in-links a.link{width:auto;margin:0;padding:0;border:0;background:none;color:var(--muted-foreground);font-size:14px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}

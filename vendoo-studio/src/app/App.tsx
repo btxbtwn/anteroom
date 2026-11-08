@@ -632,6 +632,8 @@ export function App() {
             : null
         }
       />
+      {/* One account menu, always mounted: it holds the Chrome relay. On phones CSS
+          places it at the end of the page header row, which leaves room for it. */}
       {runtime.hosted && isMobile && <div className="cloud-mobile-account">{runtime.accountControls}</div>}
       <div
         className={`app-content mobile-pane-${activeView === "listings" ? mobilePane : "workspace"}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
@@ -770,6 +772,7 @@ export function App() {
                     <InventoryTablePage
                       conversations={conversations}
                       onOpenListing={openListing}
+                      sidebarSearch={!isMobile && !sidebarHidden}
                     />
                   </Suspense>
                 ) : selectedConvId ? null : needsSetup ? (
