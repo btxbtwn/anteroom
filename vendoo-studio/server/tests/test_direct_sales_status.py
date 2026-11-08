@@ -367,6 +367,78 @@ def test_the_same_submission_records_one_sale(env):
     assert env.db.query(MarketplaceSale).count() == 1
 
 
+def test_a_sold_out_item_refuses_another_sale(env):
+    item(env.db, "coat", notes={"vendooStatus": "active", "vendooListingUrls": {"ebay": EBAY_URL}})
+    request_id = uuid4().hex
+    assert mark_sold(env, "coat", marketplace="ebay", request_id=request_id, item_revenue="9").status_code == 200
+    for marketplace in ("ebay", "other"):
+        response = mark_sold(env, "coat", marketplace=marketplace, item_revenue="9")
+        assert response.status_code == 409, response.text
+        assert "already sold" in response.json()["detail"]
+    # Resending the same form is still the one sale, not a refusal.
+    assert mark_sold(env, "coat", marketplace="ebay", request_id=request_id).status_code == 200
+    assert env.db.query(MarketplaceSale).count() == 1
+
+
+def test_a_multi_unit_item_takes_sales_until_its_units_run_out(env):
+    item(env.db, "tees", quantity=3)
+    assert mark_sold(env, "tees", quantity=1).status_code == 200
+    assert mark_sold(env, "tees", quantity=3).status_code == 409
+    assert mark_sold(env, "tees", quantity=2).status_code == 200
+    assert mark_sold(env, "tees", quantity=1).status_code == 409
+    assert env.db.query(MarketplaceSale).count() == 2
+
+
+def remove(env, sale_id, revision=None):
+    if revision is None:
+        revision = env.client.get(f"/api/sales-ledger/{sale_id}").json()["financial_revision"]
+    return env.client.delete(f"/api/sales-ledger/{sale_id}", params={"expected_revision": revision})
+
+
+def test_deleting_a_recorded_sale_puts_the_item_back(env):
+    item(env.db, "coat", notes={"vendooStatus": "active", "vendooListingUrls": {"ebay": EBAY_URL}})
+    sale_id = mark_sold(env, "coat", marketplace="ebay", item_revenue="45").json()["sale"]["id"]
+    assert status(env.db, "coat").status == "sold"
+    response = remove(env, sale_id)
+    assert response.status_code == 200, response.text
+    assert env.db.query(MarketplaceSale).count() == 0
+    # The sold mark Mark as sold made goes with it, so nothing still counts the sale.
+    assert status(env.db, "coat").status == "active"
+    assert marketplace_delist.listings(env.db, "coat")["ebay"]["sold_here"] is False
+    assert env.client.get(f"/api/sales-ledger/{sale_id}").status_code == 404
+
+
+def test_deleting_a_duplicate_keeps_the_first_sale(env):
+    item(env.db, "coat", notes={"vendooStatus": "active", "vendooListingUrls": {"ebay": EBAY_URL}})
+    first = mark_sold(env, "coat", marketplace="ebay").json()["sale"]["id"]
+    # A second record made before duplicates were refused.
+    env.db.add(MarketplaceSale(marketplace="ebay", order_id="seller-" + "b" * 32, line_id="1", quantity=1, order_status="paid",
+                               conversation_id="coat", source="seller", state="dismissed"))
+    env.db.commit()
+    second = env.db.query(MarketplaceSale).filter(MarketplaceSale.id != first).one().id
+    assert remove(env, second).status_code == 200
+    assert [sale.id for sale in env.db.query(MarketplaceSale)] == [first]
+    assert status(env.db, "coat").status == "sold"
+    assert marketplace_delist.listings(env.db, "coat")["ebay"]["sold_here"] is True
+
+
+def test_only_sales_the_seller_recorded_can_be_deleted(env):
+    item(env.db, "coat")
+    sale = line(env.db, "coat")
+    response = remove(env, sale.id)
+    assert response.status_code == 409
+    assert "marketplace reported" in response.json()["detail"]
+    assert env.db.query(MarketplaceSale).count() == 1
+    assert remove(env, "missing", 0).status_code == 404
+
+
+def test_a_sale_edited_elsewhere_is_not_deleted_from_an_old_view(env):
+    item(env.db, "coat")
+    sale_id = mark_sold(env, "coat", item_revenue="45").json()["sale"]["id"]
+    assert remove(env, sale_id, revision=0).status_code == 409
+    assert env.db.query(MarketplaceSale).count() == 1
+
+
 def test_a_partial_sale_offers_no_delist_and_marks_nothing(env):
     item(env.db, "tees", quantity=3, notes={"vendooStatus": "active", "vendooListingUrls": {"ebay": EBAY_URL}})
     body = mark_sold(env, "tees", marketplace="ebay").json()

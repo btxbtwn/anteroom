@@ -10,7 +10,7 @@ import json
 import re
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation, utcnow
@@ -258,6 +258,12 @@ def record_seller_sale(db: Session, conv_id: str, body: SellerSale) -> dict:
             if existing.conversation_id != conv_id:
                 raise LedgerError("This sale was recorded for another item.", 409)
         else:
+            before = status_for(db, conv_id, parse_notes(conv.notes))
+            left = before.quantity - before.units_sold
+            if left < body.quantity:
+                raise LedgerError(
+                    "This item is already sold. Change the amounts on its sale in Sales records, or raise its quantity if you have more."
+                    if left <= 0 else f"Only {left} of {before.quantity} left to sell.", 409)
             known = marketplace_delist.listings(db, conv_id).get(body.marketplace) or {} if body.marketplace in MARKETPLACES else {}
             sold_at = utcnow().replace(tzinfo=None) if body.sold_on == today else datetime.combine(body.sold_on, time(12))
             sale = MarketplaceSale(
@@ -287,3 +293,46 @@ def record_seller_sale(db: Session, conv_id: str, body: SellerSale) -> dict:
     ]
     return {"sale": get_sale(db, sale_id), "status": status.status, "units_sold": status.units_sold,
             "quantity": status.quantity, "listings": listings, "delist_offer": offer}
+
+
+def delete_seller_sale(db: Session, sale_id: str, expected_revision: int) -> dict:
+    """Delete a sale the seller recorded. Never touches a marketplace.
+
+    A sale a marketplace reported is refused: the next order check would bring
+    it back. When the deleted sale was the one that marked its marketplace
+    sold, that mark goes too, so the item no longer counts the sale.
+    """
+    from vendoo_studio.models.marketplace_sale import PAID_STATUSES
+    from vendoo_studio.services import marketplace_delist
+    from vendoo_studio.services.vendoo_import import parse_notes
+
+    with start_gate():
+        sale = db.get(MarketplaceSale, sale_id, populate_existing=True)
+        if sale is None:
+            raise LedgerError("Sale record not found.", 404)
+        if sale.source != "seller":
+            raise LedgerError("Only sales you recorded can be deleted. A sale the marketplace reported comes back the next time "
+                              "Anteroom checks; cancel or refund it on the marketplace instead.", 409)
+        conv_id, marketplace, recorded = sale.conversation_id, sale.marketplace, marketplace_delist._time(sale.received_at)
+        try:
+            result = db.execute(delete(MarketplaceSale).where(
+                MarketplaceSale.id == sale_id, MarketplaceSale.financial_revision == expected_revision,
+            ).execution_options(synchronize_session=False))
+            if type_cast(CursorResult, result).rowcount != 1:
+                db.rollback()
+                raise LedgerError("This sale changed. Reload it before deleting.", 409)
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        db.expire_all()
+        conv = db.get(Conversation, conv_id) if conv_id else None
+        if conv is not None and marketplace in MARKETPLACES:
+            mark = marketplace_delist._notes_dict(parse_notes(conv.notes), "marketplaceMarks").get(marketplace)
+            marked = marketplace_delist._time(mark.get("at")) if isinstance(mark, dict) and mark.get("state") == "sold" else None
+            others = db.query(MarketplaceSale.id).filter(
+                MarketplaceSale.conversation_id == conv_id, MarketplaceSale.marketplace == marketplace,
+                MarketplaceSale.order_status.in_(PAID_STATUSES)).first()
+            if marked and recorded and marked >= recorded and others is None:
+                marketplace_delist._store(db, conv.id, "marketplaceMarks", marketplace, None)
+    return {"deleted": sale_id}
