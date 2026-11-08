@@ -60,7 +60,8 @@ def test_xcodegen_download_retries_transport_errors_with_deadlines(tmp_path):
     assert "--retry-all-errors" in args  # curl exit 56 is not retried by --retry alone.
     for flag, value in (("--retry", "3"), ("--connect-timeout", "15"), ("--max-time", "120"), ("--retry-max-time", "600")):
         assert args[args.index(flag) + 1] == value
-    assert args[-1] == "https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip"
+    assert args[args.index("-H") + 1] == "Accept: application/octet-stream"
+    assert args[-1] == "https://api.github.com/repos/yonaskolb/XcodeGen/releases/assets/478866069"
     assert calls[1]["args"] == ["-a", "256", "-c", "-"]
     assert calls[1]["body"] == f"{SHA256}  {destination}/xcodegen.zip\n"
     assert "version checked" in result.stdout
