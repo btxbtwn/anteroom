@@ -18,6 +18,7 @@ from vendoo_studio.services.agent_categories import (
     apply_agent_categories,
     apply_saved_agent_category,
     map_general_category,
+    match_general_category,
     markets_for_choice,
     requested_choices,
 )
@@ -296,3 +297,42 @@ class GeneralCategoryMapTest(unittest.TestCase):
         with patch("vendoo_studio.services.agent_categories.native_rows", side_effect=AssertionError("rows")):
             map_general_category(self.db, previous, listing)
         self.assertEqual(listing["direct_category_ids"]["poshmark"], SHOES)
+
+
+class GeneralCategoryMatchTest(unittest.TestCase):
+    """The hosted save matches from the stored lists and never calls a marketplace."""
+
+    def setUp(self):
+        self.engine, self.db = _database()
+        self.db.add(CategoryTree(marketplace="etsy", status="complete", roots_loaded=True))
+        self.db.add(CategoryTreeNode(
+            marketplace="etsy", category_id="482", parent_id="0", path="Clothing > Men's Clothing > Shirts & Tees > T-shirts",
+            label="T-shirts", is_leaf=True, has_children=False, children_loaded=True,
+        ))
+        self.db.commit()
+
+    def tearDown(self):
+        self.db.close()
+        self.engine.dispose()
+
+    def test_every_form_gets_its_category_without_a_marketplace_call(self):
+        previous = {"title": "Tee", "category_path": "Old", "direct_category_ids": {"etsy": "old", "depop": "old"}}
+        listing = {**previous, "category_path": GENERAL_TEE}
+        ebay, etsy = _no_network()
+        with ebay, etsy:
+            match_general_category(self.db, previous, listing)
+        ids = listing["direct_category_ids"]
+        self.assertEqual(ids["ebay"], "15687")
+        self.assertEqual(ids["etsy"], "482")
+        self.assertEqual(ids["depop"], "menswear_tshirts")
+
+    def test_a_category_picked_on_a_form_stays(self):
+        previous = {"category_path": "Old", "direct_category_ids": {"etsy": "mine"}, "seller_fields": ["direct_category_ids.etsy"]}
+        listing = {**previous, "category_path": GENERAL_TEE}
+        match_general_category(self.db, previous, listing)
+        self.assertEqual(listing["direct_category_ids"]["etsy"], "mine")
+
+    def test_an_unchanged_category_reads_nothing(self):
+        listing = {"category_path": GENERAL_TEE, "price": 12}
+        with patch("vendoo_studio.services.agent_categories.native_rows", side_effect=AssertionError("rows")):
+            match_general_category(self.db, {"category_path": GENERAL_TEE, "price": 10}, listing)
