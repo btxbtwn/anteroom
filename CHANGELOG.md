@@ -6,6 +6,27 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.821 — 2026-11-08
+
+- When the server restarts mid-read, the message now points to the Read measurements button by its current name.
+
+## 0.1.820 — 2026-11-08
+
+- A relisted item that sold more than once keeps its earlier sale. When a marketplace order arrives, Anteroom now replaces only the Vendoo or Mark as sold record from within a week of it, instead of the nearest one no matter how old.
+
+## 0.1.819 — 2026-11-08
+
+- Keep the web app from freezing and showing "Cloud data is temporarily unavailable" when Chrome is slow to answer.
+
+## 0.1.818 — 2026-11-08
+
+- Open Suggestions from the sidebar to review older listings worth relisting, see why they are recommended, and return to your search and place after reviewing a listing.
+
+## 0.1.817 — 2026-11-08
+
+- Show skipped automatic offer attempts by listing in Activity, with Depop’s sanitized response and distinct explanations for refused previews and missing recipients instead of assuming there are no eligible likers.
+- Retry interrupted downloads of pinned build and security-check tools without bypassing their checksums or any tests.
+
 ## 0.1.816 — 2026-11-08
 
 - Make the Anteroom logo at the top of the sidebar larger.

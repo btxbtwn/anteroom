@@ -30,11 +30,13 @@ class MacInference:
         self.outbox = deque()
         self.pending = {}
 
+    def _local(self):
+        with self.condition:
+            return self.worker is not None and time.monotonic() - self.seen < 45
+
     @property
     def connected(self):
-        with self.condition:
-            local = self.worker is not None and time.monotonic() - self.seen < 45
-        if local:
+        if self._local():
             return True
         from vendoo_studio.services.device_routes import remote_fresh
         return remote_fresh(self.owner, 'mac')
@@ -83,7 +85,7 @@ class MacInference:
     async def invoke(self, operation, args, kwargs):
         from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
         try:
-            target = forward_target(self.owner, 'mac')
+            target = await forward_target(self.owner, 'mac')
         except RoutingUnavailable:
             raise MacUnavailable from None
         if target is not None:
@@ -99,7 +101,8 @@ class MacInference:
         identity = uuid.uuid4().hex
         future = concurrent.futures.Future()
         with self.condition:
-            if not self.connected:
+            # No other process holds this Mac, so only a local one can take it.
+            if not self._local():
                 raise MacUnavailable()
             self.pending[identity] = future
             self.outbox.append({'id': identity, 'operation': operation, 'args': args, 'kwargs': kwargs})
@@ -137,7 +140,8 @@ class MacChatGPTProvider:
         self.listing_model = relay.models.get('listing_model', '')
 
     async def test_connection(self):
-        if not self.relay.connected:
+        # May read the device route from Postgres: keep it off the event loop.
+        if not await asyncio.to_thread(lambda: self.relay.connected):
             raise MacUnavailable()
         return True
 
