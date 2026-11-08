@@ -68,6 +68,8 @@ interface Props {
   /** While busy a follow-up is queued; null when this chat cannot queue. */
   queueLabel?: string | null;
   className?: string;
+  /** Put the cursor in the box when it appears. */
+  autoFocus?: boolean;
 }
 
 export function ChatComposer({
@@ -83,6 +85,7 @@ export function ChatComposer({
   stopLabel,
   queueLabel,
   className,
+  autoFocus = false,
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const runtime = useWorkspaceRuntime();
@@ -139,6 +142,7 @@ export function ChatComposer({
                   onChange={onInputChange}
                   onSubmit={submit}
                   placeholder={placeholder}
+                  autoFocus={autoFocus}
                   onPasteFiles={(files) => {
                     const pasted = files.filter((file) => composerImageMimeType(file));
                     if (!runtime.features.has("chat_attachments") || !pasted.length) return false;

@@ -1,7 +1,7 @@
 {
   "name": "vendoo-studio",
   "private": true,
-  "version": "0.1.827",
+  "version": "0.1.835",
   "type": "module",
   "scripts": {
     "dev": "vite",

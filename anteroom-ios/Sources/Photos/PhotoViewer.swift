@@ -479,7 +479,7 @@ struct ArrangePhotosSheet: View {
                     Section {
                         ForEach(Array(order.enumerated()), id: \.element.id) { index, photo in
                             HStack(spacing: 12) {
-                                RemotePhoto(api: api, photoID: photo.id, maxPixels: 120, version: photo.version)
+                                RemotePhoto(api: api, photoID: photo.id, maxPixels: 192, version: photo.version)
                                     .frame(width: 56, height: 56)
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
                                 Text(index == 0 ? "Cover photo" : "Photo \(index + 1)")

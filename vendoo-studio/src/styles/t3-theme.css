@@ -932,6 +932,44 @@ body {
   overflow: hidden;
 }
 
+/* Phone inventory uses the document scrollport so Safari can paint rows all
+   the way behind its floating toolbar. Other workspaces keep their panels. */
+@media (max-width: 900px) {
+  html:has(.phone-inventory),
+  body:has(.phone-inventory),
+  #root:has(.phone-inventory) {
+    height: auto;
+    max-height: none;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .app-shell.phone-inventory,
+  .phone-inventory > .app-content {
+    height: auto;
+    max-height: none;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  #root:has(.phone-inventory) {
+    /* The sticky inventory header already accounts for the top safe area. */
+    padding-top: 0;
+  }
+
+  .phone-inventory .sidebar {
+    position: relative;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .phone-inventory > .cloud-mobile-account {
+    position: fixed;
+    z-index: 41;
+  }
+}
+
 #root {
   height: 100%;
   width: 100%;

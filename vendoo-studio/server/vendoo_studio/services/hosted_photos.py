@@ -23,9 +23,16 @@ MAX_PIXELS = 50_000_000
 MAX_SIDE = 2400
 # Thumbnail sizes the apps ask for (covers and photo strips). These are kept in
 # Storage beside the photo, so a restart or deploy never has to remake them.
-KEPT_THUMB_SIZES = (96, 192)
+# 384 is the iPhone's photo tiles (about 136 pt at 3x).
+KEPT_THUMB_SIZES = (96, 192, 384)
 register_heif_opener()
 _decode_slot = threading.Semaphore(1)
+# Thumbnails decode a JPEG at a fraction of its size, so they need little memory
+# and never wait behind a full-size upload in ``_decode_slot``.
+_thumb_slot = threading.Semaphore(2)
+# One client for every Storage call, so each reuses an open TLS connection
+# instead of paying a new handshake to Supabase. httpx clients are thread-safe.
+_storage = httpx.Client(limits=httpx.Limits(max_connections=20, max_keepalive_connections=10))
 
 
 def normalize(data: bytes) -> tuple[bytes, int, int]:
@@ -91,7 +98,7 @@ def storage_call(method: str, key: str, token: str, data: bytes | None = None) -
         url = f'{origin}/storage/v1/object/{BUCKET}'
         if method != 'DELETE':
             url += '/' + key
-        response = httpx.request(method, url,
+        response = _storage.request(method, url,
                                  headers={'Authorization': f'Bearer {token}', 'apikey': public_key,
                                           'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
                                           'Cache-Control': 'no-store'},
@@ -114,7 +121,7 @@ def remove_objects(keys: list[str], token: str) -> None:
         raise HTTPException(503, 'Photo storage is not configured')
     for start in range(0, len(keys), 1000):
         try:
-            response = httpx.request('DELETE', f'{origin}/storage/v1/object/{BUCKET}',
+            response = _storage.request('DELETE', f'{origin}/storage/v1/object/{BUCKET}',
                                      headers={'Authorization': f'Bearer {token}', 'apikey': public_key,
                                               'Cache-Control': 'no-store'},
                                      json={'prefixes': keys[start:start + 1000]}, timeout=60, follow_redirects=False)
@@ -173,7 +180,7 @@ def _store_thumbnail(name: str, data: bytes, token: str) -> None:
 
 
 def _make_thumbnail(data: bytes, size: int) -> bytes:
-    with _decode_slot, Image.open(io.BytesIO(data)) as image:
+    with _thumb_slot, Image.open(io.BytesIO(data)) as image:
         # Decode the JPEG at a fraction of its size; the cover is 96px.
         image.draft('RGB', (size, size))
         image.thumbnail((size, size))

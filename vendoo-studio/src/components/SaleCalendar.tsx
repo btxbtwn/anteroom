@@ -110,7 +110,7 @@ export function SaleCalendar({ marketplace: market, onOpenListing }: { marketpla
     <PageSection
       aria-label="Sale calendar"
       title="Sale calendar"
-      description="Saving a plan only adds it here; run the sale on the marketplace, then mark it as run."
+      description="Plan a sale here, run it on the marketplace, then mark it as run."
       actions={<>
         <Button variant="ghost-muted" size="xs" disabled={query.isFetching} onClick={() => void query.refetch()}>Refresh calendar</Button>
         <Button variant="outline" size="xs" disabled={!query.data} onClick={() => setForm({ start: today, end: today, marketplace: market, record: true })}>Record a sale I ran</Button>
@@ -148,7 +148,7 @@ export function SaleCalendar({ marketplace: market, onOpenListing }: { marketpla
             </Panel>;
           })}
         </div> : null}
-        <PageNote>Suggested days come from your imported sales ({timezone}) and are experiments, not forecasts.</PageNote>
+        <PageNote>Suggestions use your imported sales ({timezone}); they are experiments, not forecasts.</PageNote>
         <Panel divided={false} className="flex flex-col gap-3 p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-1">
