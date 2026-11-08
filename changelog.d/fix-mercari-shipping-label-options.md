@@ -1,2 +1,3 @@
 - Mercari's Shipping label list loads again when the listing answered the shoebox question with "Yes".
 - Depop's Age is always filled in: Modern unless the listing names a decade.
+- On iPad and iPhone, press and hold a photo, then drag it to reorder; the photo viewer can also move a photo or leave it off a marketplace.
