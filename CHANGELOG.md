@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.827 — 2026-11-08
+
+- Anteroom now shows a loading screen as soon as you open it, with a reload option if your workspace takes longer to open or cannot load.
+
 ## 0.1.826 — 2026-11-08
 
 - A saved cost of goods of $0 now counts as recorded in missing sale data, even before the other sale amounts are entered.
