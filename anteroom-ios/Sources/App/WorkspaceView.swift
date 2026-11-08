@@ -12,6 +12,8 @@ struct WorkspaceView: View {
     @State private var appearance: AppearanceModel
     /// What this server offers, read once per session; nil until then.
     @State private var runtime: WorkspaceRuntime?
+    /// The Assistant is home; Inventory when this server has no assistant.
+    @State private var selection: WorkspaceTab?
 
     init(api: AnteroomAPI) {
         self.api = api
@@ -20,8 +22,9 @@ struct WorkspaceView: View {
 
     var body: some View {
         Group {
-            if let runtime {
-                tabs(views: runtime.views, features: runtime.features)
+            if let runtime, let selection {
+                tabs(views: runtime.views, features: runtime.features, selection: Binding(
+                    get: { selection }, set: { self.selection = $0 }))
             } else {
                 ProgressView()
             }
@@ -33,7 +36,9 @@ struct WorkspaceView: View {
         .task { await session.followChanges() }
         .task {
             // Without an answer the workspace opens with the tabs every server has.
-            runtime = (try? await api.runtime()) ?? WorkspaceRuntime()
+            let offered = (try? await api.runtime()) ?? WorkspaceRuntime()
+            selection = offered.views.contains("assistant") ? .assistant : .inventory
+            runtime = offered
         }
         .task(id: scenePhase) {
             if scenePhase == .active { await appearance.refresh() }
@@ -41,34 +46,38 @@ struct WorkspaceView: View {
     }
 
     /// A tab bar on iPhone; on iPad the same tabs also open as a sidebar.
-    private func tabs(views: [String], features: [String]) -> some View {
+    private func tabs(views: [String], features: [String], selection: Binding<WorkspaceTab>) -> some View {
         let wide = sizeClass == .regular
-        return TabView {
-            Tab {
+        return TabView(selection: selection) {
+            Tab(value: WorkspaceTab.inventory) {
                 InventoryView(api: api)
             } label: { TabIcon(title: "Inventory", systemImage: "tag.fill", showsTitle: wide) }
             if views.contains("assistant") {
-                Tab {
+                Tab(value: WorkspaceTab.assistant) {
                     BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
                 } label: { TabIcon(title: "Assistant", systemImage: "bubble.left.and.text.bubble.right.fill", showsTitle: wide) }
             }
-            Tab {
+            Tab(value: WorkspaceTab.analytics) {
                 AnalyticsDestination(api: api)
             } label: { TabIcon(title: "Analytics", systemImage: "chart.bar.fill", showsTitle: wide) }
             if views.contains("automations") {
-                Tab {
+                Tab(value: WorkspaceTab.automations) {
                     AutomationsView(api: api, canApprove: features.contains("marketplace_actions"),
                                     showsEbayOffers: features.contains("ebay_offers"),
                                     showsPromotions: features.contains("marketplace_sessions"))
                 } label: { TabIcon(title: "Automations", systemImage: "calendar.badge.clock", showsTitle: wide) }
             }
-            Tab {
+            Tab(value: WorkspaceTab.settings) {
                 SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
             } label: { TabIcon(title: "Settings", systemImage: "gearshape.fill", showsTitle: wide) }
         }
         .tabViewStyle(.sidebarAdaptable)
         .minimizingTabBarOnScroll()
     }
+}
+
+enum WorkspaceTab: Hashable {
+    case inventory, assistant, analytics, automations, settings
 }
 
 /// iPhone tabs show only their icon; the name stays for VoiceOver and UI

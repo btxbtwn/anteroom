@@ -246,10 +246,10 @@ def weekday_patterns(rows: list[AnalyticsItem], timezone: str, *, now: datetime)
         score, best = _best_window(counts) if enough else (0.0, [])
         # A preferred window needs a unique strongest run that beats chance.
         chance = (1 + sum(value >= score - 1e-9 for value in _null_maxima(total))) / 1000 if score else 1.0
-        week = " Run a 7-day sale so every day is covered; the weekday pattern stays fair while sales build."
+        week = " Run a 7-day sale to cover every day."
         window = best[0] if len(best) == 1 else None
         if not enough:
-            reason = "Not enough history to pick days yet (20 dated sales across 8 complete weeks)." + week
+            reason = "Needs 20 dated sales over 8 weeks to pick days." + week
         elif score == 0 or window is None:
             reason = "No weekday run stands out in your sales." + week
         else:

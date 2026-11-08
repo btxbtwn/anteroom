@@ -441,6 +441,36 @@ def test_cover_thumbnails_survive_a_new_server_process(cloud, signing_keys, monk
     assert not stored
 
 
+def test_phone_photo_tiles_are_kept_like_covers(cloud, signing_keys, monkeypatch):  # noqa: F811
+    # The iPhone editor's tiles are 384 px. Remaking each from the full photo
+    # after every deploy left the seller watching tiles fill in one at a time.
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    stored, reads = {}, []
+
+    def storage(method, key, _token, data=None):
+        if method == 'POST':
+            stored[key] = data
+        if method == 'GET':
+            reads.append(key)
+        return stored.get(key, b'')
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    image = io.BytesIO()
+    Image.new('RGB', (2400, 1200), 'red').save(image, 'JPEG')
+    photo = client.post('/api/drafts/' + identity + '/photos', headers=alice, content=image.getvalue()).json()['id']
+    original = next(key for key in stored if '.t' not in key)
+
+    first = client.get('/api/photos/' + photo + '/thumb?size=384', headers=alice)
+    with Image.open(io.BytesIO(first.content)) as result:
+        assert result.size == (384, 192)
+    hosted_photos._thumbs.clear()
+    reads.clear()
+    after_deploy = client.get('/api/photos/' + photo + '/thumb?size=384', headers=alice)
+    assert after_deploy.content == first.content
+    assert reads == [hosted_photos.rendition_key(original, 384)]
+
+
 def test_job_list_skips_the_listing_snapshot(cloud, signing_keys):  # noqa: F811
     # Each job keeps a full listing copy (tens of kilobytes). The list shows
     # status only, so it should not read those copies on every request.

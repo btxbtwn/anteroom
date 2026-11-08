@@ -174,8 +174,7 @@ enum EbayFormRules {
             if format != "AUCTION" {
                 field.locked = true
                 field.selectionOnly = true
-                field.options = [gtcLabel]
-                field.optionValues = [gtcLabel: gtc]
+                field.setChoices([gtcLabel], [gtcLabel: gtc])
                 field.value = .string(gtc)
                 field.help = "eBay fixed-price listings run Good 'Til Cancelled."
                 return field
@@ -187,16 +186,14 @@ enum EbayFormRules {
             let currentID = field.optionValues[field.value?.text ?? ""] ?? field.value?.text ?? ""
             let fallback = values["7 days"] ?? values[auctionOptions[0]] ?? ""
             field.selectionOnly = true
-            field.options = auctionOptions
-            field.optionValues = values
+            field.setChoices(auctionOptions, values)
             field.value = .string(values.values.contains(currentID) ? currentID : fallback)
             field.help = nil
         case "ebay_specifics.listingFormat":
             guard varied, format != "AUCTION" else { return field }
             let options = field.options.filter { field.optionValues[$0] != "AUCTION" }
             guard !options.isEmpty, options.count != field.options.count else { return field }
-            field.optionValues = field.optionValues.filter { options.contains($0.key) }
-            field.options = options
+            field.setChoices(options, field.optionValues.filter { options.contains($0.key) })
             field.help = "A listing with variations is fixed price. Remove the variations to sell at auction."
         case "quantity":
             field.locked = varied

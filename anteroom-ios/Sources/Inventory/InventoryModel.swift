@@ -14,6 +14,8 @@ final class InventoryModel {
     private(set) var loadedAt: Date?
     var filters = InventoryFilters()
     var error: String?
+    /// The markdown review for the stale listings, read ahead so Mark down opens filled.
+    @ObservationIgnored private var markdownPreview: MarkdownPreview?
     /// Counts changes to `listings`; the cached queries recompute when it moves.
     private var revision = 0
     @ObservationIgnored private var rowsMemo = QueryMemo<RowsKey, [ListingSummary]>()
@@ -37,6 +39,10 @@ final class InventoryModel {
     func reload() async {
         isLoading = true
         defer { isLoading = false }
+        // Suggestions and the filter menu's order are extras, asked beside the
+        // inventory; it works without them.
+        async let rankedRead = try? api.suggestions()
+        async let selectedRead = try? api.selectedMarketplaces()
         do {
             let rows = try await api.listings()
             try Task.checkCancellation()
@@ -44,14 +50,64 @@ final class InventoryModel {
             hasLoaded = true
             loadedAt = Date()
             error = nil
-        } catch is CancellationError {
-        } catch let failure as URLError where failure.code == .cancelled {
+        } catch let failure where failure.isCancellation {
         } catch {
             self.error = error.localizedDescription
         }
-        // Suggestions and the filter menu's order are extras; inventory works without them.
-        if let ranked = try? await api.suggestions() { suggestions = ranked }
-        if let selected = try? await api.selectedMarketplaces() { preferredMarketplaces = selected }
+        if let ranked = await rankedRead {
+            suggestions = ranked
+            prefetchMarkdowns()
+        }
+        if let selected = await selectedRead { preferredMarketplaces = selected }
+    }
+
+    // MARK: Mark down prices
+
+    private struct MarkdownPreview {
+        let ids: [String]
+        let asked: Date
+        let task: Task<[MarkdownReviewRow], Error>
+    }
+
+    /// The stale listings the batch markdown offers.
+    var staleListingIDs: [String] {
+        suggestions.filter { $0.kind == "stale_active" }.map(\.conversationID)
+    }
+
+    /// Reads the markdown review for the stale listings in the background, at
+    /// most every five minutes for the same listings. Nothing is saved: the
+    /// seller still reviews each price, and Save sends each row's revision, so
+    /// a listing changed since is skipped rather than overwritten.
+    private func prefetchMarkdowns(now: Date = Date()) {
+        let ids = staleListingIDs
+        guard !ids.isEmpty else { return markdownPreview = nil }
+        if let kept = markdownPreview, kept.ids == ids, now.timeIntervalSince(kept.asked) < 300 { return }
+        let task = Task { [api] in try await api.previewMarkdowns(ids: ids) }
+        markdownPreview = MarkdownPreview(ids: ids, asked: now, task: task)
+    }
+
+    /// The review read ahead for exactly these listings, if there is one.
+    func markdownReview(for ids: [String]) -> Task<[MarkdownReviewRow], Error>? {
+        guard let kept = markdownPreview, kept.ids == ids else { return nil }
+        return kept.task
+    }
+
+    /// Titles to show while a markdown review loads.
+    func titles(for ids: [String]) -> [String: String] {
+        let wanted = Set(ids)
+        var titles: [String: String] = [:]
+        for suggestion in suggestions where wanted.contains(suggestion.conversationID) {
+            titles[suggestion.conversationID] = suggestion.title
+        }
+        for listing in listings where titles[listing.id] == nil && wanted.contains(listing.id) {
+            titles[listing.id] = listing.displayTitle
+        }
+        return titles
+    }
+
+    /// After markdowns are saved, the next review is read again.
+    func forgetMarkdownReview() {
+        markdownPreview = nil
     }
 
     /// Coming back to the app reloads, unless the inventory is under 30 seconds old.

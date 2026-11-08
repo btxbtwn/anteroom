@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import tempfile
 import threading
 import unittest
@@ -110,6 +111,57 @@ class ScoutScriptTest(unittest.TestCase):
 
     def _lots(self, **filters):
         return self.s.score_lots(CATALOGS, self.cfg, ZONES, self.s.Filters(**filters))[1]
+
+    def test_catalog_retries_rate_limit_and_stops_after_partial_page(self):
+        limited = urllib.error.HTTPError("https://supplier/products.json", 429, "Too Many Requests",
+                                         {"Retry-After": "3"}, None)
+        response = io.BytesIO(json.dumps({"products": RAGHOUSE}).encode())
+        with mock.patch.object(self.s.urllib.request, "urlopen", side_effect=[limited, response]) as fetch, \
+                mock.patch.object(self.s.time, "sleep") as sleep:
+            self.assertEqual(self.s.fetch_catalog("raghouse"), RAGHOUSE)
+        self.assertEqual(fetch.call_count, 2)
+        sleep.assert_called_once_with(3)
+
+    def test_catalog_rate_limit_retries_are_bounded(self):
+        limited = urllib.error.HTTPError("https://supplier/products.json", 429, "Too Many Requests", {}, None)
+        with mock.patch.object(self.s.urllib.request, "urlopen", side_effect=limited) as fetch, \
+                mock.patch.object(self.s.time, "sleep") as sleep:
+            with self.assertRaises(urllib.error.HTTPError):
+                self.s.fetch_catalog("tvf")
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual(sleep.call_args_list, [mock.call(2), mock.call(4)])
+
+    def test_catalog_preserves_full_pages_when_later_page_is_rate_limited(self):
+        first = io.BytesIO(json.dumps({"products": [RAGHOUSE[0]] * 250}).encode())
+        last = io.BytesIO(json.dumps({"products": RAGHOUSE}).encode())
+        limited = urllib.error.HTTPError("https://supplier/products.json", 429, "Too Many Requests", {}, None)
+        with mock.patch.object(self.s.urllib.request, "urlopen", side_effect=[first, limited, last]) as fetch, \
+                mock.patch.object(self.s.time, "sleep"):
+            self.assertEqual(self.s.fetch_catalog("raghouse"), [RAGHOUSE[0]] * 250 + RAGHOUSE)
+        self.assertIn("page=2", fetch.call_args_list[1].args[0].full_url)
+        self.assertEqual(fetch.call_args_list[1].args[0].full_url, fetch.call_args_list[2].args[0].full_url)
+
+    def test_catalog_does_not_retry_other_errors_or_long_cooldowns(self):
+        for code, headers in [(403, {}), (429, {"Retry-After": "120"})]:
+            with self.subTest(code=code):
+                error = urllib.error.HTTPError("https://supplier/products.json", code, "Unavailable", headers, None)
+                with mock.patch.object(self.s.urllib.request, "urlopen", side_effect=error) as fetch, \
+                        mock.patch.object(self.s.time, "sleep") as sleep:
+                    with self.assertRaises(urllib.error.HTTPError):
+                        self.s.fetch_catalog("tvf")
+                self.assertEqual(fetch.call_count, 1)
+                sleep.assert_not_called()
+
+    def test_catalog_accepts_http_date_and_invalid_retry_after(self):
+        for header in ["Thu, 01 Jan 1970 00:00:00 GMT", "invalid"]:
+            with self.subTest(header=header):
+                limited = urllib.error.HTTPError("https://supplier/products.json", 429, "Too Many Requests",
+                                                 {"Retry-After": header}, None)
+                response = io.BytesIO(b'{"products": []}')
+                with mock.patch.object(self.s.urllib.request, "urlopen", side_effect=[limited, response]), \
+                        mock.patch.object(self.s.time, "sleep") as sleep:
+                    self.assertEqual(self.s.fetch_catalog("tvf"), [])
+                sleep.assert_called_once_with(0 if header.startswith("Thu") else 2)
 
     def test_parses_both_stores_into_lots(self):
         lots = {lot["title"]: lot for lot in self._lots()}

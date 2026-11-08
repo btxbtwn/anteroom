@@ -103,12 +103,18 @@ final class StubSignIn: @unchecked Sendable {
             })
     }
 
-    /// Retries without waiting, on a clock that only the waits move.
-    func api(readRetry: ReadRetry = TestClock().retry) -> AnteroomAPI {
+    /// Retries without waiting, on a clock that only the waits move. Each
+    /// client keeps immutable reads in a folder of its own.
+    func api(readRetry: ReadRetry = TestClock().retry,
+             cache: ImmutableReadCache = ImmutableReadCache(directory: StubSignIn.temporaryFolder())) -> AnteroomAPI {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubProtocol.self]
         return AnteroomAPI(baseURL: URL(string: "https://anteroom.test")!, auth: authorization, configuration: configuration,
-                           readRetry: readRetry)
+                           readRetry: readRetry, immutableCache: cache)
+    }
+
+    static func temporaryFolder() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("anteroom-tests-\(UUID().uuidString)", isDirectory: true)
     }
 }
 
