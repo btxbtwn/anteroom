@@ -47,6 +47,8 @@ export interface ConversationSummary {
   sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
   vendoo_sold_dates?: Record<string, string>;
+  /** When the longest-standing live listing went up, counting Anteroom's own listings. */
+  oldest_listed_at?: string | null;
   /** When Studio last wrote this listing onto its Vendoo item. A marketplace
    * listed before this still shows the copy from before that write. */
   vendoo_form_updated_at?: string | null;
@@ -70,6 +72,8 @@ export interface DirectRecord {
   fields?: number;
   /** The live listing's price on this marketplace, when Anteroom knows it. */
   price?: number | null;
+  /** When Anteroom's last confirmed List put this listing up. */
+  listed_at?: string | null;
 }
 
 export interface Conversation extends ConversationSummary {
