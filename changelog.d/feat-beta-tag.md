@@ -1,1 +1,0 @@
-- Anteroom now shows a Beta tag next to its name.
