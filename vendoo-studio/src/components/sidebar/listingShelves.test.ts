@@ -7,7 +7,7 @@ import {
   notListedCount,
 } from "../inventoryFilters";
 import { activeAnchorMs, compactRelativeTime, settledAnchorMs, soldAtMs, type Listing } from "./listingShelves";
-import { inventoryStatus, liveMarketplaces, partialSale } from "./listingStatus";
+import { inventoryStatus, listingRowPrice, liveMarketplaces, partialSale, quantityLabel } from "./listingStatus";
 
 const ms = (iso: string) => Date.parse(iso);
 
@@ -159,5 +159,33 @@ describe("sidebar search", () => {
   it("counts marketplace rows from where items are actually live", () => {
     expect(marketplaceCounts(listings)).toEqual({ ebay: 1, mercari: 1 });
     expect(notListedCount(listings)).toBe(2);
+  });
+});
+
+describe("quantityLabel", () => {
+  it("shows how many units an unsold multi-quantity item has", () => {
+    expect(quantityLabel({ units_sold: 0, quantity: 3 }, "active")).toBe("Qty 3");
+    expect(quantityLabel({ quantity: 2 }, "draft")).toBe("Qty 2");
+  });
+
+  it("stays quiet for one unit, once units sell (partialSale says it) and for sold items", () => {
+    expect(quantityLabel({ quantity: 1 }, "active")).toBeNull();
+    expect(quantityLabel({ quantity: null }, "active")).toBeNull();
+    expect(quantityLabel({ units_sold: 1, quantity: 3 }, "active")).toBeNull();
+    expect(quantityLabel({ quantity: 3 }, "sold")).toBeNull();
+  });
+});
+
+describe("listingRowPrice", () => {
+  it("shows the asking price on drafts and active items", () => {
+    expect(listingRowPrice({ price: 24 }, "active")).toBe("$24");
+    expect(listingRowPrice({ price: 18.5 }, "draft")).toBe("$18.50");
+    expect(listingRowPrice({ price: 1250 }, "active")).toBe("$1,250");
+  });
+
+  it("hides a missing or zero price, and the asking price of a sold item", () => {
+    expect(listingRowPrice({ price: null }, "active")).toBeNull();
+    expect(listingRowPrice({ price: 0 }, "draft")).toBeNull();
+    expect(listingRowPrice({ price: 24 }, "sold")).toBeNull();
   });
 });
