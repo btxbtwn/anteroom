@@ -19,6 +19,8 @@ struct InventoryTests {
         precondition(rows[1].inventoryStatus == "active")
         precondition(rows[4].statusTab == "draft" && rows[4].statusLabel == "In Progress")
         precondition(rows[0].coverPhotoID == "p1" && rows[1].coverPhotoID == nil)
+        // The cover's version lets its thumbnail be kept; without one it is not.
+        precondition(rows[0].coverPhotoVersion == "abc" && rows[1].coverPhotoVersion == nil)
         precondition(rows[3].displayTitle == "Untitled")
 
         // Settled listings stay out of All, appear in Sold and in search.

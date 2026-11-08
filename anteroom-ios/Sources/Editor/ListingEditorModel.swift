@@ -30,8 +30,17 @@ final class ListingEditorModel {
     private(set) var revisionID: String?
     /// Marketplace tab edits by listing path, written into the listing on Save.
     private(set) var pending: [String: JSONValue] = [:]
+    /// Each marketplace tab's form. A form stays while a newer one loads.
     private(set) var forms: [String: NativeForm] = [:]
     private(set) var formErrors: [String: String] = [:]
+    /// Form downloads in flight, owned here so switching tabs never cancels one.
+    @ObservationIgnored private var formLoads: [String: FormLoad] = [:]
+    /// The item's photos, from the same read as the listing.
+    var photos: [ListingPhoto] = []
+    private(set) var photosLoaded = false
+    /// The inventory row's cover, shown while the photos load.
+    let coverPhotoID: String?
+    let coverPhotoVersion: String?
     private(set) var isLoading = true
     private(set) var isSaving = false
     private(set) var loadError: String?
@@ -50,6 +59,8 @@ final class ListingEditorModel {
         self.api = api
         listingID = listing.id
         status = listing.status ?? "draft"
+        coverPhotoID = listing.coverPhotoID
+        coverPhotoVersion = listing.coverPhotoVersion
         form.fields.title = listing.title ?? ""
         saved = form
     }
@@ -58,43 +69,58 @@ final class ListingEditorModel {
     var isDraft: Bool { status == "draft" }
     var title: String { form.fields.title }
 
+    /// Reads the listing, its notes and photos in one request. The General
+    /// lists and the marketplace tabs load beside it and never hold the editor
+    /// up; once both are in, every tab's form starts loading.
     func load() async {
         isLoading = true
         defer { isLoading = false }
+        let lookups = Task { await loadLookups() }
         do {
-            async let detail = api.conversation(listingID)
-            async let listing = api.listing(listingID)
-            let (conversation, current) = try await (detail, listing)
-            // Without the lists the fields stay editable as text.
-            if options == GeneralOptions(), let lists = try? await api.generalOptions() { options = lists }
-            if marketplaceTabs.isEmpty {
-                // Settings → Where you list decides which forms show, as on the web.
-                async let forms = try? api.runtime().marketplaceForms
-                async let chosen = try? api.selectedMarketplaces()
-                if let tabs = await forms {
-                    let selected = await chosen.map(Set.init)
-                    marketplaceTabs = selected.map { picked in tabs.filter(picked.contains) } ?? tabs
-                }
-            }
-            status = conversation.status ?? "draft"
-            document = current.listing
-            revisionID = current.currentRevisionID
-            pending = [:]
-            forms = [:]
-            var next = Self.form(from: document)
-            if next.fields.title.isEmpty { next.fields.title = conversation.title ?? "" }
-            next.sellerInputs = SellerInputs(notes: conversation.notes)
-            form = next
-            saved = next
-            hasLoaded = true
-            loadError = nil
-            if !checkedStash {
-                checkedStash = true
-                restoreStash()
-            }
+            let screen = try await api.listingScreen(listingID)
+            let revisionChanged = hasLoaded && screen.listing.currentRevisionID != revisionID
+            apply(screen)
+            isLoading = false
+            await lookups.value
             Task { await loadReadiness() }
+            prefetchForms(refresh: revisionChanged)
         } catch {
             loadError = error.localizedDescription
+        }
+    }
+
+    private func apply(_ screen: ListingScreen) {
+        status = screen.conversation.status ?? "draft"
+        document = screen.listing.listing
+        revisionID = screen.listing.currentRevisionID
+        pending = [:]
+        var next = Self.form(from: document)
+        if next.fields.title.isEmpty { next.fields.title = screen.conversation.title ?? "" }
+        next.sellerInputs = SellerInputs(notes: screen.conversation.notes)
+        form = next
+        saved = next
+        photos = screen.photos
+        photosLoaded = true
+        hasLoaded = true
+        loadError = nil
+        if !checkedStash {
+            checkedStash = true
+            restoreStash()
+        }
+    }
+
+    /// The General dropdown lists and the marketplace tabs, asked at once. The
+    /// API keeps both, so a second listing opens without asking again.
+    private func loadLookups() async {
+        async let listsRead = try? api.generalOptions()
+        async let formsRead = try? api.runtime().marketplaceForms
+        async let chosenRead = try? api.selectedMarketplaces()
+        // Without the lists the fields stay editable as text.
+        if let lists = await listsRead, lists != options { options = lists }
+        // Settings → Where you list decides which forms show, as on the web.
+        if marketplaceTabs.isEmpty, let tabs = await formsRead {
+            let selected = await chosenRead.map(Set.init)
+            marketplaceTabs = selected.map { picked in tabs.filter(picked.contains) } ?? tabs
         }
     }
 
@@ -209,10 +235,11 @@ final class ListingEditorModel {
                 let result = try await api.saveListing(listingID, ListingSave(
                     listing: listing, expectedRevisionID: revisionID ?? ""))
                 pending = [:]
-                // The server recomputes marketplace rows (earnings, category fields).
-                forms = [:]
                 document = result.listing
                 revisionID = result.revisionID
+                // The server recomputes marketplace rows (earnings, category
+                // fields); the tabs keep showing theirs until the new ones arrive.
+                prefetchForms(refresh: true)
                 let reloaded = Self.form(from: document)
                 form.fields = reloaded.fields
                 form.price = reloaded.price
@@ -250,12 +277,61 @@ final class ListingEditorModel {
 
     // MARK: Marketplace tabs
 
+    private struct FormLoad {
+        let revisionID: String?
+        let task: Task<Void, Never>
+    }
+
+    /// Loads a tab's form, or joins the download already running for it.
+    /// The download belongs to the model: leaving the tab doesn't stop it.
     func loadForm(_ marketplace: String) async {
-        do {
-            forms[marketplace] = try await api.nativeForm(listingID, marketplace: marketplace)
+        await startFormLoad(marketplace).value
+    }
+
+    /// Starts every tab's form at once, so switching tabs finds it ready.
+    /// `refresh` asks again for forms already loaded, keeping them on screen meanwhile.
+    func prefetchForms(refresh: Bool = false) {
+        for marketplace in marketplaceTabs where refresh || forms[marketplace] == nil {
+            startFormLoad(marketplace)
+        }
+    }
+
+    @discardableResult
+    private func startFormLoad(_ marketplace: String) -> Task<Void, Never> {
+        if let running = formLoads[marketplace] {
+            if running.revisionID == revisionID { return running.task }
+            // Asked for a revision since replaced.
+            running.task.cancel()
+        }
+        let revision = revisionID
+        formErrors[marketplace] = nil
+        let task = Task { [api, listingID] in
+            let result: Result<NativeForm, Error>
+            do {
+                result = .success(try await api.nativeForm(listingID, marketplace: marketplace))
+            } catch {
+                result = .failure(error)
+            }
+            self.finishFormLoad(marketplace, revision: revision, result)
+        }
+        formLoads[marketplace] = FormLoad(revisionID: revision, task: task)
+        return task
+    }
+
+    private func finishFormLoad(_ marketplace: String, revision: String?, _ result: Result<NativeForm, Error>) {
+        // A download for a replaced revision says nothing about the current one.
+        guard revision == revisionID else { return }
+        formLoads[marketplace] = nil
+        switch result {
+        case .success(let form):
+            forms[marketplace] = form
             formErrors[marketplace] = nil
-        } catch {
-            formErrors[marketplace] = error.localizedDescription
+        case .failure(let error) where error.isCancellation:
+            // Not loaded, not failed: the tab asks again when it shows.
+            break
+        case .failure(let error):
+            // A form already on screen stays; only a tab with nothing to show reports the error.
+            if forms[marketplace] == nil { formErrors[marketplace] = error.localizedDescription }
         }
     }
 
@@ -296,7 +372,7 @@ final class ListingEditorModel {
 
     private func fits(_ field: NativeField, _ value: JSONValue) -> Bool {
         guard field.selectionOnly, !field.options.isEmpty else { return true }
-        let known = Set(field.options).union(field.optionValues.values)
+        let known = field.choices.known
         switch value {
         case .array(let items): return items.allSatisfy { known.contains($0.text) }
         default: return known.contains(value.text)

@@ -22,8 +22,12 @@ struct NativeField: Decodable, Identifiable, Sendable {
     var required: Bool
     var multi: Bool
     var selectionOnly: Bool
-    var options: [String]
-    var optionValues: [String: String]
+    /// The labels offered, in order; change them with `setChoices` so `choices` follows.
+    private(set) var options: [String]
+    /// Label → stored value.
+    private(set) var optionValues: [String: String]
+    /// The same choices looked up by stored value, built once per list.
+    private(set) var choices = ChoiceIndex(options: [], optionValues: [:])
     var inputType: String
     var help: String?
     var section: String?
@@ -98,16 +102,44 @@ struct NativeField: Decodable, Identifiable, Sendable {
         step = try? c.decodeIfPresent(Double.self, forKey: .step)
         variationAspects = (try? c.decodeIfPresent([VariationAspect].self, forKey: .variationAspects)) ?? []
         choiceList = try c.decodeIfPresent(ChoiceListRef.self, forKey: .choiceList)
+        choices = ChoiceIndex(options: options, optionValues: optionValues)
+    }
+
+    mutating func setChoices(_ options: [String], _ optionValues: [String: String]) {
+        self.options = options
+        self.optionValues = optionValues
+        choices = ChoiceIndex(options: options, optionValues: optionValues)
     }
 
     /// The label a stored value is shown as.
     func label(for stored: String) -> String {
-        optionValues.first { $0.value == stored }?.key ?? stored
+        choices.labels[stored] ?? stored
     }
 
     /// The value a chosen label is stored as.
     func stored(for label: String) -> String {
         optionValues[label] ?? label
+    }
+}
+
+/// A field's choices by stored value. Depop's brand list is about 21,700
+/// entries, so the screen looks values up here instead of searching the list
+/// each time it draws.
+struct ChoiceIndex: Sendable {
+    /// Every label and stored value the field accepts.
+    let known: Set<String>
+    /// Stored value → the label shown; the first label in the list's order wins.
+    let labels: [String: String]
+
+    init(options: [String], optionValues: [String: String]) {
+        var labels: [String: String] = [:]
+        labels.reserveCapacity(optionValues.count)
+        for label in options {
+            if let stored = optionValues[label], labels[stored] == nil { labels[stored] = label }
+        }
+        for (label, stored) in optionValues where labels[stored] == nil { labels[stored] = label }
+        self.labels = labels
+        known = Set(options).union(optionValues.values)
     }
 }
 
@@ -145,8 +177,7 @@ extension NativeForm {
         var form = self
         for index in form.fields.indices {
             guard let ref = form.fields[index].choiceList, let list = lists[ref] else { continue }
-            form.fields[index].options = list.options
-            form.fields[index].optionValues = list.optionValues
+            form.fields[index].setChoices(list.options, list.optionValues)
             form.fields[index].choiceList = nil
         }
         return form
