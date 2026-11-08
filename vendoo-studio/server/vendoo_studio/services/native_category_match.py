@@ -41,6 +41,12 @@ _NICHE = {
     "wedding", "pet", "dog", "cat", "doll", "toy", "golf", "fishing", "scrub", "traditional",
 }
 _APPAREL = "clothing, shoes & accessories"
+# Branches outside clothing a department's item could share a word with:
+# Fragrance sets, Cleaning gloves, Storage organizers.
+_HOUSEHOLD = {
+    "beauty", "fragrance", "makeup", "skincare", "home", "cleaning", "kitchen", "storage", "office", "tool",
+    "garden", "household",
+}
 # Branches that also name an item ("Men > Kimono / Yukata > Kimono"): a row
 # inside one still needs the category or listing to say so.
 _NICHE_BRANCH = {"kimono", "yukata"}
@@ -132,7 +138,7 @@ class _Path(NamedTuple):
     # The steps naming the item, last first, skipping Other, None, or an age range.
     steps: tuple[str, ...]
     generic_leaf: bool
-    # Clothing, shoes and accessories: the General apparel root, or a department.
+    # Under General's "Clothing, Shoes & Accessories". A baby's books or a scout's mug are not.
     apparel: bool
 
 
@@ -150,7 +156,7 @@ def _parsed(path: str) -> _Path:
         words=frozenset(words(path)),
         steps=tuple(reversed(named)) if named and named[-1] == steps[-1] else (),
         generic_leaf=not _alternatives(last),
-        apparel=bool(department(path)) or bool(steps) and segments(path)[0].casefold() == _APPAREL,
+        apparel=bool(segments(path)) and segments(path)[0].casefold() == _APPAREL,
     )
 
 
@@ -158,10 +164,14 @@ def _rank(parsed: list[tuple[dict, _Path]], want: _Path, steps: tuple[str, ...],
           dept: str, *, loose: bool = False) -> list[tuple[tuple, tuple[int, int], int, dict]]:
     """The rows naming the first of `steps` that any row names, best first, as (score, item order, row order, row).
 
+    A step only a qualifier matches ("Girls swimwear" for "Swim Diapers") gives
+    way to a later step a row names outright ("Diapering").
+
     `dept` is the department to match in: the category's own, or a nearby one
     when the closest match looks further. `loose` also accepts a row that adds
     a qualifier neither the category nor the listing says.
     """
+    weak_only: list[tuple[tuple, tuple[int, int], int, dict]] = []
     for step in steps:
         items = _alternatives(step)
         nouns = {noun for noun, _ in items}
@@ -195,9 +205,9 @@ def _rank(parsed: list[tuple[dict, _Path]], want: _Path, steps: tuple[str, ...],
             # "Puzzles and games", and a truck's lighting is not studio lighting.
             if not context and (not dept or (qualifiers and not shared)):
                 continue
-            # A department's clothing never lands in a branch with no department
+            # A department's clothing never lands in a household or beauty branch
             # unless that branch says so too: kids' sets are not Fragrance sets.
-            if not context and dept and not found.department and want.apparel:
+            if not context and dept and not found.department and want.apparel and found.words & _HOUSEHOLD:
                 continue
             score = (
                 int(bool(found.department) == bool(dept)),
@@ -215,10 +225,11 @@ def _rank(parsed: list[tuple[dict, _Path]], want: _Path, steps: tuple[str, ...],
             # A tie keeps the age group: a baby's item is "0-24 mos", not "Girls (4+)".
             first = (first, int(_baby(want.key) != _baby(found.key)))
             ranked.append((score, first, index, row))
-        if ranked:
-            ranked.sort(key=lambda entry: (tuple(-value for value in entry[0]), entry[1], entry[2]))
+        ranked.sort(key=lambda entry: (tuple(-value for value in entry[0]), entry[1], entry[2]))
+        if any(entry[0][1] for entry in ranked):
             return ranked
-    return []
+        weak_only = weak_only or ranked
+    return weak_only
 
 
 def match_row(rows: list[dict], path: str, evidence: str = "") -> dict | None:

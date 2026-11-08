@@ -111,7 +111,7 @@ def test_a_suggestion_keeps_the_department_or_its_nearest(market):
 
 # General apparel leaves (457) each form fills: (exact, exact or suggested).
 # Floors that only rise: raise them when a change fills more.
-APPAREL_FLOOR = {"poshmark": (228, 377), "mercari": (194, 383), "depop": (205, 317)}
+APPAREL_FLOOR = {"poshmark": (228, 377), "mercari": (195, 383), "depop": (209, 317)}
 
 
 @pytest.mark.parametrize("market", sorted(APPAREL_FLOOR))
