@@ -46,6 +46,9 @@ const task = (overrides: Partial<Automation>): Automation => ({
   ...overrides,
 });
 
+/** The switch element's own tag, found by its accessible name. */
+const switchTag = (html: string, label: string) => new RegExp(`<[^>]*aria-label="${label}"[^>]*>`).exec(html)?.[0] ?? "";
+
 const render = () => renderToStaticMarkup(<AutomationsPage onOpenListing={vi.fn()} />);
 
 const hosted = (features: string[]) => renderToStaticMarkup(
@@ -76,7 +79,7 @@ describe("AutomationsPage", () => {
     expect(html).toContain("New automation");
     // eBay offers is a row in the same list, not a block of settings.
     expect(html).toContain("eBay offers");
-    expect(html).toContain("Every 15 minutes · No listings yet");
+    expect(html).toContain("Every 15 minutes · No listings chosen");
     expect(html).toContain('aria-label="Turn on eBay offers"');
     expect(html).not.toContain("Automatic offers check every 15 minutes");
     expect(html).not.toContain("Sharing and offers to likers");
@@ -103,8 +106,12 @@ describe("AutomationsPage", () => {
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-label="Pause Refresh stale listings"');
     expect(html).toContain('aria-label="More for Weekend drop"');
-    // A draft is confirmed from its panel, not flipped on from the list.
+    // A draft is confirmed from its panel: its switch shows, off and locked, with the word under it.
     expect(html).toContain(">Draft<");
+    expect(switchTag(html, "Turn on Weekend drop")).toContain("data-disabled");
+    // Descriptions wrap to two lines and keep their full text on hover, never cut to "…".
+    expect(html).toContain('title="Every day 9:00 AM · listed 60+ days on eBay, Poshmark"');
+    expect(html).not.toContain("@2xl/page:truncate");
     expect(html).not.toContain("No automations yet.");
   });
 
@@ -127,11 +134,12 @@ describe("AutomationsPage", () => {
     expect(hosted(["inventory", "ebay_offers"])).toContain("eBay offers");
   });
 
-  it("offers Connect eBay on the eBay row while eBay is not connected", () => {
+  it("keeps the switch on the eBay row while eBay is not connected, and says what it needs", () => {
     data.ebayConnected = false;
     const html = render();
-    expect(html).toContain("Connect eBay");
-    expect(html).not.toContain('aria-label="Turn on eBay offers"');
+    expect(html).toContain("Needs eBay");
+    expect(html).toContain("Connect eBay to turn this on.");
+    expect(switchTag(html, "Turn on eBay offers")).toContain("data-disabled");
   });
 
   it("lists sharing and offers to likers in the same list, off with why", () => {

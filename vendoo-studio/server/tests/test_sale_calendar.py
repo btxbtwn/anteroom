@@ -143,6 +143,14 @@ def test_weak_peak_suggests_a_full_week():
     assert "7-day sale" in pattern["reason"]
 
 
+def test_short_history_says_what_it_needs_in_two_short_sentences():
+    start = NOW - timedelta(weeks=3)
+    rows = [sale(start + timedelta(days=day, hours=1)) for day in (0, 1, 3)]
+    pattern = weekday_patterns(rows, "UTC", now=NOW)[0]
+    # The card's helper text stays within two lines (DESIGN.md).
+    assert pattern["reason"] == "Needs 20 dated sales over 8 weeks to pick days. Run a 7-day sale to cover every day."
+
+
 def test_tied_weekdays_suggest_a_full_week():
     start = NOW - timedelta(weeks=12)
     rows = [sale(start + timedelta(days=day, hours=1)) for day in range(84)]
