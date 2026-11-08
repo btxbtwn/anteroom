@@ -98,6 +98,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/Models.swift Sources/API/AssistantModels.swift Sources/Automations/AutomationModels.swift Sources/Assistant/BusinessAssistantModels.swift Tests/BusinessAssistantTests.swift -o "$RUNNER_TEMP/business-assistant-tests"
           "$RUNNER_TEMP/business-assistant-tests"
+      - name: Test listing assistant replies (summary, never JSON)
+        run: |
+          xcrun swiftc Sources/Assistant/AssistantDisplay.swift Tests/AssistantDisplayTests.swift -o "$RUNNER_TEMP/assistant-display-tests"
+          "$RUNNER_TEMP/assistant-display-tests"
       - name: Test appearance preference contract
         run: |
           xcrun swiftc Sources/API/AppearancePreferences.swift Tests/AppearancePreferencesTests.swift -o "$RUNNER_TEMP/appearance-tests"

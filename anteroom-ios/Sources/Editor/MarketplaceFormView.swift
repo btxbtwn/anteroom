@@ -189,6 +189,7 @@ private struct NativeFieldControl: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .fieldAnchor(field.path)
     }
 
     private var title: String { field.required ? "\(field.label) *" : field.label }

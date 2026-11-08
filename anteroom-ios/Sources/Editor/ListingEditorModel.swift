@@ -57,6 +57,18 @@ final class ListingEditorModel {
     var hasChanges: Bool { hasLoaded && !isLoading && (form != saved || !pending.isEmpty) }
     var isDraft: Bool { status == "draft" }
     var title: String { form.fields.title }
+    /// The saved listing has copy that generating would replace: a description,
+    /// or a title other than the placeholder a new draft starts with. The
+    /// draft's name alone (before any listing is saved) is not copy.
+    var hasCopy: Bool { Self.hasCopy(title: document["title"]?.text ?? "", description: document["description"]?.text ?? "") }
+    /// No description yet: the editor offers Generate listing.
+    var needsGenerating: Bool { (document["description"]?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    nonisolated static func hasCopy(title: String, description: String) -> Bool {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !(title.isEmpty || title == "New Listing")
+    }
 
     func load() async {
         isLoading = true
@@ -73,7 +85,8 @@ final class ListingEditorModel {
                 async let chosen = try? api.selectedMarketplaces()
                 if let tabs = await forms {
                     let selected = await chosen.map(Set.init)
-                    marketplaceTabs = selected.map { picked in tabs.filter(picked.contains) } ?? tabs
+                    // One order everywhere, whatever order the seller picked them in.
+                    marketplaceTabs = Marketplaces.sorted(selected.map { picked in tabs.filter(picked.contains) } ?? tabs)
                 }
             }
             status = conversation.status ?? "draft"
@@ -137,7 +150,7 @@ final class ListingEditorModel {
 
     // MARK: Readiness and List everywhere
 
-    static let listMarketplaces = ["ebay", "etsy", "poshmark", "mercari", "depop"]
+    static let listMarketplaces = MarketplaceActions.order
 
     func choice(_ marketplace: String) -> ListChoice? {
         choices.first { $0.marketplace == marketplace }

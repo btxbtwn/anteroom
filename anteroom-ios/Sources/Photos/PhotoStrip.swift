@@ -9,6 +9,8 @@ struct PhotoStrip: View {
     let api: AnteroomAPI
     let listingID: String
     var canAdd = true
+    /// Told how many photos the listing has, whenever that changes.
+    var onCount: ((Int) -> Void)? = nil
 
     @State private var photos: [ListingPhoto] = []
     @State private var picked: [PhotosPickerItem] = []
@@ -135,6 +137,7 @@ struct PhotoStrip: View {
             ArrangePhotosSheet(api: api, listingID: listingID, photos: $photos)
         }
         .task { await load() }
+        .onChange(of: photos.count) { _, count in onCount?(count) }
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []

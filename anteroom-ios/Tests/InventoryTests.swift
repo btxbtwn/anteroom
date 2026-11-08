@@ -107,9 +107,10 @@ struct InventoryTests {
         let missing = [MissingField(field: "price", label: "Item price", message: "Depop needs a price."),
                        MissingField(field: "depop_specifics.condition", label: "Condition", message: "Condition is empty.")]
         let ready = tracked.marketplaceBadges(missing: ["etsy": missing, "ebay": missing, "depop": missing, "poshmark": missing])
-        precondition(ready.map(\.label) == ["Listed", "Needs 2 fields", "Needs 2 fields", "Working", "Needs 2 fields"],
+        precondition(ready.map(\.label) == ["Listed", "Needs 2 fields", "Working", "Needs 2 fields", "Needs 2 fields"],
                      "Live and running keep their state; draft, failed and not listed read the server's count")
-        precondition(ready.map(\.marketplace) == ["ebay", "etsy", "poshmark", "mercari", "depop"])
+        // The web editor's marketplace order, the same on every screen.
+        precondition(ready.map(\.marketplace) == ["ebay", "poshmark", "mercari", "depop", "etsy"])
         precondition(rows[0].marketplaceBadges(missing: ["depop": []]).isEmpty, "Nothing missing and no record says nothing")
         precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "not_saved", failed: true, fields: 1),
                                       missing: missing)?.label == "Needs 2 fields", "Rejected fields are already in the count")
@@ -206,6 +207,14 @@ struct InventoryTests {
         precondition(searched("") == ["d", "a", "b", "e"] && computed == 1, "same inputs: no recompute")
         precondition(searched("coat") == ["c"] && computed == 2)
         precondition(searched("") == ["d", "a", "b", "e"] && computed == 3)
+        // Leaving a new draft with nothing added removes it; anything added keeps it.
+        precondition(InventoryQuery.untouched(photos: 0, notes: nil, title: "New Listing", revisionID: nil, messages: 0))
+        precondition(InventoryQuery.untouched(photos: 0, notes: " ", title: nil, revisionID: nil, messages: 0))
+        precondition(!InventoryQuery.untouched(photos: 1, notes: nil, title: "New Listing", revisionID: nil, messages: 0))
+        precondition(!InventoryQuery.untouched(photos: 0, notes: "Wool", title: "New Listing", revisionID: nil, messages: 0))
+        precondition(!InventoryQuery.untouched(photos: 0, notes: nil, title: "Blue shirt", revisionID: nil, messages: 0))
+        precondition(!InventoryQuery.untouched(photos: 0, notes: nil, title: "New Listing", revisionID: "r1", messages: 0))
+        precondition(!InventoryQuery.untouched(photos: 0, notes: nil, title: "New Listing", revisionID: nil, messages: 1))
         print("Inventory tests passed")
     }
 

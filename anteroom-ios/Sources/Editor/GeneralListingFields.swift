@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Mirrors the desktop General form's sections and order
-/// (generalFormSections in listingFieldSections.ts): what the item is, how it
-/// reads, its condition, then price, shipping and stock. Native marketplace
-/// forms remain separate.
+/// The General form, in the order agreed for web and iPhone: what sells the
+/// item first (title, description, price), then what it is, its condition,
+/// measurements, shipping, stock, and the seller's own notes last. Photos sit
+/// above it. Native marketplace forms remain separate.
 struct GeneralListingFields: View {
     @Binding var form: ListingEditorModel.Form
     var options = GeneralOptions()
@@ -11,46 +11,52 @@ struct GeneralListingFields: View {
     var api: AnteroomAPI?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    /// Section titles in order, for tests and the layout review.
+    static let sectionOrder = ["Listing", "Item", "Condition & details", "Measurements (in)", "Shipping",
+                               "Inventory", "Notes & Labels"]
+
     var body: some View {
-        ListingInspectorSection("Item") {
-            GeneralCategoryField(path: $form.fields.categoryPath, api: api)
-            TextRow("Department", text: $form.fields.department)
-            TextRow("Brand", text: $form.fields.brand)
-        }
         ListingInspectorSection("Listing") {
             WorkspaceField("Title") {
-                TextField("Title", text: $form.fields.title, axis: .vertical).lineLimit(1...3)
+                TextField("What buyers search for", text: $form.fields.title, axis: .vertical).lineLimit(1...3)
                     .accessibilityIdentifier("listing-title")
             }
+            .fieldAnchor("title")
             WorkspaceField("Description") {
                 TextField("Describe your item", text: $form.fields.description, axis: .vertical).lineLimit(5...16)
             }
+            .fieldAnchor("description")
+            pair {
+                NumberField("Price", text: $form.price, prefix: "$").fieldAnchor("price")
+                NumberField("Cost", text: $form.cost, prefix: "$").fieldAnchor("cost")
+            }
+        }
+        ListingInspectorSection("Item") {
+            GeneralCategoryField(path: $form.fields.categoryPath, api: api).fieldAnchor("category_path")
+            TextRow("Brand", text: $form.fields.brand).fieldAnchor("brand")
+            TextRow("Department", text: $form.fields.department).fieldAnchor("department")
         }
         ListingInspectorSection("Condition & details") {
-            OptionField("Condition", value: $form.fields.condition, options: options.condition)
-            OptionField("Size", value: $form.fields.size, options: options.size)
-            OptionField("Primary Color", value: $form.fields.primaryColor, options: options.primaryColor)
-            OptionField("Secondary Color", value: $form.fields.secondaryColor, options: options.secondaryColor)
+            OptionField("Condition", value: $form.fields.condition, options: options.condition).fieldAnchor("condition")
+            OptionField("Size", value: $form.fields.size, options: options.size).fieldAnchor("size")
+            OptionField("Primary Color", value: $form.fields.primaryColor, options: options.primaryColor).fieldAnchor("primaryColor")
+            OptionField("Secondary Color", value: $form.fields.secondaryColor, options: options.secondaryColor).fieldAnchor("secondaryColor")
         }
-        ListingInspectorSection("Pricing") {
-            pair {
-                NumberField("Price", text: $form.price, prefix: "$")
-                NumberField("Cost", text: $form.cost, prefix: "$")
-            }
-        }
+        SellerMeasurementFields(inputs: $form.sellerInputs)
         ListingInspectorSection("Shipping") {
             pair {
-                NumberField("Package Weight (oz)", text: $form.weightOz)
-                TextRow("Package Dimensions (LxWxH in)", text: $form.fields.packageDimensionsIn)
+                NumberField("Package Weight (oz)", text: $form.weightOz).fieldAnchor("weight_oz")
+                TextRow("Package Dimensions (LxWxH in)", text: $form.fields.packageDimensionsIn).fieldAnchor("package_dimensions_in")
             }
-            TextRow("Inventory location", text: $form.fields.zipCode)
+            TextRow("Inventory location", text: $form.fields.zipCode).fieldAnchor("zipCode")
         }
         ListingInspectorSection("Inventory") {
             pair {
-                WorkspaceField("Quantity") { TextField("1", text: $form.quantity).keyboardType(.numberPad) }
-                TextRow("SKU", text: $form.fields.sku)
+                WorkspaceField("Quantity") { TextField("1", text: $form.quantity).keyboardType(.numberPad) }.fieldAnchor("quantity")
+                TextRow("SKU", text: $form.fields.sku).fieldAnchor("sku")
             }
         }
+        SellerNoteFields(inputs: $form.sellerInputs)
     }
 
     /// Two related fields side by side; stacked at accessibility text sizes.
@@ -128,4 +134,19 @@ struct ListingInspectorSection<Content: View>: View {
         .padding(.vertical, 16)
         .overlay(alignment: .bottom) { WorkspaceStyle.border.frame(height: 1) }
     }
+}
+
+/// Where the editor scrolls to show a field a marketplace still needs. Each
+/// field is tagged with its listing path, the name the server's checks use.
+enum FieldAnchor {
+    /// The General form's listing paths.
+    static let general: Set<String> = ["title", "description", "price", "cost", "category_path", "brand", "department",
+                                       "condition", "size", "primaryColor", "secondaryColor", "weight_oz",
+                                       "package_dimensions_in", "zipCode", "quantity", "sku"]
+
+    static func id(_ path: String) -> String { "field:\(path)" }
+}
+
+extension View {
+    func fieldAnchor(_ path: String) -> some View { id(FieldAnchor.id(path)) }
 }

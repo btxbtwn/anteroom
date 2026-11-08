@@ -101,9 +101,22 @@ extension View {
 
 extension View {
     /// The primary action: a filled ink button whose label inverts with the
-    /// theme, so it reads in light and dark.
+    /// theme, so it reads in light and dark. Disabled, it keeps the system's
+    /// dimmed fill and label, so it never reads as ink on ink.
     func workspaceProminentButton() -> some View {
-        buttonStyle(.borderedProminent).foregroundStyle(WorkspaceStyle.accentForeground)
+        buttonStyle(.borderedProminent).modifier(ProminentLabel())
+    }
+}
+
+private struct ProminentLabel: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.foregroundStyle(WorkspaceStyle.accentForeground)
+        } else {
+            content
+        }
     }
 }
 

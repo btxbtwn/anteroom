@@ -119,6 +119,25 @@ final class InventoryModel {
         }
     }
 
+    /// Removes a draft made with New listing when the seller leaves it without
+    /// adding a photo, a note, a detail or a message. Anything unclear keeps it.
+    func discardIfUntouched(_ id: String) async {
+        guard EditorDraftStore.load(id) == nil else { return }
+        do {
+            async let photos = api.photos(listingID: id)
+            async let conversation = api.conversation(id)
+            async let listing = api.listing(id)
+            async let messages = api.messages(id)
+            let (shots, detail, document, chat) = try await (photos, conversation, listing, messages)
+            guard InventoryQuery.untouched(photos: shots.count, notes: detail.notes, title: detail.title,
+                                           revisionID: document.currentRevisionID, messages: chat.count) else { return }
+            try await api.deleteListing(id)
+            changeListings { rows in rows.removeAll { $0.id == id } }
+        } catch {
+            // Keeping an empty draft is harmless; deleting one by mistake is not.
+        }
+    }
+
     func rename(_ listing: ListingSummary, to title: String) async {
         do {
             try await api.rename(listing.id, title: title)

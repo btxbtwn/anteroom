@@ -14,6 +14,14 @@ struct ListingEditorView: View {
     @State private var showingListEverywhere = false
     @State private var showingMarketplaces = false
     @State private var tab = "general"
+    /// Opens the assistant and starts generating right away.
+    @State private var generateOnOpen = false
+    @State private var confirmGenerate = false
+    @State private var photoCount = 0
+    /// A field to scroll to once its tab is on screen.
+    @State private var focusPath: String?
+    /// Saved in this visit and not edited since; "Saved" shows only then.
+    @State private var justSaved = false
     @State private var saves = 0
     @State private var saveFailures = 0
     private let onSaved: () -> Void
@@ -47,7 +55,8 @@ struct ListingEditorView: View {
 
     private var editor: some View {
         @Bindable var model = model
-        return ScrollView {
+        return ScrollViewReader { proxy in
+        ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let loadError = model.loadError {
                     WorkspaceSection("Couldn't load listing") {
@@ -59,54 +68,43 @@ struct ListingEditorView: View {
                 // A listing that never loaded has no details to show; blank fields would read as lost ones.
                 if model.hasLoaded || model.loadError == nil {
                     HStack(spacing: 8) {
-                        Menu {
-                            Picker("Form", selection: $tab) {
-                                Label("General", systemImage: "square.and.pencil").tag("general")
-                                ForEach(model.marketplaceTabs, id: \.self) { marketplace in
-                                    if let choice = model.choice(marketplace) {
-                                        Label {
-                                            Text(Marketplaces.name(marketplace))
-                                            Text(choice.detail.map { "\(choice.label): \($0)" } ?? choice.label)
-                                        } icon: {
-                                            Image(systemName: choice.symbol)
-                                        }
-                                        .tag(marketplace)
-                                    } else {
-                                        Text(Marketplaces.name(marketplace)).tag(marketplace)
-                                    }
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(tab == "general" ? "General" : Marketplaces.name(tab)).fontWeight(.semibold)
-                                if let choice = model.choice(tab) { ReadinessChip(choice: choice) }
-                                Image(systemName: "chevron.down").font(.caption)
-                            }
-                            .padding(.horizontal, 12).frame(minHeight: 44)
-                            .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
-                        }
-                        .disabled(model.marketplaceTabs.isEmpty)
-                        .accessibilityLabel("Form, \(tab == "general" ? "General" : Marketplaces.name(tab))\(model.choice(tab).map { ", \($0.label)\($0.detail.map { ": \($0)" } ?? "")" } ?? "")")
+                        formMenu
                         Spacer()
-                        Text(model.isLoading ? "Loading…" : model.loadError != nil ? "Not loaded" : model.hasChanges ? "Unsaved changes" : "Saved")
-                            .font(.caption).foregroundStyle(.secondary)
+                        // Nothing to report until the seller changes something.
+                        if let saveStatus {
+                            Text(saveStatus).font(.caption).foregroundStyle(WorkspaceStyle.mutedText)
+                        }
                     }
                     .font(.subheadline)
                     .padding(.horizontal, 4)
 
                     if tab == "general" {
                         ListingInspectorSection("Photos") {
-                            PhotoStrip(api: model.api, listingID: model.listingID, canAdd: model.isDraft)
+                            PhotoStrip(api: model.api, listingID: model.listingID, canAdd: model.isDraft) { photoCount = $0 }
+                            if model.isDraft && photoCount > 0 && model.needsGenerating && model.hasLoaded {
+                                generateButton
+                            }
                         }
-                        SellerInputFields(inputs: $model.form.sellerInputs)
                         GeneralListingFields(form: $model.form, options: model.options, api: model.api)
                     } else {
+                        MarketplaceActionBar(editor: model, marketplace: tab, onFill: { fill($0, proxy: proxy) },
+                                             onManage: { showingMarketplaces = true }, onChange: onSaved)
+                            .id("\(tab)-\(model.revisionID ?? "")")
                         MarketplaceFormView(model: model, marketplace: tab)
                     }
                 }
             }
             .padding(16)
+        }
+        .onChange(of: focusPath) { _, path in
+            guard let path else { return }
+            Task {
+                // Let the tab's rows draw before scrolling to one.
+                try? await Task.sleep(for: .milliseconds(350))
+                withAnimation { proxy.scrollTo(FieldAnchor.id(path), anchor: .center) }
+                focusPath = nil
+            }
+        }
         }
         .background(WorkspaceStyle.background)
         .toolbarBackground(WorkspaceStyle.background, for: .navigationBar)
@@ -125,13 +123,16 @@ struct ListingEditorView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Listing actions", systemImage: "ellipsis.circle") {
-                    Button("Listing assistant", systemImage: "sparkles") { showingAssistant = true }
+                    Button("Listing assistant", systemImage: "sparkles") {
+                        generateOnOpen = false
+                        showingAssistant = true
+                    }
                     Button("Listing history", systemImage: "clock.arrow.circlepath") { showingHistory = true }
                     Button("Listing templates", systemImage: "rectangle.stack") { showingTemplates = true }
                     Divider()
                     Button("List everywhere…", systemImage: "paperplane") { showingListEverywhere = true }
                         .disabled(!model.choices.contains(where: \.selectable))
-                    Button("Manage marketplaces…", systemImage: "storefront") { showingMarketplaces = true }
+                    Button("Manage marketplaces", systemImage: "storefront") { showingMarketplaces = true }
                 }
                 .frame(minWidth: 44, minHeight: 44)
                 .disabled(model.hasChanges || model.isLoading || model.isSaving || model.loadError != nil)
@@ -159,6 +160,12 @@ struct ListingEditorView: View {
                 dismiss()
             }
         }
+        .confirmationDialog("Replace this listing's title?", isPresented: $confirmGenerate, titleVisibility: .visible) {
+            Button("Generate listing") { startGenerating() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Generating writes a new title, description and item details from your photos. Your photos, notes and measurements stay. The result is saved as a draft.")
+        }
         .alert("Couldn't save", isPresented: saveErrorShown) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -175,13 +182,15 @@ struct ListingEditorView: View {
         }
         .sheet(isPresented: $showingAssistant, onDismiss: {
             assistantPrompt = nil
+            generateOnOpen = false
             Task {
                 guard !model.hasChanges else { return }
                 await model.load()
                 if model.loadError == nil { onSaved() }
             }
         }) {
-            ListingAssistantView(api: model.api, listingID: model.listingID, text: assistantPrompt ?? "")
+            ListingAssistantView(api: model.api, listingID: model.listingID, photoCount: photoCount,
+                                 hasCopy: model.hasCopy, generate: generateOnOpen, text: assistantPrompt ?? "")
         }
         .sheet(isPresented: $showingHistory, onDismiss: {
             Task {
@@ -196,7 +205,10 @@ struct ListingEditorView: View {
             // Listing, updating and delisting change the tabs' readiness and the inventory row.
             Task { await model.loadReadiness() }
             onSaved()
-            if assistantPrompt != nil { showingAssistant = true }
+            if assistantPrompt != nil {
+                generateOnOpen = false
+                showingAssistant = true
+            }
         }) {
             MarketplaceActionsView(api: model.api, listingID: model.listingID,
                                    revisionID: model.revisionID, title: model.title) { prompt in
@@ -205,7 +217,11 @@ struct ListingEditorView: View {
             }
         }
         .sheet(isPresented: $showingListEverywhere, onDismiss: onSaved) {
-            ListEverywhereSheet(model: model)
+            ListEverywhereSheet(model: model) { marketplace, field in
+                showingListEverywhere = false
+                tab = marketplace
+                focusPath = field
+            }
         }
         .sheet(isPresented: $showingTemplates) {
             ListingTemplatesSheet(api: model.api, listingID: model.listingID) {
@@ -228,6 +244,95 @@ struct ListingEditorView: View {
         }
     }
 
+    /// General and each marketplace form. Each marketplace says its state in
+    /// words under its name, so the icons never need a legend.
+    private var formMenu: some View {
+        Menu {
+            tabButton("general", name: "General", status: nil, symbol: "square.and.pencil")
+            Section("Marketplaces") {
+                ForEach(model.marketplaceTabs, id: \.self) { marketplace in
+                    let choice = model.choice(marketplace)
+                    tabButton(marketplace, name: Marketplaces.name(marketplace),
+                              status: status(choice),
+                              symbol: choice?.symbol)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(formName).fontWeight(.semibold)
+                    .lineLimit(1)
+                if let choice = model.choice(tab) { ReadinessChip(choice: choice) }
+                Image(systemName: "chevron.down").font(.caption)
+            }
+            .padding(.horizontal, 12).frame(minHeight: 44)
+            .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkspaceStyle.border, lineWidth: 1))
+        }
+        .disabled(model.marketplaceTabs.isEmpty)
+        .accessibilityLabel("Form, \(formName)\(status(model.choice(tab)).map { ", \($0)" } ?? "")")
+    }
+
+    private func status(_ choice: ListChoice?) -> String? {
+        guard let choice else { return nil }
+        return choice.detail.map { "\(choice.label): \($0)" } ?? choice.label
+    }
+
+    private var formName: String { tab == "general" ? "General" : Marketplaces.name(tab) }
+
+    /// "Unsaved changes" while editing, "Saved" right after a save, otherwise nothing.
+    private var saveStatus: String? {
+        if model.isLoading && model.hasLoaded { return nil }
+        if model.loadError != nil && model.hasLoaded { return "Not loaded" }
+        if model.hasChanges { return "Unsaved changes" }
+        return justSaved ? "Saved" : nil
+    }
+
+    /// Generate listing under the photos of a draft with photos and no description
+    /// yet. It asks first only when a saved title would be replaced.
+    private var generateButton: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                if model.hasCopy { confirmGenerate = true } else { startGenerating() }
+            } label: {
+                Label("Generate listing", systemImage: "sparkles")
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .workspaceProminentButton()
+            .disabled(model.hasChanges)
+            .accessibilityIdentifier("generate-listing")
+            Text(model.hasChanges ? "Save your changes first, then generate."
+                 : "Writes the title, description and item details from your photos. You review them before anything is listed.")
+                .font(.footnote).foregroundStyle(WorkspaceStyle.mutedText)
+        }
+    }
+
+    private func startGenerating() {
+        generateOnOpen = true
+        showingAssistant = true
+    }
+
+    private func tabButton(_ id: String, name: String, status: String?, symbol: String?) -> some View {
+        Button {
+            tab = id
+        } label: {
+            Text(name)
+            if let status { Text(status) }
+            Image(systemName: tab == id ? "checkmark" : symbol ?? "circle.dashed")
+        }
+        .accessibilityAddTraits(tab == id ? .isSelected : [])
+    }
+
+    /// Shows a field a marketplace still needs: on this tab when its form has
+    /// it, else on General, where the shared fields live.
+    private func fill(_ path: String, proxy: ScrollViewProxy) {
+        if tab != "general", model.forms[tab]?.fields.contains(where: { $0.path == path }) != true,
+           FieldAnchor.general.contains(path) {
+            tab = "general"
+        }
+        focusPath = path
+    }
+
     private var draftNoticeShown: Binding<Bool> {
         Binding(get: { model.draftNotice != nil }, set: { if !$0 { model.draftNotice = nil } })
     }
@@ -240,6 +345,7 @@ struct ListingEditorView: View {
         hideKeyboard()
         Task {
             if await model.save() {
+                justSaved = true
                 saves += 1
                 onSaved()
             } else {

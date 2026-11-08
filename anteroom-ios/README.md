@@ -8,8 +8,10 @@ password reset by email link, which reopens the app through `anteroom://`), draf
 draft's title, notes and General fields, and adding photos from the camera or
 library. The listing assistant connects native generation and text chat to the
 hosted durable-task API when the server advertises generation and has a provider.
-List everywhere, and List, Update, Save draft and Delist per marketplace, work
-from a listing's actions menu; see "Listing and delisting" below.
+Each marketplace tab has its own List or Update button; List everywhere, and
+Save draft and Delist per marketplace, work from a listing's actions menu; see
+"Listing and delisting" below. A draft with photos and no description shows
+Generate listing under its photos.
 
 ## Interface
 
@@ -172,8 +174,14 @@ and edits still need configured-account verification.
 
 ## Listing and delisting
 
+A marketplace tab opens with that marketplace's status and its next step:
+"List on eBay", "Update on eBay", Cancel or Check result, through the same
+confirmation as below. Fields the marketplace needs are named there and open
+when tapped; a blocking one disables List until it is filled. Marketplaces
+show in the web editor's order everywhere: eBay, Poshmark, Mercari, Depop, Etsy.
+
 Listing actions → List everywhere… lists on several marketplaces at once.
-Listing actions → Manage marketplaces… shows each marketplace the server can act
+Listing actions → Manage marketplaces shows each marketplace the server can act
 on (`action_marketplaces` from `/api/runtime`), with the web's statuses: Listed
 with a link, Not listed, Listing… with its current step, Unconfirmed, Sold
 here, Delisting…, Ended or Deleted. Rules and wording come from the web's
@@ -207,8 +215,10 @@ sheet shows under the marketplace.
 
 ## Seller inputs and measurements
 
-Photos are followed by native Notes & Labels, Pricing & Shipping, and
-Measurements (in), before generated General listing fields. These controls use
+The General form follows the order the web uses: Photos, then Listing (Title,
+Description, Price, Cost), Item (Category, Brand, Department), Condition &
+details, Measurements (in), Shipping, Inventory, and Notes & Labels last. The
+seller-input controls use
 the desktop ItemDetails notes keys: SKU, seller notes, known flaws, labels,
 cost of goods, package dimensions, garment and per-garment measurements.
 Top, Pants and Skirt retain their separate values when switching. Measurements

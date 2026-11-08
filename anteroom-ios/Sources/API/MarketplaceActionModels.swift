@@ -36,7 +36,7 @@ struct MarketplaceRow: Equatable, Sendable {
 
 enum MarketplaceActions {
     /// The marketplaces the phone can list on, in the web's order.
-    static let order = ["ebay", "etsy", "poshmark", "mercari", "depop"]
+    static let order = ["ebay", "poshmark", "mercari", "depop", "etsy"]
     /// Through the seller's Chrome rather than an API.
     static let throughChrome: Set<String> = ["poshmark", "mercari", "depop"]
     /// What Delist does on each marketplace: eBay has no delete.
