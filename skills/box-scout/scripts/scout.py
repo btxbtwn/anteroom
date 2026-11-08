@@ -26,8 +26,10 @@ import re
 import sys
 import time
 import urllib.request
+import urllib.error
 from collections import defaultdict
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from itertools import chain
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -237,11 +239,35 @@ def fetch_catalog(store: str) -> list[dict]:
     while True:
         url = f"{STORES[store]['url']}/products.json?limit=250&page={page}"
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            batch = json.load(resp)["products"]
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    batch = json.load(resp)["products"]
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code != 429 or attempt == 2:
+                    raise
+                delay = 2 ** (attempt + 1)
+                retry_after = exc.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        delay = int(retry_after)
+                    except ValueError:
+                        try:
+                            deadline = parsedate_to_datetime(retry_after)
+                            delay = math.ceil((deadline - dt.datetime.now(dt.UTC)).total_seconds())
+                        except (ValueError, TypeError, OverflowError):
+                            pass
+                # Leave long cooldowns for the next scheduled refresh rather
+                # than retrying before the supplier allows another request.
+                if delay > 60:
+                    raise
+                time.sleep(max(0, delay))
         if not batch:
             return products
         products.extend(batch)
+        if len(batch) < 250:
+            return products
         page += 1
         time.sleep(1)
 
