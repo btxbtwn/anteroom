@@ -1,6 +1,6 @@
 /** T3 Code-style settings categories for Anteroom. */
 
-export type SettingsSectionId = "general" | "listings" | "assistant" | "providers" | "connections" | "agents" | "data" | "logs" | "help";
+export type SettingsSectionId = "general" | "listings" | "assistant" | "providers" | "connections" | "agents" | "data" | "logs" | "experimental" | "help";
 
 export type SettingsNavItem = {
   id: SettingsSectionId;
@@ -26,6 +26,7 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
   { id: "agents", label: "Agents" },
   { id: "data", label: "Data" },
   { id: "logs", label: "Logs" },
+  { id: "experimental", label: "Experimental" },
   { id: "help", label: "Help" },
 ];
 
@@ -38,13 +39,14 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
   agents: "Agents",
   data: "Data",
   logs: "Logs",
+  experimental: "Experimental",
   help: "Help",
 };
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
 
 /** Sections the web app has; the others need the Mac. */
-export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "listings", "providers", "connections"];
+export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "listings", "providers", "connections", "experimental"];
 
 /** The section to show: on the web, one only the Mac has opens Providers instead. */
 export function settingsSectionFor(section: SettingsSectionId, hosted: boolean): SettingsSectionId {
@@ -52,6 +54,20 @@ export function settingsSectionFor(section: SettingsSectionId, hosted: boolean):
 }
 
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  {
+    id: "listing-mode",
+    title: "Use Vendoo",
+    section: "experimental",
+    targetId: "listing-mode",
+    searchTerms: ["listing workflow", "experimental"],
+  },
+  {
+    id: "hosted-marketplace-browser",
+    title: "Hosted marketplace browser",
+    section: "experimental",
+    targetId: "hosted-marketplace-browser",
+    searchTerms: ["cloud browser", "without an extension", "experimental"],
+  },
   {id:"listing-templates",title:"Saved templates",section:"listings",targetId:"listing-templates",searchTerms:["template","preset","reusable fields","saved defaults"]},
   {
     id: "business-note",

@@ -18,6 +18,22 @@ it("opens appearance and web release controls without starting the desktop updat
   }
   expect(html).not.toContain("First-run tutorial");
   expect(html).not.toContain("quit and reopen");
+  expect(html).not.toContain("Use Vendoo");
   expect(client.getQueryCache().find({ queryKey: ["updates"] })).toBeUndefined();
   expect(client.getQueryCache().find({ queryKey: ["update-progress"] })).toBeUndefined();
+});
+
+it.each([false, true])("opens Experimental with the saved Vendoo choice (hosted: %s)", (hosted) => {
+  const client = new QueryClient();
+  client.setQueryData(["settings-ui"], { listing_mode: "vendoo" });
+  const html = renderToStaticMarkup(
+    <WorkspaceRuntimeProvider value={{ hosted, features: new Set(), views: new Set(["settings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
+      <QueryClientProvider client={client}><SettingsPage section="experimental" onOpenListing={() => {}} /></QueryClientProvider>
+    </WorkspaceRuntimeProvider>,
+  );
+  expect(html).toContain("Use Vendoo");
+  expect(html).toContain('aria-checked="true"');
+  expect(html).toContain("Hosted marketplace browser");
+  expect(html).toContain("Coming soon");
+  expect(client.getQueryData(["settings-ui"])).toEqual({ listing_mode: "vendoo" });
 });
