@@ -303,7 +303,7 @@ export function FirstRunGuide({
                 <ul className="setup-guide-points">
                   <li>Choose ChatGPT, a Xiaomi MiMo key, or a Cursor API key so chat can read photos.</li>
                   <li>Optionally add Brave Search for sold-price comps.</li>
-                  <li>Connect everyday Chrome once, then create a listing.</li>
+                  <li>Create a listing now; connect Chrome when you need browser-based marketplace actions.</li>
                 </ul>
               </>
             ) : null}
@@ -612,9 +612,9 @@ export function FirstRunGuide({
 
             {activeStep === "chrome" ? (
               <>
-                <h2 id="setup-guide-title" className="setup-guide-title">Connect Chrome</h2>
+                <h2 id="setup-guide-title" className="setup-guide-title">Connect Chrome (optional)</h2>
                 <p className="setup-guide-copy">
-                  {"Anteroom uses Chrome to open each marketplace. Load the listing extension from the folder below once. Listing on a marketplace opens that marketplace in this Chrome. Anteroom never publishes until you confirm."}
+                  {"Create and generate drafts without Chrome. eBay and Etsy use connected accounts. Poshmark, Mercari, Depop, Vinted and Sellwild require desktop Chrome with Bridge connected. You can skip this step."}
                 </p>
                 {!chromeAvailable ? (
                   <p className="setup-guide-copy">
@@ -658,7 +658,7 @@ export function FirstRunGuide({
                     <strong>Marketplaces</strong> — list on eBay, Poshmark, and the others from here when you confirm. Anteroom never publishes on its own.
                   </li>
                   <li>
-                    <strong>Footer</strong> — extension and listing-AI status. If either is off, fix it in Settings before generating.
+                    <strong>Footer</strong> — extension and listing-AI status. Set up listing AI before generating; Chrome is only needed for browser-based marketplace actions.
                   </li>
                 </ul>
               </>

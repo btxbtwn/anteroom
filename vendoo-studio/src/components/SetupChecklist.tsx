@@ -68,7 +68,7 @@ export function SetupChecklist({
       <div className="flex w-full max-w-md flex-col gap-6">
         <EmptyHeader className="max-w-none">
           <EmptyTitle>Turn product photos into marketplace-ready drafts</EmptyTitle>
-          <EmptyDescription>Three steps and Anteroom is ready to list.</EmptyDescription>
+          <EmptyDescription>Create and generate listings without Chrome. Connect marketplaces when you’re ready to list.</EmptyDescription>
         </EmptyHeader>
         <ol className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card text-left shadow-xs/5">
           <Step index={1} done={providerConfigured} label="Sign in with ChatGPT, or add a MiMo or Cursor API key.">
@@ -90,15 +90,16 @@ export function SetupChecklist({
           <Step
             index={2}
             done={extensionConnected}
-            label="Connect Chrome and load the listing extension once. Listing opens the marketplace in that Chrome."
+            label="Optional: connect desktop Chrome with the Bridge extension for Poshmark, Mercari, Depop, Vinted and Sellwild."
           >
+            <Note>eBay and Etsy use connected accounts and do not need the extension.</Note>
             {!chromeAvailable ? (
               <Note>
                 Install{" "}
                 <a className="underline underline-offset-2" href="https://www.google.com/chrome" target="_blank" rel="noreferrer">
                   Google Chrome
                 </a>
-                , then come back here.
+                {" "}on a computer when you want to list on those marketplaces. You can create drafts now.
               </Note>
             ) : extensionConnected ? (
               <Note>Extension connected.</Note>
