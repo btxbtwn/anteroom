@@ -380,6 +380,14 @@ def queue(db=Depends(get_seller_db, scope="function")):
     return {'work': [], 'jobs': [job_response(row) for row in rows]}
 
 
+@router.get('/conversations/{identity}/regenerate-details')
+def regenerate_details(identity: str, db=Depends(get_seller_db, scope="function")):
+    """The Item Details Regenerate will start from, for the bulk review. Nothing is saved."""
+    from vendoo_studio.services.hosted_listing_delete import carried_notes
+    row = conversation(db, identity)
+    return {'notes': carried_notes(db, identity, row.notes)}
+
+
 class ResetInput(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     keep_inputs: bool = False

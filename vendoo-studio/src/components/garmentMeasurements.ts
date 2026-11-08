@@ -114,6 +114,23 @@ function text(value: unknown): string {
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
 }
 
+const LABEL_KEY = (label: string) => label.toLowerCase().replace(/[^a-z]/g, "");
+
+/**
+ * Measurements written as text, such as `Pit to pit 20"; Length: 27"` carried
+ * from a listing's description, matched to the garment's fields by label.
+ */
+function measurementsFromText(garment: Garment, value: unknown): Record<string, string> {
+  const byLabel = new Map(garmentFields(garment).map((field) => [LABEL_KEY(field.label), field.key]));
+  const out: Record<string, string> = {};
+  for (const part of text(value).split(/[;\n]+/)) {
+    const match = /^\s*([A-Za-z][A-Za-z /-]*?)\s*[:-]?\s*(\d+(?:\.\d+)?)/.exec(part);
+    const key = match ? byLabel.get(LABEL_KEY(match[1]!)) : undefined;
+    if (key && !out[key]) out[key] = match![2]!;
+  }
+  return out;
+}
+
 /** The Item Details a listing already holds, for the regenerate review. */
 export function parseItemDetails(notes: string | null | undefined, fallbackGarment: Garment): ItemDetails {
   const parsed = parseNotesObject(notes);
@@ -124,7 +141,11 @@ export function parseItemDetails(notes: string | null | undefined, fallbackGarme
   const mine = all[garment] && typeof all[garment] === "object" ? (all[garment] as Record<string, unknown>) : {};
   return {
     garment,
-    measurements: Object.fromEntries(Object.entries(mine).map(([key, value]) => [key, text(value)])),
+    // Typed measurements win; blank ones come from the listing's description.
+    measurements: {
+      ...measurementsFromText(garment, parsed.descriptionMeasurements),
+      ...Object.fromEntries(Object.entries(mine).map(([key, value]) => [key, text(value)]).filter(([, value]) => value)),
+    },
     labels: text(parsed.vendooLabels),
     cog: text(parsed.cog),
     sku: text(parsed.sku),
