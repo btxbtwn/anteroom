@@ -6,6 +6,26 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.829 — 2026-11-08
+
+- On iPhone, listings open faster: the cover photo shows at once, and photos are kept on the phone between launches.
+- On iPhone, marketplace tabs such as Depop and eBay load in the background as soon as a listing opens.
+- On iPhone, Mark down prices opens with the stale listings already shown, and usually with their suggested prices filled in.
+
+## 0.1.828 — 2026-11-08
+
+- Marketplace logos are readable at small sizes: Etsy and Depop show their one-letter marks, and eBay's logo is no longer squeezed into a tiny square.
+- Hovering a listing in the sidebar no longer draws its buttons over the title.
+- The inventory table gives titles the spare width, wraps them to two lines, and no longer repeats the sidebar's search box.
+- The Marketplaces page names each marketplace once, shows one Connect button, and the sale calendar says less.
+- Automations always show their on/off switch, with "Draft" or "Needs eBay" under it when it can't be turned on, and descriptions are no longer cut off. The eBay offers row now says "No listings chosen" instead of "No listings yet".
+- The chats search box reads "Search" instead of a cut-off "Search cha".
+- On the phone web app, the account button sits in the page header instead of its own row.
+
+## 0.1.827 — 2026-11-08
+
+- Anteroom now shows a loading screen as soon as you open it, with a reload option if your workspace takes longer to open or cannot load.
+
 ## 0.1.826 — 2026-11-08
 
 - A saved cost of goods of $0 now counts as recorded in missing sale data, even before the other sale amounts are entered.

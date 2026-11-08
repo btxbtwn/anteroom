@@ -16,6 +16,8 @@ struct ListingEditorView: View {
     @State private var tab = "general"
     @State private var saves = 0
     @State private var saveFailures = 0
+    /// The live-change count when this editor opened, or when it last reloaded for one.
+    @State private var seenLiveChanges: Int?
     private let onSaved: () -> Void
 
     init(api: AnteroomAPI, listing: ListingSummary, onSaved: @escaping () -> Void) {
@@ -97,7 +99,10 @@ struct ListingEditorView: View {
 
                     if tab == "general" {
                         ListingInspectorSection("Photos") {
-                            PhotoStrip(api: model.api, listingID: model.listingID, canAdd: model.isDraft)
+                            PhotoStrip(api: model.api, listingID: model.listingID, photos: $model.photos,
+                                       loaded: model.photosLoaded,
+                                       cover: model.coverPhotoID.map { (id: $0, version: model.coverPhotoVersion) },
+                                       canAdd: model.isDraft)
                         }
                         SellerInputFields(inputs: $model.form.sellerInputs)
                         GeneralListingFields(form: $model.form, options: model.options, api: model.api)
@@ -220,9 +225,13 @@ struct ListingEditorView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && !model.hasChanges && !model.isSaving && !model.isLoading { Task { await model.load() } }
         }
-        // Edits from another device show up live, unless this one has unsaved changes.
+        // Edits from another device show up live, unless this one has unsaved
+        // changes. The count when the editor opens is already in the first load.
         .task(id: live?.listings) {
-            guard (live?.listings ?? 0) > 0 else { return }
+            let count = live?.listings ?? 0
+            guard let seen = seenLiveChanges else { return seenLiveChanges = count }
+            guard count != seen else { return }
+            seenLiveChanges = count
             try? await Task.sleep(for: .milliseconds(1500))
             if !Task.isCancelled && !model.hasChanges && !model.isSaving && !model.isLoading { await model.load() }
         }

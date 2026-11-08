@@ -85,3 +85,13 @@ it("shows completed listing evidence without claiming delivery to every liker", 
   expect(html).not.toContain("2 sent");
   expect(html).not.toContain("No rounds yet");
 });
+
+it.each([0, 1, 2])("uses correct activity summary grammar for %i actions", (count) => {
+  useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => ({ data:
+    queryKey.includes("activity") ? { runs: [{ id: "run", sent: count, skipped: 0, failed: count }], sends: [] }
+      : { items: [], included: 0 },
+  }));
+  const html = renderToStaticMarkup(<PromotionDetails automation={rule} />);
+  expect(html).toContain(`${count} listing ${count === 1 ? "action" : "actions"} completed`);
+  expect(html).toContain(`${count} ${count === 1 ? "needs" : "need"} attention`);
+});

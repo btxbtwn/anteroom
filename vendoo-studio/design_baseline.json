@@ -46,9 +46,6 @@
   "src/components/settings/LogsSettings.tsx": {
     "uppercase-label": 1
   },
-  "src/components/sidebar/ListingRow.tsx": {
-    "gradient": 2
-  },
   "src/components/ui/alert.tsx": {
     "arbitrary-text-size": 1
   },

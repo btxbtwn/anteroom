@@ -235,7 +235,7 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
           ))}
           {(activity.data?.runs || []).map((run) => (
             <li key={run.id} className="tabular-nums">
-              <span className="text-muted-foreground">{when(run.started_at)}</span> · {run.sent} listing actions completed · {run.skipped} skipped · {run.failed} need attention
+              <span className="text-muted-foreground">{when(run.started_at)}</span> · {run.sent} listing {run.sent === 1 ? "action" : "actions"} completed · {run.skipped} skipped · {run.failed} {run.failed === 1 ? "needs" : "need"} attention
               {run.note ? <span className="block text-muted-foreground">{run.note}</span> : null}
             </li>
           ))}

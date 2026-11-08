@@ -65,7 +65,7 @@ for (const scenario of cases) {
     await expect(dialog.getByText(scenario.label, { exact: false })).toBeVisible();
     await expect(dialog.getByText(scenario.note, { exact: true })).toBeVisible();
     await expect(dialog.getByText("Counts are listing actions, not buyers.", { exact: false })).toBeVisible();
-    await expect(dialog.getByText(/\d listing actions completed/)).toBeVisible();
+    await expect(dialog.getByText(/\d listing actions? completed/)).toBeVisible();
     await expect(dialog.getByText(/\d sent/)).toHaveCount(0);
     await expect(dialog.getByRole("button", { name: "Check result", exact: true })).toHaveCount(scenario.state === "unknown" ? 1 : 0);
     for (const theme of ["light", "dark"]) {
