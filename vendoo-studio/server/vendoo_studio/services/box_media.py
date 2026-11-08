@@ -379,9 +379,27 @@ def ffmpeg_path() -> str | None:
 _DURATION = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 
 
-def _duration(ffmpeg: str, path: Path) -> float | None:
+def video_container(head: bytes) -> str | None:
+    """The ffmpeg demuxer for an MP4/MOV or WebM/Matroska file, judged from its first bytes.
+
+    Anything else (a playlist, a stream description) could make ffmpeg open
+    addresses of its own, so it is never handed to ffmpeg.
+    """
+    if head[4:8] == b"ftyp":
+        return "mov"
+    if head[:4] == b"\x1a\x45\xdf\xa3":
+        return "matroska"
+    return None
+
+
+def _read_only(container: str, path: Path) -> list[str]:
+    """ffmpeg input options: this one local file, read as ``container``, nothing else opened."""
+    return ["-protocol_whitelist", "file", "-f", container, "-i", str(path)]
+
+
+def _duration(ffmpeg: str, path: Path, container: str) -> float | None:
     probe = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [ffmpeg, "-hide_banner", "-nostdin", "-i", str(path)],
+        [ffmpeg, "-hide_banner", "-nostdin", *_read_only(container, path)],
         capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SEC, check=False,
     )
     match = _DURATION.search(probe.stderr or "")
@@ -391,15 +409,15 @@ def _duration(ffmpeg: str, path: Path) -> float | None:
     return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
-def extract_frames(ffmpeg: str, video: Path, count: int, out_dir: Path) -> list[bytes]:
+def extract_frames(ffmpeg: str, video: Path, container: str, count: int, out_dir: Path) -> list[bytes]:
     """``count`` evenly spaced frames of ``video`` as JPEG bytes, cut into ``out_dir``."""
-    duration = _duration(ffmpeg, video)
+    duration = _duration(ffmpeg, video, container)
     points = [duration * (index + 1) / (count + 1) for index in range(count)] if duration else [0.0]
     frames = []
     for index, at in enumerate(points):
         target = out_dir / f"frame-{index}.jpg"
         subprocess.run(  # noqa: S603 - fixed argv, no shell
-            [ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-ss", f"{at:.2f}", "-i", str(video),
+            [ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-ss", f"{at:.2f}", *_read_only(container, video),
              "-frames:v", "1", "-q:v", "3", str(target)],
             capture_output=True, timeout=FFMPEG_TIMEOUT_SEC, check=False,
         )
@@ -423,12 +441,15 @@ async def video_frames(client: httpx.AsyncClient, url: str, count: int = FRAMES_
         return [], f"the video took longer than {VIDEO_TIMEOUT_SEC:.0f}s to download"
     except Exception as exc:  # noqa: BLE001 - every failure is reported to the model as text
         return [], f"the video could not be downloaded ({_reason(exc)})"
+    container = video_container(contents[:16])
+    if container is None:
+        return [], "the video is not an MP4, MOV or WebM file"
     with tempfile.TemporaryDirectory(prefix="box-video-") as tmp:
         folder = Path(tmp)
         video = folder / "video"
         video.write_bytes(contents)
         try:
-            frames = await asyncio.to_thread(extract_frames, ffmpeg, video, count, folder)
+            frames = await asyncio.to_thread(extract_frames, ffmpeg, video, container, count, folder)
         except Exception as exc:  # noqa: BLE001
             return [], f"ffmpeg could not read the video ({_reason(exc)})"
     if not frames:

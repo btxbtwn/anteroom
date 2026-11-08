@@ -362,18 +362,36 @@ describe("Etsy", () => {
     expect((await call(b.token)).status).toBe(403);
   });
 
-  it("refreshes tokens through the relay", async () => {
+  it("refreshes tokens only for the device's own Etsy account", async () => {
     const a = await register();
-    route("POST", /api\.etsy\.com\/v3\/public\/oauth\/token/, ({ body }) =>
-      new URLSearchParams(body).get("refresh_token") === "dead"
-        ? new Response('{"error":"invalid_grant"}', { status: 400 })
-        : { access_token: "1.new", refresh_token: "1.newer", expires_in: 3600 },
-    );
-    const refresh = (refreshToken) =>
-      relay("/studio/oauth/etsy/refresh", authed(a.token, { method: "POST", body: JSON.stringify({ refreshToken }) }));
-    const ok = await refresh("1.old");
-    expect((await ok.json()).tokens.accessToken).toBe("1.new");
-    expect((await refresh("dead")).status).toBe(401);
+    const b = await register();
+    await connectEtsy(a.token, { userId: "1", shopId: "60" });
+    route("POST", /api\.etsy\.com\/v3\/public\/oauth\/token/, ({ body }) => {
+      const refreshToken = new URLSearchParams(body).get("refresh_token");
+      if (refreshToken === "1.dead") return new Response('{"error":"invalid_grant"}', { status: 400 });
+      if (refreshToken === "1.other") return { access_token: "2.new", refresh_token: "2.newer", expires_in: 3600 };
+      return { access_token: "1.new", refresh_token: "1.newer", expires_in: 3600 };
+    });
+    const refresh = (token, refreshToken) =>
+      relay("/studio/oauth/etsy/refresh", authed(token, { method: "POST", body: JSON.stringify({ refreshToken }) }));
+    const ok = await refresh(a.token, "1.old");
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).tokens).toMatchObject({ accessToken: "1.new", refreshToken: "1.newer" });
+    expect((await refresh(a.token, "1.dead")).status).toBe(401);
+
+    // Etsy rotates refresh tokens, so another device's request must not spend one.
+    const exchanges = () => calls.filter((c) => c.url.includes("/v3/public/oauth/token")).length;
+    const before = exchanges();
+    const stranger = await refresh(b.token, "1.old");
+    expect(stranger.status).toBe(401);
+    expect(await stranger.text()).not.toContain("1.new");
+    expect((await refresh(a.token, "no-user-prefix")).status).toBe(401);
+    expect(exchanges()).toBe(before);
+
+    // A token that turns out to belong to someone else is withheld.
+    const swapped = await refresh(a.token, "1.other");
+    expect(swapped.status).toBe(401);
+    expect(await swapped.text()).not.toContain("2.new");
   });
 });
 
@@ -482,6 +500,20 @@ describe("eBay", () => {
     const header = btoa(JSON.stringify({ alg: "ecdsa", kid: "kid-1", signature: btoa("junk"), digest: "SHA1" }));
     const response = await relay("/ebay", { method: "POST", body: "{}", headers: { "x-ebay-signature": header } });
     expect(response.status).toBe(412);
+  });
+
+  it("refreshes tokens only for the device's own eBay account", async () => {
+    const a = await register();
+    const b = await register();
+    await connectEbay(a.token, "seller-r");
+    const refresh = (token) =>
+      relay("/studio/oauth/ebay/refresh", authed(token, { method: "POST", body: JSON.stringify({ refreshToken: "ebay-refresh" }) }));
+    const ok = await refresh(a.token);
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).tokens.accessToken).toBe("ebay-user-token-2");
+    const stranger = await refresh(b.token);
+    expect(stranger.status).toBe(401);
+    expect(await stranger.text()).not.toContain("ebay-user-token-2");
   });
 
   it("asks the seller to sign in again when a refresh token is dead", async () => {
