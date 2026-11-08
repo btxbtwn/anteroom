@@ -22,6 +22,8 @@ test("the General form leads with title, description and price, and keeps field 
     await expect(form.getByRole("heading")).toHaveText([
       "Listing", "Pricing", "Item", "Condition & details", "Measurements (in)", "Shipping", "Inventory", "Notes & Labels",
     ]);
+    // Kept with CI's browser report, for reviewing the layout at desktop and phone sizes.
+    await page.screenshot({ path: info.outputPath("general-top.png") });
 
     // Jeans are measured as pants, and empty measurements look empty.
     const measurements = form.getByRole("region", { name: "Measurements (in)" });
@@ -35,6 +37,9 @@ test("the General form leads with title, description and price, and keeps field 
     await expect(form.getByText("Ask chat", { exact: true })).toHaveCount(0);
     await titleInput.focus();
     await expect(tools).toHaveCSS("opacity", "1");
+    await page.screenshot({ path: info.outputPath("general-title-focused.png") });
+    await measurements.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: info.outputPath("general-measurements.png") });
 
     if (!phone) {
       // The rail says Etsy's state in full; the listing check below gives the reason once.
