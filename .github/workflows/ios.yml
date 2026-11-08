@@ -39,9 +39,9 @@ jobs:
           sudo xcode-select -s "$XCODE_APP"
           xcodebuild -version
       - name: Install the pinned XcodeGen
+        run: ./tools/install-xcodegen.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./tools/install-xcodegen.sh
       - name: Generate the Xcode project
         run: xcodegen
       - name: Only the confirmation dialog makes seller confirmations
@@ -157,9 +157,9 @@ jobs:
           sudo xcode-select -s "$XCODE_APP"
           xcodebuild -version
       - name: Install the pinned XcodeGen
+        run: ./anteroom-ios/tools/install-xcodegen.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./anteroom-ios/tools/install-xcodegen.sh
       - name: Prepare disposable hosted API and simulator project
         run: |
           cd vendoo-studio
@@ -276,9 +276,9 @@ jobs:
           sudo xcode-select -s "$XCODE_APP"
           xcodebuild -version
       - name: Install the pinned XcodeGen
+        run: ./tools/install-xcodegen.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./tools/install-xcodegen.sh
       - name: Generate the Xcode project
         run: xcodegen
       # Archive unsigned: development signing would need a registered device.
