@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.816 — 2026-11-08
+
+- Make the Anteroom logo at the top of the sidebar larger.
+
+## 0.1.815 — 2026-11-08
+
+- Order the By marketplace list in Analytics by whatever the chart shows, items sold or revenue.
+
 ## 0.1.814 — 2026-11-08
 
 - The marketplace list beside a listing's form no longer slides around when dragged on an iPad.
