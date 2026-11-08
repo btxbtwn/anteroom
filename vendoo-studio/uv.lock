@@ -2698,7 +2698,7 @@ wheels = [
 
 [[package]]
 name = "vendoo-studio"
-version = "0.1.801"
+version = "0.1.802"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.802 — 2026-11-08
+
+- Etsy's eligibility note now shows once instead of twice with different wording.
+
 ## 0.1.801 — 2026-11-08
 
 - **Read from photos** is now called **Read measurements** in bulk upload, Regenerate review and the iPhone app.
