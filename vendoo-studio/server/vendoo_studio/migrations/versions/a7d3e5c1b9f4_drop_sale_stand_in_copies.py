@@ -10,7 +10,9 @@ order line linked to its item by a webhook, Recover orders or a later match
 left the copy in place, so the sale was counted twice.
 
 For each seller, item and marketplace, each copy goes to the nearest order
-line by date that no other copy has taken, and is deleted. The order line
+line by date that no other copy has taken, within a week of it, and is
+deleted. A copy further from every order, or with no date, is an earlier sale
+of a relisted item and stays. The order line
 keeps the amounts the seller edited on the copy whole (with its sale date when
 they set one); otherwise it takes each amount it lacks, such as the item cost,
 from the copy. A copy on another marketplace, or with no order line left to
@@ -32,6 +34,8 @@ down_revision = 'e5b81d27c4a6'
 branch_labels = None
 depends_on = None
 
+# How far apart a copy's date and its order's date can be (item_status.SAME_SALE_DAYS, frozen here).
+SAME_SALE_SECONDS = 7 * 86400
 AMOUNTS = ("item_revenue", "shipping_credit", "refunds", "fees", "shipping_cost", "item_cost")
 BASIS_FIELDS = ("marketplace", "order_id", "line_id", "listing_id", "conversation_id", "quantity", "order_status",
                 "order_updated_at", "order_observed_at")
@@ -112,6 +116,8 @@ def upgrade() -> None:
                 return abs((moment - when).total_seconds()) if when and moment else float("inf")
 
             line = min(lines, key=distance)
+            if distance(line) > SAME_SALE_SECONDS:
+                continue
             lines.remove(line)
             if _carry_over(line, old):
                 bind.execute(sales.update().where(sales.c.user_id == line["user_id"], sales.c.id == line["id"]).values(

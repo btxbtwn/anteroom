@@ -1,0 +1,1 @@
+- A relisted item that sold more than once keeps its earlier sale. When a marketplace order arrives, Anteroom now replaces only the Vendoo or Mark as sold record from within a week of it, instead of the nearest one no matter how old.
