@@ -119,8 +119,8 @@ Every bug fix, feature and refactor follows the same loop. Component details
    pass, and keep it.
 5. **Verify like CI.** `./check.sh` runs CI's checks for every component you
    changed, browser tests included (`--fast` skips those while iterating). For
-   a visible change, look at it in the sandbox at desktop and phone sizes and
-   put screenshots in the PR.
+   a visible change, look at it in the sandbox at desktop and phone sizes,
+   put screenshots in the PR and show them to the seller in your reply.
 6. **Open the PR** (see **Pull requests** below) and stay with it until CI is
    green.
 
@@ -225,6 +225,7 @@ mix it with a fix or a feature.
 
 - Follow the established style within each component. Do not refactor unrelated files.
 - Any visible change to the Anteroom web UI follows `DESIGN.md`: shared components, theme tokens, the type and spacing scales, and its pre-ship checklist.
+- Before designing a visible change, research how established design systems handle that element (Material Design 3, Apple HIG, Shopify Polaris, WCAG 2.2) and apply what fits. See `DESIGN.md`, **Research before you design**. After a visible change, show the seller screenshots at desktop and phone sizes in your reply, not only in the PR.
 - Keep skill instructions in canonical `SKILL.md` files; keep marketplace browser logic in that marketplace's extension module under `vendoo-extension/background/`.
 - Keep frontend API calls under `vendoo-studio/src/api/`; keep backend routes thin and place domain behavior in services and repositories.
 - A direct marketplace tab (eBay, Poshmark, Mercari, Depop) is a 1:1 replica of that marketplace's own listing form: the same fields, labels and order, no more and no fewer, under the same section headings and row layout (each native field carries the page's `section`, and `width: "half"` where the page puts fields side by side). Its rows come only from the native form the server or extension builds; the editor never adds reference, hand-kept or fallback rows to it. A field the marketplace has goes into that native form builder, not the editor.

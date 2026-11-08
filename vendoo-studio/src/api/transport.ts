@@ -42,3 +42,29 @@ export async function studioBlob(input: string): Promise<Blob> {
   if (hostedSession !== session) throw new Error("Your account changed. Download the export again.");
   return blob;
 }
+
+/**
+ * A request the server refused or couldn't answer. `retryable` marks a read
+ * (GET) that failed only because the server was briefly unavailable, so asking
+ * again is safe; anything else may already have run and is never repeated.
+ */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly retryable: boolean;
+  readonly retryAfterMs: number | null;
+  constructor(message: string, status: number, retryable: boolean, retryAfterMs: number | null = null) {
+    super(message);
+    this.status = status;
+    this.retryable = retryable;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/** `Retry-After` in milliseconds: a number of seconds or an HTTP date. */
+export function retryAfterMs(value: string | null, now = Date.now()): number | null {
+  if (!value?.trim()) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.max(0, date - now);
+}

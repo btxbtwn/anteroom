@@ -105,6 +105,7 @@ private struct SaveTemplateView: View {
             }
         }
         .task { await load() }
+        .reloadingOnReturn(when: source == nil && error != nil) { await load() }
     }
 
     private var selectedFields: [String] {
@@ -232,6 +233,7 @@ private struct ApplyTemplateView: View {
             }
         }
         .task { await load() }
+        .reloadingOnReturn(when: templates == nil && error != nil) { await load() }
     }
 
     private func load() async {

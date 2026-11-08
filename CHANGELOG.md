@@ -6,6 +6,50 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.800 — 2026-11-08
+
+- Analytics, Sales records and units sold count a sale once when it was kept from Vendoo and the marketplace's own order for it also arrived, and when an eBay order line was saved twice.
+
+## 0.1.799 — 2026-11-08
+
+- Etsy and eBay sales no longer appear twice when an old Vendoo import or your Mark as sold of the same sale exists. The marketplace's record is kept, with your cost of goods and any amounts you typed, and existing duplicates are removed when you update.
+
+## 0.1.798 — 2026-11-08
+
+- When Anteroom is briefly unavailable, such as during an update, screens on the web and iPhone keep loading and catch up once it's back instead of asking you to tap Try again.
+- On iPhone, a screen that couldn't load tries again by itself when you come back to the app.
+
+## 0.1.797 — 2026-11-08
+
+- Regenerate on the web now rewrites listings that are already live on marketplaces, instead of failing with "Only an unsent draft can be removed from this workspace". Their marketplace links are kept.
+
+## 0.1.796 — 2026-11-08
+
+- The iPhone app now runs on iPad too: the tabs open as a sidebar, and Inventory keeps your listings beside the one you're editing.
+- Unsaved edits now stay when you open another listing or switch tabs, and come back when you return to that listing.
+
+## 0.1.795 — 2026-11-08
+
+- Keep the web app and iPhone app answering while Anteroom updates, instead of showing errors for up to a few minutes.
+
+## 0.1.794 — 2026-11-08
+
+- Recording a sale on an item that has already sold is refused, so the same sale can no longer be saved twice.
+- Sales you recorded yourself can now be deleted from Sales records.
+
+## 0.1.793 — 2026-11-08
+
+- The Anteroom logo now shows at the top of the sidebar.
+- The Anteroom logo now shows on the browser tab at myanteroom.com.
+
+## 0.1.792 — 2026-11-08
+
+- Sales records no longer lists a sold item a second or third time when clearing its other marketplace listings reported them as sold, so its count matches Analytics.
+
+## 0.1.791 — 2026-11-08
+
+- Make listing rows in the sidebar larger, with bigger photos and text, and keep every row the same height.
+
 ## 0.1.790 — 2026-11-08
 
 - Bulk Regenerate's review window on the web now shows each listing's photos, including the enlarged view.
