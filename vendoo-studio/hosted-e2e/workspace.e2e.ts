@@ -223,7 +223,7 @@ test("typing before the initial details arrive preserves the pending edit and un
   } finally { release(); }
 });
 
-test("a listing that cannot load says so and loads its saved details on Retry instead of showing an empty form", async ({ page, request }, info) => {
+test("a listing the server briefly cannot answer keeps loading and fills in its saved details once it is back, without an error or a Retry tap", async ({ page, request }, info) => {
   test.setTimeout(60_000);
   const alice = await (await request.post(`${api}/local/auth/v1/token?grant_type=password`, {
     data: { email: "alice@sandbox.test", password: "sandbox" },
@@ -240,8 +240,10 @@ test("a listing that cannot load says so and loads its saved details on Retry in
   await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible();
   // The hosted API answers this way when its database connections run out.
   let unavailable = true;
+  let answered503 = 0;
   await page.route(`**/api/conversations/${draft.id}**`, async route => {
     if (!unavailable || route.request().method() !== "GET") return route.continue();
+    answered503 += 1;
     await route.fulfill({ status: 503, contentType: "application/json", headers: { "Retry-After": "5" },
       body: JSON.stringify({ detail: "Cloud data is temporarily unavailable" }) });
   });
@@ -252,11 +254,13 @@ test("a listing that cannot load says so and loads its saved details on Retry in
   } else {
     await page.goto(`/?listing=${draft.id}`);
   }
-  await expect(page.getByRole("alert").filter({ hasText: "This listing didn't load" })).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator(`#item-notes-${draft.id}`)).toHaveCount(0);
+  // A deploy or a full pool passes like a slow read: no error, and the saved details arrive.
+  await expect.poll(() => answered503, { timeout: 15_000 }).toBeGreaterThan(0);
+  await page.waitForTimeout(2_000);
+  await expect(page.getByRole("alert").filter({ hasText: "This listing didn't load" })).toHaveCount(0);
   unavailable = false;
-  await page.getByRole("button", { name: "Retry", exact: true }).click();
-  await expect(page.locator(`#item-notes-${draft.id}`)).toHaveValue("Saved notes");
+  // The read is asked again after Retry-After, with no tap.
+  await expect(page.locator(`#item-notes-${draft.id}`)).toHaveValue("Saved notes", { timeout: 20_000 });
   await expect(page.getByText("A23", { exact: true })).toBeVisible();
 });
 

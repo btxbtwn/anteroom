@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, errorMessage } from "./client";
+import { ApiRequestError, retryAfterMs } from "./transport";
 
 describe("errorMessage", () => {
   it("prefers a string detail", () => {
@@ -71,3 +72,42 @@ describe("Listing action deadlines", () => {
   });
 });
 
+
+describe("Requests while the server restarts", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const failure = async (call: () => Promise<unknown>) => {
+    try { await call(); } catch (error) { return error; }
+    throw new Error("Expected the request to fail");
+  };
+
+  it("marks a read that met a gateway answer or a dropped connection as safe to ask again", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>Service Unavailable</html>", {
+      status: 503, headers: { "Retry-After": "5" },
+    })));
+    const unavailable = await failure(() => api.suggestions.list());
+    expect(unavailable).toBeInstanceOf(ApiRequestError);
+    expect(unavailable).toMatchObject({ status: 503, retryable: true, retryAfterMs: 5000, message: "Request failed: 503" });
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    expect(await failure(() => api.suggestions.list())).toMatchObject({ retryable: true, message: "Failed to fetch" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })));
+    expect(await failure(() => api.suggestions.list())).toMatchObject({ status: 404, retryable: false, message: "Not found" });
+  });
+
+  it("never marks a write as safe to repeat", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 503 })));
+    expect(await failure(() => api.listings.update("coat", { title: "Edited" }, "r1"))).toMatchObject({ status: 503, retryable: false });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const dropped = await failure(() => api.listings.update("coat", { title: "Edited" }, "r1"));
+    expect(dropped).toBeInstanceOf(TypeError);
+  });
+
+  it("reads Retry-After as seconds or a date", () => {
+    expect(retryAfterMs("7")).toBe(7000);
+    expect(retryAfterMs(new Date(60_000).toUTCString(), 40_000)).toBe(20_000);
+    expect(retryAfterMs("soon")).toBeNull();
+    expect(retryAfterMs(null)).toBeNull();
+  });
+});
