@@ -21,20 +21,8 @@
       "help": "Choose the most specific category. Each marketplace form then picks its own matching category."
     },
     {
-      "key": "department",
-      "label": "Department"
-    },
-    {
-      "key": "brand",
-      "label": "Brand"
-    },
-    {
       "key": "title",
       "label": "Title"
-    },
-    {
-      "key": "description",
-      "label": "Description"
     },
     {
       "key": "condition",
@@ -45,6 +33,19 @@
       "label": "Size"
     },
     {
+      "key": "brand",
+      "label": "Brand"
+    },
+    {
+      "key": "price",
+      "label": "Price",
+      "type": "number"
+    },
+    {
+      "key": "description",
+      "label": "Description"
+    },
+    {
       "key": "primaryColor",
       "label": "Primary Color"
     },
@@ -53,14 +54,8 @@
       "label": "Secondary Color"
     },
     {
-      "key": "price",
-      "label": "Price",
-      "type": "number"
-    },
-    {
-      "key": "cost",
-      "label": "Cost",
-      "type": "number"
+      "key": "department",
+      "label": "Department"
     },
     {
       "key": "weight_oz",
@@ -76,13 +71,18 @@
       "label": "Inventory location"
     },
     {
-      "key": "quantity",
-      "label": "Quantity",
+      "key": "cost",
+      "label": "Cost",
       "type": "number"
     },
     {
       "key": "sku",
       "label": "SKU"
+    },
+    {
+      "key": "quantity",
+      "label": "Quantity",
+      "type": "number"
     }
   ],
   "shared": [

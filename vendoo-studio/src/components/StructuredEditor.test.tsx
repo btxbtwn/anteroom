@@ -118,3 +118,26 @@ describe("editor busy state", () => {
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+describe("General form", () => {
+  it("shows its sections in filling order with More details folded", () => {
+    const html = renderToStaticMarkup(<StructuredEditor convId="item" tab="general" target={null} disabled={false} onChange={vi.fn()}
+      listing={{ title: "Tee", category_path: "Men > Shirts", price: 20, sku: "A-1", quantity: 1 }} />);
+    const headings = ["Item", "Condition &amp; details", "Pricing", "Description", "Color &amp; department", "Shipping", "More details"]
+      .map((title) => html.indexOf(`>${title}<`));
+    expect(headings.every((position) => position > 0)).toBe(true);
+    expect(headings).toEqual([...headings].sort((a, b) => a - b));
+    expect(html).toMatch(/aria-expanded="false"[^>]*>More details/);
+    // Folded, the rows are rendered but hidden; the count still shows.
+    expect(html).toMatch(/<div [^>]*hidden=""[^>]*data-slot="collapsible-panel".*data-listing-row="sku"/s);
+    expect(html).toContain("2 of 3 filled");
+    // A section with a single field does not count it.
+    expect(html).not.toContain("1 of 1 filled");
+  });
+
+  it("opens More details when an Edit link points at a field inside it", () => {
+    const html = renderToStaticMarkup(<StructuredEditor convId="item" tab="general" target={{ field: "sku", sequence: 1 }}
+      disabled={false} onChange={vi.fn()} listing={{ title: "Tee" }} />);
+    expect(html).toMatch(/aria-expanded="true"[^>]*>More details/);
+  });
+});

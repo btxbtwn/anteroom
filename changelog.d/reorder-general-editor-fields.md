@@ -1,0 +1,3 @@
+- The General form now follows the order you fill it in: category, then title, condition, size and brand, then price, description, colors and department, and shipping.
+- Cost, SKU and quantity sit under More details at the bottom, folded until you open it. Its heading still shows how many are filled.
+- The iPhone app's General form uses the same order.
