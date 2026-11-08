@@ -1,0 +1,1 @@
+- See which marketplaces need the Chrome extension during setup and beside marketplace actions. Create and generate drafts without connecting Chrome.
