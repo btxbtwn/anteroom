@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { boxesQuery } from "../api/pageQueries";
 import type { SourceBox, SourceBoxInput, SourceBoxes, SourceStoreResults } from "../api/types";
 import { confirmDialog } from "../ui/confirmDialog";
 import { toastManager } from "./ui/toast";
@@ -27,7 +28,7 @@ import { Profit, SourcingItem, SourcingList, SourcingSetting, sourcingReasonClas
  */
 export function BoughtBoxes() {
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: BOXES_QUERY_KEY, queryFn: api.boxes.list });
+  const query = useQuery(boxesQuery);
   const onSaved = (data: SourceBoxes) => queryClient.setQueryData(BOXES_QUERY_KEY, data);
   const onError = (error: Error) =>
     toastManager.add({ type: "error", title: "Could not save the box", description: error.message });
