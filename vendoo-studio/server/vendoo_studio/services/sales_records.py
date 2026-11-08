@@ -15,8 +15,8 @@ FIELD_LABELS = {"item_revenue": "sale price", "shipping_credit": "shipping the b
                 "shipping_cost": "shipping you paid", "item_cost": "cost of goods"}
 
 
-def missing_fields(record: dict) -> list[str]:
-    data = record["financials"] or {}
+def missing_fields(record: dict, item_cost: str | None = None) -> list[str]:
+    data = record["financials"] or {"item_cost": item_cost}
     missing = [label for field, label in FIELD_LABELS.items() if data.get(field) is None]
     return missing + (["sale date"] if not record["sold_at"] else [])
 
@@ -34,7 +34,7 @@ def missing_from_records(records: list[dict]) -> dict[str, list[str]]:
     for conv_id, rows in grouped.items():
         # Listings cleared on other marketplaces are not additional sales.
         backed = [row for row in rows if row["financials"] is not None or row["order_id"] != row["line_id"]]
-        missing = {field for row in (backed or rows) for field in missing_fields(row)}
+        missing = {field for row in (backed or rows) for field in row["missing_sale_data"]}
         result[conv_id] = [label for label in [*FIELD_LABELS.values(), "sale date"] if label in missing]
     return result
 
@@ -108,6 +108,6 @@ def records_from_lines(lines: list, analytics_rows: list[AnalyticsItem]) -> list
             data["item_cost"] = effective_cost
             record["net_revenue"], record["profit"] = sales_ledger.totals(data, record["financials_stale"])
         record["financials_source"] = raw.get("source")
-        record["missing_sale_data"] = missing_fields(record)
+        record["missing_sale_data"] = missing_fields(record, effective_cost if not record["financials_stale"] else None)
         rows.append(record)
     return rows

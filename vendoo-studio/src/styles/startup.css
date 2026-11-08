@@ -1,0 +1,30 @@
+/* Available in the HTML before the application bundle, and shared by React. */
+.startup-screen {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100dvh;
+  overflow: auto;
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+.startup-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+}
+.startup-logo { width: 48px; height: 48px; border-radius: 10px; margin-bottom: 16px; }
+.startup-title { margin: 0 0 24px; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.4; }
+.startup-status { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 48px; color: var(--muted-foreground); font-size: 14px; line-height: 1.5; }
+.startup-status p { margin: 0; }
+.startup-spinner { flex: none; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--foreground); border-radius: 50%; }
+.startup-recovery { display: flex; justify-content: center; align-items: flex-end; min-height: 64px; }
+@media (prefers-reduced-motion: no-preference) {
+  .startup-spinner { animation: startup-spin 1s linear infinite; }
+}
+@keyframes startup-spin { to { transform: rotate(360deg); } }
