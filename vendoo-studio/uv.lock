@@ -3,8 +3,8 @@ revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'darwin'",
-    "python_full_version < '3.14' and sys_platform == 'darwin'",
     "python_full_version >= '3.14' and sys_platform == 'linux'",
+    "python_full_version < '3.14' and sys_platform == 'darwin'",
     "python_full_version < '3.14' and sys_platform == 'linux'",
 ]
 supported-markers = [
@@ -2698,7 +2698,7 @@ wheels = [
 
 [[package]]
 name = "vendoo-studio"
-version = "0.1.847"
+version = "0.1.848"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -2708,6 +2708,7 @@ dependencies = [
     { name = "filelock" },
     { name = "hachoir" },
     { name = "httpx" },
+    { name = "jsonschema" },
     { name = "numpy" },
     { name = "pillow" },
     { name = "pillow-heif" },
@@ -2775,6 +2776,7 @@ requires-dist = [
     { name = "hachoir", specifier = ">=3.4,<4" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.15" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "keyring", marker = "extra == 'desktop'", specifier = ">=25.0.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pgserver", marker = "extra == 'dev'", specifier = "==0.1.4" },
