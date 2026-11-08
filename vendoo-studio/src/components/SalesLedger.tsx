@@ -13,6 +13,7 @@ import { Button, buttonVariants } from "./ui/button";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { confirmDialog } from "../ui/confirmDialog";
 
 const MARKETS = ["ebay", "etsy", "poshmark", "mercari", "depop", "other"];
 
@@ -67,6 +68,21 @@ export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenList
   const filtered = search || attention !== "all" || marketplace !== "all" || sort !== "newest" || period !== "30";
   const clearFilters = () => { setSearch(""); setAttention("all"); setMarketplace("all"); setSort("newest"); setPeriod("30"); setEnd(today); setStart(new Date(Date.parse(today) - 29 * 86400000).toISOString().slice(0, 10)); setPage(1); };
   const refreshing = query.isFetching || overview.isFetching;
+  const refreshSales = (conversationId: string | null) => {
+    void queryClient.invalidateQueries({ queryKey: ["sales-ledger"] });
+    void queryClient.invalidateQueries({ queryKey: ["marketplace-sales"] });
+    void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+    void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+  };
+  // Only a sale the seller recorded can go: a marketplace's own sale would come back on its next check.
+  const remove = useMutation({ mutationFn: (row: SalesLedgerRow) => api.salesLedger.remove(row.id, row.financial_revision),
+    retry: false, onSuccess: (_result, row) => refreshSales(row.conversation_id) });
+  const askRemove = async (row: SalesLedgerRow) => {
+    const what = `${row.title || "this item"} on ${marketplaceName(row.marketplace)}, ${row.sold_at ? row.sold_at.slice(0, 10) : "no date"}`;
+    if (await confirmDialog(`Delete this sale record?\nThe sale you recorded for ${what} is removed from Sales records and Analytics. Nothing changes on any marketplace.`,
+      { variant: "destructive", confirmLabel: "Delete sale" })) remove.mutate(row);
+  };
   return <>
     <PageHeader title="Analytics" description="How your sales are doing, and every sale with its price, fees and profit." actions={<div className="flex flex-wrap gap-2">
       <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.inventoryCsv()} filename="anteroom-inventory.csv">Export inventory CSV</DownloadLink>
@@ -111,6 +127,7 @@ export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenList
     {query.error ? <PageError message={query.error.message} /> : null}
     {data ? <>
       <SalesLedgerSummary summary={data.summary} />
+      {remove.error ? <PageError message={remove.error.message} /> : null}
       <PageSection title="Sales records" description="Record totals after discounts; leave an amount blank if unknown.">
         {data.rows.length ? <ul className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/60 bg-card/40">{data.rows.map((row) => <li key={row.id} className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 text-sm">
           <div className="flex min-w-0 flex-1 basis-48 flex-col gap-0.5 break-words"><p className="font-medium">{row.title || `${marketplaceName(row.marketplace)} order ${row.order_id}`}</p>
@@ -125,18 +142,16 @@ export function SalesLedger({ onOpenListing, missingOnly = false }: { onOpenList
             <div><dt className="text-muted-foreground">Profit</dt><dd className={cn("mt-1 font-medium", row.profit == null ? "text-muted-foreground" : Number(row.profit) < 0 && "text-destructive-foreground")}><span className="sr-only">Profit: </span>{ledgerMoney(row.profit, row.financials?.currency)}</dd></div>
           </dl>
           <div className="flex flex-wrap gap-2">{row.conversation_id ? <Button size="xs" variant="ghost" onClick={() => onOpenListing(row.conversation_id!)}>Open item</Button> : null}
-            <Button size="xs" variant="outline" onClick={() => { setSelected(row); setEditor((value) => value + 1); }}>Record amounts</Button></div>
+            <Button size="xs" variant="outline" onClick={() => { setSelected(row); setEditor((value) => value + 1); }}>Record amounts</Button>
+            {row.source === "seller" ? <Button size="xs" variant="ghost-destructive" disabled={remove.isPending && remove.variables?.id === row.id}
+              onClick={() => void askRemove(row)}>{remove.isPending && remove.variables?.id === row.id ? "Deleting…" : "Delete"}</Button> : null}</div>
         </li>)}</ul> : <EmptyRow>No sales match these filters. Widen the date range or clear filters.</EmptyRow>}
         <div className="flex flex-wrap items-center gap-2 text-xs"><span role="status">{data.summary.lines ? `${(page - 1) * 50 + 1}–${Math.min(page * 50, data.summary.lines)} of ${data.summary.lines} records` : "0 records"} · Page {page}</span><Button size="xs" variant="outline" disabled={page === 1 || query.isFetching} onClick={() => setPage(page - 1)}>Previous</Button><Button size="xs" variant="outline" disabled={!data.has_more || query.isFetching} onClick={() => setPage(page + 1)}>Next</Button></div>
       </PageSection>
     </> : null}
     {selected ? <FinancialEditor key={`${selected.id}:${editor}`} row={selected} onClose={() => setSelected(null)}
       onReload={(row) => { setSelected(row); setEditor((value) => value + 1); }} onSaved={() => {
-        void queryClient.invalidateQueries({ queryKey: ["sales-ledger"] });
-        void queryClient.invalidateQueries({ queryKey: ["marketplace-sales"] });
-        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        void queryClient.invalidateQueries({ queryKey: ["conversation", selected.conversation_id] });
-        void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+        refreshSales(selected.conversation_id);
         setSelected(null);
       }} /> : null}
   </>;

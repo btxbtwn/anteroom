@@ -144,7 +144,7 @@ export const ListingRow = memo(function ListingRow({
   }, [renaming]);
 
   const actionClass =
-    "inline-flex size-5.5 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40";
+    "inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40";
 
   return (
     <div className="group/row relative mb-px" ref={itemRef} {...navigationIntent}>
@@ -152,7 +152,7 @@ export const ListingRow = memo(function ListingRow({
       <div
         data-active={selected}
         className={cn(
-          "flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 py-1.5 max-[900px]:py-2 max-[900px]:pr-11 text-left text-sidebar-foreground/90 transition-colors hover:bg-sidebar-row-hover",
+          "flex w-full min-w-0 cursor-pointer min-h-22 items-center gap-4 rounded-[var(--control-radius)] px-3 py-2 max-[900px]:min-h-24 max-[900px]:py-3 max-[900px]:pr-11 text-left text-sidebar-foreground/90 transition-colors hover:bg-sidebar-row-hover",
           "data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground",
           settled && "text-sidebar-muted-foreground group-hover/row:text-sidebar-foreground group-focus-within/row:text-sidebar-foreground data-[active=true]:text-sidebar-foreground",
         )}
@@ -172,13 +172,13 @@ export const ListingRow = memo(function ListingRow({
         <ListingThumb
           src={coverUrl}
           dimmed={settled && !selected}
-          className={settled ? "group-hover/row:[&_img]:opacity-100 group-focus-within/row:[&_img]:opacity-100" : undefined}
+          className={cn("size-14 rounded-lg max-[900px]:size-16", settled && "group-hover/row:[&_img]:opacity-100 group-focus-within/row:[&_img]:opacity-100")}
         />
         <div className="min-w-0 flex-1">
           {renaming ? (
             <input
               ref={renameInputRef}
-              className="w-full bg-transparent p-0 text-sm font-medium leading-snug text-sidebar-foreground outline-none"
+              className="w-full bg-transparent p-0 text-base font-medium leading-snug text-sidebar-foreground outline-none"
               value={draftTitle}
               aria-label={`Rename ${title}`}
               disabled={renameListing.isPending}
@@ -199,12 +199,12 @@ export const ListingRow = memo(function ListingRow({
               href={listingHref(listing.id)}
               draggable={false}
               className={cn(
-                "block w-full cursor-pointer truncate text-left text-sm font-medium leading-snug text-inherit no-underline outline-none",
+                "block w-full cursor-pointer truncate text-left text-base font-medium leading-snug text-inherit no-underline outline-none",
                 // Stretch the link over the row so right-click anywhere offers "Open in new tab".
                 !selecting && "after:absolute after:inset-0 after:content-['']",
                 // Hover actions float over the title; fade it under them.
                 !selecting &&
-                  "group-hover/row:[mask-image:linear-gradient(to_right,#000_calc(100%-76px),transparent_calc(100%-56px))] group-focus-within/row:[mask-image:linear-gradient(to_right,#000_calc(100%-76px),transparent_calc(100%-56px))]",
+                  "group-hover/row:[mask-image:linear-gradient(to_right,#000_calc(100%-108px),transparent_calc(100%-88px))] group-focus-within/row:[mask-image:linear-gradient(to_right,#000_calc(100%-108px),transparent_calc(100%-88px))]",
               )}
               title={name === title ? title : `${name} · ${title}`}
               onClick={(e) => {
@@ -223,25 +223,25 @@ export const ListingRow = memo(function ListingRow({
               {name}
             </a>
           )}
-          <div className="mt-0.5 flex items-center gap-2">
+          <div className="mt-1 flex items-center gap-2">
             <ListingStatusLabel status={status} title={statusTitle} />
             {status === "sold" && listing.missing_sale_data?.length ? (
               <ListingTag tone="warning" title={`Missing: ${listing.missing_sale_data.join(", ")}`}>
                 Missing sale data
               </ListingTag>
             ) : null}
-            {partial ? <span className="truncate text-2xs text-sidebar-muted-foreground">{partial}</span> : null}
-            {hint ? <span className="min-w-0 truncate text-2xs text-sidebar-muted-foreground" title={hint}>· {hint}</span> : null}
-            {settledAt ? <span className="text-2xs font-medium text-sidebar-muted-foreground">{settledAt}</span> : null}
+            {partial ? <span className="truncate text-xs text-sidebar-muted-foreground">{partial}</span> : null}
+            {hint ? <span className="min-w-0 truncate text-xs text-sidebar-muted-foreground" title={hint}>· {hint}</span> : null}
+            {settledAt ? <span className="text-xs font-medium text-sidebar-muted-foreground">{settledAt}</span> : null}
           </div>
           {listedMarketplaces.length ? (
             <div
-              className="mt-1.5 flex flex-wrap gap-1.5"
+              className="mt-2 flex flex-wrap gap-2"
               aria-label={`Listed on ${listedMarketplaces.map((row) => row.label).join(", ")}`}
             >
               {listedMarketplaces.map((row) => (
                 <span key={row.id} className={cn("inline-flex", row.status === "SOLD" && "opacity-55")}>
-                  <MarketplaceLogo id={row.id} label={`${row.label} · ${row.status.toLowerCase()}`} size={18} />
+                  <MarketplaceLogo id={row.id} label={`${row.label} · ${row.status.toLowerCase()}`} size={20} />
                 </span>
               ))}
             </div>
@@ -249,7 +249,7 @@ export const ListingRow = memo(function ListingRow({
         </div>
       </div>
       {!renaming && !selecting && (
-        <div className="pointer-events-none absolute top-1.5 right-1.5 flex items-center opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 max-[900px]:hidden">
+        <div className="pointer-events-none absolute top-2 right-2 flex items-center opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 max-[900px]:hidden">
           <button
             type="button"
             className={actionClass}
@@ -261,10 +261,10 @@ export const ListingRow = memo(function ListingRow({
               startRename();
             }}
           >
-            <PencilIcon className="size-3" />
+            <PencilIcon className="size-3.5" />
           </button>
-          <button type="button" className={actionClass} title="Listing templates" aria-label={`Templates for ${title}`} onClick={event=>{event.stopPropagation();setTemplatesOpen(true);}}><LayoutTemplateIcon className="size-3"/></button>
-          <button type="button" className={actionClass} title="Copy listing" aria-label={`Copy ${title}`} onClick={(event) => { event.stopPropagation(); setCopyOpen(true); }}><CopyIcon className="size-3" /></button>
+          <button type="button" className={actionClass} title="Listing templates" aria-label={`Templates for ${title}`} onClick={event=>{event.stopPropagation();setTemplatesOpen(true);}}><LayoutTemplateIcon className="size-3.5"/></button>
+          <button type="button" className={actionClass} title="Copy listing" aria-label={`Copy ${title}`} onClick={(event) => { event.stopPropagation(); setCopyOpen(true); }}><CopyIcon className="size-3.5" /></button>
           <button
             type="button"
             className={actionClass}
@@ -276,7 +276,7 @@ export const ListingRow = memo(function ListingRow({
               if (ok) onDelete(listing.id, title);
             }}
           >
-            <XIcon className="size-3" />
+            <XIcon className="size-3.5" />
           </button>
         </div>
       )}

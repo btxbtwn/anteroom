@@ -35,7 +35,6 @@ NOT_STUDIO = (
     "docs/",
     "changelog.d/",
     ".github/workflows/ios.yml",
-    ".github/dependabot.yml",
 )
 
 # Files the Version workflow rewrites with nothing but the new version.

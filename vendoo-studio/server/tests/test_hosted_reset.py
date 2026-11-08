@@ -36,7 +36,7 @@ def test_regenerate_and_clear_wipe_only_owned_idle_unsent_drafts(cloud, signing_
     Image.new('RGB', (40, 30), 'red').save(image, 'JPEG')
     assert client.post(f'/api/drafts/{identity}/photos', headers=alice, content=image.getvalue()).status_code < 300
     saved = client.put(path + '/listing', headers=alice, json={
-        'listing': {'title': 'Generated coat', 'price': 40}, 'expected_revision_id': ''})
+        'listing': {'title': 'Generated coat', 'price': 40, 'sku': 'A23'}, 'expected_revision_id': ''})
     assert saved.status_code == 200, saved.text
     with Session(engine) as db:
         db.add(Message(user_id=USER_ID, conversation_id=identity, role='assistant', text='Old chat'))
@@ -47,6 +47,15 @@ def test_regenerate_and_clear_wipe_only_owned_idle_unsent_drafts(cloud, signing_
     dropped = client.post(path + '/price-drop', headers=alice, json={'price': 30, 'mode': 'custom'})
     assert dropped.status_code == 200, dropped.text
     assert client.get(path + '/listing', headers=alice).json()['listing']['price'] == 30
+
+    # The bulk review shows what Regenerate keeps from the listing, without saving it.
+    details = path + '/regenerate-details'
+    assert client.get(details).status_code == 401
+    assert client.get(details, headers=bob).status_code == 404
+    shown = client.get(details, headers=alice)
+    assert shown.status_code == 200, shown.text
+    assert json.loads(shown.json()['notes']) == {'titlePinned': True, 'sku': 'A23', 'askingPrice': '30.00'}
+    assert client.get(path, headers=alice).json()['notes'] == notes
 
     body = {'keep_inputs': True}
     assert client.post(path + '/reset', json=body).status_code == 401

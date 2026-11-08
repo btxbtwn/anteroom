@@ -6,6 +6,34 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.795 — 2026-11-08
+
+- Keep the web app and iPhone app answering while Anteroom updates, instead of showing errors for up to a few minutes.
+
+## 0.1.794 — 2026-11-08
+
+- Recording a sale on an item that has already sold is refused, so the same sale can no longer be saved twice.
+- Sales you recorded yourself can now be deleted from Sales records.
+
+## 0.1.793 — 2026-11-08
+
+- The Anteroom logo now shows at the top of the sidebar.
+- The Anteroom logo now shows on the browser tab at myanteroom.com.
+
+## 0.1.792 — 2026-11-08
+
+- Sales records no longer lists a sold item a second or third time when clearing its other marketplace listings reported them as sold, so its count matches Analytics.
+
+## 0.1.791 — 2026-11-08
+
+- Make listing rows in the sidebar larger, with bigger photos and text, and keep every row the same height.
+
+## 0.1.790 — 2026-11-08
+
+- Bulk Regenerate's review window on the web now shows each listing's photos, including the enlarged view.
+- The review window now fills in each listing's current SKU, cost of goods, labels and measurements instead of starting blank.
+- Photos in eBay variations now show on the web.
+
 ## 0.1.789 — 2026-11-08
 
 - Selecting listings on iPhone responds right away instead of lagging behind each tap, even with a large inventory.
