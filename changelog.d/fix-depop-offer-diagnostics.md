@@ -1,1 +1,2 @@
 - Show skipped automatic offer attempts by listing in Activity, with Depop’s sanitized response and distinct explanations for refused previews and missing recipients instead of assuming there are no eligible likers.
+- Retry interrupted downloads of the pinned iPhone build tool without bypassing its checksum or the iPhone test suite.

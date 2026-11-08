@@ -7,7 +7,10 @@ version=2.46.0
 sha256=4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
 dest="${1:-${RUNNER_TEMP:-$(mktemp -d)}/xcodegen-$version}"
 mkdir -p "$dest"
-curl -fsSL --retry 3 -o "$dest/xcodegen.zip" "https://github.com/yonaskolb/XcodeGen/releases/download/$version/xcodegen.zip"
+# A proxy can surface HTTP 504 as curl receive error 56, which --retry alone
+# does not retry. This is a bounded GET to a file; the pinned checksum below
+# must still pass before anything is unpacked or executed.
+curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 --retry-max-time 600 -o "$dest/xcodegen.zip" "https://github.com/yonaskolb/XcodeGen/releases/download/$version/xcodegen.zip"
 echo "$sha256  $dest/xcodegen.zip" | shasum -a 256 -c -
 unzip -q -o "$dest/xcodegen.zip" -d "$dest"
 "$dest/xcodegen/bin/xcodegen" --version
