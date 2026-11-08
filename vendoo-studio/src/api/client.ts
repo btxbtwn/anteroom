@@ -336,7 +336,7 @@ export const api = {
         const explained = typeof data?.detail === "string" && data.detail.trim();
         if (!explained && response.status >= 500) {
           if (attempt === 1) continue;
-          throw new Error("The server restarted while reading. Read from photos again.");
+          throw new Error("The server restarted while reading. Press Read measurements again.");
         }
         throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
       }
