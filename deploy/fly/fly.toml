@@ -9,6 +9,11 @@ primary_region = 'sjc'
 kill_signal = 'SIGTERM'
 kill_timeout = 300
 
+[deploy]
+  # Start the new Machine and move traffic to it before stopping the old one,
+  # so a deploy never leaves no Machine to answer. See docs/hosted-production.md.
+  strategy = 'bluegreen'
+
 [build]
   dockerfile = 'Dockerfile'
 

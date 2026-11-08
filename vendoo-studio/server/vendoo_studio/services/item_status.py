@@ -135,7 +135,46 @@ def _read_sold_out(observations: dict[str, dict], lines: list[MarketplaceSale]) 
     return False
 
 
+# How far apart Vendoo's date and the marketplace's date for one sale can be.
+SAME_SALE_DAYS = 7
+
+
+def _within_days(first: datetime | None, second: datetime | None, days: int) -> bool:
+    return first is not None and second is not None and abs((first - second).total_seconds()) <= days * 86400
+
+
+def repeated_lines(lines: list[MarketplaceSale]) -> set[str]:
+    """IDs of one item's paid lines that record a sale another of its lines already records.
+
+    - The Vendoo sale kept on the ledger, once that marketplace's own order for
+      it is on the ledger too: the order replaces it, one copy per order, the
+      nearest in date within a week. Webhooks and order reads can save the order without
+      removing the copy, so it is left out wherever sales are counted.
+    - An eBay line saved a second time under its bare transaction ID
+      (``<transaction>``) beside ``<item>-<transaction>``.
+    """
+    from vendoo_studio.services.sale_matching import matching_sale_index
+
+    repeated: set[str] = set()
+    orders = [line for line in lines if line.source == "marketplace" and line.is_order_backed]
+    for line in orders:
+        if line.marketplace == "ebay" and any(
+                other is not line and other.marketplace == "ebay" and other.order_id == line.order_id
+                and other.line_id.endswith(f"-{line.line_id}") for other in orders):
+            repeated.add(line.id)
+    copies = [line for line in lines if line.source == "vendoo"]
+    for order in sorted((line for line in orders if line.id not in repeated),
+                        key=lambda line: (line.sold_at or line.received_at, line.id)):
+        moment = sale_moment(order)
+        match = matching_sale_index(copies, order.marketplace, moment)
+        # A copy from an earlier sale of a relisted item is a sale of its own.
+        if match is not None and _within_days(sale_moment(copies[match]), moment, SAME_SALE_DAYS):
+            repeated.add(copies.pop(match).id)
+    return repeated
+
+
 def paid_lines(db: Session, conv_ids: set[str] | None = None) -> dict[str, list[MarketplaceSale]]:
+    """Each item's paid sales, every sale once (see ``repeated_lines``)."""
     query = db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id.isnot(None),
                                              MarketplaceSale.order_status.in_(PAID_STATUSES))
     if conv_ids is not None:
@@ -144,6 +183,10 @@ def paid_lines(db: Session, conv_ids: set[str] | None = None) -> dict[str, list[
     for line in query.all():
         if line.conversation_id is not None:
             grouped.setdefault(line.conversation_id, []).append(line)
+    for conv_id, own in grouped.items():
+        repeated = repeated_lines(own)
+        if repeated:
+            grouped[conv_id] = [line for line in own if line.id not in repeated]
     return grouped
 
 
