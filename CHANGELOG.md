@@ -6,6 +6,51 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.840 — 2026-11-08
+
+- A category set on General now fills the closest Poshmark, Mercari and Depop category when no exact match exists, instead of leaving it blank. That marketplace tab shows "Suggested: check it" until you pick a category or press Looks right.
+- Kids' sets and gloves no longer land in Mercari's Fragrance or Cleaning categories, and Etsy no longer picks Pet Supplies for women's tops, dresses or men's hats.
+
+## 0.1.839 — 2026-11-08
+
+- The General form now follows the order you fill it in: category, then title, condition, size and brand, then price, description, colors and department, and shipping.
+- Cost, SKU and quantity sit under More details at the bottom, folded until you open it. Its heading still shows how many are filled.
+- The iPhone app's General form uses the same order.
+
+## 0.1.838 — 2026-11-08
+
+- Choosing a category on the General form on iPhone or the web app now fills the matching category on eBay, Poshmark, Mercari, Depop and Etsy, as it already did on the Mac.
+
+## 0.1.837 — 2026-11-08
+
+- See which marketplaces need the Chrome extension during setup and beside marketplace actions. Create and generate drafts without connecting Chrome.
+
+## 0.1.836 — 2026-11-08
+
+- Fixed Scout an item showing “Not Found” on the web.
+
+## 0.1.835 — 2026-11-08
+
+- Sourcing retries brief supplier rate limits and avoids unnecessary catalog requests.
+
+## 0.1.834 — 2026-11-08
+
+- Inventory on phones scrolls to the screen edge behind Safari's floating controls, with the profile button beside the header actions.
+
+## 0.1.833 — 2026-11-08
+
+- Inventory thumbnails load ahead of scrolling so upcoming items show their photos sooner.
+
+## 0.1.832 — 2026-11-08
+
+- Signed in, Anteroom now opens on the assistant, on the web and on iPhone.
+- The assistant's home screen greets you by time of day, centers the greeting with the message box below it on desktop (cursor ready) or docked at the bottom on phones, offers four example questions, and on desktop lists your three most recent chats.
+- Chat history now opens from a History button beside New chat instead of always taking a column, and groups chats under Today, Yesterday, Previous 7 days and Older.
+
+## 0.1.831 — 2026-11-08
+
+- Settings now opens General by default on the web.
+
 ## 0.1.830 — 2026-11-08
 
 - Open "Mark down prices" in a fraction of the time: it reads only the small price fields it needs, in a few queries, instead of every saved version of every sold item.

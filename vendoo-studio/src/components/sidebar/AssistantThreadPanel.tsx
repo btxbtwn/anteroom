@@ -8,6 +8,7 @@ import { cn } from "../../lib/utils";
 import { SIDEBAR_ROW } from "./sidebarStyles";
 import { prefetchAssistantThread } from "../../api/navigationQueries";
 import { useNavigationIntent } from "../../lib/useNavigationIntent";
+import { groupChats } from "../chat/chatHistory";
 
 function ThreadButton({ thread, selected, onPick }: {
   thread: AssistantThread; selected: boolean; onPick: (id: string) => void;
@@ -18,7 +19,7 @@ function ThreadButton({ thread, selected, onPick }: {
     <button type="button" className={cn(SIDEBAR_ROW, "min-w-0 flex-1")}
       data-active={selected} aria-current={selected ? "true" : undefined}
       {...intent} onClick={() => { void prefetchAssistantThread(client, thread.id); onPick(thread.id); }}>
-      <span className="truncate">{thread.title}</span>
+      <span className="min-w-0 flex-1 truncate" title={thread.title}>{thread.title}</span>
     </button>
   );
 }
@@ -30,8 +31,9 @@ const SEARCH_INPUT_CLASS =
 
 /**
  * The assistant's conversations, in a right-hand panel on T3 Code's sidebar
- * surface. Listing chats are not in this list; the listings stay on the left.
- * On mobile it is a sheet that slides in from the right.
+ * surface, grouped by day like ChatGPT's and Claude's history. It opens from
+ * the History button and starts closed. Listing chats are not in this list;
+ * the listings stay on the left. On mobile it is a sheet that slides in from the right.
  */
 export function AssistantThreadPanel({
   selectedId,
@@ -41,7 +43,7 @@ export function AssistantThreadPanel({
 }: {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  /** `undefined` on desktop, where the panel is always shown. */
+  /** `undefined` on desktop, where the History button shows and hides it. */
   mobileOpen?: boolean;
   onCloseMobile: () => void;
 }) {
@@ -106,7 +108,8 @@ export function AssistantThreadPanel({
         </label>
         <button
           type="button"
-          className={cn(SIDEBAR_ROW, "w-auto shrink-0 px-2 text-xs font-semibold")}
+          // On desktop the titlebar has New chat; the phone sheet keeps its own.
+          className={cn(SIDEBAR_ROW, "hidden w-auto shrink-0 px-2 text-xs font-semibold max-[900px]:flex")}
           aria-pressed={selectedId === null}
           onClick={() => pick(null)}
         >
@@ -127,19 +130,24 @@ export function AssistantThreadPanel({
             {threads.data?.length ? "No matching chats" : "No chats yet"}
           </p>
         ) : (
-          shown.map((thread) => (
-            <div key={thread.id} className="group flex items-center gap-0.5">
-              <ThreadButton thread={thread} selected={selectedId === thread.id} onPick={pick} />
-              <button
-                type="button"
-                className="inline-flex size-7 max-[900px]:size-11 shrink-0 cursor-pointer items-center justify-center rounded-[var(--control-radius)] text-sidebar-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 group-hover:opacity-100 max-[900px]:opacity-100"
-                aria-label={`Delete ${thread.title}`}
-                disabled={remove.isPending}
-                onClick={() => { void deleteThread(thread); }}
-              >
-                <Trash2Icon className="size-3.5" />
-              </button>
-            </div>
+          groupChats(shown).map(({ group, chats }) => (
+            <section key={group} aria-label={group} className="pb-2">
+              <h3 className="px-2.5 pt-2 pb-1 text-xs font-medium text-sidebar-muted-foreground">{group}</h3>
+              {chats.map((thread) => (
+                <div key={thread.id} className="group flex items-center gap-0.5">
+                  <ThreadButton thread={thread} selected={selectedId === thread.id} onPick={pick} />
+                  <button
+                    type="button"
+                    className="inline-flex size-7 max-[900px]:size-11 shrink-0 cursor-pointer items-center justify-center rounded-[var(--control-radius)] text-sidebar-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 group-hover:opacity-100 max-[900px]:opacity-100"
+                    aria-label={`Delete ${thread.title}`}
+                    disabled={remove.isPending}
+                    onClick={() => { void deleteThread(thread); }}
+                  >
+                    <Trash2Icon className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </section>
           ))
         )}
       </div>

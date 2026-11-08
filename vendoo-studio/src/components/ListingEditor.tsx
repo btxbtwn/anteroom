@@ -43,7 +43,7 @@ import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
 import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, GeneralCategorySelect, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
-import { generalFormSections, groupFieldsIntoSections } from "./listingFieldSections";
+import { GENERAL_FOLDED_SECTION, generalFormSections, groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { gapsByField, rowForField } from "./nativeFieldWarnings";
 import type { NativeMarketplace } from "../api/nativeMarketplaces";
@@ -561,6 +561,17 @@ export function StructuredEditor({
   // Go to an "Edit …" target once. The rows rebuild on every save, and
   // following the target again then pulled the seller back from whatever they were editing.
   const reachedTarget = React.useRef<number | null>(null);
+  // General's More details starts folded. An "Edit …" target inside it opens it
+  // until the seller folds it again.
+  const [moreToggle, setMoreToggle] = React.useState<{ open: boolean; sequence?: number }>({ open: false });
+  const targetFolded = React.useMemo(() => {
+    if (!target || tab !== "general") return false;
+    const key = matchingEditorField(fields, target.field) ?? rowForField(tab, target.field, fields);
+    return Boolean(key && generalFormSections(fields).find((section) => section.id === GENERAL_FOLDED_SECTION)
+      ?.fields.some((field) => field.key === key));
+  }, [target, tab, fields]);
+  const moreOpen = targetFolded && moreToggle.sequence !== target?.sequence ? true : moreToggle.open;
+  const setMoreOpen = (open: boolean) => setMoreToggle({ open, sequence: target?.sequence });
   React.useEffect(() => {
     if (!target || reachedTarget.current === target.sequence) return;
     // A marketplace's answer can name the listing field its form row comes from.
@@ -571,7 +582,7 @@ export function StructuredEditor({
     reachedTarget.current = target.sequence;
     input.scrollIntoView({ block: "center" });
     input.focus();
-  }, [target, fields, tab]);
+  }, [target, fields, tab, moreOpen]);
 
   // Derive saved values during render: a cached form is filled on its first frame.
   const local = React.useMemo(() => {
@@ -1016,6 +1027,14 @@ export function StructuredEditor({
                     </div>
                   ))}
                   <div className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f)}</div>
+                  {suggestedCategory(listing, tab, f.key) && <p role="status" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-warning-foreground">
+                    <span>Suggested: check it. No exact {marketplaceName(tab)} match.</span>
+                    {!disabled && !f.locked && <InlineButton type="button" className="text-xs" onClick={() => {
+                      const updated = cloneListing(listing);
+                      setListingEditorValue(updated, `direct_category_ids.${tab}_suggested`, undefined);
+                      emitChange(updated);
+                    }}>Looks right</InlineButton>}
+                  </p>}
                   {onAskChat && !f.locked && <InlineButton type="button" className="mt-1 text-xs" onClick={() => onAskChat(
                     `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
                   )}>Ask chat</InlineButton>}
@@ -1044,7 +1063,9 @@ export function StructuredEditor({
             className="gap-3 py-4"
             title={section.title}
             titleId={`listing-section-${tab}-${section.id}`}
-            meta={section.id === "listing" || !counted.length ? null : `${filled} of ${counted.length} filled`}
+            meta={section.id === "listing" || !counted.length || (tab === "general" && counted.length < 2) ? null
+              : `${filled} of ${counted.length} filled`}
+            {...(tab === "general" && section.id === GENERAL_FOLDED_SECTION ? { open: moreOpen, onOpenChange: setMoreOpen } : {})}
           >
             {rows}
           </InspectorSection>
@@ -1460,6 +1481,15 @@ export function nativeEditorDependencies(fields: EditorField[], listing: Listing
       });
     }),
   });
+}
+
+/** Anteroom filled this tab's category with the closest option, not an exact match, and the seller has not checked it. */
+export function suggestedCategory(listing: ListingData | undefined, tab: string, key: string): boolean {
+  if (key !== `direct_category_ids.${tab}`) return false;
+  const ids = listing?.direct_category_ids;
+  if (!ids || typeof ids !== "object" || Array.isArray(ids)) return false;
+  const direct = ids as Record<string, unknown>;
+  return direct[`${tab}_suggested`] === true && Boolean(direct[tab]);
 }
 
 function liveCategoryFields(listing: ListingData | undefined, marketplace: "ebay" | "etsy"): EditorField[] {

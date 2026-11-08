@@ -65,25 +65,44 @@ def _tokens(text: str) -> list[str]:
     return [word for word in re.findall(r"[a-z0-9]+", text.lower()) if len(word) > 2]
 
 
+# Branches for a narrower kind of buyer. A leaf in one needs the category or title to say so.
+_NICHE = {"pet", "dog", "cat", "wedding", "bridal", "bride"}
+# General roots that hold clothing. A category from any other root never lands in
+# Etsy's Clothing or Shoes because of a shared word: a boiler's "Expansion Tanks" are not tank tops.
+_APPAREL_ROOTS = {"clothing, shoes & accessories", "baby", "clothing", "shoes"}
+_ETSY_APPAREL = {"clothing", "shoes"}
+
+
 def pick_etsy_leaf(leaves: list[dict], query: str) -> dict[str, str] | None:
     """Match the product type at the leaf first, then its department and ancestors."""
+    # General's apparel root names every kind of item, so its words choose nothing.
+    parts = [part.strip() for part in query.split(">")]
+    outside_apparel = len(parts) > 1 and parts[0].casefold() not in _APPAREL_ROOTS
+    if len(parts) > 2 and parts[0].casefold() == "clothing, shoes & accessories":
+        query = " > ".join(parts[1:])
     tokens = {word.rstrip("s") for word in _tokens(query)}
     if not tokens:
         return None
     product_tokens = {word.rstrip("s") for word in _tokens(query.split(">")[-1])}
-    ranked: list[tuple[int, int, int, int, dict]] = []
+    ranked: list[tuple[int, int, int, int, int, dict]] = []
     for leaf in leaves:
         path = str(leaf.get("path") or "")
         words = {word.rstrip("s") for word in _tokens(path)}
+        # Pet clothing is for a pet, and a wedding hat for a wedding, only when the query says so.
+        if (words & _NICHE) - tokens:
+            continue
+        if outside_apparel and path.split(">")[0].strip().casefold() in _ETSY_APPAREL:
+            continue
         leaf_words = {word.rstrip("s") for word in _tokens(path.split(">")[-1])}
         score = len(tokens & words)
         product_score = len(product_tokens & words)
         if product_score:
-            ranked.append((len(product_tokens & leaf_words), product_score, score, len(path), leaf))
+            # Then the leaf that adds the fewest words of its own: "Hats & Caps" over "Hat Pins & Stick Pins".
+            ranked.append((len(product_tokens & leaf_words), product_score, score, -len(leaf_words - tokens), len(path), leaf))
     if not ranked:
         return None
-    ranked.sort(key=lambda item: item[:4], reverse=True)
-    leaf = ranked[0][4]
+    ranked.sort(key=lambda item: item[:5], reverse=True)
+    leaf = ranked[0][5]
     return {"id": str(leaf["id"]), "path": str(leaf.get("path") or leaf["id"])}
 
 
@@ -243,14 +262,14 @@ async def attach_direct_categories(db, listing: dict, evidence: str = "") -> dic
     markets = {market for market in ("ebay", "poshmark", "depop", "mercari")
                if not direct_category_id({"direct_category_ids": chosen}, market)}
     if markets:
-        from vendoo_studio.services.agent_categories import apply_agent_categories, ebay_tree_leaves
+        from vendoo_studio.services.agent_categories import apply_agent_categories, tree_leaves
         from vendoo_studio.services.native_category_match import native_rows
 
         # Each form's own options, matched the same way as a category change in
         # the editor. A known eBay leaf needs no network search.
         # A copy, so filling a category here does not clear the sizes generation wrote.
         apply_agent_categories({**copy.deepcopy(listing), "direct_category_ids": chosen},
-                               {**native_rows(), "ebay": ebay_tree_leaves(db)}, markets=markets)
+                               {**native_rows(), "ebay": tree_leaves(db, "ebay")}, markets=markets)
     # Tree reads are complete. Live API/token lookups must have the pool free.
     db.close()
     if not direct_category_id({"direct_category_ids": chosen}, "ebay"):
