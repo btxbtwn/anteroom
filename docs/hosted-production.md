@@ -245,13 +245,15 @@ inside `with op.get_context().autocommit_block():`
 (`tests/test_migration_locking.py` enforces it). A concurrent build that fails
 leaves an `INVALID` index; drop it before retrying.
 
-A deploy still stops the old Machine before starting the new one, so it
-answers 503 until the new one is up: on 2026-11-07 for 2 min 15 s with open
-streams (the old process drained requests for up to 120 s first), and about
-20 s when idle. Blue-green deploys, which start the new Machine first, are
-switched on separately, once every running Machine has the handoff below.
+Deploys use Fly's `bluegreen` strategy: the new Machine starts, passes its
+health check and takes traffic before the old one is stopped, so a deploy
+never leaves no Machine to answer. Before this, the single Machine was stopped
+first; on 2026-11-07 a deploy with open streams answered 503 for 2 min 15 s
+(the old process drained requests for up to 120 s before the new one booted),
+and an idle one for about 20 s. The two Machines overlap for a few minutes per
+deploy; no Machine runs continuously beyond the one approved.
 
-When two Machines overlap, only the Machine holding the `schedulers` lease
+During the overlap only the Machine holding the `schedulers` lease
 (`anteroom_private.process_leases`, revision `e5b81d27c4a6`) runs automations,
 eBay offers, the job watchdog, sourcing, Chrome sale checks, promotions and
 sales sync, because each treats work in progress at its startup as cut off.
