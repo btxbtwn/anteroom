@@ -91,7 +91,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
   ));
 
   // Fills blank measurement fields from each listing's yardstick photos; typed values stay.
-  const readFromPhotos = async () => {
+  const readMeasurements = async () => {
     if (!rows) return;
     setReading({ done: 0, total: listings.length });
     await readEach(listings, async (listing) => {
@@ -181,7 +181,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
             Drag photos to set their order; the first one is the cover, and a click enlarges one. Rotate or remove a photo from its corners.
             Chat and every generated field are discarded, then each listing is written again from its
             photos and these details concurrently. Flaws and notes are kept.
-            {" "}Read from photos fills blank measurements from yardstick photos; check them before rewriting.
+            {" "}Read measurements fills blank measurements from yardstick photos; check them before rewriting.
           </p>
         </div>
         <ul className="bulk-upload-groups" aria-label="Each listing's photos and details">
@@ -222,9 +222,9 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
             className="btn btn-secondary"
             disabled={saving || !rows || reading !== null}
             title="Fill blank measurements from photos with a yardstick on the item"
-            onClick={() => void readFromPhotos()}
+            onClick={() => void readMeasurements()}
           >
-            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read from photos"}
+            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving || !rows || reading !== null}>
             {saving ? "Saving…" : `Rewrite ${count}`}

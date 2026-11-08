@@ -4,7 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { addLabel, removeLabel, splitLabels } from "./itemLabels";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
-import { GARMENTS } from "./garmentMeasurements";
+import { GARMENTS, type Garment } from "./garmentMeasurements";
+import { applyReading, readingSuggestion } from "../measurementReading";
+import { useWorkspaceRuntime } from "../app/runtime";
+import type { MeasurementReadResult } from "../api/types";
 import { DEFAULTS, applyDetailsPatch, changedDetails, parseNotes, type ItemDetailsData } from "./itemDetailsData";
 import { itemDetailsEdits } from "../api/itemDetailsEdits";
 import { XIcon } from "lucide-react";
@@ -22,6 +25,14 @@ interface Props {
 }
 
 type TextKey = Exclude<keyof ItemDetailsData, "garment" | "measurements">;
+
+/** One Read measurements run; its result waits for the seller to fill it in. */
+interface Reading {
+  convId: string;
+  garment: Garment;
+  result?: MeasurementReadResult;
+  error?: string;
+}
 
 const RECENT_LABELS_KEY = "vendoo-studio.recent-labels";
 
@@ -44,6 +55,7 @@ function clearLegacyStoredLabels() {
 
 export function ItemDetails({ convId }: Props) {
   const queryClient = useQueryClient();
+  const runtime = useWorkspaceRuntime();
   const edits = useMemo(() => itemDetailsEdits(queryClient, convId), [queryClient, convId]);
   const editState = React.useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
   const saving = editState.saving;
@@ -157,6 +169,30 @@ export function ItemDetails({ convId }: Props) {
       [garment.id]: { ...details.measurements[garment.id], [key]: value },
     },
   });
+
+  // Reads the yardstick in this listing's photos. Nothing is saved until the seller fills it in.
+  const [reading, setReading] = useState<Reading | null>(null);
+  const currentReading = reading?.convId === convId && reading.garment === garment.id ? reading : null;
+  const readingOutcome = currentReading?.result
+    ? applyReading(garment.id, details.measurements[garment.id], currentReading.result)
+    : null;
+  const readMeasurements = async () => {
+    const target: Reading = { convId, garment: garment.id };
+    setReading(target);
+    const settle = (patch: Partial<Reading>) => setReading((current) => (
+      current?.convId === target.convId && current.garment === target.garment ? { ...current, ...patch } : current
+    ));
+    try {
+      settle({ result: await api.measurements.readSaved(convId, garment.id) });
+    } catch (err) {
+      settle({ error: err instanceof Error ? err.message : "Reading failed." });
+    }
+  };
+  const fillReading = () => {
+    if (!readingOutcome) return;
+    void save({ ...details, measurements: { ...details.measurements, [garment.id]: readingOutcome.measurements } });
+    setReading(null);
+  };
 
   const { data: boxData } = useQuery({ queryKey: BOXES_QUERY_KEY, queryFn: api.boxes.list });
   const boxes = boxData?.boxes ?? [];
@@ -447,6 +483,40 @@ export function ItemDetails({ convId }: Props) {
             placeholder={'Anything the fields above miss, e.g. Hem 21"'}
           />
         </div>
+        {runtime.features.has("generation") && (
+          <div className="flex min-w-0 flex-col gap-2">
+            {currentReading && !currentReading.result && !currentReading.error ? (
+              <Button variant="outline" size="sm" className="w-fit" disabled>
+                <Spinner aria-hidden="true" role={undefined} className="size-3.5" />
+                Reading the yardstick…
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                title="Fill blank measurements from photos with a yardstick on the item"
+                onClick={() => void readMeasurements()}
+              >
+                Read measurements
+              </Button>
+            )}
+            {currentReading?.error ? (
+              <p className="text-destructive-foreground text-xs" role="alert">{currentReading.error}</p>
+            ) : null}
+            {readingOutcome ? (
+              <div className="flex min-w-0 flex-col gap-2 rounded-lg border bg-muted/40 p-2.5" role="status">
+                <p className="text-xs">{readingSuggestion(garment.id, readingOutcome)}</p>
+                <div className="flex gap-1">
+                  {readingOutcome.suggested.length ? (
+                    <Button size="xs" onClick={fillReading}>Fill in</Button>
+                  ) : null}
+                  <Button variant="ghost" size="xs" onClick={() => setReading(null)}>Dismiss</Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
       </InspectorSection>
 
       {saving && (

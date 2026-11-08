@@ -56,3 +56,15 @@ export function applyReading(
 export async function readEach<T>(items: T[], work: (item: T) => Promise<void>): Promise<void> {
   await Promise.all(items.map(work));
 }
+
+/**
+ * A single listing's reading as a suggestion the seller accepts before it is saved:
+ * what the photos read for blank fields, and what to measure by hand.
+ */
+export function readingSuggestion(garment: Garment, outcome: ReadingOutcome): string {
+  const labels = new Map(garmentFields(garment).map((field) => [field.key, field.label]));
+  const read = outcome.suggested.map((key) => `${labels.get(key)} ${outcome.measurements[key]} in`);
+  const byHand = outcome.note.match(/Measure by hand: .*$/)?.[0];
+  if (!read.length) return outcome.note;
+  return [`From the photos: ${read.join(", ")}.`, byHand].filter(Boolean).join(" ");
+}
