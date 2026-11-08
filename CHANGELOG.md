@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.824 — 2026-11-08
+
+- Relisting an item now makes it fresh again: "Listed N days ago", the stale filter, the Stalest sort and Suggestions count from the new listing instead of the original one, on the web and iPhone.
+
 ## 0.1.823 — 2026-11-08
 
 - Analytics no longer shows a box for sales missing data; find them in Sales records instead.
