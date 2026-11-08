@@ -154,7 +154,7 @@ export const ListingRow = memo(function ListingRow({
       <div
         data-active={selected}
         className={cn(
-          "flex w-full min-w-0 cursor-pointer min-h-22 items-center gap-4 rounded-[var(--control-radius)] px-3 py-2 max-[900px]:min-h-24 max-[900px]:py-3 max-[900px]:pr-11 text-left text-sidebar-foreground/90 transition-colors hover:bg-sidebar-row-hover",
+          "flex w-full min-w-0 cursor-pointer min-h-22 items-center gap-4 rounded-[var(--control-radius)] px-3 py-2 max-[900px]:min-h-24 max-[900px]:py-3 max-[900px]:pr-11 pointer-coarse:pr-11 text-left text-sidebar-foreground/90 transition-colors hover:bg-sidebar-row-hover",
           "data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground",
           settled && "text-sidebar-muted-foreground group-hover/row:text-sidebar-foreground group-focus-within/row:text-sidebar-foreground data-[active=true]:text-sidebar-foreground",
         )}
@@ -253,7 +253,7 @@ export const ListingRow = memo(function ListingRow({
         </div>
       </div>
       {!renaming && !selecting && (
-        <div className="pointer-events-none absolute top-2 right-2 flex items-center opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 max-[900px]:hidden">
+        <div className="pointer-events-none absolute top-2 right-2 flex items-center opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 max-[900px]:hidden pointer-coarse:hidden">
           <button
             type="button"
             className={actionClass}
@@ -284,11 +284,11 @@ export const ListingRow = memo(function ListingRow({
           </button>
         </div>
       )}
-      {/* Phones have no hover: the row's actions live behind one full-size button. */}
+      {/* Phones and tablets have no hover: the row's actions live behind one full-size button. */}
       {!renaming && !selecting && (
         <Menu>
           <MenuTrigger
-            className="absolute top-1/2 right-0 hidden size-11 -translate-y-1/2 cursor-pointer items-center justify-center rounded-lg text-sidebar-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover max-[900px]:inline-flex"
+            className="absolute top-1/2 right-0 hidden size-11 -translate-y-1/2 cursor-pointer items-center justify-center rounded-lg text-sidebar-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover max-[900px]:inline-flex pointer-coarse:inline-flex"
             aria-label={`Actions for ${title}`}
           >
             <EllipsisIcon className="size-4.5" />
