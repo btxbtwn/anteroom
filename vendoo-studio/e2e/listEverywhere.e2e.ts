@@ -114,6 +114,7 @@ test("List everywhere names each missing field in full and opens it on its form"
     await expect(needs.getByRole("button")).toHaveText(["Ships from", question]);
     const long = needs.getByRole("button", { name: question });
     expect(await long.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await info.attach("list-everywhere-missing-fields.png", { body: await page.screenshot(), contentType: "image/png" });
 
     await needs.getByRole("button", { name: "Ships from" }).click();
     await expect(dialog).toBeHidden();
