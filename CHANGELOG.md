@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.806 — 2026-11-08
+
+- Anteroom now shows a Beta tag next to its name.
+
 ## 0.1.805 — 2026-11-08
 
 - Marketplace refusals now explain the problem in plain words, like "Etsy needs to know who made this item", with the marketplace's own reply tucked under Details.
