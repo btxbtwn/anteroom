@@ -441,3 +441,31 @@ def test_record_form_keeps_amounts_it_does_not_show(ledger):
     assert response.status_code == 200, response.text
     saved = response.json()["financials"]
     assert saved["refunds"] == "2.00" and saved["item_cost"] == "7" and saved["item_revenue"] == "50"
+
+
+def _sold_hat(ledger, *, with_order: bool):
+    ledger.db.add(Conversation(id="hat", title="Felt hat", status="active", notes="{}"))
+    ledger.db.commit()
+    listing_persistence.save_revision(ledger.db, "hat", {"title": "Felt hat", "price": 20, "quantity": 1, "description": "Felt hat"}, "user")
+    if with_order:
+        ledger.db.add(MarketplaceSale(id="hat-order", marketplace="ebay", order_id="hat-order", line_id="hat-line",
+                                      listing_id="222222222222", conversation_id="hat"))
+    # Clearing the other listings after the sale reads each of them as sold: a listing, not an order.
+    for marketplace, listing in (("poshmark", "p1"), ("mercari", "m1")):
+        ledger.db.add(MarketplaceSale(id=f"hat-{marketplace}", marketplace=marketplace, order_id=listing, line_id=listing,
+                                      listing_id=listing, conversation_id="hat"))
+    ledger.db.commit()
+
+
+def test_cleared_listings_of_a_sold_item_are_not_extra_sale_records(ledger):
+    _sold_hat(ledger, with_order=True)
+    hat = [row["id"] for row in report(ledger)["rows"] if row["conversation_id"] == "hat"]
+    assert hat == ["hat-order"]
+    assert report(ledger)["summary"]["lines"] == 2
+    assert ledger.client.get("/api/sales-ledger/hat-mercari").status_code == 404
+
+
+def test_a_sold_item_with_only_cleared_listings_keeps_one_sale_record(ledger):
+    _sold_hat(ledger, with_order=False)
+    hat = [row["id"] for row in report(ledger)["rows"] if row["conversation_id"] == "hat"]
+    assert len(hat) == 1

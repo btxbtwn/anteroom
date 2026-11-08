@@ -1,4 +1,4 @@
-"""Read-only sales view: every line on the sales ledger."""
+"""Read-only sales view: every sale on the sales ledger, counted as Analytics counts it."""
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
@@ -78,9 +78,17 @@ def read_sale_lines(db: Session, conversation_id: str | None = None) -> list:
 
 def records_from_lines(lines: list, analytics_rows: list[AnalyticsItem]) -> list[dict]:
     """Build the ledger view from materialized rows, without holding its session."""
-    costs = {row.sale_id: _amount(row.cost) for row in analytics_rows if row.status == "sold" and row.sale_id}
+    sold = [row for row in analytics_rows if row.status == "sold" and row.sale_id]
+    costs = {row.sale_id: _amount(row.cost) for row in sold}
+    # A sold item's other listings, read as sold when they were cleared, are the
+    # same sale, not more: Analytics leaves them out (item_status.counted_sales), so do these.
+    counted = {row.sale_id for row in sold}
+    sold_items = {row.conversation_id for row in sold}
     rows = []
     for line, title in lines:
+        if line.conversation_id in sold_items and line.order_status in PAID_STATUSES \
+                and not line.is_order_backed and line.id not in counted:
+            continue
         record = sales_ledger.sale_out(line, title)
         data = record["financials"]
         raw = line.financials if isinstance(line.financials, dict) else {}

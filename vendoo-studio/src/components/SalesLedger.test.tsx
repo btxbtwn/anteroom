@@ -5,10 +5,10 @@ import { ledgerMoney, SalesLedger, SalesLedgerSummary } from "./SalesLedger";
 import { salesLedgerParams, type SalesLedgerPage, type SalesOverview } from "../api/salesLedger";
 
 const { useQuery } = vi.hoisted(() => ({ useQuery: vi.fn() }));
-vi.mock("@tanstack/react-query", () => ({ useQuery, keepPreviousData: (value: unknown) => value, useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
+vi.mock("@tanstack/react-query", () => ({ useQuery, useMutation: () => ({ isPending: false, mutate: vi.fn() }), keepPreviousData: (value: unknown) => value, useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
 const data: SalesLedgerPage = {
   rows: [{ id: "sale", marketplace: "ebay", order_id: "order", line_id: "line", listing_id: "123456789012", quantity: 2,
-    order_status: "partially_refunded", alert_state: "dismissed", conversation_id: "coat", title: "Wool coat", sold_at: null,
+    order_status: "partially_refunded", source: "marketplace", alert_state: "dismissed", conversation_id: "coat", title: "Wool coat", sold_at: null,
     received_at: "2026-10-26T00:00:00Z", financials: null, financials_stale: true, financial_revision: 1,
     financials_updated_at: null, order_basis: "a".repeat(64), net_revenue: null, profit: null }],
   page: 1, has_more: false, summary: { lines: 3, unmatched: 1, unrecorded: 1, needs_review: 1,
@@ -59,6 +59,15 @@ describe("local sales records", () => {
     expect(html).toContain("/api/sales-ledger/export/sales.csv?start=");
     expect(html).toContain("/api/sales-ledger/export/inventory.csv");
     expect(html).not.toContain("NaN");
+  });
+  it("offers Delete only on sales the seller recorded", () => {
+    const marketplaceOnly = renderToStaticMarkup(<SalesLedger onOpenListing={vi.fn()} />);
+    expect(marketplaceOnly).not.toContain(">Delete<");
+    const seller = { ...data.rows[0]!, id: "mine", source: "seller" };
+    useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => ({
+      data: queryKey[0] === "analytics" ? overview : { ...data, rows: [...data.rows, seller] }, isPending: false, isFetching: false,
+    }));
+    expect(renderToStaticMarkup(<SalesLedger onOpenListing={vi.fn()} />).match(/>Delete</g)).toHaveLength(1);
   });
   it("keeps currency coverage separate and never rounds recorded decimals", () => {
     const html = renderToStaticMarkup(<SalesLedgerSummary summary={data.summary} />);
