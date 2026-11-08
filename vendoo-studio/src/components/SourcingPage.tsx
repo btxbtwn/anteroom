@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PackageSearchIcon } from "lucide-react";
 import { api } from "../api/client";
+import { boxesQuery, sourcingQuery } from "../api/pageQueries";
 import { pollMs } from "../api/polling";
 import type { SourceBoxes, SourcingCart, SourcingLot, SourcingPick, SourcingPrefs, SourcingSnapshot, SourcingState } from "../api/types";
 import { cn } from "../lib/utils";
@@ -38,7 +39,7 @@ import {
   whyNotPicked,
 } from "./boxScout";
 
-const QUERY_KEY = ["sourcing"];
+const QUERY_KEY = sourcingQuery.queryKey;
 
 interface Props {
   onOpenListing: (convId: string) => void;
@@ -87,8 +88,7 @@ function BoxSourcing({ onOpenListing }: Props) {
   const queryClient = useQueryClient();
   const [choice, setChoice] = useState("all");
   const query = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: api.sourcing.get,
+    ...sourcingQuery,
     // Keep watching until the list catches up with saved shipping and budget settings.
     refetchInterval: (current) => {
       const state = current.state.data;
@@ -543,7 +543,7 @@ function Item({ lot, storeName, note, onOpenListing }: {
   lot: SourcingLot; storeName: string; note?: string; onOpenListing: (convId: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const boxes = useQuery({ queryKey: BOXES_QUERY_KEY, queryFn: api.boxes.list });
+  const boxes = useQuery(boxesQuery);
   const record = useMutation({
     mutationFn: () => api.boxes.create(boxFromLot(lot)),
     onSuccess: (data: SourceBoxes) => {

@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisIcon, PlusIcon } from "lucide-react";
 
 import { api } from "../api/client";
+import { automationApprovalsQuery, automationGapsQuery, automationsQuery, ebayOffersQuery, promotionAutomationsQuery } from "../api/pageQueries";
 import type { Automation, AutomationApproval, AutomationDraft, AutomationPreview, AutomationRun, RelistGap } from "../api/automations";
 import type { PromotionAutomation } from "../api/promotions";
 import { confirmDialog } from "../ui/confirmDialog";
@@ -43,9 +44,9 @@ import {
   type AutomationForm,
 } from "./automationsFormat";
 
-const LIST_KEY = ["automations"] as const;
-const APPROVAL_KEY = ["automation-approvals"] as const;
-const GAP_KEY = ["automation-gaps"] as const;
+const LIST_KEY = automationsQuery.queryKey;
+const APPROVAL_KEY = automationApprovalsQuery.queryKey;
+const GAP_KEY = automationGapsQuery.queryKey;
 
 function Check({
   label, checked, onChange,
@@ -111,18 +112,18 @@ type PanelContent =
   | { kind: "promotion_details"; row: PromotionAutomation };
 type PanelState = PanelContent & { key: number };
 
-const EBAY_KEY = ["ebay-offers"] as const;
-const PROMOTION_KEY = ["promotion-automations"] as const;
+const EBAY_KEY = ebayOffersQuery.queryKey;
+const PROMOTION_KEY = promotionAutomationsQuery.queryKey;
 
 export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string) => void }) {
   const queryClient = useQueryClient();
   const { features, hosted } = useWorkspaceRuntime();
   const hasEbayOffers = features.has("ebay_offers");
   const hasPromotions = features.has("marketplace_sessions");
-  const list = useQuery({ queryKey: LIST_KEY, queryFn: () => api.automations.list() });
-  const approvals = useQuery({ queryKey: APPROVAL_KEY, queryFn: () => api.automations.approvals() });
-  const gaps = useQuery({ queryKey: GAP_KEY, queryFn: () => api.errors.list() });
-  const ebay = useQuery({ queryKey: EBAY_KEY, queryFn: api.ebayOffers.status, enabled: hasEbayOffers });
+  const list = useQuery(automationsQuery);
+  const approvals = useQuery(automationApprovalsQuery);
+  const gaps = useQuery(automationGapsQuery);
+  const ebay = useQuery({ ...ebayOffersQuery, enabled: hasEbayOffers });
   const promotions = usePromotionAutomations(hasPromotions);
   const [panel, setPanel] = useState<PanelState | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);

@@ -3,6 +3,7 @@ import { useDeferredValue, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCwIcon } from "lucide-react";
 import { api } from "../api/client";
+import { lastThirtyDays, salesLedgerQuery, salesOverviewQuery } from "../api/pageQueries";
 import { DownloadLink } from "./DownloadLink";
 import { SALE_FORM_FIELDS, type SaleFormField, type SalesLedgerPage, type SalesLedgerRow } from "../api/salesLedger";
 import { pollMs } from "../api/polling";
@@ -41,8 +42,9 @@ export function SalesLedgerSummary({ summary }: { summary: SalesLedgerPage["summ
 export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => void }) {
 
   const queryClient = useQueryClient();
-  const [today] = useState(() => new Date().toISOString().slice(0, 10));
-  const [start, setStart] = useState(() => new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
+  const [initial] = useState(() => lastThirtyDays());
+  const today = initial.end;
+  const [start, setStart] = useState(initial.start);
   const [end, setEnd] = useState(today);
   const [marketplace, setMarketplace] = useState("all");
   const [search, setSearch] = useState("");
@@ -55,13 +57,12 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
   const [editor, setEditor] = useState(0);
   const filters = { start, end, q, attention, sort, ...(marketplace !== "all" ? { marketplace } : {}) };
   const valid = Boolean(start && end && start >= "1970-01-01" && start <= end && end <= today);
-  const query = useQuery({ queryKey: ["sales-ledger", filters, page], queryFn: () => api.salesLedger.list(filters, page),
-    enabled: valid, retry: false, refetchInterval: () => pollMs(15000) });
+  const query = useQuery({ ...salesLedgerQuery(filters, page),
+    enabled: valid, refetchInterval: () => pollMs(15000) });
   const data = valid ? query.data : undefined;
   const allTime = period === "all";
   const overview = useQuery({
-    queryKey: ["analytics", "overview", allTime ? null : start, end, marketplace],
-    queryFn: () => api.analytics.overview({ start: allTime ? null : start, end, ...(marketplace !== "all" ? { marketplace } : {}) }),
+    ...salesOverviewQuery(allTime ? null : start, end, marketplace),
     enabled: valid, placeholderData: keepPreviousData, refetchInterval: () => pollMs(15000),
   });
   const filtered = search || attention !== "all" || marketplace !== "all" || sort !== "newest" || period !== "30";

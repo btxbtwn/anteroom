@@ -1,0 +1,1 @@
+- Sourcing, Automations, Marketplaces, Analytics and Settings open with their data already loaded, with no spinner or placeholder first.
