@@ -1,8 +1,18 @@
 import { DurableObject } from "cloudflare:workers";
 
+function timingSafeEqual(a, b) {
+  const left = new TextEncoder().encode(a);
+  const right = new TextEncoder().encode(b);
+  return left.length === right.length && crypto.subtle.timingSafeEqual(left, right);
+}
+
 // Who is who: each Mac running Anteroom is a device with its own token (only
 // a hash is kept), each marketplace account a seller signs in with is linked
 // to one device, and sign-ins in progress wait here for a few minutes.
+//
+// A sign-in is handed over only with the claim the relay gave the browser that
+// approved it (only its hash is kept). The device that started it cannot
+// collect a seller's tokens by sending someone else the sign-in link.
 const SESSION_TTL_MS = 15 * 60 * 1000;
 
 export class Directory extends DurableObject {
@@ -24,12 +34,15 @@ export class Directory extends DurableObject {
         PRIMARY KEY (marketplace, account_id)
       );
       CREATE INDEX IF NOT EXISTS accounts_by_device ON accounts (device_id);
-      CREATE TABLE IF NOT EXISTS oauth_sessions (
+      DROP TABLE IF EXISTS oauth_sessions;
+      CREATE TABLE IF NOT EXISTS sign_ins (
         state TEXT PRIMARY KEY,
         device_id TEXT NOT NULL,
         marketplace TEXT NOT NULL,
+        return_to TEXT NOT NULL,
         verifier TEXT,
         result TEXT,
+        claim_hash TEXT,
         created_at INTEGER NOT NULL
       );
     `);
@@ -55,7 +68,7 @@ export class Directory extends DurableObject {
 
   async deleteDevice(id) {
     this.sql.exec("DELETE FROM accounts WHERE device_id = ?", id);
-    this.sql.exec("DELETE FROM oauth_sessions WHERE device_id = ?", id);
+    this.sql.exec("DELETE FROM sign_ins WHERE device_id = ?", id);
     this.sql.exec("DELETE FROM devices WHERE id = ?", id);
     await this.#scheduleExpiry();
   }
@@ -112,11 +125,11 @@ export class Directory extends DurableObject {
   }
 
   #expireSessions() {
-    this.sql.exec("DELETE FROM oauth_sessions WHERE created_at <= ?", Date.now() - SESSION_TTL_MS);
+    this.sql.exec("DELETE FROM sign_ins WHERE created_at <= ?", Date.now() - SESSION_TTL_MS);
   }
 
   async #scheduleExpiry() {
-    const { oldest } = this.sql.exec("SELECT MIN(created_at) AS oldest FROM oauth_sessions").one();
+    const { oldest } = this.sql.exec("SELECT MIN(created_at) AS oldest FROM sign_ins").one();
     const alarm = await this.ctx.storage.getAlarm();
     if (oldest === null) {
       if (alarm !== null) await this.ctx.storage.deleteAlarm();
@@ -131,13 +144,14 @@ export class Directory extends DurableObject {
     await this.#scheduleExpiry();
   }
 
-  async startSession(state, deviceId, marketplace, verifier = null) {
+  async startSession(state, deviceId, marketplace, returnTo, verifier = null) {
     this.#expireSessions();
     this.sql.exec(
-      "INSERT INTO oauth_sessions (state, device_id, marketplace, verifier, created_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO sign_ins (state, device_id, marketplace, return_to, verifier, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       state,
       deviceId,
       marketplace,
+      returnTo,
       verifier,
       Date.now(),
     );
@@ -147,32 +161,48 @@ export class Directory extends DurableObject {
   async session(state) {
     this.#expireSessions();
     await this.#scheduleExpiry();
-    const row = this.sql.exec("SELECT * FROM oauth_sessions WHERE state = ?", state).toArray()[0];
+    const row = this.sql.exec("SELECT * FROM sign_ins WHERE state = ?", state).toArray()[0];
     if (!row) return null;
-    return { deviceId: row.device_id, marketplace: row.marketplace, verifier: row.verifier, done: row.result !== null };
+    return {
+      deviceId: row.device_id,
+      marketplace: row.marketplace,
+      returnTo: row.return_to,
+      verifier: row.verifier,
+      done: row.result !== null,
+    };
   }
 
-  async finishSession(state, result) {
+  // ``outcome`` is { error } for a sign-in that failed, or { link, result } for
+  // one that succeeded, which is only handed over with the claim.
+  async finishSession(state, outcome, claimHash = null) {
     this.#expireSessions();
     this.sql.exec(
-      "UPDATE oauth_sessions SET result = ?, verifier = NULL WHERE state = ? AND result IS NULL",
-      JSON.stringify(result),
+      "UPDATE sign_ins SET result = ?, claim_hash = ?, verifier = NULL WHERE state = ? AND result IS NULL",
+      JSON.stringify(outcome),
+      claimHash,
       state,
     );
     await this.#scheduleExpiry();
   }
 
-  // Hands the sign-in result to the device that started it, once.
-  async takeResult(state, deviceId) {
+  // Hands the sign-in result to the device that started it, once. A success
+  // also needs the claim, and links the account to that device only then.
+  async takeResult(state, deviceId, claimHash = null) {
     this.#expireSessions();
     await this.#scheduleExpiry();
     const row = this.sql
-      .exec("SELECT result FROM oauth_sessions WHERE state = ? AND device_id = ?", state, deviceId)
+      .exec("SELECT result, claim_hash FROM sign_ins WHERE state = ? AND device_id = ?", state, deviceId)
       .toArray()[0];
     if (!row) return { status: "unknown" };
     if (row.result === null) return { status: "pending" };
-    this.sql.exec("DELETE FROM oauth_sessions WHERE state = ?", state);
+    const outcome = JSON.parse(row.result);
+    if (!outcome.error) {
+      if (claimHash === null) return { status: "pending" };
+      if (!timingSafeEqual(claimHash, row.claim_hash ?? "")) return { status: "refused" };
+      for (const account of outcome.link) this.link(account.marketplace, account.accountId, deviceId, account.label);
+    }
+    this.sql.exec("DELETE FROM sign_ins WHERE state = ?", state);
     await this.#scheduleExpiry();
-    return { status: "done", result: JSON.parse(row.result) };
+    return { status: "done", result: outcome.error ? { marketplace: outcome.marketplace, error: outcome.error } : outcome.result };
   }
 }

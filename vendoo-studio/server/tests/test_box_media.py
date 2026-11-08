@@ -201,6 +201,44 @@ def test_a_video_is_cut_into_evenly_spaced_frames_in_a_temp_dir_that_is_then_del
     assert seen_dirs and not any(folder.exists() for folder in seen_dirs)
 
 
+def test_ffmpeg_reads_only_the_downloaded_file_as_the_container_its_bytes_name(public_dns):
+    calls = []
+
+    def recording(argv, **kwargs):
+        calls.append(argv)
+        return fake_ffmpeg([])(argv, **kwargs)
+
+    async def run():
+        async with httpx.AsyncClient(transport=shop_transport(video_pages())) as client:
+            return await box_media.video_frames(client, "https://cdn.example/clip.mp4")
+    with mock.patch.object(box_media, "ffmpeg_path", return_value="/fake/ffmpeg"), \
+            mock.patch.object(box_media.subprocess, "run", side_effect=recording):
+        frames, why = asyncio.run(run())
+    assert frames and why is None
+    for argv in calls:
+        before_input = argv[:argv.index("-i")]
+        # No network or other protocols for playlists inside the file, and no format guessing.
+        assert before_input[before_input.index("-protocol_whitelist") + 1] == "file"
+        assert before_input[before_input.index("-f") + 1] == "mov"
+
+
+@pytest.mark.parametrize("body", [
+    b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nhttp://127.0.0.1:4318/api/health\n#EXT-X-ENDLIST\n",
+    b"v=0\no=- 0 0 IN IP4 127.0.0.1\ns=x\nc=IN IP4 127.0.0.1\nt=0 0\nm=video 9 RTP/AVP 96\n",
+])
+def test_a_store_file_that_is_not_an_mp4_or_webm_is_never_handed_to_ffmpeg(public_dns, body):
+    pages = {"https://cdn.example/clip": ("application/octet-stream", body)}
+
+    async def run():
+        async with httpx.AsyncClient(transport=shop_transport(pages)) as client:
+            return await box_media.video_frames(client, "https://cdn.example/clip")
+    with mock.patch.object(box_media, "ffmpeg_path", return_value="/fake/ffmpeg"), \
+            mock.patch.object(box_media.subprocess, "run") as ffmpeg:
+        frames, why = asyncio.run(run())
+    assert frames == [] and why == "the video is not an MP4, MOV or WebM file"
+    ffmpeg.assert_not_called()
+
+
 def test_without_ffmpeg_the_poster_stands_in_and_the_video_is_not_viewed(public_dns):
     async def run():
         async with httpx.AsyncClient(transport=shop_transport(video_pages())) as client:

@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.785 — 2026-11-08
+
+- Connecting eBay or Etsy now finishes back in the Anteroom that started it, so a sign-in link someone else sends you can't hand them your account. Update Anteroom to connect eBay or Etsy.
+
+## 0.1.784 — 2026-11-08
+
+- Box videos from store pages are only opened as MP4, MOV or WebM files, so a crafted video can't make the Mac reach other addresses.
+
 ## 0.1.783 — 2026-11-07
 
 - Listings and pages no longer go blank or freeze while Anteroom waits on Chrome, eBay, Etsy or the AI.

@@ -1,8 +1,10 @@
 """Direct eBay and Etsy sign-in, through Anteroom's relay.
 
 eBay and Etsy only send a sign-in back to an HTTPS address, and eBay's code
-exchange needs the app's Cert ID, so the relay hosts the callback and hands
-this Mac the tokens once. They live in the Keychain from then on. Refreshes go
+exchange needs the app's Cert ID, so the relay hosts the callback. It then sends
+the seller's browser back to this Anteroom with a one-time claim, and hands over
+the tokens only for that claim: someone who sends the seller a sign-in link they
+started cannot collect the seller's tokens. They live in the Keychain from then on. Refreshes go
 through the relay for the same reason; Etsy API calls go through it because
 every one needs the app's shared secret.
 
@@ -12,6 +14,7 @@ that account's sales here.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import time
 import webbrowser
@@ -42,6 +45,8 @@ SIGN_IN_TIMEOUT_S = 10 * 60
 POLL_INTERVAL_S = 2
 # Refresh a little before the marketplace says the token expires.
 REFRESH_MARGIN_S = 120
+# Where the iPhone app asks the relay to send the browser back.
+APP_RETURN = "anteroom://marketplace-signin"
 
 
 @dataclass
@@ -109,31 +114,27 @@ def _account_record(result: dict) -> dict:
 
 
 async def _wait_for_sign_in(pending: PendingSignIn) -> None:
+    """Report a sign-in that failed or expired. Success arrives through finish_sign_in."""
     deadline = pending.started_at + SIGN_IN_TIMEOUT_S
     name = NAMES[pending.marketplace]
     try:
         while time.time() < deadline:
             await asyncio.sleep(POLL_INTERVAL_S)
+            if pending.done:
+                return
             resp = await relay_request("GET", "/studio/oauth/result", params={"state": pending.state})
-            if resp.status_code == 202:
-                continue
+            if pending.done:
+                return
             if resp.status_code == 404:
                 pending.error = f"The {name} sign-in expired. Try again."
                 return
-            if resp.status_code != 200:
-                continue
-            result = resp.json()
-            if result.get("error"):
-                pending.error = result["error"]
+            if resp.status_code == 200 and resp.json().get("error"):
+                pending.error = resp.json()["error"]
                 return
-            await asyncio.to_thread(set_marketplace_account, pending.marketplace, _account_record(result))
-            for warning in result.get("warnings") or []:
-                log.warning("%s sign-in: %s", name, warning)
-            start_listening()
-            return
         pending.error = f"The {name} sign-in timed out. Try again."
     except asyncio.CancelledError:
-        pending.error = "Sign-in cancelled"
+        if not pending.done:
+            pending.error = "Sign-in cancelled"
         raise
     except Exception as exc:  # noqa: BLE001 - surfaced in status
         log.warning("%s sign-in failed: %s", name, exc)
@@ -142,7 +143,47 @@ async def _wait_for_sign_in(pending: PendingSignIn) -> None:
         pending.done = True
 
 
-async def start_sign_in(marketplace: str, features: list[str] | None = None) -> dict:
+class SignInNotFound(RuntimeError):
+    """The browser brought back a sign-in this Anteroom did not start, or one that ended."""
+
+
+async def finish_sign_in(marketplace: str, state: str, claim: str) -> dict:
+    """Collect the tokens for a sign-in this Anteroom started, with the claim its browser brought back."""
+    _check(marketplace)
+    name = NAMES[marketplace]
+    pending = _pending.get((_seller(), marketplace))
+    if pending is None or pending.done or not hmac.compare_digest(pending.state.encode(), state.encode()):
+        raise SignInNotFound(f"This {name} sign-in was not started here, or it already ended. Start again from Connections.")
+    resp = await relay_request("GET", "/studio/oauth/result", params={"state": state, "claim": claim})
+    result = resp.json() if resp.status_code == 200 else {}
+    if resp.status_code != 200 or result.get("error") or not (result.get("tokens") or {}).get("accessToken"):
+        message = str(result.get("error") or f"{name} sign-in could not be confirmed. Try again.")
+        pending.error = message
+        pending.done = True
+        raise RelayError(message, resp.status_code)
+    account = _account_record(result)
+    await asyncio.to_thread(set_marketplace_account, marketplace, account)
+    pending.done = True
+    for warning in result.get("warnings") or []:
+        log.warning("%s sign-in: %s", name, warning)
+    start_listening()
+    return {"marketplace": marketplace, "label": account["label"]}
+
+
+def _return_to(marketplace: str, client: str) -> str:
+    """Where the relay sends the browser after the seller approves: back to this Anteroom."""
+    if not _on_web():
+        from vendoo_studio.config import PORT
+
+        return f"http://127.0.0.1:{PORT}/api/marketplace-accounts/{marketplace}/finish"
+    if client == "app":
+        return APP_RETURN
+    from vendoo_studio.config import HOSTED_URL
+
+    return f"{HOSTED_URL}/"
+
+
+async def start_sign_in(marketplace: str, features: list[str] | None = None, client: str = "web") -> dict:
     """Open the marketplace's sign-in page; finish in the background."""
     _check(marketplace)
     if marketplace == "ebay":
@@ -151,7 +192,9 @@ async def start_sign_in(marketplace: str, features: list[str] | None = None) -> 
     previous = _pending.pop((_seller(), marketplace), None)
     if previous and previous.task and not previous.task.done():
         previous.task.cancel()
-    resp = await relay_request("POST", f"/studio/oauth/{marketplace}/start", params={"features": ",".join(features)} if features else None)
+    params = {"features": ",".join(features)} if features else {}
+    params["returnTo"] = _return_to(marketplace, client)
+    resp = await relay_request("POST", f"/studio/oauth/{marketplace}/start", params=params)
     if resp.status_code == 503:
         raise RelayError(f"{NAMES[marketplace]} sign-in isn't set up on Anteroom's relay yet.", 503)
     if resp.status_code != 200:

@@ -17,6 +17,7 @@ from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.queries import ConversationRepo
+from vendoo_studio import config
 from vendoo_studio.services import keychain, marketplace_accounts, order_recovery, relay_client, relay_sales, user_settings
 from vendoo_studio.services.marketplace_delist import DelistError
 
@@ -283,20 +284,24 @@ class FakeResponse:
 
 
 class SignInTest(unittest.TestCase):
-    def test_sign_in_saves_the_account_and_starts_listening(self):
-        replies = iter([FakeResponse(202), FakeResponse(200, {
-            "status": "done", "marketplace": "ebay", "accountId": "seller-a", "username": "cris",
-            "tokens": {"accessToken": "at", "refreshToken": "rt", "expiresIn": 7200, "refreshTokenExpiresIn": 100},
-            "warnings": [],
-        })])
+    def test_sign_in_finishes_only_with_the_claim_its_browser_brought_back(self):
         calls = []
 
         async def fake_request(method, path, **kwargs):
-            calls.append((method, path))
+            calls.append((method, path, kwargs.get("params")))
             if path.endswith("/start"):
-                self.assertEqual(kwargs.get("params"), {"features": "listings"})
+                self.assertEqual(kwargs.get("params"), {
+                    "features": "listings",
+                    "returnTo": f"http://127.0.0.1:{config.PORT}/api/marketplace-accounts/ebay/finish",
+                })
                 return FakeResponse(200, {"state": "s1", "authorizeUrl": "https://auth.ebay.com/x"})
-            return next(replies)
+            if (kwargs.get("params") or {}).get("claim") == "c1":
+                return FakeResponse(200, {
+                    "status": "done", "marketplace": "ebay", "accountId": "seller-a", "username": "cris",
+                    "tokens": {"accessToken": "at", "refreshToken": "rt", "expiresIn": 7200, "refreshTokenExpiresIn": 100},
+                    "warnings": [],
+                })
+            return FakeResponse(202)
 
         async def scenario():
             with mock.patch.object(marketplace_accounts, "relay_request", fake_request), \
@@ -306,7 +311,16 @@ class SignInTest(unittest.TestCase):
                 out = await marketplace_accounts.start_sign_in("ebay")
                 self.assertEqual(out["authorizeUrl"], "https://auth.ebay.com/x")
                 opened.assert_called_once_with("https://auth.ebay.com/x")
+                await asyncio.sleep(0.01)
+                # Waiting on the relay alone never connects the account.
                 self.assertTrue(marketplace_accounts.status()["accounts"]["ebay"]["pending"])
+                self.assertNotIn("ebay", keychain.get_marketplace_accounts())
+                # A link carrying another sign-in's state is refused without asking the relay.
+                with self.assertRaises(marketplace_accounts.SignInNotFound):
+                    await marketplace_accounts.finish_sign_in("ebay", "someone-elses", "c1")
+                self.assertNotIn(("GET", "/studio/oauth/result", {"state": "someone-elses", "claim": "c1"}), calls)
+                done = await marketplace_accounts.finish_sign_in("ebay", "s1", "c1")
+                self.assertEqual(done, {"marketplace": "ebay", "label": "cris"})
                 await marketplace_accounts._pending[("", "ebay")].task
                 listen.assert_called_once()
 
@@ -316,7 +330,31 @@ class SignInTest(unittest.TestCase):
         status = marketplace_accounts.status()["accounts"]["ebay"]
         self.assertTrue(status["connected"])
         self.assertFalse(status["pending"])
-        self.assertIn(("GET", "/studio/oauth/result"), calls)
+        self.assertIsNone(status["error"])
+        self.assertIn(("GET", "/studio/oauth/result", {"state": "s1", "claim": "c1"}), calls)
+
+    def test_a_claim_the_relay_refuses_saves_nothing(self):
+        async def fake_request(method, path, **kwargs):
+            if path.endswith("/start"):
+                return FakeResponse(200, {"state": "s3", "authorizeUrl": "https://auth.ebay.com/x"})
+            if (kwargs.get("params") or {}).get("claim"):
+                return FakeResponse(403, {"error": "this sign-in was not confirmed"})
+            return FakeResponse(202)
+
+        async def scenario():
+            with mock.patch.object(marketplace_accounts, "relay_request", fake_request), \
+                 mock.patch.object(marketplace_accounts, "POLL_INTERVAL_S", 0), \
+                 mock.patch.object(marketplace_accounts.webbrowser, "open"):
+                await marketplace_accounts.start_sign_in("ebay")
+                with self.assertRaises(marketplace_accounts.RelayError):
+                    await marketplace_accounts.finish_sign_in("ebay", "s3", "forged")
+                await marketplace_accounts._pending[("", "ebay")].task
+
+        asyncio.run(scenario())
+        self.assertNotIn("ebay", keychain.get_marketplace_accounts())
+        status = marketplace_accounts.status()["accounts"]["ebay"]
+        self.assertFalse(status["connected"])
+        self.assertEqual(status["error"], "eBay sign-in could not be confirmed. Try again.")
 
     def test_a_failed_sign_in_is_reported(self):
         async def fake_request(method, path, **kwargs):

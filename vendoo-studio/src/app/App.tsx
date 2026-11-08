@@ -29,6 +29,7 @@ import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
 import { toastManager } from "../components/ui/toast";
+import { takeMarketplaceSignIn } from "../lib/marketplaceSignIn";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import {
@@ -218,6 +219,18 @@ export function App() {
   const providerConfigured = Boolean(status?.provider_configured);
   const needsSetup = !runtime.hosted && (!status || !status.provider_configured || !status.extension_connected);
   const createListingTitle = "New listing";
+
+  useEffect(() => {
+    const signIn = takeMarketplaceSignIn();
+    if (!signIn) return;
+    const name = signIn.marketplace === "ebay" ? "eBay" : "Etsy";
+    void api.directConnections.finish(signIn.marketplace, signIn.state, signIn.claim)
+      .then((done) => toastManager.add({ type: "success", title: `${name} is connected`, description: done.label ?? undefined }))
+      .catch((error: unknown) => toastManager.add({
+        type: "error", title: `${name} was not connected`, description: error instanceof Error ? error.message : undefined,
+      }))
+      .finally(() => void queryClient.invalidateQueries({ queryKey: ["direct-connections"] }));
+  }, [queryClient]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

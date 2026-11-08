@@ -6,10 +6,12 @@ publish or delist; seller-confirmed marketplace actions are handled separately.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from html import escape
 from typing import Literal, cast
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -36,21 +38,74 @@ def get_status():
 
 class ConnectionRequest(BaseModel):
     features: list[str] = Field(default_factory=list, max_length=8)
+    # The iPhone app finishes sign-in itself; everyone else returns to the web page.
+    client: Literal["web", "app"] = "web"
 
 
 @router.post("/api/marketplace-accounts/{marketplace}/connect")
 async def connect(marketplace: str, body: ConnectionRequest | None = None):
     try:
-        features = body.features if body else []
+        body = body or ConnectionRequest()
+        features = body.features
         if any(feature not in {"analytics", "finances", "orders", "disputes", "messages", "feedback", "marketing", "listings"} for feature in features):
             raise HTTPException(422, "Unknown eBay permission group")
-        return await marketplace_accounts.start_sign_in(_marketplace(marketplace), **({"features": features} if features else {}))
+        return await marketplace_accounts.start_sign_in(_marketplace(marketplace), **({"features": features} if features else {}),
+                                                        client=body.client)
     except HTTPException:
         raise
     except RelayError as exc:
         raise HTTPException(503 if exc.status in (None, 429, 503) else 502, str(exc)) from exc
     except (httpx.HTTPError, OSError) as exc:  # offline and the like
         raise HTTPException(503, "Can't reach Anteroom's relay. Check your internet connection.") from exc
+
+
+class FinishRequest(BaseModel):
+    state: str = Field(min_length=1, max_length=200)
+    claim: str = Field(min_length=1, max_length=200)
+
+
+async def _finish(marketplace: str, state: str, claim: str) -> dict:
+    try:
+        return await marketplace_accounts.finish_sign_in(_marketplace(marketplace), state, claim)
+    except marketplace_accounts.SignInNotFound as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except RelayError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except (httpx.HTTPError, OSError) as exc:
+        raise HTTPException(503, "Can't reach Anteroom's relay. Check your internet connection.") from exc
+
+
+@router.post("/api/marketplace-accounts/{marketplace}/finish")
+async def finish(marketplace: str, body: FinishRequest):
+    """The web page or the iPhone app hands over the claim the relay sent its browser back with."""
+    return await _finish(marketplace, body.state, body.claim)
+
+
+def _finish_page(title: str, detail: str, status: int) -> HTMLResponse:
+    html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{escape(title)} · Anteroom</title>
+<style>:root{{color-scheme:light dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+body{{margin:0;min-height:100vh;display:grid;place-items:center}}main{{max-width:26rem;padding:2rem;text-align:center}}
+h1{{font-size:1.25rem}}p{{opacity:.75;line-height:1.5}}</style></head>
+<body><main><h1>{escape(title)}</h1><p>{escape(detail)}</p></main></body></html>"""
+    return HTMLResponse(html, status, headers={
+        "cache-control": "no-store", "referrer-policy": "no-referrer",
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+    })
+
+
+@router.get("/api/marketplace-accounts/{marketplace}/finish", include_in_schema=False)
+async def finish_page(marketplace: str, state: str = "", claim: str = ""):
+    """Where the seller's browser lands on this Mac after approving eBay or Etsy."""
+    name = marketplace_accounts.NAMES.get(_marketplace(marketplace), marketplace)
+    if not state or not claim or len(state) > 200 or len(claim) > 200:
+        return _finish_page(f"{name} was not connected", "This link is incomplete. Start again from Anteroom's Connections settings.", 400)
+    try:
+        done = await _finish(marketplace, state, claim)
+    except HTTPException as exc:
+        return _finish_page(f"{name} was not connected", str(exc.detail), exc.status_code)
+    who = f"{done['label']} is" if done.get("label") else "Your account is"
+    return _finish_page(f"{who} connected", f"{who} now linked to Anteroom. You can close this tab.", 200)
 
 
 @router.delete("/api/marketplace-accounts/{marketplace}/connect")

@@ -87,3 +87,35 @@ def test_a_non_loopback_bind_is_refused():
     result = subprocess.run([sys.executable, "-c", "import vendoo_studio.config"], env=env, capture_output=True, text=True)
     assert result.returncode != 0
     assert "must bind to 127.0.0.1" in result.stderr
+
+
+def test_a_browser_returning_from_marketplace_sign_in_reaches_only_the_finish_page():
+    from vendoo_studio.services import marketplace_accounts
+
+    async def finish(marketplace, state, claim):
+        assert (marketplace, state, claim) == ("ebay", "s1", "c1")
+        return {"marketplace": "ebay", "label": "<cris>"}
+
+    navigation = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}
+    with patch.object(marketplace_accounts, "finish_sign_in", finish):
+        page = TestClient(app).get("/api/marketplace-accounts/ebay/finish?marketplace=ebay&state=s1&claim=c1", headers=navigation)
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("text/html")
+    assert "&lt;cris&gt; is connected" in page.text and "<cris>" not in page.text
+    # The exception covers that one page, for GET only, from Anteroom's own address.
+    assert TestClient(app).post("/api/marketplace-accounts/ebay/finish", headers=navigation, json={}).status_code == 403
+    assert TestClient(app).get("/api/marketplace-accounts", headers=navigation).status_code == 403
+    assert TestClient(app).get("/api/marketplace-accounts/ebay/finish?state=s1&claim=c1",
+                               headers={**navigation, "Host": "foreign.example"}).status_code == 403
+
+
+def test_a_sign_in_this_mac_did_not_start_is_not_finished():
+    from vendoo_studio.services import marketplace_accounts
+
+    async def finish(marketplace, state, claim):
+        raise marketplace_accounts.SignInNotFound("This sign-in was not started in this Anteroom, or it expired.")
+
+    with patch.object(marketplace_accounts, "finish_sign_in", finish):
+        page = TestClient(app).get("/api/marketplace-accounts/etsy/finish?state=s1&claim=c1", headers={"Sec-Fetch-Site": "cross-site"})
+    assert page.status_code == 409
+    assert "Etsy was not connected" in page.text
