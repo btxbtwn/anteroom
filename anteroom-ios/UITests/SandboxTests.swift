@@ -301,8 +301,9 @@ final class AssistantSandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        launchSandbox(app)
-        app.tabBars.buttons["Assistant"].tap()
+        // Signed in, the app opens on the Assistant.
+        launchSandbox(app, tab: nil)
+        XCTAssertTrue(app.tabBars.buttons["Assistant"].isSelected, "The Assistant is home")
         let starter = app.buttons["Which brands and categories make me the most profit?"]
         XCTAssertTrue(starter.waitForExistence(timeout: 20), "A new chat offers starter questions")
         keep(app, "Assistant starters")
@@ -315,6 +316,7 @@ final class AssistantSandboxTests: XCTestCase {
         waitForExpectations(timeout: 60)
         keep(app, "Assistant answer")
 
+        XCTAssertTrue(app.buttons["Chats"].waitForExistence(timeout: 30), "History shows once there is a chat")
         app.buttons["Chats"].tap()
         // The starter with this same title remains in the background after a
         // relaunch. Only a row in the Chats list is a saved conversation.
@@ -324,8 +326,8 @@ final class AssistantSandboxTests: XCTestCase {
         app.buttons["Done"].tap()
 
         app.terminate()
-        launchSandbox(app)
-        app.tabBars.buttons["Assistant"].tap()
+        launchSandbox(app, tab: "Assistant")
+        XCTAssertTrue(app.buttons["Chats"].waitForExistence(timeout: 30), "History shows once there is a chat")
         app.buttons["Chats"].tap()
         XCTAssertTrue(thread.waitForExistence(timeout: 60), "Chats finishes loading the saved conversation")
         thread.tap()
@@ -441,13 +443,34 @@ final class AutomationOffersSandboxTests: XCTestCase {
     }
 
     private func reveal(_ element: XCUIElement, app: XCUIApplication) {
-        // List/Form virtualizes offscreen rows. Scroll until the semantic
-        // target is visible rather than depending on fixed coordinates.
-        for _ in 0..<16 {
-            if element.waitForExistence(timeout: 1), element.isHittable { return }
-            app.swipeUp()
+        // Hittable can mean only one line is onscreen. Screenshots need the
+        // whole label, especially the multiline totals at accessibility sizes.
+        var viewport = app.frame.insetBy(dx: 8, dy: 8)
+        let navigationBar = app.navigationBars.firstMatch
+        if navigationBar.exists {
+            let top = navigationBar.frame.maxY + 8
+            viewport.size.height -= top - viewport.minY
+            viewport.origin.y = top
         }
-        XCTAssertTrue(element.isHittable, "Expected offer content must be reachable without horizontal scrolling")
+        let tabBar = app.tabBars.firstMatch
+        if tabBar.exists, tabBar.isHittable {
+            viewport.size.height = min(viewport.maxY, tabBar.frame.minY - 8) - viewport.minY
+        }
+        for _ in 0..<20 {
+            if element.waitForExistence(timeout: 1), element.isHittable,
+               viewport.contains(element.frame) { return }
+            // Small drags avoid skipping a tall label. Reverse only when the
+            // target has moved above the unobscured content area.
+            let scrollDown = element.exists && !element.frame.isEmpty
+                && element.frame.minY < viewport.minY
+            let startY = scrollDown ? 0.45 : 0.75
+            let endY = scrollDown ? 0.70 : 0.50
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+                .press(forDuration: 0.05, thenDragTo:
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY)))
+        }
+        XCTAssertTrue(element.isHittable && viewport.contains(element.frame),
+                      "Expected offer content must be fully visible without horizontal scrolling")
     }
 
     private func keep(_ app: XCUIApplication, _ name: String) {
@@ -469,8 +492,13 @@ final class IPadSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         app.launch()
-        // On iPad the tabs may draw as a sidebar, so wait for Inventory itself.
-        XCTAssertTrue(app.buttons["New listing"].firstMatch.waitForExistence(timeout: 90),
+        // The app opens on the Assistant. On iPad the tabs may draw as a
+        // sidebar, so find the Inventory tab wherever it is, then wait for Inventory itself.
+        let inventoryTab = app.buttons["Inventory"].firstMatch
+        XCTAssertTrue(inventoryTab.waitForExistence(timeout: 90),
+                      "Sandbox sign-in must finish before interacting with the workspace")
+        inventoryTab.tap()
+        XCTAssertTrue(app.buttons["New listing"].firstMatch.waitForExistence(timeout: 30),
                       "Sandbox sign-in must finish before interacting with the workspace")
         XCTAssertTrue(app.staticTexts["No listing open"].waitForExistence(timeout: 15),
                       "With nothing open, the editor column says so")
@@ -530,13 +558,15 @@ fileprivate extension XCTestCase {
         // Seller-input steps after this scroll back up to their own fields.
     }
 
+    /// Signs in and opens `tab`; nil stays on the tab the app opens on, the Assistant.
     @MainActor
-    func launchSandbox(_ app: XCUIApplication) {
+    func launchSandbox(_ app: XCUIApplication, tab: String? = "Inventory") {
         app.launch()
         // launch() can return while the disposable account is still signing
         // in on a cold CI simulator. Screen waits start at workspace readiness.
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 90),
                       "Sandbox sign-in must finish before interacting with the workspace")
+        if let tab { app.tabBars.buttons[tab].tap() }
     }
 
     @MainActor

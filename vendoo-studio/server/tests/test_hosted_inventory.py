@@ -107,7 +107,7 @@ def test_storage_requests_use_seller_credentials_and_sdk_delete_contract(monkeyp
         captured.append((method, url, kwargs))
         return httpx.Response(200, content=b'photo')
 
-    monkeypatch.setattr(httpx, 'request', request)
+    monkeypatch.setattr(hosted_photos._storage, 'request', request)
     key = USER_ID + '/draft/' + 'a' * 32 + '.jpg'
     assert hosted_photos.storage_call('GET', key, 'seller-token') == b'photo'
     hosted_photos.storage_call('DELETE', key, 'seller-token')
@@ -115,8 +115,8 @@ def test_storage_requests_use_seller_credentials_and_sdk_delete_contract(monkeyp
     assert captured[1][1].endswith('/object/anteroom-photos')
     # A photo's kept thumbnails go with it.
     base = USER_ID + '/draft/' + 'a' * 32
-    assert captured[1][2]['json'] == {'prefixes': [key, base + '.t96.jpg', base + '.t192.jpg']}
-    monkeypatch.setattr(httpx, 'request', lambda *args, **kwargs: httpx.Response(500, text='PRIVATE diagnostic'))
+    assert captured[1][2]['json'] == {'prefixes': [key, base + '.t96.jpg', base + '.t192.jpg', base + '.t384.jpg']}
+    monkeypatch.setattr(hosted_photos._storage, 'request', lambda *args, **kwargs: httpx.Response(500, text='PRIVATE diagnostic'))
     with pytest.raises(Exception) as error:
         hosted_photos.storage_call('POST', key, 'seller-token', b'data')
     assert 'PRIVATE' not in str(error.value)

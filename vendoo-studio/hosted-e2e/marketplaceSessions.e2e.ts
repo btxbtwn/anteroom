@@ -3,7 +3,10 @@ import { test, expect, type Page } from "@playwright/test";
 async function navigate(page: Page, name: string, phone: boolean) {
   if (phone) {
     const navigation = page.getByRole("button", { name: "Open navigation", exact: true });
-    if (!await navigation.isVisible()) await page.getByRole("button", { name: "Inventory", exact: true }).click();
+    const back = page.getByRole("button", { name: "Inventory", exact: true });
+    // Wait for the screen to settle: the menu, or a back button in front of it.
+    await expect(navigation.or(back).first()).toBeVisible();
+    if (!await navigation.isVisible()) await back.click();
     await navigation.click();
   }
   await page.getByRole("button", { name, exact: true }).click();
