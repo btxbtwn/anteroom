@@ -519,3 +519,13 @@ def test_a_vendoo_sale_from_before_a_relist_still_counts(ledger):
     ledger.db.get(MarketplaceSale, "vendoo-blouse").sold_at = dt(2026, 3, 1, 12)
     ledger.db.commit()
     assert sorted(line.id for line in paid_lines(ledger.db)["blouse"]) == ["etsy-blouse", "vendoo-blouse"]
+
+
+@pytest.mark.parametrize("cost", [0, 5, None])
+def test_listing_cost_is_known_before_sale_financials_are_recorded(ledger, cost):
+    listing_persistence.save_revision(ledger.db, "coat", {"title": "Wool coat", "cost": cost}, "user")
+    row = report(ledger)["rows"][0]
+    assert ("cost of goods" in row["missing_sale_data"]) == (cost is None)
+    assert "fees" in row["missing_sale_data"]
+    missing = ledger.client.get("/api/conversations/coat").json()["missing_sale_data"]
+    assert ("cost of goods" in missing) == (cost is None)
