@@ -66,22 +66,25 @@ class MarketplaceListingRepo:
         """Each item's direct listing per marketplace, as the inventory table shows it.
 
         One small query over every record: its state, live link, whether the
-        last action failed, how many fields the marketplace sent back, and the
-        live listing's price when it is known.
+        last action failed, how many fields the marketplace sent back, the
+        live listing's price when it is known, and when Anteroom listed it.
         """
         query = select(MarketplaceListing.conversation_id, MarketplaceListing.marketplace,
                        MarketplaceListing.state, MarketplaceListing.listing_url,
-                       MarketplaceListing.error, MarketplaceListing.error_fields, MarketplaceListing.listed_price)
+                       MarketplaceListing.error, MarketplaceListing.error_fields, MarketplaceListing.listed_price,
+                       MarketplaceListing.listed_at)
         if conv_id:
             query = query.where(MarketplaceListing.conversation_id == conv_id)
         grouped: dict[str, dict[str, dict]] = {}
-        for conversation_id, marketplace, state, url, error, fields, price in self.db.execute(query):
+        for conversation_id, marketplace, state, url, error, fields, price, listed_at in self.db.execute(query):
             grouped.setdefault(conversation_id, {})[marketplace] = {
                 "state": state,
                 "listing_url": url,
                 "failed": bool(error),
                 "fields": len(fields) if isinstance(fields, list) else 0,
                 "price": price,
+                "listed_at": (listed_at if listed_at.tzinfo else listed_at.replace(tzinfo=UTC)).isoformat()
+                if listed_at else None,
             }
         return grouped
 

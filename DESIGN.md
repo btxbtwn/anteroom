@@ -229,6 +229,11 @@ Reject a change that adds any of these:
 
 ## Research before you design
 
+Use the living [design reference library](docs/design-references.md) to find
+relevant catalogs and product examples. Consult what helps the current task
+and maintain the directory as sources change; it supplements these rules
+rather than adding another checklist.
+
 Before building or changing a visible element, look up how established design
 systems handle that element: Material Design 3, Apple's Human Interface
 Guidelines, Shopify Polaris, WCAG 2.2, and products the seller already uses.

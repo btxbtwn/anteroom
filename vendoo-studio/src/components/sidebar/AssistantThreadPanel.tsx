@@ -102,7 +102,7 @@ export function AssistantThreadPanel({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className={SEARCH_INPUT_CLASS}
-            placeholder="Search chats"
+            placeholder="Search"
             aria-label="Search chats"
           />
         </label>

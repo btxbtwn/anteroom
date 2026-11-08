@@ -4,7 +4,6 @@ import { ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
 import { formatDays, formatMoney } from "../analyticsFormat";
 import { InventoryImport } from "../InventoryImport";
-import { MarketplaceLogo } from "../MarketplaceLogo";
 import { marketplaceName } from "../marketplaceNames";
 import { PageError, PageNote } from "../WorkspacePage";
 import { Input } from "../ui/input";
@@ -28,7 +27,8 @@ export function ChannelWorkspace({ marketplace, onOpenListing }: { marketplace: 
   return <div className="ebay-workspace" data-marketplace={marketplace}>
     <header className="ebay-page-heading">
       <div>
-        <div className="flex items-center gap-2"><MarketplaceLogo id={marketplace} label={name} size={18} /><h2>{name}</h2></div>
+        {/* The tab above names the marketplace; the heading is for screen readers. */}
+        <h2 className="sr-only">{name}</h2>
         <p>Sales recorded in Studio.</p></div>
       <div className="ebay-connection">
         <a className="inline-flex items-center gap-1 text-sm underline" href={CHANNEL_URLS[marketplace]} target="_blank" rel="noreferrer">Open {name}<ExternalLinkIcon className="size-3.5" aria-hidden="true" /></a>

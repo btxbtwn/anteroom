@@ -120,9 +120,9 @@ class ListingFacetsTest(unittest.TestCase):
         response = _conv_response(conv, _extras(None, None, None, False, direct[conv.id]))
         self.assertEqual(response.direct_records["ebay"].model_dump(),
                          {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0,
-                          "price": 42.5})
+                          "price": 42.5, "listed_at": None})
         self.assertEqual(response.direct_records["poshmark"].model_dump(),
-                         {"state": "not_saved", "listing_url": None, "failed": True, "fields": 2, "price": None})
+                         {"state": "not_saved", "listing_url": None, "failed": True, "fields": 2, "price": None, "listed_at": None})
         self.assertEqual(response.direct_records["depop"].state, "draft")
         self.assertEqual(response.direct_marketplaces, ["ebay"])
 

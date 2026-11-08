@@ -19,6 +19,8 @@ struct InventoryTests {
         precondition(rows[1].inventoryStatus == "active")
         precondition(rows[4].statusTab == "draft" && rows[4].statusLabel == "In Progress")
         precondition(rows[0].coverPhotoID == "p1" && rows[1].coverPhotoID == nil)
+        // The cover's version lets its thumbnail be kept; without one it is not.
+        precondition(rows[0].coverPhotoVersion == "abc" && rows[1].coverPhotoVersion == nil)
         precondition(rows[3].displayTitle == "Untitled")
 
         // Settled listings stay out of All, appear in Sold and in search.
@@ -55,14 +57,12 @@ struct InventoryTests {
         filters.sort = .createdAsc
         precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "b", "d", "e"])
 
-        // The desktop's listing-date and sale-date sorts. An item is as stale as
-        // its oldest live marketplace; one never listed or never sold sorts last.
+        // The desktop's listing-date and sale-date sorts, by the server's oldest
+        // live listing date; one never listed or never sold sorts last.
         let dated = try JSONDecoder().decode([ListingSummary].self, from: Data(#"""
         [
-          {"id":"p","title":"P","status":"active","vendoo_marketplaces":["ebay","etsy"],
-           "vendoo_listed_dates":{"ebay":"2026-09-01T00:00:00+00:00","etsy":"2026-06-01T00:00:00+00:00"},
-           "vendoo_sold_dates":{"etsy":"2026-07-01T00:00:00+00:00"}},
-          {"id":"q","title":"Q","status":"active","vendoo_listed_at":"2026-08-01T00:00:00Z"},
+          {"id":"p","title":"P","status":"active","oldest_listed_at":"2026-09-01T00:00:00+00:00"},
+          {"id":"q","title":"Q","status":"active","oldest_listed_at":"2026-08-01T00:00:00Z"},
           {"id":"r","title":"R","status":"draft"},
           {"id":"s","title":"S","status":"sold","sold_at":"2026-10-05T00:00:00Z"},
           {"id":"t","title":"T","status":"sold","sold_at":"2026-10-09T00:00:00.5Z"}

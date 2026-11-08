@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -23,7 +23,7 @@ class SetPriceBody(BaseModel):
     marketplace: str | None = None
     marketplace_price: float | None = None
     push: bool = False
-    confirmed: bool = False
+    confirm: bool = False
 
 
 class FieldBody(BaseModel):
@@ -107,30 +107,27 @@ async def set_price(conv_id: str, body: SetPriceBody):
     """Set the item price. Unlocked marketplace prices follow it. Push writes a live listing."""
     if body.price <= 0:
         raise HTTPException(400, "Enter a price greater than zero.")
-    if body.push and not body.confirmed:
-        raise HTTPException(400, "Pushing a price onto a live listing needs confirmed=true.")
-    # The save ends its session before the updates, which wait on Chrome or the marketplace.
+    market = str(body.marketplace or "").strip().lower()
+    if body.push and market not in _PUSHABLE:
+        raise HTTPException(400, f"Name the marketplace to update: one of {', '.join(_PUSHABLE)}.")
+    if body.push and body.confirm is not True:
+        raise HTTPException(400, "Pushing a price onto a live listing needs confirm=true.")
+    # The save ends its session before the update, which waits on Chrome or the marketplace.
     saved = await in_worker_session(_save_price, conv_id, body)
-    market = saved["market"]
     pushed: list[str] = []
     waiting: list[str] = []
     if body.push:
-        from vendoo_studio.routes.native_marketplaces import ListRequest
-        from vendoo_studio.services.native_marketplaces import NativeMarketplaceError, update_live
+        from vendoo_studio.services import native_marketplaces as native
 
-        live = saved["live"]
-        targets = [market] if market else [name for name in _PUSHABLE if (live.get(name) or {}).get("state") == "live"]
-        for name in targets:
-            entry = live.get(name) or {}
-            if entry.get("state") != "live" or not entry.get("listing_id"):
-                continue
+        entry = saved["live"].get(market) or {}
+        if entry.get("state") != "live" or not entry.get("listing_id"):
+            waiting.append(f"{market}: not live")
+        else:
             try:
-                await update_live(conv_id, name, ListRequest(revision_id=saved["current_revision_id"], confirm=True))
-                pushed.append(name)
-                break
-            except NativeMarketplaceError as exc:
-                waiting.append(f"{name}: {exc}")
-        waiting.extend(name for name in targets if name not in pushed and not any(name in item for item in waiting))
+                await native.update_live(conv_id, cast(native.Marketplace, market), native.ListRequest(revision_id=saved["current_revision_id"], confirm=True))
+                pushed.append(market)
+            except native.NativeMarketplaceError as exc:
+                waiting.append(f"{market}: {exc}")
     return {"ok": True, "revision_id": saved["revision_id"], "price": saved["price"], "pushed": pushed, "waiting": waiting}
 
 

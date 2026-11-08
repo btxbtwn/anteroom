@@ -24,10 +24,10 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
     var vendooListingURLs: [String: String]?
     var vendooSoldDates: [String: String]?
     var removedMarketplaces: [String]?
-    /// When the item last went live, overall and per marketplace, for the
-    /// staleness sorts; and when Anteroom's sales ledger last saw it sell.
-    var vendooListedAt: String?
-    var vendooListedDates: [String: String]?
+    /// When the item's longest-standing live listing went up, for the
+    /// staleness sorts. The server counts Anteroom's own listings, so a relist
+    /// starts its marketplace over. And when the sales ledger last saw it sell.
+    var oldestListedAt: String?
     var soldAt: String?
 
     enum CodingKeys: String, CodingKey {
@@ -44,8 +44,7 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
         case vendooListingURLs = "vendoo_listing_urls"
         case vendooSoldDates = "vendoo_sold_dates"
         case removedMarketplaces = "removed_marketplaces"
-        case vendooListedAt = "vendoo_listed_at"
-        case vendooListedDates = "vendoo_listed_dates"
+        case oldestListedAt = "oldest_listed_at"
         case soldAt = "sold_at"
     }
 
@@ -60,6 +59,11 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
         let parts = components.path.split(separator: "/")
         guard parts.count >= 3, parts[parts.count - 3] == "photos", parts.last == "thumb" else { return nil }
         return String(parts[parts.count - 2])
+    }
+
+    /// The cover's content version (`v=`), which lets the thumbnail be kept.
+    var coverPhotoVersion: String? {
+        coverPhotoURL.flatMap { URLComponents(string: $0)?.queryItems?.first { $0.name == "v" }?.value }
     }
 }
 
@@ -104,6 +108,14 @@ struct ConversationDetail: Decodable, Sendable {
     let title: String?
     let status: String?
     let notes: String?
+}
+
+/// `GET /api/conversations/{id}/screen`: the editor's core reads in one
+/// request, as the web app batches them (`listingScreen.ts`).
+struct ListingScreen: Decodable, Sendable {
+    let conversation: ConversationDetail
+    let listing: ListingDocument
+    let photos: [ListingPhoto]
 }
 
 /// Any JSON value, so a listing's marketplace data survives an edit untouched.

@@ -37,7 +37,10 @@ final class AnteroomAPI: Sendable {
     private let readRetry: ReadRetry
     private let thumbnails = RequestGate(limit: 4)
     private let choiceLists = ChoiceListCache()
-    private let runtimeCache = RuntimeCache()
+    private let immutable: ImmutableReadCache
+    private let runtimeCache = SharedRead<WorkspaceRuntime>(maxAge: 30)
+    private let selectedCache = SharedRead<[String]>(maxAge: 30)
+    private let optionsCache = SharedRead<GeneralOptions>(maxAge: .infinity)
 
     /// Where CSV exports are written for the share sheet; emptied on sign-out.
     static var exportsDirectory: URL {
@@ -45,16 +48,21 @@ final class AnteroomAPI: Sendable {
     }
 
     init(baseURL: URL, auth: APIAuthorization, configuration: URLSessionConfiguration = .ephemeral,
-         readRetry: ReadRetry = .standard) {
+         readRetry: ReadRetry = .standard, immutableCache: ImmutableReadCache = ImmutableReadCache()) {
         self.baseURL = baseURL
         self.auth = auth
         self.readRetry = readRetry
+        immutable = immutableCache
         session = URLSession(configuration: configuration)
     }
 
-    /// Forgets what belongs to the signed-in seller: cached server answers and exported files.
+    /// Forgets what belongs to the signed-in seller: cached server answers,
+    /// kept thumbnails and lists, and exported files.
     func forgetSeller() async {
         await runtimeCache.clear()
+        await selectedCache.clear()
+        await optionsCache.clear()
+        await immutable.clear()
         try? FileManager.default.removeItem(at: Self.exportsDirectory)
     }
 
@@ -106,6 +114,11 @@ final class AnteroomAPI: Sendable {
         return try await decode(upload)
     }
 
+    /// The editor's first read in one request: the listing, its notes and its photos.
+    func listingScreen(_ id: String) async throws -> ListingScreen {
+        try await decode(request("GET", "api/conversations/\(id)/screen"))
+    }
+
     func conversation(_ id: String) async throws -> ConversationDetail {
         try await decode(request("GET", "api/conversations/\(id)"))
     }
@@ -131,18 +144,24 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("DELETE", "api/conversations/\(id)"))
     }
 
-    /// Settings → Listings → Where you list, in the seller's order.
+    /// Settings → Listings → Where you list, in the seller's order. Screens
+    /// asking within 30 seconds share one answer; changing it asks again.
     func selectedMarketplaces() async throws -> [String] {
-        struct Payload: Decodable { let selected: [String] }
-        let payload: Payload = try await decode(request("GET", "api/settings/marketplaces"))
-        return payload.selected
+        try await selectedCache.value(fresh: false) {
+            struct Payload: Decodable { let selected: [String] }
+            let payload: Payload = try await self.decode(self.request("GET", "api/settings/marketplaces"))
+            return payload.selected
+        }
     }
 
-    /// The desktop's General dropdown lists (Condition, colors, Size).
+    /// The desktop's General dropdown lists (Condition, colors, Size). They
+    /// come with the app's release, so one answer serves the whole sign-in.
     func generalOptions() async throws -> GeneralOptions {
-        struct Payload: Decodable { let forms: [String: [String: [String]]] }
-        let payload: Payload = try await decode(request("GET", "api/catalog/dropdown-options"))
-        return GeneralOptions(vendoo: payload.forms["vendoo"] ?? [:])
+        try await optionsCache.value(fresh: false) {
+            struct Payload: Decodable { let forms: [String: [String: [String]]] }
+            let payload: Payload = try await self.decode(self.request("GET", "api/catalog/dropdown-options"))
+            return GeneralOptions(vendoo: payload.forms["vendoo"] ?? [:])
+        }
     }
 
     /// The inventory's ranked next steps.
@@ -242,16 +261,33 @@ final class AnteroomAPI: Sendable {
         }
     }
 
+    /// A marketplace tab's form, with the shared lists it names downloaded side by side.
     func nativeForm(_ id: String, marketplace: String) async throws -> NativeForm {
         let form: NativeForm = try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/\(marketplace)/form"))
-        var lists: [ChoiceListRef: ChoiceList] = [:]
-        for ref in Set(form.fields.compactMap(\.choiceList)) {
-            lists[ref] = try await choiceLists.list(ref) { () async throws -> ChoiceList in
-                try await self.decode(self.request("GET", "api/catalog/choice-lists/\(ref.name)",
-                                                   query: [URLQueryItem(name: "v", value: ref.version)]))
+        let refs = Set(form.fields.compactMap(\.choiceList))
+        let lists = try await withThrowingTaskGroup(of: (ChoiceListRef, ChoiceList).self,
+                                                    returning: [ChoiceListRef: ChoiceList].self) { group in
+            for ref in refs {
+                group.addTask {
+                    let list = try await self.choiceList(ref)
+                    return (ref, list)
+                }
             }
+            var lists: [ChoiceListRef: ChoiceList] = [:]
+            for try await (ref, list) in group { lists[ref] = list }
+            return lists
         }
         return form.filled(with: lists)
+    }
+
+    /// A shared list by version: from memory, else from disk, else downloaded once.
+    private func choiceList(_ ref: ChoiceListRef) async throws -> ChoiceList {
+        try await choiceLists.list(ref) { () async throws -> ChoiceList in
+            let data = try await self.immutableRead(
+                "choice-list/\(ref.name)/\(ref.version)", "api/catalog/choice-lists/\(ref.name)",
+                query: [URLQueryItem(name: "v", value: ref.version)])
+            return try JSONDecoder().decode(ChoiceList.self, from: data)
+        }
     }
 
     // MARK: Listings settings (hosted rows of Settings → Listings)
@@ -261,7 +297,9 @@ final class AnteroomAPI: Sendable {
     }
 
     func setMarketplaces(_ selected: [String]) async throws -> MarketplaceSettings {
-        try await decode(request("PUT", "api/settings/marketplaces", json: ["selected": selected]))
+        let settings: MarketplaceSettings = try await decode(request("PUT", "api/settings/marketplaces", json: ["selected": selected]))
+        await selectedCache.clear()
+        return settings
     }
 
     func packageDimensions() async throws -> PackageDimensions {
@@ -752,15 +790,26 @@ final class AnteroomAPI: Sendable {
         try await send(request("GET", "api/conversations/\(listingID)/photos/\(photoID)/bytes"))
     }
 
-    /// At most four at a time: the server resizes each one while holding one of
-    /// its few database connections, so a screen of covers at once would queue
-    /// a seller's save behind them.
-    func photoThumbnailData(photoID: String, size: Int) async throws -> Data {
-        await thumbnails.enter()
+    /// A photo's thumbnail at one of the sizes the server keeps. With the
+    /// photo's `version` the server marks it immutable, and it is kept on disk.
+    ///
+    /// At most four downloads run at a time: the server resizes each one while
+    /// holding one of its few database connections, so a screen of covers at
+    /// once would queue a seller's save behind them. An `urgent` thumbnail (the
+    /// open listing's) goes ahead of waiting inventory covers, and a cover whose
+    /// row scrolled away leaves the queue.
+    func photoThumbnailData(photoID: String, size: Int, version: String? = nil, urgent: Bool = false) async throws -> Data {
+        let size = ThumbnailSize.snapped(size)
+        let key = version.map { "thumb/" + ThumbnailSize.key(photoID: photoID, version: $0, size: size) }
+        if let key, let kept = await immutable.data(for: key) { return kept }
+        let generation = await immutable.generation
+        try await thumbnails.enter(urgent: urgent)
         do {
-            let data = try await send(request("GET", "api/photos/\(photoID)/thumb",
-                                              query: [URLQueryItem(name: "size", value: String(size))]))
+            var query = [URLQueryItem(name: "size", value: String(size))]
+            if let version { query.append(URLQueryItem(name: "v", value: version)) }
+            let data = try await send(request("GET", "api/photos/\(photoID)/thumb", query: query))
             await thumbnails.leave()
+            if let key { await immutable.store(data, for: key, generation: generation) }
             return data
         } catch {
             await thumbnails.leave()
@@ -1023,6 +1072,15 @@ final class AnteroomAPI: Sendable {
         return withBody
     }
 
+    /// A read whose URL names a version that never changes, answered from disk when it was kept.
+    private func immutableRead(_ key: String, _ path: String, query: [URLQueryItem]) async throws -> Data {
+        if let kept = await immutable.data(for: key) { return kept }
+        let generation = await immutable.generation
+        let data = try await send(request("GET", path, query: query))
+        await immutable.store(data, for: key, generation: generation)
+        return data
+    }
+
     private func decode<T: Decodable>(_ request: URLRequest) async throws -> T {
         try JSONDecoder().decode(T.self, from: try await send(request))
     }
@@ -1134,12 +1192,18 @@ struct WorkspaceRuntime: Decodable, Sendable, Equatable {
     }
 }
 
-/// One `/api/runtime` answer, shared by the screens that ask within 30 seconds.
-actor RuntimeCache {
-    private var current: (task: Task<WorkspaceRuntime, Error>, asked: Date)?
+/// One answer shared by the screens that ask for it within `maxAge` seconds
+/// (such as `/api/runtime`); screens asking at the same time share one request.
+actor SharedRead<Value: Sendable> {
+    private let maxAge: TimeInterval
+    private var current: (task: Task<Value, Error>, asked: Date)?
 
-    func value(fresh: Bool, load: @escaping @Sendable () async throws -> WorkspaceRuntime) async throws -> WorkspaceRuntime {
-        if fresh || current.map({ Date().timeIntervalSince($0.asked) > 30 }) ?? true {
+    init(maxAge: TimeInterval) {
+        self.maxAge = maxAge
+    }
+
+    func value(fresh: Bool, load: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        if fresh || current.map({ Date().timeIntervalSince($0.asked) > maxAge }) ?? true {
             current = (Task { try await load() }, Date())
         }
         let task = current!.task
@@ -1175,26 +1239,61 @@ actor ChoiceListCache {
 }
 
 /// Lets a fixed number of callers through at once; the rest wait their turn.
+/// Urgent callers wait ahead of the others. A caller cancelled while it waits
+/// leaves the queue at once, with `CancellationError`, and takes no turn.
 actor RequestGate {
+    private struct Waiter {
+        let id: UUID
+        let urgent: Bool
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
     private let limit: Int
     private var running = 0
-    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var waiting: [Waiter] = []
 
     init(limit: Int) { self.limit = limit }
 
-    func enter() async {
+    /// How many callers are waiting; for tests.
+    var waitingCount: Int { waiting.count }
+
+    /// Returns once the caller may run. Every successful `enter` needs one `leave`.
+    func enter(urgent: Bool = false) async throws {
+        try Task.checkCancellation()
         if running < limit {
             running += 1
             return
         }
-        await withCheckedContinuation { waiting.append($0) }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                let waiter = Waiter(id: id, urgent: urgent, continuation: continuation)
+                if urgent, let firstOther = waiting.firstIndex(where: { !$0.urgent }) {
+                    waiting.insert(waiter, at: firstOther)
+                } else {
+                    waiting.append(waiter)
+                }
+            }
+        } onCancel: {
+            Task { await self.cancel(id) }
+        }
     }
 
     func leave() {
         if waiting.isEmpty {
             running -= 1
         } else {
-            waiting.removeFirst().resume()
+            // The turn passes straight to the next caller.
+            waiting.removeFirst().continuation.resume()
         }
+    }
+
+    private func cancel(_ id: UUID) {
+        guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
+        waiting.remove(at: index).continuation.resume(throwing: CancellationError())
     }
 }

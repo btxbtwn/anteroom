@@ -88,27 +88,32 @@ export function MarketplaceLogo({
   const reactId = useId().replace(/:/g, "");
   const prefix = `mpl-${reactId}`;
   const logo = OFFICIAL_LOGOS[id];
-  const box = marketplaceLogoBox(id, size, fit);
+  // In a square, Etsy and Depop draw their one-letter marks (the letters on their
+  // app icons): their wordmarks squeezed into 14-20px were a few pixels tall.
+  // eBay has no such mark, so its wordmark keeps its own proportions instead.
+  const mark = logo && fit === "square" ? logo.compact : undefined;
+  const box = marketplaceLogoBox(id, size, fit === "square" && !mark ? "wordmark" : fit);
   const wide = box.width !== size || box.height !== size;
 
   if (logo) {
+    const drawn = mark ?? logo;
     return (
       <span
-        className="marketplace-logo"
+        className="marketplace-logo inline-flex shrink-0 items-center justify-center"
         role="img"
         title={label}
         aria-label={label}
-        style={wide ? { width: box.width, height: size, display: "inline-flex", alignItems: "center" } : { width: size, height: size }}
+        style={{ width: wide ? box.width : size, height: size }}
       >
         <svg
           width={wide ? box.width : size - 2}
           height={wide ? box.height : size - 2}
-          viewBox={logo.viewBox}
+          viewBox={drawn.viewBox}
           preserveAspectRatio="xMidYMid meet"
           aria-hidden="true"
         >
           <GradientDefs logo={logo} prefix={prefix} />
-          {logo.paths.map((path, index) => (
+          {drawn.paths.map((path, index) => (
             <path
               key={index}
               d={path.d}
