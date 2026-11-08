@@ -672,6 +672,8 @@ export const api = {
     copy: (id: string, body: CopyListingRequest) => request<Conversation>(`/conversations/${id}/copy`, { method: "POST", body: JSON.stringify(body) }),
     list: (options?: ReadOptions) => read<ConversationSummary[]>("/conversations", options),
     get: (id: string, options?: ReadOptions) => read<Conversation>(`/conversations/${id}`, options),
+    /** Item Details as Regenerate will start from them; nothing is saved. */
+    regenerateDetails: (id: string) => read<{ notes: string | null }>(`/conversations/${id}/regenerate-details`),
     create: (body?: { title?: string; notes?: string; box_id?: string | null }) =>
       request<Conversation>("/conversations", { method: "POST", body: JSON.stringify(body || {}) }),
     update: (id: string, body: { title?: string; notes?: string; box_id?: string | null }) =>

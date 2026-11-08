@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariationRow, EbayVariations, ListingData } from "../api/types";
 import { formPhotos } from "../marketplaceMedia";
 import { photoThumbUrl } from "../photoThumb";
+import { StudioImage } from "./StudioImage";
 import { SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -139,7 +140,7 @@ export function EbayVariationsEditor({ convId, listing, value, aspects, disabled
                 disabled={disabled || (!on && chosen.length >= MAX_VARIATION_PHOTOS)}
                 className={`size-12 overflow-hidden rounded-md border-2 ${on ? "border-primary" : "border-transparent opacity-60"}`}
                 onClick={() => commit({ ...draft, photos: { ...draft.photos, [text]: on ? chosen.filter(id => id !== photo.id) : [...chosen, photo.id] } })}>
-                <img src={photoThumbUrl(photo)} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
+                <StudioImage src={photoThumbUrl(photo)} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
               </button>;
             })}
           </div>
