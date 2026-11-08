@@ -23,7 +23,7 @@ it("announces startup and offers recovery only after a long wait", () => {
   const reload = vi.fn();
   act(() => root.render(<StartupScreen onReload={reload} />));
   expect(host.querySelector("h1")?.textContent).toBe("Anteroom");
-  expect(host.querySelector('[role="status"]')?.textContent).toBe("Opening your workspace…");
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("Getting things ready…");
   expect(host.querySelector("button")).toBeNull();
   act(() => vi.advanceTimersByTime(10_000));
   expect(host.querySelector('[role="status"]')?.textContent).toContain("Taking longer than usual");

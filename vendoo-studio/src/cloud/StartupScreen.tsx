@@ -21,7 +21,7 @@ export function StartupScreen({ error, onReload = () => window.location.reload()
         <h1 className="startup-title">Anteroom</h1>
         <div className="startup-status" role={error ? "alert" : "status"} aria-atomic="true">
           {!error && <span className="startup-spinner" aria-hidden="true" />}
-          <p>{error || (slow ? "Taking longer than usual. You can keep waiting or reload." : "Opening your workspace…")}</p>
+          <p>{error || (slow ? "Taking longer than usual. You can keep waiting or reload." : "Getting things ready…")}</p>
         </div>
         <div className="startup-recovery">
           {(slow || error) && <Button variant="outline" className="min-h-11" onClick={onReload}>Reload Anteroom</Button>}

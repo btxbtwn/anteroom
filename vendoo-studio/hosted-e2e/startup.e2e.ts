@@ -12,7 +12,7 @@ for (const theme of ["light", "dark"]) {
     try {
       await page.goto("/?sign-in", { waitUntil: "commit" });
       await expect(page.getByRole("heading", { name: "Anteroom", exact: true })).toBeVisible();
-      await expect(page.getByRole("status")).toHaveText("Opening your workspace…");
+      await expect(page.getByRole("status")).toHaveText("Getting things ready…");
       await expect(page.locator("html")).toHaveClass(theme === "dark" ? "dark" : "");
       const screen = page.getByRole("main");
       await expect(screen).toHaveCSS("height", `${page.viewportSize()!.height}px`);
@@ -36,7 +36,7 @@ test("workspace startup supports a slow response, reload and an actionable error
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   try {
-    await expect(page.getByRole("status")).toHaveText("Opening your workspace…");
+    await expect(page.getByRole("status")).toHaveText("Getting things ready…");
     await expect(page.getByRole("button", { name: "Reload Anteroom" })).toHaveCount(0);
     await expect(page.locator(".startup-spinner")).toHaveCSS("animation-name", "none");
     await expect(page.getByRole("status")).toContainText("Taking longer than usual", { timeout: 15_000 });
