@@ -23,7 +23,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
@@ -177,29 +177,11 @@ def _placeholders(db: Session, marketplace: str, listing_ids: list[str]) -> list
         if row.source == "marketplace" and row.order_id == row.line_id == row.listing_id]
 
 
-def _stand_ins(db: Session, marketplace: str, conversation_id: str) -> list[MarketplaceSale]:
-    """The seller's Mark as sold and the kept Vendoo sale for this item on this marketplace."""
-    return db.query(MarketplaceSale).filter(
-        MarketplaceSale.marketplace == marketplace, MarketplaceSale.conversation_id == conversation_id,
-        MarketplaceSale.source.in_(("seller", "vendoo"))).all()
-
-
-def _item_cost(rows: list[MarketplaceSale]) -> str | None:
-    for row in rows:
-        cost = row.financials.get("item_cost") if isinstance(row.financials, dict) else None
-        if cost is not None:
-            try:
-                return format(Decimal(str(cost)), "f")
-            except InvalidOperation:
-                continue
-    return None
-
-
 def save_orders(db: Session, marketplace: str, orders: list[Order], observed: datetime) -> dict:
     """Store each order line once, replacing what stood in for it. Returns counts and the sales to announce."""
     from vendoo_studio.services.relay_sales import find_listing
+    from vendoo_studio.services.sale_matching import carry_over, replace_stand_in
     from vendoo_studio.services.sales_ledger import order_basis
-    from vendoo_studio.services.sale_matching import matching_sale_index
 
     counts = {"recorded": 0, "updated": 0, "replaced": 0}
     announce: list[str] = []
@@ -214,18 +196,8 @@ def save_orders(db: Session, marketplace: str, orders: list[Order], observed: da
             owner = find_listing(db, marketplace, line.listing_id)
             conversation_id = (sale.conversation_id if sale else None) or (owner.id if owner else None) \
                 or next((row.conversation_id for row in placeholders if row.conversation_id), None)
-            stand_ins = _stand_ins(db, marketplace, conversation_id) if conversation_id and sale is None else []
-            moment = order.sold_at.replace(tzinfo=UTC) if order.sold_at else None
-            match = matching_sale_index(stand_ins, marketplace, moment)
-            stand_ins = [stand_ins[match]] if match is not None else []
-            replaced = placeholders + stand_ins
-            corrected_sale = next((row for row in replaced
-                                   if isinstance(row.financials, dict) and row.financials.get("source") == "seller"), None)
-            corrected = dict(corrected_sale.financials) if corrected_sale is not None else None
-            item_cost = _item_cost([row for row in (sale, *replaced) if row is not None])
-            for row in replaced:
+            for row in placeholders:
                 db.delete(row)
-            counts["replaced"] += len(replaced)
             db.flush()
             fresh = sale is None
             if sale is None:
@@ -241,22 +213,19 @@ def save_orders(db: Session, marketplace: str, orders: list[Order], observed: da
             sale.order_observed_at = observed
             sale.conversation_id = conversation_id
             raw = sale.financials if isinstance(sale.financials, dict) else {}
-            saved_date = corrected if corrected is not None else raw
-            if order.sold_at is not None and "sold_on" not in saved_date:
+            if order.sold_at is not None and "sold_on" not in raw:
                 sale.sold_at = order.sold_at
             db.flush()
+            for row in placeholders:
+                carry_over(sale, row)
+            replaced = len(placeholders) + (fresh and replace_stand_in(db, sale) is not None)
+            counts["replaced"] += replaced
             raw = sale.financials if isinstance(sale.financials, dict) else {}
-            if corrected_sale is not None and corrected is not None and raw.get("source") != "seller":
-                if "sold_on" in corrected:
-                    sale.sold_at = corrected_sale.sold_at
-                sale.financials = {**corrected, "order_basis": order_basis(sale)}
-                sale.financial_revision = (sale.financial_revision or 0) + 1
-                raw = sale.financials
             if raw.get("source") != "seller":
-                cost = raw.get("item_cost") if raw.get("item_cost") is not None else item_cost
                 sale.financials = {"currency": order.currency,
                                    **{field: format(value, "f") if value is not None else None for field, value in money.items()},
-                                   "item_cost": cost, "order_basis": order_basis(sale), "updated_at": observed.replace(tzinfo=UTC).isoformat(),
+                                   "item_cost": raw.get("item_cost"), "order_basis": order_basis(sale),
+                                   "updated_at": observed.replace(tzinfo=UTC).isoformat(),
                                    "source": "marketplace", "order_final": order.final}
                 sale.financial_revision = (sale.financial_revision or 0) + 1
             counts["recorded" if fresh else "updated"] += 1
