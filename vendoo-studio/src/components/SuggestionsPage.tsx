@@ -23,15 +23,24 @@ export function SuggestionsPage({ active, onOpenListing }: { active: boolean; on
   const visible = suggestions.filter(item => `${item.title} ${item.reason}`.toLowerCase().includes(needle));
   const container = useRef<HTMLDivElement>(null);
   const returnId = useRef<string | null>(null);
+  const returnScroll = useRef(0);
   useLayoutEffect(() => {
     if (!active) return;
     const links = container.current?.querySelectorAll<HTMLAnchorElement>("a[data-suggestion-id]");
     const previous = Array.from(links ?? []).find(link => link.dataset.suggestionId === returnId.current);
     const target = previous ?? container.current?.querySelector<HTMLHeadingElement>("h1");
-    if (target) {
-      if (!previous) target.tabIndex = -1;
-      target.focus({ preventScroll: true });
-    }
+    const restore = () => {
+      const scroller = container.current?.querySelector<HTMLElement>('[role="region"]');
+      if (scroller) scroller.scrollTop = returnScroll.current;
+      if (target) {
+        if (!previous) target.tabIndex = -1;
+        target.focus({ preventScroll: true });
+      }
+    };
+    restore();
+    // WebKit lays out a previously hidden scroll container on the next frame.
+    const frame = requestAnimationFrame(restore);
+    return () => cancelAnimationFrame(frame);
   }, [active]);
 
   return (
@@ -48,11 +57,14 @@ export function SuggestionsPage({ active, onOpenListing }: { active: boolean; on
         {visible.length > 0 && <Panel>
           <ul aria-label="Recommendations" className="divide-y divide-border/50">
             {visible.map(item => <li key={item.conversation_id}>
-              <a href={listingHref(item.conversation_id)} aria-label={item.title} data-suggestion-id={item.conversation_id}
+              <a href={listingHref(item.conversation_id)} data-suggestion-id={item.conversation_id}
                 className={`${rowButtonClassName} min-h-24 no-underline`}
                 onClick={event => {
                   if (isBrowserLinkClick(event)) return;
-                  event.preventDefault(); returnId.current = item.conversation_id; onOpenListing(item.conversation_id);
+                  event.preventDefault();
+                  returnId.current = item.conversation_id;
+                  returnScroll.current = container.current?.querySelector<HTMLElement>('[role="region"]')?.scrollTop ?? 0;
+                  onOpenListing(item.conversation_id);
                 }}>
                 <ListingThumb src={displayCoverUrl(item.cover_photo_url)} />
                 <span className="flex min-w-0 flex-1 flex-col gap-1">

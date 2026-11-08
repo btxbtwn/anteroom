@@ -744,13 +744,18 @@ export function App() {
               </div>
             ) : null}
           </header>
-          {activeView === "listings" && returnToSuggestions && (
+          {isMobile && activeView === "listings" && returnToSuggestions && (
             <div className="shrink-0 border-b border-border px-3 py-2">
-              <Button variant="ghost" size="sm" className="min-h-11 sm:min-h-8" onClick={openSuggestions}><ArrowLeftIcon /> Back to suggestions</Button>
+              <Button variant="ghost" size="sm" className="min-h-11" onClick={openSuggestions}><ArrowLeftIcon /> Back to suggestions</Button>
             </div>
           )}
           <div className="workspace-body">
             <main className="panel main-panel" ref={mainPanelRef}>
+              {!isMobile && activeView === "listings" && returnToSuggestions && (
+                <div className="shrink-0 border-b border-border px-3 py-2">
+                  <Button variant="ghost" size="sm" onClick={openSuggestions}><ArrowLeftIcon /> Back to suggestions</Button>
+                </div>
+              )}
               <ErrorBoundary label="This page" resetKey={activeView === "settings" ? `settings:${settingsSection}` : activeView}>
                 {activeView === "suggestions" ? null : activeView === "settings" ? (
                   <Suspense fallback={pageLoading}>

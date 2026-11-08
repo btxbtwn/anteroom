@@ -366,9 +366,9 @@ export function ListingSidebar({
           {runtime.features.has("suggestions") && (
             <div className="shrink-0 px-(--sidebar-content-inset)">
               <Button variant="ghost" size="sm" className="min-h-11 w-full justify-start sm:min-h-8"
-                aria-label="Suggestions" data-pressed={activeView === "suggestions" ? "" : undefined} aria-current={activeView === "suggestions" ? "page" : undefined} onClick={onOpenSuggestions}>
+                data-pressed={activeView === "suggestions" ? "" : undefined} aria-current={activeView === "suggestions" ? "page" : undefined} onClick={onOpenSuggestions}>
                 <LightbulbIcon /> <span>Suggestions</span>
-                {suggestionData && <span aria-hidden="true" className="ml-auto text-xs text-muted-foreground tabular-nums">{suggestions.length}</span>}
+                {suggestionData && <span className="ml-auto text-xs text-muted-foreground tabular-nums">{suggestions.length}</span>}
               </Button>
             </div>
           )}

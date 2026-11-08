@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "./fixtures";
 
 test("suggestions preserve search, scroll and keyboard focus after reviewing a listing", async ({ page, phone, createConversation }, info) => {
@@ -14,11 +15,14 @@ test("suggestions preserve search, scroll and keyboard focus after reviewing a l
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
-  const entry = page.getByRole("button", { name: "Suggestions", exact: true });
+  const entry = page.getByRole("button", { name: /^Suggestions(?: \d+)?$/ });
   await expect(entry).toContainText("24");
   await page.screenshot({ path: info.outputPath("suggestions-button.png") });
   await entry.click();
   await expect(page.getByRole("heading", { name: "Suggestions", exact: true })).toBeFocused();
+  await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity));
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations.filter(item => item.impact === "serious" || item.impact === "critical")).toEqual([]);
   const search = page.getByRole("searchbox", { name: "Search suggestions" });
   await search.fill("Wool");
   for (const theme of ["light", "dark"]) {
@@ -28,7 +32,7 @@ test("suggestions preserve search, scroll and keyboard focus after reviewing a l
     }, theme);
     await page.screenshot({ path: info.outputPath(`suggestions-${theme}.png`) });
   }
-  const item = page.getByRole("link", { name: "Wool coat 21", exact: true });
+  const item = page.getByRole("link", { name: /^Wool coat 21(?: |$)/ });
   await item.scrollIntoViewIfNeeded();
   const scroller = page.getByRole("region", { name: "Suggested listings" });
   const scroll = await scroller.evaluate(el => el.scrollTop);
@@ -37,7 +41,7 @@ test("suggestions preserve search, scroll and keyboard focus after reviewing a l
   await page.getByRole("button", { name: "Back to suggestions", exact: true }).click();
   await expect(search).toHaveValue("Wool");
   await expect(item).toBeFocused();
-  expect(await scroller.evaluate(el => el.scrollTop)).toBeGreaterThanOrEqual(scroll - 2);
+  await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBeGreaterThanOrEqual(scroll - 2);
   await search.fill("No matching recommendation");
   await expect(page.getByText("No suggestions match your search.")).toBeVisible();
 });
