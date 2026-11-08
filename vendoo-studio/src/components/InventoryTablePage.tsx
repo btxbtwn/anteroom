@@ -119,8 +119,9 @@ export function InventoryTablePage({
           }}
         >
           {tabs.map((tab) => (
-            <Toggle key={tab} value={tab} aria-label={loading ? LISTING_STATUS_LABELS[tab] : `${LISTING_STATUS_LABELS[tab]}, ${counts[tab] ?? 0}`}>
+            <Toggle key={tab} value={tab}>
               {LISTING_STATUS_LABELS[tab]}
+              {loading ? null : " "}
               {loading ? null : <span className="text-2xs text-muted-foreground tabular-nums">{counts[tab] ?? 0}</span>}
             </Toggle>
           ))}

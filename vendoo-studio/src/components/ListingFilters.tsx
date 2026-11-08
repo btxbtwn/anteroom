@@ -145,11 +145,12 @@ export function ListingFilters({
               className="group/tab relative flex h-6 max-[900px]:h-9 max-[900px]:after:absolute max-[900px]:after:inset-x-0 max-[900px]:after:-inset-y-1 min-w-0 flex-auto cursor-pointer items-center justify-center overflow-hidden rounded-md px-1 text-xs font-medium text-sidebar-muted-foreground outline-none transition-colors hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground data-[active=true]:shadow-xs/5"
               // A narrow sidebar drops the counts, so the tab itself carries one.
               title={counts ? `${LISTING_STATUS_LABELS[status]} · ${counts[status] || 0}` : LISTING_STATUS_LABELS[status]}
-              aria-label={counts ? `${LISTING_STATUS_LABELS[status]}, ${counts[status] || 0}` : LISTING_STATUS_LABELS[status]}
               onClick={() => onChange({ ...filters, status })}
             >
               <span className="flex min-w-0 items-baseline gap-1">
                 <span className="min-w-0 truncate">{LISTING_STATUS_LABELS[status]}</span>
+                {/* The space keeps the accessible name "Open 4", not "Open4"; flex layout hides it. */}
+                {counts ? " " : null}
                 {counts ? (
                   <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums @max-[300px]/tabs:group-data-[active=false]/tab:hidden @max-[212px]/tabs:hidden">
                     {compactCount(counts[status] || 0)}

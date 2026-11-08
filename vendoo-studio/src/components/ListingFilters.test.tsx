@@ -14,7 +14,8 @@ describe("ListingFilters status tabs", () => {
   it("names the working list Open, since sold listings have their own tab", () => {
     const html = tabs({ all: 4, draft: 1, active: 3, sold: 12 });
     expect(html).toContain('title="Open · 4"');
-    expect(html).toContain('aria-label="Open, 4"');
+    // A space between label and count makes the accessible name "Open 4".
+    expect(html).toMatch(/>Open<\/span> <span[^>]*>4</);
     expect(html).toContain(">Open</span>");
     expect(html).not.toContain(">All</span>");
     expect(html).toContain('title="Sold · 12"');

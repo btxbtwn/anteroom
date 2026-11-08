@@ -37,7 +37,7 @@ test("the inventory shows placeholder rows until it loads, and its working tab i
     await page.screenshot({ path: `e2e/results/inventory-loading-${info.project.name}.png` });
     release();
     await expect(loading).toHaveCount(0);
-    await expect(tabs.getByRole("tab", { name: /^Open, \d+$/ })).toHaveAttribute("aria-selected", "true");
+    await expect(tabs.getByRole("tab", { name: /^Open \d+$/ })).toHaveAttribute("aria-selected", "true");
     await expect(tabs.getByRole("tab", { name: /^All\b/ })).toHaveCount(0);
     await expect(page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true })).toBeVisible();
     await page.screenshot({ path: `e2e/results/inventory-loaded-${info.project.name}.png` });
