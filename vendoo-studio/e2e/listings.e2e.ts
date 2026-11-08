@@ -72,3 +72,19 @@ test("a marketplace form can be filled in without generating", async ({ page, ph
     await request.delete(`/api/conversations/${id}`);
   }
 });
+
+test("the marketplace rail stays put when dragged", async ({ page, phone }) => {
+  test.skip(phone, "a phone picks the form from a menu, not a rail");
+  // An iPad in landscape, where Safari let the rail be pulled sideways and past its ends.
+  await page.setViewportSize({ width: 1366, height: 1024 });
+  await openListing(page, phone, SAMPLES[0]);
+  const rail = page.getByRole("navigation", { name: "Marketplaces" });
+  await expect(rail).toBeVisible();
+  const box = await rail.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { overflowX: style.overflowX, overscroll: style.overscrollBehaviorY,
+      wider: el.scrollWidth > el.clientWidth };
+  });
+  // Nothing to scroll sideways, and no rubber band past the top or bottom.
+  expect(box).toEqual({ overflowX: "hidden", overscroll: "none", wider: false });
+});

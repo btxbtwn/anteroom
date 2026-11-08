@@ -20,3 +20,13 @@ def test_hosted_image_copies_every_skill_the_server_reads():
     for name in sorted(skills):
         assert re.search(rf'^COPY skills/{re.escape(name)}/\S* /app/skills/{re.escape(name)}/', dockerfile, re.M), name
         assert f'!skills/{name}/' in dockerignore, name
+
+
+def test_hosted_image_carries_the_favicon_the_server_serves():
+    # hosted.py serves web_dir / "favicon.png", which Vite copies from public/.
+    # Without it in the build context, /favicon.png answers 500.
+    hosted = (SERVER / 'hosted.py').read_text(encoding='utf-8')
+    assert 'web_dir / "favicon.png"' in hosted
+    dockerignore = (ROOT / '.dockerignore').read_text(encoding='utf-8').splitlines()
+    assert '!vendoo-studio/public/' in dockerignore
+    assert '!vendoo-studio/public/favicon.png' in dockerignore

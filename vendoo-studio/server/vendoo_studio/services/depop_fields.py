@@ -332,6 +332,16 @@ def _infer_depop_parcel_size(listing: dict) -> str:
     return "Extra large"
 
 
+def depop_default_age(listing: dict) -> str:
+    """Depop's Age when nobody chose one: a decade the listing names, else Modern."""
+    ebay = listing.get("ebay_specifics")
+    hay = ebay_season_haystack(listing, ebay if isinstance(ebay, dict) else {})
+    for decade in ("50s", "60s", "70s", "80s", "90s"):
+        if re.search(rf"\b{decade}\b", hay):
+            return decade
+    return "y2k" if re.search(r"\by2k\b", hay) else "Modern"
+
+
 def ensure_depop_category_optionals(listing: dict) -> bool:
     """Fill Depop Show-Optional-Fields rows; omit size grouping for Regular."""
     if not isinstance(listing, dict):
@@ -362,14 +372,7 @@ def ensure_depop_category_optionals(listing: dict) -> bool:
         set_key("source", source)
 
     if ebay_optional_blank(depop.get("age")):
-        age = "Modern"
-        for decade in ("50s", "60s", "70s", "80s", "90s"):
-            if re.search(rf"\b{decade}\b", hay):
-                age = decade
-                break
-        if age == "Modern" and re.search(r"\by2k\b", hay):
-            age = "y2k"
-        set_key("age", age)
+        set_key("age", depop_default_age(listing))
 
     from vendoo_studio.services.seller_overrides import is_locked
 

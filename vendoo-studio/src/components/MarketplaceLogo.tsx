@@ -55,18 +55,41 @@ function remapFill(fill: string | undefined, prefix: string): string | undefined
   return `url(#${prefix}-${m[1]})`;
 }
 
+/**
+ * The box a logo is drawn in. "square" fits every logo in size×size. "wordmark"
+ * draws a wide wordmark (eBay, Etsy, Depop) at its own proportions with about
+ * the same area as the others (1.2 × size²), so a short word is not dwarfed by
+ * a long one at row size; square marks keep size×size.
+ */
+export function marketplaceLogoBox(id: string, size: number, fit: "square" | "wordmark" = "square"): { width: number; height: number } {
+  const logo = OFFICIAL_LOGOS[id];
+  if (fit === "wordmark" && logo) {
+    const [, , w, h] = logo.viewBox.split(/\s+/).map(Number);
+    const aspect = w / h;
+    if (aspect >= 1.5) {
+      const height = Math.round(Math.sqrt((1.2 * size * size) / aspect));
+      return { width: Math.round(height * aspect), height };
+    }
+  }
+  return { width: size, height: size };
+}
+
 export function MarketplaceLogo({
   id,
   label,
   size = 16,
+  fit = "square",
 }: {
   id: string;
   label: string;
   size?: number;
+  fit?: "square" | "wordmark";
 }) {
   const reactId = useId().replace(/:/g, "");
   const prefix = `mpl-${reactId}`;
   const logo = OFFICIAL_LOGOS[id];
+  const box = marketplaceLogoBox(id, size, fit);
+  const wide = box.width !== size || box.height !== size;
 
   if (logo) {
     return (
@@ -75,11 +98,11 @@ export function MarketplaceLogo({
         role="img"
         title={label}
         aria-label={label}
-        style={{ width: size, height: size }}
+        style={wide ? { width: box.width, height: size, display: "inline-flex", alignItems: "center" } : { width: size, height: size }}
       >
         <svg
-          width={size - 2}
-          height={size - 2}
+          width={wide ? box.width : size - 2}
+          height={wide ? box.height : size - 2}
           viewBox={logo.viewBox}
           preserveAspectRatio="xMidYMid meet"
           aria-hidden="true"

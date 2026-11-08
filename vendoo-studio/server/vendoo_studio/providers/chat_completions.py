@@ -267,10 +267,10 @@ class ChatCompletionsProvider:
             body["reasoning"] = {"effort": self.reasoning_effort}
         return body
 
-    async def _post(self, body: dict, timeout: float = 300) -> dict:
+    async def _post(self, body: dict, timeout: float = 300, *, endpoint: str = "chat/completions") -> dict:
         with model_usage.observe(self.name, str(body.get("model") or "")) as call:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(f"{self.base_url}/chat/completions", headers=self._headers(), json=body)
+                resp = await client.post(f"{self.base_url}/{endpoint}", headers=self._headers(), json=body)
             if resp.status_code >= 400:
                 raise RuntimeError(self._http_error(resp))
             payload = resp.json()
@@ -332,16 +332,16 @@ class ChatCompletionsProvider:
 
 
 def openrouter_sources(payload: dict) -> list[dict]:
-    """``url_citation`` annotations on the reply, as ``{url, title, description}``.
-
-    OpenRouter nests each citation's fields under ``url_citation``.
-    """
-    choices = payload.get("choices") or []
-    message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
-    annotations = message.get("annotations") if isinstance(message, dict) else None
+    """Citations from OpenRouter Responses output, retaining page excerpts."""
+    annotations = [
+        annotation
+        for item in payload.get("output") or [] if isinstance(item, dict) and item.get("type") == "message"
+        for part in item.get("content") or [] if isinstance(part, dict)
+        for annotation in part.get("annotations") or []
+    ]
     sources: list[dict] = []
     seen: set[str] = set()
-    for item in annotations if isinstance(annotations, list) else []:
+    for item in annotations:
         if not isinstance(item, dict) or item.get("type") != "url_citation":
             continue
         cited = item.get("url_citation")
@@ -359,14 +359,19 @@ def openrouter_sources(payload: dict) -> list[dict]:
 
 
 class OpenRouterProvider(ChatCompletionsProvider):
-    """OpenRouter adds web search to any model with its ``web`` plugin."""
+    """OpenRouter runs model-directed web searches through its server tool."""
 
     async def web_search(self, messages: list[dict]) -> dict:
-        payload = await self._post(
-            self._body(messages, self.listing_model, plugins=[{"id": "web"}]),
-            timeout=180,
-        )
-        answer = chunk_text(payload).strip()
+        from vendoo_studio.providers.chatgpt_codex import web_search_answer
+
+        body = self._body(messages, self.listing_model)
+        body["input"] = body.pop("messages")
+        # Unlike the one-search web plugin, the Responses server tool lets the
+        # model refine queries, as the sold-comps research prompt asks.
+        # https://openrouter.ai/docs/guides/features/server-tools/web-search
+        body["tools"] = [{"type": "openrouter:web_search"}]
+        payload = await self._post(body, timeout=90, endpoint="responses")
+        answer = web_search_answer(payload.get("output") or [])
         sources = openrouter_sources(payload)
         if sources:
             live_trace.emit("step", f"OpenRouter searched the web ({len(sources)} pages)")
