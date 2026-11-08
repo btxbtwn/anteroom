@@ -23,8 +23,6 @@ import re
 import socket
 
 import httpx
-from jaraco.classes import properties
-from keyring.backend import KeyringBackend
 
 ENV_VAR = "ANTEROOM_SANDBOX"
 LISTING_DETAIL = "Sandbox mode never publishes, delists, updates or deletes a marketplace listing."
@@ -78,27 +76,6 @@ def refusal(method: str, path: str) -> str | None:
 
 
 _installed = False
-
-
-class MemoryKeyring(KeyringBackend):
-    """A keyring that forgets everything when the process ends."""
-
-    @properties.classproperty
-    def priority(cls) -> float:
-        return 1.0
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.items: dict[tuple[str, str], str] = {}
-
-    def get_password(self, service, username):
-        return self.items.get((service, username))
-
-    def set_password(self, service, username, password):
-        self.items[(service, username)] = password
-
-    def delete_password(self, service, username):
-        self.items.pop((service, username), None)
 
 
 def _is_loopback(host: str) -> bool:
@@ -155,7 +132,11 @@ def install() -> None:
     global _installed
     if _installed:
         return
+    # keyring ships only in the Mac app; the hosted API imports this module
+    # without it, so it loads here, when sandbox mode is switched on.
     import keyring
+
+    from vendoo_studio.memory_keyring import MemoryKeyring
 
     keyring.set_keyring(MemoryKeyring())
     _block_outbound()

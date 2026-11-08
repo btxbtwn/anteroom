@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.786 — 2026-11-08
+
+- The iPhone Assistant answers again instead of failing with "Something went wrong (500)".
+
 ## 0.1.785 — 2026-11-08
 
 - Connecting eBay or Etsy now finishes back in the Anteroom that started it, so a sign-in link someone else sends you can't hand them your account. Update Anteroom to connect eBay or Etsy.
