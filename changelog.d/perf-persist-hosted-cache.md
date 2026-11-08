@@ -1,0 +1,1 @@
+- On the web and iPhone browser, reopening Anteroom shows your inventory and pages right away from your last visit, then refreshes them. Signing out erases what was kept on the device.
