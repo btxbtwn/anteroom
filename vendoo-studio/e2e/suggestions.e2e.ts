@@ -16,7 +16,10 @@ test("suggestions remain reachable with a listing open", async ({ page, phone, c
   await page.getByRole("button", { name: "Suggestions", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Suggestions" });
   await expect(dialog.getByText("Listed 75 days · In season")).toBeVisible();
-  await page.screenshot({ path: info.outputPath("suggestions.png") });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await page.screenshot({ path: info.outputPath(`suggestions-${colorScheme}.png`) });
+  }
   await dialog.getByRole("link", { name: new RegExp(title) }).click();
   await expect(dialog).not.toBeVisible();
 });
