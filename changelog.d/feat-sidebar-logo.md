@@ -1,2 +1,0 @@
-- The Anteroom logo now shows at the top of the sidebar.
-- The Anteroom logo now shows on the browser tab at myanteroom.com.
