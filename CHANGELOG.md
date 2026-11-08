@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.808 — 2026-11-08
+
+- Let DeepSeek and other OpenRouter listing models search repeatedly for sold comparisons during listing generation.
+
 ## 0.1.807 — 2026-11-08
 
 - On the web, listing photos you've already seen appear right away when you scroll your inventory, even after reloading the page or after an Anteroom update.
