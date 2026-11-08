@@ -1,1 +1,0 @@
-- Inventory thumbnails load ahead of scrolling so upcoming items show their photos sooner.
