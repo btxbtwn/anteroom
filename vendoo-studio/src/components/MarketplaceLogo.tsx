@@ -57,8 +57,9 @@ function remapFill(fill: string | undefined, prefix: string): string | undefined
 
 /**
  * The box a logo is drawn in. "square" fits every logo in size×size. "wordmark"
- * draws a wide wordmark (eBay, Etsy, Depop) at its own proportions and 60% of
- * the height, so it reads at row size; square marks keep size×size.
+ * draws a wide wordmark (eBay, Etsy, Depop) at its own proportions with about
+ * the same area as the others (1.2 × size²), so a short word is not dwarfed by
+ * a long one at row size; square marks keep size×size.
  */
 export function marketplaceLogoBox(id: string, size: number, fit: "square" | "wordmark" = "square"): { width: number; height: number } {
   const logo = OFFICIAL_LOGOS[id];
@@ -66,7 +67,7 @@ export function marketplaceLogoBox(id: string, size: number, fit: "square" | "wo
     const [, , w, h] = logo.viewBox.split(/\s+/).map(Number);
     const aspect = w / h;
     if (aspect >= 1.5) {
-      const height = Math.round(size * 0.6);
+      const height = Math.round(Math.sqrt((1.2 * size * size) / aspect));
       return { width: Math.round(height * aspect), height };
     }
   }
