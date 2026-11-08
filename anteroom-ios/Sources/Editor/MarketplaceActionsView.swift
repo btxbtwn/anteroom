@@ -176,7 +176,7 @@ struct MarketplaceActionsView: View {
                                 rowView(row)
                             }
                         } footer: {
-                            Text("eBay and Etsy list directly. Poshmark, Mercari and Depop go through Chrome on your computer, so keep Anteroom open there with Chrome connected.")
+                            Text("eBay and Etsy use connected accounts without the extension. Poshmark, Mercari and Depop require desktop Chrome with the Bridge extension connected and an Anteroom tab open. You can create and edit drafts on iPhone without Chrome.")
                         }
                     }
                 }
@@ -224,6 +224,10 @@ struct MarketplaceActionsView: View {
                 Spacer()
                 if row.tone == .busy { ProgressView().controlSize(.small) }
                 Text(row.label).font(.subheadline.weight(.medium)).foregroundStyle(color(row.tone))
+            }
+            if MarketplaceActions.throughChrome.contains(row.marketplace) {
+                Text("Requires desktop Chrome with Bridge connected")
+                    .font(.footnote).foregroundStyle(WorkspaceStyle.mutedText)
             }
             if let detail = row.detail { Text(detail).font(.footnote).foregroundStyle(WorkspaceStyle.mutedText) }
             // Anteroom's own words lead; the marketplace's raw reply is there for whoever wants it.

@@ -17,7 +17,7 @@ import logging
 import re
 from typing import Any
 
-from vendoo_studio.services.direct_categories import direct_category_id
+from vendoo_studio.services.direct_categories import direct_category_id, pick_etsy_leaf
 from vendoo_studio.services.native_category_match import closest_row, evidence, match_row, native_rows
 from vendoo_studio.services.seller_overrides import is_locked
 
@@ -361,13 +361,13 @@ def _saved_message(saved: list[str], missing: list[str]) -> str:
     return " ".join(parts)
 
 
-def ebay_tree_leaves(db) -> list[dict]:
-    """eBay leaves already synced into Studio. Empty when that tree has not been stored."""
+def tree_leaves(db, marketplace: str) -> list[dict]:
+    """A marketplace's leaves already synced into Studio. Empty when that tree has not been stored."""
     from vendoo_studio.models.catalog import CategoryTree, CategoryTreeNode
 
-    if db.get(CategoryTree, "ebay") is None:
+    if db.get(CategoryTree, marketplace) is None:
         return []
-    rows = db.query(CategoryTreeNode).filter_by(marketplace="ebay").all()
+    rows = db.query(CategoryTreeNode).filter_by(marketplace=marketplace).all()
     return [
         {"id": row.category_id, "path": row.path}
         for row in rows
@@ -417,7 +417,7 @@ async def _fill_etsy(listing: dict, path: str) -> bool:
 
 
 def _catalogs(db) -> dict[str, list[dict]]:
-    return {**native_rows(), "ebay": ebay_tree_leaves(db)}
+    return {**native_rows(), "ebay": tree_leaves(db, "ebay")}
 
 
 async def apply_native_categories(
@@ -453,13 +453,18 @@ def _run(coroutine):
         return pool.submit(asyncio.run, coroutine).result()
 
 
+def _new_general_path(previous: dict | None, listing: dict) -> str:
+    if not isinstance(listing, dict):
+        return ""
+    path = _text(listing.get("category_path"))
+    before = _text(previous.get("category_path")) if isinstance(previous, dict) else ""
+    return path if path != before else ""
+
+
 def map_general_category(db, previous: dict | None, listing: dict) -> None:
     """A new general category fills each marketplace form's own category."""
-    if not isinstance(listing, dict):
-        return
-    previous = previous if isinstance(previous, dict) else {}
-    path = _text(listing.get("category_path"))
-    if not path or path == _text(previous.get("category_path")):
+    path = _new_general_path(previous, listing)
+    if not path:
         return
     requested = {"category_path": path, "paths": {}, "ids": {}}
     try:
@@ -467,6 +472,28 @@ def map_general_category(db, previous: dict | None, listing: dict) -> None:
         _run(apply_native_categories(None, listing, previous, requested, catalogs=_catalogs(db)))
     except Exception:
         log.exception("Could not map the general category onto the marketplace forms")
+
+
+def match_general_category(db, previous: dict | None, listing: dict) -> None:
+    """A new general category fills each marketplace form's own category from the lists Studio holds.
+
+    No marketplace is called, so the save never waits on one and its database
+    work stays short. A marketplace none of whose categories matches is cleared
+    for the seller to pick, and a category the seller picked on a form stays.
+    """
+    path = _new_general_path(previous, listing)
+    if not path:
+        return
+    requested = {"category_path": path, "paths": {}, "ids": {}}
+    try:
+        markets, explicit = markets_for_choice(previous, listing, requested)
+        apply_agent_categories(listing, _catalogs(db), requested=requested, markets=markets, explicit=explicit)
+        if not is_locked(listing, _FIELD["etsy"]):
+            hit = pick_etsy_leaf(tree_leaves(db, "etsy"), path)
+            _set_direct(listing, "etsy", _text((hit or {}).get("id")))
+            _set_direct(listing, "etsy_path", _text((hit or {}).get("path")))
+    except Exception:
+        log.exception("Could not match the general category onto the marketplace forms")
 
 
 async def apply_saved_agent_category(

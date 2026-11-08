@@ -29,6 +29,10 @@ struct SignInView: View {
                          : "One account for your listings on the web, iPhone and Mac.")
                         .foregroundStyle(.secondary)
                 }
+                if mode == .createAccount {
+                    Text("Create and generate drafts on iPhone without Chrome. eBay and Etsy use connected accounts. Other marketplace actions require Chrome on a computer with the Bridge extension connected.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 WorkspaceSection(title) {
                     WorkspaceField("Email address") {
                         TextField("you@example.com", text: $email)

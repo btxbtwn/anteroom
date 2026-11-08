@@ -345,8 +345,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from vendoo_studio.routes.hosted_attachments import router as attachment_router
     app.include_router(attachment_router)
     from vendoo_studio.routes import analytics, boxes, sale_calendar, sales_ledger
-    from vendoo_studio.routes import sourcing
-    for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router, sourcing.router):
+    from vendoo_studio.routes import scout, sourcing
+    for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router, sourcing.router, scout.router):
         app.include_router(shared_router)
     from vendoo_studio.routes.photos import edit_router
     app.include_router(edit_router)

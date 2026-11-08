@@ -262,14 +262,14 @@ async def attach_direct_categories(db, listing: dict, evidence: str = "") -> dic
     markets = {market for market in ("ebay", "poshmark", "depop", "mercari")
                if not direct_category_id({"direct_category_ids": chosen}, market)}
     if markets:
-        from vendoo_studio.services.agent_categories import apply_agent_categories, ebay_tree_leaves
+        from vendoo_studio.services.agent_categories import apply_agent_categories, tree_leaves
         from vendoo_studio.services.native_category_match import native_rows
 
         # Each form's own options, matched the same way as a category change in
         # the editor. A known eBay leaf needs no network search.
         # A copy, so filling a category here does not clear the sizes generation wrote.
         apply_agent_categories({**copy.deepcopy(listing), "direct_category_ids": chosen},
-                               {**native_rows(), "ebay": ebay_tree_leaves(db)}, markets=markets)
+                               {**native_rows(), "ebay": tree_leaves(db, "ebay")}, markets=markets)
     # Tree reads are complete. Live API/token lookups must have the pool free.
     db.close()
     if not direct_category_id({"direct_category_ids": chosen}, "ebay"):
