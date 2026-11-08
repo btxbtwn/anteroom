@@ -1,3 +1,0 @@
-- Bulk Regenerate's review window on the web now shows each listing's photos, including the enlarged view.
-- The review window now fills in each listing's current SKU, cost of goods, labels and measurements instead of starting blank.
-- Photos in eBay variations now show on the web.
