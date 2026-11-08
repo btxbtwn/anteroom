@@ -10,7 +10,7 @@ while IFS= read -r -d '' source_file; do
   layout_sources+=("$source_file")
 done < <(find Sources -name '*.swift' ! -path '*/Session/*' ! -name AnteroomApp.swift ! -name WorkspaceView.swift -print0)
 xcrun --sdk iphonesimulator swiftc -swift-version 6 -D LAYOUT_REVIEW \
-  -target "$(uname -m)-apple-ios17.0-simulator" \
+  -target "$(uname -m)-apple-ios18.0-simulator" \
   -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
   "${layout_sources[@]}" Tests/LayoutReviewApp.swift -o "$review_output/LayoutReview.app/LayoutReview"
 python3 - "$review_output/LayoutReview.app/Info.plist" <<'PY'
@@ -22,8 +22,8 @@ with open(sys.argv[1], 'wb') as output:
         'CFBundleExecutable': 'LayoutReview',
         'CFBundleName': 'LayoutReview',
         'CFBundlePackageType': 'APPL',
-        'MinimumOSVersion': '17.0',
-        'UIDeviceFamily': [1],
+        'MinimumOSVersion': '18.0',
+        'UIDeviceFamily': [1, 2],
         'UILaunchScreen': {},
     }, output)
 PY

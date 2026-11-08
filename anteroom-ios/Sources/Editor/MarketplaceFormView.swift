@@ -53,6 +53,9 @@ struct MarketplaceFormView: View {
         .task(id: "\(marketplace)-\(model.forms[marketplace] == nil)") {
             if model.forms[marketplace] == nil { await model.loadForm(marketplace) }
         }
+        .reloadingOnReturn(when: model.forms[marketplace] == nil && model.formErrors[marketplace] != nil) {
+            await model.loadForm(marketplace)
+        }
     }
 
     private struct FormSection {

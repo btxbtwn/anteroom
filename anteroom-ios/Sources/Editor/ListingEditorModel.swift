@@ -100,8 +100,9 @@ final class ListingEditorModel {
 
     // MARK: Unsaved edits kept on the phone
 
-    /// Keeps unsaved edits on the phone while the app is in the background,
-    /// where iOS may end it. Save, Discard and sign-out remove them.
+    /// Keeps unsaved edits on the device while the app is in the background,
+    /// where iOS may end it, or while the editor is closed. Save, Discard and
+    /// sign-out remove them.
     func stashEdits() {
         guard hasChanges else { return EditorDraftStore.remove(listingID) }
         EditorDraftStore.save(EditorDraft(listingID: listingID, revisionID: revisionID, baselineInputs: saved.sellerInputs,
@@ -110,6 +111,13 @@ final class ListingEditorModel {
 
     func forgetStash() {
         EditorDraftStore.remove(listingID)
+    }
+
+    /// Puts the form back to what is saved and drops any kept copy.
+    func discardChanges() {
+        form = saved
+        pending = [:]
+        forgetStash()
     }
 
     /// Puts kept edits back when they were made on the version still saved;
