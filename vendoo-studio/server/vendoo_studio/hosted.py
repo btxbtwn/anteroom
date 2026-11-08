@@ -16,6 +16,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -286,6 +287,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1' and app.state.process_role != 'web'
     )
     app.add_middleware(SellerSessionMiddleware)
+    # JSON forms and choice lists (Depop's brands are about 300 KB) shrink several
+    # times over a phone connection. Event streams and images are left alone.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.middleware("http")
     async def response_headers(request, call_next):

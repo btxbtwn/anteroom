@@ -6,6 +6,10 @@ import SwiftUI
 struct BulkMarkdownView: View {
     let api: AnteroomAPI
     let ids: [String]
+    /// Listing titles to show while the review loads.
+    var titles: [String: String] = [:]
+    /// The review the inventory read ahead for these listings, if any.
+    var prefetched: Task<[MarkdownReviewRow], Error>? = nil
     let onFinished: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -45,6 +49,21 @@ struct BulkMarkdownView: View {
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                         ForEach(rows) { row in markdownSection(row) }
+                    } else if error == nil && !titles.isEmpty {
+                        // The listings show at once; their suggested prices fill in when read.
+                        Section {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("Suggesting prices from your own sales…")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                        ForEach(ids.filter { titles[$0] != nil }, id: \.self) { id in
+                            Section {
+                                Text(titles[id] ?? "").fontWeight(.medium)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     if let error {
                         Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
@@ -53,7 +72,7 @@ struct BulkMarkdownView: View {
                 .listRowBackground(WorkspaceStyle.surface)
             }
             .workspaceGroupedList()
-            .overlay { if !loaded && error == nil { ProgressView() } }
+            .overlay { if !loaded && error == nil && titles.isEmpty { ProgressView() } }
             .navigationTitle(result == nil ? "Mark down prices" : "Markdowns")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -138,9 +157,16 @@ struct BulkMarkdownView: View {
     }
 
     private func load() async {
+        // The inventory's read-ahead, when it worked; otherwise ask now.
+        if let prefetched, let ready = try? await prefetched.value {
+            rows = ready
+            loaded = true
+            return
+        }
         do {
             rows = try await api.previewMarkdowns(ids: ids)
             loaded = true
+        } catch let failure where failure.isCancellation {
         } catch {
             self.error = error.localizedDescription
         }

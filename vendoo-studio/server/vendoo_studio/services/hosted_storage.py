@@ -10,6 +10,7 @@ import re
 import httpx
 from fastapi import HTTPException
 
+from vendoo_studio.services import hosted_photos
 from vendoo_studio.services.hosted_photos import BUCKET, check_key, with_renditions
 from vendoo_studio.services.service_context import current
 
@@ -37,7 +38,7 @@ def photo_call(method: str, key: str, data: bytes | None = None) -> bytes:
     if method != 'DELETE':
         url += '/' + key
     try:
-        response = httpx.request(method, url, headers={
+        response = hosted_photos._storage.request(method, url, headers={
             'apikey': secret, 'Cache-Control': 'no-store',
             'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
             **({'x-upsert': 'true'} if method == 'POST' else {}),

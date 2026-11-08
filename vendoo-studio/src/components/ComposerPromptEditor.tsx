@@ -133,6 +133,8 @@ interface Props {
   handleRef: RefObject<ComposerPromptEditorHandle | null>;
   /** Files pasted into the box (images). Returning true keeps them out of the text. */
   onPasteFiles?: (files: File[]) => boolean;
+  /** Put the cursor at the end of the box when it is created. */
+  autoFocus?: boolean;
 }
 
 /**
@@ -140,7 +142,7 @@ interface Props {
  * inline as chips exactly where the seller dropped them, serialized back to a
  * markdown prompt whose quotes are links.
  */
-export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, handleRef, onPasteFiles }: Props) {
+export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, handleRef, onPasteFiles, autoFocus = false }: Props) {
   const submitRef = useRef(onSubmit);
   submitRef.current = onSubmit;
   const pasteFilesRef = useRef(onPasteFiles);
@@ -187,6 +189,7 @@ export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, h
     {
       extensions,
       content: asContent(promptToDoc(value)),
+      autofocus: autoFocus ? "end" : false,
       editorProps: {
         // T3 Code's composer editor classes.
         attributes: {

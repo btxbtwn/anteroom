@@ -2,7 +2,6 @@ import { OrderRecovery } from "../OrderRecovery";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, Settings2Icon } from "lucide-react";
-import { MarketplaceLogo } from "../MarketplaceLogo";
 import { api } from "../../api/client";
 import { BUSY_POLL_MS, pollMs } from "../../api/polling";
 import { PageError, PageNote } from "../WorkspacePage";
@@ -50,12 +49,13 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
   const account = connection.data?.accounts.ebay;
   return <div className="ebay-workspace">
     <header className="ebay-page-heading">
-      <div><div className="flex items-center gap-2"><MarketplaceLogo id="ebay" label="eBay" size={18} /><h2>eBay</h2></div>
-        <p>Orders, buyers, listings, and performance.</p></div>
-      <div className="ebay-connection">
-        {account?.connected ? <span className="ebay-status"><CheckCircle2Icon aria-hidden="true" />{account.label || "Connected"}</span> : null}
-        <Button variant="outline" onClick={() => setPermissionsOpen(true)}><Settings2Icon />{account?.connected ? "Connection" : "Connect eBay"}</Button>
-      </div>
+      {/* The tab above names the marketplace; the heading is for screen readers. */}
+      <div><h2 className="sr-only">eBay</h2><p>Orders, buyers, listings, and performance.</p></div>
+      {/* Until eBay is connected, the panel below holds the one Connect eBay button. */}
+      {account?.connected ? <div className="ebay-connection">
+        <span className="ebay-status"><CheckCircle2Icon aria-hidden="true" />{account.label || "Connected"}</span>
+        <Button variant="outline" onClick={() => setPermissionsOpen(true)}><Settings2Icon />Connection</Button>
+      </div> : null}
     </header>
     {connection.error ? <PageError message={connection.error.message} /> : null}
     {account?.connected ? <WorkspaceTabs label="eBay workspace" main items={tabs} value={tab} onChange={(value) => setTab(value as Tab)}>

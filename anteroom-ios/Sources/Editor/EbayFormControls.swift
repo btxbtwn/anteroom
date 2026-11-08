@@ -342,7 +342,7 @@ struct EbayVariationsEditor: View {
                                     next.photos[text] = on ? chosen.filter { $0 != photo.id } : chosen + [photo.id]
                                     commit(next)
                                 } label: {
-                                    RemotePhoto(api: model.api, photoID: photo.id, maxPixels: 120, version: photo.version)
+                                    RemotePhoto(api: model.api, photoID: photo.id, maxPixels: 192, version: photo.version)
                                         .frame(width: 48, height: 48)
                                         .clipShape(RoundedRectangle(cornerRadius: 6))
                                         .overlay(RoundedRectangle(cornerRadius: 6)
