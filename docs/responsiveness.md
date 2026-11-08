@@ -175,6 +175,17 @@ with it, and the web app keeps versioned thumbnails per seller in Cache Storage
 (`anteroom-thumbnails:<seller>`), cleared on sign-out. Not yet re-measured on
 the hosted app after deploy.
 
+Inventory rows now warm covers through 80 rows from the start of the rendered
+range, with 10 rows behind it retained in the warm-up window. Three downloads
+run at a time, using the hosted image cache or the browser cache on the Mac.
+Changing the window stops obsolete warm-ups without cancelling a visible
+row's shared download. An aborted download can be requested again immediately.
+The sandbox regression uses 120 listings and verifies that cover 50 is requested
+while fewer than 35 rows are mounted, and cover 119 is not requested yet. It
+passes on desktop Chromium, phone Chromium and phone WebKit. This verifies
+prefetch behavior, not hosted latency or concurrent-seller p50/p95; those still
+need measurement against the hosted service.
+
 ## Poshmark size corrections
 
 On 2026-11-03, a Mac sizing-error report led to two reproducible editor defects:
