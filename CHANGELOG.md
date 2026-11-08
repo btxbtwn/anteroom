@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.846 — 2026-11-08
+
+- Errors in the hosted app, from the server, background work and the web page, are now emailed to the operator with the error, where it happened, which request and seller it affected, and its stack trace. Repeats are grouped so one problem does not flood the inbox.
+
 ## 0.1.845 — 2026-11-08
 
 - On the web and iPhone browser, reopening Anteroom shows your inventory and pages right away from your last visit, then refreshes them. Signing out erases what was kept on the device.

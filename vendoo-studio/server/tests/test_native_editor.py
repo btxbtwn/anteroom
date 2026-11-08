@@ -564,15 +564,23 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
     async def test_ebay_form_reads_category_rules_and_policies_together(self):
         """The category schema, format rules and account policies are independent eBay reads."""
         import asyncio
+        import contextlib
 
         in_flight = peak = 0
+        all_started = asyncio.Event()
 
         def slow(value):
             async def read(*args, **kwargs):
                 nonlocal in_flight, peak
                 in_flight += 1
                 peak = max(peak, in_flight)
-                await asyncio.sleep(0.01)
+                if in_flight == 3:
+                    all_started.set()
+                # Each read waits for the others instead of sleeping a fixed time: a read
+                # that starts late (first-call imports on a busy runner) still overlaps.
+                # Reads made one after another never reach three and time out here.
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(all_started.wait(), 1)
                 in_flight -= 1
                 return value
             return read

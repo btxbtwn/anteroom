@@ -1,3 +1,4 @@
+import { installErrorReports } from "../api/errorReports";
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient, type Session } from "@supabase/supabase-js";
@@ -36,6 +37,7 @@ supabase.auth.onAuthStateChange(event => { if (event === "PASSWORD_RECOVERY") re
 // A link from another browser or the Mac app carries a code this browser cannot use.
 const openedElsewhere = linkOpenedElsewhere(window.location.search);
 const sandbox = import.meta.env.DEV && import.meta.env.VITE_ANTEROOM_SANDBOX === "1" && new URL(url).hostname === "127.0.0.1";
+installErrorReports();
 applyTheme();
 installSoftwareKeyboard(window);
 markMacApp();

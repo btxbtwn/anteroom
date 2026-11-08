@@ -1,3 +1,4 @@
+import { reportError } from "../api/errorReports";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { RotateCwIcon } from "lucide-react";
 import { Button } from "./ui/button";
@@ -38,6 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
+    reportError("render", error);
     console.error(`[ErrorBoundary] ${this.props.label} failed`, error, info.componentStack);
   }
 

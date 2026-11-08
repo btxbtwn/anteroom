@@ -23,6 +23,7 @@ from vendoo_studio.routes import account_move, ebay
 from vendoo_studio.routes import chrome_import, similar_items
 from vendoo_studio.routes import ai_keys, sales_ledger, bulk_delete, bulk_edit, bulk_marketplace, listing_copies, listing_templates
 from vendoo_studio.routes import automations as automations_route
+from vendoo_studio.routes.error_reports import router as error_reports_router
 from vendoo_studio.routes import errors as errors_route
 from vendoo_studio.routes import listing_videos
 from vendoo_studio.routes.vendoo_drafts import router as vendoo_drafts_router
@@ -275,6 +276,7 @@ app.include_router(backups.router)
 app.include_router(updates.router)
 app.include_router(changelog.router)
 app.include_router(desktop.router)
+app.include_router(error_reports_router)
 
 dist_dir = frontend_dist_dir()
 if dist_dir.exists():
