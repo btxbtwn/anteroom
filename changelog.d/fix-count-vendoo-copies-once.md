@@ -1,0 +1,1 @@
+- Analytics, Sales records and units sold count a sale once when it was kept from Vendoo and the marketplace's own order for it also arrived, and when an eBay order line was saved twice.
