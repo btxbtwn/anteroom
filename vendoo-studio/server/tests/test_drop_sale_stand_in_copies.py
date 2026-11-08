@@ -29,7 +29,7 @@ def test_upgrade_keeps_the_marketplace_record_with_the_sellers_amounts(migration
             "shipping_cost": None, "item_cost": None, "order_basis": "kept", "source": "marketplace"}
     with engine.begin() as connection:
         conversations, sales = (Table(name, MetaData(), autoload_with=connection) for name in ("conversations", "marketplace_sales"))
-        for item in ("blouse", "scarf", "coat", "boots"):
+        for item in ("blouse", "scarf", "coat", "boots", "jeans", "hat"):
             connection.execute(conversations.insert().values(id=item, user_id=LOCAL_USER_ID, title=item))
         connection.execute(conversations.insert().values(id="other-blouse", user_id=OTHER, title="blouse"))
         connection.execute(sales.insert(), [
@@ -47,6 +47,12 @@ def test_upgrade_keeps_the_marketplace_record_with_the_sellers_amounts(migration
             _sale("etsy-boots-2", "boots", "etsy", "marketplace", datetime(2026, 6, 1)),
             _sale("mark-boots", "boots", "etsy", "seller", datetime(2026, 6, 2),
                   financials={"currency": "USD", "item_cost": "9", "source": "seller"}),
+            # A relisted item: January's copy is an earlier sale of its own, not June's order.
+            _sale("ebay-jeans", "jeans", "ebay", "marketplace", datetime(2026, 6, 1)),
+            _sale("vendoo-jeans", "jeans", "ebay", "vendoo", datetime(2026, 1, 5), financials=vendoo),
+            # A copy without a sale date cannot be matched to an order and stays.
+            _sale("ebay-hat", "hat", "ebay", "marketplace", datetime(2026, 6, 1)),
+            _sale("vendoo-hat", "hat", "ebay", "vendoo", None, financials=vendoo),
             # Another seller's copy has no order of its own and stays.
             _sale("vendoo-other-blouse", "other-blouse", "etsy", "vendoo", datetime(2026, 3, 2), user=OTHER, financials=vendoo),
         ])
@@ -55,7 +61,10 @@ def test_upgrade_keeps_the_marketplace_record_with_the_sellers_amounts(migration
         sales = Table("marketplace_sales", MetaData(), autoload_with=connection)
         rows = {(row.user_id, row.id): row for row in connection.execute(select(sales))}
     mine = {row_id for user, row_id in rows if user == LOCAL_USER_ID}
-    assert mine == {"etsy-blouse", "ebay-scarf", "etsy-coat", "vendoo-coat", "etsy-boots-1", "etsy-boots-2"}
+    assert mine == {"etsy-blouse", "ebay-scarf", "etsy-coat", "vendoo-coat", "etsy-boots-1", "etsy-boots-2",
+                    "ebay-jeans", "vendoo-jeans", "ebay-hat", "vendoo-hat"}
+    assert rows[(LOCAL_USER_ID, "ebay-jeans")].financials is None
+    assert rows[(LOCAL_USER_ID, "ebay-hat")].financials is None
     assert {row_id for user, row_id in rows if user == OTHER} == {"vendoo-other-blouse"}
     blouse = rows[(LOCAL_USER_ID, "etsy-blouse")]
     assert blouse.financials == {**etsy, "item_cost": "4", "fees": "3.5"}
