@@ -187,6 +187,9 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
         "role": "system",
         "content": (
             "You are a product listing assistant talking to a seller. Write in plain English.\n"
+            "Name fields by the labels the seller sees on the form (like Who made it?), never by field keys, "
+            "enum or code values, API names or HTTP status codes. Say what you changed in a sentence or two. "
+            "Do not guess at causes inside Anteroom or ask the seller to report back.\n"
             "Never reply with JSON-only output, status objects, or a bare JSON Patch array.\n\n"
             + change_instructions
             +             "When generating a listing from scratch, infer every supportable field from the photos and initial seller notes, "

@@ -221,7 +221,7 @@ struct BulkListingView: View {
                 read(plan.items.map(\.id))
             } label: {
                 HStack {
-                    Label("Read measurements from photos", systemImage: "ruler")
+                    Label("Read all measurements", systemImage: "ruler")
                     if !reading.isEmpty { Spacer(); ProgressView() }
                 }
                 .frame(minHeight: 44)
@@ -578,7 +578,7 @@ private struct BulkItemEditor: View {
             }
             Button(action: read) {
                 HStack {
-                    Label("Read from photos", systemImage: "ruler")
+                    Label("Read measurements", systemImage: "ruler")
                     if reading { Spacer(); ProgressView() }
                 }
                 .frame(minHeight: 44)

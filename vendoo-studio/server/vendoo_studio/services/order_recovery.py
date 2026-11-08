@@ -16,6 +16,7 @@ from vendoo_studio.services.api_job_lock import start_gate
 from vendoo_studio.services.ebay_client import EbayClient, NS, assert_identity, digest, trading_xml
 from vendoo_studio.services.etsy_workspace import EtsyClient
 from vendoo_studio.services.relay_sales import find_listing, find_sale_line, reconcile_unmatched
+from vendoo_studio.services.sale_matching import replace_stand_in
 
 PAGE_SIZE = 25
 MAX_PAGES = 4000
@@ -279,11 +280,13 @@ def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datet
                 counts["conflicts"] += 1
                 continue
             owner = find_listing(db, marketplace, line.listing_id)
-            db.add(MarketplaceSale(marketplace=marketplace, order_id=line.order_id, line_id=line.line_id,
-                                  listing_id=line.listing_id, quantity=line.quantity, order_status=line.status,
-                                  order_updated_at=line.modified_at, order_observed_at=observed, sold_at=line.sold_at,
-                                  conversation_id=owner.id if owner else None))
+            sale = MarketplaceSale(marketplace=marketplace, order_id=line.order_id, line_id=line.line_id,
+                                   listing_id=line.listing_id, quantity=line.quantity, order_status=line.status,
+                                   order_updated_at=line.modified_at, order_observed_at=observed, sold_at=line.sold_at,
+                                   conversation_id=owner.id if owner else None)
+            db.add(sale)
             db.flush()
+            replace_stand_in(db, sale)
             counts["recorded"] += 1
             continue
         if sale.listing_id and sale.listing_id != line.listing_id:

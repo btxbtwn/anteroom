@@ -24,7 +24,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "Put each item's photos in its own folder. Drop all the folders on the window together, or press **Add Folder** and pick the folder that holds them.",
       "In **Set details for … listings**, set what applies to every item: the **Box** it came from, the **Cost of goods (COG)** and **Labels** such as a bin.",
       "For each item, type the **SKU**, pick **Top**, **Pants** or **Skirt**, and type the measurements in inches.",
-      "Press **Read from photos** to fill blank measurements from the yardstick in the photos. Filled boxes are outlined, so check them.",
+      "Press **Read measurements** to fill blank measurements from the yardstick in the photos. Filled boxes are outlined, so check them.",
       "Press **Create and generate** to write every listing, or **Create drafts only** to write them later.",
     ],
   },

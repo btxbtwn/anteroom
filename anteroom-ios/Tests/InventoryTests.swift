@@ -129,6 +129,11 @@ struct InventoryTests {
         precondition(importedBadges[0].url?.absoluteString == "https://www.ebay.com/itm/2")
         precondition(imported.marketplaceBadges(missing: ["poshmark": missing])[1].label == "Delisted", "A delist outranks fields still needed")
         precondition(imported.liveMarketplaces == ["ebay", "mercari", "vestiaire"])
+        // The row's logo strip, as on the web: where it is listed or sold, never drafts or fields still needed.
+        precondition(imported.rowLogos().map(\.marketplace) == ["ebay", "mercari", "vestiaire"])
+        precondition(imported.rowLogos().map(\.sold) == [false, true, false])
+        precondition(tracked.rowLogos().map(\.marketplace) == ["ebay"])
+        precondition(imported.rowLogos(selling: ["ebay", "poshmark"]).map(\.marketplace) == ["ebay"], "Only the marketplaces the seller sells on")
         precondition(imported.inventoryStatus == "active")
         // Each marketplace's live price, marked when it is not the item price; unknown stays unknown.
         let priced = try JSONDecoder().decode(ListingSummary.self, from: Data(#"""
