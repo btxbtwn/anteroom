@@ -1,0 +1,1 @@
+- Inventory on phones scrolls to the screen edge behind Safari's floating controls, with the profile button beside the header actions.
