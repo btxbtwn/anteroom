@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.database import get_db
 from vendoo_studio.services.etsy_fields import etsy_eligible
 from vendoo_studio.services.validation import validate_listing
+from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ListingRepo, ConversationRepo
 from vendoo_studio.services import price_markdown
 from vendoo_studio.services.price_drop import build_preview
@@ -184,7 +185,8 @@ def _preview_inputs(conv_id: str, db: Session) -> tuple[dict, list, str | None, 
     conv_repo = ConversationRepo(db)
     analysis = current_photo_analysis(conv_repo, conv_id)
     conv = conv_repo.get(conv_id)
-    age_days = listing_age_days(conv.notes if conv else None)
+    age_days = listing_age_days(conv.notes if conv else None,
+                                MarketplaceListingRepo(db).summaries(conv_id).get(conv_id, {}))
     return listing, revisions, analysis, collect_outcomes(db), age_days
 
 

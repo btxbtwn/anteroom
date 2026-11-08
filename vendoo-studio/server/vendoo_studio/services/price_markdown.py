@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.validation import normalize_listing_dropdowns, validate_listing
+from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.price_drop import (
     PRICE_DROP_SOURCE,
@@ -195,6 +196,7 @@ def batch_preview(conv_ids: list[str], db: Session) -> list[dict[str, Any]]:
     covers = ConversationRepo(db).cover_photos(ids)
     outcomes = collect_outcomes(db)
     convs, revisions_by_id, busy = _batch_reads(db, ids)
+    direct = MarketplaceListingRepo(db).summaries()
     rows: list[dict[str, Any]] = []
     for conv_id in ids:
         conv = convs.get(conv_id)
@@ -219,7 +221,7 @@ def batch_preview(conv_ids: list[str], db: Session) -> list[dict[str, Any]]:
         if not revisions or listing_price(revisions[0].listing_json) is None:
             row["skip_reason"] = NO_PRICE
             continue
-        age_days = listing_age_days(conv.notes)
+        age_days = listing_age_days(conv.notes, direct.get(conv_id, {}))
         preview = build_preview(revisions[0].listing_json, revisions, sold_outcomes=outcomes, age_days=age_days)
         row.update(
             revision_id=revisions[0].id,

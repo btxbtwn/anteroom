@@ -438,11 +438,11 @@ class ListingAgeTest(unittest.TestCase):
     def test_age_counts_from_the_last_time_it_went_live(self):
         listed = (datetime.now(UTC) - timedelta(days=63)).isoformat()
         notes = json.dumps({"vendooDates": {"listed": listed}})
-        self.assertEqual(listing_age_days(notes), 63)
+        self.assertEqual(listing_age_days(notes, {}), 63)
 
     def test_no_listing_date_means_no_age(self):
-        self.assertIsNone(listing_age_days(json.dumps({"vendooDates": {}})))
-        self.assertIsNone(listing_age_days(None))
+        self.assertIsNone(listing_age_days(json.dumps({"vendooDates": {}}), {}))
+        self.assertIsNone(listing_age_days(None, {}))
 
 
 if __name__ == "__main__":

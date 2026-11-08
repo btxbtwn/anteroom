@@ -62,7 +62,6 @@ def conversation_response(row, listing=None, direct=None, *, notes=None, include
 
     if notes is None:
         notes = parse_notes(row.notes)
-    live_urls = {market: record['listing_url'] for market, record in (direct or {}).items() if record.get('listing_url')}
     result = {'id': row.id, 'title': row.title, 'status': row.status,
             'box_id': row.box_id, 'settled_at': row.settled_at, 'unsettled_at': row.unsettled_at,
             'created_at': row.created_at, 'updated_at': row.updated_at,
@@ -72,7 +71,7 @@ def conversation_response(row, listing=None, direct=None, *, notes=None, include
             'direct_records': direct or {},
             'units_sold': sold.units_sold if sold else 0,
             'sold_at': sold.sold_at.isoformat() if sold and sold.sold_at else None,
-            'missing_sale_data': missing_sale_data or [], **imported_fields(notes, live_urls)}
+            'missing_sale_data': missing_sale_data or [], **imported_fields(notes, direct or {})}
     if include_notes:
         result['notes'] = row.notes
     return result

@@ -1,7 +1,7 @@
 import { SalesLedger } from "./SalesLedger";
 import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
 import "./ebay/ebay.css";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon } from "lucide-react";
 import { api } from "../api/client";
@@ -38,21 +38,18 @@ const PERIODS: { id: AnalyticsRange; label: string }[] = [
 
 interface Props {
   onOpenListing: (id: string) => void;
-  onOpenSalesRecords?: () => void;
 }
 
 export function AnalyticsPage({ onOpenListing }: Props) {
   const [view, setView] = useState("Sales records");
-  const [missingOnly, setMissingOnly] = useState(false);
-  const changeView = (next: string) => { setView(next); setMissingOnly(false); };
-  return <WorkspacePage width="expanded"><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics"]} value={view} onChange={changeView}>
+  return <WorkspacePage width="expanded"><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics"]} value={view} onChange={setView}>
     {view === "Sales records"
-      ? <SalesLedger key={String(missingOnly)} onOpenListing={onOpenListing} missingOnly={missingOnly} />
-      : <InventoryAnalyticsView onOpenListing={onOpenListing} onOpenSalesRecords={() => { setView("Sales records"); setMissingOnly(true); }} />}
+      ? <SalesLedger onOpenListing={onOpenListing} />
+      : <InventoryAnalyticsView onOpenListing={onOpenListing} />}
   </WorkspaceTabs></WorkspacePage>;
 }
 
-export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Props) {
+export function InventoryAnalyticsView({ onOpenListing }: Props) {
   const [range, setRange] = useState<AnalyticsRange>("12m");
   const [breakdownSearch, setBreakdownSearch] = useState("");
   const [rankMetric, setRankMetric] = useState<RankMetric>("revenue");
@@ -132,31 +129,6 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
 
       {data && (!custom || customValid) ? (
         <>
-          {data.incomplete_sales.length > 0 ? (
-            <PageSection
-              aria-label="Missing sales data"
-              className="rounded-xl border border-warning/32 bg-warning-surface p-4"
-              title={`${data.incomplete_sales.length} ${data.incomplete_sales.length === 1 ? "sale needs" : "sales need"} sales data`}
-              description={<>
-                Across all time. Add missing amounts in Sales records. Missing prices, costs, or fees leave revenue and profit incomplete.
-              </>}
-            >
-              {onOpenSalesRecords ? <Button size="sm" variant="outline" onClick={onOpenSalesRecords}>Open sales records</Button> : null}
-              <Disclosure summary="Review sales with missing data">
-                <RowList className="max-h-80 overflow-y-auto">
-                    {data.incomplete_sales.map(({ id, conversation_id: listing, title, missing }) => (
-                      <ListRow
-                        key={id}
-                        title={title}
-                        meta={`Missing ${missing.join(", ")}`}
-                        onClick={listing ? () => onOpenListing(listing) : onOpenSalesRecords}
-                      />
-                    ))}
-                </RowList>
-              </Disclosure>
-            </PageSection>
-          ) : null}
-
           <PageSection aria-label={heading} title={heading}>
             <SalesStats data={data} />
             {data.previous ? (
@@ -302,18 +274,6 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
         </>
       ) : null}
     </>
-  );
-}
-
-function Disclosure({ summary, children }: { summary: string; children: ReactNode }) {
-  return (
-    <details className="group/disclosure flex flex-col">
-      <summary className="inline-flex w-fit cursor-pointer list-none items-center gap-1 rounded-md text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-        <ChevronRightIcon aria-hidden className="size-3.5 transition-transform group-open/disclosure:rotate-90" />
-        {summary}
-      </summary>
-      <div className="mt-3">{children}</div>
-    </details>
   );
 }
 
