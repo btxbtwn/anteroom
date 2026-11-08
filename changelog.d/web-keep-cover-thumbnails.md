@@ -1,1 +1,0 @@
-- On the web, listing photos you've already seen appear right away when you scroll your inventory, even after reloading the page or after an Anteroom update.
