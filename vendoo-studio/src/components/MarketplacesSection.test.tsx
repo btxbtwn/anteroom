@@ -58,6 +58,11 @@ const enabledButton = (html: string, label: string) => new RegExp(`<button(?![^>
 describe("marketplaces section", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it("explains the browser requirement beside Chrome marketplace actions only", () => {
+    expect(render({}, {}, { selected: "mercari" })).toContain("Requires desktop Chrome with the Bridge extension connected");
+    expect(render({}, {}, { selected: "ebay" })).not.toContain("Requires desktop Chrome with the Bridge extension connected");
+  });
+
   it("keeps List available when local field checks are incomplete or unavailable", () => {
     for (const options of [
       { preflightMissing: true }, { preflightPlaceholder: true }, { preflightError: true },
