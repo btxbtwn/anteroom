@@ -46,6 +46,8 @@ class DirectRecord(BaseModel):
     fields: int = 0
     # The live listing's price on this marketplace, when Anteroom knows it.
     price: float | None = None
+    # When Anteroom's last confirmed List put this listing up.
+    listed_at: str | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -90,12 +92,14 @@ class ConversationSummary(BaseModel):
     vendoo_listing_urls: dict[str, str] = {}
     # Imported Vendoo time tracking for the item: when it was created, last
     # modified, last went live and sold, plus the listing date per marketplace.
-    # "listed" drives the staleness filter and sort.
     vendoo_created_at: str | None = None
     vendoo_modified_at: str | None = None
     vendoo_listed_at: str | None = None
     vendoo_listed_dates: dict[str, str] = {}
     vendoo_sold_dates: dict[str, str] = {}
+    # When the item's longest-standing live listing went up, counting Anteroom's
+    # own listings: what "listed N days ago", the staleness filter and sort read.
+    oldest_listed_at: str | None = None
     # Edited here since the item's live direct listings were written: Update
     # is the step that is owed.
     unsent_edits: bool = False
@@ -564,8 +568,6 @@ def _extras(
         "unsent_edits": unsent_edits,
         "etsy_eligible": (facet or {}).get("etsy_eligible", True),
         "direct_marketplaces": [market for market, record in (direct or {}).items() if record["state"] in LIVE_STATES],
-        "direct_listing_urls": {market: record["listing_url"] for market, record in (direct or {}).items()
-                                if record.get("listing_url")},
         "direct_records": dict(direct or {}),
         "units_sold": sold.units_sold if sold else 0,
         "quantity": sold.quantity if sold else None,
@@ -683,7 +685,7 @@ def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
         missing_sale_data=row.get("missing_sale_data", []),
         unsent_edits=bool(row.get("unsent_edits")),
         etsy_eligible=bool(row.get("etsy_eligible", True)),
-        **imported_fields(parse_notes(conv.notes), row.get("direct_listing_urls") or {}),
+        **imported_fields(parse_notes(conv.notes), row.get("direct_records") or {}),
     )
 
 

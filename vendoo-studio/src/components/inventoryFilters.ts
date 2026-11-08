@@ -59,10 +59,9 @@ export type FilterableListing = {
   vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
   removed_marketplaces?: string[];
-  vendoo_listed_at?: string | null;
   sold_at?: string | null;
-  vendoo_listed_dates?: Record<string, string>;
-  vendoo_sold_dates?: Record<string, string>;
+  /** When the longest-standing live listing went up. A relist starts its marketplace over. */
+  oldest_listed_at?: string | null;
   unsent_edits?: boolean;
   /** Sale details the sales records still lack, such as fees or the sale date. */
   missing_sale_data?: string[];
@@ -133,17 +132,11 @@ export function matchesSearch(listing: FilterableListing, needle: string): boole
 
 /**
  * When the longest-standing live listing went up. An item is only as fresh as
- * its stalest live marketplace, so a new listing elsewhere does not reset it.
- * Falls back to the item-wide listing date when no per-marketplace date is known.
+ * its stalest live marketplace; the server works it out from imported dates
+ * and Anteroom's own listings, so a relist counts.
  */
 export function oldestLiveListedMs(listing: FilterableListing): number {
-  const listedDates = listing.vendoo_listed_dates || {};
-  const sold = listing.vendoo_sold_dates || {};
-  const stamps = (listing.vendoo_marketplaces || [])
-    .filter((id) => !sold[id])
-    .map((id) => timeMs(listedDates[id]))
-    .filter((ms) => ms > 0);
-  return stamps.length ? Math.min(...stamps) : timeMs(listing.vendoo_listed_at);
+  return timeMs(listing.oldest_listed_at);
 }
 
 /** Days since the oldest live listing went up, or null for one that never did. */

@@ -1,0 +1,1 @@
+- Relisting an item now makes it fresh again: "Listed N days ago", the stale filter, the Stalest sort and Suggestions count from the new listing instead of the original one, on the web and iPhone.
