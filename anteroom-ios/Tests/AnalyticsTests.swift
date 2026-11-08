@@ -41,6 +41,14 @@ struct AnalyticsTests {
         precondition(cards["Average days to sell"]?.value == nil && cards["Sell-through"]?.value == "25%")
         let filtered = AnalyticsFormat.overviewFigures(overview.current, nil, marketplaceChosen: true)
         precondition(filtered[4].hint == "Shown for all marketplaces only" && filtered[0].change == nil)
+        // Sorted by revenue, the Sold column read 19, 9, 11: by items sold Depop comes before eBay.
+        let breakdown = try JSONDecoder().decode([SalesOverview.Marketplace].self, from: Data(#"""
+[{"id": "etsy", "count": 19, "revenue": 220.65, "revenue_known": 19},
+ {"id": "ebay", "count": 9, "revenue": 122.78, "revenue_known": 9},
+ {"id": "depop", "count": 11, "revenue": 112.6, "revenue_known": 11}]
+"""#.utf8))
+        precondition(AnalyticsFormat.rankBreakdown(breakdown, by: "count").map(\.id) == ["etsy", "depop", "ebay"])
+        precondition(AnalyticsFormat.rankBreakdown(breakdown, by: "revenue").map(\.id) == ["etsy", "ebay", "depop"])
         print("Analytics tests passed")
     }
 }

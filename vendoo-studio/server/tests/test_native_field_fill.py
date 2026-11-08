@@ -289,6 +289,29 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated["mercari_specifics"]["material"], "")
         self.assertTrue(any(item["field"] == "mercari_specifics.material" for item in native_contract.gaps(updated, "mercari")))
 
+    async def test_depop_age_keeps_its_modern_default_when_no_decade_is_shown(self):
+        # Photos never show "Modern"; an evidence check must not leave Depop's Age blank.
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "womenswear_other-tops", "page_labels": True, "fields": [
+            row("depop_specifics.age", "Age", ["Modern", "90s"], multi=True, max_values=1,
+                option_values={"Modern": "modern", "90s": "90s"}),
+            row("depop_specifics.source", "Source", ["Preloved", "Vintage"], multi=True, max_values=2,
+                option_values={"Preloved": "preloved", "Vintage": "vintage"}),
+        ]}
+        listing = {"title": "Faux suede button-down shirt", "direct_category_ids": {"depop": "womenswear_other-tops"},
+                   "depop_specifics": {"age": "Modern", "source": ["preloved"]}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
+        evidence = "Tag reads Crazy Horse. Preloved shirt."
+        reply = json.dumps({"fields": {"depop_specifics.source": {"value": ["Preloved"], "evidence": "Preloved shirt"}}})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            await fill_native_fields(self.db, self.conv.id, object(), evidence=evidence, markets={"depop"})
+        saved = self._current().listing_json
+        self.assertEqual(saved["depop_specifics"]["age"], ["modern"])
+        self.assertEqual(saved["depop_specifics"]["source"], ["preloved"])
+
     async def test_refill_preserves_verified_answers_when_model_only_answers_missing_field(self):
         from vendoo_studio.services import native_contract
 

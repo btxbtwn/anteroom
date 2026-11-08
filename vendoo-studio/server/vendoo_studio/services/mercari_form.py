@@ -71,7 +71,9 @@ def package(listing: dict) -> tuple[int, tuple[float, float, float] | None, dict
     sides = [_number(value) for value in detail] if len(detail) == 3 else []
     values = {"pounds": own.get("pounds", listing.get("weight_lb", "")),
               "ounces": own.get("ounces", listing.get("weight_oz", "")),
-              "fitsShoebox": own.get("fitsShoebox", ""), "skipDimensions": own.get("skipDimensions", False)}
+              # A saved radio label ("Yes") is the same answer as its value ("yes").
+              "fitsShoebox": str(own.get("fitsShoebox") or "").strip().casefold(),
+              "skipDimensions": own.get("skipDimensions", False)}
     for index, key in enumerate(("length", "width", "height")):
         values[key] = own[key] if own.get(key) not in (None, "") else sides[index] if sides else ""
     # Once either weight input is set, both come from that native question.
