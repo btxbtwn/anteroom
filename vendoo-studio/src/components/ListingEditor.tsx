@@ -692,7 +692,7 @@ export function StructuredEditor({
     };
   }, [hasDrafts]);
 
-  const commitField = (key: string, value: string | string[] | boolean) => {
+  const commitField = (key: string, value: string | string[] | boolean, also: Record<string, string> = {}) => {
     if (editingDisabled.current || agentFieldLocked(key, agentLocks) || fields.find((field) => field.key === key)?.locked) return;
     if (typeof value === "string" && value.trim() === "[object Object]") return;
     const updated = cloneListing(listing);
@@ -700,6 +700,7 @@ export function StructuredEditor({
     const stored = typeof value === "string" ? field?.optionValues?.[value] ?? (field?.type === "number" ? coerce(value) : value)
       : Array.isArray(value) ? value.map(label => field?.optionValues?.[label] ?? label) : value;
     setListingEditorValue(updated, key, stored);
+    for (const [path, extra] of Object.entries(also)) setListingEditorValue(updated, path, extra);
     if (key === "poshmark_specifics.nativeSizeId") {
       setListingEditorValue(updated, "poshmark_specifics.sizeSetId", fields.find((row) => row.key === "poshmark_specifics.sizeSetId")?.defaultValue || "");
     }
@@ -828,7 +829,9 @@ export function StructuredEditor({
     }} />;
     const categoryChoices = f.native && !f.multi ? pathCategoryChoices(f) : null;
     if (categoryChoices) return <CategoryTreeSelect key={text} id={id} fieldKey={f.key} value={text} choices={categoryChoices}
-      disabled={locked} onChange={(choice) => commitField(f.key, choice.label)} />;
+      disabled={locked} onChange={(choice) => commitField(f.key, choice.label,
+        // Etsy's category keeps its breadcrumb beside the id, as category fills write it.
+        f.key === "direct_category_ids.etsy" ? { "direct_category_ids.etsy_path": choice.label } : {})} />;
     if (f.type === "boolean" && f.presentation === "button") return <Toggle id={id} data-listing-field={f.key} variant="outline"
       className="w-full" pressed={text === "true"} disabled={locked} onPressedChange={(pressed) => commitField(f.key, pressed)}>{f.label}</Toggle>;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
