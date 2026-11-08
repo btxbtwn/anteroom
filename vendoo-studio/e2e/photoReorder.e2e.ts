@@ -66,6 +66,8 @@ test("photos on a marketplace form reorder by dragging, with a mouse or a finger
       await route.fulfill({ response, json: { ...await response.json(), selected: ["ebay", "etsy", "poshmark", "mercari", "depop"] } });
     });
     await openListing(page, phone, title);
+    // A phone opens the listing on its Chat tab; the forms are on the Listing tab.
+    if (phone) await page.getByRole("tab", { name: "Listing" }).click();
     await openForm(page, phone, "Depop");
     const strip = page.locator('[data-marketplace-media="depop"]');
     await expect(strip.locator("[data-sortable-photo]")).toHaveCount(3, { timeout: 30_000 });
