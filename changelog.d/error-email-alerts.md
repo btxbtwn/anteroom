@@ -1,1 +1,0 @@
-- Errors in the hosted app, from the server, background work and the web page, are now emailed to the operator with the error, where it happened, which request and seller it affected, and its stack trace. Repeats are grouped so one problem does not flood the inbox.
