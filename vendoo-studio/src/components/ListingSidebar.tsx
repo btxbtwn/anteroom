@@ -26,8 +26,9 @@ import {
   statusCounts,
   type ListingFilters as Filters,
 } from "./inventoryFilters";
-import { PlusIcon, SearchIcon, Table2Icon, XIcon } from "lucide-react";
+import { LightbulbIcon, PlusIcon, SearchIcon, Table2Icon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
 import { SIDEBAR_ICON_BUTTON, SIDEBAR_ROW } from "./sidebar/sidebarStyles";
 import { ListingRow } from "./sidebar/ListingRow";
@@ -69,6 +70,7 @@ interface Props {
   onOpenAssistant: () => void;
   onOpenSourcing: () => void;
   /** Opens or closes the inventory table, the full-width view of these listings. */
+  onOpenSuggestions: () => void;
   onToggleInventoryTable: () => void;
   /** Phones: opens the page drawer from the sidebar header. */
   onOpenMobileNav?: () => void;
@@ -96,6 +98,7 @@ export function ListingSidebar({
   onOpenAutomations,
   onOpenAssistant,
   onOpenSourcing,
+  onOpenSuggestions,
   onToggleInventoryTable,
   onOpenMobileNav,
   onCloseSettings,
@@ -360,6 +363,15 @@ export function ListingSidebar({
             </button>
           </div>
 
+          {runtime.features.has("suggestions") && (
+            <div className="shrink-0 px-(--sidebar-content-inset)">
+              <Button variant="ghost" size="sm" className="min-h-11 w-full justify-start sm:min-h-8"
+                data-pressed={activeView === "suggestions" ? "" : undefined} aria-current={activeView === "suggestions" ? "page" : undefined} onClick={onOpenSuggestions}>
+                <LightbulbIcon /> <span>Suggestions</span>
+                {suggestionData && <span className="ml-auto text-xs text-muted-foreground tabular-nums">{suggestions.length}</span>}
+              </Button>
+            </div>
+          )}
           <ListingFilters
             filters={filters}
             counts={counts}

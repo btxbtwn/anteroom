@@ -363,7 +363,7 @@ describe("followListingGeneration", () => {
   it("signs the web app's generate stream with the seller's session", async () => {
     const fetchMock = vi.fn(async () => sseResponse("data: {\"title\":\"Coat\"}\n\ndata: [DONE]\n\n"));
     vi.stubGlobal("fetch", fetchMock);
-    const uninstall = installHostedApiSession({ origin: "https://anteroom.test", accessToken: async () => "seller-token", unauthorized: () => {} });
+    const uninstall = installHostedApiSession({ seller: "seller", origin: "https://anteroom.test", accessToken: async () => "seller-token", unauthorized: () => {} });
     try {
       await followListingGeneration("conv-1");
     } finally {

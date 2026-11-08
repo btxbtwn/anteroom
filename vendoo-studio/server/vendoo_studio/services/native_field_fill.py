@@ -202,6 +202,26 @@ def write_value(listing: dict, path: str, value: Any) -> None:
     set_path(listing, path, value)
 
 
+DEPOP_AGE = "depop_specifics.age"
+
+
+def _keep_depop_age(listing: dict, row: dict | None) -> None:
+    """Depop's Age always has an answer. Photos never show "Modern", so the
+    evidence check leaves it blank; give it the default generation uses."""
+    from vendoo_studio.services.depop_fields import depop_default_age
+
+    if row is None or not _empty(get_path(listing, DEPOP_AGE)):
+        return
+    wanted = fold_key(depop_default_age(listing))
+    values = row.get("option_values") or {}
+    label = next((label for label in row.get("options") or []
+                  if wanted in (fold_key(label), fold_key(str(values.get(label, label))))), None)
+    if label is None:
+        return
+    stored = str(values.get(label, label))
+    write_value(listing, DEPOP_AGE, [stored] if row.get("multi") else stored)
+
+
 async def load_forms(db: Session, conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str, dict]:
     """Each named direct marketplace's current form. One that cannot be read is skipped."""
     from vendoo_studio.services.native_editor import editor_form
@@ -434,6 +454,7 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
         if strict:
             updated.setdefault(native_contract.EVIDENCE_KEY, {})[path] = {
                 "value": copy.deepcopy(value), "quote": reply["fields"][path]["evidence"]}
+    _keep_depop_age(updated, rows.get(DEPOP_AGE))
     if updated == listing:
         return updated if strict else None
     listing_persistence.save_revision(listing_repo.db, conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision.id, expected_revision_id=revision.id)

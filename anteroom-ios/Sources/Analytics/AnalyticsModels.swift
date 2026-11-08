@@ -168,6 +168,19 @@ enum AnalyticsFormat {
 
     static func saleCount(_ count: Int) -> String { count == 1 ? "1 sale" : "\(count) sales" }
 
+    /// Largest first by the figure the weekly chart shows ("count" or "revenue"), then by the other one (rankBreakdown).
+    static func rankBreakdown(_ rows: [SalesOverview.Marketplace], by metric: String) -> [SalesOverview.Marketplace] {
+        let byCount = metric == "count"
+        return rows.enumerated().sorted { left, right in
+            let (a, b) = (left.element, right.element)
+            let first = byCount ? (Double(a.count), Double(b.count)) : (a.revenue, b.revenue)
+            let second = byCount ? (a.revenue, b.revenue) : (Double(a.count), Double(b.count))
+            if first.0 != first.1 { return first.0 > first.1 }
+            if second.0 != second.1 { return second.0 > second.1 }
+            return left.offset < right.offset
+        }.map(\.element)
+    }
+
     /// An absolute change when a zero or negative baseline makes a percentage misleading.
     static func change(_ current: Double?, _ previous: Double?, _ format: (Double) -> String) -> String {
         guard let current, let previous else { return "No comparison data" }

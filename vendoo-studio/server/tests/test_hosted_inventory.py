@@ -113,7 +113,9 @@ def test_storage_requests_use_seller_credentials_and_sdk_delete_contract(monkeyp
     hosted_photos.storage_call('DELETE', key, 'seller-token')
     assert captured[0][2]['headers']['Authorization'] == 'Bearer seller-token'
     assert captured[1][1].endswith('/object/anteroom-photos')
-    assert captured[1][2]['json'] == {'prefixes': [key]}
+    # A photo's kept thumbnails go with it.
+    base = USER_ID + '/draft/' + 'a' * 32
+    assert captured[1][2]['json'] == {'prefixes': [key, base + '.t96.jpg', base + '.t192.jpg']}
     monkeypatch.setattr(httpx, 'request', lambda *args, **kwargs: httpx.Response(500, text='PRIVATE diagnostic'))
     with pytest.raises(Exception) as error:
         hosted_photos.storage_call('POST', key, 'seller-token', b'data')
