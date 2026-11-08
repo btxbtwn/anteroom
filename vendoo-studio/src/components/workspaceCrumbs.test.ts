@@ -71,3 +71,7 @@ describe("workspaceCrumbs", () => {
     expect(workspaceCrumbs("assistant", "Providers", null, "New thread").title).toBeNull();
   });
 });
+
+it("names the dedicated suggestions workspace", () => {
+  expect(workspaceCrumbs("suggestions", "", null)).toEqual({ context: "Suggestions", title: null });
+});
