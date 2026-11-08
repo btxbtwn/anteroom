@@ -37,4 +37,12 @@ final class NewDraftTests: XCTestCase {
         await model.discardIfUntouched("n")
         XCTAssertFalse(StubProtocol.requests.contains { $0.httpMethod == "DELETE" })
     }
+
+    /// A draft never saved has only its name as a title, so Generate listing asks nothing.
+    func testUnsavedDraftNameIsNotCopy() {
+        XCTAssertFalse(ListingEditorModel.hasCopy(title: "Sandbox photos only", description: "", revisionID: nil))
+        XCTAssertFalse(ListingEditorModel.hasCopy(title: "New Listing", description: "", revisionID: "r1"))
+        XCTAssertTrue(ListingEditorModel.hasCopy(title: "Blue tee", description: "", revisionID: "r1"))
+        XCTAssertTrue(ListingEditorModel.hasCopy(title: "", description: "Soft cotton", revisionID: "r1"))
+    }
 }
