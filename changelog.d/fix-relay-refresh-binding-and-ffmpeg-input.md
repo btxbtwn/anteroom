@@ -1,0 +1,1 @@
+- Box videos from store pages are only opened as MP4, MOV or WebM files, so a crafted video can't make the Mac reach other addresses.

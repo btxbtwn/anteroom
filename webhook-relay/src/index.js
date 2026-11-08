@@ -279,18 +279,34 @@ async function handleOAuthCallback(env, marketplace, url) {
   }
 }
 
-async function handleOAuthRefresh(request, env, marketplace) {
+// The app's secret refreshes only accounts that signed in through this device,
+// so a refresh token on its own is not enough to mint access tokens. Anteroom
+// answers 401 by asking the seller to sign in again, which relinks the account.
+async function handleOAuthRefresh(request, env, deviceId, marketplace) {
   const body = await request.json().catch(() => null);
   const refreshToken = typeof body?.refreshToken === "string" ? body.refreshToken : "";
   if (!refreshToken) return json({ error: "refreshToken is required" }, 400);
+  const notLinked = () => json({ error: "sign in again" }, 401);
+  const linked = async (kind, accountId) =>
+    Boolean(accountId) && (await directory(env).deviceForAccount(kind, accountId)) === deviceId;
   try {
     if (marketplace === "ebay") {
       if (!ebayConfigured(env)) return json({ error: "eBay is not configured" }, 503);
-      return json({ tokens: tokenSet(await ebayRefresh(env, refreshToken)) });
+      // eBay refresh tokens are opaque and are not rotated: refresh, then check whose they are.
+      const tokens = await ebayRefresh(env, refreshToken);
+      const user = await ebayUser(env, tokens.access_token);
+      if (!(await linked("ebay", user.userId))) return notLinked();
+      return json({ tokens: tokenSet(tokens) });
     }
     if (marketplace === "etsy") {
       if (!etsyConfigured(env)) return json({ error: "Etsy is not configured" }, 503);
-      return json({ tokens: tokenSet(await etsyRefresh(env, refreshToken)) });
+      // Etsy tokens start with the user ID, and Etsy rotates refresh tokens:
+      // check before spending one, and again on what comes back.
+      const user = etsyUserIdFromToken(refreshToken);
+      if (!(await linked("etsy-user", user))) return notLinked();
+      const tokens = await etsyRefresh(env, refreshToken);
+      if (etsyUserIdFromToken(tokens.access_token) !== user) return notLinked();
+      return json({ tokens: tokenSet(tokens) });
     }
   } catch (error) {
     // 400/401 from the marketplace means the seller has to sign in again.
@@ -368,7 +384,7 @@ async function handleStudio(request, env, url, deviceId) {
     return json({ status: "done", ...outcome.result });
   }
   const refresh = /^\/studio\/oauth\/(ebay|etsy)\/refresh$/.exec(pathname);
-  if (refresh && request.method === "POST") return handleOAuthRefresh(request, env, refresh[1]);
+  if (refresh && request.method === "POST") return handleOAuthRefresh(request, env, deviceId, refresh[1]);
   if (pathname.startsWith("/studio/etsy/v3/application/")) {
     return handleEtsyProxy(request, env, deviceId, pathname.slice("/studio/etsy/v3/application/".length));
   }
