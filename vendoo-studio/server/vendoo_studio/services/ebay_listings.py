@@ -27,7 +27,7 @@ from vendoo_studio.services.ebay_fields import EBAY_CONDITION_DESCRIPTION
 from vendoo_studio.services.ebay_api import dollars, money_cents
 import httpx
 
-from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, segment
+from vendoo_studio.services.ebay_client import EBAY_DOWN, EbayClient, EbayFailure, segment
 from vendoo_studio.services.listing_result import ListingProblem, failure, missing
 from vendoo_studio.services.marketplace_accounts import SignInRequired
 from vendoo_studio.services.relay_client import RelayError
@@ -404,7 +404,7 @@ def _failure(exc: Exception, pending: str | None) -> dict:
     if isinstance(exc, EbayFailure) and exc.code:
         # A definite refusal: eBay answered and did not run the call.
         return failure(str(exc), exc.code, safe=True, retry_after_s=exc.retry_after_s, marketplace_message=said)
-    if isinstance(exc, EbayFailure) and exc.status >= 500 and pending not in _UNREPEATABLE and str(exc).startswith("eBay returned HTTP"):
+    if isinstance(exc, EbayFailure) and exc.status >= 500 and pending not in _UNREPEATABLE and str(exc) == EBAY_DOWN:
         # A gateway 503 (and its cousins) is eBay being down, not a refusal of this listing.
         # Hand-raised failures also default to status 502, and those keep their own words.
         return failure("eBay is temporarily unavailable. Try again.", "network", safe=True, marketplace_message=said)

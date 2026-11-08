@@ -20,9 +20,10 @@ final class ListingAssistantModel {
     var attachments: [ChatAttachment] = []
     private(set) var attachmentsAvailable = false
 
-    init(api: AnteroomAPI, listingID: String) {
+    init(api: AnteroomAPI, listingID: String, text: String = "") {
         self.api = api
         self.listingID = listingID
+        self.text = text
     }
 
     var canStart: Bool {

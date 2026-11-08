@@ -159,6 +159,16 @@ Authorization`); every other hosted response stays `no-store`. A dropped
 connection or a 429/5xx response is retried twice instead of leaving the row
 blank.
 
+That browser copy did not last: `Vary: Authorization` keys it to the sign-in
+token, which Supabase renews hourly, and the server's thumbnail cache lived only
+in process memory, so every deploy remade each cover from the full photo. On
+2026-11-08 an iPad recording showed most inventory covers blank while scrolling,
+filling in one at a time. Thumbnails of the sizes the apps use (96 and 192 px)
+are now stored in Storage beside their photo (`<photo>.t96.jpg`) and deleted
+with it, and the web app keeps versioned thumbnails per seller in Cache Storage
+(`anteroom-thumbnails:<seller>`), cleared on sign-out. Not yet re-measured on
+the hosted app after deploy.
+
 ## Poshmark size corrections
 
 On 2026-11-03, a Mac sizing-error report led to two reproducible editor defects:
