@@ -1,5 +1,10 @@
 # Responsiveness and concurrent work
 
+The enduring goals and per-change workflow live in
+[Performance goals](performance.md). This document records reference
+observations, verification, dated measurements and remaining latency work;
+historical results are not current release guarantees.
+
 The web, Mac and iPhone apps share the responsiveness requirements in
 [AGENTS.md](../AGENTS.md#responsiveness-and-concurrent-work). Independent drafts
 and accounts must overlap; long work must leave navigation, input and unrelated
@@ -24,8 +29,9 @@ capacity or zero model/network latency.
 
 ## Targets and verification
 
-Target input acknowledgement within 100 ms and cached navigation within 200 ms
-on supported devices. Keep already loaded screens available during background
+Use the shared input-acknowledgement and cached-navigation targets in
+[AGENTS.md](../AGENTS.md#responsiveness-and-concurrent-work) on supported
+devices. Keep already loaded screens available during background
 refresh. Do not block a screen on unrelated requests or hold database
 transactions during model or remote-storage waits. Record the tested load,
 device/build, p50/p95 latency, errors and any missed target. Separate queue wait,
