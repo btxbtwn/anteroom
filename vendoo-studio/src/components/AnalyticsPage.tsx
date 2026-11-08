@@ -129,8 +129,9 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
             {data.previous ? <PageNote>Compared with {dayRange(data.previous.start, previousEnd(data.previous.end))}.</PageNote> : null}
             {data.undated_sales > 0 ? (
               <PageNote>
-                {data.undated_sales} {data.undated_sales === 1 ? "sale has" : "sales have"} no date
-                {data.range === "all" ? " and isn't charted." : " and only count in All time."}
+                {data.undated_sales === 1
+                  ? `1 sale has no date and ${data.range === "all" ? "isn't charted" : "only counts in All time"}.`
+                  : `${data.undated_sales} sales have no date and ${data.range === "all" ? "aren't charted" : "only count in All time"}.`}
               </PageNote>
             ) : null}
             {data.periods_truncated ? <PageNote>The chart shows the latest 18 months.</PageNote> : null}

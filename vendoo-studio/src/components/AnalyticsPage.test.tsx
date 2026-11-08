@@ -104,7 +104,7 @@ describe("InventoryAnalyticsView", () => {
     expect(html).toContain("Compared with Aug 1 – Aug 30, 2026.");
     expect(html).toContain("$80.00");
     expect(html).not.toContain("sales with recorded prices");
-    expect(html).toContain("only count in All time");
+    expect(html).toContain("1 sale has no date and only counts in All time.");
     expect(html).toContain("<details");
     expect(html).toContain("<summary");
     expect(html).toContain("Older jacket");
