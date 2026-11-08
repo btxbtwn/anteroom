@@ -549,8 +549,8 @@ final class CoreFlowSandboxTests: XCTestCase {
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '```' OR label CONTAINS '\"title\"'")).firstMatch.exists,
                        "The generated JSON is never shown")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'filled.'")).firstMatch.exists)
-        XCTAssertFalse(app.buttons["Generate listing"].exists, "After a first run the assistant offers Regenerate")
-        XCTAssertTrue(app.buttons["Regenerate"].exists)
+        // The editor's own Generate listing sits under the sheet, so check for Regenerate only.
+        XCTAssertTrue(app.buttons["Regenerate"].exists, "After a first run the assistant offers Regenerate")
         keep(app, "Assistant summary")
         review.tap()
         XCTAssertFalse(app.buttons["generate-listing"].waitForExistence(timeout: 5), "With copy, the editor hides Generate listing")

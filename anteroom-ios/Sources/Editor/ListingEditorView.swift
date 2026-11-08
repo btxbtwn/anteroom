@@ -6,7 +6,9 @@ struct ListingEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model: ListingEditorModel
     @State private var confirmDiscard = false
-    @State private var showingAssistant = false
+    /// The open assistant and how it opened. An item, not a flag: a sheet
+    /// shown from a flag can be built with the values from before the tap.
+    @State private var assistant: AssistantOpening?
     /// An Ask chat from the marketplaces sheet, opened in the assistant once that sheet closes.
     @State private var assistantPrompt: String?
     @State private var showingHistory = false
@@ -14,8 +16,6 @@ struct ListingEditorView: View {
     @State private var showingListEverywhere = false
     @State private var showingMarketplaces = false
     @State private var tab = "general"
-    /// Opens the assistant and starts generating right away.
-    @State private var generateOnOpen = false
     @State private var confirmGenerate = false
     @State private var photoCount = 0
     /// A field to scroll to once its tab is on screen.
@@ -123,10 +123,7 @@ struct ListingEditorView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Listing actions", systemImage: "ellipsis.circle") {
-                    Button("Listing assistant", systemImage: "sparkles") {
-                        generateOnOpen = false
-                        showingAssistant = true
-                    }
+                    Button("Listing assistant", systemImage: "sparkles") { assistant = AssistantOpening() }
                     Button("Listing history", systemImage: "clock.arrow.circlepath") { showingHistory = true }
                     Button("Listing templates", systemImage: "rectangle.stack") { showingTemplates = true }
                     Divider()
@@ -180,17 +177,15 @@ struct ListingEditorView: View {
         } message: {
             Text("Reloading shows the latest version and drops your edits here.")
         }
-        .sheet(isPresented: $showingAssistant, onDismiss: {
-            assistantPrompt = nil
-            generateOnOpen = false
+        .sheet(item: $assistant, onDismiss: {
             Task {
                 guard !model.hasChanges else { return }
                 await model.load()
                 if model.loadError == nil { onSaved() }
             }
-        }) {
+        }) { opening in
             ListingAssistantView(api: model.api, listingID: model.listingID, photoCount: photoCount,
-                                 hasCopy: model.hasCopy, generate: generateOnOpen, text: assistantPrompt ?? "")
+                                 hasCopy: model.hasCopy, generate: opening.generate, text: opening.text)
         }
         .sheet(isPresented: $showingHistory, onDismiss: {
             Task {
@@ -205,9 +200,9 @@ struct ListingEditorView: View {
             // Listing, updating and delisting change the tabs' readiness and the inventory row.
             Task { await model.loadReadiness() }
             onSaved()
-            if assistantPrompt != nil {
-                generateOnOpen = false
-                showingAssistant = true
+            if let prompt = assistantPrompt {
+                assistantPrompt = nil
+                assistant = AssistantOpening(text: prompt)
             }
         }) {
             MarketplaceActionsView(api: model.api, listingID: model.listingID,
@@ -308,8 +303,7 @@ struct ListingEditorView: View {
     }
 
     private func startGenerating() {
-        generateOnOpen = true
-        showingAssistant = true
+        assistant = AssistantOpening(generate: true)
     }
 
     private func tabButton(_ id: String, name: String, status: String?, symbol: String?) -> some View {
@@ -404,4 +398,12 @@ struct NumberField: View {
             }
         }
     }
+}
+
+/// How the listing assistant opens: plainly, generating straight away, or
+/// with an Ask chat prompt in the composer.
+struct AssistantOpening: Identifiable {
+    let id = UUID()
+    var generate = false
+    var text = ""
 }
