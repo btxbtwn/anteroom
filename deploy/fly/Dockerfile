@@ -1,5 +1,4 @@
-# Base images are pinned by digest so a rebuild gets the same system packages;
-# Dependabot (docker, deploy/fly) proposes the updates.
+# Base images are pinned by digest so a rebuild gets the same system packages.
 FROM node:22-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS web
 WORKDIR /src/vendoo-studio
 COPY vendoo-studio/package.json vendoo-studio/package-lock.json ./
