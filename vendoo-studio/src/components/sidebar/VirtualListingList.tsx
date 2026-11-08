@@ -1,8 +1,11 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { loadPrivateImage } from "../../api/privateImages";
+import { useWorkspaceRuntime } from "../../app/runtime";
+import { displayCoverUrl } from "./coverSrc";
 
 /** Mount just the visible threads; the inventory's full array still drives filters and bulk selection. */
-export function VirtualListingList<T extends { id: string }>({ rows, renderRow, children }: {
+export function VirtualListingList<T extends { id: string; cover_photo_url?: string | null; vendoo_cover_url?: string | null }>({ rows, renderRow, children }: {
   rows: readonly T[];
   renderRow: (row: T) => ReactNode;
   children?: ReactNode;
@@ -21,6 +24,38 @@ export function VirtualListingList<T extends { id: string }>({ rows, renderRow, 
     scrollMargin,
     initialRect: { width: 300, height: 800 },
   });
+  const { hosted } = useWorkspaceRuntime();
+  const first = virtualizer.getVirtualItems()[0]?.index ?? 0;
+  useEffect(() => {
+    // Warm upcoming covers independently of row mounting. Keep downloads small
+    // and bounded so they leave capacity for visible images and normal API reads.
+    let stopped = false;
+    const controller = new AbortController();
+    const sources = [...new Set(rows.slice(Math.max(0, first - 10), first + 80)
+      .map(row => displayCoverUrl(row.cover_photo_url || row.vendoo_cover_url))
+      .filter((src): src is string => Boolean(src)))];
+    let next = 0;
+    const warm = async () => {
+      while (!stopped && next < sources.length) {
+        const src = sources[next++];
+        try {
+          if (hosted && src.startsWith("/api/")) await loadPrivateImage(src, controller.signal);
+          else await new Promise<void>(resolve => {
+            const image = new Image();
+            const stop = () => { image.src = ""; resolve(); };
+            controller.signal.addEventListener("abort", stop, { once: true });
+            image.onload = image.onerror = () => {
+              controller.signal.removeEventListener("abort", stop);
+              resolve();
+            };
+            image.src = src;
+          });
+        } catch { /* A failed warm-up must not interrupt inventory navigation. */ }
+      }
+    };
+    void Promise.all(Array.from({ length: 3 }, warm));
+    return () => { stopped = true; controller.abort(); };
+  }, [rows, first, hosted]);
 
   useLayoutEffect(() => {
     const media = window.matchMedia("(max-width: 900px)");
