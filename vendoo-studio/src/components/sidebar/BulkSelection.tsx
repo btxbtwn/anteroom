@@ -59,7 +59,7 @@ export function BulkActionBar({
             else exitSelecting();
           }}
         >
-          {bulk.running ? (bulk.run?.cancelRequested ? "Finishing…" : "Stop batch") : "Done"}
+          {bulk.running ? (bulk.run?.cancelRequested ? "Finishing…" : "Stop batch") : "Cancel"}
         </Button>
       </div>
       <div className="flex flex-wrap gap-1.5">
