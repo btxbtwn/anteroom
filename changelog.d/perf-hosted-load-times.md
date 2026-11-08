@@ -1,0 +1,3 @@
+- Open "Mark down prices" in a fraction of the time: it reads only the small price fields it needs, in a few queries, instead of every saved version of every sold item.
+- Load photo tiles faster in the iPhone editor: their size is now kept after it is first made, so it is not rebuilt from the full photo after each update.
+- Download marketplace forms and brand lists compressed, and reuse connections to photo storage.

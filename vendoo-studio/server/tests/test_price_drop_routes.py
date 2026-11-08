@@ -270,6 +270,41 @@ class BatchMarkdownRouteTest(unittest.TestCase):
             {"conversation_id": self.tee.id, "reason": "Anteroom is generating or sending this listing"},
         ])
 
+    def test_preview_reads_a_fixed_number_of_small_rows(self):
+        """On the hosted database every query is a network round trip, and a
+        listing's full marketplace forms can be hundreds of KB. The review sheet
+        reads a fixed number of queries for any batch and never the full forms."""
+        from sqlalchemy import event
+
+        from vendoo_studio.database import engine
+
+        def statements(*ids):
+            seen: list[str] = []
+
+            def record(_conn, _cursor, statement, *_args):
+                seen.append(statement)
+
+            event.listen(engine, "before_cursor_execute", record)
+            try:
+                rows = self._preview(*ids)
+            finally:
+                event.remove(engine, "before_cursor_execute", record)
+            return rows, seen
+
+        more = [self._listing(f"Stale {n}", 20 + n) for n in range(6)]
+        for conv in more:
+            listing_persistence.save_revision(self.db, conv.id, {"title": conv.title, "price": 18},
+                                              source=PRICE_DROP_SOURCE)
+        with patch("vendoo_studio.services.sell_through.collect_outcomes", return_value=[]):
+            _rows, two = statements(self.tee.id, self.coat.id)
+            rows, eight = statements(self.tee.id, self.coat.id, *(conv.id for conv in more))
+
+        self.assertEqual(len(eight), len(two))
+        self.assertFalse([sql for sql in eight if "listing_revisions.listing_json" in sql])
+        # A prior drop is still read from the small fields: 18 after 20 is a 10% cut.
+        self.assertEqual(rows[more[0].id]["current_price"], 18)
+        self.assertEqual(rows[self.tee.id]["suggested_price"], 43)
+
     def test_empty_batches_are_rejected(self):
         self.assertEqual(self.client.post("/api/price-drop/batch/preview", json={"conversation_ids": []}).status_code, 422)
         self.assertEqual(self.client.post("/api/price-drop/batch", json={"drops": []}).status_code, 422)

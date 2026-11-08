@@ -388,6 +388,39 @@ class CollectOutcomesCostTest(unittest.TestCase):
         self.db.commit()
         assert collect_outcomes(self.db)[0].sold_price == 44
 
+    def test_the_scan_reads_small_fields_not_full_forms(self):
+        """Full marketplace forms can be hundreds of KB per revision; a sold
+        item's evidence needs only its price, brand and category."""
+        self._sold_conversation()
+        seen: list[str] = []
+
+        def record(_conn, _cursor, statement, *_args):
+            seen.append(statement)
+
+        event.listen(self.engine, "before_cursor_execute", record)
+        try:
+            outcome = collect_outcomes(self.db)[0]
+        finally:
+            event.remove(self.engine, "before_cursor_execute", record)
+        self.assertEqual((outcome.first_price, outcome.category, outcome.brand), (50, "jeans", "levi's"))
+        self.assertFalse([sql for sql in seen if "listing_revisions.listing_json" in sql])
+
+    def test_sellers_sharing_one_engine_keep_their_own_evidence(self):
+        """The hosted API serves every seller from one engine. Two sellers'
+        fingerprints may match, so the cache is keyed by seller too."""
+        self._sold_conversation()
+        alice = self.db
+        alice.user_id = "alice"  # type: ignore[attr-defined]
+        self.assertEqual(len(collect_outcomes(alice)), 1)
+        bob = sessionmaker(bind=self.engine)()
+        self.addCleanup(bob.close)
+        bob.user_id = "bob"  # type: ignore[attr-defined]
+        with patch.object(sell_through, "_evidence_fingerprint", return_value=("same",)):
+            sell_through._outcome_cache.clear()
+            collect_outcomes(alice)
+            _again, queries = self._count_selects(lambda: collect_outcomes(bob))
+        self.assertGreater(queries, 0)
+
     def test_more_sold_items_than_one_id_batch(self):
         for index in range(5):
             self._sold_conversation(price=50 + index)

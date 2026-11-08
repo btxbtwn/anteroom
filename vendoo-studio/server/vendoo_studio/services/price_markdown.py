@@ -139,20 +139,65 @@ def _cover_url(conv, covers: dict[str, tuple[str, str | None]]) -> str | None:
     return str(parse_notes(conv.notes).get("vendooCoverUrl") or "") or None
 
 
+def _batch_reads(db: Session, conv_ids: list[str]) -> tuple[dict, dict, set[str]]:
+    """Everything the review reads for a batch, in a fixed number of queries.
+
+    Each query is a network round trip on the hosted database, so the batch
+    never reads per listing. Revisions carry only their small stored fields
+    (``inventory_fields``): price, brand and category are all a markdown needs,
+    and the full marketplace forms can be hundreds of KB each.
+    """
+    from types import SimpleNamespace
+
+    from vendoo_studio.models.background_task import BackgroundTask
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
+    from vendoo_studio.models.listing import ListingRevision
+
+    convs: dict[str, Any] = {}
+    revisions: dict[str, list[Any]] = {conv_id: [] for conv_id in conv_ids}
+    busy: set[str] = set()
+    for start in range(0, len(conv_ids), _ID_BATCH):
+        batch = conv_ids[start : start + _ID_BATCH]
+        for row in db.execute(select(Conversation.id, Conversation.title, Conversation.notes)
+                              .where(Conversation.id.in_(batch))):
+            convs[row.id] = row
+        for row in db.execute(select(ListingRevision.id, ListingRevision.conversation_id, ListingRevision.source,
+                                     ListingRevision.parent_revision_id, ListingRevision.created_at,
+                                     ListingRevision.inventory_fields)
+                              .where(ListingRevision.conversation_id.in_(batch))
+                              .order_by(ListingRevision.created_at.desc())):
+            revisions[row.conversation_id].append(SimpleNamespace(
+                id=row.id, source=row.source, parent_revision_id=row.parent_revision_id,
+                created_at=row.created_at, listing_json=row.inventory_fields))
+        busy.update(conv_id for conv_id in db.scalars(select(BackgroundTask.conversation_id).where(
+            BackgroundTask.conversation_id.in_(batch), BackgroundTask.status.in_(("queued", "running")))) if conv_id)
+        busy.update(conv_id for conv_id in db.scalars(select(Job.conversation_id).where(
+            Job.conversation_id.in_(batch), Job.status.in_(ACTIVE_JOB_STATUSES))) if conv_id)
+    return convs, revisions, busy
+
+
+# SQLite binds each id in an IN clause as its own variable; older builds stop at 999.
+_ID_BATCH = 500
+
+
 def batch_preview(conv_ids: list[str], db: Session) -> list[dict[str, Any]]:
     """One review row per listing, in the order asked, with its suggested markdown.
 
     A listing that cannot be marked down comes back with ``skip_reason`` set
     rather than failing the batch.
     """
+    from vendoo_studio.services import activity
     from vendoo_studio.services.sell_through import collect_outcomes, listing_age_days
+    from vendoo_studio.services.streaming import active_generation
 
-    conv_repo = ConversationRepo(db)
-    covers = conv_repo.cover_photos()
+    ids = list(dict.fromkeys(conv_ids))
+    covers = ConversationRepo(db).cover_photos(ids)
     outcomes = collect_outcomes(db)
+    convs, revisions_by_id, busy = _batch_reads(db, ids)
     rows: list[dict[str, Any]] = []
-    for conv_id in dict.fromkeys(conv_ids):
-        conv = conv_repo.get(conv_id)
+    for conv_id in ids:
+        conv = convs.get(conv_id)
         row: dict[str, Any] = {
             "conversation_id": conv_id,
             "title": ((conv.title or "").strip() or "Untitled") if conv else "Untitled",
@@ -170,13 +215,12 @@ def batch_preview(conv_ids: list[str], db: Session) -> list[dict[str, Any]]:
         if conv is None:
             row["skip_reason"] = "It is no longer in Anteroom"
             continue
-        try:
-            listing, revisions = current_listing(conv_id, db)
-        except PriceDropError as exc:
-            row["skip_reason"] = str(exc)
+        revisions = revisions_by_id.get(conv_id) or []
+        if not revisions or listing_price(revisions[0].listing_json) is None:
+            row["skip_reason"] = NO_PRICE
             continue
         age_days = listing_age_days(conv.notes)
-        preview = build_preview(listing, revisions, sold_outcomes=outcomes, age_days=age_days)
+        preview = build_preview(revisions[0].listing_json, revisions, sold_outcomes=outcomes, age_days=age_days)
         row.update(
             revision_id=revisions[0].id,
             current_price=preview["current_price"],
@@ -186,7 +230,7 @@ def batch_preview(conv_ids: list[str], db: Session) -> list[dict[str, Any]]:
             suggested_reason=preview["suggested_reason"],
             age_days=age_days,
         )
-        if listing_busy(conv_id, db):
+        if conv_id in busy or active_generation(conv_id) or activity.running(conv_id):
             row["skip_reason"] = BUSY
         elif preview["suggested_price"] >= preview["current_price"]:
             row["skip_reason"] = "The price is already as low as it goes"

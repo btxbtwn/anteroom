@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 import statistics
-import weakref
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, UTC
 from typing import Any
@@ -285,12 +285,10 @@ def _discount_is_evidence(
 # One whole-workspace scan is enough until something in it changes. The price
 # drop dialog asks for this evidence on every open, and the answer only moves
 # when a conversation or a revision does — see ``_evidence_fingerprint``.
-_CACHE_LIMIT = 4
-# Keyed weakly on the engine, so a workspace that goes away takes its evidence
-# with it and no two databases can ever collide on a recycled key.
-_outcome_cache: weakref.WeakKeyDictionary[Any, tuple[tuple | None, list[SoldOutcome]]] = (
-    weakref.WeakKeyDictionary()
-)
+# Keyed on the engine and the seller, most recently used last. Each entry is a
+# few hundred small tuples, so this holds every recently active hosted seller.
+_CACHE_LIMIT = 64
+_outcome_cache: OrderedDict[tuple, tuple[tuple | None, list[SoldOutcome]]] = OrderedDict()
 # SQLite binds each id in an IN clause as its own variable; older builds stop
 # at 999 of them, and a seller with that many sold items is not exotic.
 _ID_BATCH = 500
@@ -317,24 +315,27 @@ def collect_outcomes(db, *, use_cache: bool = True) -> list[SoldOutcome]:
     Sales come from the local ledger, including the frozen Vendoo history.
     An item without a closing price uses its last saved asking price.
 
-    Only the columns this reads are loaded: a workspace of a thousand items
-    holds far more listing JSON than a price suggestion needs to look at.
+    Revisions are read from their small stored fields (``inventory_fields``),
+    never the full marketplace forms: a workspace of a thousand items holds
+    far more listing JSON than a price suggestion needs to look at, and on the
+    hosted database every byte of it crosses the network.
     """
     from vendoo_studio.models.listing import ListingRevision
     from vendoo_studio.services.inventory_analytics import load_rows
     from vendoo_studio.services.vendoo_sales_archive import ensure_archived
 
     ensure_archived(db)
-    engine = db.get_bind() if use_cache else None
+    key = _cache_key(db) if use_cache else None
     fingerprint = _evidence_fingerprint(db) if use_cache else None
-    if engine is not None:
-        cached = _outcome_cache.get(engine)
+    if key is not None:
+        cached = _outcome_cache.get(key)
         if cached and cached[0] == fingerprint:
+            _outcome_cache.move_to_end(key)
             return list(cached[1])
 
     sold = [row for row in load_rows(db) if row.status == "sold"]
     if not sold:
-        return _remember(engine, fingerprint, [])
+        return _remember(key, fingerprint, [])
     ids = list({row.conversation_id for row in sold})
     revisions: dict[str, list[Any]] = {}
     for start in range(0, len(ids), _ID_BATCH):
@@ -342,7 +343,7 @@ def collect_outcomes(db, *, use_cache: bool = True) -> list[SoldOutcome]:
         rows = (
             db.query(
                 ListingRevision.conversation_id,
-                ListingRevision.listing_json,
+                ListingRevision.inventory_fields,
                 ListingRevision.created_at,
             )
             .filter(ListingRevision.conversation_id.in_(batch))
@@ -355,7 +356,7 @@ def collect_outcomes(db, *, use_cache: bool = True) -> list[SoldOutcome]:
     outcomes: list[SoldOutcome] = []
     for sale in sold:
         history = revisions.get(sale.conversation_id) or []
-        prices = [(_price_of(row.listing_json), row.listing_json, row.created_at) for row in history]
+        prices = [(_price_of(row.inventory_fields), row.inventory_fields, row.created_at) for row in history]
         priced = [(amount, listing, seen) for amount, listing, seen in prices if amount > 0]
         if not priced:
             continue
@@ -378,15 +379,19 @@ def collect_outcomes(db, *, use_cache: bool = True) -> list[SoldOutcome]:
                 ),
             )
         )
-    return _remember(engine, fingerprint, outcomes)
+    return _remember(key, fingerprint, outcomes)
 
 
-def _remember(engine: Any, fingerprint: tuple | None, outcomes: list[SoldOutcome]):
-    if engine is None:
+def _cache_key(db) -> tuple:
+    # The hosted API serves every seller from one engine: the seller is part of the key.
+    return (db.get_bind(), getattr(db, "user_id", None))
+
+
+def _remember(key: tuple | None, fingerprint: tuple | None, outcomes: list[SoldOutcome]):
+    if key is None:
         return outcomes
-    if len(_outcome_cache) >= _CACHE_LIMIT and engine not in _outcome_cache:
-        oldest = next(iter(_outcome_cache), None)
-        if oldest is not None:
-            _outcome_cache.pop(oldest, None)
-    _outcome_cache[engine] = (fingerprint, outcomes)
+    _outcome_cache[key] = (fingerprint, outcomes)
+    _outcome_cache.move_to_end(key)
+    while len(_outcome_cache) > _CACHE_LIMIT:
+        _outcome_cache.popitem(last=False)
     return list(outcomes)
