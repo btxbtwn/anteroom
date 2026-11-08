@@ -23,6 +23,7 @@ from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.services.marketplace_identity import listing_id as listing_id_from_url
+from vendoo_studio.services.sale_matching import replace_stand_in
 from vendoo_studio.services.vendoo_import import parse_notes
 
 log = logging.getLogger("vendoo_studio.relay_sales")
@@ -66,7 +67,8 @@ def reconcile_unmatched(db: Session, *, conversation_id: str | None = None, mark
     """Match previously received sales to exact listing links, without remote actions.
 
     Dismissed sales and existing assignments are left alone. Duplicate local
-    owners remain unresolved. Nothing here notifies, publishes, or delists.
+    owners remain unresolved. A sale linked here replaces the Vendoo copy or
+    Mark as sold that stood for it. Nothing here notifies, publishes, or delists.
     """
     pending = db.query(MarketplaceSale.id, MarketplaceSale.marketplace, MarketplaceSale.listing_id).filter(
         MarketplaceSale.state == "new", MarketplaceSale.conversation_id.is_(None), MarketplaceSale.listing_id.isnot(None),
@@ -74,7 +76,7 @@ def reconcile_unmatched(db: Session, *, conversation_id: str | None = None, mark
     if marketplace:
         pending = pending.filter(MarketplaceSale.marketplace == marketplace)
     owners: dict[tuple[str, str | None], str | None] = {}
-    matched = 0
+    linked: list[str] = []
     for sale_id, marketplace, item_id in pending.yield_per(100):
         key = (marketplace, item_id)
         if key not in owners:
@@ -85,11 +87,16 @@ def reconcile_unmatched(db: Session, *, conversation_id: str | None = None, mark
             continue
         # Re-check assignment and state when writing, so an overlapping refresh
         # cannot take a sale another request just assigned or dismissed.
-        matched += db.query(MarketplaceSale).filter(
+        if db.query(MarketplaceSale).filter(
             MarketplaceSale.id == sale_id, MarketplaceSale.conversation_id.is_(None), MarketplaceSale.state == "new",
-        ).update({"conversation_id": owner_id}, synchronize_session=False)
+        ).update({"conversation_id": owner_id}, synchronize_session=False):
+            linked.append(sale_id)
+    for sale_id in linked:
+        sale = db.get(MarketplaceSale, sale_id, populate_existing=True)
+        if sale is not None:
+            replace_stand_in(db, sale)
     db.commit()
-    return matched
+    return len(linked)
 
 
 def _parse_time(value: Any) -> datetime | None:
@@ -166,6 +173,8 @@ def record_sale(
     )
     db.add(sale)
     try:
+        db.flush()
+        replace_stand_in(db, sale)
         db.commit()
     except IntegrityError:
         db.rollback()
