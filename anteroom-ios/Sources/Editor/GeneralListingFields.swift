@@ -1,42 +1,44 @@
 import SwiftUI
 
 /// Mirrors the desktop General form's sections and order
-/// (generalFormSections in listingFieldSections.ts): what the item is, how it
-/// reads, its condition, then price, shipping and stock. Native marketplace
-/// forms remain separate.
+/// (generalFormSections in listingFieldSections.ts): the order a seller fills
+/// it in by hand. Category first, then title, condition, size and brand, the
+/// price, the description, the remaining item details and shipping. Cost, SKU
+/// and quantity wait under a folded More details. Native marketplace forms
+/// remain separate.
 struct GeneralListingFields: View {
     @Binding var form: ListingEditorModel.Form
     var options = GeneralOptions()
     /// Loads the shared category tree. Without it, Category is a text field.
     var api: AnteroomAPI?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var showsMoreDetails = false
 
     var body: some View {
         ListingInspectorSection("Item") {
             GeneralCategoryField(path: $form.fields.categoryPath, api: api)
-            TextRow("Department", text: $form.fields.department)
-            TextRow("Brand", text: $form.fields.brand)
-        }
-        ListingInspectorSection("Listing") {
             WorkspaceField("Title") {
                 TextField("Title", text: $form.fields.title, axis: .vertical).lineLimit(1...3)
                     .accessibilityIdentifier("listing-title")
-            }
-            WorkspaceField("Description") {
-                TextField("Describe your item", text: $form.fields.description, axis: .vertical).lineLimit(5...16)
             }
         }
         ListingInspectorSection("Condition & details") {
             OptionField("Condition", value: $form.fields.condition, options: options.condition)
             OptionField("Size", value: $form.fields.size, options: options.size)
-            OptionField("Primary Color", value: $form.fields.primaryColor, options: options.primaryColor)
-            OptionField("Secondary Color", value: $form.fields.secondaryColor, options: options.secondaryColor)
+            TextRow("Brand", text: $form.fields.brand)
         }
         ListingInspectorSection("Pricing") {
-            pair {
-                NumberField("Price", text: $form.price, prefix: "$")
-                NumberField("Cost", text: $form.cost, prefix: "$")
+            NumberField("Price", text: $form.price, prefix: "$")
+        }
+        ListingInspectorSection("Description") {
+            WorkspaceField("Description") {
+                TextField("Describe your item", text: $form.fields.description, axis: .vertical).lineLimit(5...16)
             }
+        }
+        ListingInspectorSection("Color & department") {
+            OptionField("Primary Color", value: $form.fields.primaryColor, options: options.primaryColor)
+            OptionField("Secondary Color", value: $form.fields.secondaryColor, options: options.secondaryColor)
+            TextRow("Department", text: $form.fields.department)
         }
         ListingInspectorSection("Shipping") {
             pair {
@@ -45,11 +47,12 @@ struct GeneralListingFields: View {
             }
             TextRow("Inventory location", text: $form.fields.zipCode)
         }
-        ListingInspectorSection("Inventory") {
+        ListingInspectorSection("More details", isExpanded: $showsMoreDetails) {
             pair {
-                WorkspaceField("Quantity") { TextField("1", text: $form.quantity).keyboardType(.numberPad) }
+                NumberField("Cost", text: $form.cost, prefix: "$")
                 TextRow("SKU", text: $form.fields.sku)
             }
+            WorkspaceField("Quantity") { TextField("1", text: $form.quantity).keyboardType(.numberPad) }
         }
     }
 
@@ -112,17 +115,39 @@ struct GeneralCategoryField: View {
 
 struct ListingInspectorSection<Content: View>: View {
     let title: String
+    /// When set, the title is a disclosure button and the content folds away.
+    let isExpanded: Binding<Bool>?
     let content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(_ title: String, isExpanded: Binding<Bool>? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.isExpanded = isExpanded
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(title).font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
-            content
+            if let isExpanded {
+                Button {
+                    withAnimation(.snappy) { isExpanded.wrappedValue.toggle() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(title).font(.subheadline.weight(.semibold))
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityValue(isExpanded.wrappedValue ? "Expanded" : "Collapsed")
+                if isExpanded.wrappedValue { content }
+            } else {
+                Text(title).font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                content
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 16)

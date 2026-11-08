@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { catalogLeafChoices, categoryChoiceAt, categoryMenu, categoryPathKey, categorySearch, categorySegments, type CategoryChoice, type CategoryItem } from "./categoryTree";
 import { cn } from "../lib/utils";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { Combobox, ComboboxCollection, ComboboxEmpty, ComboboxGroup, ComboboxGroupLabel, ComboboxInput, ComboboxItem, ComboboxList, ComboboxListVirtualized, ComboboxPopup, ComboboxSearchInput, ComboboxStatus, ComboboxTrigger } from "./ui/combobox";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { toggleVariants } from "./ui/toggle";
@@ -73,7 +74,11 @@ export function SectionHeading({ className, ...props }: React.ComponentProps<"h3
   );
 }
 
-/** One titled block of the inspector: heading row (title, meta, actions), then body. */
+/**
+ * One titled block of the inspector: heading row (title, meta, actions), then body.
+ * With `onOpenChange` the title is a disclosure button and the body folds away
+ * (WAI-ARIA disclosure pattern); find-in-page still reaches the folded fields.
+ */
 export function InspectorSection({
   title,
   titleId,
@@ -81,24 +86,45 @@ export function InspectorSection({
   actions,
   className,
   children,
+  open,
+  onOpenChange,
   ...props
 }: Omit<React.ComponentProps<"section">, "title"> & {
   title: React.ReactNode;
   titleId?: string;
   meta?: React.ReactNode;
   actions?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
+  const collapsible = onOpenChange !== undefined;
+  const heading = (
+    <div className="flex min-h-7 min-w-0 items-center gap-2">
+      <SectionHeading id={titleId} className="shrink-0">
+        {collapsible ? (
+          <CollapsibleTrigger className="-mx-1 inline-flex items-center gap-1 rounded-md px-1 outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11">
+            {title}
+            <ChevronRightIcon aria-hidden className={cn("size-4 text-muted-foreground transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+          </CollapsibleTrigger>
+        ) : title}
+      </SectionHeading>
+      {meta ? <span className="min-w-0 truncate text-muted-foreground text-[13px]">{meta}</span> : null}
+      {actions ? <div className="ms-auto flex shrink-0 items-center gap-1">{actions}</div> : null}
+    </div>
+  );
+  const sectionClassName = cn("flex min-w-0 flex-col gap-4 border-b pt-6 pb-6 first:pt-1 last:border-b-0", className);
+  if (collapsible) {
+    return (
+      <Collapsible open={open} onOpenChange={onOpenChange}
+        render={<section {...props} aria-labelledby={titleId} className={sectionClassName} />}>
+        {heading}
+        <CollapsiblePanel hiddenUntilFound>{children}</CollapsiblePanel>
+      </Collapsible>
+    );
+  }
   return (
-    <section
-      {...props}
-      aria-labelledby={titleId}
-      className={cn("flex min-w-0 flex-col gap-4 border-b pt-6 pb-6 first:pt-1 last:border-b-0", className)}
-    >
-      <div className="flex min-h-7 min-w-0 items-center gap-2">
-        <SectionHeading id={titleId} className="shrink-0">{title}</SectionHeading>
-        {meta ? <span className="min-w-0 truncate text-muted-foreground text-[13px]">{meta}</span> : null}
-        {actions ? <div className="ms-auto flex shrink-0 items-center gap-1">{actions}</div> : null}
-      </div>
+    <section {...props} aria-labelledby={titleId} className={sectionClassName}>
+      {heading}
       {children}
     </section>
   );
