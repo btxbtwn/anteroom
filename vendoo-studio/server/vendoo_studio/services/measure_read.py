@@ -16,6 +16,7 @@ import logging
 import re
 import sys
 import tempfile
+import threading
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
@@ -30,6 +31,12 @@ MAX_RULER_PHOTOS = 3  # pants take two; a third covers a sleeve shot
 WOOD_SHARE = 0.04  # a photo with less yardstick colour than this has no yardstick worth finding
 TILES_PER_MEASURE = 2  # the locate step picks at most this many
 MAX_TILES_SHOWN = 4  # the read step also sees their neighbours, as a reader scanning along the stick would
+
+# A bulk read asks for every item at once. Searching an item's full-size photos holds
+# several decoded copies of each in memory, so only this many searches run together in
+# a process; the model calls, which take most of the time, are not limited.
+PHOTO_SEARCHES_AT_ONCE = 2
+_photo_searches = threading.BoundedSemaphore(PHOTO_SEARCHES_AT_ONCE)
 
 # Skill measurement keys -> the bulk upload's field keys (garmentMeasurements.ts).
 FIELD_KEYS = {"pit_to_pit": "pitToPit", "leg_opening": "legOpening"}
@@ -71,6 +78,20 @@ def _has_wood(path: Path) -> bool:
     except Exception:
         return False
     return float(ruler().wood_mask(image).mean()) > WOOD_SHARE
+
+
+def _search_photos(paths: list[Path], out: Path) -> list[dict]:
+    with _photo_searches:
+        return find_ruler_photos(paths, out)
+
+
+def reader_name(provider) -> str:
+    """The provider and photo model a seller would recognise, for the bulk upload's notes."""
+    from vendoo_studio.services.provider_deadlines import provider_label
+
+    label = provider_label(getattr(provider, "name", None))
+    model = getattr(provider, "vision_model", None)
+    return f"{label} ({model})" if isinstance(model, str) and model else label
 
 
 def find_ruler_photos(paths: list[Path], out: Path) -> list[dict]:
@@ -193,9 +214,9 @@ async def read_measurements(provider, paths: list[Path], garment: str) -> dict:
     module = ruler()
     measures = [key for key, _ in module.MEASURES[garment]]
     with tempfile.TemporaryDirectory(prefix="measure-") as workdir:
-        photos = await asyncio.to_thread(find_ruler_photos, paths, Path(workdir))
+        photos = await asyncio.to_thread(_search_photos, paths, Path(workdir))
         if not photos:
-            return {"photos_read": 0, "measurements": {}}
+            return {"photos_read": 0, "measurements": {}, "reader": reader_name(provider)}
         first, second = await asyncio.gather(
             _read_once(provider, photos, garment, measures),
             _read_once(provider, photos, garment, measures),
@@ -211,4 +232,4 @@ async def read_measurements(provider, paths: list[Path], garment: str) -> dict:
             found = next(r for r in reads if module.parse_inches(r) is not None)
             reads = [found, third.get(measure, "cannot read")]
         measurements[FIELD_KEYS.get(measure, measure)] = module.settle_one(*reads)
-    return {"photos_read": len(photos), "measurements": measurements}
+    return {"photos_read": len(photos), "measurements": measurements, "reader": reader_name(provider)}

@@ -6,6 +6,24 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.809 — 2026-11-08
+
+- Read from photos in bulk upload reads every item at once instead of two at a time, so a box of items finishes in minutes instead of half an hour.
+- A photo reading cut off by an app update or restart is tried once more instead of showing "Reading failed: 500".
+- Each item's note now names the AI model that read its yardstick photos, so you can tell when a different photo model would read them better.
+
+## 0.1.808 — 2026-11-08
+
+- Let DeepSeek and other OpenRouter listing models search repeatedly for sold comparisons during listing generation.
+
+## 0.1.807 — 2026-11-08
+
+- On the web, listing photos you've already seen appear right away when you scroll your inventory, even after reloading the page or after an Anteroom update.
+
+## 0.1.806 — 2026-11-08
+
+- Anteroom now shows a Beta tag next to its name.
+
 ## 0.1.805 — 2026-11-08
 
 - Marketplace refusals now explain the problem in plain words, like "Etsy needs to know who made this item", with the marketplace's own reply tucked under Details.

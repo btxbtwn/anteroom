@@ -9,7 +9,7 @@ import { formatMoney } from "./analyticsFormat";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
-import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
+import { applyReading, readEach } from "../measurementReading";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { StudioImage } from "./StudioImage";
 
@@ -101,7 +101,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   const readMeasurements = async () => {
     const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
     setReading({ done: 0, total: todo.length });
-    await readEach(todo, READ_CONCURRENCY, async (index) => {
+    await readEach(todo, async (index) => {
       const garment = rows[index]!.garment;
       setRow(index, { readNote: "Reading the yardstick…" });
       try {
