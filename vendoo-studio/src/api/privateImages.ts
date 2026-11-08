@@ -50,6 +50,9 @@ export async function loadPrivateImage(src: string, signal?: AbortSignal): Promi
   signal?.throwIfAborted();
   forCurrentSession();
   let download = pending.get(src);
+  // A new viewport can request the same cover before an aborted warm-up's
+  // promise has settled. Start a fresh download rather than sharing that abort.
+  if (download?.controller.signal.aborted) download = undefined;
   if (!download) {
     const controller = new AbortController();
     const started: Download = { promise: fetchPrivateImage(src, controller.signal), controller, viewers: 0, kept: false };

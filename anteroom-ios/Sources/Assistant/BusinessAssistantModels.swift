@@ -121,14 +121,70 @@ struct AssistantQueuedQuestion: Identifiable, Sendable {
 /// What the assistant screens say, as AssistantPage.tsx and its cards say it.
 enum AssistantFormat {
     /// Questions that show what the assistant can see, offered before the first one is asked.
-    static let starters = [
-        "How did last month compare with the month before?",
-        "Which brands and categories make me the most profit?",
-        "What has been listed longest, and what should I do with it?",
-        "Which wholesale boxes paid off, and which did not?",
-        "Mark down everything listed over 90 days by 15%.",
-        "Find listings whose size differs between forms and fix them.",
+    static let starters: [(text: String, systemImage: String)] = [
+        ("How did last month compare with the month before?", "chart.line.uptrend.xyaxis"),
+        ("Which brands and categories make me the most profit?", "tag"),
+        ("What has been listed longest, and what should I do with it?", "hourglass"),
+        ("Mark down everything listed over 90 days by 15%.", "percent"),
     ]
+
+    /// How many past chats the home screen offers to pick back up.
+    static let recentChats = 3
+
+    /// The history's day groups (chatHistory.ts), by the chat's last activity in local days.
+    static func chatGroup(_ updatedAt: String?, now: Date = .now, calendar: Calendar = .current) -> String {
+        guard let days = daysAgo(updatedAt, now: now, calendar: calendar) else { return "Older" }
+        switch days {
+        case ...0: return "Today"
+        case 1: return "Yesterday"
+        case 2..<7: return "Previous 7 days"
+        default: return "Older"
+        }
+    }
+
+    /// "3:42 PM" today, "Mon" this week, "Oct 3" before, "Oct 3, 2025" in another year.
+    static func chatTime(_ updatedAt: String?, now: Date = .now, calendar: Calendar = .current) -> String {
+        guard let date = ServerDate.parse(updatedAt), let days = daysAgo(updatedAt, now: now, calendar: calendar) else { return "" }
+        var style = Date.FormatStyle(timeZone: calendar.timeZone)
+        switch days {
+        case ...0: style = style.hour().minute()
+        case 1: return "Yesterday"
+        case 2..<7: style = style.weekday(.abbreviated)
+        default:
+            style = style.month(.abbreviated).day()
+            if calendar.component(.year, from: date) != calendar.component(.year, from: now) { style = style.year() }
+        }
+        return date.formatted(style)
+    }
+
+    /// Chats newest first under their day headings; groups with no chats are left out.
+    static func groupChats(_ threads: [AssistantThread], now: Date = .now,
+                           calendar: Calendar = .current) -> [(group: String, threads: [AssistantThread])] {
+        let sorted = threads.sorted {
+            (ServerDate.parse($0.updatedAt) ?? .distantPast) > (ServerDate.parse($1.updatedAt) ?? .distantPast)
+        }
+        var groups: [(group: String, threads: [AssistantThread])] = []
+        for thread in sorted {
+            let group = chatGroup(thread.updatedAt, now: now, calendar: calendar)
+            if groups.last?.group == group { groups[groups.count - 1].threads.append(thread) }
+            else { groups.append((group, [thread])) }
+        }
+        return groups
+    }
+
+    private static func daysAgo(_ updatedAt: String?, now: Date, calendar: Calendar) -> Int? {
+        guard let date = ServerDate.parse(updatedAt) else { return nil }
+        return calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day
+    }
+
+    /// The home screen's greeting, by the seller's local time.
+    static func greeting(at date: Date = .now, calendar: Calendar = .current) -> String {
+        switch calendar.component(.hour, from: date) {
+        case 5..<12: return "Good morning"
+        case 12..<18: return "Good afternoon"
+        default: return "Good evening"
+        }
+    }
 
     static let lostConnection =
         "Lost the connection to Anteroom. If it was still answering, the answer appears here when you come back."
