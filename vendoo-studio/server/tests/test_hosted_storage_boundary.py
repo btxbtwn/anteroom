@@ -48,7 +48,8 @@ def test_background_storage_uses_server_apikey_without_a_user_bearer(monkeypatch
     assert 'Authorization' not in options['headers']
     assert options['follow_redirects'] is False
     if method == 'DELETE':
-        assert options['json'] == {'prefixes': [KEY]}
+        # A photo's kept thumbnails go with it.
+        assert options['json'] == {'prefixes': [KEY, KEY[:-4] + '.t96.jpg', KEY[:-4] + '.t192.jpg']}
     else:
         assert args[1].endswith('/' + KEY)
 
