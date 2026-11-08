@@ -146,15 +146,18 @@ class ConversationRepo:
         return row
 
 
-    def cover_photos(self) -> dict[str, tuple[str, str | None]]:
-        """Map each conversation to its first photo's id and checksum, for sidebar thumbnails."""
+    def cover_photos(self, conv_ids: list[str] | None = None) -> dict[str, tuple[str, str | None]]:
+        """Map each conversation (or just ``conv_ids``) to its first photo's id and checksum, for thumbnails."""
         ranked = self.db.query(
             Photo.conversation_id, Photo.id, Photo.checksum,
             func.row_number().over(
                 partition_by=Photo.conversation_id,
                 order_by=(Photo.display_order, Photo.created_at, Photo.id),
             ).label("position"),
-        ).subquery()
+        )
+        if conv_ids is not None:
+            ranked = ranked.filter(Photo.conversation_id.in_(conv_ids))
+        ranked = ranked.subquery()
         rows = self.db.query(
             ranked.c.conversation_id, ranked.c.id, ranked.c.checksum,
         ).filter(ranked.c.position == 1).all()
