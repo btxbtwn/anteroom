@@ -1,1 +1,0 @@
-- Find the Vendoo switch under Settings → Experimental, alongside a coming-soon hosted marketplace browser option.
