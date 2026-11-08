@@ -1,4 +1,5 @@
 import { useWorkspaceRuntime } from "./runtime";
+import { MOBILE_LAYOUT_QUERY, useMobileLayout } from "../lib/useMobileLayout";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useReducer, type CSSProperties } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -72,24 +73,12 @@ const FirstRunGuide = lazy(() =>
 );
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "awaiting_extension", "dispatched"]);
-const MOBILE_LAYOUT_QUERY = "(max-width: 900px)";
 /* Open wider for listing titles; resizing still stops at the footer's minimum width. */
 const SIDEBAR_WIDTH: PanelWidthLimits = { min: SIDEBAR_FOOTER_WIDTH, max: 420, maxVw: 30 };
 const THREADS_WIDTH: PanelWidthLimits = { min: 200, max: 420, maxVw: 30 };
 const MAIN_PANEL_MIN_WIDTH = 360;
 let setupGuideAutoOpen: boolean | null = null;
 
-function useMobileLayout() {
-  const [isMobile, setIsMobile] = useState(() => window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
-  useEffect(() => {
-    const media = window.matchMedia(MOBILE_LAYOUT_QUERY);
-    const onChange = () => setIsMobile(media.matches);
-    onChange();
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
-  }, []);
-  return isMobile;
-}
 
 export function App() {
   const runtime = useWorkspaceRuntime();

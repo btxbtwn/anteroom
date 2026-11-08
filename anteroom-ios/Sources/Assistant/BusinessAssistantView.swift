@@ -6,6 +6,7 @@ import SwiftUI
 struct BusinessAssistantView: View {
     let attachmentsAvailable: Bool
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var model: BusinessAssistantModel
     @State private var path = NavigationPath()
     @State private var showingChats = false
@@ -67,41 +68,50 @@ struct BusinessAssistantView: View {
     // MARK: Empty conversation
 
     private var starters: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(AssistantFormat.greeting()).font(.title3.weight(.semibold))
-                // A plain list with dividers, as on the web (DESIGN.md).
-                VStack(spacing: 0) {
-                    ForEach(Array(AssistantFormat.starters.enumerated()), id: \.offset) { index, starter in
-                        if index > 0 { Divider() }
-                        Button { model.ask(starter.text) } label: {
-                            Label {
-                                Text(starter.text).multilineTextAlignment(.leading)
-                            } icon: {
-                                Image(systemName: starter.systemImage).foregroundStyle(.secondary)
+        // The greeting and questions sit centered in the space above the
+        // composer, which stays docked at the bottom within thumb reach.
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(AssistantFormat.greeting())
+                        .font(.title2.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
+                        .padding(.bottom, 8)
+                    // A plain list with dividers, as on the web (DESIGN.md).
+                    VStack(spacing: 0) {
+                        ForEach(Array(AssistantFormat.starters.enumerated()), id: \.offset) { index, starter in
+                            if index > 0 { Divider() }
+                            Button { model.ask(starter.text) } label: {
+                                Label {
+                                    Text(starter.text).multilineTextAlignment(.leading)
+                                } icon: {
+                                    Image(systemName: starter.systemImage).foregroundStyle(.secondary)
+                                }
+                                .font(.subheadline)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
-                            .font(.subheadline)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(starter.text)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(starter.text)
                     }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Example questions")
+                    recentChats
+                    errorRow
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Example questions")
-                recentChats
-                errorRow
+                .padding(16)
+                .frame(minHeight: geometry.size.height)
             }
-            .padding(16)
-            .padding(.top, 24)
         }
     }
 
     /// The latest chats to pick back up (Gemini's "Recent"); Show all opens Chats.
+    /// iPhone keeps its home to the greeting and questions; the Chats button holds the history.
     @ViewBuilder
     private var recentChats: some View {
-        let recent = Array(model.threads.prefix(AssistantFormat.recentChats))
+        let recent = sizeClass == .regular ? Array(model.threads.prefix(AssistantFormat.recentChats)) : []
         if !recent.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {

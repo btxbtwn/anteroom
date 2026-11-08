@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage, type AssistantThread } from "../api/assistant";
 import type { ChatAttachment, ChatAttachmentUpload } from "../api/types";
 import { addToast } from "../ui/toast";
+import { useMobileLayout } from "../lib/useMobileLayout";
 import { AssistantAutomationCard } from "./AssistantAutomationCard";
 import { AssistantChangesCard } from "./AssistantChangesCard";
 import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
@@ -154,6 +155,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
   const images = useComposerImages();
   const scroll = useChatScroll("assistant");
+  const phone = useMobileLayout();
 
   const turns = messages.data ?? [];
   const turnsRef = useRef(turns);
@@ -441,58 +443,63 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     </div>
   );
 
-  // The server lists chats newest first.
-  const recent: AssistantThread[] = (threads.data ?? []).slice(0, RECENT_CHATS);
+  // The server lists chats newest first. A phone keeps its home to the greeting
+  // and questions; its header's History button holds the chats.
+  const recent: AssistantThread[] = phone ? [] : (threads.data ?? []).slice(0, RECENT_CHATS);
 
   if (empty) {
     return (
-      <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-y-auto px-4">
-        {/* Centered a little above the middle, as wide as the composer's surface so the heading and questions line up with it. */}
-        <div className="my-auto flex w-full max-w-[calc(var(--chat-content-max-width)+2rem)] flex-col pt-8 pb-[12vh] max-[900px]:pb-8">
-          <h1 className="mx-3 mb-3 font-semibold sm:mx-4 text-xl tracking-tight text-foreground">{greeting()}</h1>
-          {composer}
-          <ul aria-label="Example questions" className="mx-3 mt-2 list-none divide-y sm:mx-4 divide-border/60 p-0">
-            {ASSISTANT_STARTERS.map(({ text, icon: Icon }) => (
-              <li key={text}>
-                <button
-                  type="button"
-                  className="group flex min-h-10 w-full cursor-pointer items-center gap-3 py-2 text-left text-muted-foreground text-sm transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none max-[900px]:min-h-11"
-                  onClick={() => { void ask(text); }}
-                >
-                  <Icon aria-hidden className="size-4 shrink-0" />
-                  <span className="flex-1">{text}</span>
-                  <ArrowUpRightIcon aria-hidden className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 max-[900px]:hidden" />
-                </button>
-              </li>
-            ))}
-          </ul>
-          {recent.length ? (
-            <section aria-labelledby="assistant-recent" className="mx-3 mt-6 sm:mx-4">
-              <div className="flex items-center justify-between">
-                <h2 id="assistant-recent" className="font-medium text-muted-foreground text-xs">Recent chats</h2>
-                {onShowHistory && (threads.data?.length ?? 0) > RECENT_CHATS ? (
-                  <Button type="button" size="xs" variant="ghost-muted" className="-me-2" onClick={onShowHistory}>
-                    Show all
-                  </Button>
-                ) : null}
-              </div>
-              <ul aria-label="Recent chats" className="mt-1 list-none divide-y divide-border/60 p-0">
-                {recent.map((thread) => (
-                  <li key={thread.id}>
-                    <button
-                      type="button"
-                      className="flex min-h-10 w-full cursor-pointer items-center gap-3 py-2 text-left text-sm text-foreground transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:underline max-[900px]:min-h-11"
-                      onClick={() => onThreadReady?.(thread.id)}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-                      <span className="shrink-0 text-muted-foreground text-xs tabular-nums">{chatTime(thread)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+      <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4">
+          {/* Centered a little above the middle, as wide as the composer's surface so the questions line up with it. */}
+          <div className="my-auto flex w-full max-w-[calc(var(--chat-content-max-width)+2rem)] flex-col pt-8 pb-[12vh] max-[900px]:pb-6">
+            <h1 className="mx-3 mb-5 text-center font-semibold sm:mx-4 text-2xl tracking-tight text-foreground">{greeting()}</h1>
+            {/* On a phone the box stays at the bottom, within thumb reach, as in the conversation. */}
+            {phone ? null : composer}
+            <ul aria-label="Example questions" className="mx-3 mt-2 list-none divide-y sm:mx-4 divide-border/60 p-0">
+              {ASSISTANT_STARTERS.map(({ text, icon: Icon }) => (
+                <li key={text}>
+                  <button
+                    type="button"
+                    className="group flex min-h-10 w-full cursor-pointer items-center gap-3 py-2 text-left text-muted-foreground text-sm transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none max-[900px]:min-h-11"
+                    onClick={() => { void ask(text); }}
+                  >
+                    <Icon aria-hidden className="size-4 shrink-0" />
+                    <span className="flex-1">{text}</span>
+                    <ArrowUpRightIcon aria-hidden className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 max-[900px]:hidden" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {recent.length ? (
+              <section aria-labelledby="assistant-recent" className="mx-3 mt-6 sm:mx-4">
+                <div className="flex items-center justify-between">
+                  <h2 id="assistant-recent" className="font-medium text-muted-foreground text-xs">Recent chats</h2>
+                  {onShowHistory && (threads.data?.length ?? 0) > RECENT_CHATS ? (
+                    <Button type="button" size="xs" variant="ghost-muted" className="-me-2" onClick={onShowHistory}>
+                      Show all
+                    </Button>
+                  ) : null}
+                </div>
+                <ul aria-label="Recent chats" className="mt-1 list-none divide-y divide-border/60 p-0">
+                  {recent.map((thread) => (
+                    <li key={thread.id}>
+                      <button
+                        type="button"
+                        className="flex min-h-10 w-full cursor-pointer items-center gap-3 py-2 text-left text-sm text-foreground transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:underline max-[900px]:min-h-11"
+                        onClick={() => onThreadReady?.(thread.id)}
+                      >
+                        <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+                        <span className="shrink-0 text-muted-foreground text-xs tabular-nums">{chatTime(thread)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </div>
         </div>
+        {phone ? composer : null}
       </div>
     );
   }
