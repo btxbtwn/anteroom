@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.792 — 2026-11-08
+
+- Sales records no longer lists a sold item a second or third time when clearing its other marketplace listings reported them as sold, so its count matches Analytics.
+
 ## 0.1.791 — 2026-11-08
 
 - Make listing rows in the sidebar larger, with bigger photos and text, and keep every row the same height.
