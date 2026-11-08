@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.822 — 2026-11-08
+
+- When a marketplace is busy listing another item, List, Update and Save draft now wait their turn and start on their own, instead of showing "Another action is running". The marketplace shows "Waiting for …" with a Cancel button.
+- A new activity button at the top of the window shows marketplace work across all your items: what's running, what's waiting and anything that didn't start.
+
 ## 0.1.821 — 2026-11-08
 
 - When the server restarts mid-read, the message now points to the Read measurements button by its current name.
