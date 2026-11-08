@@ -235,6 +235,36 @@ describe("useChatStream generate", () => {
     expect(getLive(convId)).toMatchObject({ streaming: false, failedAction: null });
   });
 
+  it("keeps reconnecting through server errors while the server restarts", async () => {
+    let attempt = 0;
+    routes = () => {
+      attempt += 1;
+      if (attempt === 1) return sse("data: Half a draft", "");
+      if (attempt === 2) return new Response("Internal Server Error", { status: 500 });
+      if (attempt === 3) return new Response("", { status: 502 });
+      if (attempt === 4) return json({ detail: "Draft generation is being configured. Try again shortly." }, 503);
+      return sse("data: The whole draft", "", DONE);
+    };
+    const { chat } = mountChat();
+
+    await act(() => chat().handleGenerate());
+
+    expect(requested("/generate").map((call) => call.url.endsWith("?resume=1"))).toEqual([false, true, true, true, true]);
+    expect(sleeps).toEqual([1500, 3000, 4500, 5000]);
+    expect(getLive(convId)).toMatchObject({ streaming: false, generating: false, failedAction: null });
+  });
+
+  it("stops reconnecting on a client error", async () => {
+    let attempt = 0;
+    routes = () => (++attempt === 1 ? sse("data: Half a draft", "") : json({ detail: "Sign in again" }, 401));
+    const { chat } = mountChat();
+
+    await act(() => chat().handleGenerate());
+
+    expect(requested("/generate")).toHaveLength(2);
+    expect(getLive(convId).streamText).toMatch(/^Error: Listing generation failed \(HTTP 401\)/);
+  });
+
   it("does not stack the reconnecting suffix across attempts", async () => {
     const statuses: string[] = [];
     onSleep.current = () => statuses.push(getLive(convId).streamStatus);
