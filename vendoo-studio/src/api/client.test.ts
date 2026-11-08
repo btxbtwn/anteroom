@@ -108,7 +108,7 @@ describe("Reading measurements from photos", () => {
     const fetch = vi.fn().mockResolvedValue(new Response("", { status: 503 }));
     vi.stubGlobal("fetch", fetch);
     await expect(api.measurements.read([photo()], "top")).rejects.toThrow(
-      "The server restarted while reading. Read from photos again.",
+      "The server restarted while reading. Press Read measurements again.",
     );
     expect(fetch).toHaveBeenCalledTimes(2);
   });
