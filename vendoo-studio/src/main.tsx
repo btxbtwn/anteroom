@@ -1,3 +1,4 @@
+import { installErrorReports } from "./api/errorReports";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { focusManager, QueryClientProvider } from "@tanstack/react-query";
@@ -14,6 +15,7 @@ import { installChunkReload } from "./lib/chunkReload";
 import { installUnsavedWorkGuard } from "./lib/unsavedWork";
 import "./styles/app.css";
 
+installErrorReports();
 applyTheme();
 
 markMacApp();

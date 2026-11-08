@@ -1,0 +1,226 @@
+"""Operator error emails: structured, grouped, scrubbed and never blocking."""
+import logging
+import sys
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+from vendoo_studio.services import error_alerts
+from vendoo_studio.services.error_alerts import AlertHandler, build_report, render_email, send_email
+
+
+FAKE_KEY = "-".join(("fake", "value", "123456789"))
+
+
+def record_with_exception(message="Draft save failed", error=None):
+    try:
+        raise error or RuntimeError(f"could not save listing api_key={FAKE_KEY}")
+    except Exception:
+        return logging.LogRecord("vendoo_studio.jobs", logging.ERROR, __file__, 12, message, (), sys.exc_info())
+
+
+def test_report_has_type_message_stack_location_and_release():
+    report = build_report(record_with_exception())
+    assert report["exception"]["type"] == "RuntimeError"
+    assert "could not save listing" in report["exception"]["message"]
+    assert "record_with_exception" in report["stack"]
+    assert report["location"].startswith("test_error_alerts.py:")
+    assert report["environment"]["release"]
+    assert report["title"].startswith("RuntimeError: could not save listing")
+
+
+def test_secrets_and_sql_parameters_are_removed():
+    report = build_report(record_with_exception())
+    assert FAKE_KEY not in str(report)
+    sql = RuntimeError("(psycopg.errors.X) boom\n[SQL: UPDATE listings SET title=%(t)s]\n"
+                       "[parameters: {'t': 'Seller private title'}]\n(Background on this error at: x)")
+    report = build_report(record_with_exception(error=sql))
+    assert "Seller private title" not in str(report)
+    assert "UPDATE listings" in report["exception"]["message"]
+
+
+def test_same_failure_with_different_messages_shares_a_fingerprint():
+    first = build_report(record_with_exception(error=ValueError("listing 1")))
+    second = build_report(record_with_exception(error=ValueError("listing 2")))
+    assert first["fingerprint"] == second["fingerprint"]
+
+
+def test_request_context_names_route_request_and_seller():
+    scope = {"method": "POST", "route": SimpleNamespace(path="/api/drafts/{draft_id}"),
+             "state": {"seller": SimpleNamespace(user_id="seller-1")}}
+    token = error_alerts.request_context.set({"scope": scope, "request_id": "req-9"})
+    try:
+        report = build_report(record_with_exception())
+    finally:
+        error_alerts.request_context.reset(token)
+    assert report["request"] == {"method": "POST", "route": "/api/drafts/{draft_id}",
+                                 "request_id": "req-9", "seller_id": "seller-1"}
+    subject, body = render_email(report, 0, None)
+    assert "POST /api/drafts/{draft_id}" in body and "seller-1" in body
+
+
+def test_browser_reports_carry_page_and_release():
+    record = logging.LogRecord("vendoo_studio.browser", logging.ERROR, __file__, 1, "Browser crash", (), None)
+    record.browser = {"kind": "crash", "name": "TypeError", "message": "x is undefined at row 42",
+                      "stack": "at Row (app.js:1:2)", "path": "/inventory", "user_agent": "Safari", "release": "0.1.840"}
+    report = build_report(record)
+    assert report["exception"] == {"type": "TypeError", "message": "x is undefined at row 42"}
+    assert report["location"] == "/inventory"
+    subject, body = render_email(report, 0, None)
+    assert subject.startswith("[Anteroom local] ERROR TypeError: x is undefined")
+    assert "web release 0.1.840" in body
+
+
+def test_email_goes_to_operator_over_tls():
+    with patch("smtplib.SMTP") as factory:
+        send_email("subject", "body")
+    factory.assert_called_once_with("smtp-relay.gmail.com", 587, local_hostname="myanteroom.com", timeout=20)
+    smtp = factory.return_value.__enter__.return_value
+    smtp.starttls.assert_called_once()
+    message = smtp.send_message.call_args.args[0]
+    assert message["To"] == "ccanizares@myanteroom.com"
+
+
+def handler(send, clock=lambda: 0.0):
+    # Tests drive process() directly; the idle daemon thread sees an empty queue.
+    return AlertHandler(send, sleep=lambda _s: None, clock=clock)
+
+
+def test_repeats_are_grouped_then_counted_in_the_next_email():
+    sent, now = [], [0.0]
+    h = handler(lambda s, b: sent.append((s, b)), clock=lambda: now[0])
+    for _ in range(5):
+        h.process(build_report(record_with_exception()))
+    assert len(sent) == 1
+    now[0] = error_alerts.REPEAT_WINDOW + 1
+    h.process(build_report(record_with_exception()))
+    assert len(sent) == 2 and "(+4 more)" in sent[1][0]
+    assert "Occurrences  5 since" in sent[1][1]
+
+
+def test_repeats_left_at_shutdown_are_flushed():
+    sent = []
+    h = handler(lambda s, b: sent.append(s))
+    for _ in range(3):
+        h.process(build_report(record_with_exception()))
+    h.flush_repeats()
+    assert len(sent) == 2 and "(+2 more)" in sent[1]
+
+
+def test_failed_delivery_is_retried():
+    attempts = []
+
+    def flaky(subject, body):
+        attempts.append(subject)
+        if len(attempts) < 3:
+            raise OSError("relay down")
+
+    h = handler(flaky)
+    h.process(build_report(record_with_exception()))
+    assert len(attempts) == 3
+
+
+def test_hourly_cap_stops_a_flood_and_says_so():
+    sent, now = [], [0.0]
+    h = handler(lambda s, b: sent.append(b), clock=lambda: now[0])
+    for i in range(error_alerts.HOURLY_CAP + 5):
+        record = logging.LogRecord("vendoo_studio.x", logging.ERROR, f"/f{i}.py", i, "m", (), None)
+        h.process(build_report(record))
+    assert len(sent) == error_alerts.HOURLY_CAP
+    now[0] = 3601
+    h.process(build_report(logging.LogRecord("vendoo_studio.x", logging.ERROR, "/new.py", 1, "m", (), None)))
+    assert "5 report(s) were not emailed" in sent[-1]
+
+
+def test_reporter_ignores_its_own_logs_and_uvicorns_duplicate():
+    h = handler(lambda s, b: None)
+    own = logging.LogRecord("vendoo_studio.services.error_alerts", logging.ERROR, __file__, 1, "x", (), None)
+    dup = logging.LogRecord("uvicorn.error", logging.ERROR, __file__, 1, "Exception in ASGI application\n", (), None)
+    other = logging.LogRecord("uvicorn.error", logging.ERROR, __file__, 1, "lifespan failed", (), None)
+    assert not h.filter(own) and not h.filter(dup) and h.filter(other)
+
+
+def test_warnings_are_not_emailed():
+    h = handler(lambda s, b: None)
+    assert h.level == logging.ERROR
+
+
+@pytest.mark.parametrize("env", [{}, {"ANTEROOM_ERROR_EMAIL": "1", "ANTEROOM_SANDBOX": "1"}])
+def test_disabled_or_sandbox_never_sends(monkeypatch, env):
+    monkeypatch.delenv("ANTEROOM_ERROR_EMAIL", raising=False)
+    monkeypatch.delenv("ANTEROOM_SANDBOX", raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    with patch.object(error_alerts, "AlertHandler") as factory:
+        assert error_alerts.install_alerts() is None
+    factory.assert_not_called()
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_enabled_install_reports_errors_and_uncaught_thread_exceptions(monkeypatch):
+    import threading
+
+    monkeypatch.setenv("ANTEROOM_ERROR_EMAIL", "1")
+    monkeypatch.delenv("ANTEROOM_SANDBOX", raising=False)
+    queued = []
+    monkeypatch.setattr(AlertHandler, "emit", lambda self, record: queued.append(record))
+    hooks = sys.excepthook, threading.excepthook
+    installed = error_alerts.install_alerts()
+    try:
+        assert installed is not None
+        logging.getLogger("vendoo_studio.jobs").error("boom")
+        logging.getLogger("vendoo_studio.jobs").warning("not emailed")
+        worker = threading.Thread(target=lambda: 1 / 0, name="broken")
+        worker.start()
+        worker.join()
+    finally:
+        monkeypatch.setattr(installed, "send", lambda s, b: None)
+        error_alerts.uninstall_alerts()
+    assert (sys.excepthook, threading.excepthook) == hooks
+    assert [r.getMessage() for r in queued] == ["boom", "Uncaught exception in thread broken"]
+
+
+def test_browser_route_logs_structured_report():
+    from pydantic import ValidationError
+    from vendoo_studio.routes.error_reports import BrowserFailure, report
+
+    with pytest.raises(ValidationError):
+        BrowserFailure.model_validate({"kind": "crash", "unexpected": "x"})
+    with patch.object(logging.getLogger("vendoo_studio.browser"), "error") as error:
+        report(BrowserFailure(kind="render", name="TypeError", message="bad", path="/inventory"))
+    assert error.call_args.kwargs["extra"]["browser"]["path"] == "/inventory"
+
+
+def test_route_crash_is_reported_once_with_request_context():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from vendoo_studio.hosted import AccessLogMiddleware
+
+    app = FastAPI()
+
+    @app.get("/api/items/{item_id}")
+    def broken(item_id: str):
+        raise KeyError("missing")
+
+    @app.get("/api/unavailable")
+    def unavailable():
+        from fastapi.responses import JSONResponse
+        return JSONResponse({}, status_code=503)
+
+    app.add_middleware(AccessLogMiddleware)
+    reports = []
+    handler = logging.Handler(logging.ERROR)
+    handler.emit = lambda record: reports.append(build_report(record))
+    logging.getLogger("vendoo_studio.http").addHandler(handler)
+    try:
+        client = TestClient(app, raise_server_exceptions=False)
+        assert client.get("/api/items/abc?code=secret", headers={"fly-request-id": "r-1"}).status_code == 500
+        assert client.get("/api/unavailable").status_code == 503
+    finally:
+        logging.getLogger("vendoo_studio.http").removeHandler(handler)
+    crash, unavailable_report = reports
+    assert crash["exception"]["type"] == "KeyError"
+    assert crash["request"] == {"method": "GET", "route": "/api/items/{item_id}", "request_id": "r-1", "seller_id": None}
+    assert "secret" not in str(crash)
+    assert unavailable_report["message"] == "GET /api/unavailable answered 503"

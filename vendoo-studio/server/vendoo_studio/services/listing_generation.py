@@ -413,7 +413,7 @@ async def run_listing_generation(
                 message = (
                     "Timed out while generating the listing. Retry generate."
                 )
-        log.warning("listing generation failed for %s: %s", conv_id, message)
+        log.error("listing generation failed for %s: %s", conv_id, message)
         try:
             run.publish(sse_data(f"Error: {message}"))
             stream_repo.add_message(conv_id, "system", message, provider="system", model="")
