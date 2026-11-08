@@ -64,6 +64,15 @@ class MissingTest(unittest.TestCase):
                 {"field": "title", "message": "Title is empty.", "blocking": True}]
         self.assertEqual(len(missing(gaps, [{"field": "title", "message": "Rejected."}])), 1)
 
+    def test_a_form_label_reads_without_its_trailing_colon(self):
+        # Mercari's sell page labels the row "Ships from:"; the seller reads "Ships from".
+        gaps = [{"field": "mercari_specifics.shipsFrom", "message": "Ships from: Required field is empty.",
+                 "blocking": False, "required": True, "label": "Ships from:"},
+                {"field": "mercari_specifics.prepaid", "message": "Required.", "blocking": True,
+                 "label": "Will your item ship with a prepaid label?"}]
+        self.assertEqual([item["label"] for item in missing(gaps)],
+                         ["Ships from", "Will your item ship with a prepaid label?"])
+
     def test_field_names_read_as_the_form_says_them(self):
         self.assertEqual(label("direct_category_ids.mercari"), "Category")
         self.assertEqual(label("depop_specifics.parcelSize"), "Parcel size")

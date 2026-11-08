@@ -29,7 +29,8 @@ test("another batch and inventory selection stay available while generation wait
     for (let index = 0; index < 2; index++) {
       await page.getByRole("button", { name: "Select listings", exact: true }).click();
       await page.getByRole("list", { name: "Listings" }).getByRole("checkbox", { name: `Select ${titles[index]}`, exact: true }).click();
-      await page.getByRole("region", { name: "Bulk listing actions" }).getByRole("button", { name: "Regenerate", exact: true }).click();
+      await page.getByRole("region", { name: "Bulk listing actions" }).getByRole("button", { name: "More", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Regenerate…", exact: true }).click();
       await page.getByRole("button", { name: "Rewrite 1", exact: true }).click();
       await expect.poll(() => started.has(ids[index]!)).toBe(true);
     }

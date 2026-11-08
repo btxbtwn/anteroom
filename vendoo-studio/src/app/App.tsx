@@ -49,7 +49,8 @@ import { ThemeSync } from "../components/ThemeSync";
 import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSessionNotice";
 
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
-import { initialOpenListing, openListingReducer } from "./openListing";
+import { initialOpenListing, openListingReducer, phonePaneOnOpen } from "./openListing";
+import type { ListingResponse } from "../api/types";
 import { loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode } from "./pageLoaders";
 import { ListingChatPane, ListingEditorPane, pageLoading, type ListingPaneActions } from "./ListingPanes";
 import { ErrorBoundary } from "../components/ErrorBoundary";
@@ -367,9 +368,12 @@ export function App() {
     void prefetchListingReads(queryClient, id);
     dispatchOpenListing({ type: "open", id, tab });
     goListings();
-    setMobilePane(runtime.hosted ? "editor" : "workspace");
+    setMobilePane(runtime.hosted ? "editor" : phonePaneOnOpen(
+      conversations?.find((row) => row.id === id),
+      queryClient.getQueryData<ListingResponse>(["listing", id]),
+    ));
     closeMobileSidebar();
-  }, [goListings, closeMobileSidebar, queryClient, runtime.hosted]);
+  }, [goListings, closeMobileSidebar, queryClient, runtime.hosted, conversations]);
 
   const handleSettingsSectionChange = (section: SettingsSectionId) => {
     setSettingsSection(section);
