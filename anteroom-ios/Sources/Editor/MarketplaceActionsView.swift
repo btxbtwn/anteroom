@@ -199,6 +199,7 @@ struct MarketplaceActionsView: View {
                 }
             }
             .task { await model.load() }
+            .reloadingOnReturn(when: model.loadError != nil) { await model.load() }
             // A List or Delist runs in the background: follow it while one is running.
             .task(id: model.anyRunning) {
                 while model.anyRunning && !Task.isCancelled {

@@ -98,7 +98,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   )));
 
   // Fills blank measurement fields from each item's yardstick photos; typed values stay.
-  const readFromPhotos = async () => {
+  const readMeasurements = async () => {
     const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
     setReading({ done: 0, total: todo.length });
     await readEach(todo, READ_CONCURRENCY, async (index) => {
@@ -197,7 +197,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             Box, COG and labels go on every draft. Drag photos to set their order; the first one is
             the cover, and a click enlarges one. Rotate or remove a photo from its corners. Type each item's SKU and measurements in inches, or
             leave them blank: a typed SKU is kept as is, a blank one is made up from the brand and size.
-            Read from photos fills blank measurements from yardstick photos; check them before creating.
+            Read measurements fills blank measurements from yardstick photos; check them before creating.
           </p>
         </div>
         <div className="bulk-upload-fields">
@@ -406,9 +406,9 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             className="btn btn-secondary"
             disabled={reading !== null || !runtime.features.has("generation")}
             title="Fill blank measurements from photos with a yardstick on the item"
-            onClick={() => void readFromPhotos()}
+            onClick={() => void readMeasurements()}
           >
-            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read from photos"}
+            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
           </button>
           <button type="button" className="btn btn-secondary" disabled={invalidCog || reading !== null} onClick={() => confirm(false)}>
             Create drafts only

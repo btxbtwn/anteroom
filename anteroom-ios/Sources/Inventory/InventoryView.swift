@@ -164,6 +164,7 @@ struct InventoryView: View {
         .searchable(text: $search, prompt: "Search title or SKU")
         .refreshable { await model.reload() }
         .task { if !model.hasLoaded { await model.reload() } }
+        .reloadingOnReturn(when: !model.hasLoaded && model.error != nil) { await model.reload() }
         // Listings change on other devices; catch up when the app comes back
         // after a while (a quick switch away keeps what's on screen).
         .onChange(of: scenePhase) { _, phase in
@@ -307,7 +308,7 @@ struct InventoryView: View {
                     }
                 }
             }
-        } else if !model.hasLoaded, model.error != nil {
+        } else if !model.hasLoaded, model.error != nil, !model.isLoading {
             ContentUnavailableView {
                 Label("Couldn't load inventory", systemImage: "wifi.exclamationmark")
             } description: {

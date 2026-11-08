@@ -137,7 +137,7 @@ struct GeneralSettingsSections: View {
                     .font(.footnote).foregroundStyle(.secondary)
                 if appearance.isLoading { ProgressView("Loading appearance…") }
                 if appearance.isSaving { ProgressView("Saving…") }
-                if let error = appearance.error {
+                if let error = appearance.error, !appearance.isLoading {
                     Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                     Button("Reload appearance") { Task { await appearance.refresh() } }
                         .disabled(appearance.isLoading || appearance.isSaving)

@@ -12,7 +12,7 @@ Each item's Vendoo sale becomes one of:
   it, or only a listing the old sold check read as sold, which it replaces.
 
 A sale later read from the marketplace itself replaces the Vendoo copy for
-that item and marketplace (see ``order_history``).
+that item and marketplace (see ``sale_matching``).
 """
 from __future__ import annotations
 
