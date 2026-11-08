@@ -109,6 +109,15 @@ export function App() {
   const [mobilePane, setMobilePane] = useState<"workspace" | "editor">(runtime.hosted ? "editor" : "workspace");
   // On mobile the listings start open only when a listing link opened the app; home is the assistant.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => listingFromUrl && window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
+  const phoneInventory = isMobile && activeView === "listings" && mobileSidebarOpen;
+  const inventoryScroll = useRef(0);
+  useLayoutEffect(() => {
+    if (!phoneInventory) return;
+    window.scrollTo(0, inventoryScroll.current);
+    const remember = () => { inventoryScroll.current = window.scrollY; };
+    window.addEventListener("scroll", remember, { passive: true });
+    return () => window.removeEventListener("scroll", remember);
+  }, [phoneInventory]);
   const [mobileThreadsOpen, setMobileThreadsOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [setupGuideOpen, setSetupGuideOpen] = useState(setupGuideAutoOpen === true);
@@ -629,7 +638,7 @@ export function App() {
     : null;
 
   return (
-    <div className="app-shell" style={panelWidthStyle}>
+    <div className={`app-shell${phoneInventory ? " phone-inventory" : ""}`} style={panelWidthStyle}>
       {runtime.features.has("marketplace_sessions") && <MarketplaceSessionNotice />}
       <WorkspaceTopbar
         accountControls={isMobile ? undefined : runtime.accountControls}

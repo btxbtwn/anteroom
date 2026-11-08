@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.834 — 2026-11-08
+
+- Inventory on phones scrolls to the screen edge behind Safari's floating controls, with the profile button beside the header actions.
+
 ## 0.1.833 — 2026-11-08
 
 - Inventory thumbnails load ahead of scrolling so upcoming items show their photos sooner.

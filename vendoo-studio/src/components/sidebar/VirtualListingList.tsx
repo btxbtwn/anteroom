@@ -1,4 +1,4 @@
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { loadPrivateImage } from "../../api/privateImages";
 import { useWorkspaceRuntime } from "../../app/runtime";
@@ -13,9 +13,10 @@ export function VirtualListingList<T extends { id: string; cover_photo_url?: str
   const listRef = useRef<HTMLDivElement>(null);
   const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches);
   const [scrollMargin, setScrollMargin] = useState(0);
-  const getScrollElement = useCallback(() => mobile ? listRef.current?.closest("aside") ?? null : listRef.current, [mobile]);
+  const getScrollElement = useCallback(() => listRef.current, []);
   // oxlint-disable-next-line react/incompatible-library -- The app does not use the React Compiler; nothing memoizes this component.
-  const virtualizer = useVirtualizer({
+  const elementVirtualizer = useVirtualizer({
+    enabled: !mobile,
     count: rows.length,
     getScrollElement,
     getItemKey: index => rows[index].id,
@@ -24,6 +25,18 @@ export function VirtualListingList<T extends { id: string; cover_photo_url?: str
     scrollMargin,
     initialRect: { width: 300, height: 800 },
   });
+  // Safari paints document scrolling behind its floating browser controls.
+  // oxlint-disable-next-line react/incompatible-library -- No React Compiler.
+  const windowVirtualizer = useWindowVirtualizer({
+    enabled: mobile,
+    count: rows.length,
+    getItemKey: index => rows[index].id,
+    estimateSize: () => 97,
+    overscan: 5,
+    scrollMargin,
+    initialRect: { width: 390, height: 800 },
+  });
+  const virtualizer = mobile ? windowVirtualizer : elementVirtualizer;
   const { hosted } = useWorkspaceRuntime();
   const first = virtualizer.getVirtualItems()[0]?.index ?? 0;
   useEffect(() => {
@@ -63,8 +76,8 @@ export function VirtualListingList<T extends { id: string; cover_photo_url?: str
     media.addEventListener("change", resize);
     const scroll = getScrollElement();
     const list = listRef.current;
-    const measure = () => setScrollMargin(mobile && scroll && list
-      ? list.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop : 0);
+    const measure = () => setScrollMargin(mobile && list
+      ? list.getBoundingClientRect().top + window.scrollY : 0);
     measure();
     const observer = new ResizeObserver(measure);
     if (scroll) observer.observe(scroll);
