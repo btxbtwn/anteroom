@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.797 — 2026-11-08
+
+- Regenerate on the web now rewrites listings that are already live on marketplaces, instead of failing with "Only an unsent draft can be removed from this workspace". Their marketplace links are kept.
+
 ## 0.1.796 — 2026-11-08
 
 - The iPhone app now runs on iPad too: the tabs open as a sidebar, and Inventory keeps your listings beside the one you're editing.
