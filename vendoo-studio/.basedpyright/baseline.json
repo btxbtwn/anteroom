@@ -52,14 +52,6 @@
         ],
         "./server/vendoo_studio/routes/listing_commands.py": [
             {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 43,
-                    "endColumn": 47,
-                    "lineCount": 1
-                }
-            },
-            {
                 "code": "reportOptionalMemberAccess",
                 "range": {
                     "startColumn": 87,
