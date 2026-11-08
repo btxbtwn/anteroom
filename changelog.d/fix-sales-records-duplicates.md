@@ -1,0 +1,1 @@
+- Sales records no longer lists a sold item a second or third time when clearing its other marketplace listings reported them as sold, so its count matches Analytics.

@@ -118,7 +118,10 @@ def get_sale(db: Session, sale_id: str) -> dict:
     row = db.query(MarketplaceSale, Conversation.title).outerjoin(Conversation, Conversation.id == MarketplaceSale.conversation_id).filter(MarketplaceSale.id == sale_id).first()
     if row is None:
         raise LedgerError("Sale record not found.", 404)
-    return next(record for record in records(db, row[0].conversation_id) if record["id"] == sale_id)
+    found = next((record for record in records(db, row[0].conversation_id) if record["id"] == sale_id), None)
+    if found is None:
+        raise LedgerError("Sale record not found.", 404)
+    return found
 
 
 def save_financials(db: Session, sale_id: str, body: FinancialSave) -> dict:
