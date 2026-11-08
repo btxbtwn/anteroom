@@ -1,1 +1,0 @@
-- Listing generation no longer stops with "HTTP 500" when Anteroom restarts for an update mid-generation; it keeps reconnecting until the draft finishes.
