@@ -21,3 +21,21 @@ it("opens appearance and web release controls without starting the desktop updat
   expect(client.getQueryCache().find({ queryKey: ["updates"] })).toBeUndefined();
   expect(client.getQueryCache().find({ queryKey: ["update-progress"] })).toBeUndefined();
 });
+
+it("explains the theme and the Vendoo switch in seller words, with the switch at the row's end on phones", () => {
+  const client = new QueryClient();
+  client.setQueryData(["settings-ui"], { theme: "system", listing_names: "title", listing_mode: "direct" });
+  client.setQueryData(["status"], { version: "99.0.0" });
+  const html = renderToStaticMarkup(
+    <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(), views: new Set(["settings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
+      <QueryClientProvider client={client}><SettingsPage section="general" onOpenListing={() => {}} /></QueryClientProvider>
+    </WorkspaceRuntimeProvider>,
+  );
+  expect(html).toContain("System follows your device’s light or dark setting.");
+  expect(html).not.toContain("Mac");
+  expect(html).not.toContain("Use Vendoo");
+  expect(html).toContain("List through Vendoo");
+  expect(html).toContain("Only if you have a Vendoo account.");
+  const vendoo = html.slice(html.indexOf("List through Vendoo") - 600, html.indexOf("List through Vendoo"));
+  expect(vendoo).toContain("data-inline-control");
+});

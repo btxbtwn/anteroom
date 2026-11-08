@@ -451,7 +451,8 @@ export const api = {
     remove: (id: string) => request<SourceBoxes>(`/boxes/${id}`, { method: "DELETE" }),
   },
   sourcing: {
-    get: () => request<SourcingState>("/sourcing"),
+    // A stalled read ends in an error with Try again, not an endless skeleton.
+    get: () => requestWithTimeout<SourcingState>("/sourcing", {}, "Sourcing took too long to answer."),
     refresh: () => request<SourcingState>("/sourcing/refresh", { method: "POST" }),
     evidence: (theme: string) =>
       request<SourcingEvidence>(`/sourcing/evidence?theme=${encodeURIComponent(theme)}`),
@@ -1049,11 +1050,6 @@ export const api = {
         { method: "DELETE" },
       ),
     ebayInventoryLocation: () => request<{ location: string }>("/settings/ebay-inventory-location"),
-    setEbayInventoryLocation: (location: string) =>
-      request<{ ok: boolean; location: string }>("/settings/ebay-inventory-location", {
-        method: "PUT",
-        body: JSON.stringify({ location }),
-      }),
     hiddenFields: (conversationId?: string) =>
       request<{
         always: { marketplace: string; field: string; label: string }[];

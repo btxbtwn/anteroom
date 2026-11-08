@@ -31,7 +31,7 @@ test("Vendoo is opt-in, replaces direct actions, and keeps manually edited draft
     await openListing(page, phone, title);
     await expect(page.getByRole("button", {name: "Send to Vendoo", exact: true})).toHaveCount(0);
     await settings();
-    const toggle = page.getByRole("switch", {name: "Use Vendoo"});
+    const toggle = page.getByRole("switch", {name: "List through Vendoo"});
     await expect(toggle).not.toBeChecked();
     await toggle.click();
     await expect.poll(async () => (await (await request.get("/api/settings/ui")).json()).listing_mode).toBe("vendoo");
@@ -52,7 +52,7 @@ test("Vendoo is opt-in, replaces direct actions, and keeps manually edited draft
     await titleBox(page, phone);
     await expect(page.getByRole("button", {name: "Save changes to Vendoo"})).toBeVisible();
     await settings();
-    await page.getByRole("switch", {name: "Use Vendoo"}).click();
+    await page.getByRole("switch", {name: "List through Vendoo"}).click();
     await expect.poll(async () => (await (await request.get("/api/settings/ui")).json()).listing_mode).toBe("direct");
     await openListing(page, phone, "Manually edited Vendoo draft");
     await expect(page.getByRole("button", {name: /Send to Vendoo|Save changes to Vendoo/})).toHaveCount(0);

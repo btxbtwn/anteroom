@@ -15,7 +15,6 @@ import { ConnectChromeButton } from "../ConnectChromeButton";
 import { ExtensionLoadPath } from "../ExtensionLoadPath";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { Button, buttonVariants } from "../ui/button";
-import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
@@ -58,24 +57,30 @@ const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }
 
 const CHROME_MARKET_ORDER: ExtensionSessionMarket[] = ["poshmark", "mercari", "depop"];
 
+/** Builds a row's Detect sales switch once the row knows whether its account can be checked. */
+type SalesSwitch = (blockedReason: string | null) => ReactNode;
+
 function MarketplaceSalesSwitch({
   name,
   enabled,
   pending,
+  blockedReason,
   onChange,
 }: {
   name: string;
   enabled: boolean;
   pending: boolean;
+  /** Why sales can't be checked yet. The switch shows off until then; the saved choice is kept. */
+  blockedReason: string | null;
   onChange: (enabled: boolean) => void;
 }) {
   return (
     <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      Detect sales
+      {blockedReason ?? "Detect sales"}
       <Switch
         size="sm"
-        checked={enabled}
-        disabled={pending}
+        checked={blockedReason ? false : enabled}
+        disabled={pending || Boolean(blockedReason)}
         aria-label={`Sale detection for ${name}`}
         onCheckedChange={onChange}
       />
@@ -101,7 +106,7 @@ export function DirectConnectionRow({
 }: {
   marketplace: (typeof DIRECT_MARKETPLACES)[number];
   account: DirectAccountStatus | undefined;
-  salesSwitch?: ReactNode;
+  salesSwitch?: SalesSwitch;
   checkError?: string | null;
 }) {
   const queryClient = useQueryClient();
@@ -153,7 +158,7 @@ export function DirectConnectionRow({
       }
       control={
         <span className="flex flex-wrap items-center justify-end gap-2">
-          {salesSwitch}
+          {salesSwitch?.(account?.connected ? null : "Connect to detect sales")}
           {control}
         </span>
       }
@@ -169,7 +174,6 @@ export function DirectConnectionRow({
       ) : null}
       {error && !account?.pending ? <SettingsNote tone="error">{error}</SettingsNote> : null}
       {marketplace.id === "etsy" && account?.connected ? <EtsyListingDefaults /> : null}
-      {marketplace.id === "ebay" ? <EbayInventoryLocationRow /> : null}
       {marketplace.id === "ebay" && account?.connected ? (
         <EbayListingDefaults reconnecting={connect.isPending} onReconnect={() => connect.mutate()} />
       ) : null}
@@ -224,53 +228,6 @@ function EtsyListingDefaults() {
       </div>
       {profiles.error || save.error ? <SettingsNote tone="error">{(save.error || profiles.error)?.message}</SettingsNote>
         : <SettingsNote>New Etsy listings use these profiles, with the package weight and size from each listing.</SettingsNote>}
-    </div>
-  );
-}
-
-function EbayInventoryLocationRow() {
-  const queryClient = useQueryClient();
-  const { data, error, isPending } = useQuery({
-    queryKey: ["settings-ebay-inventory-location"],
-    queryFn: api.settings.ebayInventoryLocation,
-  });
-  const [draft, setDraft] = useState<string | null>(null);
-  const value = draft ?? data?.location ?? "";
-  const dirty = value !== (data?.location ?? "");
-  const save = useMutation({
-    mutationFn: (location: string) => api.settings.setEbayInventoryLocation(location),
-    onSuccess: (payload) => {
-      queryClient.setQueryData(["settings-ebay-inventory-location"], { location: payload.location });
-      setDraft(null);
-    },
-  });
-
-  return (
-    <div id="ebay-inventory-location" className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-end gap-2">
-        <Input
-          size="sm"
-          className="w-52"
-          aria-label="eBay inventory location"
-          placeholder="ZIP or city"
-          value={isPending ? "" : value}
-          disabled={isPending}
-          onChange={(event) => setDraft(event.target.value)}
-        />
-        <Button
-          size="sm"
-          disabled={isPending || !dirty || save.isPending}
-          onClick={() => save.mutate(value.trim())}
-        >
-          {save.isPending ? <Spinner /> : null}
-          {save.isPending ? "Saving" : "Save"}
-        </Button>
-      </div>
-      <SettingsNote>
-        ZIP code eBay ships from. Anteroom writes it on every listing, and creates the eBay inventory location from a 5-digit ZIP when eBay does not have one yet. Mercari and Depop use the ships-from ZIP under Settings → Listings.
-      </SettingsNote>
-      {error ? <SettingsNote tone="error">{(error as Error).message || "Could not load inventory location"}</SettingsNote> : null}
-      {save.error ? <SettingsNote tone="error">{(save.error as Error).message}</SettingsNote> : null}
     </div>
   );
 }
@@ -345,7 +302,7 @@ function ChromeSessionRow({
   marketplace: ExtensionSessionMarket;
   chromeReady: boolean;
   unavailable?: string | null;
-  salesSwitch?: ReactNode;
+  salesSwitch?: SalesSwitch;
   checkError?: string | null;
 }) {
   const queryClient = useQueryClient();
@@ -388,10 +345,10 @@ function ChromeSessionRow({
       }
       control={
         <span className="flex flex-wrap items-center justify-end gap-2">
-          {salesSwitch}
+          {salesSwitch?.(!chromeReady ? "Connect Chrome to detect sales" : session?.state === "signed_in" ? null : "Sign in to detect sales")}
           <Button size="xs" variant="outline" disabled={!chromeReady || connect.isPending} onClick={() => connect.mutate()}>
             {connect.isPending ? <Spinner /> : null}
-            {session?.state === "signed_in" ? "Sign in again" : "Sign in"}
+            {session?.state === "signed_in" || session?.state === "expired" ? "Sign in again" : "Sign in"}
           </Button>
         </span>
       }
@@ -405,7 +362,7 @@ function ChromeSessionRow({
 
 /** On the web, Chrome's marketplace sign-ins are read through this seller's connected Anteroom tab. */
 function HostedChromeSessions({ salesSwitch, checks }: {
-  salesSwitch?: (marketplace: string, name: string) => ReactNode;
+  salesSwitch?: (marketplace: string, name: string) => SalesSwitch;
   checks?: Record<string, string>;
 }) {
   const sessions = useQuery({
@@ -469,11 +426,12 @@ function MarketplaceSection() {
   const accounts = direct.data?.accounts;
   const relay = direct.data?.relay;
   const enabled = (marketplace: string) => detection.data?.enabled?.[marketplace] !== false;
-  const salesSwitch = (marketplace: string, name: string) => (
+  const salesSwitch = (marketplace: string, name: string): SalesSwitch => (blockedReason) => (
     <MarketplaceSalesSwitch
       name={name}
       enabled={enabled(marketplace)}
       pending={saveDetection.isPending}
+      blockedReason={blockedReason}
       onChange={(next) => saveDetection.mutate({ marketplace, enabled: next })}
     />
   );
@@ -538,6 +496,7 @@ function MarketplaceSection() {
       </SettingsRow>
       <SettingsRow
         id="sale-autodelist"
+        inlineControl
         title="Delist the other marketplaces"
         description="When something sells, take it off the other marketplaces it’s still listed on; the sale notice says if a delist can’t finish."
         control={

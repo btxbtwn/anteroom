@@ -9,6 +9,8 @@ const MIN_PASSWORD = 8;
 /** Opens the reset form when the Mac app sends the seller here to reset in their browser. */
 const RESET_PATH = "/?forgot-password";
 
+export const SIGN_IN_INTRO = "One account for your listings on the web, on iPhone and on desktop.";
+
 export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; notice?: string; sandbox?: boolean }) {
   const mac = useMacApp();
   const [mode, setMode] = useState<Mode>(() => {
@@ -59,9 +61,8 @@ export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; no
   return (
     <main className="sign-in">
       <div className="pywebview-drag-region cloud-drag" aria-hidden="true" />
-      <p className="eyebrow">YOUR LISTING WORKSPACE</p>
       <h1>{title}</h1>
-      <p>{mode === "reset" ? "Enter your account’s email. We’ll send a link to choose a new password." : "One account for your listings on the web, iPhone and Mac."}</p>
+      <p>{mode === "reset" ? "Enter your account’s email. We’ll send a link to choose a new password." : SIGN_IN_INTRO}</p>
       {sandbox && <p>Local sandbox: use alice@sandbox.test or bob@sandbox.test with the password <code>sandbox</code>.</p>}
       {notice && <p role="status">{notice}</p>}
       <form onSubmit={submit}>
@@ -110,7 +111,6 @@ export function SetPassword({ client, onDone }: { client: SupabaseClient; onDone
   return (
     <main className="sign-in">
       <div className="pywebview-drag-region cloud-drag" aria-hidden="true" />
-      <p className="eyebrow">YOUR LISTING WORKSPACE</p>
       <h1>Choose a new password</h1>
       <form onSubmit={event => void submit(event)}>
         <label htmlFor="new-password">New password</label>

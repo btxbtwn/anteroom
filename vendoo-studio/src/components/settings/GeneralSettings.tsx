@@ -36,7 +36,7 @@ function AppearanceSection() {
     <SettingsSection id="appearance" title="Appearance">
       <SettingsRow
         title="Theme"
-        description="System follows your Mac’s appearance."
+        description="System follows your device’s light or dark setting."
         control={
           <SettingsSelect<ThemePreference>
             aria-label="Theme"
@@ -87,9 +87,9 @@ function ListingModeSection() {
     },
   });
   return <SettingsSection id="listing-mode" title="Listing workflow">
-    <SettingsRow title="Use Vendoo"
-      description="On uses Vendoo for draft review and listing. Off uses direct marketplace forms and actions."
-      control={<Switch aria-label="Use Vendoo" checked={prefs.data?.listing_mode === "vendoo"}
+    <SettingsRow title="List through Vendoo" inlineControl
+      description="Only if you have a Vendoo account. On sends each draft to Vendoo to review and list there. Off lists on each marketplace from Anteroom."
+      control={<Switch aria-label="List through Vendoo" checked={prefs.data?.listing_mode === "vendoo"}
         disabled={prefs.isPending || save.isPending} onCheckedChange={value => save.mutate(value)} />} />
     {save.error && <SettingsNote tone="error">{save.error.message}</SettingsNote>}
   </SettingsSection>;

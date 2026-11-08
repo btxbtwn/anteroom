@@ -1,6 +1,6 @@
 # Optional Vendoo workflow
 
-Settings → General → Listing workflow → **Use Vendoo** selects one workflow.
+Settings → General → Listing workflow → **List through Vendoo** selects one workflow.
 New installations use direct marketplaces. The obsolete `vendoo_enabled` flag
 does not enable Vendoo.
 
