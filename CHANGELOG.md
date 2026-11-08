@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.840 — 2026-11-08
+
+- A category set on General now fills the closest Poshmark, Mercari and Depop category when no exact match exists, instead of leaving it blank. That marketplace tab shows "Suggested: check it" until you pick a category or press Looks right.
+- Kids' sets and gloves no longer land in Mercari's Fragrance or Cleaning categories, and Etsy no longer picks Pet Supplies for women's tops, dresses or men's hats.
+
 ## 0.1.839 — 2026-11-08
 
 - The General form now follows the order you fill it in: category, then title, condition, size and brand, then price, description, colors and department, and shipping.
