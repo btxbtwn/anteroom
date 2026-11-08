@@ -42,6 +42,13 @@ struct MarketplaceActionsTests {
 
         // A refused List can be tried again; never listed anywhere can be listed.
         precondition(rows["depop"]!.label == "Not listed" && rows["depop"]!.tone == .failed && rows["depop"]!.canList)
+        // A refusal about the listing offers Ask chat; one chat cannot fix (a sign-in, an outage) does not.
+        precondition(rows["depop"]!.chatPrompt?.contains("Depop failed. Anteroom said: Add a size.") == true)
+        precondition(rows["depop"]!.chatPrompt?.contains("plain words") == true)
+        let outage = try JSONDecoder().decode(NativeDraftState.self, from: Data(#"""
+        {"state":"not_saved","error":"Etsy is having trouble right now.","error_code":"network"}
+        """#.utf8))
+        precondition(MarketplaceActions.status("etsy", live: nil, draft: outage, revisionID: nil).chatPrompt == nil)
         precondition(rows["etsy"]!.label == "Not listed" && rows["etsy"]!.canList && !rows["etsy"]!.canDelist)
         precondition(rows["etsy"]!.canSaveDraft && !rows["etsy"]!.canUpdate)
         precondition(!poshmark.canUpdate && !poshmark.canSaveDraft && !mercari.canUpdate)

@@ -42,7 +42,12 @@ test("a marketplace rejection leaves the form editable and List available for re
     await expect(list).toBeEnabled();
     await list.click();
     await page.getByRole("button", { name: "List on Poshmark", exact: true }).click();
-    await expect(page.getByText(/Poshmark said: Please select a valid size/)).toBeVisible();
+    // Anteroom's words lead; Poshmark's own reply waits under Details.
+    await expect(page.getByText("Poshmark rejected the size.", { exact: true })).toBeVisible();
+    const said = page.getByText(/Poshmark said: Please select a valid size/);
+    await expect(said).toBeHidden();
+    await page.getByText("Details", { exact: true }).click();
+    await expect(said).toBeVisible();
     await page.screenshot({ path: info.outputPath("marketplace-rejection.png"), fullPage: true });
     const size = page.getByRole("textbox", { name: "Custom size 1", exact: true });
     await expect(size).toBeEditable();
