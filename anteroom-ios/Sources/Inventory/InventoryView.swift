@@ -77,18 +77,44 @@ struct InventoryView: View {
         }
     }
 
-    @ViewBuilder
+    /// The web's phone row (sidebar/ListingRow.tsx): no disclosure chevron, and
+    /// the row's actions behind one full-size "…" button.
     private func link(_ listing: ListingSummary, hint: String?) -> some View {
-        let row = ListingRow(api: model.api, listing: listing, hint: hint, missing: model.missing(listing))
-        if sideBySide {
-            Button { open = listing } label: {
-                row.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        let row = ListingRow(api: model.api, listing: listing, hint: hint, selling: model.preferredMarketplaces)
+        return HStack(spacing: 0) {
+            if sideBySide {
+                Button { open = listing } label: {
+                    row.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(open?.id == listing.id ? .isSelected : [])
+            } else {
+                row.frame(maxWidth: .infinity, alignment: .leading)
+                    .background { NavigationLink(value: listing) { EmptyView() }.opacity(0) }
             }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(open?.id == listing.id ? .isSelected : [])
-        } else {
-            NavigationLink(value: listing) { row }
+            if !selecting {
+                Menu { actions(listing) } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.body)
+                        .foregroundStyle(WorkspaceStyle.mutedText)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Actions for \(listing.displayTitle)")
+            }
         }
+    }
+
+    @ViewBuilder
+    private func actions(_ listing: ListingSummary) -> some View {
+        Button("Rename", systemImage: "pencil") {
+            newTitle = listing.title ?? ""
+            renaming = listing
+        }
+        Button("Copy listing", systemImage: "doc.on.doc") { bulk = .copy([listing.id]) }
+        Button("Listing templates", systemImage: "rectangle.stack") { templating = listing }
+        Button("Delete", systemImage: "trash", role: .destructive) { deleting = listing }
     }
 
     private var inventory: some View {
@@ -109,10 +135,9 @@ struct InventoryView: View {
             }
             ForEach(rows) { listing in
                 link(listing, hint: hints[listing.id])
-                    .onAppear { model.wantsReadiness(listing) }
                     .listRowSeparator(.hidden)
                     .listRowBackground(sideBySide && open?.id == listing.id ? WorkspaceStyle.selected : Color.clear)
-                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 4))
                     .swipeActions(edge: .trailing) {
                         Button("Delete", systemImage: "trash") { deleting = listing }
                             .tint(.red)
@@ -121,15 +146,7 @@ struct InventoryView: View {
                             renaming = listing
                         }
                     }
-                    .contextMenu {
-                        Button("Rename", systemImage: "pencil") {
-                            newTitle = listing.title ?? ""
-                            renaming = listing
-                        }
-                        Button("Copy listing", systemImage: "doc.on.doc") { bulk = .copy([listing.id]) }
-                        Button("Listing templates", systemImage: "rectangle.stack") { templating = listing }
-                        Button("Delete", systemImage: "trash", role: .destructive) { deleting = listing }
-                    }
+                    .contextMenu { actions(listing) }
             }
         }
         .listStyle(.plain)
@@ -412,13 +429,14 @@ private struct StatusTabs: View {
                     }
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(isSelected ? Color.primary : WorkspaceStyle.mutedText)
-                    .frame(maxWidth: .infinity, minHeight: 36)
+                    // The highlight fills the tab, 2 points in from the track on every side, as on the web.
+                    // With the track's padding the tab bar stays 44 points tall.
+                    .frame(maxWidth: .infinity, minHeight: 40)
                     .background(isSelected ? WorkspaceStyle.selected : .clear,
                                 in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius - 2, style: .continuous))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .frame(minHeight: 44)
                 .accessibilityLabel("\(tab.label), \(count) listings")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
@@ -436,13 +454,13 @@ struct ListingRow: View {
     let api: AnteroomAPI
     let listing: ListingSummary
     var hint: String?
-    var missing: [String: [MissingField]] = [:]
+    var selling: [String] = []
     @Environment(AppearanceModel.self) private var appearance
 
     var body: some View {
-        ListingRowContent(listing: listing, bySKU: appearance.listingNames == .sku, hint: hint, missing: missing) {
+        ListingRowContent(listing: listing, bySKU: appearance.listingNames == .sku, hint: hint, selling: selling) {
             if let cover = listing.coverPhotoID {
-                RemotePhoto(api: api, photoID: cover, maxPixels: 96)
+                RemotePhoto(api: api, photoID: cover, maxPixels: 192)
             } else {
                 Image(systemName: "photo")
                     .foregroundStyle(.secondary)
@@ -453,21 +471,22 @@ struct ListingRow: View {
     }
 }
 
-/// The desktop row: cover, name, colored lifecycle word, the suggested next
-/// step, then each marketplace's status as a compact badge.
+/// The web's listing row (sidebar/ListingRow.tsx): cover, one-line name, the
+/// lifecycle dot and word, then a logo for each marketplace it is listed on.
 struct ListingRowContent<Thumbnail: View>: View {
     let listing: ListingSummary
     var bySKU = false
     var hint: String?
-    var missing: [String: [MissingField]] = [:]
+    /// The marketplaces the seller sells on; the logos show only these.
+    var selling: [String] = []
     let thumbnail: Thumbnail
 
-    init(listing: ListingSummary, bySKU: Bool = false, hint: String? = nil, missing: [String: [MissingField]] = [:],
+    init(listing: ListingSummary, bySKU: Bool = false, hint: String? = nil, selling: [String] = [],
          @ViewBuilder thumbnail: () -> Thumbnail) {
         self.listing = listing
         self.bySKU = bySKU
         self.hint = hint
-        self.missing = missing
+        self.selling = selling
         self.thumbnail = thumbnail()
     }
 
@@ -478,52 +497,52 @@ struct ListingRowContent<Thumbnail: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 16) {
             thumbnail
-                .frame(width: 44, height: 44)
+                .frame(width: 64, height: 64)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(WorkspaceStyle.border, lineWidth: 1))
-                .opacity(listing.settledAt == nil ? 1 : 0.6)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspaceStyle.border, lineWidth: 1))
+                .opacity(listing.settledAt == nil ? 1 : 0.55)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text(name).font(.subheadline.weight(.medium)).lineLimit(2)
-                HStack(spacing: 6) {
-                    HStack(spacing: 5) {
+                Text(name).font(.body.weight(.medium)).lineLimit(1)
+                HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Circle().fill(statusColor).frame(width: 6, height: 6).accessibilityHidden(true)
-                        Text(listing.statusLabel).fontWeight(.medium)
+                        Text(listing.statusLabel)
                             .foregroundStyle(listing.inventoryStatus == "failed" ? WorkspaceStyle.destructive : WorkspaceStyle.mutedText)
                     }
-                    if let price = listing.price {
-                        Text(price, format: .currency(code: "USD")).foregroundStyle(.secondary)
+                    if listing.status == "sold", let missing = listing.missingSaleData, !missing.isEmpty {
+                        Text("Missing sale data")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(WorkspaceStyle.warning)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(WorkspaceStyle.warning.opacity(0.14), in: Capsule())
+                            .accessibilityLabel("Missing sale data: \(missing.joined(separator: ", "))")
                     }
-                    if bySKU, name != listing.displayTitle {
-                        Text(listing.displayTitle).foregroundStyle(.secondary).lineLimit(1)
-                    } else if let sku = listing.sku, !sku.isEmpty {
-                        Text(sku).foregroundStyle(.secondary).lineLimit(1)
+                    if let hint {
+                        Text("· \(hint)").foregroundStyle(WorkspaceStyle.mutedText).lineLimit(1)
                     }
                 }
-                .font(.caption)
-                if let hint {
-                    Text(hint).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-                if listing.status == "sold", let missing = listing.missingSaleData, !missing.isEmpty {
-                    Text("Missing sale data")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(WorkspaceStyle.warning)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(WorkspaceStyle.warning.opacity(0.14), in: Capsule())
-                        .accessibilityLabel("Missing sale data: \(missing.joined(separator: ", "))")
-                }
-                let badges = listing.marketplaceBadges(missing: missing)
-                if !badges.isEmpty {
-                    MarketplaceBadges(badges: badges)
+                .font(.subheadline)
+                let logos = listing.rowLogos(selling: selling)
+                if !logos.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(logos, id: \.marketplace) { logo in
+                            MarketplaceLogo(id: logo.marketplace).opacity(logo.sold ? 0.55 : 1)
+                        }
+                    }
+                    .padding(.top, 4)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Listed on " + logos.map { Marketplaces.name($0.marketplace) }.joined(separator: ", "))
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 12)
+        .frame(minHeight: 96)
         .accessibilityElement(children: .combine)
     }
 
@@ -540,55 +559,24 @@ struct ListingRowContent<Thumbnail: View>: View {
     }
 }
 
-/// "eBay Listed · Poshmark Needs 2 fields", wrapped to the row's width.
-private struct MarketplaceBadges: View {
-    let badges: [MarketplaceBadge]
+/// The web's marketplace logo (MarketplaceLogo.tsx), from the same artwork; a
+/// marketplace without one shows its initial.
+struct MarketplaceLogo: View {
+    let id: String
+    var size: CGFloat = 20
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 4) { chips }
-            VStack(alignment: .leading, spacing: 4) { chips }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(badges.map(Self.spoken).joined(separator: ", "))
-    }
-
-    private static func spoken(_ badge: MarketplaceBadge) -> String {
-        var text = "\(Marketplaces.name(badge.marketplace)) \(badge.label)"
-        if badge.tone == .attention, let detail = badge.detail { text += ": \(detail)" }
-        guard let price = badge.price else { return text }
-        return "\(text) at \(price.formatted(.currency(code: "USD")))\(badge.priceDiffers ? ", not the item price" : "")"
-    }
-
-    private var chips: some View {
-        ForEach(badges, id: \.marketplace) { badge in
-            HStack(spacing: 3) {
-                Text(Marketplaces.name(badge.marketplace)).foregroundStyle(.secondary)
-                Text(badge.label).fontWeight(.medium).foregroundStyle(color(badge.tone))
-                if let price = badge.price {
-                    // A price apart from the item's own stands out, as on the desktop table.
-                    Text(price, format: .currency(code: "USD"))
-                        .monospacedDigit()
-                        .fontWeight(badge.priceDiffers ? .semibold : .regular)
-                        .foregroundStyle(badge.priceDiffers ? Color.primary : Color.secondary)
-                }
+        Group {
+            if UIImage(named: "Marketplaces/\(id)") != nil {
+                Image("Marketplaces/\(id)").resizable().scaledToFit().padding(1)
+            } else {
+                Text(Marketplaces.name(id).prefix(1).uppercased())
+                    .font(.system(size: size * 0.6, weight: .semibold))
+                    .foregroundStyle(WorkspaceStyle.mutedText)
             }
-            .font(.caption2)
-            .lineLimit(1)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(WorkspaceStyle.surface, in: Capsule())
-            .overlay(Capsule().stroke(WorkspaceStyle.border, lineWidth: 1))
         }
-    }
-
-    private func color(_ tone: MarketplaceBadge.Tone) -> Color {
-        switch tone {
-        case .good: .green
-        case .attention: .orange
-        case .problem: .red
-        case .neutral: .secondary
-        }
+        .frame(width: size, height: size)
+        .accessibilityLabel(Marketplaces.name(id))
     }
 }
 
