@@ -1,0 +1,3 @@
+- Read from photos in bulk upload reads every item at once instead of two at a time, so a box of items finishes in minutes instead of half an hour.
+- A photo reading cut off by an app update or restart is tried once more instead of showing "Reading failed: 500".
+- Each item's note now names the AI model that read its yardstick photos, so you can tell when a different photo model would read them better.

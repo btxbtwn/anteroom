@@ -1,9 +1,6 @@
 import type { MeasurementReadResult } from "./api/types";
 import { garmentFields, type Garment } from "./components/garmentMeasurements";
 
-/** Items read at once from a window's Read from photos. */
-export const READ_CONCURRENCY = 2;
-
 export interface ReadingOutcome {
   /** The row's measurements with read values filled into blank fields only. */
   measurements: Record<string, string>;
@@ -41,20 +38,21 @@ export function applyReading(
     }
   }
   const parts: string[] = [];
-  if (suggested.length) parts.push("Filled from the photos. Check them.");
-  else parts.push("Nothing new could be read from the photos.");
+  const reader = result.reader;
+  if (suggested.length) {
+    parts.push(reader ? `Filled from the photos by ${reader}. Check them.` : "Filled from the photos. Check them.");
+  } else if (reader && !Object.values(result.measurements).some((read) => read.status === "accepted")) {
+    parts.push(`${reader} could not read the yardstick.`);
+  } else parts.push("Nothing new could be read from the photos.");
   if (byHand.length) parts.push(`Measure by hand: ${byHand.join(", ")}.`);
   return { measurements, suggested, note: parts.join(" ") };
 }
 
-/** Run `work` over every item, `limit` at a time; each reading is several photo-model calls. */
-export async function readEach<T>(items: T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
-  const queue = [...items];
-  const next = async (): Promise<void> => {
-    const item = queue.shift();
-    if (item === undefined) return;
-    await work(item);
-    await next();
-  };
-  await Promise.all(Array.from({ length: limit }, next));
+/**
+ * Run `work` over every item at once. Each reading is minutes of photo-model calls,
+ * so reading two at a time kept a box of items waiting most of half an hour; the
+ * server limits the memory-heavy photo search itself.
+ */
+export async function readEach<T>(items: T[], work: (item: T) => Promise<void>): Promise<void> {
+  await Promise.all(items.map(work));
 }
