@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.795 — 2026-11-08
+
+- Keep the web app and iPhone app answering while Anteroom updates, instead of showing errors for up to a few minutes.
+
 ## 0.1.794 — 2026-11-08
 
 - Recording a sale on an item that has already sold is refused, so the same sale can no longer be saved twice.
