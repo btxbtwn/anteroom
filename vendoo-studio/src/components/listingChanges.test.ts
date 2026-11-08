@@ -31,7 +31,8 @@ describe("listing review", () => {
     expect(blockerTarget("direct_category_ids.depop").tab).toBe("depop");
     expect(blockerTarget("direct_category_ids.mercari").tab).toBe("mercari");
     expect(blockerTarget("marketplace_category_ids.ebay").tab).toBe("ebay");
-    expect(blockerTarget("marketplace_category_ids.etsy").tab).toBe("general");
+    expect(blockerTarget("marketplace_category_ids.etsy").tab).toBe("etsy");
+    expect(matchingEditorField([{ key: "direct_category_ids.etsy" }], "marketplace_category_ids.etsy")).toBe("direct_category_ids.etsy");
     expect(matchingEditorField([{ key: "price" }, { key: "direct_category_ids.ebay" }], "marketplace_category_ids.ebay")).toBe("direct_category_ids.ebay");
   });
   it("matches Vendoo labels to nested listing keys", () => {

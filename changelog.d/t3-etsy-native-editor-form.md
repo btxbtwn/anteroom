@@ -1,0 +1,3 @@
+- The Etsy tab now follows Etsy's own listing form: Photo & video, Category, Item details, Item options, Pricing & shipping, How it's made and Settings, with your category's Etsy attributes.
+- Pick the Etsy category on the Etsy tab. Your pick stays put when the listing is generated again.
+- A price or tags you change on the Etsy tab are now what Etsy gets, without changing General.
