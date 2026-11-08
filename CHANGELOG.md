@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.838 — 2026-11-08
+
+- Choosing a category on the General form on iPhone or the web app now fills the matching category on eBay, Poshmark, Mercari, Depop and Etsy, as it already did on the Mac.
+
 ## 0.1.837 — 2026-11-08
 
 - See which marketplaces need the Chrome extension during setup and beside marketplace actions. Create and generate drafts without connecting Chrome.
