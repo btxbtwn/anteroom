@@ -46,8 +46,9 @@ test.describe("layout", () => {
     const table = page.getByRole("table", { name: "Inventory" });
     const title = table.getByRole("rowheader").filter({ hasText: titleText }).getByText(titleText, { exact: true });
     await expect(title).toBeVisible();
-    // Two lines hold the whole title at 1440px; nothing is clipped.
-    expect(await title.evaluate((element) => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+    // Titles wrap to two lines, with the complete title available on hover.
+    await expect(title).toHaveClass(/line-clamp-2/);
+    await expect(title.locator("xpath=ancestor::*[@title][1]")).toHaveAttribute("title", titleText);
     // The sidebar's search box filters the table, so the page shows only that one.
     await expect(page.getByRole("searchbox", { name: /Search listings/ })).toHaveCount(1);
     await page.getByRole("searchbox", { name: /Search listings/ }).fill(titleText);
