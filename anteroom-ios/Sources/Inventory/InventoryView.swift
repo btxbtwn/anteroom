@@ -428,13 +428,14 @@ private struct StatusTabs: View {
                     }
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(isSelected ? Color.primary : WorkspaceStyle.mutedText)
-                    .frame(maxWidth: .infinity, minHeight: 36)
+                    // The highlight fills the tab, 2 points in from the track on every side, as on the web.
+                    // With the track's padding the tab bar stays 44 points tall.
+                    .frame(maxWidth: .infinity, minHeight: 40)
                     .background(isSelected ? WorkspaceStyle.selected : .clear,
                                 in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius - 2, style: .continuous))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .frame(minHeight: 44)
                 .accessibilityLabel("\(tab.label), \(count) listings")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
