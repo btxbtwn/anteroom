@@ -1,0 +1,1 @@
+- Sourcing retries brief supplier rate limits and avoids unnecessary catalog requests.
