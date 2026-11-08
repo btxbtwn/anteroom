@@ -25,10 +25,16 @@ def stored_listing_fields(raw):
         # Generation keeps its search query beside the chosen categories.
         # That provenance is server-owned, not an editable category identity.
         payload['direct_category_ids'] = {
-            key: value for key, value in categories.items()
-            if key in MARKETS or key.removesuffix('_path') in MARKETS
+            key: value for key, value in categories.items() if category_key(key, value)
         }
     return editable_listing(without_operational_keys(payload))
+
+
+def category_key(key, value):
+    """A marketplace's category id or path, or `<market>_suggested`: true when Anteroom picked the closest option."""
+    if key.endswith('_suggested'):
+        return key.removesuffix('_suggested') in MARKETS and value is True
+    return key in MARKETS or key.removesuffix('_path') in MARKETS
 
 
 def operational_key(key):
@@ -50,7 +56,7 @@ def editable_listing(raw):
         raise HTTPException(422, 'Only listing fields can be saved')
     categories = raw.get('direct_category_ids')
     if categories is not None and (not isinstance(categories, dict) or any(
-        key not in MARKETS and key.removesuffix('_path') not in MARKETS for key in categories)):
+        not category_key(key, value) for key, value in categories.items())):
         raise HTTPException(422, 'Only marketplace category identities can be supplied')
     try:
         DraftFields.model_validate({key: value for key, value in raw.items() if key in DraftFields.model_fields})
