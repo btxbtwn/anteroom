@@ -792,7 +792,7 @@ export function MarketplacesLayout({
               })}
               <MenuSeparator />
               {showListEverywhere && <MenuItem disabled={busy} onClick={() => setPicking(true)}><SendIcon />List everywhere…</MenuItem>}
-              <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</MenuItem>
+              {!soldSomewhere && <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</MenuItem>}
               {showDelistEverywhere && <MenuItem variant="destructive" disabled={busy} onClick={() => void runDelist(removable)}>
                 <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
               </MenuItem>}
@@ -854,8 +854,9 @@ export function MarketplacesLayout({
             <Button size="xs" variant="ghost" disabled={busy} title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
               onClick={() => setPicking(true)}><SendIcon />List everywhere…</Button>
           )}
-          <Button size="xs" variant="ghost-muted" disabled={busy} title="A sale in person or anywhere off these marketplaces"
-            onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>
+          {/* A sold item's sale is already recorded; change its amounts in Sales records. */}
+          {!soldSomewhere && <Button size="xs" variant="ghost-muted" disabled={busy} title="A sale in person or anywhere off these marketplaces"
+            onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>}
           {showDelistEverywhere && (
             <Button size="xs" variant="ghost-destructive" disabled={busy} onClick={() => void runDelist(removable)}>
               <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}

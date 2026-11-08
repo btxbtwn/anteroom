@@ -27,6 +27,7 @@ BASELINE = ROOT / "design_baseline.json"
 TOKEN_FILES = {"src/styles/t3-theme.css"}
 # Logos draw a brand's own colors, which DESIGN.md allows in logos only.
 LOGO_FILES = {
+    "src/components/AnteroomLogo.tsx",
     "src/components/marketplaceLogos.ts",
     "src/components/MarketplaceLogo.tsx",
     "src/components/providerIcons.tsx",

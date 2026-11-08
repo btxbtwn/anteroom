@@ -1,1 +1,0 @@
-- Keep the web app and iPhone app answering while Anteroom updates, instead of showing errors for up to a few minutes.

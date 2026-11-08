@@ -34,6 +34,13 @@ struct ListingEditorView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { model.stashEdits() }
             }
+            // The editor also closes without Save or Discard: on iPad when the
+            // seller opens another listing or the window changes size, and on
+            // either device when they switch tabs. Keep the edits until it reopens.
+            .onDisappear { model.stashEdits() }
+            // Back on screen with the edits still in memory (from a tab switch or
+            // a pushed picker): the copy on disk is no longer needed.
+            .onAppear { if model.hasLoaded { model.forgetStash() } }
     }
 
     private var editor: some View {
@@ -145,7 +152,8 @@ struct ListingEditorView: View {
         }
         .confirmationDialog("Discard your changes?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("Discard changes", role: .destructive) {
-                model.forgetStash()
+                // On iPad the editor is the detail column's root, where dismiss does nothing.
+                model.discardChanges()
                 dismiss()
             }
         }

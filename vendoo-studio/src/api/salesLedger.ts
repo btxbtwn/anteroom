@@ -16,6 +16,8 @@ export interface SalesLedgerRow {
   listing_id: string | null;
   quantity: number | null;
   order_status: string;
+  /** Who reported it: "seller" for Mark as sold, the only kind a seller can delete. */
+  source: string;
   alert_state: string;
   conversation_id: string | null;
   title: string | null;
