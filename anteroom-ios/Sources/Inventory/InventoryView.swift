@@ -32,7 +32,9 @@ struct InventoryView: View {
         Group {
             if sideBySide {
                 NavigationSplitView {
-                    inventory
+                    // The system's 320-point column folds New listing and Bulk
+                    // listing into a More menu; this width keeps them visible.
+                    inventory.navigationSplitViewColumnWidth(min: 380, ideal: 420, max: 480)
                 } detail: {
                     NavigationStack {
                         if let open {
