@@ -22,6 +22,10 @@ vendoo-studio/server/*
 !vendoo-studio/tsconfig.json
 !vendoo-studio/src/
 !vendoo-studio/src/**
+# The browser tab icon the hosted server serves at /favicon.png.
+!vendoo-studio/public/
+vendoo-studio/public/*
+!vendoo-studio/public/favicon.png
 # Hosted generation and native forms use the same canonical public rules.
 !skills/
 skills/*
