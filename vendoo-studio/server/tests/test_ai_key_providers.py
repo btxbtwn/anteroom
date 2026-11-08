@@ -223,18 +223,42 @@ def test_photo_analysis_parses_evidence(fake_http, tmp_path):
     assert "Tag says 32x30" in body["messages"][0]["content"]
 
 
-def test_openrouter_web_search_reads_nested_citations(fake_http):
-    payload = {"choices": [{"message": {
-        "content": "Sold for about $40.",
-        "annotations": [{"type": "url_citation", "url_citation": {"url": "https://ebay.com/itm/1", "title": "Levi's 501", "content": "Sold $40"}}],
-    }}]}
+@pytest.mark.parametrize("nested", [True, False])
+def test_openrouter_web_search_allows_repeated_searches_and_reads_citations(fake_http, nested):
+    citation = {"url": "https://ebay.com/itm/1", "title": "Levi's 501", "content": "Sold $40"}
+    annotation = {"type": "url_citation", **({"url_citation": citation} if nested else citation)}
+    payload = {"output": [{"type": "message", "content": [{
+        "type": "output_text", "text": "Sold for about $40.",
+        "annotations": [annotation],
+    }]}]}
     calls = fake_http(lambda request: httpx.Response(200, json=payload))
-    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "m", "m")
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "deepseek/deepseek-v3.2")
     result = run(provider.web_search([{"role": "user", "content": "comps"}]))
     assert result == {"answer": "Sold for about $40.", "sources": [{"url": "https://ebay.com/itm/1", "title": "Levi's 501", "description": "Sold $40"}]}
     body = json.loads(calls[0].content)
-    assert body["plugins"] == [{"id": "web"}]
+    assert body["model"] == "deepseek/deepseek-v3.2"
+    assert "plugins" not in body
+    assert body["tools"] == [{"type": "openrouter:web_search"}]
+    assert body["input"] == [{"role": "user", "content": "comps"}]
+    assert "messages" not in body
+    assert calls[0].url.path == "/api/v1/responses"
     assert calls[0].headers["x-title"] == "Anteroom"
+
+
+@pytest.mark.parametrize("payload", [{"output": []}, {"output": [{"type": "reasoning", "summary": []}]}])
+def test_openrouter_web_search_rejects_missing_answer_and_sources(fake_http, payload):
+    fake_http(lambda request: httpx.Response(200, json=payload))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "m", "m")
+    with pytest.raises(RuntimeError, match="OpenRouter web search returned no results"):
+        run(provider.web_search([{"role": "user", "content": "comps"}]))
+
+
+def test_openrouter_web_search_surfaces_search_access_errors(fake_http):
+    calls = fake_http(lambda request: httpx.Response(403, json={"error": {"message": "Web search is disabled"}}))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "m", "m")
+    with pytest.raises(RuntimeError, match="OpenRouter HTTP 403: Web search is disabled"):
+        run(provider.web_search([{"role": "user", "content": "comps"}]))
+    assert len(calls) == 1
 
 
 def test_models_without_web_search_fall_back_to_brave(clean_settings):

@@ -4,6 +4,7 @@ import { createClient, type Session } from "@supabase/supabase-js";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createStudioQueryClient } from "../api/queryClient";
 import { installHostedApiSession, studioFetch } from "../api/transport";
+import { forgetDeviceImages } from "../api/privateImages";
 import { App } from "../app/App";
 import { WorkspaceRuntimeProvider, type WorkspaceFeature } from "../app/runtime";
 import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
@@ -67,7 +68,8 @@ function CloudApp() {
         // Let the Bridge revoke remembered approval before navigation unloads
         // the content script and can discard the disconnect message. Signing out
         // returns to the sign-in form, not the landing page.
-        void cloudExtension({ id: previous, email: "" }).disconnect().finally(() => {
+        // The last seller's thumbnails kept on this device go with them.
+        void Promise.allSettled([cloudExtension({ id: previous, email: "" }).disconnect(), forgetDeviceImages()]).finally(() => {
           window.location.replace(new URL(SIGN_IN_PATH, window.location.origin).href);
         });
         return;
@@ -100,6 +102,7 @@ function HostedWorkspace({ session }: { session: Session }) {
     let active = true;
     const remove = installHostedApiSession({
       origin: window.location.origin,
+      seller: session.user.id,
       accessToken: async () => {
         const { data, error } = await supabase.auth.getSession();
         if (error || data.session?.user.id !== session.user.id) return null;

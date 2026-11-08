@@ -3,7 +3,7 @@ import { api } from "./client";
 import { installHostedApiSession } from "./transport";
 
 it("shares one hosted screen request across the core listing reads", async () => {
-  const stop = installHostedApiSession({ origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
+  const stop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
   const screen = { conversation: { id: "coat" }, listing: { listing: { title: "Coat" } }, photos: [], messages: [], jobs: [], activity: { busy: false } };
   const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify(screen)));
   vi.stubGlobal("fetch", fetch);
@@ -17,7 +17,7 @@ it("shares one hosted screen request across the core listing reads", async () =>
 });
 
 it("keeps a single polling read narrow and retries failed batches", async () => {
-  const stop = installHostedApiSession({ origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
+  const stop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
   const fetch = vi.fn().mockImplementation(async () => new Response("[]"));
   vi.stubGlobal("fetch", fetch);
   try {
@@ -33,13 +33,13 @@ it("keeps a single polling read narrow and retries failed batches", async () => 
 
 it("never shares an in-flight screen across accounts", async () => {
   let finish!: (response: Response) => void;
-  const oldStop = installHostedApiSession({ origin: "https://app.test", accessToken: async () => "old", unauthorized: () => {} });
+  const oldStop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "old", unauthorized: () => {} });
   const fetch = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
     .mockImplementation(async () => new Response(JSON.stringify({ conversation: { id: "new" }, listing: {} })));
   vi.stubGlobal("fetch", fetch);
   const old = Promise.allSettled([api.conversations.get("coat"), api.listings.get("coat")]);
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-  const newStop = installHostedApiSession({ origin: "https://app.test", accessToken: async () => "new", unauthorized: () => {} });
+  const newStop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "new", unauthorized: () => {} });
   try {
     const fresh = await Promise.all([api.conversations.get("coat"), api.listings.get("coat")]);
     expect(fresh).toEqual([{ id: "new" }, {}]);
@@ -50,7 +50,7 @@ it("never shares an in-flight screen across accounts", async () => {
 });
 
 it("coalesces a cold editor open without requiring a warm-up call", async () => {
-  const stop = installHostedApiSession({ origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
+  const stop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
   const screen = { conversation: { id: "coat" }, listing: { listing: { title: "Coat" } } };
   const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify(screen)));
   vi.stubGlobal("fetch", fetch);
@@ -69,7 +69,7 @@ it("passes a query's signal through to fetch", async () => {
     const controller = new AbortController();
     await api.conversations.list({ signal: controller.signal });
     expect(fetch.mock.calls[0][1].signal).toBe(controller.signal);
-    const stop = installHostedApiSession({ origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
+    const stop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
     try {
       await api.conversations.photos("coat", undefined, { signal: controller.signal });
       expect(fetch.mock.calls[1][0]).toBe("https://app.test/api/conversations/coat/photos");
@@ -82,7 +82,7 @@ it("passes a query's signal through to fetch", async () => {
 });
 
 it("keeps a shared screen read running until every caller has aborted", async () => {
-  const stop = installHostedApiSession({ origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
+  const stop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
   const signals: AbortSignal[] = [];
   let finish!: (response: Response) => void;
   const fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
@@ -122,7 +122,7 @@ it("keeps a shared screen read running until every caller has aborted", async ()
 });
 
 it("never aborts a shared read that a caller without a signal is waiting on", async () => {
-  const stop = installHostedApiSession({ origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
+  const stop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
   let finish!: (response: Response) => void;
   let signal!: AbortSignal;
   const fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
