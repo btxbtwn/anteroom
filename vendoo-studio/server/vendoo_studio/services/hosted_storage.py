@@ -10,7 +10,7 @@ import re
 import httpx
 from fastapi import HTTPException
 
-from vendoo_studio.services.hosted_photos import BUCKET, check_key
+from vendoo_studio.services.hosted_photos import BUCKET, check_key, with_renditions
 from vendoo_studio.services.service_context import current
 
 
@@ -41,7 +41,7 @@ def photo_call(method: str, key: str, data: bytes | None = None) -> bytes:
             'apikey': secret, 'Cache-Control': 'no-store',
             'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
             **({'x-upsert': 'true'} if method == 'POST' else {}),
-        }, json={'prefixes': [key]} if method == 'DELETE' else None,
+        }, json={'prefixes': with_renditions(key)} if method == 'DELETE' else None,
                                  content=None if method == 'DELETE' else data, timeout=30, follow_redirects=False)
     except httpx.HTTPError:
         raise HTTPException(503, 'Background photo storage is temporarily unavailable') from None

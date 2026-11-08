@@ -12,7 +12,7 @@ it("loads the canonical marketplace form through authenticated HTTP without chan
   ] };
   const fetch = vi.fn(async () => new Response(JSON.stringify(form), { status: 200 }));
   vi.stubGlobal("fetch", fetch);
-  dispose = installHostedApiSession({ origin: "https://anteroom.example", accessToken: async () => "seller-token", unauthorized: vi.fn() });
+  dispose = installHostedApiSession({ seller: "seller", origin: "https://anteroom.example", accessToken: async () => "seller-token", unauthorized: vi.fn() });
   expect(await api.nativeMarketplaces.form("owned", "depop", "revision")).toEqual(form);
   const [url, options] = fetch.mock.calls[0] as unknown as [string, RequestInit];
   expect(url).toBe("https://anteroom.example/api/conversations/owned/native-marketplaces/depop/form?revision_id=revision");
