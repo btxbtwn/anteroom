@@ -703,7 +703,7 @@ export function StructuredEditor({
     };
   }, [hasDrafts]);
 
-  const commitField = (key: string, value: string | string[] | boolean) => {
+  const commitField = (key: string, value: string | string[] | boolean, also: Record<string, string> = {}) => {
     if (editingDisabled.current || agentFieldLocked(key, agentLocks) || fields.find((field) => field.key === key)?.locked) return;
     if (typeof value === "string" && value.trim() === "[object Object]") return;
     const updated = cloneListing(listing);
@@ -711,6 +711,7 @@ export function StructuredEditor({
     const stored = typeof value === "string" ? field?.optionValues?.[value] ?? (field?.type === "number" ? coerce(value) : value)
       : Array.isArray(value) ? value.map(label => field?.optionValues?.[label] ?? label) : value;
     setListingEditorValue(updated, key, stored);
+    for (const [path, extra] of Object.entries(also)) setListingEditorValue(updated, path, extra);
     if (key === "poshmark_specifics.nativeSizeId") {
       setListingEditorValue(updated, "poshmark_specifics.sizeSetId", fields.find((row) => row.key === "poshmark_specifics.sizeSetId")?.defaultValue || "");
     }
@@ -839,7 +840,9 @@ export function StructuredEditor({
     }} />;
     const categoryChoices = f.native && !f.multi ? pathCategoryChoices(f) : null;
     if (categoryChoices) return <CategoryTreeSelect key={text} id={id} fieldKey={f.key} value={text} choices={categoryChoices}
-      disabled={locked} onChange={(choice) => commitField(f.key, choice.label)} />;
+      disabled={locked} onChange={(choice) => commitField(f.key, choice.label,
+        // Etsy's category keeps its breadcrumb beside the id, as category fills write it.
+        f.key === "direct_category_ids.etsy" ? { "direct_category_ids.etsy_path": choice.label } : {})} />;
     if (f.type === "boolean" && f.presentation === "button") return <Toggle id={id} data-listing-field={f.key} variant="outline"
       className="w-full" pressed={text === "true"} disabled={locked} onPressedChange={(pressed) => commitField(f.key, pressed)}>{f.label}</Toggle>;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
@@ -1027,6 +1030,14 @@ export function StructuredEditor({
                     </div>
                   ))}
                   <div className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f)}</div>
+                  {suggestedCategory(listing, tab, f.key) && <p role="status" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-warning-foreground">
+                    <span>Suggested: check it. No exact {marketplaceName(tab)} match.</span>
+                    {!disabled && !f.locked && <InlineButton type="button" className="text-xs" onClick={() => {
+                      const updated = cloneListing(listing);
+                      setListingEditorValue(updated, `direct_category_ids.${tab}_suggested`, undefined);
+                      emitChange(updated);
+                    }}>Looks right</InlineButton>}
+                  </p>}
                   {onAskChat && !f.locked && <InlineButton type="button" className="mt-1 text-xs" onClick={() => onAskChat(
                     `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
                   )}>Ask chat</InlineButton>}
@@ -1473,6 +1484,15 @@ export function nativeEditorDependencies(fields: EditorField[], listing: Listing
       });
     }),
   });
+}
+
+/** Anteroom filled this tab's category with the closest option, not an exact match, and the seller has not checked it. */
+export function suggestedCategory(listing: ListingData | undefined, tab: string, key: string): boolean {
+  if (key !== `direct_category_ids.${tab}`) return false;
+  const ids = listing?.direct_category_ids;
+  if (!ids || typeof ids !== "object" || Array.isArray(ids)) return false;
+  const direct = ids as Record<string, unknown>;
+  return direct[`${tab}_suggested`] === true && Boolean(direct[tab]);
 }
 
 function liveCategoryFields(listing: ListingData | undefined, marketplace: "ebay" | "etsy"): EditorField[] {

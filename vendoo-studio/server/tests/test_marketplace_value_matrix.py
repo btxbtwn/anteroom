@@ -117,31 +117,11 @@ APPAREL_ROOTS = {
     "depop": {"women", "men", "kids", "everything else"},
     "mercari": {"women", "men", "kids", "vintage & collectibles", "sports & outdoors"},
 }
-# Apparel the matcher puts outside apparel: a department's item matched by its
-# last word alone, in a branch with no department. Fixing this means telling a
-# kids' item from a household one without losing real matches elsewhere (baby
-# books are still Books), so it is left for its own change.
-KNOWN_CATEGORY_GAPS = {
-    "mercari": {
-        "Baby > Baby & Toddler Clothing > Outfits & Sets": "Beauty > Fragrance > Sets",
-        "Baby > Baby Accessories > Gloves & Mittens": "Home > Cleaning supplies > Gloves",
-        "Kids > Boys > Boys' Accessories > Accessory Sets": "Beauty > Fragrance > Sets",
-        "Kids > Boys > Boys' Accessories > Gloves & Mittens": "Home > Cleaning supplies > Gloves",
-        "Kids > Boys > Boys' Clothing (Sizes 4 & Up) > Activewear > Tracksuits & Sets": "Beauty > Fragrance > Sets",
-        "Kids > Boys > Boys' Clothing (Sizes 4 & Up) > Outfits & Sets": "Beauty > Fragrance > Sets",
-        "Kids > Girls > Girls' Accessories > Accessory Sets": "Beauty > Fragrance > Sets",
-        "Kids > Girls > Girls' Accessories > Gloves & Mittens": "Home > Cleaning supplies > Gloves",
-        "Kids > Girls > Girls' Clothing (Sizes 4 & Up) > Activewear > Tracksuits & Sets": "Beauty > Fragrance > Sets",
-        "Kids > Girls > Girls' Clothing (Sizes 4 & Up) > Outfits & Sets": "Beauty > Fragrance > Sets",
-        "Kids > Unisex Kids > Unisex Kids' Clothing (Sizes 4 & Up) > Activewear > Tracksuits & Sets": "Beauty > Fragrance > Sets",
-        "Men > Men's Accessories > Accessory Sets": "Beauty > Fragrance > Sets",
-        "Women > Women's Accessories > Accessory Sets": "Beauty > Fragrance > Sets",
-        "Women > Women's Accessories > Organizers & Day Planners": "Home > Storage & organization > Jewelry boxes & organizers",
-        "Women > Women's Clothing > Outfits & Sets": "Beauty > Fragrance > Sets",
-    },
-    "poshmark": {},
-    "depop": {},
-}
+# Apparel the matcher puts outside apparel. A department's clothing needs a
+# branch that names something it says too, so kids' sets no longer land in
+# Fragrance or gloves in Cleaning. The closest-match fallback is checked in
+# test_closest_category.py.
+KNOWN_CATEGORY_GAPS: dict[str, dict[str, str]] = {"mercari": {}, "poshmark": {}, "depop": {}}
 
 
 @pytest.mark.parametrize("market", ["poshmark", "mercari", "depop"])
@@ -164,16 +144,9 @@ def test_every_apparel_category_lands_in_apparel_or_nowhere(market):
 
 
 # Etsy's category is read from its taxonomy by ``pick_etsy_leaf`` when the General
-# category changes. Scoring counts every shared word, so General's own root,
-# "Clothing, Shoes & Accessories", outvotes the item and Pet Supplies' "Pet
-# Clothing, Accessories & Shoes" wins. A fix needs a different matcher for Etsy
-# (``native_category_match`` keeps every family below in Clothing).
-ETSY_FAMILY_GAPS = {
-    "Women's Clothing > Tops": "Pet Supplies > Pet Clothing, Accessories & Shoes > Pet Clothing > Pet Tops",
-    "Women's Clothing > Dresses": "Pet Supplies > Pet Clothing, Accessories & Shoes > Pet Clothing > Pet Dresses",
-    "Girls' Clothing (Sizes 4 & Up) > Dresses": "Pet Supplies > Pet Clothing, Accessories & Shoes > Pet Clothing > Pet Dresses",
-    "Men's Accessories > Hats": "Pet Supplies > Pet Clothing, Accessories & Shoes > Pet Clothing > Pet Hats & Wigs",
-}
+# category changes. General's root words choose nothing, and a pet or wedding
+# leaf needs the category to say so, so no family lands in Pet Supplies.
+ETSY_FAMILY_GAPS: dict[str, str] = {}
 ETSY_ROOTS = {"Clothing", "Shoes", "Accessories"}
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -11,6 +12,15 @@ import pytest
 
 INSTALLER = Path(__file__).resolve().parents[3] / "anteroom-ios/tools/install-xcodegen.sh"
 SHA256 = "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+
+
+def test_ci_passes_job_token_to_every_xcodegen_install():
+    workflow = INSTALLER.parents[2] / ".github/workflows/ios.yml"
+    steps = re.findall(r"      - name: Install the pinned XcodeGen\n(.*?)(?=      - |\Z)",
+                       workflow.read_text(), re.DOTALL)
+    assert len(steps) == 3
+    for step in steps:
+        assert step.count("GITHUB_TOKEN: ${{ github.token }}") == 1
 
 
 def install(tmp_path, *, fail_download=False, fail_checksum=False, github_token: str | None = None):

@@ -9,6 +9,7 @@ import { AgentSettings } from "./settings/AgentSettings";
 import { AssistantSettings } from "./settings/AssistantSettings";
 import { ConnectionsSettings } from "./settings/ConnectionsSettings";
 import { DataSettings } from "./settings/DataSettings";
+import { ExperimentalSettings } from "./settings/ExperimentalSettings";
 import { GeneralSettings } from "./settings/GeneralSettings";
 import { HelpSettings } from "./settings/HelpSettings";
 import { ListingsSettings } from "./settings/ListingsSettings";
@@ -67,6 +68,7 @@ export function SettingsPage({
       {section === "agents" ? <AgentSettings /> : null}
       {section === "data" ? <DataSettings /> : null}
       {section === "logs" ? <LogsSettings /> : null}
+      {section === "experimental" ? <ExperimentalSettings /> : null}
       {section === "help" ? <HelpSettings /> : null}
     </SettingsPageContainer>
   );

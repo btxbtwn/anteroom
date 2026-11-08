@@ -37,6 +37,10 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
         from vendoo_studio.services.mercari_form import editor_form as mercari_form
 
         return await mercari_form(snapshot)
+    if marketplace == "etsy":
+        from vendoo_studio.services.etsy_form import editor_form as etsy_form
+
+        return await etsy_form(snapshot)
     if not refresh:
         from vendoo_studio.services import native_contract
 
