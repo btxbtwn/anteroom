@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.810 — 2026-11-08
+
+- Let iPads and other touch screens delete, rename and copy a listing from the sidebar with the ⋯ button.
+
 ## 0.1.809 — 2026-11-08
 
 - Read from photos in bulk upload reads every item at once instead of two at a time, so a box of items finishes in minutes instead of half an hour.
