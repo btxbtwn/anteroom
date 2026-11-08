@@ -469,3 +469,53 @@ def test_a_sold_item_with_only_cleared_listings_keeps_one_sale_record(ledger):
     _sold_hat(ledger, with_order=False)
     hat = [row["id"] for row in report(ledger)["rows"] if row["conversation_id"] == "hat"]
     assert len(hat) == 1
+
+
+def _sold_once_twice(ledger):
+    """A sold one-unit item whose Etsy sale is on the ledger as the kept Vendoo copy and as Etsy's order."""
+    from datetime import datetime as dt
+
+    ledger.db.add(Conversation(id="blouse", title="Paisley blouse", status="active", notes="{}"))
+    ledger.db.commit()
+    listing_persistence.save_revision(ledger.db, "blouse", {"title": "Paisley blouse", "price": 18, "quantity": 1, "description": "Paisley blouse"}, "user")
+    ledger.db.add(MarketplaceSale(id="vendoo-blouse", marketplace="etsy", order_id="Vendoo import", line_id="blouse", listing_id=None,
+                                  quantity=1, order_status="paid", source="vendoo", state="dismissed", conversation_id="blouse",
+                                  sold_at=dt(2026, 10, 24, 12), financials={"currency": "USD", "item_revenue": "18", "source": "vendoo"}))
+    ledger.db.add(MarketplaceSale(id="etsy-blouse", marketplace="etsy", order_id="4211998766", line_id="5263428371", listing_id="4400000001",
+                                  quantity=1, conversation_id="blouse", sold_at=dt(2026, 10, 24, 15)))
+    ledger.db.commit()
+
+
+def test_a_kept_vendoo_sale_and_the_marketplace_order_for_it_count_once(ledger):
+    from vendoo_studio.services.inventory_analytics import load_rows
+    from vendoo_studio.services.item_status import status_for
+
+    _sold_once_twice(ledger)
+    sold = [row for row in load_rows(ledger.db) if row.conversation_id == "blouse" and row.status == "sold"]
+    assert [row.sale_id for row in sold] == ["etsy-blouse"]
+    assert status_for(ledger.db, "blouse", {}).units_sold == 1
+    rows = report(ledger, start="1970-01-01")["rows"]
+    assert [row["id"] for row in rows if row["conversation_id"] == "blouse"] == ["etsy-blouse"]
+
+
+def test_an_ebay_line_saved_under_both_id_forms_counts_once(ledger):
+    from vendoo_studio.services.item_status import paid_lines
+
+    for sale_id, line_id in (("long", "377487606253-10087353543813"), ("short", "10087353543813")):
+        ledger.db.add(MarketplaceSale(id=sale_id, marketplace="ebay", order_id="13-15364-10317", line_id=line_id,
+                                      listing_id="377487606253", conversation_id="coat"))
+    ledger.db.commit()
+    assert sorted(line.id for line in paid_lines(ledger.db)["coat"]) == sorted([ledger.sale.id, "long"])
+    ids = [row["id"] for row in report(ledger)["rows"]]
+    assert "short" not in ids and "long" in ids
+
+
+def test_a_vendoo_sale_from_before_a_relist_still_counts(ledger):
+    from datetime import datetime as dt
+
+    from vendoo_studio.services.item_status import paid_lines
+
+    _sold_once_twice(ledger)
+    ledger.db.get(MarketplaceSale, "vendoo-blouse").sold_at = dt(2026, 3, 1, 12)
+    ledger.db.commit()
+    assert sorted(line.id for line in paid_lines(ledger.db)["blouse"]) == ["etsy-blouse", "vendoo-blouse"]
