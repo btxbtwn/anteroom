@@ -52,3 +52,19 @@ describe("sharing and offer rule forms", () => {
     for (const [options] of useMutation.mock.calls) expect(options.retry).toBe(false);
   });
 });
+
+
+it("shows skipped listing identity and the precise reason without send controls", () => {
+  useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => ({ data:
+    queryKey.includes("activity") ? { runs: [], sends: [{ id: "skip", state: "skipped", title: "Vintage tee",
+      listing_id: "seller-vintage-tee", note: "Depop refused this listing’s send-all preview (HTTP 400, code 1003)." }] }
+      : { items: [], included: 0 },
+  }));
+  const html = renderToStaticMarkup(<PromotionDetails automation={{ ...rule, marketplace: "depop" }} />);
+  expect(html).toContain("Vintage tee");
+  expect(html).toContain("seller-vintage-tee");
+  expect(html).toContain("HTTP 400, code 1003");
+  expect(html).toContain("skipped");
+  expect(html).not.toContain("offer $null");
+  expect(html).not.toContain("Check result");
+});
