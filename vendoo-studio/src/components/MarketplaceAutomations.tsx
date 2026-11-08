@@ -222,6 +222,13 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
               </div>
             </li>
           ))}
+          {(activity.data?.sends || []).filter((send) => send.state === "skipped").map((send) => (
+            <li key={send.id}>
+              <p><span className="font-medium">{send.title || send.listing_id}</span> · skipped</p>
+              <p className="break-words font-mono text-2xs text-muted-foreground">{send.listing_id}</p>
+              <p className="break-words text-muted-foreground">{send.note}</p>
+            </li>
+          ))}
           {(activity.data?.runs || []).map((run) => (
             <li key={run.id}>
               <span className="text-muted-foreground">{when(run.started_at)}</span> · {run.sent} sent · {run.skipped} skipped · {run.failed} not done

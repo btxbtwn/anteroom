@@ -6,6 +6,64 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.818 — 2026-11-08
+
+- Open Suggestions from the sidebar to review older listings worth relisting, see why they are recommended, and return to your search and place after reviewing a listing.
+
+## 0.1.817 — 2026-11-08
+
+- Show skipped automatic offer attempts by listing in Activity, with Depop’s sanitized response and distinct explanations for refused previews and missing recipients instead of assuming there are no eligible likers.
+- Retry interrupted downloads of pinned build and security-check tools without bypassing their checksums or any tests.
+
+## 0.1.816 — 2026-11-08
+
+- Make the Anteroom logo at the top of the sidebar larger.
+
+## 0.1.815 — 2026-11-08
+
+- Order the By marketplace list in Analytics by whatever the chart shows, items sold or revenue.
+
+## 0.1.814 — 2026-11-08
+
+- The marketplace list beside a listing's form no longer slides around when dragged on an iPad.
+
+## 0.1.813 — 2026-11-08
+
+- Mercari's Shipping label list loads again when the listing answered the shoebox question with "Yes".
+- Depop's Age is always filled in: Modern unless the listing names a decade.
+- On iPad and iPhone, press and hold a photo, then drag it to reorder; the photo viewer can also move a photo or leave it off a marketplace.
+
+## 0.1.812 — 2026-11-08
+
+- The Anteroom icon now shows on the browser tab for myanteroom.com.
+
+## 0.1.811 — 2026-11-08
+
+- Listing rows in the sidebar show the asking price and how many units are on hand.
+- eBay, Etsy and Depop logos in listing rows are now large enough to read.
+
+## 0.1.810 — 2026-11-08
+
+- Let iPads and other touch screens delete, rename and copy a listing from the sidebar with the ⋯ button.
+
+## 0.1.809 — 2026-11-08
+
+- Read from photos in bulk upload reads every item at once instead of two at a time, so a box of items finishes in minutes instead of half an hour.
+- A photo reading cut off by an app update or restart is tried once more instead of showing "Reading failed: 500".
+- Each item's note now names the AI model that read its yardstick photos, so you can tell when a different photo model would read them better.
+
+## 0.1.808 — 2026-11-08
+
+- Let DeepSeek and other OpenRouter listing models search repeatedly for sold comparisons during listing generation.
+
+## 0.1.807 — 2026-11-08
+
+- On the web, listing photos you've already seen appear right away when you scroll your inventory, even after reloading the page or after an Anteroom update.
+
+## 0.1.806 — 2026-11-08
+
+- Anteroom now shows a Beta tag next to its name.
+
 ## 0.1.805 — 2026-11-08
 
 - Marketplace refusals now explain the problem in plain words, like "Etsy needs to know who made this item", with the marketplace's own reply tucked under Details.
