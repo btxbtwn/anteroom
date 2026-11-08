@@ -1,0 +1,1 @@
+- Analytics no longer shows a box for sales missing data; find them in Sales records instead.
