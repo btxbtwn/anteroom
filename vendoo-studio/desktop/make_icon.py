@@ -1,8 +1,9 @@
 """Draw the Anteroom icon: rooms receding toward a lit doorway.
 
-One drawing, three targets. macOS masks and lights the app icon itself, so the
+One drawing, four targets. macOS masks and lights the app icon itself, so the
 art is flat colour on Apple's 824-px tile with 100-px margins; anything larger
-lands in the grey "squircle jail" on macOS 26. Chrome wants its 128-px icon on
+lands in the grey "squircle jail" on macOS 26. iOS wants a full-bleed opaque
+square and rounds the corners itself. Chrome wants its 128-px icon on
 96 px with 16 px of padding and a faint light edge for dark toolbars. Below
 64 px the bands blur together, so 32 and 16 px are drawn separately with fewer
 arches on whole pixels instead of being scaled down.
@@ -17,7 +18,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 DESKTOP = Path(__file__).resolve().parent
 REPO_ROOT = DESKTOP.parent.parent
@@ -25,21 +26,28 @@ EXTENSION_ICONS = REPO_ROOT / "vendoo-extension" / "icons"
 EXTENSION_ICON_SIZES = (16, 32, 48, 128)
 STUDIO_FAVICON = DESKTOP.parent / "public" / "favicon.png"
 APP_ICON_PNG = DESKTOP / "AppIcon.png"
+IOS_APP_ICON = REPO_ROOT / "anteroom-ios" / "Sources" / "Assets.xcassets" / "AppIcon.appiconset" / "AppIcon.png"
 
 SUPERSAMPLE = 8
 CANVAS = 1024
 TILE_BOX = (100, 100, 924, 924)
 TILE_RADIUS = 185.4
 TILE = (9, 9, 9, 255)
-# One OKLCH hue (~265) with even lightness steps, so no band sinks into the
-# tile or its neighbour; #346bf1 is the app's accent.
-ARCH_COLOURS = ((21, 41, 105, 255), (36, 74, 180, 255), (52, 107, 241, 255), (144, 179, 254, 255))
-DOOR = (255, 255, 255, 255)
+# Dusk: OKLCH lightness 0.34, 0.50, 0.66, 0.82 in even steps, so each room is
+# brighter than the one around it, while the hue turns about 45 degrees per
+# room from violet through magenta and coral to amber. The doorway is a warm
+# white. src/components/AnteroomLogo.tsx draws the same colours.
+ARCH_COLOURS = ((67, 16, 132, 255), (158, 48, 129, 255), (232, 96, 91, 255), (254, 178, 81, 255))
+DOOR = (254, 250, 240, 255)
 # Arches share one floor and one centre for their tops (1024 canvas units).
 FLOOR = 768
 ARCH_CENTRE_Y = 488
 ARCH_SPANS = ((192, 832), (256, 768), (320, 704), (384, 640))
 DOOR_SPAN = (448, 576)
+# The arches fade out from here to the floor instead of ending on a hard line,
+# fully opaque at FADE_TOP, 70% at 45% of the way, clear at the floor.
+FADE_TOP = 560
+_FADE_FROM = (FADE_TOP - ARCH_CENTRE_Y) / (FLOOR - ARCH_CENTRE_Y)
 
 # Below 64 px: (tile offset, tile size, corner radius, floor, arch spans, door
 # span, door height, colours), in whole pixels of that size.
@@ -90,9 +98,32 @@ def _tile(box: tuple[float, float, float, float], radius: float, k: int) -> list
     return continuous_rect((left, top, right - 1, bottom - 1), radius * k)
 
 
-def _supersampled(size: int, paint) -> Image.Image:
-    image = Image.new("RGBA", (size * SUPERSAMPLE, size * SUPERSAMPLE), (0, 0, 0, 0))
-    paint(ImageDraw.Draw(image), SUPERSAMPLE)
+def _fade_opacity(t: float) -> float:
+    if t <= 0:
+        return 1.0
+    if t >= 1:
+        return 0.0
+    return 1 - 0.3 * t / 0.45 if t < 0.45 else 0.7 * (1 - t) / 0.55
+
+
+def _fade(layer: Image.Image, top: float, floor: float) -> Image.Image:
+    """Multiply ``layer``'s alpha by the floor fade between rows ``top`` and ``floor``."""
+    ramp = Image.new("L", (1, layer.height))
+    ramp.putdata([round(255 * _fade_opacity((y + 0.5 - top) / (floor - top))) for y in range(layer.height)])
+    alpha = ImageChops.multiply(layer.getchannel("A"), ramp.resize(layer.size))
+    layer.putalpha(alpha)
+    return layer
+
+
+def _supersampled(size: int, tile, arches, centre_y: float, floor: float) -> Image.Image:
+    """Draw the tile, then the arches faded toward ``floor`` (pixels of ``size``)."""
+    k = SUPERSAMPLE
+    image = Image.new("RGBA", (size * k, size * k), (0, 0, 0, 0))
+    tile(ImageDraw.Draw(image), k)
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    arches(ImageDraw.Draw(layer), k)
+    top = centre_y + (floor - centre_y) * _FADE_FROM
+    image = Image.alpha_composite(image, _fade(layer, top * k, floor * k))
     # Box filtering averages coverage exactly; Lanczos rings past the tile edge.
     return image.resize((size, size), Image.Resampling.BOX)
 
@@ -105,27 +136,31 @@ def _render_master(size: int, tile_box: tuple[float, float, float, float]) -> Im
     def place(x: float, y: float, k: float) -> tuple[float, float]:
         return ((tile_box[0] + (x - TILE_BOX[0]) * unit) * k, (tile_box[1] + (y - TILE_BOX[1]) * unit) * k)
 
-    def paint(draw: ImageDraw.ImageDraw, k: int) -> None:
+    def tile(draw: ImageDraw.ImageDraw, k: int) -> None:
         draw.polygon(_tile(tile_box, TILE_RADIUS * unit, k), fill=TILE)
+
+    def arches(draw: ImageDraw.ImageDraw, k: int) -> None:
         _, centre_y = place(0, ARCH_CENTRE_Y, k)
         _, floor = place(0, FLOOR, k)
         for (left, right), colour in zip((*ARCH_SPANS, DOOR_SPAN), (*ARCH_COLOURS, DOOR), strict=True):
             _arch(draw, place(left, 0, k)[0], place(right, 0, k)[0], centre_y, floor, colour)
 
-    return _supersampled(size, paint)
+    return _supersampled(size, tile, arches, place(0, ARCH_CENTRE_Y, 1)[1], place(0, FLOOR, 1)[1])
 
 
 def _render_small(size: int) -> Image.Image:
     offset, tile, radius, floor, spans, door, door_height, colours = SMALL_MASTERS[size]
     centre_y = floor - door_height + (door[1] - door[0]) / 2
 
-    def paint(draw: ImageDraw.ImageDraw, k: int) -> None:
+    def paint_tile(draw: ImageDraw.ImageDraw, k: int) -> None:
         box = (offset, offset, offset + tile, offset + tile)
         draw.polygon(_tile(box, radius, k), fill=TILE)
+
+    def arches(draw: ImageDraw.ImageDraw, k: int) -> None:
         for (left, right), colour in zip((*spans, door), (*colours, DOOR), strict=True):
             _arch(draw, left * k, right * k, centre_y * k, floor * k, colour)
 
-    return _supersampled(size, paint)
+    return _supersampled(size, paint_tile, arches, centre_y, floor)
 
 
 def render_icon(size: int) -> Image.Image:
@@ -138,6 +173,12 @@ def render_icon(size: int) -> Image.Image:
         # 64-unit bands land on whole pixels here; put the tile on them too.
         box = (6, 6, 58, 58)
     return _render_master(size, box)
+
+
+def render_ios_icon() -> Image.Image:
+    """The iPhone icon: the tile edge to edge on an opaque square; iOS rounds it."""
+    square = Image.new("RGBA", (CANVAS, CANVAS), TILE)
+    return Image.alpha_composite(square, _render_master(CANVAS, (0, 0, CANVAS, CANVAS))).convert("RGB")
 
 
 def render_extension_icon(size: int) -> Image.Image:
@@ -176,6 +217,11 @@ def write_app_icon_png(destination: Path = APP_ICON_PNG) -> Path:
     return destination
 
 
+def write_ios_icon(destination: Path = IOS_APP_ICON) -> Path:
+    render_ios_icon().save(destination)
+    return destination
+
+
 def write_favicon(destination: Path = STUDIO_FAVICON) -> Path:
     destination = destination.resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -201,6 +247,7 @@ if __name__ == "__main__":
     elif destination.suffix.lower() == ".icns":
         print(f"skip icns (iconutil not found): {destination}")
     written.append(write_app_icon_png())
+    written.append(write_ios_icon())
     written.append(write_favicon())
     written.extend(write_extension_icons())
     for path in written:

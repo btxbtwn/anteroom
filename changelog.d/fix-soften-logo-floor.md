@@ -1,0 +1,2 @@
+- The Anteroom logo has new sunset colors, from violet to amber, on the sidebar, browser tab, Mac app, iPhone app and Chrome extension.
+- The logo's arches now fade softly at the bottom instead of ending in a hard line.
