@@ -106,8 +106,12 @@ def upgrade() -> None:
             if not lines:
                 break
             when = _moment(old)
-            line = min(lines, key=lambda row: abs((_moment(row) - when).total_seconds())
-                       if when and _moment(row) else float("inf"))
+
+            def distance(row: dict, when: datetime | None = when) -> float:
+                moment = _moment(row)
+                return abs((moment - when).total_seconds()) if when and moment else float("inf")
+
+            line = min(lines, key=distance)
             lines.remove(line)
             if _carry_over(line, old):
                 bind.execute(sales.update().where(sales.c.user_id == line["user_id"], sales.c.id == line["id"]).values(
