@@ -22,6 +22,8 @@ final class SessionStore {
 
     private(set) var state: State = .loading
     private(set) var signInError: String?
+    /// How an eBay or Etsy sign-in the browser just came back from ended.
+    var marketplaceSignInMessage: String?
     let api: AnteroomAPI?
     let changes = LiveChanges()
     private let client: SupabaseClient?
@@ -181,6 +183,19 @@ final class SessionStore {
             }
         } catch {
             signInError = "That link opened somewhere other than where it was asked for, or it expired. If you just confirmed your email, sign in with your password."
+        }
+    }
+
+    func completeMarketplaceSignIn(_ signIn: MarketplaceSignInReturn) async {
+        guard let api, case .signedIn = state else {
+            marketplaceSignInMessage = "Sign in to Anteroom, then connect \(signIn.name) again."
+            return
+        }
+        do {
+            let label = try await api.finishMarketplaceSignIn(signIn)
+            marketplaceSignInMessage = "\(label ?? signIn.name) is connected."
+        } catch {
+            marketplaceSignInMessage = "\(signIn.name) was not connected. \(error.localizedDescription)"
         }
     }
 

@@ -22,6 +22,13 @@ def origin_allowed(origin: str, *, extension: bool = False) -> bool:
     return origin in CORS_ORIGINS or origin == _private_origin or (extension and bool(_EXTENSION.fullmatch(origin)))
 
 
+_SIGN_IN_RETURN = re.compile(r"/api/marketplace-accounts/(ebay|etsy)/finish")
+
+
+def _returning_from_sign_in(scope) -> bool:
+    return scope["type"] == "http" and scope.get("method") == "GET" and bool(_SIGN_IN_RETURN.fullmatch(scope.get("path", "")))
+
+
 class LocalRequestMiddleware:
     def __init__(self, app):
         self.app = app
@@ -45,6 +52,11 @@ class LocalRequestMiddleware:
         trusted_origin = origin is not None and origin_allowed(origin, extension=True)
         rejected = not valid_host or (origin is not None and not trusted_origin)
         rejected = rejected or (headers.get("sec-fetch-site") in {"cross-site", "same-site"} and not trusted_origin)
+        # The relay sends the seller's browser back here after an eBay or Etsy
+        # sign-in. That page only finishes a sign-in this Mac started, and only
+        # with the one-time claim the relay gave that browser.
+        if rejected and valid_host and _returning_from_sign_in(scope):
+            rejected = False
         if rejected:
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 1008})

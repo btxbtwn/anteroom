@@ -110,6 +110,10 @@ jobs:
         run: |
           xcrun swiftc Sources/Session/SignInMessages.swift Tests/SignInMessagesTests.swift -o "$RUNNER_TEMP/sign-in-tests"
           "$RUNNER_TEMP/sign-in-tests"
+      - name: Test eBay and Etsy sign-in return links
+        run: |
+          xcrun swiftc Sources/Session/MarketplaceSignInReturn.swift Tests/MarketplaceSignInReturnTests.swift -o "$RUNNER_TEMP/marketplace-sign-in-tests"
+          "$RUNNER_TEMP/marketplace-sign-in-tests"
       - name: Test marketplace readiness and List everywhere choices
         run: |
           xcrun swiftc Sources/API/MarketplaceReadiness.swift Tests/MarketplaceReadinessTests.swift -o "$RUNNER_TEMP/readiness-tests"
