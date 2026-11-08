@@ -6,6 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.798 — 2026-11-08
+
+- When Anteroom is briefly unavailable, such as during an update, screens on the web and iPhone keep loading and catch up once it's back instead of asking you to tap Try again.
+- On iPhone, a screen that couldn't load tries again by itself when you come back to the app.
+
+## 0.1.797 — 2026-11-08
+
+- Regenerate on the web now rewrites listings that are already live on marketplaces, instead of failing with "Only an unsent draft can be removed from this workspace". Their marketplace links are kept.
+
 ## 0.1.796 — 2026-11-08
 
 - The iPhone app now runs on iPad too: the tabs open as a sidebar, and Inventory keeps your listings beside the one you're editing.

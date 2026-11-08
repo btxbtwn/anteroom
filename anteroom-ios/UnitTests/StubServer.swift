@@ -6,6 +6,9 @@ final class StubProtocol: URLProtocol {
     struct Reply {
         var status: Int
         var body: String
+        var headers: [String: String] = [:]
+        /// Fails the request without an answer, like a dropped connection.
+        var failure: URLError.Code?
     }
 
     private static let lock = NSLock()
@@ -42,8 +45,12 @@ final class StubProtocol: URLProtocol {
         let respond: (URLRequest) -> Reply = index >= 0 ? Self.replies[index] : { _ in Reply(status: 500, body: "") }
         Self.lock.unlock()
         let reply = respond(sent)
+        if let failure = reply.failure {
+            client?.urlProtocol(self, didFailWithError: URLError(failure))
+            return
+        }
         let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: "HTTP/1.1",
-                                       headerFields: ["Content-Type": "application/json"])!
+                                       headerFields: ["Content-Type": "application/json"].merging(reply.headers) { $1 })!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(reply.body.utf8))
         client?.urlProtocolDidFinishLoading(self)
@@ -96,10 +103,38 @@ final class StubSignIn: @unchecked Sendable {
             })
     }
 
-    func api() -> AnteroomAPI {
+    /// Retries without waiting, on a clock that only the waits move.
+    func api(readRetry: ReadRetry = TestClock().retry) -> AnteroomAPI {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubProtocol.self]
-        return AnteroomAPI(baseURL: URL(string: "https://anteroom.test")!, auth: authorization, configuration: configuration)
+        return AnteroomAPI(baseURL: URL(string: "https://anteroom.test")!, auth: authorization, configuration: configuration,
+                           readRetry: readRetry)
+    }
+}
+
+/// Time for `ReadRetry` that passes only when it waits, and records each wait.
+final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var time: TimeInterval = 0
+    private var recorded: [TimeInterval] = []
+    /// Runs during each wait, before time moves on.
+    var onWait: (@Sendable () -> Void)?
+
+    var waits: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return recorded }
+
+    var retry: ReadRetry {
+        var retry = ReadRetry()
+        retry.now = { [self] in lock.lock(); defer { lock.unlock() }; return time }
+        retry.sleep = { [self] seconds in
+            onWait?()
+            try Task.checkCancellation()
+            lock.lock(); defer { lock.unlock() }
+            recorded.append(seconds)
+            time += seconds
+        }
+        // The longest wait each step allows, so budgets are exact.
+        retry.jitter = { $0.upperBound }
+        return retry
     }
 }
 

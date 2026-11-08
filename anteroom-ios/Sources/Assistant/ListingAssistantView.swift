@@ -50,6 +50,7 @@ struct ListingAssistantView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             .task { await model.load() }
+            .reloadingOnReturn(when: !model.ready && model.error != nil) { await model.load() }
             .task(id: runID) {
                 if let action { await model.run(action) }
             }
