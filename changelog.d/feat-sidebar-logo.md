@@ -1,0 +1,1 @@
+- The Anteroom logo now shows at the top of the sidebar.
