@@ -70,7 +70,7 @@ describe("Connections settings", () => {
     expect(row("chrome-depop")).toContain("Detect sales");
     expect(row("chrome-depop")).not.toContain("to detect sales");
     const switches = [...html.matchAll(/<[a-z]+ [^>]*aria-label="Sale detection for (\w+)"[^>]*>/g)];
-    const state = Object.fromEntries(switches.map(([tag, name]) => [name, { checked: tag.includes('aria-checked="true"'), disabled: tag.includes("data-disabled") }]));
+    const state = Object.fromEntries(switches.map(([tag, name]) => [name, { checked: tag.includes('aria-checked="true"'), disabled: / data-disabled(="")?[ >]|aria-disabled="true"/.test(tag) }]));
     expect(state.Depop).toEqual({ checked: true, disabled: false });
     for (const name of ["eBay", "Etsy", "Poshmark", "Mercari"]) expect(state[name]).toEqual({ checked: false, disabled: true });
   });
