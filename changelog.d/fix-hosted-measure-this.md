@@ -1,0 +1,1 @@
+- Read from photos works again on myanteroom.com: the web app now ships the measuring tool instead of saying the measure-this skill is missing. Box Scout's sourcing refresh gets its files there too.
