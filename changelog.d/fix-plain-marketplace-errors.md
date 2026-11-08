@@ -1,4 +1,0 @@
-- Marketplace refusals now explain the problem in plain words, like "Etsy needs to know who made this item", with the marketplace's own reply tucked under Details.
-- Ask chat appears on a refusal only when chat can fix it by changing the listing, and it now works while chat is busy by joining the queue. It is on iPhone too.
-- Anteroom now warns before you list on Etsy when Who made it? or When was it made? is empty, and reads every way those answers are saved.
-- Chat names fields the way the form labels them and no longer answers in codes or field keys.
