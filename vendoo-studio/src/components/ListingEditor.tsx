@@ -43,7 +43,7 @@ import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
 import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, GeneralCategorySelect, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
-import { generalFormSections, groupFieldsIntoSections } from "./listingFieldSections";
+import { GENERAL_FOLDED_SECTION, generalFormSections, groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { gapsByField, rowForField } from "./nativeFieldWarnings";
 import type { NativeMarketplace } from "../api/nativeMarketplaces";
@@ -561,6 +561,17 @@ export function StructuredEditor({
   // Go to an "Edit …" target once. The rows rebuild on every save, and
   // following the target again then pulled the seller back from whatever they were editing.
   const reachedTarget = React.useRef<number | null>(null);
+  // General's More details starts folded. An "Edit …" target inside it opens it
+  // until the seller folds it again.
+  const [moreToggle, setMoreToggle] = React.useState<{ open: boolean; sequence?: number }>({ open: false });
+  const targetFolded = React.useMemo(() => {
+    if (!target || tab !== "general") return false;
+    const key = matchingEditorField(fields, target.field) ?? rowForField(tab, target.field, fields);
+    return Boolean(key && generalFormSections(fields).find((section) => section.id === GENERAL_FOLDED_SECTION)
+      ?.fields.some((field) => field.key === key));
+  }, [target, tab, fields]);
+  const moreOpen = targetFolded && moreToggle.sequence !== target?.sequence ? true : moreToggle.open;
+  const setMoreOpen = (open: boolean) => setMoreToggle({ open, sequence: target?.sequence });
   React.useEffect(() => {
     if (!target || reachedTarget.current === target.sequence) return;
     // A marketplace's answer can name the listing field its form row comes from.
@@ -571,7 +582,7 @@ export function StructuredEditor({
     reachedTarget.current = target.sequence;
     input.scrollIntoView({ block: "center" });
     input.focus();
-  }, [target, fields, tab]);
+  }, [target, fields, tab, moreOpen]);
 
   // Derive saved values during render: a cached form is filled on its first frame.
   const local = React.useMemo(() => {
@@ -1047,7 +1058,9 @@ export function StructuredEditor({
             className="gap-3 py-4"
             title={section.title}
             titleId={`listing-section-${tab}-${section.id}`}
-            meta={section.id === "listing" || !counted.length ? null : `${filled} of ${counted.length} filled`}
+            meta={section.id === "listing" || !counted.length || (tab === "general" && counted.length < 2) ? null
+              : `${filled} of ${counted.length} filled`}
+            {...(tab === "general" && section.id === GENERAL_FOLDED_SECTION ? { open: moreOpen, onOpenChange: setMoreOpen } : {})}
           >
             {rows}
           </InspectorSection>
