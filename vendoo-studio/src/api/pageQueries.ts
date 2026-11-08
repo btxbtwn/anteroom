@@ -1,5 +1,6 @@
-import { queryOptions, type QueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
+import type { DirectConnectionsStatus } from "./directConnections";
 
 /**
  * The first reads of each sidebar page. Pages read through these definitions
@@ -8,6 +9,9 @@ import { api } from "./client";
  *
  * Warmed reads are kept for half an hour without a screen watching them;
  * the default five minutes would drop them before the seller gets there.
+ *
+ * These are plain objects rather than `queryOptions(...)`, so component tests
+ * that replace React Query with a mock can still import them.
  */
 const KEEP_MS = 30 * 60_000;
 
@@ -21,44 +25,44 @@ export function lastThirtyDays(now = Date.now()) {
   };
 }
 
-export const sourcingQuery = queryOptions({ queryKey: ["sourcing"], queryFn: api.sourcing.get, gcTime: KEEP_MS });
-export const boxesQuery = queryOptions({ queryKey: ["boxes"], queryFn: api.boxes.list, gcTime: KEEP_MS });
+export const sourcingQuery = { queryKey: ["sourcing"] as const, queryFn: api.sourcing.get, gcTime: KEEP_MS };
+export const boxesQuery = { queryKey: ["boxes"] as const, queryFn: api.boxes.list, gcTime: KEEP_MS };
 
-export const automationsQuery = queryOptions({ queryKey: ["automations"], queryFn: () => api.automations.list(), gcTime: KEEP_MS });
-export const automationApprovalsQuery = queryOptions({ queryKey: ["automation-approvals"], queryFn: () => api.automations.approvals(), gcTime: KEEP_MS });
-export const automationGapsQuery = queryOptions({ queryKey: ["automation-gaps"], queryFn: () => api.errors.list(), gcTime: KEEP_MS });
-export const ebayOffersQuery = queryOptions({ queryKey: ["ebay-offers"], queryFn: api.ebayOffers.status, gcTime: KEEP_MS });
-export const promotionAutomationsQuery = queryOptions({ queryKey: ["promotion-automations"], queryFn: api.promotionAutomations.list, gcTime: KEEP_MS });
+export const automationsQuery = { queryKey: ["automations"] as const, queryFn: () => api.automations.list(), gcTime: KEEP_MS };
+export const automationApprovalsQuery = { queryKey: ["automation-approvals"] as const, queryFn: () => api.automations.approvals(), gcTime: KEEP_MS };
+export const automationGapsQuery = { queryKey: ["automation-gaps"] as const, queryFn: () => api.errors.list(), gcTime: KEEP_MS };
+export const ebayOffersQuery = { queryKey: ["ebay-offers"] as const, queryFn: api.ebayOffers.status, gcTime: KEEP_MS };
+export const promotionAutomationsQuery = { queryKey: ["promotion-automations"] as const, queryFn: api.promotionAutomations.list, gcTime: KEEP_MS };
 
-export const directConnectionsQuery = queryOptions({ queryKey: ["direct-connections"], queryFn: api.directConnections.status, gcTime: KEEP_MS });
+export const directConnectionsQuery = { queryKey: ["direct-connections"] as const, queryFn: api.directConnections.status, gcTime: KEEP_MS };
 
 export function ebayFinancesQuery(start: string, end: string) {
-  return queryOptions({
-    queryKey: ["ebay", "finances", { start, end }, 0],
+  return {
+    queryKey: ["ebay", "finances", { start, end }, 0] as const,
     queryFn: () => api.ebay.read("finances", { start, end, offset: 0 }),
     retry: false, staleTime: 30_000, gcTime: KEEP_MS,
-  });
+  };
 }
 
 export type SalesLedgerFilters = { start: string; end: string; q: string; attention: string; sort: string; marketplace?: string };
 
 export function salesLedgerQuery(filters: SalesLedgerFilters, page: number) {
-  return queryOptions({
-    queryKey: ["sales-ledger", filters, page],
+  return {
+    queryKey: ["sales-ledger", filters, page] as const,
     queryFn: () => api.salesLedger.list(filters, page),
     retry: false, gcTime: KEEP_MS,
-  });
+  };
 }
 
 export function salesOverviewQuery(start: string | null, end: string, marketplace: string) {
-  return queryOptions({
-    queryKey: ["analytics", "overview", start, end, marketplace],
+  return {
+    queryKey: ["analytics", "overview", start, end, marketplace] as const,
     queryFn: () => api.analytics.overview({ start, end, ...(marketplace !== "all" ? { marketplace } : {}) }),
     gcTime: KEEP_MS,
-  });
+  };
 }
 
-export const settingsUiQuery = queryOptions({ queryKey: ["settings-ui"], queryFn: api.settings.ui, gcTime: KEEP_MS });
+export const settingsUiQuery = { queryKey: ["settings-ui"] as const, queryFn: api.settings.ui, gcTime: KEEP_MS };
 
 type Runtime = { views: ReadonlySet<string>; features: ReadonlySet<string> };
 
@@ -81,7 +85,7 @@ export async function prefetchPageReads(client: QueryClient, runtime: Runtime, n
   }
   if (runtime.views.has("marketplaces")) {
     reads.push(client.prefetchQuery(directConnectionsQuery).then(() => {
-      const connections = client.getQueryData(directConnectionsQuery.queryKey);
+      const connections = client.getQueryData<DirectConnectionsStatus>(directConnectionsQuery.queryKey);
       if (connections?.accounts.ebay?.connected) return client.prefetchQuery(ebayFinancesQuery(start, end));
     }));
   }
