@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, Settings2Icon } from "lucide-react";
 import { api } from "../../api/client";
+import { directConnectionsQuery } from "../../api/pageQueries";
 import { BUSY_POLL_MS, pollMs } from "../../api/polling";
 import { PageError, PageNote } from "../WorkspacePage";
 import { SaleCalendar } from "../SaleCalendar";
@@ -39,7 +40,7 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [features, setFeatures] = useState(FEATURES.map((feature) => feature.id));
   const queryClient = useQueryClient();
-  const connection = useQuery({ queryKey: ["direct-connections"], queryFn: api.directConnections.status,
+  const connection = useQuery({ ...directConnectionsQuery,
     refetchInterval: (query) => pollMs(query.state.data?.accounts.ebay.pending ? BUSY_POLL_MS : 15000) });
   const grant = useMutation({ mutationFn: () => api.ebay.grant(features), retry: false,
     onSuccess: (result) => {

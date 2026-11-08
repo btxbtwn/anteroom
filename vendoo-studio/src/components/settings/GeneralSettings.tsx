@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
+import { settingsUiQuery } from "../../api/pageQueries";
 import type { ListingNames } from "../../api/types";
 import { frontendBuildState } from "../buildStamp";
 import { useStudioUpdate } from "../UpdateButton";
@@ -15,10 +16,7 @@ import { useWorkspaceRuntime } from "../../app/runtime";
 
 function AppearanceSection() {
   const queryClient = useQueryClient();
-  const { data, isPending } = useQuery({
-    queryKey: ["settings-ui"],
-    queryFn: api.settings.ui,
-  });
+  const { data, isPending } = useQuery(settingsUiQuery);
   const mutation = useMutation({
     mutationFn: (theme: ThemePreference) => api.settings.setUi({ theme }),
     onSuccess: (payload) => {
@@ -77,7 +75,7 @@ function AppearanceSection() {
 
 function ListingModeSection() {
   const client = useQueryClient();
-  const prefs = useQuery({ queryKey: ["settings-ui"], queryFn: api.settings.ui });
+  const prefs = useQuery(settingsUiQuery);
   const save = useMutation({
     mutationFn: (enabled: boolean) => api.settings.setUi({ listing_mode: enabled ? "vendoo" : "direct" }),
     onSuccess: result => {

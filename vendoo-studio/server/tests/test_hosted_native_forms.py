@@ -13,7 +13,7 @@ from vendoo_studio.services.hosted_database import SellerDatabaseSession
 from vendoo_studio.services.native_editor import editor_form
 from vendoo_studio.services.service_context import use
 
-MARKETS = ('poshmark', 'depop', 'mercari')
+MARKETS = ('poshmark', 'depop', 'mercari', 'etsy')
 
 
 def with_choice_lists(client, form, auth):
@@ -30,13 +30,14 @@ def with_choice_lists(client, form, auth):
 
 def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(cloud, signing_keys, monkeypatch):  # noqa: F811
     client, engine = cloud
-    from vendoo_studio.services import mercari_api
+    from vendoo_studio.services import marketplace_schemas, mercari_api
 
     async def no_quotes(*_args):
         raise OSError('offline')
 
-    # Mercari's anonymous shipping quote is the form's only outbound read.
+    # Mercari's anonymous shipping quote and Etsy's category attributes are the forms' only outbound reads.
     monkeypatch.setattr(mercari_api, 'shipping_quotes', no_quotes)
+    monkeypatch.setattr(marketplace_schemas, 'etsy_properties', no_quotes)
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
     identity = client.post('/api/conversations', headers=alice, json={'title': 'Private coat'}).json()['id']
     path = '/api/conversations/' + identity

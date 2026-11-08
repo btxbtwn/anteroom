@@ -13,7 +13,7 @@ from functools import cache
 
 
 def _sources() -> dict[str, tuple[str, str, Callable[[], dict]]]:
-    from vendoo_studio.services import depop_form, mercari_form, poshmark_form
+    from vendoo_studio.services import depop_form, etsy_form, mercari_form, poshmark_form
 
     return {
         "mercari-brands": ("mercari", "mercari_specifics.brand", mercari_form.brand_choices),
@@ -21,6 +21,7 @@ def _sources() -> dict[str, tuple[str, str, Callable[[], dict]]]:
         "depop-brands": ("depop", "depop_specifics.brand", depop_form.brand_choices),
         "depop-categories": ("depop", "direct_category_ids.depop", depop_form.category_choices),
         "poshmark-categories": ("poshmark", poshmark_form.CATEGORY_PATH, poshmark_form.category_choices),
+        "etsy-categories": ("etsy", etsy_form.CATEGORY_PATH, etsy_form.category_choices),
     }
 
 

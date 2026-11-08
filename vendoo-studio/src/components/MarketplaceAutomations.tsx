@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "../api/client";
+import { promotionAutomationsQuery } from "../api/pageQueries";
 import { pollMs } from "../api/polling";
 import type { PromotionAction, PromotionAutomation, PromotionMarketplace } from "../api/promotions";
 import { confirmDialog } from "../ui/confirmDialog";
@@ -22,7 +23,7 @@ import { Radio, RadioGroup } from "./ui/radio-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
 
-const KEY = ["promotion-automations"] as const;
+const KEY = promotionAutomationsQuery.queryKey;
 const FIELD = "h-8 rounded-md border border-border bg-background px-2 text-sm";
 
 function when(value: string | null | undefined): string {
@@ -53,7 +54,7 @@ export async function confirmPromotionOn(row: PromotionAutomation): Promise<bool
 }
 
 export function usePromotionAutomations(enabled = true) {
-  return useQuery({ queryKey: KEY, queryFn: api.promotionAutomations.list, refetchInterval: () => pollMs(30000), enabled });
+  return useQuery({ ...promotionAutomationsQuery, refetchInterval: () => pollMs(30000), enabled });
 }
 
 function useSavePromotion(onSaved: () => void) {

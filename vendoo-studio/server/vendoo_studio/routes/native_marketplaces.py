@@ -88,7 +88,7 @@ async def cancel(conv_id: str, marketplace: Marketplace):
 
 
 @router.get("/{marketplace}/form")
-def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop"],
+def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "etsy"],
                 revision_id: str | None = None, db: Session = Depends(get_db, scope="function")):
     import asyncio
 
