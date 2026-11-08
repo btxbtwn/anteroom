@@ -1,1 +1,0 @@
-- Keep the web app from freezing and showing "Cloud data is temporarily unavailable" when Chrome is slow to answer.
