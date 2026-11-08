@@ -553,7 +553,9 @@ final class CoreFlowSandboxTests: XCTestCase {
         XCTAssertTrue(app.buttons["Regenerate"].exists, "After a first run the assistant offers Regenerate")
         keep(app, "Assistant summary")
         review.tap()
-        XCTAssertFalse(app.buttons["generate-listing"].waitForExistence(timeout: 5), "With copy, the editor hides Generate listing")
+        // The editor reloads the saved draft on return; then it has copy and no Generate listing.
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["generate-listing"])
+        waitForExpectations(timeout: 30)
     }
 
     func testMarketplaceTabHasItsOwnListButton() {
