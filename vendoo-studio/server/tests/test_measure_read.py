@@ -113,8 +113,14 @@ class ReadMeasurementsRouteTest(unittest.TestCase):
     def test_no_yardstick_photo_reads_nothing(self):
         provider = FakeProvider([])
         body = self.post(provider, [_plain_photo()]).json()
-        self.assertEqual(body, {"photos_read": 0, "measurements": {}})
+        self.assertEqual(body, {"photos_read": 0, "measurements": {}, "reader": "The AI provider"})
         self.assertEqual(provider.calls, [])
+
+    def test_names_the_model_that_read_the_photos(self):
+        provider = FakeProvider([{"pit_to_pit": 20.5}, {"pit_to_pit": 20.5}])
+        provider.name, provider.vision_model = "openrouter", "openrouter/auto"
+        body = self.post(provider, [_ruler_photo()]).json()
+        self.assertEqual(body["reader"], "OpenRouter (openrouter/auto)")
 
     def test_needs_a_connected_model(self):
         response = self.post(None, [_ruler_photo()])
@@ -122,6 +128,41 @@ class ReadMeasurementsRouteTest(unittest.TestCase):
 
     def test_rejects_an_unknown_garment(self):
         self.assertEqual(self.post(FakeProvider([]), [_ruler_photo()], garment="hat").status_code, 400)
+
+
+class PhotoSearchMemoryTest(unittest.TestCase):
+    """A bulk read sends every item at once; the full-size photo work must not all run at once."""
+
+    def test_at_most_two_items_search_their_photos_at_a_time(self):
+        import asyncio
+        import threading
+        import time
+
+        from vendoo_studio.services import measure_read
+
+        running = 0
+        most = 0
+        lock = threading.Lock()
+
+        def search(paths, out):
+            nonlocal running, most
+            with lock:
+                running += 1
+                most = max(most, running)
+            time.sleep(0.05)
+            with lock:
+                running -= 1
+            return []
+
+        async def read_many():
+            await asyncio.gather(*(
+                measure_read.read_measurements(FakeProvider([]), [Path("x.jpg")], "top") for _ in range(6)
+            ))
+
+        with patch.object(measure_read, "find_ruler_photos", search):
+            asyncio.run(read_many())
+        self.assertEqual(most, measure_read.PHOTO_SEARCHES_AT_ONCE)
+        self.assertLessEqual(most, 2)
 
 
 class BundledImportsTest(unittest.TestCase):
