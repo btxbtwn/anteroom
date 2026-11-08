@@ -7,6 +7,7 @@ from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from vendoo_studio.services import sales_ledger
 from vendoo_studio.services.inventory_analytics import AnalyticsItem, load_rows
+from vendoo_studio.services.item_status import repeated_lines
 
 # Named as Mark as sold and the item's form name them. Refunds are not asked for:
 # blank counts as none, and marketplaces fill them in when they happen.
@@ -84,10 +85,16 @@ def records_from_lines(lines: list, analytics_rows: list[AnalyticsItem]) -> list
     # same sale, not more: Analytics leaves them out (item_status.counted_sales), so do these.
     counted = {row.sale_id for row in sold}
     sold_items = {row.conversation_id for row in sold}
+    # A sale recorded twice (a kept Vendoo copy beside the marketplace's order) is listed once.
+    paid: dict[str, list] = {}
+    for line, _title in lines:
+        if line.conversation_id is not None and line.order_status in PAID_STATUSES:
+            paid.setdefault(line.conversation_id, []).append(line)
+    repeated = {sale_id for own in paid.values() for sale_id in repeated_lines(own)}
     rows = []
     for line, title in lines:
-        if line.conversation_id in sold_items and line.order_status in PAID_STATUSES \
-                and not line.is_order_backed and line.id not in counted:
+        if line.id in repeated or (line.conversation_id in sold_items and line.order_status in PAID_STATUSES
+                                   and not line.is_order_backed and line.id not in counted):
             continue
         record = sales_ledger.sale_out(line, title)
         data = record["financials"]

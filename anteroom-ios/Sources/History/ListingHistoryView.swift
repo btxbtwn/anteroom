@@ -45,6 +45,7 @@ struct ListingHistoryView: View {
             .interactiveDismissDisabled(restoring)
             .refreshable { await load() }
             .task { await load() }
+            .reloadingOnReturn(when: error != nil && revisions.isEmpty) { await load() }
             .navigationDestination(for: ListingRevision.self) { revision in
                 RevisionPreviewView(api: api, listingID: listingID, revision: revision,
                                     currentID: currentID, onRestored: { dismiss() }, restoring: $restoring)
@@ -155,6 +156,7 @@ private struct RevisionPreviewView: View {
         .navigationBarBackButtonHidden(restoring)
         .interactiveDismissDisabled(restoring)
         .task { await load() }
+        .reloadingOnReturn(when: snapshot == nil && error != nil && !conflict) { await load() }
         .confirmationDialog("Restore this listing version?", isPresented: $confirmRestore, titleVisibility: .visible) {
             Button("Restore version") { Task { await restore() } }
             Button("Cancel", role: .cancel) {}

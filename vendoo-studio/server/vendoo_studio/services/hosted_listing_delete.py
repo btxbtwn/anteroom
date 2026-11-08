@@ -1,8 +1,9 @@
-"""Removing or clearing an unsent draft in a seller's account. Never contacts a marketplace.
+"""Removing, clearing or regenerating an item in a seller's account. Never contacts a marketplace.
 
 Only an unsent draft can be removed or cleared here: an item with a Send or a
 marketplace record keeps its identities and history until the web app can act
-on those marketplaces.
+on those marketplaces. Regenerate keeps photos, jobs and marketplace records, so
+it may rewrite a listed item, as it does on the Mac.
 """
 from sqlalchemy import delete, select
 
@@ -16,14 +17,16 @@ from vendoo_studio.services.background_tasks import ACTIVE
 NOT_REMOVABLE = 'Only an unsent draft can be removed from this workspace'
 
 
-def blocker(db, identity) -> str | None:
-    """Why this owned item cannot be removed right now, or None."""
+def blocker(db, identity, *, regenerate: bool = False) -> str | None:
+    """Why this owned item cannot be removed (or, with ``regenerate``, rewritten) right now, or None."""
     row = db.get(Conversation, identity)
     if row is None:
         return 'This item is no longer in Anteroom.'
     if db.scalar(select(BackgroundTask.id).where(
             BackgroundTask.conversation_id == identity, BackgroundTask.status.in_(ACTIVE)).limit(1)):
         return 'Wait for the draft task to finish, or stop it first.'
+    if regenerate:
+        return None
     if row.status != 'draft' or db.scalar(select(Job.id).where(Job.conversation_id == identity).limit(1)) or db.scalar(
             select(MarketplaceListing.id).where(MarketplaceListing.conversation_id == identity).limit(1)):
         return NOT_REMOVABLE
@@ -92,7 +95,7 @@ def reset_unsent_draft(db, identity, *, keep_inputs: bool) -> set[str]:
     from vendoo_studio.services.background_tasks import delete_history
     from vendoo_studio.services.vendoo_import import parse_notes
 
-    reason = blocker(db, identity)
+    reason = blocker(db, identity, regenerate=keep_inputs)
     if reason:
         raise ValueError(reason)
     row = db.get(Conversation, identity)

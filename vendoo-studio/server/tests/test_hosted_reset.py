@@ -12,10 +12,11 @@ from vendoo_studio.models.background_task import BackgroundTask
 from vendoo_studio.models.conversation import Conversation, Message, Photo
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.listing import ListingRevision
+from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.services import hosted_photos
 
 
-def test_regenerate_and_clear_wipe_only_owned_idle_unsent_drafts(cloud, signing_keys, monkeypatch):  # noqa: F811
+def test_regenerate_and_clear_wipe_only_owned_idle_items(cloud, signing_keys, monkeypatch):  # noqa: F811
     client, engine = cloud
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
     stored = {}
@@ -89,6 +90,44 @@ def test_regenerate_and_clear_wipe_only_owned_idle_unsent_drafts(cloud, signing_
         assert db.query(Photo).filter_by(conversation_id=identity).count() == 0
         db.get(Conversation, identity).status = 'active'
         db.commit()
-    assert client.post(path + '/reset', headers=alice, json=body).status_code == 409
+    assert client.post(path + '/reset', headers=alice, json={'keep_inputs': False}).status_code == 409
     with Session(engine) as db:
         assert db.query(Job).count() == 0
+
+
+def test_regenerate_rewrites_a_listed_item_and_keeps_its_marketplace_records(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, engine = cloud
+    alice = headers(signing_keys)
+    monkeypatch.setattr(hosted_photos, 'storage_call', lambda *args, **kwargs: b'')
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Listed tee'}).json()['id']
+    path = '/api/conversations/' + identity
+    saved = client.put(path + '/listing', headers=alice, json={
+        'listing': {'title': 'Listed tee', 'price': 20}, 'expected_revision_id': ''})
+    assert saved.status_code == 200, saved.text
+    with Session(engine) as db:
+        db.get(Conversation, identity).status = 'active'
+        job = Job(user_id=USER_ID, conversation_id=identity, approved_revision_id='r', listing_snapshot={},
+                  status='dispatched')
+        db.add(job)
+        db.flush()
+        db.add(MarketplaceListing(user_id=USER_ID, conversation_id=identity, marketplace='ebay', state='published',
+                                  listing_id='live-1', job_id=job.id))
+        db.commit()
+        job_id = job.id
+
+    # A marketplace action still writing this item has to finish first.
+    busy = client.post(path + '/reset', headers=alice, json={'keep_inputs': True})
+    assert busy.status_code == 409
+    with Session(engine) as db:
+        db.get(Job, job_id).status = 'completed'
+        db.commit()
+
+    regenerated = client.post(path + '/reset', headers=alice, json={'keep_inputs': True})
+    assert regenerated.status_code == 200, regenerated.text
+    with Session(engine) as db:
+        assert db.query(ListingRevision).filter_by(conversation_id=identity).count() == 0
+        assert db.query(MarketplaceListing).filter_by(conversation_id=identity).count() == 1
+        assert db.get(Job, job_id) is not None
+
+    # Clear still refuses an item with marketplace records: it would drop its photos.
+    assert client.post(path + '/reset', headers=alice, json={'keep_inputs': False}).status_code == 409
