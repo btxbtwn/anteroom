@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.836 — 2026-11-08
+
+- Fixed Scout an item showing “Not Found” on the web.
+
 ## 0.1.835 — 2026-11-08
 
 - Sourcing retries brief supplier rate limits and avoids unnecessary catalog requests.
