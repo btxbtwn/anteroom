@@ -43,12 +43,13 @@ describe("automation rows", () => {
     // A draft is confirmed from its form, not switched on from the list.
     expect(row.detail).toBe("drop 10% each cycle, floor $15, relist");
     expect(scheduledRow(task({ actions: [{ type: "regenerate" }] })).detail).toBe("");
-    expect(scheduledRow(task({ status: "draft" }))).toMatchObject({ on: null, state: "Draft", nextRun: "—" });
-    expect(scheduledRow(task({ status: "paused" }))).toMatchObject({ on: false, nextRun: "—" });
+    // The switch is always there; a draft shows it off and locked, with the word beside it.
+    expect(scheduledRow(task({ status: "draft" }))).toMatchObject({ on: false, toggleable: false, state: "Draft", nextRun: "—" });
+    expect(scheduledRow(task({ status: "paused" }))).toMatchObject({ on: false, toggleable: true, state: "", nextRun: "—" });
   });
 
   it("shows eBay offers as one row, switched by its saved rules", () => {
-    expect(ebayOffersRow(ebay(), "UTC")).toMatchObject({ name: "eBay offers", on: false, when: "Every 15 minutes · No listings yet", nextRun: "—" });
+    expect(ebayOffersRow(ebay(), "UTC")).toMatchObject({ name: "eBay offers", on: false, when: "Every 15 minutes · No listings chosen", nextRun: "—" });
     expect(ebayOffersRow(ebay({ allListings: { enabled: true, discountPercent: 15, minimumPrice: "20" }, lastCheck: "2026-11-05T15:00:00Z" }), "UTC"))
       .toMatchObject({ on: true, when: "Every 15 minutes · All listings, 15% off, minimum $20", lastRun: "Nov 5, 3:00 PM", nextRun: "Nov 5, 3:15 PM" });
     const picked = ebayOffersRow(ebay({ listings: [
@@ -56,8 +57,9 @@ describe("automation rows", () => {
       { conversationId: "c2", listingId: "2", title: "Hat", ruleId: "r2", enabled: false, discountPercent: 10, minimumPrice: "5" },
     ] }), "UTC");
     expect(picked).toMatchObject({ on: true, when: "Every 15 minutes · 1 listing", nextRun: "Within 15 min" });
-    // Without a connection there is nothing to switch; the row offers Connect eBay instead.
-    expect(ebayOffersRow(ebay({ connected: false }), "UTC")).toMatchObject({ on: null, state: "Not connected" });
+    // Without a connection the switch stays off and locked, and the row says what it needs.
+    expect(ebayOffersRow(ebay({ connected: false }), "UTC"))
+      .toMatchObject({ on: false, toggleable: false, state: "Needs eBay", note: "Connect eBay to turn this on." });
   });
 
   it("shows sharing and offers to likers with why they are off", () => {

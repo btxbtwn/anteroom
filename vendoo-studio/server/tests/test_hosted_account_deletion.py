@@ -235,7 +235,7 @@ def test_photos_are_removed_in_batches_with_the_seller_session(monkeypatch):
         sent.append((method, url, kwargs['headers']['Authorization'], len(kwargs['json']['prefixes'])))
         return Reply()
 
-    monkeypatch.setattr(hosted_photos.httpx, 'request', request)
+    monkeypatch.setattr(hosted_photos._storage, 'request', request)
     hosted_photos.remove_objects([f'{ALICE}/item/{uuid.uuid4().hex}.jpg' for _ in range(2500)], 'seller-jwt')
     assert sent == [('DELETE', 'https://project.supabase.co/storage/v1/object/anteroom-photos', 'Bearer seller-jwt', size)
                     for size in (1000, 1000, 500)]

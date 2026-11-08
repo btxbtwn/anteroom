@@ -60,6 +60,11 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
         guard parts.count >= 3, parts[parts.count - 3] == "photos", parts.last == "thumb" else { return nil }
         return String(parts[parts.count - 2])
     }
+
+    /// The cover's content version (`v=`), which lets the thumbnail be kept.
+    var coverPhotoVersion: String? {
+        coverPhotoURL.flatMap { URLComponents(string: $0)?.queryItems?.first { $0.name == "v" }?.value }
+    }
 }
 
 /// One marketplace's direct listing record, as the inventory list carries it.
@@ -103,6 +108,14 @@ struct ConversationDetail: Decodable, Sendable {
     let title: String?
     let status: String?
     let notes: String?
+}
+
+/// `GET /api/conversations/{id}/screen`: the editor's core reads in one
+/// request, as the web app batches them (`listingScreen.ts`).
+struct ListingScreen: Decodable, Sendable {
+    let conversation: ConversationDetail
+    let listing: ListingDocument
+    let photos: [ListingPhoto]
 }
 
 /// Any JSON value, so a listing's marketplace data survives an edit untouched.

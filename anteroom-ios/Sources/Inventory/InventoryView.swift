@@ -122,7 +122,7 @@ struct InventoryView: View {
         let counts = model.counts(search: search)
         let rows = model.rows(search: search)
         let hints = Suggestion.hints(model.suggestions)
-        let stale = model.suggestions.filter { $0.kind == "stale_active" }.map(\.conversationID)
+        let stale = model.staleListingIDs
         return List(selection: $selected) {
             // Suggestions show on each listing's own row; only the batch markdown needs a place of its own.
             if !selecting && !stale.isEmpty {
@@ -261,7 +261,8 @@ struct InventoryView: View {
             case .copy(let ids):
                 BulkCopyView(api: model.api, ids: ids) { finishBulk() }
             case .markdown(let ids):
-                BulkMarkdownView(api: model.api, ids: ids) { finishBulk() }
+                BulkMarkdownView(api: model.api, ids: ids, titles: model.titles(for: ids),
+                                 prefetched: model.markdownReview(for: ids)) { finishBulk() }
             case .regenerate(let ids):
                 BulkRegenerateView(api: model.api, listings: ids.compactMap { id in model.listings.first { $0.id == id } }) { finishBulk() }
             }
@@ -348,6 +349,8 @@ struct InventoryView: View {
     private func finishBulk() {
         selecting = false
         selected = []
+        // Prices or listings changed: the next markdown review is read again.
+        model.forgetMarkdownReview()
         Task { await model.reload() }
     }
 
@@ -483,7 +486,7 @@ struct ListingRow: View {
     var body: some View {
         ListingRowContent(listing: listing, bySKU: appearance.listingNames == .sku, hint: hint, selling: selling) {
             if let cover = listing.coverPhotoID {
-                RemotePhoto(api: api, photoID: cover, maxPixels: 192)
+                RemotePhoto(api: api, photoID: cover, maxPixels: 192, version: listing.coverPhotoVersion, urgent: false)
             } else {
                 Image(systemName: "photo")
                     .foregroundStyle(.secondary)
