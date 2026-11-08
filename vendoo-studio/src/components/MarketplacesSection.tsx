@@ -34,7 +34,6 @@ type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; de
 
 const BUSY = new Set(["saving", "publishing", "updating"]);
 type ActionKind = "check" | "list" | "save_draft" | "update" | "cancel" | "reset" | "reconnect";
-export const ETSY_NOT_ELIGIBLE = "Etsy generally requires vintage (20+ years), handmade or craft supplies. You can still try listing; Etsy decides whether to accept it.";
 
 /** A record whose job is running now. A busy state with no job running is unconfirmed until checked. */
 export function isRunning(draft: NativeDraft | undefined): boolean {
@@ -122,7 +121,8 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   // eBay keeps a saved draft as an unpublished offer, which has no page to open.
   if (draft?.state === "draft" && marketplace === "ebay") return { tone: "neutral", label: "Saved on eBay",
     detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to eBay." : "Not listed. Buyers cannot see it until you List." };
-  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Review eligibility", detail: ETSY_NOT_ELIGIBLE };
+  // The listing check says why and how to fix it, under the header.
+  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Review eligibility" };
   return { tone: "idle", label: "Not listed" };
 }
 

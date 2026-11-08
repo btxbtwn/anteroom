@@ -1,0 +1,1 @@
+- Etsy's eligibility note now shows once instead of twice with different wording.
