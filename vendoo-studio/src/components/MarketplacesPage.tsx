@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { directConnectionsQuery } from "../api/pageQueries";
 import { BUSY_POLL_MS, pollMs } from "../api/polling";
 import { FormDraftProvider } from "./ebay/FormDrafts";
 import { Tabs } from "@base-ui/react/tabs";
@@ -19,7 +19,7 @@ export function MarketplacesPage({ marketplace, onMarketplaceChange, onOpenListi
   onMarketplaceChange: (marketplace: Marketplace) => void;
   onOpenListing: (id: string) => void;
 }) {
-  const connection = useQuery({ queryKey: ["direct-connections"], queryFn: api.directConnections.status,
+  const connection = useQuery({ ...directConnectionsQuery,
     refetchInterval: (query) => pollMs(Object.values(query.state.data?.accounts || {}).some((account) => account.pending) ? BUSY_POLL_MS : 15000) });
   const ebay = connection.data?.accounts.ebay;
   return (

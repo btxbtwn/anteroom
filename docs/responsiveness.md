@@ -135,6 +135,25 @@ reported `max_connections` 60 with 40 sessions already present. Lease renewal
 no longer publishes a listing change. A passing live generation retest is
 still required before calling concurrent drafting fast enough.
 
+## Sidebar pages open with data in
+
+A phone recording of web 0.1.830 (2026-11-08) showed a placeholder on
+Sourcing's wholesale boxes and a page spinner on Marketplaces before content
+appeared. Each page asked for its data only when it opened, and `React.lazy`
+shows its fallback for a turn on first render even when the page's code is
+already downloaded.
+
+Once the inventory has loaded, the app now reads each visible page's first
+data (`src/api/pageQueries.ts`) and keeps it for 30 minutes, then loads the
+page code one chunk per idle turn. Pages read through the same query
+definitions, so their keys cannot drift from the prefetch. A preloaded page
+renders directly instead of going through `React.lazy`. Opening a page shows
+the cached data and refreshes it in the background.
+`e2e/instantPages.e2e.ts` fails if Sourcing, Automations, Marketplaces or
+Settings shows a page spinner or skeleton when opened; it fails on the
+previous code. This cache is in memory; the hosted app also keeps part of it
+on the device across reloads (next section).
+
 ## Hosted reloads open on the kept workspace
 
 iOS Safari often reloads a backgrounded tab, and each reload used to wait on
