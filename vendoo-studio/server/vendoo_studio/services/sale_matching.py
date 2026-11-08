@@ -4,7 +4,7 @@ Vendoo's kept sale and the seller's Mark as sold record a sale with no order
 of the marketplace's. When the marketplace's own order line for that item is
 linked to it, by any reader (Chrome order history, an eBay or Etsy webhook,
 Recover orders, or a later match of an unmatched sale), it replaces the one
-nearest its date on the same marketplace. The item cost and any amounts the
+nearest its date on the same marketplace, within a week of it. The item cost and any amounts the
 seller typed carry over. Nothing on any marketplace changes.
 """
 from datetime import UTC, datetime
@@ -70,11 +70,12 @@ def replace_stand_in(db: Session, sale: MarketplaceSale) -> MarketplaceSale | No
     """Delete the Mark as sold or Vendoo sale this order line stood for, keeping what was recorded on it.
 
     ``sale`` is a marketplace order line just linked to its item. The record
-    nearest its date on the same marketplace is replaced, and only when no
+    nearest its date on the same marketplace, within a week of it, is replaced, and only when no
     other order line for the item is nearer to that record: one sale is never
     replaced twice, never across marketplaces, and an order line is never
     deleted. Returns the record replaced.
     """
+    from vendoo_studio.services.item_status import SAME_SALE_DAYS, within_days
     from vendoo_studio.services.order_history import is_listing_report
 
     if sale.source != "marketplace" or sale.conversation_id is None or is_listing_report(sale):
@@ -86,6 +87,9 @@ def replace_stand_in(db: Session, sale: MarketplaceSale) -> MarketplaceSale | No
     if match is None:
         return None
     old = stand_ins[match]
+    # A record from an earlier sale of a relisted item is a sale of its own.
+    if not within_days(_aware(old.sold_at or old.received_at), _aware(sale.sold_at or sale.received_at), SAME_SALE_DAYS):
+        return None
     lines = [row for row in same_item if row.source == "marketplace" and not is_listing_report(row)]
     nearest = matching_sale_index(lines, sale.marketplace, _aware(old.sold_at or old.received_at))
     if nearest is None or lines[nearest] is not sale:
