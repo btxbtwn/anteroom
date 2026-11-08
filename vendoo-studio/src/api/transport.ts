@@ -52,11 +52,14 @@ export class ApiRequestError extends Error {
   readonly status: number;
   readonly retryable: boolean;
   readonly retryAfterMs: number | null;
-  constructor(message: string, status: number, retryable: boolean, retryAfterMs: number | null = null) {
+  /** Why the server refused, when it says (`X-Anteroom-Reason`), e.g. "marketplace_busy". */
+  readonly reason: string | null;
+  constructor(message: string, status: number, retryable: boolean, retryAfterMs: number | null = null, reason: string | null = null) {
     super(message);
     this.status = status;
     this.retryable = retryable;
     this.retryAfterMs = retryAfterMs;
+    this.reason = reason;
   }
 }
 

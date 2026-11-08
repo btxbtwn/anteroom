@@ -1,16 +1,18 @@
 import { useWorkspaceRuntime } from "../app/runtime";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon, ClockIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { pollMs } from "../api/polling";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightCheck, PreflightGap } from "../api/nativeMarketplaces";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket } from "../api/marketplaceSessions";
+import { isBusyRefusal, useWaitlist, type WaitingAction } from "../lib/marketplaceWaitlist";
 import { cn } from "../lib/utils";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
 import { confirmDialog } from "../ui/confirmDialog";
 import { ListEverywhereDialog, type ListChoice } from "./ListEverywhereDialog";
+import { waitlist } from "./MarketplaceActivity";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { MarkSoldForm } from "./MarkSoldForm";
 import { marketplaceName } from "./marketplaceNames";
@@ -29,7 +31,7 @@ const REMOVED: Record<Marketplace, string> = {
   ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted",
 };
 
-type Tone = "live" | "sold" | "neutral" | "busy" | "attention" | "failed" | "idle";
+type Tone = "live" | "sold" | "neutral" | "busy" | "waiting" | "attention" | "failed" | "idle";
 type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; detail?: string | null; said?: string | null };
 
 const BUSY = new Set(["saving", "publishing", "updating"]);
@@ -86,6 +88,7 @@ const TONE_ICON: Record<Tone, ReactNode> = {
   sold: <BadgeDollarSignIcon aria-hidden className="size-3.5 text-info" />,
   neutral: <MinusCircleIcon aria-hidden className="size-3.5 text-muted-foreground" />,
   busy: <Spinner size="sm" tone="muted" />,
+  waiting: <ClockIcon aria-hidden className="size-3.5 text-muted-foreground" />,
   attention: <AlertTriangleIcon aria-hidden className="size-3.5 text-warning" />,
   failed: <XCircleIcon aria-hidden className="size-3.5 text-destructive" />,
   idle: <CircleIcon aria-hidden className="size-3.5 text-muted-foreground/60" />,
@@ -158,13 +161,23 @@ export function listChoice(marketplace: NativeMarketplace, { status, canAct, lis
   if (status.tone === "live" && status.label === "Listed") return choice("Listed", "listed");
   if (!canAct) return choice("Not available here", "muted");
   if (soldSomewhere) return choice("Not listed", "muted");
-  if (!listable || status.tone === "busy") return choice(status.label, "muted");
+  if (!listable || status.tone === "busy" || status.tone === "waiting") return choice(status.label, "muted");
   if (retryIn > 0) return choice(`Retry in ${retryIn}s`, "muted");
   // Missing fields are advice, as on List…: the seller may still try.
   const missing = check?.missing ?? [];
   if (missing.length) return choice(needsText(missing.length), "needs", true, missing.map((item) => item.label).join(", "));
   if (marketplace === "etsy" && status.tone === "attention") return choice(status.label, "needs", true);
   return check?.ready ? choice("Ready", "ready", true) : choice("Not checked", "muted", true);
+}
+
+/** A confirmed action that waits for its marketplace, or one that stopped when its turn came. */
+function waitingStatus(action: WaitingAction, ahead: number): Status {
+  const name = marketplaceName(action.marketplace);
+  if (action.error) return { tone: "failed", label: "Didn't start", detail: action.error };
+  if (action.starting) return { tone: "busy", label: "Starting…" };
+  const verb = action.kind === "update" ? "Update" : action.kind === "save_draft" ? "Save draft" : "List";
+  return { tone: "waiting", label: `Waiting for ${name}`,
+    detail: `${verb} starts when ${name} finishes its current action${ahead > 1 ? ` (${ahead} ahead)` : ""}. Keep Anteroom open.` };
 }
 
 function railLabel(id: string): string {
@@ -317,6 +330,10 @@ export function MarketplacesLayout({
   // Each marketplace tracks its own request, so starting one never locks the others.
   const [starting, setStarting] = useState<Partial<Record<NativeMarketplace, ActionKind>>>({});
   const [actionErrors, setActionErrors] = useState<Partial<Record<NativeMarketplace, string>>>({});
+  // Confirmed actions on this item that wait for a busy marketplace (see MarketplaceActivity).
+  const waitingHere = useWaitlist(waitlist).filter((item) => item.convId === convId);
+  const waitingOn = (marketplace: Marketplace) => waitingHere.find((item) => item.marketplace === marketplace);
+  const queuedOn = (marketplace: Marketplace) => { const item = waitingOn(marketplace); return item && !item.error ? item : undefined; };
   const action = useMutation({
     mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: ActionKind; draftUrl?: string }) => {
       if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
@@ -336,11 +353,21 @@ export function MarketplacesLayout({
     },
     retry: false,
     onMutate: ({ marketplace, kind }) => {
+      waitlist.clearStopped(convId, marketplace);
       setStarting((current) => ({ ...current, [marketplace]: kind }));
       setActionErrors((current) => ({ ...current, [marketplace]: undefined }));
       setReconnected((current) => ({ ...current, [marketplace]: undefined }));
+      // The revision the seller confirmed, so a wait never sends a later one.
+      return { revision: revisionId };
     },
-    onError: (error, { marketplace }) => setActionErrors((current) => ({ ...current, [marketplace]: error.message })),
+    onError: (error, { marketplace, kind }, context) => {
+      // The marketplace is busy with another action: this one waits its turn.
+      if (isBusyRefusal(error) && context?.revision && (kind === "list" || kind === "update" || kind === "save_draft")) {
+        waitlist.add({ convId, title, marketplace, kind, revisionId: context.revision });
+        return;
+      }
+      setActionErrors((current) => ({ ...current, [marketplace]: error.message }));
+    },
     onSuccess: (data, { marketplace, kind }) => {
       if (kind !== "reconnect") return;
       const session = data as ExtensionSessionConnect | undefined;
@@ -428,8 +455,11 @@ export function MarketplacesLayout({
   }
 
   const busy = disabled || delist.isPending || mark.isPending || recordSale.isPending || native.isPending || native.isError;
-  const statuses = ORDER.map((marketplace) => rowStatus(marketplace, listings[marketplace],
-    drafts[marketplace], revisionId, etsyEligible));
+  const statuses = ORDER.map((marketplace) => {
+    const item = waitingOn(marketplace);
+    return item ? waitingStatus(item, waitlist.ahead(item))
+      : rowStatus(marketplace, listings[marketplace], drafts[marketplace], revisionId, etsyEligible);
+  });
   const removable = ORDER.filter((marketplace) => canAct(marketplace) && deletable(listings[marketplace]));
   const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
 
@@ -443,7 +473,7 @@ export function MarketplacesLayout({
     return draft?.error_code === "rate_limited" ? secondsUntil(draft.retry_after, now) : 0;
   };
   function listable(marketplace: Marketplace, status: Status): boolean {
-    if (!canAct(marketplace) || unconfirmed(marketplace)) return false;
+    if (!canAct(marketplace) || unconfirmed(marketplace) || queuedOn(marketplace)) return false;
     // A delisted listing keeps its ID, but nothing is live there: it can be listed again.
     const entry = listings[marketplace];
     if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || (entry?.listing_id && entry.state !== "deleted")) return false;
@@ -478,6 +508,8 @@ export function MarketplacesLayout({
     if (running(marketplace)) {
       return <Button size="xs" variant="outline" disabled={startingOn(m)} onClick={() => action.mutate({ marketplace: m, kind: "cancel" })}>Cancel</Button>;
     }
+    const queued = queuedOn(marketplace);
+    if (queued) return <Button size="xs" variant="outline" disabled={queued.starting} onClick={() => waitlist.remove(queued.id)}>Cancel</Button>;
     if (unconfirmed(marketplace)) {
       return (
         <>

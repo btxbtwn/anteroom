@@ -149,6 +149,7 @@ async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
       res.status,
       isRead && UNAVAILABLE_STATUSES.has(res.status),
       retryAfterMs(res.headers.get("Retry-After")),
+      res.headers.get("X-Anteroom-Reason"),
     );
   }
   return res.json();
