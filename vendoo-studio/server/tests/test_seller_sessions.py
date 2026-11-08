@@ -220,3 +220,12 @@ def test_invalid_configuration_refuses_startup(url):
 def test_project_origin_has_no_shared_secret():
     verifier = SessionVerifier(PROJECT_URL + "/")
     assert verifier.issuer == PROJECT_URL + "/auth/v1"
+
+
+def test_large_json_is_compressed_for_phones(client, signing_keys):
+    """Depop's brand list is about 300 KB of JSON; a phone downloads it gzipped."""
+    auth = {"Authorization": f"Bearer {session_token(signing_keys)}", "Accept-Encoding": "gzip"}
+    response = client.get("/api/catalog/choice-lists/depop-brands", headers=auth)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-encoding"] == "gzip"
+    assert int(response.headers["content-length"]) < len(response.content) / 2
