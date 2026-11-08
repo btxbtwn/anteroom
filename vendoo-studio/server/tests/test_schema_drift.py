@@ -85,26 +85,37 @@ def _migrated_database(tmp_path, monkeypatch, revision):
     return path
 
 
-def _previous_revision():
+def _last_sqlite_change(tmp_path, monkeypatch):
+    """The newest release database that the following revisions change on SQLite.
+
+    Hosted-only revisions change nothing on the Mac, so they are skipped.
+    Returns its drift, path, revision and the revisions it still needs.
+    """
     from alembic.script import ScriptDirectory
 
-    from vendoo_studio.services.schema_migrations import alembic_config, head_revision
+    from vendoo_studio.services.schema_migrations import alembic_config
 
-    previous = ScriptDirectory.from_config(alembic_config()).get_revision(head_revision()).down_revision
-    assert isinstance(previous, str)
-    return previous
+    pending = []
+    for script in ScriptDirectory.from_config(alembic_config()).walk_revisions():
+        pending.insert(0, script.revision)
+        previous = script.down_revision
+        assert isinstance(previous, str)
+        folder = tmp_path / previous
+        folder.mkdir()
+        path = _migrated_database(folder, monkeypatch, previous)
+        drift = inspect_database(path)
+        if not drift.clean:
+            return drift, path, previous, tuple(pending)
+    raise AssertionError('no revision changes the SQLite schema')
 
 
 def test_previous_release_database_is_healed_by_pending_migrations(tmp_path, monkeypatch):
     """Startup runs the revisions a database has not applied yet, so their columns heal."""
     from vendoo_studio.services.schema_migrations import head_revision
 
-    previous = _previous_revision()
-    path = _migrated_database(tmp_path, monkeypatch, previous)
-
-    drift = inspect_database(path)
-    assert not drift.clean
-    assert drift.pending_revisions == (head_revision(),)
+    drift, path, previous, pending = _last_sqlite_change(tmp_path, monkeypatch)
+    assert drift.pending_revisions == pending
+    assert pending[-1] == head_revision()
     assert drift.healed_by_init_db
     report = describe(drift)
     assert f"{previous} to {head_revision()}" in report
