@@ -271,13 +271,15 @@ enum InventoryQuery {
     /// settled ones by when they settled, unless another sort replaces both.
     static func rows(_ listings: [ListingSummary], search: String, filters: InventoryFilters) -> [ListingSummary] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let matching = listings.filter { matchesSearch($0, needle) && matchesFilters($0, filters) }
-        let working = stableSorted(matching.filter { $0.settledAt == nil }) { $0.activeAnchor > $1.activeAnchor }
-        let settled = stableSorted(matching.filter { $0.settledAt != nil }) {
-            $0.settledAnchor != $1.settledAnchor ? $0.settledAnchor > $1.settledAnchor : $0.id < $1.id
+        let matching = listings
+            .filter { matchesSearch($0, needle) && matchesFilters($0, filters) }
+            .filter { visible($0, tab: filters.status, searching: !needle.isEmpty) }
+            .map(SortKeys.init)
+        let working = stableSorted(matching.filter { $0.listing.settledAt == nil }) { $0.active > $1.active }
+        let settled = stableSorted(matching.filter { $0.listing.settledAt != nil }) {
+            $0.settled != $1.settled ? $0.settled > $1.settled : $0.listing.id < $1.listing.id
         }
-        let ordered = sorted(working, filters.sort) + sorted(settled, filters.sort)
-        return ordered.filter { visible($0, tab: filters.status, searching: !needle.isEmpty) }
+        return (sorted(working, filters.sort) + sorted(settled, filters.sort)).map(\.listing)
     }
 
     /// Tab counts over the searched inventory.
@@ -323,31 +325,52 @@ enum InventoryQuery {
         return (text.hasSuffix(".0") ? String(text.dropLast(2)) : text) + "k"
     }
 
-    private static func sorted(_ listings: [ListingSummary], _ sort: ListingSort) -> [ListingSummary] {
-        guard let compare = comparison(sort) else { return listings }
-        return stableSorted(listings) { compare($0, $1) < 0 }
+    /// A listing with the dates its sorts compare, parsed once. A sort compares
+    /// thousands of pairs; parsing dates inside each comparison made every
+    /// redraw of a large inventory take about a second.
+    private struct SortKeys {
+        let listing: ListingSummary
+        let active: Double
+        let settled: Double
+        let created: Double
+        let modified: Double
+        let oldestLive: Double
+        let sold: Double
+
+        init(_ listing: ListingSummary) {
+            self.listing = listing
+            active = listing.activeAnchor
+            settled = listing.settledAnchor
+            created = ListingSummary.stamp(listing.createdAt)
+            modified = ListingSummary.stamp(listing.updatedAt)
+            oldestLive = listing.oldestLiveListed
+            sold = ListingSummary.stamp(listing.soldAt)
+        }
     }
 
-    private static func comparison(_ sort: ListingSort) -> ((ListingSummary, ListingSummary) -> Int)? {
-        let created: (ListingSummary) -> Double = { ListingSummary.stamp($0.createdAt) }
-        let modified: (ListingSummary) -> Double = { ListingSummary.stamp($0.updatedAt) }
+    private static func sorted(_ rows: [SortKeys], _ sort: ListingSort) -> [SortKeys] {
+        guard let compare = comparison(sort) else { return rows }
+        return stableSorted(rows) { compare($0, $1) < 0 }
+    }
+
+    private static func comparison(_ sort: ListingSort) -> ((SortKeys, SortKeys) -> Int)? {
         switch sort {
         case .recent: return nil
-        case .createdDesc: return { sign(created($1) - created($0)) }
-        case .createdAsc: return { sign(created($0) - created($1)) }
-        case .modifiedDesc: return { sign(modified($1) - modified($0)) }
-        case .modifiedAsc: return { sign(modified($0) - modified($1)) }
-        case .titleAsc: return { byText($0.displayTitle, $1.displayTitle, 1) }
-        case .titleDesc: return { byText($0.displayTitle, $1.displayTitle, -1) }
-        case .priceDesc: return { byNumber($0.price, $1.price, -1) }
-        case .priceAsc: return { byNumber($0.price, $1.price, 1) }
-        case .skuAsc: return { byText($0.sku, $1.sku, 1) }
-        case .skuDesc: return { byText($0.sku, $1.sku, -1) }
+        case .createdDesc: return { sign($1.created - $0.created) }
+        case .createdAsc: return { sign($0.created - $1.created) }
+        case .modifiedDesc: return { sign($1.modified - $0.modified) }
+        case .modifiedAsc: return { sign($0.modified - $1.modified) }
+        case .titleAsc: return { byText($0.listing.displayTitle, $1.listing.displayTitle, 1) }
+        case .titleDesc: return { byText($0.listing.displayTitle, $1.listing.displayTitle, -1) }
+        case .priceDesc: return { byNumber($0.listing.price, $1.listing.price, -1) }
+        case .priceAsc: return { byNumber($0.listing.price, $1.listing.price, 1) }
+        case .skuAsc: return { byText($0.listing.sku, $1.listing.sku, 1) }
+        case .skuDesc: return { byText($0.listing.sku, $1.listing.sku, -1) }
         // A listing that never went live has no staleness to compare, so it
         // sorts last either way rather than pretending to be the oldest.
-        case .stalest: return { byNumber(nonZero($0.oldestLiveListed), nonZero($1.oldestLiveListed), 1) }
-        case .freshest: return { byNumber(nonZero($0.oldestLiveListed), nonZero($1.oldestLiveListed), -1) }
-        case .soldDesc: return { byNumber(nonZero(ListingSummary.stamp($0.soldAt)), nonZero(ListingSummary.stamp($1.soldAt)), -1) }
+        case .stalest: return { byNumber(nonZero($0.oldestLive), nonZero($1.oldestLive), 1) }
+        case .freshest: return { byNumber(nonZero($0.oldestLive), nonZero($1.oldestLive), -1) }
+        case .soldDesc: return { byNumber(nonZero($0.sold), nonZero($1.sold), -1) }
         }
     }
 
@@ -368,12 +391,25 @@ enum InventoryQuery {
         return sign(a - b) * direction
     }
 
-    private static func stableSorted(_ items: [ListingSummary],
-                                     by before: (ListingSummary, ListingSummary) -> Bool) -> [ListingSummary] {
+    private static func stableSorted(_ items: [SortKeys], by before: (SortKeys, SortKeys) -> Bool) -> [SortKeys] {
         items.enumerated().sorted { lhs, rhs in
             if before(lhs.element, rhs.element) { return true }
             if before(rhs.element, lhs.element) { return false }
             return lhs.offset < rhs.offset
         }.map(\.element)
+    }
+}
+
+/// The last answer to one inventory query, kept until its inputs change, so a
+/// redraw that changes none of them (a selection tap, a readiness update)
+/// does not filter and sort the whole inventory again.
+struct QueryMemo<Key: Equatable, Value> {
+    private var last: (key: Key, value: Value)?
+
+    mutating func value(for key: Key, _ compute: () -> Value) -> Value {
+        if let last, last.key == key { return last.value }
+        let value = compute()
+        last = (key, value)
+        return value
     }
 }

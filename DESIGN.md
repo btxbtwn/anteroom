@@ -79,6 +79,7 @@ exception is drawing over live third-party content (the browser preview).
 | Page title (`PageHeader`) | 20px (`text-xl`) | 600, `tracking-tight` |
 | Large figure in a metric card | 24px | 600, `-0.02em` |
 | Dialog title, phone page title | 16–17px | 600 |
+| Listing row title in the sidebar | 16px (`text-base`) | 500 |
 | Section title, row title, body | 14px (`text-sm`) | 500 for titles, 400 for body |
 | Labels, descriptions, metadata | 12px (`text-xs`) | 500 for labels, 400 otherwise |
 | Dense metadata, IDs, counters | 11px (`text-2xs`) | 400 |
@@ -158,6 +159,22 @@ Reject a change that adds any of these:
 - A new gray, radius or font size that isn't in the scales above.
 - Helper paragraphs longer than two lines.
 
+## Research before you design
+
+Before building or changing a visible element, look up how established design
+systems handle that element: Material Design 3, Apple's Human Interface
+Guidelines, Shopify Polaris, WCAG 2.2, and products the seller already uses.
+Look for sizes, spacing, touch targets, states and how the content is
+arranged. Apply what fits Anteroom. When a finding conflicts with a rule
+here, say so in the PR and update this file in the same PR. List what you
+applied, what you did not and why, with links to the sources, in the PR and
+in your reply to the seller.
+
+The sidebar listing row is an example. Material 3 sets a three-line list row
+at 88px with a 56px leading image and a 16px gap to the text. Polaris keeps
+one thumbnail size throughout a list. So every row is 88px (96px on phones)
+whether or not it shows marketplace logos.
+
 ## Before you ship a visible change
 
 `scripts/check-design.py` (run by `./check.sh` and CI) fails on a new hard-coded
@@ -172,8 +189,11 @@ already there; it only shrinks. The rest of this list needs a person's eye.
 - [ ] Figures use `tabular-nums`; IDs are mono and muted.
 - [ ] Empty, loading and error states are designed, not left blank.
 - [ ] Copy is short and in the seller's words; no repeated explanations.
+- [ ] Researched how established design systems handle the element (see
+      **Research before you design**); findings and sources are in the PR.
 - [ ] Checked in the sandbox in dark and light, at desktop (1440×900) and phone
-      (iPhone 15) sizes, with screenshots in the PR.
+      (iPhone 15) sizes. Screenshots are in the PR and shown to the seller in
+      your reply.
 
 ## Sources
 
