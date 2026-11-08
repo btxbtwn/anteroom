@@ -1,1 +1,0 @@
-- Etsy and eBay sales no longer appear twice when an old Vendoo import or your Mark as sold of the same sale exists. The marketplace's record is kept, with your cost of goods and any amounts you typed, and existing duplicates are removed when you update.

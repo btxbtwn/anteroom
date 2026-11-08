@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.799 — 2026-11-08
+
+- Etsy and eBay sales no longer appear twice when an old Vendoo import or your Mark as sold of the same sale exists. The marketplace's record is kept, with your cost of goods and any amounts you typed, and existing duplicates are removed when you update.
+
 ## 0.1.798 — 2026-11-08
 
 - When Anteroom is briefly unavailable, such as during an update, screens on the web and iPhone keep loading and catch up once it's back instead of asking you to tap Try again.
