@@ -27,10 +27,14 @@ struct APIAuthorization: Sendable {
 /// When the server refuses the token (401) the client renews the sign-in once.
 /// A read (GET) is then sent again; anything else is not, because it may have
 /// already run. When the sign-in cannot be renewed the seller is signed out.
+///
+/// A read the server can't answer yet (it is restarting, or the connection
+/// dropped) is tried again for a while before its error shows; see `ReadRetry`.
 final class AnteroomAPI: Sendable {
     private let baseURL: URL
     private let auth: APIAuthorization
     private let session: URLSession
+    private let readRetry: ReadRetry
     private let thumbnails = RequestGate(limit: 4)
     private let choiceLists = ChoiceListCache()
     private let runtimeCache = RuntimeCache()
@@ -40,9 +44,11 @@ final class AnteroomAPI: Sendable {
         FileManager.default.temporaryDirectory.appending(path: "Exports", directoryHint: .isDirectory)
     }
 
-    init(baseURL: URL, auth: APIAuthorization, configuration: URLSessionConfiguration = .ephemeral) {
+    init(baseURL: URL, auth: APIAuthorization, configuration: URLSessionConfiguration = .ephemeral,
+         readRetry: ReadRetry = .standard) {
         self.baseURL = baseURL
         self.auth = auth
+        self.readRetry = readRetry
         session = URLSession(configuration: configuration)
     }
 
@@ -157,14 +163,6 @@ final class AnteroomAPI: Sendable {
     /// Which required fields each marketplace still needs, for the saved listing.
     func marketplacePreflight(_ id: String) async throws -> NativePreflight {
         try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/preflight"))
-    }
-
-    /// The fields each listing still needs per marketplace; the inventory asks for the rows on screen.
-    func listingReadiness(_ ids: [String]) async throws -> [String: ListingReadiness] {
-        struct Payload: Decodable { let listings: [String: ListingReadiness] }
-        let payload: Payload = try await decode(request("GET", "api/listing-readiness",
-                                                        query: ids.map { URLQueryItem(name: "ids", value: $0) }))
-        return payload.listings
     }
 
     func nativeMarketplaceStates(_ id: String) async throws -> [String: NativeDraftState] {
@@ -1055,11 +1053,14 @@ final class AnteroomAPI: Sendable {
     }
 
     private func perform(_ request: URLRequest) async throws -> (Data, Int) {
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError(status: 0, message: "Anteroom didn't answer. Try again.")
+        let (data, response) = try await readRetry.run(request) { request in
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw APIError(status: 0, message: "Anteroom didn't answer. Try again.")
+            }
+            return (data, http)
         }
-        return (data, http.statusCode)
+        return (data, response.statusCode)
     }
 
     /// The server refused a request with 401. A refusal of the seller's session

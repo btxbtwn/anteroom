@@ -1,5 +1,4 @@
-# Base images are pinned by digest so a rebuild gets the same system packages;
-# Dependabot (docker, deploy/fly) proposes the updates.
+# Base images are pinned by digest so a rebuild gets the same system packages.
 FROM node:22-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS web
 WORKDIR /src/vendoo-studio
 COPY vendoo-studio/package.json vendoo-studio/package-lock.json ./
@@ -36,6 +35,9 @@ COPY CHANGELOG.md /app/CHANGELOG.md
 COPY vendoo-studio/server/vendoo_studio/ /app/vendoo-studio/server/vendoo_studio/
 COPY skills/list-this/SKILL.md /app/skills/list-this/SKILL.md
 COPY skills/list-this/references/ /app/skills/list-this/references/
+# Bulk listing reads measurements and Sourcing runs Box Scout from these skills' scripts.
+COPY skills/measure-this/ /app/skills/measure-this/
+COPY skills/box-scout/ /app/skills/box-scout/
 COPY --from=requirements /requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements.txt \
     && pip install --no-cache-dir --no-deps /app/vendoo-studio \
@@ -47,4 +49,4 @@ ENV VENDOO_STUDIO_DATA_DIR=/home/anteroom/.local/share/anteroom
 USER anteroom
 EXPOSE 8080
 # Authentication callbacks can contain one-use codes; do not log request URLs.
-CMD ["python", "-m", "uvicorn", "vendoo_studio.hosted:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log", "--timeout-graceful-shutdown", "120"]
+CMD ["python", "-m", "vendoo_studio.hosted_server"]

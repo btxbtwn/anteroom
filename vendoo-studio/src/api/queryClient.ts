@@ -1,4 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
+import { ApiRequestError } from "./transport";
 import { LIVE_IDLE_POLL_MS } from "./polling";
 
 /** How long a read counts as fresh. Studio talks to its local server, so rereading is cheap. */
@@ -10,6 +11,29 @@ export const STALE_MS = 5000;
  */
 export const LIVE_STALE_MS = LIVE_IDLE_POLL_MS;
 
+/**
+ * How many times a read the server couldn't answer yet (a 502/503/504 while it
+ * restarts, or a dropped connection) is asked again: about 45-90 seconds of
+ * waiting, so a deploy passes unnoticed and a real outage still shows its error.
+ * Other failures are retried once, as before. Writes are mutations, which
+ * never retry.
+ */
+export const UNAVAILABLE_RETRIES = 13;
+const LONGEST_RETRY_MS = 8000;
+
+export function retryRead(failureCount: number, error: unknown): boolean {
+  if (error instanceof ApiRequestError && error.retryable) return failureCount < UNAVAILABLE_RETRIES;
+  return failureCount < 1;
+}
+
+/** Waits double up to 8 seconds, with jitter so tabs don't all come back at once; the server's `Retry-After` wins. */
+export function readRetryDelay(failureCount: number, error: unknown, random = Math.random): number {
+  if (!(error instanceof ApiRequestError && error.retryable)) return Math.min(1000 * 2 ** failureCount, 30000);
+  if (error.retryAfterMs !== null) return Math.min(error.retryAfterMs, 30000);
+  const ceiling = Math.min(LONGEST_RETRY_MS, 1000 * 2 ** failureCount);
+  return ceiling / 2 + random() * (ceiling / 2);
+}
+
 export function createStudioQueryClient() {
   return new QueryClient({
     defaultOptions: {
@@ -18,7 +42,8 @@ export function createStudioQueryClient() {
       queries: {
         networkMode: "always",
         staleTime: STALE_MS,
-        retry: 1,
+        retry: retryRead,
+        retryDelay: readRetryDelay,
       },
       mutations: {
         networkMode: "always",

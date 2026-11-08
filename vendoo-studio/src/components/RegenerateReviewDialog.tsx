@@ -9,6 +9,7 @@ import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading"
 import { toastManager } from "./ui/toast";
 import { PhotoZoom } from "./BulkUploadDialog";
 import { photoThumbUrl } from "../photoThumb";
+import { StudioImage } from "./StudioImage";
 import {
   GARMENTS,
   garmentFields,
@@ -67,8 +68,10 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
     void mapWithConcurrency(listings, BULK_READ_CONCURRENCY, async (listing) => {
       const guess = guessGarment(listing.title);
       try {
-        const conv = await api.conversations.get(listing.id);
-        return [listing.id, parseItemDetails(conv.notes, guess)] as const;
+        // What the rewrite will keep, including SKU, COG, labels and
+        // measurements that so far live only on the listing.
+        const { notes } = await api.conversations.regenerateDetails(listing.id);
+        return [listing.id, parseItemDetails(notes, guess)] as const;
       } catch {
         return [listing.id, parseItemDetails(null, guess)] as const;
       }
@@ -88,7 +91,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
   ));
 
   // Fills blank measurement fields from each listing's yardstick photos; typed values stay.
-  const readFromPhotos = async () => {
+  const readMeasurements = async () => {
     if (!rows) return;
     setReading({ done: 0, total: listings.length });
     await readEach(listings, READ_CONCURRENCY, async (listing) => {
@@ -178,7 +181,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
             Drag photos to set their order; the first one is the cover, and a click enlarges one. Rotate or remove a photo from its corners.
             Chat and every generated field are discarded, then each listing is written again from its
             photos and these details concurrently. Flaws and notes are kept.
-            {" "}Read from photos fills blank measurements from yardstick photos; check them before rewriting.
+            {" "}Read measurements fills blank measurements from yardstick photos; check them before rewriting.
           </p>
         </div>
         <ul className="bulk-upload-groups" aria-label="Each listing's photos and details">
@@ -219,9 +222,9 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
             className="btn btn-secondary"
             disabled={saving || !rows || reading !== null}
             title="Fill blank measurements from photos with a yardstick on the item"
-            onClick={() => void readFromPhotos()}
+            onClick={() => void readMeasurements()}
           >
-            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read from photos"}
+            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving || !rows || reading !== null}>
             {saving ? "Saving…" : `Rewrite ${count}`}
@@ -362,7 +365,7 @@ function usePhotoRotate(convId: string) {
 }
 
 /** The listing's saved photos in order; a drop, turn or removal is saved straight away, like the photo tray. */
-function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: number) => void }) {
+export function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: number) => void }) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["photos", convId],
@@ -456,7 +459,7 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: numb
           }}
           onDragEnd={resetDrag}
         >
-          <img src={photoThumbUrl(photo)} alt="" draggable={false} loading="lazy" decoding="async" />
+          <StudioImage src={photoThumbUrl(photo)} alt="" draggable={false} loading="lazy" decoding="async" />
           <div className="photo-thumb-num">{String(index + 1).padStart(2, "0")}</div>
           <button
             type="button"

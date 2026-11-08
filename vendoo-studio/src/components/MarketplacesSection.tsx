@@ -1,6 +1,6 @@
 import { useWorkspaceRuntime } from "../app/runtime";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { pollMs } from "../api/polling";
@@ -34,7 +34,6 @@ type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; de
 
 const BUSY = new Set(["saving", "publishing", "updating"]);
 type ActionKind = "check" | "list" | "save_draft" | "update" | "cancel" | "reset" | "reconnect";
-export const ETSY_NOT_ELIGIBLE = "Etsy generally requires vintage (20+ years), handmade or craft supplies. You can still try listing; Etsy decides whether to accept it.";
 
 /** A record whose job is running now. A busy state with no job running is unconfirmed until checked. */
 export function isRunning(draft: NativeDraft | undefined): boolean {
@@ -59,7 +58,16 @@ export function askChatPrompt(marketplace: Marketplace, draft: NativeDraft): str
   }
   if (draft.error_fields?.length) lines.push(`Fields: ${draft.error_fields.map((item) => `${item.field} (${item.message})`).join("; ")}`);
   lines.push(`Fill or fix those fields in this listing so ${name} accepts it. Do not list it; I will press List again.`);
+  lines.push("Then tell me in plain words what you changed, naming fields as the form labels them. No codes or field keys.");
   return lines.join("\n");
+}
+
+// Problems outside the listing: chat cannot sign in, wait out a limit, fix an outage or check a result.
+const NOT_FOR_CHAT = new Set(["signed_out", "challenge", "rate_limited", "network", "uncertain"]);
+
+/** Whether chat can fix this refusal by changing the listing. */
+export function chatCanFix(draft: NativeDraft): boolean {
+  return !NOT_FOR_CHAT.has(draft.error_code ?? "");
 }
 
 function fieldLabel(field: string): string {
@@ -122,7 +130,8 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   // eBay keeps a saved draft as an unpublished offer, which has no page to open.
   if (draft?.state === "draft" && marketplace === "ebay") return { tone: "neutral", label: "Saved on eBay",
     detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to eBay." : "Not listed. Buyers cannot see it until you List." };
-  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Review eligibility", detail: ETSY_NOT_ELIGIBLE };
+  // The listing check says why and how to fix it, under the header.
+  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Review eligibility" };
   return { tone: "idle", label: "Not listed" };
 }
 
@@ -585,7 +594,7 @@ export function MarketplacesLayout({
           onClick={() => onEditField(item.field, marketplace)}>Edit {fieldLabel(item.field)}</Button>);
       }
     }
-    if ((code === "missing_fields" || code === "rejected" || code === "schema_drift" || !code) && onAskChat) {
+    if (chatCanFix(draft) && onAskChat) {
       buttons.push(<Button key="ask" size="xs" variant="outline"
         title="Chat fixes the fields in this listing. It does not list it; press List again after."
         onClick={() => onAskChat(askChatPrompt(marketplace, draft))}>Ask chat</Button>);
@@ -730,7 +739,16 @@ export function MarketplacesLayout({
           </div>
           {detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
             role={selectedStatus.tone === "failed" ? "alert" : undefined}>{detail}</p>}
-          {said && <p className="whitespace-pre-wrap break-words text-muted-foreground" data-marketplace-message>{said}</p>}
+          {/* Anteroom's own words lead; the marketplace's raw reply is there for whoever wants it. */}
+          {said && (
+            <details className="group/said text-muted-foreground">
+              <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-[900px]:min-h-11 [&::-webkit-details-marker]:hidden">
+                <ChevronRightIcon aria-hidden className="size-3.5 transition-transform group-open/said:rotate-90" />
+                Details
+              </summary>
+              <p className="mt-1 whitespace-pre-wrap break-words" data-marketplace-message>{said}</p>
+            </details>
+          )}
           {reconnectNotice(selectedMarketplace)}
           {errorActions(selectedMarketplace)}
           {preflightNotice(selectedMarketplace)}
@@ -792,7 +810,7 @@ export function MarketplacesLayout({
               })}
               <MenuSeparator />
               {showListEverywhere && <MenuItem disabled={busy} onClick={() => setPicking(true)}><SendIcon />List everywhere…</MenuItem>}
-              <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</MenuItem>
+              {!soldSomewhere && <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</MenuItem>}
               {showDelistEverywhere && <MenuItem variant="destructive" disabled={busy} onClick={() => void runDelist(removable)}>
                 <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
               </MenuItem>}
@@ -854,8 +872,9 @@ export function MarketplacesLayout({
             <Button size="xs" variant="ghost" disabled={busy} title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
               onClick={() => setPicking(true)}><SendIcon />List everywhere…</Button>
           )}
-          <Button size="xs" variant="ghost-muted" disabled={busy} title="A sale in person or anywhere off these marketplaces"
-            onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>
+          {/* A sold item's sale is already recorded; change its amounts in Sales records. */}
+          {!soldSomewhere && <Button size="xs" variant="ghost-muted" disabled={busy} title="A sale in person or anywhere off these marketplaces"
+            onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>}
           {showDelistEverywhere && (
             <Button size="xs" variant="ghost-destructive" disabled={busy} onClick={() => void runDelist(removable)}>
               <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}

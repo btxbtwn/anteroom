@@ -1,7 +1,7 @@
 import type { MeasurementReadResult } from "./api/types";
 import { garmentFields, type Garment } from "./components/garmentMeasurements";
 
-/** Items read at once from a window's Read from photos. */
+/** Items read at once from a window's Read measurements. */
 export const READ_CONCURRENCY = 2;
 
 export interface ReadingOutcome {
@@ -57,4 +57,16 @@ export async function readEach<T>(items: T[], limit: number, work: (item: T) => 
     await next();
   };
   await Promise.all(Array.from({ length: limit }, next));
+}
+
+/**
+ * A single listing's reading as a suggestion the seller accepts before it is saved:
+ * what the photos read for blank fields, and what to measure by hand.
+ */
+export function readingSuggestion(garment: Garment, outcome: ReadingOutcome): string {
+  const labels = new Map(garmentFields(garment).map((field) => [field.key, field.label]));
+  const read = outcome.suggested.map((key) => `${labels.get(key)} ${outcome.measurements[key]} in`);
+  const byHand = outcome.note.match(/Measure by hand: .*$/)?.[0];
+  if (!read.length) return outcome.note;
+  return [`From the photos: ${read.join(", ")}.`, byHand].filter(Boolean).join(" ");
 }

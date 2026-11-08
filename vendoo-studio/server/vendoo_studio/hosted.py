@@ -12,6 +12,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -100,7 +101,7 @@ class SellerSessionMiddleware:
             (scope["path"] in {"/api/health", "/api/ready", "/api/auth-config"} and scope["method"] == "GET")
             or scope["path"].startswith("/internal/")
             or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
-                and (scope["path"] == "/" or scope["path"].startswith("/assets/")))
+                and (scope["path"] in {"/", "/favicon.png"} or scope["path"].startswith("/assets/")))
         ):
             await self.app(scope, receive, send)
             return
@@ -185,9 +186,18 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         loop_checkouts = LoopCheckoutWarning(database_engine)
         from vendoo_studio.services import chrome_wait_connections
         watching_chrome_waits = chrome_wait_connections.watch(database_engine)
-        worker = offers = watchdog = sale_checks = promotion_scheduler = None
+        from vendoo_studio.services import process_handoff
+        process_handoff.reset()
+        worker = None
+        start_schedulers: Callable[[], Callable[[], None]] | None = None
         stopping = threading.Event()
         backgrounds = []
+
+        def start_background(coroutine, name):
+            background = BackgroundLoop(name)
+            backgrounds.append(background)
+            return background, background.run(coroutine)
+
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
             from vendoo_studio.services import (
@@ -198,49 +208,71 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             # Each service opens blocking database sessions. An offer or
             # watchdog read must not stop draft lease renewal, another service
             # or the request loop while it waits for the database.
-            def start_background(coroutine, name):
-                background = BackgroundLoop(name)
-                backgrounds.append(background)
-                return background.run(coroutine)
-
             from vendoo_studio.routes.assistant import answer_task
             # Assistant answers share the draft worker; the route supplies how to answer one.
             background_worker.register(queue.ASSISTANT, answer_task)
-            worker = start_background(background_worker.serve(engine, stopping), 'anteroom-drafts')
-            # Automations still submit regenerations through the same durable queue.
-            start_background(hosted_automation_scheduler.serve(engine), 'anteroom-automations')
-            offers = start_background(hosted_offer_scheduler.serve(engine), 'anteroom-offers')
-            # Frees the marketplace slot a restart left held and reads unconfirmed results.
-            watchdog = start_background(hosted_job_watchdog.serve(engine), 'anteroom-watchdog')
-            # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
-            start_background(hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing')
-            sale_checks = start_background(hosted_sale_checks.serve(), 'anteroom-chrome-sales')
-            promotion_scheduler = start_background(hosted_promotion_scheduler.serve(), 'anteroom-promotions')
-            start_background(hosted_sales_scheduler.serve(engine), 'anteroom-sales')
+            # Drafts are claimed row by row, so every Machine may run this worker.
+            _, worker = start_background(background_worker.serve(engine, stopping), 'anteroom-drafts')
+
+            def run_schedulers():
+                # Only the Machine holding the scheduler lease runs these.
+                schedulers = [
+                    # Automations still submit regenerations through the same durable queue.
+                    (hosted_automation_scheduler.serve(engine), 'anteroom-automations'),
+                    (hosted_offer_scheduler.serve(engine), 'anteroom-offers'),
+                    # Frees the marketplace slot a restart left held and reads unconfirmed results.
+                    (hosted_job_watchdog.serve(engine), 'anteroom-watchdog'),
+                    # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
+                    (hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing'),
+                    (hosted_sale_checks.serve(), 'anteroom-chrome-sales'),
+                    (hosted_promotion_scheduler.serve(), 'anteroom-promotions'),
+                    (hosted_sales_scheduler.serve(engine), 'anteroom-sales'),
+                ]
+                loops = []
+                for coroutine, name in schedulers:
+                    loop = BackgroundLoop(name)
+                    loop.run(coroutine)
+                    loops.append(loop)
+
+                def stop():
+                    threads = [threading.Thread(target=loop.stop) for loop in loops]
+                    for thread in threads:
+                        thread.start()
+                    for thread in threads:
+                        thread.join()
+                return stop
+            start_schedulers = run_schedulers
+
+        from vendoo_studio.database import engine as handoff_engine
+        # Hands the schedulers, Mac and Chrome to the next Machine when this one stops.
+        _, handoff = start_background(
+            process_handoff.lead(handoff_engine, start_schedulers, stopping.set), 'anteroom-handoff',
+        )
         app.state.background_worker = worker
-        app.state.offer_scheduler = offers
-        app.state.job_watchdog = watchdog
-        app.state.sale_checks = sale_checks
-        app.state.promotion_scheduler = promotion_scheduler
+        app.state.handoff = handoff
         try:
             yield
         finally:
             loop_checkouts.close()
             if watching_chrome_waits:
                 chrome_wait_connections.unwatch(database_engine)
-            if backgrounds:
-                stopping.set()
-                try:
-                    if worker is not None:
-                        # A disconnected browser does not mean its draft is done.
-                        # Let the current task save before cancelling the background loop.
-                        await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(worker)), timeout=120)
-                except TimeoutError:
-                    logging.getLogger(__name__).warning('Draft worker exceeded the shutdown grace period')
-                except Exception:
-                    logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
-                finally:
-                    await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
+            process_handoff.begin_draining()
+            try:
+                await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(handoff)), timeout=30)
+            except Exception:
+                logging.getLogger(__name__).warning('Scheduled work did not stop before shutdown')
+            stopping.set()
+            try:
+                if worker is not None:
+                    # A disconnected browser does not mean its draft is done.
+                    # Let the current task save before cancelling the background loop.
+                    await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(worker)), timeout=120)
+            except TimeoutError:
+                logging.getLogger(__name__).warning('Draft worker exceeded the shutdown grace period')
+            except Exception:
+                logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
+            finally:
+                await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,
@@ -314,10 +346,11 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.include_router(shared_router)
     from vendoo_studio.routes.photos import edit_router
     app.include_router(edit_router)
-    # Bulk listing reads measurements from photos not uploaded yet. The saved-listing
-    # read uses local photo paths, which hosted storage does not have.
+    # Bulk listing reads photos not uploaded yet; a saved listing reads its photos from private storage.
     from vendoo_studio.routes import measurements
     app.add_api_route('/api/measurements/read', measurements.read_measurements, methods=['POST'], tags=['measurements'])
+    app.add_api_route('/api/conversations/{conv_id}/measurements/read', measurements.read_hosted_saved_measurements,
+                      methods=['POST'], tags=['measurements'])
     from vendoo_studio.routes import listing_templates, listing_copies, similar_items, changelog
     app.include_router(listing_templates.router)
     app.include_router(listing_copies.router)
@@ -372,6 +405,10 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         @app.get("/", include_in_schema=False)
         def web_index():
             return FileResponse(web_dir / "cloud.html")
+
+        @app.get("/favicon.png", include_in_schema=False)
+        def web_favicon():
+            return FileResponse(web_dir / "favicon.png", media_type="image/png")
 
     @app.get("/api/auth-config")
     def auth_config():

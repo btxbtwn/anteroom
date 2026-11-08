@@ -147,9 +147,12 @@ struct MarketplaceActionsView: View {
     @Environment(\.openURL) private var openURL
     @State private var model: MarketplaceActionsModel
     @State private var confirming: SellerConfirmationRequest?
+    /// Hand a prompt to the listing assistant, which fixes the listing but never lists it.
+    let onAskChat: ((String) -> Void)?
 
-    init(api: AnteroomAPI, listingID: String, revisionID: String?, title: String) {
+    init(api: AnteroomAPI, listingID: String, revisionID: String?, title: String, onAskChat: ((String) -> Void)? = nil) {
         self.title = title
+        self.onAskChat = onAskChat
         _model = State(initialValue: MarketplaceActionsModel(api: api, listingID: listingID, revisionID: revisionID))
     }
 
@@ -199,6 +202,7 @@ struct MarketplaceActionsView: View {
                 }
             }
             .task { await model.load() }
+            .reloadingOnReturn(when: model.loadError != nil) { await model.load() }
             // A List or Delist runs in the background: follow it while one is running.
             .task(id: model.anyRunning) {
                 while model.anyRunning && !Task.isCancelled {
@@ -222,7 +226,19 @@ struct MarketplaceActionsView: View {
                 Text(row.label).font(.subheadline.weight(.medium)).foregroundStyle(color(row.tone))
             }
             if let detail = row.detail { Text(detail).font(.footnote).foregroundStyle(WorkspaceStyle.mutedText) }
-            if let said = row.said { Text(said).font(.footnote).foregroundStyle(WorkspaceStyle.mutedText) }
+            // Anteroom's own words lead; the marketplace's raw reply is there for whoever wants it.
+            if let said = row.said {
+                DisclosureGroup("Details") {
+                    Text(said).font(.footnote).foregroundStyle(WorkspaceStyle.mutedText)
+                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                }
+                .font(.footnote).tint(WorkspaceStyle.mutedText)
+            }
+            if let prompt = row.chatPrompt, let onAskChat {
+                Button("Ask chat", systemImage: "sparkles") { onAskChat(prompt) }
+                    .buttonStyle(.bordered)
+                    .accessibilityHint("Chat fixes the listing. It does not list it.")
+            }
             if row.canList {
                 let gaps = model.gaps(row.marketplace)
                 ForEach(Array(gaps.enumerated()), id: \.offset) { _, gap in

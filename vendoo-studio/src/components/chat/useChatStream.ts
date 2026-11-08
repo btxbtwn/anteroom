@@ -84,6 +84,10 @@ export function useChatStream({
       return /^(load failed|failed to fetch|networkerror when attempting to fetch resource|network request failed|the internet connection appears to be offline\.?)$/i.test(msg.trim())
         || /failed to fetch|networkerror|load failed/i.test(msg);
     };
+    // A resumed generate can encounter a transient 5xx during a deploy.
+    // Reattach to the durable task within the existing retry budget.
+    const isResumableServerError = (err: unknown, resumed: boolean) =>
+      resumed && Number((err as StreamRequestError | null)?.httpStatus) >= 500;
     const readStream = async (resume: boolean): Promise<{ content: string; sawDone: boolean }> => {
       // A reconnect only follows the run it lost; if that run already ended,
       // the server answers [DONE] instead of starting a second generation.
@@ -108,11 +112,13 @@ export function useChatStream({
     let assembled = "";
     let sawDone = false;
     let attempt = 0;
+    let resumed = false;
     try {
       while (stillMine()) {
         attempt += 1;
         try {
-          const result = await readStream(canResumeGenerate && (resumeFirst || attempt > 1));
+          resumed = canResumeGenerate && (resumeFirst || attempt > 1);
+          const result = await readStream(resumed);
           assembled = result.content;
           sawDone = result.sawDone;
           if (
@@ -141,7 +147,7 @@ export function useChatStream({
             canResumeGenerate
             && stillMine()
             && !isAbortError(first)
-            && isNetworkFailure(first)
+            && (isNetworkFailure(first) || isResumableServerError(first, resumed))
             && attempt < maxAttempts
           ) {
             const priorStatus = getLive(convId).streamStatus || initialStatus;

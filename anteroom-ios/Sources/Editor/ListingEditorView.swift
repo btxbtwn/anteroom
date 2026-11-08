@@ -7,6 +7,8 @@ struct ListingEditorView: View {
     @State private var model: ListingEditorModel
     @State private var confirmDiscard = false
     @State private var showingAssistant = false
+    /// An Ask chat from the marketplaces sheet, opened in the assistant once that sheet closes.
+    @State private var assistantPrompt: String?
     @State private var showingHistory = false
     @State private var showingTemplates = false
     @State private var showingListEverywhere = false
@@ -34,6 +36,13 @@ struct ListingEditorView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { model.stashEdits() }
             }
+            // The editor also closes without Save or Discard: on iPad when the
+            // seller opens another listing or the window changes size, and on
+            // either device when they switch tabs. Keep the edits until it reopens.
+            .onDisappear { model.stashEdits() }
+            // Back on screen with the edits still in memory (from a tab switch or
+            // a pushed picker): the copy on disk is no longer needed.
+            .onAppear { if model.hasLoaded { model.forgetStash() } }
     }
 
     private var editor: some View {
@@ -145,7 +154,8 @@ struct ListingEditorView: View {
         }
         .confirmationDialog("Discard your changes?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("Discard changes", role: .destructive) {
-                model.forgetStash()
+                // On iPad the editor is the detail column's root, where dismiss does nothing.
+                model.discardChanges()
                 dismiss()
             }
         }
@@ -164,13 +174,14 @@ struct ListingEditorView: View {
             Text("Reloading shows the latest version and drops your edits here.")
         }
         .sheet(isPresented: $showingAssistant, onDismiss: {
+            assistantPrompt = nil
             Task {
                 guard !model.hasChanges else { return }
                 await model.load()
                 if model.loadError == nil { onSaved() }
             }
         }) {
-            ListingAssistantView(api: model.api, listingID: model.listingID)
+            ListingAssistantView(api: model.api, listingID: model.listingID, text: assistantPrompt ?? "")
         }
         .sheet(isPresented: $showingHistory, onDismiss: {
             Task {
@@ -185,9 +196,13 @@ struct ListingEditorView: View {
             // Listing, updating and delisting change the tabs' readiness and the inventory row.
             Task { await model.loadReadiness() }
             onSaved()
+            if assistantPrompt != nil { showingAssistant = true }
         }) {
             MarketplaceActionsView(api: model.api, listingID: model.listingID,
-                                   revisionID: model.revisionID, title: model.title)
+                                   revisionID: model.revisionID, title: model.title) { prompt in
+                assistantPrompt = prompt
+                showingMarketplaces = false
+            }
         }
         .sheet(isPresented: $showingListEverywhere, onDismiss: onSaved) {
             ListEverywhereSheet(model: model)

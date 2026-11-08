@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyReading } from "./measurementReading";
+import { applyReading, readingSuggestion } from "./measurementReading";
 
 describe("applyReading", () => {
   it("fills blank fields with accepted readings and names the rest", () => {
@@ -21,5 +21,23 @@ describe("applyReading", () => {
     const outcome = applyReading("top", {}, { photos_read: 0, measurements: {} });
     expect(outcome.measurements).toEqual({});
     expect(outcome.note).toBe("No yardstick photo found.");
+  });
+});
+
+describe("readingSuggestion", () => {
+  it("lists what was read for blank fields and what to measure by hand", () => {
+    const outcome = applyReading("pants", { waist: "15" }, {
+      photos_read: 2,
+      measurements: {
+        inseam: { status: "accepted", value: 27.25, reads: [27.25, 27.25] },
+        rise: { status: "cannot_read", reads: ["cannot read", 10.25] },
+      },
+    });
+    expect(readingSuggestion("pants", outcome)).toBe("From the photos: Inseam 27.25 in. Measure by hand: Rise, Leg Opening.");
+  });
+
+  it("passes the plain note through when nothing new was read", () => {
+    const outcome = applyReading("top", {}, { photos_read: 0, measurements: {} });
+    expect(readingSuggestion("top", outcome)).toBe("No yardstick photo found.");
   });
 });

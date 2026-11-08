@@ -44,7 +44,7 @@ def _check_response(response: httpx.Response) -> None:
         raise SignInRequired("Reconnect eBay to grant permission to manage offers.")
     if not response.is_success:
         # Error bodies may contain seller or buyer details. Only expose the code.
-        raise EbayError(f"eBay rejected the request (HTTP {response.status_code}). Check Seller Hub.")
+        raise EbayError("eBay did not accept the request. Check the listing in Seller Hub.")
 
 
 async def eligible_items() -> set[str]:

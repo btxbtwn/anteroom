@@ -1,5 +1,7 @@
 import type { MouseEvent, ReactElement, ReactNode } from "react";
 import { PanelLeftCloseIcon, PanelLeftIcon, PanelRightCloseIcon, PanelRightIcon } from "lucide-react";
+import { AnteroomLogo } from "./AnteroomLogo";
+import { Badge } from "./ui/badge";
 import { Toggle } from "./ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import type { WorkspaceCrumbs } from "./workspaceCrumbs";
@@ -91,6 +93,15 @@ export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPan
         >
           {sidebarOpen ? <PanelLeftCloseIcon className="size-4" /> : <PanelLeftIcon className="size-4" />}
         </PanelToggle>
+        {sidebarOpen ? (
+          <div className="ml-1.5 flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight text-foreground">
+            <AnteroomLogo className="size-5 shrink-0" />
+            <span className="truncate">Anteroom</span>
+            <Badge variant="secondary" size="sm" className="font-normal text-muted-foreground">
+              Beta
+            </Badge>
+          </div>
+        ) : null}
       </div>
       <div
         className={`relative flex h-7 min-w-0 flex-1 items-center gap-2 text-sm leading-none tracking-tight${sidebarOpen ? " pl-3" : ""}`}

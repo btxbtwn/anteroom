@@ -129,6 +129,11 @@ struct InventoryTests {
         precondition(importedBadges[0].url?.absoluteString == "https://www.ebay.com/itm/2")
         precondition(imported.marketplaceBadges(missing: ["poshmark": missing])[1].label == "Delisted", "A delist outranks fields still needed")
         precondition(imported.liveMarketplaces == ["ebay", "mercari", "vestiaire"])
+        // The row's logo strip, as on the web: where it is listed or sold, never drafts or fields still needed.
+        precondition(imported.rowLogos().map(\.marketplace) == ["ebay", "mercari", "vestiaire"])
+        precondition(imported.rowLogos().map(\.sold) == [false, true, false])
+        precondition(tracked.rowLogos().map(\.marketplace) == ["ebay"])
+        precondition(imported.rowLogos(selling: ["ebay", "poshmark"]).map(\.marketplace) == ["ebay"], "Only the marketplaces the seller sells on")
         precondition(imported.inventoryStatus == "active")
         // Each marketplace's live price, marked when it is not the item price; unknown stays unknown.
         let priced = try JSONDecoder().decode(ListingSummary.self, from: Data(#"""
@@ -188,6 +193,19 @@ struct InventoryTests {
         precondition(InventoryQuery.isStale(loadedAt: nil, now: loaded))
         precondition(!InventoryQuery.isStale(loadedAt: loaded, now: loaded.addingTimeInterval(29)))
         precondition(InventoryQuery.isStale(loadedAt: loaded, now: loaded.addingTimeInterval(30)))
+        // A redraw with the same inputs reuses the last rows; a change to any input recomputes.
+        var memo = QueryMemo<String, [String]>()
+        var computed = 0
+        func searched(_ text: String) -> [String] {
+            memo.value(for: text) {
+                computed += 1
+                return ids(InventoryQuery.rows(rows, search: text, filters: InventoryFilters()))
+            }
+        }
+        precondition(searched("") == ["d", "a", "b", "e"] && computed == 1)
+        precondition(searched("") == ["d", "a", "b", "e"] && computed == 1, "same inputs: no recompute")
+        precondition(searched("coat") == ["c"] && computed == 2)
+        precondition(searched("") == ["d", "a", "b", "e"] && computed == 3)
         print("Inventory tests passed")
     }
 

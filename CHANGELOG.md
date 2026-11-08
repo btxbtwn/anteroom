@@ -6,6 +6,93 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.806 — 2026-11-08
+
+- Anteroom now shows a Beta tag next to its name.
+
+## 0.1.805 — 2026-11-08
+
+- Marketplace refusals now explain the problem in plain words, like "Etsy needs to know who made this item", with the marketplace's own reply tucked under Details.
+- Ask chat appears on a refusal only when chat can fix it by changing the listing, and it now works while chat is busy by joining the queue. It is on iPhone too.
+- Anteroom now warns before you list on Etsy when Who made it? or When was it made? is empty, and reads every way those answers are saved.
+- Chat names fields the way the form labels them and no longer answers in codes or field keys.
+
+## 0.1.804 — 2026-11-08
+
+- The Anteroom logo has new sunset colors, from violet to amber, on the sidebar, browser tab, Mac app, iPhone app and Chrome extension.
+- The logo's arches now fade softly at the bottom instead of ending in a hard line.
+
+## 0.1.803 — 2026-11-08
+
+- Listing generation no longer stops with "HTTP 500" when Anteroom restarts for an update mid-generation; it keeps reconnecting until the draft finishes.
+
+## 0.1.802 — 2026-11-08
+
+- Etsy's eligibility note now shows once instead of twice with different wording.
+
+## 0.1.801 — 2026-11-08
+
+- **Read from photos** is now called **Read measurements** in bulk upload, Regenerate review and the iPhone app.
+- A single listing can read its measurements too: press **Read measurements** under Measurements to see what the yardstick in its photos reads, then **Fill in** to add those to the blank fields. Nothing is saved until you do. This works on the Mac and on myanteroom.com.
+
+## 0.1.800 — 2026-11-08
+
+- Analytics, Sales records and units sold count a sale once when it was kept from Vendoo and the marketplace's own order for it also arrived, and when an eBay order line was saved twice.
+
+## 0.1.799 — 2026-11-08
+
+- Etsy and eBay sales no longer appear twice when an old Vendoo import or your Mark as sold of the same sale exists. The marketplace's record is kept, with your cost of goods and any amounts you typed, and existing duplicates are removed when you update.
+
+## 0.1.798 — 2026-11-08
+
+- When Anteroom is briefly unavailable, such as during an update, screens on the web and iPhone keep loading and catch up once it's back instead of asking you to tap Try again.
+- On iPhone, a screen that couldn't load tries again by itself when you come back to the app.
+
+## 0.1.797 — 2026-11-08
+
+- Regenerate on the web now rewrites listings that are already live on marketplaces, instead of failing with "Only an unsent draft can be removed from this workspace". Their marketplace links are kept.
+
+## 0.1.796 — 2026-11-08
+
+- The iPhone app now runs on iPad too: the tabs open as a sidebar, and Inventory keeps your listings beside the one you're editing.
+- Unsaved edits now stay when you open another listing or switch tabs, and come back when you return to that listing.
+
+## 0.1.795 — 2026-11-08
+
+- Keep the web app and iPhone app answering while Anteroom updates, instead of showing errors for up to a few minutes.
+
+## 0.1.794 — 2026-11-08
+
+- Recording a sale on an item that has already sold is refused, so the same sale can no longer be saved twice.
+- Sales you recorded yourself can now be deleted from Sales records.
+
+## 0.1.793 — 2026-11-08
+
+- The Anteroom logo now shows at the top of the sidebar.
+- The Anteroom logo now shows on the browser tab at myanteroom.com.
+
+## 0.1.792 — 2026-11-08
+
+- Sales records no longer lists a sold item a second or third time when clearing its other marketplace listings reported them as sold, so its count matches Analytics.
+
+## 0.1.791 — 2026-11-08
+
+- Make listing rows in the sidebar larger, with bigger photos and text, and keep every row the same height.
+
+## 0.1.790 — 2026-11-08
+
+- Bulk Regenerate's review window on the web now shows each listing's photos, including the enlarged view.
+- The review window now fills in each listing's current SKU, cost of goods, labels and measurements instead of starting blank.
+- Photos in eBay variations now show on the web.
+
+## 0.1.789 — 2026-11-08
+
+- Selecting listings on iPhone responds right away instead of lagging behind each tap, even with a large inventory.
+
+## 0.1.788 — 2026-11-08
+
+- Read from photos works again on myanteroom.com: the web app now ships the measuring tool instead of saying the measure-this skill is missing. Box Scout's sourcing refresh gets its files there too.
+
 ## 0.1.787 — 2026-11-08
 
 - Show only icons in the iPhone app's tab bar.
