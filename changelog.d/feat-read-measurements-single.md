@@ -1,0 +1,2 @@
+- **Read from photos** is now called **Read measurements** in bulk upload, Regenerate review and the iPhone app.
+- A single listing can read its measurements too: press **Read measurements** under Measurements to see what the yardstick in its photos reads, then **Fill in** to add those to the blank fields. Nothing is saved until you do. This works on the Mac and on myanteroom.com.
