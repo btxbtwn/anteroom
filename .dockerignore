@@ -32,6 +32,11 @@ skills/list-this/*
 skills/list-this/references/*
 !skills/list-this/references/*.md
 !skills/list-this/references/*.json
+# Measurement reading and Box Scout load their skill's script and references.
+!skills/measure-this/
+!skills/measure-this/**
+!skills/box-scout/
+!skills/box-scout/**
 # The site compares Chrome's Anteroom Bridge with this version.
 !vendoo-extension/
 vendoo-extension/*

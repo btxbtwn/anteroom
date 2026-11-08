@@ -71,6 +71,22 @@ describe("parseItemDetails and notesWithItemDetails", () => {
     });
   });
 
+  it("fills blank measurements from the ones the listing's description carried", () => {
+    const notes = JSON.stringify({
+      descriptionMeasurements: 'Waist 16"; Rise: 11 in; Inseam - 5.5"; Leg opening 12"',
+      measurements: { pants: { waist: "15" } },
+    });
+    expect(parseItemDetails(notes, "pants").measurements).toEqual({
+      waist: "15",
+      rise: "11",
+      inseam: "5.5",
+      legOpening: "12",
+    });
+    const top = JSON.stringify({ descriptionMeasurements: 'Pit to pit 20"\nLength: 27"; Sleeve 8.25"' });
+    expect(parseItemDetails(top, "top").measurements).toEqual({ pitToPit: "20", length: "27", sleeve: "8.25" });
+    expect(parseItemDetails(JSON.stringify({ descriptionMeasurements: "See photos" }), "top").measurements).toEqual({});
+  });
+
   it("falls back to the guessed garment for empty or plain notes", () => {
     expect(parseItemDetails(null, "skirt")).toMatchObject({ garment: "skirt", measurements: {}, labels: "" });
     expect(parseItemDetails("just text", "top").garment).toBe("top");

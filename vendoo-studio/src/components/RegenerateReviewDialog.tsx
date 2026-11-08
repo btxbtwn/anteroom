@@ -9,6 +9,7 @@ import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading"
 import { toastManager } from "./ui/toast";
 import { PhotoZoom } from "./BulkUploadDialog";
 import { photoThumbUrl } from "../photoThumb";
+import { StudioImage } from "./StudioImage";
 import {
   GARMENTS,
   garmentFields,
@@ -67,8 +68,10 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
     void mapWithConcurrency(listings, BULK_READ_CONCURRENCY, async (listing) => {
       const guess = guessGarment(listing.title);
       try {
-        const conv = await api.conversations.get(listing.id);
-        return [listing.id, parseItemDetails(conv.notes, guess)] as const;
+        // What the rewrite will keep, including SKU, COG, labels and
+        // measurements that so far live only on the listing.
+        const { notes } = await api.conversations.regenerateDetails(listing.id);
+        return [listing.id, parseItemDetails(notes, guess)] as const;
       } catch {
         return [listing.id, parseItemDetails(null, guess)] as const;
       }
@@ -362,7 +365,7 @@ function usePhotoRotate(convId: string) {
 }
 
 /** The listing's saved photos in order; a drop, turn or removal is saved straight away, like the photo tray. */
-function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: number) => void }) {
+export function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: number) => void }) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["photos", convId],
@@ -456,7 +459,7 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: numb
           }}
           onDragEnd={resetDrag}
         >
-          <img src={photoThumbUrl(photo)} alt="" draggable={false} loading="lazy" decoding="async" />
+          <StudioImage src={photoThumbUrl(photo)} alt="" draggable={false} loading="lazy" decoding="async" />
           <div className="photo-thumb-num">{String(index + 1).padStart(2, "0")}</div>
           <button
             type="button"

@@ -71,6 +71,15 @@ def remove_unsent_draft(db, identity) -> set[str]:
     return keys
 
 
+def carried_notes(db, identity, notes):
+    """The Item Details Regenerate starts from: the latest listing's seller facts merged in."""
+    from vendoo_studio.repositories.queries import ListingRepo
+    from vendoo_studio.services.listing_carryover import notes_with_carryover
+
+    latest = ListingRepo(db).latest_revision(identity)
+    return notes_with_carryover(notes, dict(latest.listing_json) if latest else None)
+
+
 def reset_unsent_draft(db, identity, *, keep_inputs: bool) -> set[str]:
     """Clear the locked, idle draft's generated listing and chat, as desktop Clear does.
 
@@ -79,11 +88,9 @@ def reset_unsent_draft(db, identity, *, keep_inputs: bool) -> set[str]:
     after the caller commits; the caller then clears the listing's hidden fields.
     """
     from vendoo_studio.models.conversation import utcnow
-    from vendoo_studio.repositories.queries import ListingRepo
     from vendoo_studio.models.listing_evidence import ListingCorrection
     from vendoo_studio.services.background_tasks import delete_history
-    from vendoo_studio.services.listing_carryover import carryover_updates
-    from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
+    from vendoo_studio.services.vendoo_import import parse_notes
 
     reason = blocker(db, identity)
     if reason:
@@ -91,10 +98,7 @@ def reset_unsent_draft(db, identity, *, keep_inputs: bool) -> set[str]:
     row = db.get(Conversation, identity)
     notes = row.notes
     if keep_inputs:
-        latest = ListingRepo(db).latest_revision(identity)
-        carried = carryover_updates(dict(latest.listing_json) if latest else None, parse_notes(notes))
-        if carried:
-            notes = merge_notes(notes, carried)
+        notes = carried_notes(db, identity, notes)
     keys = _attachment_keys(db, identity) | (set() if keep_inputs else _photo_keys(db, identity))
     delete_history(db, identity)
     for model in (Listing, ListingRevision, Message) + (() if keep_inputs else (Photo, ListingCorrection)):

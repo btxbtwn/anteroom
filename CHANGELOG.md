@@ -6,6 +6,20 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.790 — 2026-11-08
+
+- Bulk Regenerate's review window on the web now shows each listing's photos, including the enlarged view.
+- The review window now fills in each listing's current SKU, cost of goods, labels and measurements instead of starting blank.
+- Photos in eBay variations now show on the web.
+
+## 0.1.789 — 2026-11-08
+
+- Selecting listings on iPhone responds right away instead of lagging behind each tap, even with a large inventory.
+
+## 0.1.788 — 2026-11-08
+
+- Read from photos works again on myanteroom.com: the web app now ships the measuring tool instead of saying the measure-this skill is missing. Box Scout's sourcing refresh gets its files there too.
+
 ## 0.1.787 — 2026-11-08
 
 - Show only icons in the iPhone app's tab bar.
