@@ -397,7 +397,7 @@ private struct MarketplacePhotoPicker: View {
                     ForEach(photos) { photo in
                         let position = sent.firstIndex(of: photo.id)
                         Button { toggle(photo.id) } label: {
-                            RemotePhoto(api: model.api, photoID: photo.id, maxPixels: 200, version: photo.version)
+                            RemotePhoto(api: model.api, photoID: photo.id, maxPixels: 192, version: photo.version)
                                 .frame(height: 80)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                                 .opacity(position == nil ? 0.35 : 1)
@@ -469,9 +469,17 @@ private struct MarketplacePhotoPicker: View {
         Array((pick.isEmpty ? itemPhotoIDs : pick).prefix(limit))
     }
 
+    /// The item's photos come with the listing; only this form's own are asked for.
     private func load() async {
-        let item = (try? await model.api.photos(listingID: model.listingID)) ?? []
-        let own = (try? await model.api.photos(listingID: model.listingID, marketplace: marketplace)) ?? []
+        let api = model.api, listingID = model.listingID, formMarketplace = self.marketplace
+        async let ownRead = try? api.photos(listingID: listingID, marketplace: formMarketplace)
+        let item: [ListingPhoto]
+        if model.photosLoaded {
+            item = model.photos
+        } else {
+            item = (try? await api.photos(listingID: listingID)) ?? []
+        }
+        let own = await ownRead ?? []
         itemPhotoIDs = item.map(\.id)
         photos = item + own
     }
