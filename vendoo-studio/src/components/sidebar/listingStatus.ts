@@ -1,5 +1,6 @@
 import { statusIsListed } from "../fillLog/marketplaces";
 import { marketplaceName } from "../marketplaceNames";
+import { formatMoney } from "../analyticsFormat";
 
 ;
 
@@ -141,4 +142,16 @@ export function partialSale(listing: { units_sold?: number; quantity?: number | 
   const sold = listing.units_sold ?? 0;
   const quantity = listing.quantity ?? 0;
   return status === "active" && sold > 0 && quantity > sold ? `${sold} of ${quantity} sold` : null;
+}
+
+/** Units on hand for an unsold multi-quantity item. Once one sells, partialSale says it. */
+export function quantityLabel(listing: { units_sold?: number; quantity?: number | null }, status: string): string | null {
+  const quantity = listing.quantity ?? 0;
+  return status !== "sold" && quantity > 1 && !(listing.units_sold ?? 0) ? `Qty ${quantity}` : null;
+}
+
+/** The asking price on a draft or active row. A sold item's asking price is not what it sold for. */
+export function listingRowPrice(listing: { price?: number | null }, status: string): string | null {
+  const price = listing.price;
+  return status !== "sold" && price != null && Number.isFinite(price) && price > 0 ? formatMoney(price) : null;
 }
