@@ -322,10 +322,25 @@ export const api = {
       const form = new FormData();
       files.forEach((file) => form.append("files", file));
       form.append("garment", garment);
-      const response = await studioFetch(`${BASE}/measurements/read`, { method: "POST", body: form });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
-      return data as MeasurementReadResult;
+      // A read takes minutes, so a deploy or restart can cut it off. That is tried
+      // once more; an error the server explains (a model that failed) is not.
+      for (let attempt = 1; ; attempt++) {
+        let response: Response;
+        try {
+          response = await studioFetch(`${BASE}/measurements/read`, { method: "POST", body: form });
+        } catch (error) {
+          if (error instanceof TypeError && attempt === 1) continue;
+          throw error;
+        }
+        const data = await response.json().catch(() => null);
+        if (response.ok) return data as MeasurementReadResult;
+        const explained = typeof data?.detail === "string" && data.detail.trim();
+        if (!explained && response.status >= 500) {
+          if (attempt === 1) continue;
+          throw new Error("The server restarted while reading. Read from photos again.");
+        }
+        throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
+      }
     },
     /** The same, from a saved listing's photos. */
     readSaved: (convId: string, garment: string) =>

@@ -1,6 +1,8 @@
 /** The existing API client uses this for desktop HTTP and authenticated cloud HTTP. */
 export interface HostedApiSession {
   origin: string;
+  /** The signed-in seller, so what this device keeps for them stays theirs. */
+  seller: string;
   accessToken: () => Promise<string | null>;
   unauthorized: () => void;
 }

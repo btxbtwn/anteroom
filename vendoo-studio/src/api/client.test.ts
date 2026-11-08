@@ -73,6 +73,47 @@ describe("Listing action deadlines", () => {
 });
 
 
+describe("Reading measurements from photos", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const photo = () => new File(["x"], "1.jpg", { type: "image/jpeg" });
+  const result = { photos_read: 1, measurements: {}, reader: "OpenRouter" };
+
+  it("tries once more when a restart cuts the read off", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response("Internal Server Error", { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(result)));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.measurements.read([photo()], "top")).resolves.toEqual(result);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("tries once more when the connection drops", async () => {
+    const fetch = vi.fn()
+      .mockRejectedValueOnce(new TypeError("Load failed"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(result)));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.measurements.read([photo()], "top")).resolves.toEqual(result);
+  });
+
+  it("does not repeat a read the model itself failed", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "OpenRouter stopped responding while looking at the photos." }), { status: 502 },
+    ));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.measurements.read([photo()], "top")).rejects.toThrow("OpenRouter stopped responding");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after the second try", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response("", { status: 503 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.measurements.read([photo()], "top")).rejects.toThrow(
+      "The server restarted while reading. Read from photos again.",
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("Requests while the server restarts", () => {
   afterEach(() => vi.unstubAllGlobals());
 

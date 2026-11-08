@@ -861,7 +861,7 @@ export function MarketplacesLayout({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-      <nav aria-label="Marketplaces" className="flex w-40 shrink-0 flex-col gap-0.5 overflow-y-auto border-e py-1.5 ps-1.5 pe-1">
+      <nav aria-label="Marketplaces" className="flex w-40 shrink-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden overscroll-none border-e py-1.5 ps-1.5 pe-1">
         <ul className="flex flex-col gap-0.5 text-xs">
           {ids.map((id) => {
             const marketplace = MANAGED.has(id) ? id as Marketplace : null;
