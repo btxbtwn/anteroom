@@ -503,6 +503,68 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(self.promoted(), [])
         self.assertIn("Poshmark refused the request: This item is reserved for a buyer. (1)", self.db.query(PromotionRun).one().note)
 
+    def test_review_refusal_keeps_listing_and_sanitized_reason_in_activity(self):
+        conv, post = self.items[0]
+        detail = "HTTP 400, code 1003: " + "No recipient was returned. " * 8
+        self.bridge.side_effect = AsyncMock(return_value={
+            "ok": False, "error": "Depop refused the preview. token=private-value",
+            "error_code": "rejected", "marketplace_message": detail + " Bearer private-token",
+        })
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        activity = self.client.get(f"/api/promotion-automations/{saved['id']}/activity").json()
+        self.assertEqual(len(activity["sends"]), 1)
+        skipped = activity["sends"][0]
+        self.assertEqual((skipped["state"], skipped["listing_id"], skipped["title"]), ("skipped", post, conv.title))
+        self.assertIn(detail.strip(), skipped["note"])
+        self.assertIn("HTTP 400, code 1003", skipped["marketplace_message"])
+        self.assertNotIn("private-value", skipped["note"])
+        self.assertNotIn("private-token", str(activity))
+        self.assertIsNotNone(skipped["finished_at"])
+        self.assertIsNone(listing_promotions.blocking(self.db, "poshmark", post, "offer"))
+        self.assertEqual(self.promoted(), [])
+        self.assertEqual(activity["runs"][0]["skipped"], 1)
+
+    def test_review_stop_is_journaled_with_known_listing_even_before_remote_check(self):
+        conv, post = self.items[0]
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        with patch.object(listing_promotions, "review", new_callable=AsyncMock) as review:
+            review.side_effect = listing_promotions.PromotionError(409, "Reconnect Depop.", "signed_out")
+            self.tick()
+        activity = self.client.get(f"/api/promotion-automations/{saved['id']}/activity").json()
+        self.assertEqual(len(activity["sends"]), 1)
+        skipped = activity["sends"][0]
+        self.assertEqual((skipped["state"], skipped["listing_id"], skipped["title"]), ("skipped", post, conv.title))
+        self.assertEqual(skipped["note"], "Reconnect Depop.")
+        self.assertIsNone(skipped["marketplace_message"])
+        self.assertEqual(activity["runs"][0]["skipped"], 1)
+        self.assertFalse(self.db.get(PromotionAutomation, saved["id"]).enabled)
+        self.assertEqual(self.promoted(), [])
+
+    def test_deleted_draft_during_review_keeps_skip_without_a_dangling_reference(self):
+        conv, post = self.items[0]
+        conv_id, title = conv.id, conv.title
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv_id]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+
+        async def refuse_after_delete(_job, message_type, payload, timeout=0):
+            self.assertEqual(message_type, "marketplace.promotion_check")
+            self.db.execute(text("DELETE FROM conversations WHERE id = :id"), {"id": conv_id})
+            self.db.commit()
+            return {"ok": False, "error": "Depop refused the preview.", "error_code": "rejected"}
+
+        self.bridge.side_effect = refuse_after_delete
+        self.tick()
+        skipped = self.client.get(f"/api/promotion-automations/{saved['id']}/activity").json()["sends"][0]
+        self.assertIsNone(skipped["conversation_id"])
+        self.assertEqual((skipped["listing_id"], skipped["title"], skipped["state"]), (post, title, "skipped"))
+        self.assertEqual(self.promoted(), [])
+
     def test_minimum_days_listed_and_activity_log(self):
         saved = self.create({**SHARE, "min_days_listed": 20, "daily_cap": 10})
         self.enable(saved["id"])
