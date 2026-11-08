@@ -1,1 +1,0 @@
-- Make the Anteroom logo at the top of the sidebar larger.
