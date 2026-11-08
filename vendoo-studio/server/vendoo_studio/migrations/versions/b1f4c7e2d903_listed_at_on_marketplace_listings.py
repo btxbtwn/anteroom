@@ -44,10 +44,13 @@ jobs_table = sa.table(
 
 
 def upgrade() -> None:
+    connection = op.get_bind()
+    # Adopting a database from before migrations creates the column with its tables.
+    if "listed_at" in {column["name"] for column in sa.inspect(connection).get_columns("marketplace_listings")}:
+        return
     with op.batch_alter_table('marketplace_listings', schema=None) as batch_op:
         batch_op.add_column(sa.Column('listed_at', sa.DateTime(), nullable=True))
 
-    connection = op.get_bind()
     finished = sa.func.max(sa.func.coalesce(jobs_table.c.updated_at, jobs_table.c.created_at))
     listed: dict[tuple[str, str], datetime] = {
         (conversation_id, step): when
