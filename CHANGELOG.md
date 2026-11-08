@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.829 — 2026-11-08
+
+- On iPhone, listings open faster: the cover photo shows at once, and photos are kept on the phone between launches.
+- On iPhone, marketplace tabs such as Depop and eBay load in the background as soon as a listing opens.
+- On iPhone, Mark down prices opens with the stale listings already shown, and usually with their suggested prices filled in.
+
 ## 0.1.828 — 2026-11-08
 
 - Marketplace logos are readable at small sizes: Etsy and Depop show their one-letter marks, and eBay's logo is no longer squeezed into a tiny square.

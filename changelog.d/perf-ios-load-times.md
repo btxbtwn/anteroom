@@ -1,3 +1,0 @@
-- On iPhone, listings open faster: the cover photo shows at once, and photos are kept on the phone between launches.
-- On iPhone, marketplace tabs such as Depop and eBay load in the background as soon as a listing opens.
-- On iPhone, Mark down prices opens with the stale listings already shown, and usually with their suggested prices filled in.
