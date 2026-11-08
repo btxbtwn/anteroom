@@ -670,7 +670,7 @@ export function MarketplacesLayout({
     const missing = check?.missing.length ?? 0;
     const line = <>
       {status && !quiet && (
-        // A narrow rail wraps a status instead of cutting it off; the row's tooltip carries the reason.
+        // A narrow rail wraps a status instead of cutting it off; the row's tooltip names it too.
         <span role="status" className={cn("flex items-start gap-1 text-xs text-muted-foreground",
           status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
           status.tone === "sold" && "text-info-foreground")}>
@@ -839,7 +839,7 @@ export function MarketplacesLayout({
             const { status, check, line } = formState(id);
             return (
               <li key={id} aria-label={name} className="group relative flex items-start">
-                <button type="button" aria-current={current ? "true" : undefined} title={check ? missingDetail(check.missing) : status && (status.detail ? `${status.label}: ${status.detail}` : status.label)} onClick={() => onSelect(id)}
+                <button type="button" aria-current={current ? "true" : undefined} title={check ? missingDetail(check.missing) : status?.label} onClick={() => onSelect(id)}
                   onPointerEnter={() => onPrepare?.(id)} onFocus={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
                   className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent",
                     current && "bg-accent text-foreground")}>
