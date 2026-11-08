@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.791 — 2026-11-08
+
+- Make listing rows in the sidebar larger, with bigger photos and text, and keep every row the same height.
+
 ## 0.1.790 — 2026-11-08
 
 - Bulk Regenerate's review window on the web now shows each listing's photos, including the enlarged view.
