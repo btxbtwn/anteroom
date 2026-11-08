@@ -11,8 +11,14 @@ mkdir -p "$dest"
 # A proxy can surface HTTP 504 as curl receive error 56, which --retry alone
 # does not retry. This is a bounded GET to a file; the pinned checksum below
 # must still pass before anything is unpacked or executed.
+# Shared Actions runners hit unauthenticated API rate limits (HTTP 403); the
+# job token raises that limit. Local installs without a token keep working.
+headers=(-H "Accept: application/octet-stream")
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  headers+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+fi
 curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 --retry-max-time 600 -o "$dest/xcodegen.zip" \
-  -H "Accept: application/octet-stream" \
+  "${headers[@]}" \
   "https://api.github.com/repos/yonaskolb/XcodeGen/releases/assets/$asset_id"
 echo "$sha256  $dest/xcodegen.zip" | shasum -a 256 -c -
 unzip -q -o "$dest/xcodegen.zip" -d "$dest"
