@@ -1,0 +1,1 @@
+- Fixed Scout an item showing “Not Found” on the web.
