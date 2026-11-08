@@ -1,0 +1,2 @@
+- Signed in, Anteroom now opens on the assistant, on the web and on iPhone.
+- The assistant's home screen greets you by time of day, puts the message box in the middle with the cursor ready on desktop, and offers four example questions.

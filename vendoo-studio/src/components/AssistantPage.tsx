@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type MouseEvent } from "react";
-import { ArrowUpRightIcon, CircleAlertIcon } from "lucide-react";
+import { ArrowUpRightIcon, CircleAlertIcon, HourglassIcon, PercentIcon, TagIcon, TrendingUpIcon, type LucideIcon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage } from "../api/assistant";
@@ -26,14 +26,25 @@ import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
 
 /** Questions that show what the assistant can see, offered before the first one is asked. */
-export const ASSISTANT_STARTERS = [
-  "How did last month compare with the month before?",
-  "Which brands and categories make me the most profit?",
-  "What has been listed longest, and what should I do with it?",
-  "Which wholesale boxes paid off, and which did not?",
-  "Mark down everything listed over 90 days by 15%.",
-  "Find listings whose size differs between forms and fix them.",
+export const ASSISTANT_STARTERS: readonly { text: string; icon: LucideIcon }[] = [
+  { text: "How did last month compare with the month before?", icon: TrendingUpIcon },
+  { text: "Which brands and categories make me the most profit?", icon: TagIcon },
+  { text: "What has been listed longest, and what should I do with it?", icon: HourglassIcon },
+  { text: "Mark down everything listed over 90 days by 15%.", icon: PercentIcon },
 ];
+
+/** The home screen's greeting, by the seller's local time. */
+export function greeting(now = new Date()): string {
+  const hour = now.getHours();
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/** A mouse or trackpad: put the cursor in the box. On a phone the keyboard would cover the questions. */
+function finePointer(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: fine)").matches;
+}
 
 const THREADS_KEY = ["assistant", "threads"];
 
@@ -408,7 +419,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         composerRef={composerRef}
         input={input}
         onInputChange={setInput}
-        placeholder="Ask anything about the shop…"
+        placeholder="Ask about sales, inventory or listings…"
+        autoFocus={empty && finePointer()}
         images={images}
         busy={Boolean(live)}
         onSend={() => { void ask(input); }}
@@ -422,23 +434,24 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   if (empty) {
     return (
       <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-y-auto px-4">
-        {/* As wide as the composer's surface, so the heading and questions line up with it. */}
-        <div className="flex w-full max-w-[calc(var(--chat-content-max-width)+2rem)] flex-col pt-[18vh] pb-8 max-[900px]:pt-6">
-          <h1 className="mx-3 mb-1 font-semibold sm:mx-4 text-xl tracking-tight text-foreground">Ask about your business</h1>
+        {/* Centered a little above the middle, as wide as the composer's surface so the heading and questions line up with it. */}
+        <div className="my-auto flex w-full max-w-[calc(var(--chat-content-max-width)+2rem)] flex-col pt-8 pb-[12vh] max-[900px]:pb-8">
+          <h1 className="mx-3 mb-1 font-semibold sm:mx-4 text-xl tracking-tight text-foreground">{greeting()}</h1>
           <p className="mx-3 mb-3 text-muted-foreground text-sm sm:mx-4">
-            You review every change before it is saved. Nothing here publishes a listing.
+            Ask about your shop. You review every change before it is saved, and nothing here publishes a listing.
           </p>
           {composer}
-          <ul aria-label="Example questions" className="mx-3 mt-4 list-none divide-y sm:mx-4 divide-border/60 border-border/60 border-y p-0">
-            {ASSISTANT_STARTERS.map((starter) => (
-              <li key={starter}>
+          <ul aria-label="Example questions" className="mx-3 mt-2 list-none divide-y sm:mx-4 divide-border/60 p-0">
+            {ASSISTANT_STARTERS.map(({ text, icon: Icon }) => (
+              <li key={text}>
                 <button
                   type="button"
-                  className="group flex min-h-10 w-full cursor-pointer items-center justify-between gap-3 py-2 text-left text-muted-foreground text-sm transition-colors hover:text-foreground max-[900px]:min-h-11"
-                  onClick={() => { void ask(starter); }}
+                  className="group flex min-h-10 w-full cursor-pointer items-center gap-3 py-2 text-left text-muted-foreground text-sm transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none max-[900px]:min-h-11"
+                  onClick={() => { void ask(text); }}
                 >
-                  <span>{starter}</span>
-                  <ArrowUpRightIcon aria-hidden className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 max-[900px]:opacity-60" />
+                  <Icon aria-hidden className="size-4 shrink-0" />
+                  <span className="flex-1">{text}</span>
+                  <ArrowUpRightIcon aria-hidden className="size-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 max-[900px]:hidden" />
                 </button>
               </li>
             ))}

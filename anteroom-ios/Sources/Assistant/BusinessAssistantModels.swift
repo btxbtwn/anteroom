@@ -121,14 +121,21 @@ struct AssistantQueuedQuestion: Identifiable, Sendable {
 /// What the assistant screens say, as AssistantPage.tsx and its cards say it.
 enum AssistantFormat {
     /// Questions that show what the assistant can see, offered before the first one is asked.
-    static let starters = [
-        "How did last month compare with the month before?",
-        "Which brands and categories make me the most profit?",
-        "What has been listed longest, and what should I do with it?",
-        "Which wholesale boxes paid off, and which did not?",
-        "Mark down everything listed over 90 days by 15%.",
-        "Find listings whose size differs between forms and fix them.",
+    static let starters: [(text: String, systemImage: String)] = [
+        ("How did last month compare with the month before?", "chart.line.uptrend.xyaxis"),
+        ("Which brands and categories make me the most profit?", "tag"),
+        ("What has been listed longest, and what should I do with it?", "hourglass"),
+        ("Mark down everything listed over 90 days by 15%.", "percent"),
     ]
+
+    /// The home screen's greeting, by the seller's local time.
+    static func greeting(at date: Date = .now, calendar: Calendar = .current) -> String {
+        switch calendar.component(.hour, from: date) {
+        case 5..<12: return "Good morning"
+        case 12..<18: return "Good afternoon"
+        default: return "Good evening"
+        }
+    }
 
     static let lostConnection =
         "Lost the connection to Anteroom. If it was still answering, the answer appears here when you come back."

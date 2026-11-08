@@ -65,30 +65,36 @@ struct BusinessAssistantView: View {
 
     private var starters: some View {
         ScrollView {
-            VStack(spacing: 20) {
-                VStack(spacing: 8) {
-                    Text("Ask about your business").font(.title3.weight(.semibold))
-                    Text("You review every change before it is saved, and nothing here publishes a listing.")
-                        .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(AssistantFormat.greeting()).font(.title3.weight(.semibold))
+                    Text("Ask about your shop. You review every change before it is saved, and nothing here publishes a listing.")
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
-                .padding(.top, 40)
-                VStack(spacing: 8) {
-                    ForEach(AssistantFormat.starters, id: \.self) { starter in
-                        Button { model.ask(starter) } label: {
-                            Text(starter)
-                                .font(.subheadline)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, 14)
-                                .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(WorkspaceStyle.border, lineWidth: 1))
+                // A plain list with dividers, as on the web (DESIGN.md).
+                VStack(spacing: 0) {
+                    ForEach(Array(AssistantFormat.starters.enumerated()), id: \.offset) { index, starter in
+                        if index > 0 { Divider() }
+                        Button { model.ask(starter.text) } label: {
+                            Label {
+                                Text(starter.text).multilineTextAlignment(.leading)
+                            } icon: {
+                                Image(systemName: starter.systemImage).foregroundStyle(.secondary)
+                            }
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(starter.text)
                     }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Example questions")
                 errorRow
             }
             .padding(16)
+            .padding(.top, 24)
         }
     }
 
@@ -193,7 +199,7 @@ struct BusinessAssistantView: View {
             }
             // The web's composer: the message on top, its tools along the bottom.
             VStack(alignment: .leading, spacing: 0) {
-                TextField("Ask anything about the shop…", text: $model.text, axis: .vertical)
+                TextField("Ask about sales, inventory or listings…", text: $model.text, axis: .vertical)
                     .lineLimit(1...6)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 14)

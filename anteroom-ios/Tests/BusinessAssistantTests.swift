@@ -59,6 +59,16 @@ struct BusinessAssistantTests {
 
         precondition(AssistantFormat.sendsNow(busy: false, queued: 0))
         precondition(!AssistantFormat.sendsNow(busy: true, queued: 0) && !AssistantFormat.sendsNow(busy: false, queued: 1))
+        // The home screen greets by the seller's local time.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let at = { (hour: Int) in
+            AssistantFormat.greeting(at: calendar.date(from: DateComponents(year: 2026, month: 11, day: 7, hour: hour))!, calendar: calendar)
+        }
+        precondition([4, 5, 11, 12, 17, 18, 23].map(at) == [
+            "Good evening", "Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening",
+        ])
+        precondition(AssistantFormat.starters.count == 4)
         print("Business assistant tests passed")
     }
 

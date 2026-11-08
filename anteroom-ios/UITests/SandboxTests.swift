@@ -301,8 +301,9 @@ final class AssistantSandboxTests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
-        launchSandbox(app)
-        app.tabBars.buttons["Assistant"].tap()
+        // Signed in, the app opens on the Assistant.
+        launchSandbox(app, tab: nil)
+        XCTAssertTrue(app.tabBars.buttons["Assistant"].isSelected, "The Assistant is home")
         let starter = app.buttons["Which brands and categories make me the most profit?"]
         XCTAssertTrue(starter.waitForExistence(timeout: 20), "A new chat offers starter questions")
         keep(app, "Assistant starters")
@@ -324,8 +325,7 @@ final class AssistantSandboxTests: XCTestCase {
         app.buttons["Done"].tap()
 
         app.terminate()
-        launchSandbox(app)
-        app.tabBars.buttons["Assistant"].tap()
+        launchSandbox(app, tab: "Assistant")
         app.buttons["Chats"].tap()
         XCTAssertTrue(thread.waitForExistence(timeout: 60), "Chats finishes loading the saved conversation")
         thread.tap()
@@ -459,13 +459,15 @@ fileprivate extension XCTestCase {
         // Seller-input steps after this scroll back up to their own fields.
     }
 
+    /// Signs in and opens `tab`; nil stays on the tab the app opens on, the Assistant.
     @MainActor
-    func launchSandbox(_ app: XCUIApplication) {
+    func launchSandbox(_ app: XCUIApplication, tab: String? = "Inventory") {
         app.launch()
         // launch() can return while the disposable account is still signing
         // in on a cold CI simulator. Screen waits start at workspace readiness.
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 90),
                       "Sandbox sign-in must finish before interacting with the workspace")
+        if let tab { app.tabBars.buttons[tab].tap() }
     }
 
     @MainActor

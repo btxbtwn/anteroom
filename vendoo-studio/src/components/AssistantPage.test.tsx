@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { AssistantChanges, AssistantMessage } from "../api/assistant";
 import { changeValue, changesHeading } from "./AssistantChangesCard";
-import { ASSISTANT_STARTERS, AssistantPage, askNow, linkedListingId, liveParts, type QueuedQuestion } from "./AssistantPage";
+import { ASSISTANT_STARTERS, AssistantPage, askNow, greeting, linkedListingId, liveParts, type QueuedQuestion } from "./AssistantPage";
 
 const { useQuery } = vi.hoisted(() => ({ useQuery: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -23,11 +23,18 @@ function render(turns: AssistantMessage[] | undefined, state: { isLoading?: bool
 describe("AssistantPage", () => {
   it("opens with what it reads and questions to start from", () => {
     const html = render([]);
-    expect(html).toContain(">Ask about your business</h1>");
+    expect(html).toContain(`>${greeting()}</h1>`);
     expect(html).toContain("You review every change before it is saved");
-    for (const starter of ASSISTANT_STARTERS) expect(html).toContain(starter);
+    for (const starter of ASSISTANT_STARTERS) expect(html).toContain(starter.text);
     // The business note and the memory list live in Settings → Assistant now.
     expect(html).not.toContain("About your business");
+  });
+
+  it("greets by the time of day", () => {
+    const at = (hour: number) => greeting(new Date(2026, 10, 7, hour));
+    expect([at(4), at(5), at(11), at(12), at(17), at(18), at(23)]).toEqual([
+      "Good evening", "Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening",
+    ]);
   });
 
   it("shows the saved conversation; threads, not a clear button, start over", () => {
@@ -38,7 +45,7 @@ describe("AssistantPage", () => {
     expect(html).toMatch(/data-message-role="user".*<p>What sold last week\?<\/p>/);
     expect(html).toMatch(/data-message-role="assistant".*<p>Three items for \$96\.<\/p>/);
     expect(html).not.toContain("Clear conversation");
-    expect(html).not.toContain("Ask about your business");
+    expect(html).not.toContain('aria-label="Example questions"');
   });
 
   it("shows proposed changes before and after with Apply, and only the outcome once settled", () => {
@@ -79,7 +86,7 @@ describe("AssistantPage", () => {
   });
 
   it("holds the welcome back while the conversation loads, and reports a failed load", () => {
-    expect(render(undefined, { isLoading: true })).not.toContain("Ask about your business");
+    expect(render(undefined, { isLoading: true })).not.toContain('aria-label="Example questions"');
     expect(render(undefined, { error: new Error("Anteroom is not running") })).toContain("Anteroom is not running");
   });
 

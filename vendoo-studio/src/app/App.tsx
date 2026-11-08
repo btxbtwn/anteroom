@@ -103,11 +103,13 @@ export function App() {
   const setSelectedConvId = useCallback((id: string) => dispatchOpenListing({ type: "open", id }), []);
   const clearListingWorkspace = (id: string) => dispatchOpenListing({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
-  const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl || runtime.hosted ? "listings" : "assistant");
+  // The assistant is home, on the Mac and signed in alike; a listing link opens that listing.
+  const home = listingFromUrl || !runtime.views.has("assistant") ? "listings" : "assistant";
+  const [activeView, setActiveView] = useState<WorkspaceView>(home);
   const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
   /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
-  const shell = useRef<"listings" | "assistant">(listingFromUrl || runtime.hosted ? "listings" : "assistant");
-  const viewBeforeSettings = useRef<WorkspaceView>(listingFromUrl || runtime.hosted ? "listings" : "assistant");
+  const shell = useRef<"listings" | "assistant">(home);
+  const viewBeforeSettings = useRef<WorkspaceView>(home);
   const [pickedThreadId, setPickedThreadId] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(runtime.hosted ? "providers" : DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
