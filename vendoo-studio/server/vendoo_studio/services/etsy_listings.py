@@ -18,7 +18,8 @@ import httpx
 
 from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.etsy_fields import (
-    sanitize_etsy_tags, etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_raw, etsy_when_to_store, is_etsy_digital_listing,
+    sanitize_etsy_tags, etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_raw, etsy_when_to_store, etsy_what_raw,
+    etsy_who_raw, is_etsy_digital_listing,
 )
 from vendoo_studio.services import marketplace_accounts, marketplace_schemas
 from vendoo_studio.services.keychain import get_marketplace_accounts
@@ -222,8 +223,8 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     if is_etsy_digital_listing(snapshot):
         raise ValueError("This listing flow supports physical Etsy items. Prepare digital files in Etsy Shop Manager.")
     details = snapshot.get("etsy_specifics") or {}
-    who = _code(details.get("who_made") or details.get("whoMade"), _WHO)
-    what = _code(details.get("what_is") or details.get("whatIsIt"), _WHAT)
+    who = _code(etsy_who_raw(details), _WHO)
+    what = _code(etsy_what_raw(details), _WHAT)
     when = etsy_when_to_store(etsy_when_raw(details, snapshot), snapshot, etsy_when_options())
     when = etsy_when_made_code(when)
     from vendoo_studio.services.direct_categories import direct_category_id
@@ -271,6 +272,10 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
         reason = (f"Etsy titles are at most {_ETSY_TITLE_MAX} characters" if len(source_title) > _ETSY_TITLE_MAX
                   else "Etsy allows %, :, & and + once each and no emoji or special symbols")
         found.append(gap("title", f"{reason}, so Etsy gets: {fields['title']}", blocking=False))
+    if not fields["who_made"]:
+        found.append(gap("etsy_specifics.who_made", _PLAIN["who_made"]))
+    if not fields["when_made"]:
+        found.append(gap("etsy_specifics.when_made", _PLAIN["when_made"]))
     if not fields["taxonomy_id"]:
         found.append(gap("direct_category_ids.etsy", "Choose an Etsy category."))
     if seeded_leaf(context.db, "etsy", fields["taxonomy_id"]) is False:
@@ -441,6 +446,26 @@ _FIELD_PATHS = {"shipping_profile_id": "etsy_specifics.shipping_profile_id", "re
                 "price": "price", "quantity": "quantity", "title": "title", "description": "description", "image": "photos"}
 
 
+# Etsy's choices, for a refusal that lists them without naming the field.
+_CHOICES = {"who_made": ("i_did", "someone_else", "collective"), "when_made": ("made_to_order",)}
+
+# What each refused field means to the seller.
+_PLAIN = {
+    "who_made": "Etsy needs to know who made this item. Choose it under Who made it?",
+    "when_made": "Etsy needs to know when this item was made. Choose it under When was it made?",
+    "is_supply": "Etsy needs to know whether this is a finished item or a supply. Choose it under What is it?",
+    "shipping_profile_id": "Etsy needs a shipping profile. Choose one in Settings → Connections.",
+    "readiness_state_id": "Etsy needs a processing time. Choose one in Settings → Connections.",
+    "return_policy_id": "Etsy needs a return policy. Choose one in Settings → Connections.",
+    "taxonomy_id": "Etsy did not accept the category. Choose a more specific Etsy category.",
+    "price": "Etsy did not accept the price.",
+    "quantity": "Etsy did not accept the quantity.",
+    "title": "Etsy did not accept the title.",
+    "description": "Etsy did not accept the description.",
+    "image": "Etsy did not accept one of the photos.",
+}
+
+
 def _etsy_messages(exc: httpx.HTTPStatusError) -> str:
     try:
         body = exc.response.json()
@@ -472,7 +497,8 @@ def marketplace_message(exc: Exception) -> str | None:
 
 
 def _named_fields(message: str) -> list[str]:
-    return [name for name in _FIELD_PATHS if re.search(rf"\b{re.escape(name)}\b", message)]
+    return [name for name in _FIELD_PATHS if re.search(rf"\b{re.escape(name)}\b", message)
+            or any(re.search(rf"\b{choice}\b", message) for choice in _CHOICES.get(name, ()))]
 
 
 def _error_text(exc: Exception) -> str:
@@ -481,12 +507,16 @@ def _error_text(exc: Exception) -> str:
         status = exc.response.status_code
         if status == 429:
             return "Etsy is limiting requests right now. Wait a moment, then List again."
-        message = _etsy_messages(exc)
-        fields = _named_fields(message)
-        detail = f"Check Etsy fields: {', '.join(fields)}." if fields else "Review the Etsy draft fields and connection."
-        if not fields and status == 400:
-            detail = "Etsy refused these listing details. Its reason is below."
-        return f"Etsy rejected the request (HTTP {status}). {detail}"
+        if status >= 500:
+            return "Etsy is having trouble right now. Try again in a few minutes."
+        fields = _named_fields(_etsy_messages(exc))
+        if fields:
+            return " ".join(_PLAIN[name] for name in fields)
+        if status == 400:
+            return "Etsy did not accept some of this listing's details."
+        if status == 404:
+            return "Etsy could not find this listing. It may have been deleted in Etsy."
+        return "Etsy did not accept the request. Check your Etsy connection in Settings → Connections."
     if isinstance(exc, httpx.HTTPError):
         return "Etsy's API did not confirm the request. Check the result before trying again."
     if isinstance(exc, (ValueError, marketplace_accounts.SignInRequired, RelayError)):
@@ -509,10 +539,12 @@ def _failure(exc: Exception, *, safe: bool, **extra) -> dict:
         if status == 429:
             return failure(text, "rate_limited", safe=True, marketplace_message=said,
                            retry_after_s=retry_after_seconds(exc.response.headers.get("retry-after")), **extra)
+        if status >= 500:
+            return failure(text, "network", safe=True, marketplace_message=said, **extra)
         fields = _named_fields(_etsy_messages(exc))
         if status == 400 and fields:
             return failure(text, "missing_fields", safe=True, marketplace_message=said,
-                           fields=[{"field": _FIELD_PATHS[name], "message": f"Etsy refused {name}."} for name in fields], **extra)
+                           fields=[{"field": _FIELD_PATHS[name], "message": _PLAIN[name]} for name in fields], **extra)
         return failure(text, "rejected", safe=True, marketplace_message=said, **extra)
     if isinstance(exc, (RelayError, httpx.TransportError)):
         return failure(text, "network", safe=True, **extra)
