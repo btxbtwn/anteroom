@@ -37,12 +37,12 @@ test("the General form leads with title, description and price, and keeps field 
     await expect(tools).toHaveCSS("opacity", "1");
 
     if (!phone) {
-      // The rail says Etsy's state in full and puts the reason in the row's tooltip.
+      // The rail says Etsy's state in full; the listing check below gives the reason once.
       const etsy = page.getByRole("navigation", { name: "Marketplaces" }).getByRole("listitem", { name: "Etsy" });
       const status = etsy.getByRole("status");
       await expect(status).toHaveText("May not qualify");
       expect(await status.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-      await expect(etsy.getByRole("button").first()).toHaveAttribute("title", /^May not qualify: Etsy generally requires/);
+      await expect(etsy.getByRole("button").first()).toHaveAttribute("title", "May not qualify");
     }
   } finally { await request.delete(`/api/conversations/${id}`); }
 });

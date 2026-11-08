@@ -197,6 +197,7 @@ export function PhotoLightbox({
   onStep,
   onMove,
   onRemove,
+  removeLabel = "Delete",
   onClose,
 }: {
   urls: string[];
@@ -210,9 +211,11 @@ export function PhotoLightbox({
   /** The photo shown is an edit of a kept original. */
   edited?: boolean;
   onStep: (index: number) => void;
-  /** Touch screens cannot drag thumbnails, so the viewer moves the photo instead. */
+  /** Moves the photo without dragging it (WCAG 2.2, 2.5.7 Dragging Movements). */
   onMove?: (delta: -1 | 1) => void;
+  /** Touch screens hide the tiles' remove buttons, so the viewer offers it instead. */
   onRemove?: () => void;
+  removeLabel?: string;
   onClose: () => void;
 }) {
   const step = (delta: number) => onStep((index + delta + urls.length) % urls.length);
@@ -292,8 +295,9 @@ export function PhotoLightbox({
             ) : null}
           </div>
           {onMove || onRemove ? (
-            // Touch only: the desktop drags thumbnails and uses their delete button.
-            <div className="mt-3 hidden items-center gap-2 pointer-coarse:flex">
+            // Earlier and Later show everywhere: dragging is never the only way to reorder.
+            // Remove is for touch only; the desktop uses the tiles' own buttons.
+            <div className="mt-3 flex items-center gap-2">
               {onMove && urls.length > 1 ? (
                 <>
                   <Button variant="outline" size="sm" disabled={index === 0} onClick={() => onMove(-1)}>
@@ -307,9 +311,9 @@ export function PhotoLightbox({
                 </>
               ) : null}
               {onRemove ? (
-                <Button variant="destructive-outline" size="sm" onClick={onRemove}>
+                <Button variant="destructive-outline" size="sm" className="hidden pointer-coarse:inline-flex" onClick={onRemove}>
                   <Trash2Icon />
-                  Delete
+                  {removeLabel}
                 </Button>
               ) : null}
             </div>

@@ -222,7 +222,8 @@ export function ListingEditor({
     refetchInterval: (query) => (sessionActive ? activityPollMs(Boolean(query.state.data?.busy)) : false),
   });
   const generating = chatBusy || Boolean(activity?.busy);
-  const askChat = generating || !runtime.features.has("generation") ? undefined : onAskChat;
+  // While chat is busy an Ask chat joins its queue and runs next.
+  const askChat = runtime.features.has("generation") ? onAskChat : undefined;
 
   const listing = editState.draft ?? data?.listing ?? {};
   const listingTitle = String(listing.title || "Listing");

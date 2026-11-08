@@ -33,19 +33,6 @@ struct MissingField: Decodable, Equatable, Hashable, Sendable {
     let message: String
 }
 
-/// Each listing's missing fields per marketplace (`/api/listing-readiness`), for the inventory.
-struct ListingReadiness: Decodable, Equatable, Sendable {
-    struct Marketplace: Decodable, Equatable, Sendable { let missing: [MissingField] }
-
-    let revisionID: String?
-    let marketplaces: [String: Marketplace]
-
-    enum CodingKeys: String, CodingKey {
-        case revisionID = "revision_id"
-        case marketplaces
-    }
-}
-
 /// "Needs 2 fields".
 func needsText(_ count: Int) -> String { "Needs \(count) \(count == 1 ? "field" : "fields")" }
 

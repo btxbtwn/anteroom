@@ -2,13 +2,14 @@ import { useWorkspaceRuntime } from "../app/runtime";
 import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { dragHasFiles, groupImageFilesByFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
+import { groupImageFilesByFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import type { Photo } from "../api/types";
 import { toastManager } from "./ui/toast";
 import { BulkUploadDialog } from "./BulkUploadDialog";
 import { InspectorSection } from "./ListingFormControls";
 import { PhotoEditor } from "./PhotoEditor";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
+import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
 import { photoThumbUrl } from "../photoThumb";
 import { Button } from "./ui/button";
@@ -19,8 +20,6 @@ import {
   type BulkUploadDefaults,
   type BulkUploadItem,
 } from "../bulkPhotoUpload";
-
-const PHOTO_DRAG_TYPE = "application/x-vendoo-photo-id";
 
 interface Props {
   convId: string;
@@ -33,14 +32,10 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const suppressClickRef = useRef(false);
-  const dragIdRef = useRef<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropId, setDropId] = useState<string | null>(null);
   const [pendingBulkGroups, setPendingBulkGroups] = useState<PhotoFolderGroup[] | null>(null);
 
   const { data: photos } = useQuery({
@@ -112,8 +107,6 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   useEffect(() => {
     setPreviewId(null);
     setEditingId(null);
-    setDragId(null);
-    setDropId(null);
   }, [convId]);
 
   useEffect(() => {
@@ -127,60 +120,15 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   const sessionActive = useListingSessionActive();
 
   const canReorder = (photos?.length || 0) > 1;
-  // A phone cannot drag thumbnails or drop files; it reorders from the photo viewer.
+  // A phone cannot drop files.
   const touchScreen = typeof window !== "undefined" && Boolean(window.matchMedia?.("(hover: none)").matches);
 
-  const resetDrag = () => {
-    dragIdRef.current = null;
-    setDragId(null);
-    setDropId(null);
-    window.setTimeout(() => {
-      suppressClickRef.current = false;
-    }, 150);
-  };
-
-  const onThumbDragStart = (event: React.DragEvent<HTMLDivElement>, photoId: string) => {
-    if (!canReorder) {
-      event.preventDefault();
-      return;
-    }
-    suppressClickRef.current = true;
-    dragIdRef.current = photoId;
-    setDragId(photoId);
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData(PHOTO_DRAG_TYPE, photoId);
-    event.dataTransfer.setData("text/plain", photoId);
-  };
-
-  const onThumbDragOver = (event: React.DragEvent<HTMLDivElement>, photoId: string) => {
-    const sourceId = dragIdRef.current;
-    if (!sourceId || sourceId === photoId) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.dataTransfer.dropEffect = "move";
-    if (dropId !== photoId) setDropId(photoId);
-  };
-
-  const onThumbDrop = (event: React.DragEvent<HTMLDivElement>, photoId: string) => {
-    // Files dropped on a thumbnail are an upload, not a reorder — let the
-    // window-level drop handler take them.
-    if (dragHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const sourceId = dragIdRef.current || event.dataTransfer.getData(PHOTO_DRAG_TYPE) || event.dataTransfer.getData("text/plain");
-    resetDrag();
-    if (!photos || !sourceId || sourceId === photoId) return;
-    const from = photos.findIndex((photo) => photo.id === sourceId);
-    const to = photos.findIndex((photo) => photo.id === photoId);
+  const movePhoto = (from: number, to: number) => {
+    if (!photos) return;
     const next = moveItem(photos, from, to);
     if (next === photos) return;
     setUploadError(null);
     reorderMutation.mutate(next.map((photo) => photo.id));
-  };
-
-  const openPreview = (photoId: string) => {
-    if (suppressClickRef.current) return;
-    setPreviewId(photoId);
   };
 
   const resetInputs = () => {
@@ -289,28 +237,27 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
       {uploadError && <div className="text-destructive-foreground text-xs">{uploadError}</div>}
       {photos && photos.length > 0 && (
         <PhotoStrip className="gap-2">
-          {photos.map((p, i) => (
-            <PhotoThumb
-              key={p.id}
-              className="size-30 sm:size-34"
-              url={photoThumbUrl(p)}
-              index={i}
-              reorderable={canReorder}
-              dragging={dragId === p.id}
-              dropTarget={dropId === p.id}
-              draggable={canReorder}
-              onDragStart={(event) => onThumbDragStart(event, p.id)}
-              onDragOver={(event) => onThumbDragOver(event, p.id)}
-              onDrop={(event) => onThumbDrop(event, p.id)}
-              onDragEnd={resetDrag}
-              title={canReorder ? "Drag to set upload order" : undefined}
-              onOpen={() => openPreview(p.id)}
-              onRotate={runtime.features.has("photo_edits") ? () => rotate(p.id, 90) : undefined}
-              rotating={rotatingId === p.id}
-              onRemove={() => deleteMutation.mutate(p.id)}
-              controlsInViewerOnTouch
-            />
-          ))}
+          <SortablePhotos ids={photos.map((p) => p.id)} onMove={movePhoto}>
+            {photos.map((p, i) => (
+              <SortablePhoto key={p.id} id={p.id} disabled={!canReorder}>
+                {(dragging) => (
+                  <PhotoThumb
+                    className="size-30 sm:size-34"
+                    url={photoThumbUrl(p)}
+                    index={i}
+                    reorderable={canReorder}
+                    dragging={dragging}
+                    title={canReorder ? (touchScreen ? "Press and hold, then drag to set upload order" : "Drag to set upload order") : undefined}
+                    onOpen={() => setPreviewId(p.id)}
+                    onRotate={runtime.features.has("photo_edits") ? () => rotate(p.id, 90) : undefined}
+                    rotating={rotatingId === p.id}
+                    onRemove={() => deleteMutation.mutate(p.id)}
+                    controlsInViewerOnTouch
+                  />
+                )}
+              </SortablePhoto>
+            ))}
+          </SortablePhotos>
         </PhotoStrip>
       )}
       {previewPhoto && photos ? (
@@ -325,12 +272,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
             setPreviewId(null);
           } : undefined}
           onStep={(next) => setPreviewId(photos[next].id)}
-          onMove={(delta) => {
-            const next = moveItem(photos, previewIndex, previewIndex + delta);
-            if (next === photos) return;
-            setUploadError(null);
-            reorderMutation.mutate(next.map((photo) => photo.id));
-          }}
+          onMove={(delta) => movePhoto(previewIndex, previewIndex + delta)}
           onRemove={() => {
             const rest = photos.filter((photo) => photo.id !== previewPhoto.id);
             deleteMutation.mutate(previewPhoto.id);

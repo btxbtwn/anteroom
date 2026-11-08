@@ -11,8 +11,9 @@ struct ListingAssistantView: View {
     @State private var confirmRegenerate = false
     @State private var picked: [PhotosPickerItem] = []
 
-    init(api: AnteroomAPI, listingID: String) {
-        _model = State(initialValue: ListingAssistantModel(api: api, listingID: listingID))
+    /// `text` starts the composer, e.g. an Ask chat about a marketplace refusal; the seller sends it.
+    init(api: AnteroomAPI, listingID: String, text: String = "") {
+        _model = State(initialValue: ListingAssistantModel(api: api, listingID: listingID, text: text))
     }
 
     var body: some View {

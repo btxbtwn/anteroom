@@ -222,7 +222,8 @@ function mercariDetailSides(listing) {
 
 // The seller's own answer. Item Details never answer it: the page shows no size until they do.
 function mercariShoeboxAnswer(listing) {
-  const own = mercariOwnPackage(listing).fitsShoebox;
+  // A saved radio label ("Yes") is the same answer as its value ("yes").
+  const own = String(mercariOwnPackage(listing).fitsShoebox ?? '').trim().toLowerCase();
   return own === 'yes' || own === 'no' ? own : '';
 }
 

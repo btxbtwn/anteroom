@@ -21,6 +21,9 @@ MAX_PHOTOS = MAX_PHOTO_COUNT
 # Camera photos reach about 48 megapixels (6000×8000); larger is refused.
 MAX_PIXELS = 50_000_000
 MAX_SIDE = 2400
+# Thumbnail sizes the apps ask for (covers and photo strips). These are kept in
+# Storage beside the photo, so a restart or deploy never has to remake them.
+KEPT_THUMB_SIZES = (96, 192)
 register_heif_opener()
 _decode_slot = threading.Semaphore(1)
 
@@ -67,6 +70,16 @@ def check_key(key: str, user_id: str, draft_id: str) -> None:
         raise HTTPException(404, 'Photo not found')
 
 
+def rendition_key(key: str, size: int) -> str:
+    """Where a stored photo's thumbnail of ``size`` px is kept, beside the photo."""
+    return f'{key[:-4]}.t{size}.jpg'
+
+
+def with_renditions(key: str) -> list[str]:
+    """A photo's key and its kept thumbnails, so a delete removes them together."""
+    return [key, *(rendition_key(key, size) for size in KEPT_THUMB_SIZES)]
+
+
 def storage_call(method: str, key: str, token: str, data: bytes | None = None) -> bytes:
     public_key = os.environ.get('SUPABASE_PUBLISHABLE_KEY', '')
     if not public_key:
@@ -82,7 +95,7 @@ def storage_call(method: str, key: str, token: str, data: bytes | None = None) -
                                  headers={'Authorization': f'Bearer {token}', 'apikey': public_key,
                                           'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
                                           'Cache-Control': 'no-store'},
-                                 json={'prefixes': [key]} if method == 'DELETE' else None,
+                                 json={'prefixes': with_renditions(key)} if method == 'DELETE' else None,
                                  content=None if method == 'DELETE' else data, timeout=20, follow_redirects=False)
     except httpx.HTTPError:
         raise HTTPException(503, 'Photo storage is temporarily unavailable') from None
@@ -123,23 +136,54 @@ _thumbs_lock = threading.Lock()
 def thumbnail(key: str, version: str | None, size: int, token: str) -> bytes:
     """A JPEG at most ``size`` px on a side, made once per stored photo.
 
-    The caller has already checked that the seller owns ``key``.
+    Kept in memory for repeat requests, and for the sizes the apps use, in
+    Storage beside the photo so a new server process does not remake it from
+    the full photo. The caller has already checked that the seller owns ``key``.
     """
-    global _thumbs_bytes
     entry = (key, version or '', size)
     with _thumbs_lock:
         kept = _thumbs.get(entry)
         if kept is not None:
             _thumbs.move_to_end(entry)
             return kept
-    data = storage_call('GET', key, token)
+    stored = size in KEPT_THUMB_SIZES
+    made = _stored_thumbnail(rendition_key(key, size), token) if stored else None
+    if made is None:
+        made = _make_thumbnail(storage_call('GET', key, token), size)
+        if stored:
+            _store_thumbnail(rendition_key(key, size), made, token)
+    _keep(entry, made)
+    return made
+
+
+def _stored_thumbnail(name: str, token: str) -> bytes | None:
+    try:
+        return storage_call('GET', name, token) or None
+    except HTTPException:
+        # Not made yet, or Storage is slow to say so: make it from the photo.
+        return None
+
+
+def _store_thumbnail(name: str, data: bytes, token: str) -> None:
+    try:
+        storage_call('POST', name, token, data)
+    except HTTPException:
+        # Another request stored it first, or Storage is busy; the next ask makes it again.
+        pass
+
+
+def _make_thumbnail(data: bytes, size: int) -> bytes:
     with _decode_slot, Image.open(io.BytesIO(data)) as image:
         # Decode the JPEG at a fraction of its size; the cover is 96px.
         image.draft('RGB', (size, size))
         image.thumbnail((size, size))
         output = io.BytesIO()
         image.convert('RGB').save(output, 'JPEG', quality=82)
-    made = output.getvalue()
+    return output.getvalue()
+
+
+def _keep(entry: tuple[str, str, int], made: bytes) -> None:
+    global _thumbs_bytes
     with _thumbs_lock:
         if entry not in _thumbs:
             _thumbs[entry] = made
@@ -147,4 +191,3 @@ def thumbnail(key: str, version: str | None, size: int, token: str) -> bytes:
         while _thumbs_bytes > THUMB_CACHE_BYTES:
             _old, dropped = _thumbs.popitem(last=False)
             _thumbs_bytes -= len(dropped)
-    return made
