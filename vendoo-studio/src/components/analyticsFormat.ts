@@ -114,7 +114,7 @@ export function profitHint(figures: Coverage & { profit: number | null }): strin
   return gaps ? `Partial: ${gaps}` : "After fees, shipping and cost";
 }
 
-/** A change only when both periods have every amount; otherwise which amounts are missing, and where. */
+/** A change only when both periods have every amount; names the earlier period's gaps, since the hint names this one's. */
 export function compareChange(
   current: Coverage, previous: Coverage | null, kind: "revenue" | "profit",
   now: number | null, before: number | null, format: (value: number) => string,
@@ -122,7 +122,8 @@ export function compareChange(
   if (!previous) return undefined;
   const gaps = kind === "revenue" ? priceGaps : profitGaps;
   const here = gaps(current);
-  if (here) return `No comparison: ${here}`;
+  // The hint below the figure already names this period's gaps.
+  if (here) return "No comparison";
   const there = gaps(previous);
   if (there) return `No comparison: ${there} in the earlier period`;
   return formatChange(now, before, format);

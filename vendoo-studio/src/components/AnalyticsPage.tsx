@@ -80,7 +80,7 @@ export function InventoryAnalyticsView({ onOpenListing, onOpenSalesRecords }: Pr
         {data ? <InventoryStrip inventory={data.inventory} /> : null}
         <div className="flex flex-wrap items-center gap-2">
           <Select value={range} onValueChange={value => { if (value) setRange(value as AnalyticsRange); }}>
-            <SelectTrigger aria-label="Sales period" className="w-40"><SelectValue>{PERIODS.find(item => item.id === range)?.label}</SelectValue></SelectTrigger>
+            <SelectTrigger aria-label="Sales period" className="w-44"><SelectValue>{PERIODS.find(item => item.id === range)?.label}</SelectValue></SelectTrigger>
             <SelectPopup>{PERIODS.map(item => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectPopup>
           </Select>
           <Button size="icon-sm" variant="ghost" aria-label="Refresh analytics" title="Refresh analytics"

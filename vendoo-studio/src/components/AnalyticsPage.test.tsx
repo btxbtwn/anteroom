@@ -113,8 +113,8 @@ describe("InventoryAnalyticsView", () => {
 
   it("withholds comparisons when prices or costs are missing", () => {
     const html = render({ ...data, sales: { ...sales, revenue_known: 1, profit_known: 1, fees_known: 0 } });
-    expect(html).toContain("No comparison: price missing on 1 sale");
-    expect(html).toContain("No comparison: cost missing on 1 sale, fees missing on 1 sale");
+    expect(html.match(/>No comparison</g)).toHaveLength(2);
+    expect(html).toContain("Partial: cost missing on 1 sale, fees missing on 1 sale");
     expect(html).toContain("Partial: price missing on 1 sale");
     expect(html).not.toContain("Up $40");
     expect(html).not.toContain("undefined");

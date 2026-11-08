@@ -42,8 +42,8 @@ describe("overviewFigures", () => {
 
   it("does not compare totals that are missing amounts", () => {
     const cards = byLabel(overviewFigures(figures({ revenue_known: 3, fees_known: 2 }), figures(), false));
-    expect(cards.Revenue.change).toBe("No comparison: price missing on 1 sale");
-    expect(cards.Profit.change).toBe("No comparison: fees missing on 2 sales");
+    expect(cards.Revenue.change).toBe("No comparison");
+    expect(cards.Profit.change).toBe("No comparison");
     expect(cards.Revenue.hint).toBe("Partial: price missing on 1 sale");
     expect(cards.Profit.hint).toBe("Partial: fees missing on 2 sales");
   });

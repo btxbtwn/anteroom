@@ -3,7 +3,7 @@ import { useDeferredValue, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DownloadIcon, ListFilterIcon, RefreshCwIcon } from "lucide-react";
 import { api } from "../api/client";
-import { downloadFile } from "./DownloadLink";
+import { downloadFile } from "./downloadFile";
 import { dayRange, formatCurrency } from "./analyticsFormat";
 import { MissingAmountsNotice } from "./MissingAmounts";
 import { SALE_FORM_FIELDS, type SaleFormField, type SalesLedgerPage, type SalesLedgerRow } from "../api/salesLedger";
