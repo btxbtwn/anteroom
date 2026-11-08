@@ -192,11 +192,35 @@ jobs:
           set -euxo pipefail
           ANTEROOM_TEST_DESTINATION="platform=iOS Simulator,id=$SIMULATOR_ID" \
             ANTEROOM_TEST_RESULTS="$RUNNER_TEMP/sandbox.xcresult" ./anteroom-ios/test-sandbox.sh
+      - name: Boot an iPad simulator
+        run: |
+          set -euxo pipefail
+          xcrun simctl shutdown "$SIMULATOR_ID" || true
+          # Device type names change between Xcode releases; take an iPad Air, or any iPad.
+          IPAD_TYPE="$(xcrun simctl list devicetypes -j | python3 -c '
+          import json, sys
+          ids = [d["identifier"] for d in json.load(sys.stdin)["devicetypes"]]
+          print(([i for i in ids if "iPad-Air" in i] or [i for i in ids if ".iPad" in i])[-1])
+          ')"
+          IPAD_ID="$(xcrun simctl create 'Anteroom iPad sandbox tests' "$IPAD_TYPE")"
+          xcrun simctl bootstatus "$IPAD_ID" -b
+          xcrun simctl spawn "$IPAD_ID" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true
+          echo "IPAD_ID=$IPAD_ID" >> "$GITHUB_ENV"
+      - name: Run the iPad layout against the hosted sandbox
+        run: |
+          set -euxo pipefail
+          ANTEROOM_TEST_DESTINATION="platform=iOS Simulator,id=$IPAD_ID" \
+            ANTEROOM_TEST_ONLY=AnteroomUITests/IPadSandboxTests \
+            ANTEROOM_TEST_RESULTS="$RUNNER_TEMP/sandbox-ipad.xcresult" ./anteroom-ios/test-sandbox.sh
       - name: Export simulator screenshots
         if: always()
         run: |
           if [[ -d "$RUNNER_TEMP/sandbox.xcresult" ]]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/sandbox.xcresult" --output-path "$RUNNER_TEMP/screenshots"
+          fi
+          if [[ -d "$RUNNER_TEMP/sandbox-ipad.xcresult" ]]; then
+            mkdir -p "$RUNNER_TEMP/screenshots/ipad"
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/sandbox-ipad.xcresult" --output-path "$RUNNER_TEMP/screenshots/ipad"
           fi
       - name: Keep simulator results
         if: always()
@@ -206,6 +230,7 @@ jobs:
           path: |
             ${{ runner.temp }}/unit.xcresult
             ${{ runner.temp }}/sandbox.xcresult
+            ${{ runner.temp }}/sandbox-ipad.xcresult
             ${{ runner.temp }}/screenshots
             ${{ runner.temp }}/sandbox.log
 

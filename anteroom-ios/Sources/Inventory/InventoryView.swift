@@ -1,11 +1,17 @@
 import SwiftUI
 
+/// On iPhone, and in a narrow iPad window, the list pushes the editor. With
+/// room for both (a regular-width iPad window), the list stays on the left and
+/// the open listing fills the right, as in Mail.
 struct InventoryView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(LiveChanges.self) private var live: LiveChanges?
     @State private var model: InventoryModel
     @State private var search = ""
     @State private var path: [ListingSummary] = []
+    /// The listing in the editor beside the list, in the side-by-side layout.
+    @State private var open: ListingSummary?
     @State private var creatingListing = false
     @State private var bulkListing = false
     @State private var renaming: ListingSummary?
@@ -20,30 +26,90 @@ struct InventoryView: View {
         _model = State(initialValue: InventoryModel(api: api))
     }
 
+    private var sideBySide: Bool { sizeClass == .regular }
+
     var body: some View {
+        Group {
+            if sideBySide {
+                NavigationSplitView {
+                    inventory
+                } detail: {
+                    NavigationStack {
+                        if let open {
+                            editor(open).id(open.id)
+                        } else {
+                            ContentUnavailableView("No listing open", systemImage: "tag",
+                                                   description: Text("Choose a listing to edit it here."))
+                        }
+                    }
+                }
+            } else {
+                NavigationStack(path: $path) {
+                    inventory.navigationDestination(for: ListingSummary.self) { editor($0) }
+                }
+            }
+        }
+        // Resizing an iPad window can switch layouts; the open listing stays open.
+        .onChange(of: sideBySide) { _, wide in
+            if wide {
+                open = path.first
+            } else {
+                path = open.map { [$0] } ?? []
+            }
+        }
+        .onChange(of: model.listings.map(\.id)) { _, ids in
+            if let listing = open, !ids.contains(listing.id) { open = nil }
+        }
+    }
+
+    private func editor(_ listing: ListingSummary) -> some View {
+        ListingEditorView(api: model.api, listing: listing) { Task { await model.reload() } }
+    }
+
+    /// Opens the listing beside the list, or pushes it on iPhone.
+    private func show(_ listing: ListingSummary) {
+        if sideBySide {
+            open = listing
+        } else {
+            path.append(listing)
+        }
+    }
+
+    @ViewBuilder
+    private func link(_ listing: ListingSummary, hint: String?) -> some View {
+        let row = ListingRow(api: model.api, listing: listing, hint: hint, missing: model.missing(listing))
+        if sideBySide {
+            Button { open = listing } label: {
+                row.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(open?.id == listing.id ? .isSelected : [])
+        } else {
+            NavigationLink(value: listing) { row }
+        }
+    }
+
+    private var inventory: some View {
         @Bindable var model = model
         let counts = model.counts(search: search)
         let rows = model.rows(search: search)
         let hints = Suggestion.hints(model.suggestions)
         let stale = model.suggestions.filter { $0.kind == "stale_active" }.map(\.conversationID)
-        NavigationStack(path: $path) {
-            List(selection: $selected) {
-                // Suggestions show on each listing's own row; only the batch markdown needs a place of its own.
-                if !selecting && !stale.isEmpty {
-                    Button(stale.count == 1 ? "Mark down 1 stale listing" : "Mark down \(stale.count) stale listings",
-                           systemImage: "tag") { bulk = .markdown(stale) }
-                        .font(.footnote)
-                        .accessibilityHint("Review a lower price for each stale listing. Saves in Anteroom only.")
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                }
-                ForEach(rows) { listing in
-                    NavigationLink(value: listing) {
-                        ListingRow(api: model.api, listing: listing, hint: hints[listing.id], missing: model.missing(listing))
-                    }
-                    .onAppear { model.wantsReadiness(listing) }
+        return List(selection: $selected) {
+            // Suggestions show on each listing's own row; only the batch markdown needs a place of its own.
+            if !selecting && !stale.isEmpty {
+                Button(stale.count == 1 ? "Mark down 1 stale listing" : "Mark down \(stale.count) stale listings",
+                       systemImage: "tag") { bulk = .markdown(stale) }
+                    .font(.footnote)
+                    .accessibilityHint("Review a lower price for each stale listing. Saves in Anteroom only.")
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
+            }
+            ForEach(rows) { listing in
+                link(listing, hint: hints[listing.id])
+                    .onAppear { model.wantsReadiness(listing) }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(sideBySide && open?.id == listing.id ? WorkspaceStyle.selected : Color.clear)
                     .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     .swipeActions(edge: .trailing) {
                         Button("Delete", systemImage: "trash") { deleting = listing }
@@ -62,126 +128,122 @@ struct InventoryView: View {
                         Button("Listing templates", systemImage: "rectangle.stack") { templating = listing }
                         Button("Delete", systemImage: "trash", role: .destructive) { deleting = listing }
                     }
+            }
+        }
+        .listStyle(.plain)
+        .environment(\.editMode, .constant(selecting ? .active : .inactive))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            StatusTabs(tabs: model.tabs(counts: counts), counts: counts, selection: $model.filters.status)
+        }
+        .overlay { emptyState(rows: rows) }
+        .navigationTitle("Inventory")
+        .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .background(WorkspaceStyle.sidebar)
+        .toolbarBackground(WorkspaceStyle.sidebar, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .searchable(text: $search, prompt: "Search title or SKU")
+        .refreshable { await model.reload() }
+        .task { if !model.hasLoaded { await model.reload() } }
+        // Listings change on other devices; catch up when the app comes back
+        // after a while (a quick switch away keeps what's on screen).
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && model.hasLoaded && model.shouldReloadOnReturn() { Task { await model.reload() } }
+        }
+        // And live, while the app is open; a burst of changes reloads once.
+        .task(id: live?.listings) {
+            guard model.hasLoaded, (live?.listings ?? 0) > 0 else { return }
+            try? await Task.sleep(for: .milliseconds(1500))
+            if !Task.isCancelled { await model.reload() }
+        }
+        // Marketplace work moves a row on only while it is listing, updating or generating.
+        .task(id: live?.jobs) {
+            guard model.hasLoaded, (live?.jobs ?? 0) > 0, model.hasWorkInProgress else { return }
+            try? await Task.sleep(for: .milliseconds(1500))
+            if !Task.isCancelled { await model.reload() }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarLeading) {
+                filterMenu
+                sortMenu
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(selecting ? "Done" : "Select") {
+                    selecting.toggle()
+                    selected = []
                 }
+                .frame(minHeight: 44)
+                .disabled(model.listings.isEmpty)
             }
-            .listStyle(.plain)
-            .environment(\.editMode, .constant(selecting ? .active : .inactive))
-            .safeAreaInset(edge: .top, spacing: 0) {
-                StatusTabs(tabs: model.tabs(counts: counts), counts: counts, selection: $model.filters.status)
-            }
-            .overlay { emptyState(rows: rows) }
-            .navigationTitle("Inventory")
-            .navigationBarTitleDisplayMode(.inline)
-            .scrollContentBackground(.hidden)
-            .background(WorkspaceStyle.sidebar)
-            .toolbarBackground(WorkspaceStyle.sidebar, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .searchable(text: $search, prompt: "Search title or SKU")
-            .refreshable { await model.reload() }
-            .task { if !model.hasLoaded { await model.reload() } }
-            // Listings change on other devices; catch up when the app comes back
-            // after a while (a quick switch away keeps what's on screen).
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active && model.hasLoaded && model.shouldReloadOnReturn() { Task { await model.reload() } }
-            }
-            // And live, while the app is open; a burst of changes reloads once.
-            .task(id: live?.listings) {
-                guard model.hasLoaded, (live?.listings ?? 0) > 0 else { return }
-                try? await Task.sleep(for: .milliseconds(1500))
-                if !Task.isCancelled { await model.reload() }
-            }
-            // Marketplace work moves a row on only while it is listing, updating or generating.
-            .task(id: live?.jobs) {
-                guard model.hasLoaded, (live?.jobs ?? 0) > 0, model.hasWorkInProgress else { return }
-                try? await Task.sleep(for: .milliseconds(1500))
-                if !Task.isCancelled { await model.reload() }
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    filterMenu
-                    sortMenu
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(selecting ? "Done" : "Select") {
-                        selecting.toggle()
-                        selected = []
+            if selecting {
+                ToolbarItemGroup(placement: .bottomBar) {
+                    let visible = Set(rows.map(\.id))
+                    Button(visible.isSubset(of: selected) && !visible.isEmpty ? "Deselect all" : "Select all") {
+                        selected = visible.isSubset(of: selected) ? [] : visible
                     }
-                    .frame(minHeight: 44)
-                    .disabled(model.listings.isEmpty)
-                }
-                if selecting {
-                    ToolbarItemGroup(placement: .bottomBar) {
-                        let visible = Set(rows.map(\.id))
-                        Button(visible.isSubset(of: selected) && !visible.isEmpty ? "Deselect all" : "Select all") {
-                            selected = visible.isSubset(of: selected) ? [] : visible
-                        }
-                        Spacer()
-                        Text("\(selected.count) selected").font(.footnote).foregroundStyle(.secondary)
-                        Spacer()
-                        Menu("Actions") {
-                            Button("Edit fields", systemImage: "square.and.pencil") { bulk = .edit(ordered(rows)) }
-                            Button("Copy items", systemImage: "doc.on.doc") { bulk = .copy(ordered(rows)) }
-                            Button("Mark down prices", systemImage: "tag") { bulk = .markdown(ordered(rows)) }
-                            Button("Regenerate", systemImage: "arrow.triangle.2.circlepath") { bulk = .regenerate(ordered(rows)) }
-                            Button("Delete", systemImage: "trash", role: .destructive) { bulk = .delete(ordered(rows)) }
-                        }
-                        .disabled(selected.isEmpty || selected.count > 300)
+                    Spacer()
+                    Text("\(selected.count) selected").font(.footnote).foregroundStyle(.secondary)
+                    Spacer()
+                    Menu("Actions") {
+                        Button("Edit fields", systemImage: "square.and.pencil") { bulk = .edit(ordered(rows)) }
+                        Button("Copy items", systemImage: "doc.on.doc") { bulk = .copy(ordered(rows)) }
+                        Button("Mark down prices", systemImage: "tag") { bulk = .markdown(ordered(rows)) }
+                        Button("Regenerate", systemImage: "arrow.triangle.2.circlepath") { bulk = .regenerate(ordered(rows)) }
+                        Button("Delete", systemImage: "trash", role: .destructive) { bulk = .delete(ordered(rows)) }
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Bulk listing", systemImage: "square.stack.3d.up") { bulkListing = true }
-                        .frame(minWidth: 44, minHeight: 44)
-                        .accessibilityHint("Make many drafts from one batch of photos")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("New listing", systemImage: "plus", action: newListing)
-                        .disabled(creatingListing)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .accessibilityHint("Create a draft, then add photos and item details")
+                    .disabled(selected.isEmpty || selected.count > 300)
                 }
             }
-            .alert("Rename listing", isPresented: renameShown) {
-                TextField("Title", text: $newTitle)
-                Button("Cancel", role: .cancel) {}
-                Button("Rename") {
-                    let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if let listing = renaming, !title.isEmpty { Task { await model.rename(listing, to: title) } }
-                }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Bulk listing", systemImage: "square.stack.3d.up") { bulkListing = true }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityHint("Make many drafts from one batch of photos")
             }
-            .confirmationDialog(deleteTitle, isPresented: deleteShown, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) {
-                    if let listing = deleting { Task { await model.delete(listing) } }
-                }
-            } message: {
-                Text("This removes the listing and its photos from Anteroom.")
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New listing", systemImage: "plus", action: newListing)
+                    .disabled(creatingListing)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityHint("Create a draft, then add photos and item details")
             }
-            .alert("Something went wrong", isPresented: errorShown) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(model.error ?? "")
+        }
+        .alert("Rename listing", isPresented: renameShown) {
+            TextField("Title", text: $newTitle)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let listing = renaming, !title.isEmpty { Task { await model.rename(listing, to: title) } }
             }
-            .sheet(item: $templating) { listing in
-                ListingTemplatesSheet(api: model.api, listingID: listing.id) { Task { await model.reload() } }
+        }
+        .confirmationDialog(deleteTitle, isPresented: deleteShown, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let listing = deleting { Task { await model.delete(listing) } }
             }
-            .sheet(isPresented: $bulkListing) {
-                BulkListingView(api: model.api) { Task { await model.reload() } }
-            }
-            .sheet(item: $bulk) { action in
-                switch action {
-                case .edit(let ids):
-                    BulkEditView(api: model.api, ids: ids) { finishBulk() }
-                case .delete(let ids):
-                    BulkDeleteView(api: model.api, ids: ids) { finishBulk() }
-                case .copy(let ids):
-                    BulkCopyView(api: model.api, ids: ids) { finishBulk() }
-                case .markdown(let ids):
-                    BulkMarkdownView(api: model.api, ids: ids) { finishBulk() }
-                case .regenerate(let ids):
-                    BulkRegenerateView(api: model.api, listings: ids.compactMap { id in model.listings.first { $0.id == id } }) { finishBulk() }
-                }
-            }
-            .navigationDestination(for: ListingSummary.self) { listing in
-                ListingEditorView(api: model.api, listing: listing) { Task { await model.reload() } }
+        } message: {
+            Text("This removes the listing and its photos from Anteroom.")
+        }
+        .alert("Something went wrong", isPresented: errorShown) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.error ?? "")
+        }
+        .sheet(item: $templating) { listing in
+            ListingTemplatesSheet(api: model.api, listingID: listing.id) { Task { await model.reload() } }
+        }
+        .sheet(isPresented: $bulkListing) {
+            BulkListingView(api: model.api) { Task { await model.reload() } }
+        }
+        .sheet(item: $bulk) { action in
+            switch action {
+            case .edit(let ids):
+                BulkEditView(api: model.api, ids: ids) { finishBulk() }
+            case .delete(let ids):
+                BulkDeleteView(api: model.api, ids: ids) { finishBulk() }
+            case .copy(let ids):
+                BulkCopyView(api: model.api, ids: ids) { finishBulk() }
+            case .markdown(let ids):
+                BulkMarkdownView(api: model.api, ids: ids) { finishBulk() }
+            case .regenerate(let ids):
+                BulkRegenerateView(api: model.api, listings: ids.compactMap { id in model.listings.first { $0.id == id } }) { finishBulk() }
             }
         }
     }
@@ -313,7 +375,7 @@ struct InventoryView: View {
         creatingListing = true
         Task {
             defer { creatingListing = false }
-            if let listing = await model.createListing() { path.append(listing) }
+            if let listing = await model.createListing() { show(listing) }
         }
     }
 }

@@ -39,25 +39,32 @@ struct WorkspaceView: View {
         }
     }
 
+    /// A tab bar on iPhone; on iPad the same tabs also open as a sidebar.
     private func tabs(views: [String], features: [String]) -> some View {
         TabView {
-            InventoryView(api: api)
-                .tabItem { Label("Inventory", systemImage: "tag.fill") }
+            Tab("Inventory", systemImage: "tag.fill") {
+                InventoryView(api: api)
+            }
             if views.contains("assistant") {
-                BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
-                    .tabItem { Label("Assistant", systemImage: "bubble.left.and.text.bubble.right.fill") }
+                Tab("Assistant", systemImage: "bubble.left.and.text.bubble.right.fill") {
+                    BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
+                }
             }
-            AnalyticsDestination(api: api)
-                .tabItem { Label("Analytics", systemImage: "chart.bar.fill") }
+            Tab("Analytics", systemImage: "chart.bar.fill") {
+                AnalyticsDestination(api: api)
+            }
             if views.contains("automations") {
-                AutomationsView(api: api, canApprove: features.contains("marketplace_actions"),
-                                showsEbayOffers: features.contains("ebay_offers"),
-                                showsPromotions: features.contains("marketplace_sessions"))
-                    .tabItem { Label("Automations", systemImage: "calendar.badge.clock") }
+                Tab("Automations", systemImage: "calendar.badge.clock") {
+                    AutomationsView(api: api, canApprove: features.contains("marketplace_actions"),
+                                    showsEbayOffers: features.contains("ebay_offers"),
+                                    showsPromotions: features.contains("marketplace_sessions"))
+                }
             }
-            SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+            Tab("Settings", systemImage: "gearshape.fill") {
+                SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
+            }
         }
+        .tabViewStyle(.sidebarAdaptable)
         .minimizingTabBarOnScroll()
     }
 }
