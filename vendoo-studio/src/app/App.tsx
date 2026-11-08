@@ -1,5 +1,6 @@
 import { useWorkspaceRuntime } from "./runtime";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useReducer, type CSSProperties } from "react";
+import { discardBlankDraft, discardBlankDraftOnExit } from "./blankDraft";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, inventoryPollMs, pollMs } from "../api/polling";
@@ -142,11 +143,13 @@ export function App() {
   // Re-reading the whole inventory is the heaviest request Studio makes.
   // Studio's own edits and finished sends (the queue watcher below) refresh it;
   // the poll only backs those up. See inventoryPollMs.
-  const { data: conversations } = useQuery({
+  const inventory = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => api.conversations.list({ signal }),
     refetchInterval: (query) => inventoryPollMs(query.state.data),
   });
+  const conversations = inventory.data;
+  const inventoryFailed = inventory.isError && conversations === undefined;
   const assistantThreads = useQuery({
     queryKey: ["assistant", "threads"],
     queryFn: ({ signal }) => api.assistant.threads({ signal }),
@@ -288,6 +291,8 @@ export function App() {
   const threadsHidden = !isMobile && threadsCollapsed;
 
   const closeMobileSidebar = useCallback(() => setMobileSidebarOpen(false), []);
+  // On a phone, Inventory with no listing open is the list itself, never an empty inspector.
+  const mobileListOpen = isMobile && (mobileSidebarOpen || (activeView === "listings" && !selectedConvId));
 
   const goListings = useCallback(() => {
     shell.current = "listings";
@@ -426,7 +431,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isMobile, activeView, selectedConvId, chatMinimized, setChatMinimized]);
 
-  const showMailToolbar = isMobile && activeView === "listings" && mobileSidebarOpen;
+  const showMailToolbar = activeView === "listings" && mobileListOpen;
 
   /** Phone pages open from the navigation drawer; a listing and a settings section step back to their list. */
   const navigateMobile = (target: MobileNavTarget) => {
@@ -455,10 +460,40 @@ export function App() {
     if (isMobile) setMobileSidebarOpen(true);
   }, [isMobile]);
 
+  // The draft New listing just made, until the seller moves on from it. Left
+  // without a photo or a typed word, it is discarded (see blankDraft.ts).
+  const freshDraftId = useRef<string | null>(null);
+  const discardFreshDraft = useCallback((id: string) => {
+    void discardBlankDraft(id, api.conversations.discardBlank).then((discarded) => {
+      if (discarded) void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    });
+  }, [queryClient]);
+  useEffect(() => {
+    const fresh = freshDraftId.current;
+    if (!fresh || fresh === selectedConvId) return;
+    freshDraftId.current = null;
+    discardFreshDraft(fresh);
+  }, [selectedConvId, discardFreshDraft]);
+  useEffect(() => {
+    // Registered after the unsaved-work guard, so a typed field has already started saving.
+    const onPageHide = (event: PageTransitionEvent) => {
+      const fresh = freshDraftId.current;
+      if (!fresh || event.persisted) return;
+      if (discardBlankDraftOnExit(fresh, (id) => api.conversations.discardBlank(id, { keepalive: true }))) {
+        freshDraftId.current = null;
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
+
   const createConv = useMutation({
     mutationFn: () => api.conversations.create({ title: "New Listing" }),
     onSuccess: (conv) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      const previous = freshDraftId.current;
+      freshDraftId.current = conv.id;
+      if (previous && previous !== conv.id) discardFreshDraft(previous);
       setSelectedConvId(conv.id);
       goListings();
       setMobilePane(runtime.hosted ? "editor" : "workspace");
@@ -634,15 +669,16 @@ export function App() {
       />
       {runtime.hosted && isMobile && <div className="cloud-mobile-account">{runtime.accountControls}</div>}
       <div
-        className={`app-content mobile-pane-${activeView === "listings" ? mobilePane : "workspace"}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
+        className={`app-content mobile-pane-${activeView === "listings" ? mobilePane : "workspace"}${mobileListOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
       >
         {sidebarHidden ? null : (
           <ListingSidebar
             conversations={conversations}
+            loadFailed={inventoryFailed}
             selectedConvId={selectedConvId}
             activeView={activeView}
             settingsSection={settingsSection}
-            mobileOpen={!isMobile || mobileSidebarOpen}
+            mobileOpen={!isMobile || mobileListOpen}
             onSearch={openSidebarForSearch}
             onSelect={openListing}
             onDelete={deleteListing}
@@ -769,6 +805,7 @@ export function App() {
                   <Suspense fallback={pageLoading}>
                     <InventoryTablePage
                       conversations={conversations}
+                      loadFailed={inventoryFailed}
                       onOpenListing={openListing}
                     />
                   </Suspense>
@@ -832,19 +869,14 @@ export function App() {
             </main>
 
             {/* On a phone the form is its own pane; on desktop it is the main panel. */}
-            {isMobile && (openListingState || activeView === "listings") && (
+            {/* With no listing open, a phone shows the inventory list instead (mobileListOpen). */}
+            {isMobile && openListingState && (
               <aside id="listing-inspector" className="panel detail-panel" hidden={activeView !== "listings"}>
-                {openListingState ? (
-                  <div className="listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>
-                    <ListingSession active={activeView === "listings"}>
-                      <ListingEditorPane listing={openListingState} actions={paneActions} />
-                    </ListingSession>
-                  </div>
-                ) : (
-                  <Empty className="h-full">
-                    <EmptyDescription>Select a listing to inspect</EmptyDescription>
-                  </Empty>
-                )}
+                <div className="listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>
+                  <ListingSession active={activeView === "listings"}>
+                    <ListingEditorPane listing={openListingState} actions={paneActions} />
+                  </ListingSession>
+                </div>
               </aside>
             )}
 

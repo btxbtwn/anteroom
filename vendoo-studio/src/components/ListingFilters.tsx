@@ -22,6 +22,7 @@ import {
 import {
   DEFAULT_LISTING_FILTERS,
   LISTING_SORTS,
+  LISTING_STATUS_LABELS,
   LISTING_STATUS_TABS,
   activeFilterCount,
   compactCount,
@@ -31,14 +32,6 @@ import {
   type ListingSortId,
   type ListingStatusFilter,
 } from "./inventoryFilters";
-
-const STATUS_LABELS: Record<string, string> = {
-  all: "All",
-  draft: "Draft",
-  active: "Active",
-  sold: "Sold",
-  failed: "Failed",
-};
 
 /** One narrowing, as a checkable menu row: check, glyph, name, count. */
 function FilterRow({
@@ -102,7 +95,8 @@ export function ListingFilters({
   onChange,
 }: {
   filters: Filters;
-  counts: Record<string, number>;
+  /** Listings per status tab; null while the inventory is still loading. */
+  counts: Record<string, number> | null;
   labels: string[];
   /** Label counts, keyed lowercase the way `labelCounts` returns them. */
   labelCounts: Record<string, number>;
@@ -124,7 +118,7 @@ export function ListingFilters({
   // "Failed" shows only when something failed.
   const tabs: ListingStatusFilter[] = [
     "all",
-    ...LISTING_STATUS_TABS.filter((status) => status !== "failed" || counts.failed),
+    ...LISTING_STATUS_TABS.filter((status) => status !== "failed" || counts?.failed),
   ];
   const sortLabel = LISTING_SORTS.find((option) => option.id === filters.sort)?.label ?? "Sort";
 
@@ -150,14 +144,17 @@ export function ListingFilters({
               data-active={selected}
               className="group/tab relative flex h-6 max-[900px]:h-9 max-[900px]:after:absolute max-[900px]:after:inset-x-0 max-[900px]:after:-inset-y-1 min-w-0 flex-auto cursor-pointer items-center justify-center overflow-hidden rounded-md px-1 text-xs font-medium text-sidebar-muted-foreground outline-none transition-colors hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground data-[active=true]:shadow-xs/5"
               // A narrow sidebar drops the counts, so the tab itself carries one.
-              title={`${STATUS_LABELS[status]} · ${counts[status] || 0}`}
+              title={counts ? `${LISTING_STATUS_LABELS[status]} · ${counts[status] || 0}` : LISTING_STATUS_LABELS[status]}
+              aria-label={counts ? `${LISTING_STATUS_LABELS[status]}, ${counts[status] || 0}` : LISTING_STATUS_LABELS[status]}
               onClick={() => onChange({ ...filters, status })}
             >
               <span className="flex min-w-0 items-baseline gap-1">
-                <span className="min-w-0 truncate">{STATUS_LABELS[status]}</span>
-                <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums @max-[300px]/tabs:group-data-[active=false]/tab:hidden @max-[212px]/tabs:hidden">
-                  {compactCount(counts[status] || 0)}
-                </span>
+                <span className="min-w-0 truncate">{LISTING_STATUS_LABELS[status]}</span>
+                {counts ? (
+                  <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums @max-[300px]/tabs:group-data-[active=false]/tab:hidden @max-[212px]/tabs:hidden">
+                    {compactCount(counts[status] || 0)}
+                  </span>
+                ) : null}
               </span>
             </button>
           );

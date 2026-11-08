@@ -46,6 +46,19 @@ export const LISTING_STATUS_TABS = ["draft", "active", "sold", "failed"] as cons
 
 export type ListingStatusFilter = "all" | (typeof LISTING_STATUS_TABS)[number];
 
+/**
+ * Tab names. "all" is the working list, drafts and active listings, so it reads
+ * "Open": sold listings sit under their own tab, and "All 4" beside "Sold 12"
+ * looked like a miscount.
+ */
+export const LISTING_STATUS_LABELS: Record<ListingStatusFilter, string> = {
+  all: "Open",
+  draft: "Draft",
+  active: "Active",
+  sold: "Sold",
+  failed: "Failed",
+};
+
 export type FilterableListing = {
   id?: string;
   settled_at?: string | null;

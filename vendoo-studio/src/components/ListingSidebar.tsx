@@ -31,6 +31,7 @@ import { cn } from "../lib/utils";
 import { Kbd } from "./ui/kbd";
 import { SIDEBAR_ICON_BUTTON, SIDEBAR_ROW } from "./sidebar/sidebarStyles";
 import { ListingRow } from "./sidebar/ListingRow";
+import { ListingRowsSkeleton } from "./sidebar/ListingRowsSkeleton";
 import { VirtualListingList } from "./sidebar/VirtualListingList";
 import type { Listing } from "./sidebar/listingShelves";
 import { shelveListings } from "./sidebar/shelveListings";
@@ -52,6 +53,8 @@ const NO_SUGGESTIONS: Suggestion[] = [];
 
 interface Props {
   conversations: Listing[] | undefined;
+  /** The inventory could not be read; until it arrives the rows show as placeholders. */
+  loadFailed?: boolean;
   selectedConvId: string | null;
   activeView: WorkspaceView;
   settingsSection: SettingsSectionId;
@@ -81,6 +84,7 @@ interface Props {
 
 export function ListingSidebar({
   conversations,
+  loadFailed = false,
   selectedConvId,
   activeView,
   settingsSection,
@@ -362,7 +366,7 @@ export function ListingSidebar({
 
           <ListingFilters
             filters={filters}
-            counts={counts}
+            counts={conversations ? counts : null}
             labels={labels}
             labelCounts={filterLabelCounts}
             labelColors={uiPrefs?.label_colors}
@@ -394,7 +398,11 @@ export function ListingSidebar({
               />
             )}>
 
-            {(!conversations || conversations.length === 0) && (
+            {/* Until the list arrives, show its shape; never claim it is empty. */}
+            {!conversations && (loadFailed ? (
+              <p role="alert" className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">Could not load listings. Retrying…</p>
+            ) : <ListingRowsSkeleton />)}
+            {conversations?.length === 0 && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No listings yet</p>
             )}
             {conversations && conversations.length > 0 && matched === 0 && (

@@ -24,9 +24,8 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  if (info.project.name === "phone") {
-    await page.getByRole("button", { name: "Inventory", exact: true }).click();
-  }
+  // Both layouts land on the inventory: a phone shows the list itself, not an empty inspector.
+  await expect(page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true })).toBeInViewport();
   await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
@@ -248,7 +247,6 @@ test("a listing the server briefly cannot answer keeps loading and fills in its 
       body: JSON.stringify({ detail: "Cloud data is temporarily unavailable" }) });
   });
   if (info.project.name === "phone") {
-    await page.getByRole("button", { name: "Inventory", exact: true }).click();
     await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: draft.title, exact: true }).click();
     await page.getByRole("tab", { name: "Listing", exact: true }).click();
   } else {
