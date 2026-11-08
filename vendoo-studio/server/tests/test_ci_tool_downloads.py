@@ -21,10 +21,13 @@ def test_gitleaks_download_has_bounded_retries_and_never_extracts_unverified_byt
         pytest.skip("The Linux repo-check workflow uses sha256sum.")
     step = WORKFLOW.read_text().split("      - name: Install gitleaks\n", 1)[1].split("      - name:", 1)[0]
     version_match = re.search(r'GITLEAKS_VERSION: "([^"]+)"', step)
+    asset_match = re.search(r'GITLEAKS_ASSET_ID: "([0-9]+)"', step)
     checksum_match = re.search(r"GITLEAKS_SHA256: ([a-f0-9]+)", step)
-    assert version_match and checksum_match
+    assert version_match and checksum_match and asset_match
     version, checksum = version_match.group(1), checksum_match.group(1)
     assert version == "8.30.1"
+    asset = asset_match.group(1)
+    assert asset == "378332058"
     assert checksum == "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
     script = textwrap.dedent(step.split("        run: |\n", 1)[1])
     bin_dir = tmp_path / "bin"
@@ -43,13 +46,14 @@ pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'unverified archiv
     tar.chmod(0o755)
     result = subprocess.run(["bash", "-e", "-c", script], env={
         **os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "RUNNER_TEMP": str(tmp_path),
-        "GITLEAKS_VERSION": version, "GITLEAKS_SHA256": checksum, "FAIL_DOWNLOAD": str(int(download_fails)),
+        "GITLEAKS_VERSION": version, "GITLEAKS_ASSET_ID": asset, "GITLEAKS_SHA256": checksum, "FAIL_DOWNLOAD": str(int(download_fails)),
     }, capture_output=True, text=True, timeout=10)
     args = json.loads((tmp_path / "curl.json").read_text())
     assert "--retry-all-errors" in args
     for flag, value in (("--retry", "3"), ("--connect-timeout", "15"), ("--max-time", "120"), ("--retry-max-time", "600")):
         assert args[args.index(flag) + 1] == value
-    assert args[-1] == f"https://github.com/gitleaks/gitleaks/releases/download/v{version}/gitleaks_{version}_linux_x64.tar.gz"
+    assert args[args.index("-H") + 1] == "Accept: application/octet-stream"
+    assert args[-1] == f"https://api.github.com/repos/gitleaks/gitleaks/releases/assets/{asset}"
     assert result.returncode == (56 if download_fails else 1)
     if not download_fails:
         assert "FAILED" in result.stdout  # The real checksum tool rejected the stubbed archive.
