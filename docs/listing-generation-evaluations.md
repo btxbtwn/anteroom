@@ -101,3 +101,20 @@ References:
 - [Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
 - [Claude SDK structured outputs](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
 - [Claude SDK cost and usage accounting](https://code.claude.com/docs/en/agent-sdk/cost-tracking)
+
+### Photo-evidence contract and GLM trial (2026-11-08)
+
+Chat Completions photo responses must satisfy the shared photo-evidence schema
+before entering listing generation. Missing/misspelled tag or uncertainty fields,
+wrong field types and incomplete objects return an analysis error with empty
+evidence; the seller can retry. This is local response validation, not a guarantee
+of provider-side constrained decoding or factual accuracy. Valid unknown values
+stay unknown. Other provider adapters are not changed by this contract check.
+
+An isolated follow-up on five public product/detail images, repeated twice with
+GLM 5.3 Flash, returned nine structurally valid responses and rejected one malformed
+response. This sample does not establish a factual-accuracy improvement. Earlier
+trials also found unsupported condition/material claims in structurally valid
+responses. Canonical listing rules now explicitly distinguish inferred descriptors
+from supported facts and leave unsupported required shell material as a blocker.
+No provider substitution or production setting change is included.

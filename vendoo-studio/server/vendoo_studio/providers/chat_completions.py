@@ -16,8 +16,9 @@ import re
 from dataclasses import dataclass
 
 import httpx
+from jsonschema import Draft202012Validator
 
-from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
+from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM, PHOTO_EVIDENCE_SCHEMA
 from vendoo_studio.providers.xiaomi_mimo import (
     VISION_MAX_SIDE,
     StreamChunk,
@@ -55,6 +56,8 @@ def parse_evidence(content: str) -> dict:
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict):
+            if not Draft202012Validator(PHOTO_EVIDENCE_SCHEMA).is_valid(value):
+                return {"evidence": {}, "error": "The AI returned incomplete or malformed photo evidence. Retry photo analysis."}
             return {"evidence": value}
     return {"evidence": {}, "raw": content}
 

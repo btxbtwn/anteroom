@@ -22,8 +22,12 @@ test("Vendoo is opt-in, replaces direct actions, and keeps manually edited draft
       url: sends ? "https://web.vendoo.co/app/item/aaaaaaaaaaaaaaaaaaaa" : null}});
   });
   const settings = async () => {
-    await page.goto("/");
-    if (phone) await page.getByRole("button", {name: "Open navigation"}).click();
+    // Use the app navigation: reloading here can race newly mounted job reads
+    // and WebKit rejects those reads while their document is being replaced.
+    if (phone) {
+      await page.getByRole("button", {name: "Inventory", exact: true}).click();
+      await page.getByRole("button", {name: "Open navigation"}).click();
+    }
     await page.getByRole("button", {name: "Settings", exact: true}).click();
     await page.getByRole("navigation", {name: "Settings sections"}).getByRole("button", {name: "Experimental", exact: true}).click();
     if (phone) {

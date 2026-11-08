@@ -213,11 +213,15 @@ def test_photo_analysis_parses_evidence(fake_http, tmp_path):
 
     photo = tmp_path / "item.jpg"
     Image.new("RGB", (8, 8), "red").save(photo)
-    reply = 'Here you go: {"brand": {"value": "Levi\'s"}}'
+    from tests.test_photo_evidence_contract import evidence
+
+    expected = evidence()
+    expected["brand"] = {"value": "Levi's", "confidence": "high"}
+    reply = "Here you go: " + json.dumps(expected)
     calls = fake_http(lambda request: httpx.Response(200, json={"choices": [{"message": {"content": reply}}]}))
     provider = ChatCompletionsProvider(KEY_PROVIDERS["mistral"], "k", "vision-m", "listing-m")
     result = run(provider.analyze_photos([str(photo)], notes="Tag says 32x30"))
-    assert result == {"evidence": {"brand": {"value": "Levi's"}}}
+    assert result == {"evidence": expected}
     body = json.loads(calls[0].content)
     assert body["model"] == "vision-m"
     assert "Tag says 32x30" in body["messages"][0]["content"]

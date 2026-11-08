@@ -290,6 +290,9 @@ test("the Mac window hands its account session to the native AI worker and clear
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const current = () => calls.at(-1);
   await expect.poll(current).toMatchObject({ hasToken: true, owner: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+  // The worker receives auth before workspace startup finishes. Wait for the
+  // interactive home screen so startup cannot replace an already-open menu.
+  await expect(page.getByRole("list", { name: "Example questions" })).toBeVisible();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByLabel("Email address")).toBeVisible();
