@@ -25,18 +25,27 @@ class SaveDraftRequest(BaseModel):
     revision_id: str
 
 
+# Why a refusal happened, beside its plain-text message: the app lets a confirmed
+# action wait its turn when the reason is native.BUSY.
+REASON_HEADER = "X-Anteroom-Reason"
+
+
+def _http(exc: native.NativeMarketplaceError) -> HTTPException:
+    return HTTPException(exc.status_code, str(exc), headers={REASON_HEADER: exc.reason} if exc.reason else None)
+
+
 async def _reply(call: Awaitable[dict]) -> dict:
     try:
         return await call
     except native.NativeMarketplaceError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        raise _http(exc) from exc
 
 
 def _sync(call, *args):
     try:
         return call(*args)
     except native.NativeMarketplaceError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        raise _http(exc) from exc
 
 
 @router.get("")
@@ -91,7 +100,7 @@ def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari"
     try:
         return share(asyncio.run(native_editor.editor_form(conv_id, marketplace, revision_id, db)))
     except native.NativeMarketplaceError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        raise _http(exc) from exc
 
 
 @router.post("/{marketplace}/check")

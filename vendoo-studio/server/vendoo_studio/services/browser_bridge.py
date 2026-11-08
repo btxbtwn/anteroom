@@ -32,13 +32,14 @@ async def request(job, message_type: str, payload: dict[str, Any] | None = None,
         # A hosted seller's mode is read from the database: keep that off the event loop.
         await asyncio.to_thread(listing_mode.require, "vendoo" if message_type == "job.vendoo_api" else "direct")
     manager = _manager()
-    if not manager.connected:
+    # A hosted relay may read the device route from Postgres: keep it off the event loop.
+    if not await asyncio.to_thread(lambda: manager.connected):
         raise BrowserBridgeError("Connect Chrome first.")
     owner = getattr(manager, "owner", None)
     if owner:
         from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
         try:
-            target = forward_target(owner, "chrome")
+            target = await forward_target(owner, "chrome")
         except RoutingUnavailable:
             raise BrowserBridgeError("Could not reach the Chrome extension.") from None
         if target is not None:

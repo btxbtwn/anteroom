@@ -6,6 +6,27 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.823 — 2026-11-08
+
+- Analytics no longer shows a box for sales missing data; find them in Sales records instead.
+
+## 0.1.822 — 2026-11-08
+
+- When a marketplace is busy listing another item, List, Update and Save draft now wait their turn and start on their own, instead of showing "Another action is running". The marketplace shows "Waiting for …" with a Cancel button.
+- A new activity button at the top of the window shows marketplace work across all your items: what's running, what's waiting and anything that didn't start.
+
+## 0.1.821 — 2026-11-08
+
+- When the server restarts mid-read, the message now points to the Read measurements button by its current name.
+
+## 0.1.820 — 2026-11-08
+
+- A relisted item that sold more than once keeps its earlier sale. When a marketplace order arrives, Anteroom now replaces only the Vendoo or Mark as sold record from within a week of it, instead of the nearest one no matter how old.
+
+## 0.1.819 — 2026-11-08
+
+- Keep the web app from freezing and showing "Cloud data is temporarily unavailable" when Chrome is slow to answer.
+
 ## 0.1.818 — 2026-11-08
 
 - Open Suggestions from the sidebar to review older listings worth relisting, see why they are recommended, and return to your search and place after reviewing a listing.

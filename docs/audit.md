@@ -25,6 +25,11 @@ These override everything below.
   `git fetch origin && git worktree add -b audit/<YYYY-MM-DD> ../anteroom-audit-<YYYY-MM-DD> origin/main`.
   Other sessions share the main checkout. Remove the worktree at the end unless
   a PR branch still needs it.
+- Never start the installed app's binary yourself, not even with `--version`:
+  without `ANTEROOM_SANDBOX=1` it opens the seller's real data, connects their
+  Chrome and the relay, and reads marketplaces. Read the installed version
+  with `defaults read /Applications/Anteroom.app/Contents/Info.plist CFBundleShortVersionString`,
+  and start the app only through `smoke-packaged-sandbox.py`.
 - Run one sandbox at a time, or give each its own ports
   (`VENDOO_STUDIO_PORT`, `VENDOO_STUDIO_WEB_PORT`). The iPhone script always uses
   4320, so stop the hosted sandbox before running it. If a developer's sandbox
@@ -55,10 +60,22 @@ passing when it did not run.
 Every run, in this order:
 
 1. `./check.sh --all` in the audit worktree after setup
-   (`cd vendoo-studio && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci`).
+   (`cd vendoo-studio && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci`).
+   Use Python 3.12, CI's version: a newer `python3` (3.14 on the seller's Mac)
+   cannot install `pgserver`. Put `vendoo-studio/.venv/bin` first on `PATH`.
+   This also runs `npm run e2e` (local web, desktop and phone),
+   `npm run e2e:hosted` (hosted web, two sellers) and, on macOS,
+   `./anteroom-ios/test-sandbox.sh`, so steps 2 to 4 need no separate run
+   when it covered them. On macOS, **Anteroom types** fails on PyObjC symbols
+   in `desktop.py`, `macos_keychain.py` and `photo_edits.py` that CI's Linux
+   job never sees; report any other type error. Do not run `basedpyright` on
+   single files: it rewrites `.basedpyright/baseline.json`.
 2. `cd vendoo-studio && npm run e2e` (local web, desktop and phone sizes).
 3. `cd vendoo-studio && npm run e2e:hosted` (hosted web, two sellers).
-4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator).
+4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator). Run
+   it while nothing else heavy runs: under load its 5 to 30 second waits time
+   out on different tests each run. Before reporting a failure, rerun it alone
+   and compare with the latest iPhone job on `main` (`gh run list --workflow ios.yml --branch main`).
 5. Mac app:
    `vendoo-studio/.venv/bin/python vendoo-studio/scripts/smoke-packaged-sandbox.py /Applications/Anteroom.app`.
    This checks the installed release in sandbox mode on a temporary data
@@ -72,7 +89,11 @@ Every run, in this order:
 6. One hand-driven core journey on each surface: create a draft, add photos,
    generate, edit a field, save, reopen, and try to publish (it must be
    refused). Surfaces:
-   - local web (`./sandbox.sh`, UI 5174) at desktop and phone sizes;
+   - local web (`./sandbox.sh`, UI 5174) at desktop and phone sizes. If the
+     browser tools cannot connect, drive it with a Playwright script kept
+     outside `e2e/` (a running suite would pick it up) and its own config;
+     `e2e/fixtures.ts` shows the selectors. On a phone the editor stages
+     photos in the composer and its send button starts generation;
    - hosted web (`./sandbox.sh --hosted`, UI 5175, sign in as
      `alice@sandbox.test` / `sandbox`);
    - iPhone in the Simulator against the hosted sandbox, driven with the T3
@@ -111,7 +132,7 @@ list remembers.
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |
 | Friday | Settings, providers, labels, sign-in, sign-up, password reset, account menu, analytics, sales records, mark sold; Mac app first run, backups and restore, migration of a database from the previous release | `src/components/SettingsPage.tsx`, `src/components/settings/`, `src/cloud/`, `anteroom-ios/Sources/Settings/`, `Session/`, `Analytics/`, `services/backups.py` |
 | Saturday | Concurrency and speed: several sellers generating several drafts at once while navigating and typing. Record p50/p95 input and navigation latency and errors against the targets in `docs/responsiveness.md` | `e2e/concurrentGeneration.e2e.ts`, `docs/responsiveness.md` |
-| Sunday | Safety sweep: every publish, delist, update and save-draft route without `confirm` and without named marketplaces must be refused; search for any code path where automation, retries, queues or bulk actions could reach them. Seller isolation: Alice and Bob never see each other's drafts or photos. Live updates and stale-edit protection between web and iPhone on the same draft | `routes/native_marketplaces.py`, `routes/marketplace_listings.py`, `docs/seller-isolation.md` |
+| Sunday | Safety sweep: every publish, delist, update and save-draft route without `confirm` and without named marketplaces must be refused; search for any code path where automation, retries, queues or bulk actions could reach them. Seller isolation: Alice and Bob never see each other's drafts or photos. Live updates and stale-edit protection between web and iPhone on the same draft | `routes/native_marketplaces.py`, `routes/marketplace_listings.py`, `routes/listing_commands.py` (set-price push), `cli/catalog.py` and `cli/execute.py` (the CLI's confirm gate), `docs/seller-isolation.md` |
 
 ## Feature checks
 
