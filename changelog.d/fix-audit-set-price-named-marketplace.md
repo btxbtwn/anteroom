@@ -1,0 +1,1 @@
+- Pushing a new price onto a live listing from the command line now names the one marketplace to update and carries the same confirmation as every other live-listing change. It no longer picks the live marketplaces by itself.
