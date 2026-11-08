@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { promotionOutcomeLabel } from "../promotions";
 import { api } from "../api/client";
 import { pollMs } from "../api/polling";
 import type { PromotionAction, PromotionAutomation, PromotionMarketplace } from "../api/promotions";
@@ -87,7 +88,7 @@ export function PromotionEditor({ initial, onSaved, onCancel }: {
   const offerMarketplaces: PromotionMarketplace[] = ["poshmark", "mercari", "depop"];
   return (
     <div className="flex flex-col gap-3 text-sm">
-      <p className="text-muted-foreground">Saved off. Turn it on from the list; any edit turns it off again.</p>
+      <p className="text-muted-foreground">Saving leaves this automation off. Turn it on from the list when you’re ready. Editing turns it off again.</p>
       {save.error ? <p role="alert" className="text-destructive-foreground">{save.error.message}</p> : null}
       <label className="flex flex-col gap-1">Name
         <Input value={form.name} maxLength={80} placeholder={form.action === "share" ? "Poshmark sharing" : "Offers to likers"} onChange={(event) => set({ name: event.target.value })} />
@@ -150,7 +151,7 @@ export function PromotionEditor({ initial, onSaved, onCancel }: {
             <span className="text-xs text-muted-foreground">Labels come from offers you reviewed. A listing where Poshmark does not offer this one is skipped.</span>
           </label>
         ) : null}
-        <p className="text-xs text-muted-foreground">At most one offer a day per listing; saved individual minimums still apply.</p>
+        <p className="text-xs text-muted-foreground">At most one offer action per listing each day. Marketplace eligibility rules apply, so not every like will receive an offer. Your saved minimum prices still apply.</p>
       </>}
       <div className="flex gap-2">
         <Button size="sm" disabled={busy} onClick={() => save.mutate(form)}>{busy ? <Spinner /> : null}Save</Button>
@@ -211,6 +212,8 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
       </div>
       <div className="rounded-lg border border-border/60 p-3">
         <p className="font-medium">Activity</p>
+        <p className="mt-1 text-xs text-muted-foreground">Counts are listing actions, not buyers. Each result shows what the marketplace confirmed.</p>
+        {activity.isPending ? <Spinner aria-label="Loading activity" size="md" /> : null}
         <ul className="mt-2 max-h-72 space-y-2 overflow-y-auto text-xs">
           {(activity.data?.sends || []).filter((send) => send.state === "unknown").map((send) => (
             <li key={send.id} className="rounded border border-destructive/40 p-2">
@@ -222,20 +225,21 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
               </div>
             </li>
           ))}
-          {(activity.data?.sends || []).filter((send) => send.state === "skipped").map((send) => (
-            <li key={send.id}>
-              <p><span className="font-medium">{send.title || send.listing_id}</span> · skipped</p>
-              <p className="break-words font-mono text-2xs text-muted-foreground">{send.listing_id}</p>
-              <p className="break-words text-muted-foreground">{send.note}</p>
+          {(activity.data?.sends || []).filter((send) => send.state !== "unknown").map((send) => (
+            <li key={send.id} className="min-w-0 space-y-1 break-words">
+              <p className="font-medium">{send.title || send.listing_id}</p>
+              <p className="tabular-nums">{promotionOutcomeLabel(send)}{send.offer_price ? ` · $${send.offer_price}` : ""}</p>
+              {!send.title ? null : <p className="text-2xs text-muted-foreground">Listing <span className="font-mono">{send.listing_id}</span></p>}
+              {send.note ? <p className="text-muted-foreground">{send.note}</p> : null}
             </li>
           ))}
           {(activity.data?.runs || []).map((run) => (
-            <li key={run.id}>
-              <span className="text-muted-foreground">{when(run.started_at)}</span> · {run.sent} sent · {run.skipped} skipped · {run.failed} not done
+            <li key={run.id} className="tabular-nums">
+              <span className="text-muted-foreground">{when(run.started_at)}</span> · {run.sent} listing actions completed · {run.skipped} skipped · {run.failed} need attention
               {run.note ? <span className="block text-muted-foreground">{run.note}</span> : null}
             </li>
           ))}
-          {activity.data && !activity.data.runs.length ? <li className="text-muted-foreground">No rounds yet.</li> : null}
+          {activity.data && !activity.data.runs.length && !activity.data.sends.length ? <li className="text-muted-foreground">No activity yet.</li> : null}
         </ul>
       </div>
     </div>

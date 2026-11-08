@@ -119,6 +119,8 @@ test('offer to likers sends Poshmark’s own body and refuses below the floor or
   const { c, bodies, results } = worker({ [`POST ${offer}`]: [200, { data: {} }] });
   await promote(c, { action: 'offer', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3500, shipping_discount_id: DISCOUNT });
   assert.equal(results[0].ok, true);
+  assert.equal(results[0].confirmation, 'request_accepted');
+  assert.equal(results[0].recipient_count, undefined);
   assert.deepEqual(bodies[`POST ${offer}`], { offer_amount: { val: '40', currency_code: 'USD' }, offer_api_version: 3,
     seller_shipping_discount: { id: DISCOUNT } });
   const cases = [
@@ -126,6 +128,7 @@ test('offer to likers sends Poshmark’s own body and refuses below the floor or
     { offer_price_cents: 4000, floor_cents: 0 },
     { offer_price_cents: 4500, floor_cents: 3500 },
     { price_cents: 6000, offer_price_cents: 4000, floor_cents: 3500 },
+    { offer_price_cents: 1000, floor_cents: 500 },
   ];
   for (const [index, overrides] of cases.entries()) {
     const run = worker({ [`POST ${offer}`]: [200, { data: {} }] });
@@ -292,7 +295,7 @@ test('Mercari sends createOfferToLikers once, in cents, and answers a repeat fro
   const sent = offerWorker('mercari', mercariAnswers());
   await mercariOffer(sent.c, { floor_cents: 3500 });
   await mercariOffer(sent.c, { floor_cents: 3500 });
-  assert.deepEqual(sent.results[0], { ok: true, state: 'done', recipient_count: 3 });
+  assert.deepEqual(sent.results[0], { ok: true, state: 'done', confirmation: 'recipients_created', recipient_count: 3 });
   assert.deepEqual(sent.results[1], sent.results[0]);
   const offers = sent.requests.filter(r => r.key === OFFER_SEND);
   assert.equal(offers.length, 1);
@@ -488,7 +491,7 @@ test('Depop submits one bulk job, waits for success, and never invents a deliver
   const sent = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: () => [200, { status: statuses.shift() }] }));
   await depopOffer(sent);
   await depopOffer(sent);
-  assert.deepEqual(sent.results[0], { ok: true, state: 'done' });
+  assert.deepEqual(sent.results[0], { ok: true, state: 'done', confirmation: 'job_completed' });
   assert.deepEqual(sent.results[1], sent.results[0]);
   const posts = sent.requests.filter(r => r.key.startsWith('POST'));
   assert.deepEqual(posts.map(r => [r.key, r.body]), [[DEPOP_SEND, { offer_currency: 'USD', offer_value: '42.50' }]]);
@@ -522,6 +525,78 @@ test('a Depop bulk job with a failed, lost, malformed or timed out status remain
   assert.equal(timed.requests.filter(r => r.key === DEPOP_SEND).length, 1);
 });
 
+test('a persisted Depop job can be checked after interruption without another POST', async () => {
+  const statuses = [[401, {}], [200, { status: 'SUCCESS' }]];
+  const run = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: () => statuses.shift() || [200, { status: 'SUCCESS' }] }));
+  await depopOffer(run);
+  assert.equal(run.results[0].error_code, 'uncertain');
+  assert.equal(run.store['promotion_action-1'].depop_job.id, 'offer-job-1');
+  // A new worker has only persisted storage, not the first call's locals.
+  const restarted = offerWorker('depop', depopAnswers());
+  restarted.store['promotion_action-1'] = structuredClone(run.store['promotion_action-1']);
+  await restarted.c.handleMarketplacePromotion({ type: 'marketplace.promotion_result', payload: { action_id: 'action-1' } });
+  assert.deepEqual(restarted.results[0], { finished: true, result: { ok: true, state: 'done', confirmation: 'job_completed' } });
+  assert.ok(restarted.requests.every(r => r.key.startsWith('GET')));
+  assert.equal(restarted.requests.filter(r => r.key === DEPOP_JOB).length, 1);
+  await depopOffer(restarted);
+  assert.ok(restarted.requests.every(r => r.key.startsWith('GET')));
+});
+
+test('Depop job reconciliation refuses a different signed-in account and leaves an unknown job blocked', async () => {
+  const run = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/users/me/`]: [200, { id: 66 }] }));
+  run.store['promotion_action-1'] = { finished: false, marketplace: 'depop', action: 'offer',
+    depop_job: { id: 'offer-job-1', product_id: '999', account_id: '55' } };
+  await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_result', payload: { action_id: 'action-1' } });
+  assert.deepEqual(run.results[0], { finished: false, known: true });
+  assert.ok(!run.requests.some(r => r.key === DEPOP_JOB || r.key.startsWith('POST')));
+});
+
+test('late original failure cannot overwrite a reconciled Depop completion', async () => {
+  const run = offerWorker('depop', depopAnswers());
+  let release;
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  run.c.runMarketplacePromotion = async () => {
+    run.store['promotion_action-1'].depop_job = { id: 'offer-job-1', product_id: '999', account_id: '55' };
+    started();
+    return await new Promise(resolve => { release = resolve; });
+  };
+  const original = depopOffer(run);
+  await ready;
+  await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_result', payload: { action_id: 'action-1' } });
+  release({ ok: false, error_code: 'uncertain', safe_to_retry: false });
+  await original;
+  assert.equal(run.store['promotion_action-1'].result.confirmation, 'job_completed');
+  assert.equal(run.results[1].confirmation, 'job_completed');
+  assert.ok(run.requests.every(r => r.key.startsWith('GET')));
+});
+
+test('concurrent Depop result checks return success even when an older check later fails', async () => {
+  const run = offerWorker('depop', {});
+  run.store['promotion_action-1'] = { finished: true, marketplace: 'depop', action: 'offer',
+    result: { ok: false, error_code: 'uncertain', safe_to_retry: false },
+    depop_job: { id: 'offer-job-1', product_id: '999', account_id: '55' } };
+  let failFirst;
+  let firstStarted;
+  const ready = new Promise(resolve => { firstStarted = resolve; });
+  let calls = 0;
+  run.c.depopOfferCall = async (_method, path) => {
+    if (path.endsWith('/users/me/')) return { data: { id: 55 } };
+    if (++calls === 1) {
+      firstStarted();
+      return await new Promise((_resolve, reject) => { failFirst = reject; });
+    }
+    return { data: { status: 'SUCCESS' } };
+  };
+  const first = run.c.reconcilePromotionResult('action-1');
+  await ready;
+  const second = await run.c.reconcilePromotionResult('action-1');
+  failFirst(new Error('late timeout'));
+  const late = await first;
+  assert.equal(second.result.confirmation, 'job_completed');
+  assert.equal(late.result.confirmation, 'job_completed');
+});
+
 test('the Depop worker completes the bulk job over HTTP and answers duplicates from its journal', async t => {
   const { createServer } = require('node:http');
   const run = offerWorker('depop', {});
@@ -544,7 +619,7 @@ test('the Depop worker completes the bulk job over HTTP and answers duplicates f
   await depopOffer(run);
   const count = seen.length;
   await depopOffer(run);
-  assert.deepEqual(run.results, [{ ok: true, state: 'done' }, { ok: true, state: 'done' }]);
+  assert.deepEqual(run.results, [{ ok: true, state: 'done', confirmation: 'job_completed' }, { ok: true, state: 'done', confirmation: 'job_completed' }]);
   assert.equal(seen.length, count);
   assert.deepEqual(seen.filter(r => r.key.startsWith('POST')), [{ key: DEPOP_SEND, body: { offer_currency: 'USD', offer_value: '42.50' } }]);
   assert.equal(seen.filter(r => r.key === DEPOP_JOB).length, 3);
@@ -561,7 +636,7 @@ test('a marked-down Depop listing takes the discount off its sale price, as buye
 
   const send = offerWorker('depop', depopAnswers(sale));
   await depopOffer(send, { price_cents: 3750, offer_price_cents: 3375, floor_cents: 3000 });
-  assert.deepEqual(send.results[0], { ok: true, state: 'done' });
+  assert.deepEqual(send.results[0], { ok: true, state: 'done', confirmation: 'job_completed' });
   assert.deepEqual(send.requests.filter(r => r.key.startsWith('POST')).map(r => r.body), [{ offer_currency: 'USD', offer_value: '33.75' }]);
 });
 

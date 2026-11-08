@@ -30,8 +30,8 @@ describe("sharing and offer rule forms", () => {
   it("saves a new rule off, in one line, and turns nothing on by itself", () => {
     const enable = vi.spyOn(api.promotionAutomations, "enable");
     const html = renderToStaticMarkup(<PromotionEditor initial={emptyPromotionForm("offer")} onSaved={vi.fn()} onCancel={vi.fn()} />);
-    expect(html).toContain("Saved off. Turn it on from the list; any edit turns it off again.");
-    expect(html).toContain("At most one offer a day per listing");
+    expect(html).toContain("Saving leaves this automation off.");
+    expect(html).toContain("At most one offer action per listing each day");
     expect(html).toMatch(/<button[^>]*>Save<\/button>/);
     expect(enable).not.toHaveBeenCalled();
     for (const [options] of useMutation.mock.calls) expect(options.retry).toBe(false);
@@ -67,4 +67,21 @@ it("shows skipped listing identity and the precise reason without send controls"
   expect(html).toContain("skipped");
   expect(html).not.toContain("offer $null");
   expect(html).not.toContain("Check result");
+});
+
+it("shows completed listing evidence without claiming delivery to every liker", () => {
+  useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => ({ data:
+    queryKey.includes("activity") ? { runs: [{ id: "run", sent: 2, skipped: 1, failed: 0 }], sends: [
+      { id: "accepted", state: "done", action: "offer", title: "Blue tee", listing_id: "blue", confirmation: "request_accepted", note: "Buyer delivery is not verified." },
+      { id: "created", state: "done", action: "offer", title: "Red tee", listing_id: "red", confirmation: "recipients_created", recipient_count: 3 },
+      { id: "old", state: "done", action: "offer", title: "Older offer", listing_id: "old" },
+    ] } : { items: [], included: 0 },
+  }));
+  const html = renderToStaticMarkup(<PromotionDetails automation={rule} />);
+  expect(html).toContain("Request accepted");
+  expect(html).toContain("Offers created for 3 buyers");
+  expect(html).toContain("Delivery not verified");
+  expect(html).toContain("2 listing actions completed");
+  expect(html).not.toContain("2 sent");
+  expect(html).not.toContain("No rounds yet");
 });

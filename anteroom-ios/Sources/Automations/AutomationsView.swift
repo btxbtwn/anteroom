@@ -5,6 +5,7 @@ import SwiftUI
 /// hosted API; sharing and offers to likers run in the seller's own Chrome, so
 /// the iPhone saves them and says where they run.
 struct AutomationsView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let api: AnteroomAPI
     /// Approving runs a marketplace action, which needs the seller's marketplace sessions.
     let canApprove: Bool
@@ -286,24 +287,38 @@ struct AutomationsView: View {
     /// The same row as a scheduled task: name, what and when, runs, a switch and a menu.
     private func marketRow(_ view: AutomationRowModel, open: @escaping () -> Void,
                            @ViewBuilder control: () -> some View, @ViewBuilder menu: () -> some View) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Button(action: open) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(view.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                    Text(view.type == view.name ? view.when : "\(view.type) · \(view.when)").font(.caption).foregroundStyle(.secondary)
-                    if !view.note.isEmpty { Text(view.note).font(.caption).foregroundStyle(.secondary) }
-                    Text("Last run \(view.lastRun) · Next \(view.nextRun)").font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+        let headerLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return VStack(alignment: .leading, spacing: 8) {
+            headerLayout {
+                Button(action: open) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(view.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                        if !view.name.localizedCaseInsensitiveContains(view.type) {
+                            Text(view.type).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                control()
+                Menu(content: menu) {
+                    Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("More for \(view.name)")
             }
-            .buttonStyle(.plain)
-            control()
-            Menu(content: menu) {
-                Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
+            Text(view.when).font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !view.note.isEmpty { Text(view.note).font(.footnote).foregroundStyle(.secondary) }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Last check: \(view.lastRun == "—" ? "Not recorded" : view.lastRun)")
+                Text("Next check: \(view.nextRun == "—" ? "Not scheduled" : view.nextRun)")
             }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("More for \(view.name)")
+            .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
         }
         .padding(.vertical, 2)
     }

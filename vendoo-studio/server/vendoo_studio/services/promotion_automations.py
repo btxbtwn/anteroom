@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 
-from sqlalchemy import CursorResult, update
+from sqlalchemy import CursorResult, func, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal
@@ -287,8 +287,18 @@ def _shares_today(db: Session, marketplace: str, now: datetime) -> int:
     ).count()
 
 
-def _order(row: PromotionAutomation, targets: list) -> list:
-    if row.action == "offer" or row.share_order == "random":
+def _order(db: Session, row: PromotionAutomation, targets: list) -> list:
+    if row.action == "offer":
+        # Skipped reviews are journaled too: low-like listings must not keep
+        # consuming the bounded scan while other listings never get checked.
+        # Persisted checks survive restarts; a new rule starts with unseen items.
+        checked = dict(db.query(ListingPromotion.listing_id, func.max(ListingPromotion.created_at)).filter(
+            ListingPromotion.automation_id == row.id,
+            ListingPromotion.marketplace == row.marketplace,
+            ListingPromotion.action == "offer",
+        ).group_by(ListingPromotion.listing_id).all())
+        return sorted(targets, key=lambda target: (checked.get(target[1], datetime.min), target[1]))
+    if row.share_order == "random":
         return random.sample(targets, len(targets))
     oldest = datetime.min
     return sorted(targets, key=lambda target: target[2] or oldest, reverse=row.share_order == "newest")
@@ -329,7 +339,7 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
     stop_note = None
     try:
         promotions.require_chrome()
-        targets = [target for target in _order(row, _covered(db, row))
+        targets = [target for target in _order(db, row, _covered(db, row))
                    if (like_events is None or target[1] in like_events)
                    if not row.min_days_listed or (target[2] and (now - target[2]).days >= row.min_days_listed)]
         remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
