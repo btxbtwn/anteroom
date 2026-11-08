@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.839 — 2026-11-08
+
+- The General form now follows the order you fill it in: category, then title, condition, size and brand, then price, description, colors and department, and shipping.
+- Cost, SKU and quantity sit under More details at the bottom, folded until you open it. Its heading still shows how many are filled.
+- The iPhone app's General form uses the same order.
+
 ## 0.1.838 — 2026-11-08
 
 - Choosing a category on the General form on iPhone or the web app now fills the matching category on eBay, Poshmark, Mercari, Depop and Etsy, as it already did on the Mac.
