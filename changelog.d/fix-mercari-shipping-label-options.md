@@ -1,0 +1,2 @@
+- Mercari's Shipping label list loads again when the listing answered the shoebox question with "Yes".
+- Depop's Age is always filled in: Modern unless the listing names a decade.

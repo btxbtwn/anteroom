@@ -81,6 +81,19 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(fields['mercari_specifics.shippingClassId']['options'], [])
             self.assertTrue(result['notes'])
 
+    async def test_a_capitalized_shoebox_answer_still_loads_the_labels(self):
+        # Generation saved the radio's label ("Yes") rather than its value ("yes").
+        listing = {'direct_category_ids': {'mercari': '165'}, 'weight_oz': 12,
+                   'mercari_specifics': {'package': {'fitsShoebox': 'Yes', 'ounces': 12, 'pounds': 0}}}
+        self.assertEqual(mercari_form.package(listing)[1], (14, 10, 5))
+        quote = {'id': 2551, 'fee': 739, 'etaForSeller': '1 - 7 days', 'weightRange': {'min': 9, 'max': 12}}
+        with patch('vendoo_studio.services.mercari_api.shipping_quotes', new=AsyncMock(return_value=[quote])) as read:
+            result = await mercari_form.editor_form(listing)
+        read.assert_awaited_once_with(165, 12, (14, 10, 5))
+        field = next(row for row in result['fields'] if row['path'] == 'mercari_specifics.shippingClassId')
+        self.assertEqual(field['option_values'], {'USPS Ground Advantage': '2551'})
+        self.assertEqual(field['value'], '2551')
+
     def test_package_skip_and_explicit_weight_match_the_native_question(self):
         listing = {'weight_lb': 3, 'weight_oz': 8, 'package_dimensions_in': '13x10x3',
                    'mercari_specifics': {'package': {'fitsShoebox': 'no', 'ounces': 6.1, 'skipDimensions': True}}}
