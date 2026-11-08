@@ -98,18 +98,18 @@ def runtime(request: Request, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.category_tree import categories_ready
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
-    offers = getattr(request.app.state, 'offer_scheduler', None)
-    watchdog = getattr(request.app.state, 'job_watchdog', None)
-    session_timers = (getattr(request.app.state, name, None) for name in ('sale_checks', 'promotion_scheduler'))
-    sessions = all(timer is not None and not timer.done() for timer in session_timers)
+    # The schedulers run on whichever Machine holds their lease, so a Machine
+    # waiting for it during a deploy still offers what they serve.
+    handoff = getattr(request.app.state, 'handoff', None)
+    scheduled = bool(request.app.state.background_worker_enabled and handoff is not None and not handoff.done())
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant', 'account_deletion']
-            + (['marketplace_sessions'] if sessions else [])
+            + (['marketplace_sessions'] if scheduled else [])
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else [])
-            + (['ebay_offers'] if offers is not None and not offers.done() else []),
+            + (['ebay_offers'] if scheduled else []),
             'views': ['listings', 'analytics', 'settings', 'automations', 'assistant', 'marketplaces', 'sourcing'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
             # eBay and Etsy list through their APIs, the rest through the seller's Chrome; a restart's held slot needs the job watchdog.
-            'action_marketplaces': list(ACTION_MARKETPLACES) if watchdog is not None and not watchdog.done() else []}
+            'action_marketplaces': list(ACTION_MARKETPLACES) if scheduled else []}
 
 
 @router.get('/status')
