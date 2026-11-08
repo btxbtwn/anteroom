@@ -1,2 +1,0 @@
-- When Anteroom is briefly unavailable, such as during an update, screens on the web and iPhone keep loading and catch up once it's back instead of asking you to tap Try again.
-- On iPhone, a screen that couldn't load tries again by itself when you come back to the app.
