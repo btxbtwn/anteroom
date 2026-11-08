@@ -42,7 +42,7 @@ def _is_zero_date(value: Any) -> bool:
     An empty stamp is left alone: it is already "no date", and dropping the key
     would make these notes compare unequal to a freshly read set of dates.
     """
-    return bool(str(value or "").strip()) and not _as_iso(value)
+    return bool(str(value or "").strip()) and not as_iso(value)
 
 
 def _without_zero_dates(notes: dict[str, Any]) -> dict[str, Any]:
@@ -101,7 +101,7 @@ def merge_notes(existing: str | None, updates: dict[str, Any]) -> str:
 VENDOO_MARKETPLACE_ALIASES = {"vestiaireApi": "vestiaire"}
 
 
-def _as_iso(raw: Any) -> str:
+def as_iso(raw: Any) -> str:
     """One Vendoo date as an ISO 8601 string, whatever shape it arrived in.
 
     ``/api/item`` answers Firestore timestamps as ``{_seconds, _nanoseconds}``,
@@ -133,35 +133,3 @@ def _as_iso(raw: Any) -> str:
         if not parsed.tzinfo:
             parsed = parsed.replace(tzinfo=UTC)
     return parsed.isoformat() if parsed > VENDOO_FIRST_DATE else ""
-
-
-def oldest_live_listed_at(notes: dict[str, Any]) -> str:
-    """When the longest-standing live listing went up, as an ISO string.
-
-    An item is only as fresh as its stalest live listing: a new
-    listing says nothing about the copy that has sat on eBay for 90 days. A
-    sold marketplace is finished and a delisted one has no copy to age, so
-    neither counts. An item with no per-marketplace dates falls back to the
-    item-wide listing date.
-    """
-    dates = notes.get("vendooDates")
-    if not isinstance(dates, dict):
-        dates = {}
-    listed_by = dates.get("listedByMarketplace")
-    if not isinstance(listed_by, dict):
-        listed_by = {}
-    sold_by = dates.get("soldByMarketplace")
-    if not isinstance(sold_by, dict):
-        sold_by = {}
-    live = notes.get("vendooMarketplaces")
-    if not isinstance(live, list):
-        live = []
-    stamps = [
-        _as_iso(listed_by[market])
-        for market in live
-        if listed_by.get(market) and not sold_by.get(market)
-    ]
-    stamps = [stamp for stamp in stamps if stamp]
-    if stamps:
-        return min(stamps, key=datetime.fromisoformat)
-    return str(dates.get("listed") or "")

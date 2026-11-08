@@ -96,27 +96,6 @@ struct InventoryAnalyticsView: View {
 
     @ViewBuilder
     private func content(_ data: InventoryAnalytics) -> some View {
-        if !data.incompleteSales.isEmpty {
-            AnalyticsSection(data.incompleteSales.count == 1 ? "1 sale needs sales data" : "\(data.incompleteSales.count) sales need sales data",
-                             note: "Across all time. Add the missing details on the listing to update your analytics. Missing prices, costs, or fees leave revenue and profit incomplete.") {
-                DisclosureGroup("Review sales with missing data") {
-                    ForEach(data.incompleteSales) { sale in
-                        if let listingID = sale.conversationID {
-                            ListingLink(id: listingID, title: sale.title, meta: "Missing \(sale.missing.joined(separator: ", "))")
-                        } else {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(sale.title).font(.subheadline)
-                                Text("Missing \(sale.missing.joined(separator: ", "))").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                .font(.footnote)
-            }
-            .padding(12)
-            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        }
-
         AnalyticsSection(heading) {
             salesStats(data)
             if let previous = data.previous {

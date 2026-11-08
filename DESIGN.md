@@ -139,6 +139,74 @@ internal ids. Put an error next to its field.
 they replace. An empty state says what is missing and what to do next, in one
 line.
 
+## How the interface behaves
+
+The rules above cover how Anteroom looks. These cover how it responds. They
+follow Nielsen's usability heuristics, NN/g's research on response times and
+progress, Material 3, Apple's HIG, Polaris and WCAG 2.2 (sources at the end),
+and the responsiveness targets in `AGENTS.md`.
+
+**Acknowledge every input at once.** A tap, click or keystroke changes
+something on screen within 100ms: the button presses, the row shows its new
+state, the text appears. Save edits optimistically and show "Saving…" quietly
+only when it takes longer than a second. Never freeze the page while the
+server answers.
+
+**Always show what is happening.** Any wait longer than a second gets a
+status in place, on the thing it is about: the marketplace row says
+"Listing…", not a spinner in a corner. Under 10 seconds, an indeterminate
+spinner and the step's name are enough. Longer work shows the current step
+("Uploading photos", "Saving the listing") or a count ("3 of 8"). Use a
+determinate progress bar only when the number is real.
+
+**Busy is a state, not an error.** When something the seller asked for has to
+wait its turn (a marketplace already working on another item, a provider at
+its limit), accept the request, show it as *Waiting* with the reason ("Waiting
+for Depop · 1 ahead") and a **Cancel**, and start it when its turn comes. Do
+not refuse the click with a red message that tells the seller to try again
+later. Waiting work lives only as long as the page that started it unless the
+seller asked for it to be kept, and a marketplace action still runs only what
+the seller confirmed (see **Security and Product Invariants** in `AGENTS.md`).
+
+**Keep the seller moving.** Long work never blocks navigation, typing or
+another draft. Show running and waiting work in one place the seller can
+open from anywhere (a small activity tray, like a browser's downloads list)
+as well as on the item itself, and send the seller to the item when it needs
+them.
+
+**Prevent errors before reporting them.** Disable or hide an action that
+cannot succeed, and say why next to it ("Add a price to list on Mercari").
+Validate a field when the seller leaves it, not on every keystroke. Keep what
+the seller typed when something fails.
+
+**Write errors the seller can act on.** Say what failed, in the seller's
+words, and what to do next: "Depop didn't accept the size. Pick one from
+Depop's list." Name the marketplace or provider that failed. No codes, stack
+traces or "Something went wrong" on their own. Put the error next to the
+thing it is about; use a page-level error only when the whole page failed.
+
+**Undo over confirm, except where it reaches outside.** Changes inside
+Anteroom (archive, delete a draft, remove a photo) happen at once and offer
+**Undo** in a toast. Ask first only when the action cannot be undone or
+reaches a marketplace, buyer or account: publishing, delisting, ending an
+eBay listing, sending an offer. Those confirmations name what will happen and
+where ("List on eBay and Depop"), and the button says the action, never "OK".
+
+**Toasts are for news, not for decisions.** A toast reports something that
+just happened somewhere the seller isn't looking, stays for about five
+seconds (longer if it has an action) and holds at most one action. Anything
+the seller must decide or read carefully goes in place, not in a toast.
+
+**Remember where the seller was.** Going back restores the list's scroll
+position, filters, search and selection. A half-written message or edit
+survives switching items.
+
+**Reachable by everyone.** Every action works from the keyboard with a
+visible focus ring. Touch targets are at least 24×24px (WCAG 2.2 AA) and 44px
+on phones (HIG). Status changes that appear without a page change (*Listed*,
+*Waiting*, an error) are announced to screen readers through a live region.
+Never rely on color alone: a status has a word or an icon too.
+
 ## What generated UI tends to get wrong
 
 Reject a change that adds any of these:
@@ -188,6 +256,11 @@ already there; it only shrinks. The rest of this list needs a person's eye.
 - [ ] Sizes, weights, spacing and radii come from the scales above.
 - [ ] Figures use `tabular-nums`; IDs are mono and muted.
 - [ ] Empty, loading and error states are designed, not left blank.
+- [ ] Input is acknowledged at once; waits show their status in place; a busy
+      resource shows *Waiting* with **Cancel** instead of an error (see **How
+      the interface behaves**).
+- [ ] Works from the keyboard; touch targets meet the sizes above; new status
+      changes are announced.
 - [ ] Copy is short and in the seller's words; no repeated explanations.
 - [ ] Researched how established design systems handle the element (see
       **Research before you design**); findings and sources are in the PR.
@@ -203,4 +276,13 @@ already there; it only shrinks. The rest of this list needs a person's eye.
   [Geist colors](https://vercel.com/geist/colors) and
   [Geist typography](https://vercel.com/geist/typography)
 - Stripe, [Designing accessible color systems](https://stripe.com/blog/accessible-color-systems)
+- Nielsen Norman Group, [10 usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/),
+  [Response times: the 3 important limits](https://www.nngroup.com/articles/response-times-3-important-limits/),
+  [Progress indicators](https://www.nngroup.com/articles/progress-indicators/) and
+  [Error-message guidelines](https://www.nngroup.com/articles/error-message-guidelines/)
+- Material Design 3, [Progress indicators](https://m3.material.io/components/progress-indicators/guidelines)
+  and [Snackbar](https://m3.material.io/components/snackbar/guidelines)
+- Apple, [Human Interface Guidelines: Feedback](https://developer.apple.com/design/human-interface-guidelines/feedback)
+- Shopify Polaris, [Toast](https://polaris.shopify.com/components/feedback-indicators/toast)
+- W3C, [WCAG 2.2](https://www.w3.org/TR/WCAG22/) (2.5.8 Target Size, 4.1.3 Status Messages)
 - The Fountain Institute, [Signs of a vibe-coded UI](https://www.thefountaininstitute.com/blog/signs-vibe-coded-ui)
