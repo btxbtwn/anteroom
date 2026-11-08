@@ -42,29 +42,40 @@ struct WorkspaceView: View {
     private func tabs(views: [String], features: [String]) -> some View {
         TabView {
             InventoryView(api: api)
-                .tabItem { Label("Inventory", systemImage: "tag.fill") }
+                .tabItem { TabIcon(title: "Inventory", systemImage: "tag.fill") }
             if views.contains("assistant") {
                 BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
-                    .tabItem { Label("Assistant", systemImage: "bubble.left.and.text.bubble.right.fill") }
+                    .tabItem { TabIcon(title: "Assistant", systemImage: "bubble.left.and.text.bubble.right.fill") }
             }
             AnalyticsDestination(api: api)
-                .tabItem { Label("Analytics", systemImage: "chart.bar.fill") }
+                .tabItem { TabIcon(title: "Analytics", systemImage: "chart.bar.fill") }
             if views.contains("automations") {
                 AutomationsView(api: api, canApprove: features.contains("marketplace_actions"),
                                 showsEbayOffers: features.contains("ebay_offers"),
                                 showsPromotions: features.contains("marketplace_sessions"))
-                    .tabItem { Label("Automations", systemImage: "calendar.badge.clock") }
+                    .tabItem { TabIcon(title: "Automations", systemImage: "calendar.badge.clock") }
             }
             SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tabItem { TabIcon(title: "Settings", systemImage: "gearshape.fill") }
         }
         .minimizingTabBarOnScroll()
     }
 }
 
+/// Tabs show only their icon; the name stays for VoiceOver and UI tests.
+private struct TabIcon: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .accessibilityLabel(Text(title))
+    }
+}
+
 private extension View {
     /// On iOS 26 the tab bar shrinks while the seller scrolls down a list and
-    /// comes back on scroll up, leaving more room for listings. Its labels stay.
+    /// comes back on scroll up, leaving more room for listings.
     @ViewBuilder
     func minimizingTabBarOnScroll() -> some View {
         if #available(iOS 26, *) {
