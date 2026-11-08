@@ -6,6 +6,19 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.802 — 2026-11-08
+
+- Etsy's eligibility note now shows once instead of twice with different wording.
+
+## 0.1.801 — 2026-11-08
+
+- **Read from photos** is now called **Read measurements** in bulk upload, Regenerate review and the iPhone app.
+- A single listing can read its measurements too: press **Read measurements** under Measurements to see what the yardstick in its photos reads, then **Fill in** to add those to the blank fields. Nothing is saved until you do. This works on the Mac and on myanteroom.com.
+
+## 0.1.800 — 2026-11-08
+
+- Analytics, Sales records and units sold count a sale once when it was kept from Vendoo and the marketplace's own order for it also arrived, and when an eBay order line was saved twice.
+
 ## 0.1.799 — 2026-11-08
 
 - Etsy and eBay sales no longer appear twice when an old Vendoo import or your Mark as sold of the same sale exists. The marketplace's record is kept, with your cost of goods and any amounts you typed, and existing duplicates are removed when you update.

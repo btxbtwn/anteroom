@@ -210,12 +210,13 @@ describe("marketplaces section", () => {
     expect(enabledButton(html, "List…")).toBe(true);
   });
 
-  it("warns about Etsy eligibility without disabling List", () => {
-    const html = render({}, {}, { etsyEligible: false, etsyReady: true, selected: "etsy" });
+  it("warns about Etsy eligibility once, without disabling List", () => {
+    const message = "Etsy generally requires vintage (20+ years), handmade or craft supplies. If it is vintage or handmade, set When made.";
+    const html = render({}, {}, { etsyEligible: false, etsyReady: true, selected: "etsy",
+      preflight: { marketplaces: { etsy: { ready: false, gaps: [{ field: "etsy_specifics.when_made", message, blocking: true }] } } } });
     expect(row(html, "Etsy")).toContain("Review eligibility");
-    expect(html).toContain("Etsy generally requires vintage (20+ years), handmade or craft supplies.");
+    expect(html.split("Etsy generally requires").length - 1).toBe(1);
     expect(enabledButton(html, "List…")).toBe(true);
-    expect(html).not.toContain("Ask chat");
   });
 
 

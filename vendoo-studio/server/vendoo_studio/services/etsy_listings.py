@@ -31,9 +31,6 @@ from vendoo_studio.services.vendoo_marketplace_fields import ETSY_WHAT_CODES, ET
 from vendoo_studio.services.vendoo_specifics import is_not_applicable
 
 
-NOT_ELIGIBLE = "Etsy only allows vintage (20+ years), handmade or craft supplies. This item doesn't qualify."
-
-
 def connected_shop_id() -> str:
     account = get_marketplace_accounts().get("etsy") or {}
     shop_id = str(account.get("accountId") or "")
@@ -255,8 +252,9 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
     if not etsy_eligible(snapshot):
         return [gap(
             "etsy_specifics.when_made",
-            NOT_ELIGIBLE + " If it is vintage or handmade, set When made (Before 2007 counts as vintage) "
-            "and Who made it. Otherwise leave Etsy off this item.",
+            "Etsy generally requires vintage (20+ years), handmade or craft supplies. If it is vintage or handmade, "
+            "set When made (Before 2007 counts as vintage) and Who made it. You can still try listing; "
+            "Etsy decides whether to accept it.",
         )]
     found = []
     try:
