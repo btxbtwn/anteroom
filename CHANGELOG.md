@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.813 — 2026-11-08
+
+- Mercari's Shipping label list loads again when the listing answered the shoebox question with "Yes".
+- Depop's Age is always filled in: Modern unless the listing names a decade.
+- On iPad and iPhone, press and hold a photo, then drag it to reorder; the photo viewer can also move a photo or leave it off a marketplace.
+
 ## 0.1.812 — 2026-11-08
 
 - The Anteroom icon now shows on the browser tab for myanteroom.com.
