@@ -5,7 +5,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from vendoo_studio.services import hosted_storage, service_context
+from vendoo_studio.services import hosted_photos, hosted_storage, service_context
 from test_service_context import runtime
 
 OWNER = 'a7a5ee16-9850-49ba-b5bd-83b8be54df46'
@@ -19,7 +19,7 @@ KEY = f'{OWNER}/draft_1/{"b" * 32}.jpg'
 ])
 def test_foreign_and_malformed_keys_never_reach_storage(monkeypatch, key):
     request = Mock(side_effect=AssertionError('No privileged call'))
-    monkeypatch.setattr(httpx, 'request', request)
+    monkeypatch.setattr(hosted_photos._storage, 'request', request)
     with service_context.use(runtime(OWNER)), pytest.raises(HTTPException) as error:
         hosted_storage.photo_call('GET', key)
     assert error.value.status_code == 404
@@ -28,7 +28,7 @@ def test_foreign_and_malformed_keys_never_reach_storage(monkeypatch, key):
 
 def test_background_storage_requires_verified_context(monkeypatch):
     request = Mock()
-    monkeypatch.setattr(httpx, 'request', request)
+    monkeypatch.setattr(hosted_photos._storage, 'request', request)
     with pytest.raises(RuntimeError, match='verified seller'):
         hosted_storage.photo_call('GET', KEY)
     request.assert_not_called()
@@ -39,7 +39,7 @@ def test_background_storage_uses_server_apikey_without_a_user_bearer(monkeypatch
     monkeypatch.setenv('SUPABASE_SERVER_SECRET_KEY', 'fake-server-credential')
     monkeypatch.setenv('SUPABASE_URL', 'https://project.supabase.co')
     request = Mock(return_value=httpx.Response(200, content=b'photo'))
-    monkeypatch.setattr(httpx, 'request', request)
+    monkeypatch.setattr(hosted_photos._storage, 'request', request)
     with service_context.use(runtime(OWNER)):
         assert hosted_storage.photo_call(method, KEY, b'input') == b'photo'
     args, options = request.call_args
@@ -49,7 +49,7 @@ def test_background_storage_uses_server_apikey_without_a_user_bearer(monkeypatch
     assert options['follow_redirects'] is False
     if method == 'DELETE':
         # A photo's kept thumbnails go with it.
-        assert options['json'] == {'prefixes': [KEY, KEY[:-4] + '.t96.jpg', KEY[:-4] + '.t192.jpg']}
+        assert options['json'] == {'prefixes': [KEY, KEY[:-4] + '.t96.jpg', KEY[:-4] + '.t192.jpg', KEY[:-4] + '.t384.jpg']}
     else:
         assert args[1].endswith('/' + KEY)
 
@@ -57,7 +57,7 @@ def test_background_storage_uses_server_apikey_without_a_user_bearer(monkeypatch
 def test_storage_failure_does_not_reflect_provider_details(monkeypatch):
     monkeypatch.setenv('SUPABASE_SERVER_SECRET_KEY', 'fake-server-credential')
     monkeypatch.setenv('SUPABASE_URL', 'https://project.supabase.co')
-    monkeypatch.setattr(httpx, 'request', Mock(side_effect=httpx.ConnectError('sensitive diagnostic')))
+    monkeypatch.setattr(hosted_photos._storage, 'request', Mock(side_effect=httpx.ConnectError('sensitive diagnostic')))
     with service_context.use(runtime(OWNER)), pytest.raises(HTTPException) as error:
         hosted_storage.photo_call('GET', KEY)
     assert error.value.status_code == 503
