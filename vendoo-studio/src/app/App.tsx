@@ -24,6 +24,7 @@ import { useBulkRegenerate } from "../components/useBulkRegenerate";
 import { bulkRegenerateToast } from "../bulkRegenerate";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "../components/PanelResizeHandle";
 import { WorkspaceTopbar } from "../components/WorkspaceTopbar";
+import { MarketplaceActivity } from "../components/MarketplaceActivity";
 import { workspaceCrumbs, type WorkspaceView } from "../components/workspaceCrumbs";
 import { SuggestionsPage } from "../components/SuggestionsPage";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
@@ -628,12 +629,16 @@ export function App() {
     bulkCreated: (listings, generate) => paneHandlers.current?.bulkCreated(listings, generate),
   }), []);
   const generation = runtime.features.has("generation");
+  const activity = runtime.actionMarketplaces.size > 0
+    ? <MarketplaceActivity jobs={queue.data?.jobs} checkedAt={queue.dataUpdatedAt} onOpen={openListing} />
+    : null;
 
   return (
     <div className="app-shell" style={panelWidthStyle}>
       {runtime.features.has("marketplace_sessions") && <MarketplaceSessionNotice />}
       <WorkspaceTopbar
         accountControls={isMobile ? undefined : runtime.accountControls}
+        activity={isMobile ? undefined : activity}
         crumbs={crumbs}
         sidebarOpen={!sidebarHidden}
         onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -707,6 +712,7 @@ export function App() {
               <MobileNavButton onClick={() => setMobileNavOpen(true)} />
             )}
             <div className="mobile-workspace-title" data-mobile-title>{workspaceTitle}</div>
+            {isMobile && activity}
             {activeView === "assistant" ? (
               <button
                 type="button"

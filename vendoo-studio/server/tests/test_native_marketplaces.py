@@ -1023,6 +1023,14 @@ class NativeMarketplacesTest(unittest.TestCase):
         refused = self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(refused.status_code, 409)
         self.assertIn("Another Poshmark action", refused.json()["detail"])
+        # The app reads this to let the seller's confirmed List wait its turn.
+        self.assertEqual(refused.headers.get("X-Anteroom-Reason"), "marketplace_busy")
+
+    def test_only_a_busy_marketplace_is_marked_as_waiting(self):
+        JobRepo(self.db).create(self.conv.id, self.rev.id, LISTING)
+        refused = self.client.post(f"{self.base}/mercari/update", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(refused.status_code, 409)
+        self.assertIsNone(refused.headers.get("X-Anteroom-Reason"))
 
     def test_delist_and_inspection_still_hold_every_marketplace(self):
         for step in ("native_delist", "native_poshmark_inspect"):

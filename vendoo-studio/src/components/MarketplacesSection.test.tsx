@@ -5,6 +5,7 @@ import type { ListingData } from "../api/types";
 import type { MissingField, NativeDraft, NativeDrafts, PreflightGap } from "../api/nativeMarketplaces";
 import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, listChoice, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
 import { readyMarketplaces } from "./ListEverywhereDialog";
+import { waitlist } from "./MarketplaceActivity";
 
 import { StructuredEditor } from "./ListingEditor";
 
@@ -234,6 +235,20 @@ describe("marketplaces section", () => {
     // A busy state no job is running any more is unconfirmed, not a spinner.
     const orphan = render({ depop: { state: "saving", running: false } }, {}, { selected: "depop" });
     expect(row(orphan, "Depop")).toContain("Unconfirmed");
+  });
+
+  it("shows a List that waits for a busy marketplace as Waiting, with Cancel instead of List", () => {
+    waitlist.add({ convId: "item", title: "Tee", marketplace: "depop", kind: "list", revisionId: "current" });
+    try {
+      const html = render({}, {}, { selected: "depop" });
+      expect(row(html, "Depop")).toContain("Waiting for Depop");
+      expect(html).toContain("List starts when Depop finishes its current action.");
+      expect(enabledButton(html, "Cancel")).toBe(true);
+      expect(html).not.toContain("List…");
+      expect(html).not.toContain('role="alert"');
+    } finally {
+      for (const item of waitlist.snapshot()) waitlist.remove(item.id);
+    }
   });
 
   it("shows the marketplace's own words and one action per error code", () => {

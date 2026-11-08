@@ -44,10 +44,16 @@ from vendoo_studio.services.seller_overrides import price_for
 log = logging.getLogger("vendoo_studio.native_marketplaces")
 
 
+# Why a refusal happened, when the app acts on it: a busy marketplace means the
+# seller's confirmed action waits its turn instead of failing.
+BUSY = "marketplace_busy"
+
+
 class NativeMarketplaceError(RuntimeError):
-    def __init__(self, status_code: int, detail: str):
+    def __init__(self, status_code: int, detail: str, *, reason: str | None = None):
         super().__init__(detail)
         self.status_code = status_code
+        self.reason = reason
 
 
 Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy"]
@@ -504,7 +510,7 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
             steps = _plan(marketplace, kind, record, body.revision_id)
             repo = JobRepo(db)
             if (busy := blocking_job(repo, marketplace)) is not None:
-                raise NativeMarketplaceError(409, _busy_message(busy, marketplace))
+                raise NativeMarketplaceError(409, _busy_message(busy, marketplace), reason=BUSY)
             if steps == ["publish"]:
                 previous_job_id = record.get("job_id")
                 previous_job = repo.get(previous_job_id) if previous_job_id else None
