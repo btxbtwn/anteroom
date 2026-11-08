@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.814 — 2026-11-08
+
+- The marketplace list beside a listing's form no longer slides around when dragged on an iPad.
+
 ## 0.1.813 — 2026-11-08
 
 - Mercari's Shipping label list loads again when the listing answered the shoebox question with "Yes".
