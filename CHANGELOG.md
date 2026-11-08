@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.818 — 2026-11-08
+
+- Open Suggestions from the sidebar to review older listings worth relisting, see why they are recommended, and return to your search and place after reviewing a listing.
+
 ## 0.1.817 — 2026-11-08
 
 - Show skipped automatic offer attempts by listing in Activity, with Depop’s sanitized response and distinct explanations for refused previews and missing recipients instead of assuming there are no eligible likers.
