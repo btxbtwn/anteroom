@@ -85,7 +85,7 @@ export function ListingStatusLabel({ status, title }: { status: string; title?: 
   return (
     <span
       className={cn(
-        "inline-flex max-w-full items-center gap-1.5 truncate text-2xs font-medium capitalize leading-tight",
+        "inline-flex max-w-full items-center gap-1.5 truncate text-xs font-medium capitalize leading-tight",
         key === "failed" ? "text-destructive-foreground" : "text-sidebar-muted-foreground",
       )}
       title={title}
