@@ -89,8 +89,10 @@ test.describe("layout", () => {
 // Screenshots for review at phone size; CI keeps e2e/results.
 test("phone screens after the layout fixes", async ({ page, phone }, info) => {
   test.skip(!phone, "Phone screenshots");
+  await page.goto("/");
   for (const name of ["Assistant", "Marketplaces", "Automations"]) {
-    await openPage(page, name, true);
+    await page.getByRole("button", { name: "Open navigation" }).first().click();
+    await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name, exact: true }).click();
     await expect(page.getByRole("main")).toBeVisible();
     await page.screenshot({ path: `e2e/results/layout/${name.toLowerCase()}-${info.project.name}.png` });
   }
