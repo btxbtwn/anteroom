@@ -25,6 +25,7 @@ import { bulkRegenerateToast } from "../bulkRegenerate";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "../components/PanelResizeHandle";
 import { WorkspaceTopbar } from "../components/WorkspaceTopbar";
 import { workspaceCrumbs, type WorkspaceView } from "../components/workspaceCrumbs";
+import { SuggestionsPage } from "../components/SuggestionsPage";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
@@ -103,6 +104,8 @@ export function App() {
   const setSelectedConvId = useCallback((id: string) => dispatchOpenListing({ type: "open", id }), []);
   const clearListingWorkspace = (id: string) => dispatchOpenListing({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
+  const [suggestionsVisited, setSuggestionsVisited] = useState(false);
+  const [returnToSuggestions, setReturnToSuggestions] = useState(false);
   const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl || runtime.hosted ? "listings" : "assistant");
   const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
   /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
@@ -260,7 +263,7 @@ export function App() {
   }, [status]);
 
   const selectedListing = conversations?.find((listing: { id: string }) => listing.id === selectedConvId);
-  const workspaceTitle = activeView === "settings"
+  const workspaceTitle = activeView === "suggestions" ? "Suggestions" : activeView === "settings"
     ? SETTINGS_SECTION_LABELS[settingsSection]
     : activeView === "analytics"
       ? "Analytics"
@@ -363,6 +366,7 @@ export function App() {
   const openSourcing = () => togglePage("sourcing");
 
   const openListing = useCallback((id: string, tab?: string) => {
+    setReturnToSuggestions(false);
     preloadListingCode();
     void prefetchListingReads(queryClient, id);
     dispatchOpenListing({ type: "open", id, tab });
@@ -370,6 +374,18 @@ export function App() {
     setMobilePane(runtime.hosted ? "editor" : "workspace");
     closeMobileSidebar();
   }, [goListings, closeMobileSidebar, queryClient, runtime.hosted]);
+
+  const openSuggestions = () => {
+    if (!runtime.features.has("suggestions")) return;
+    setSuggestionsVisited(true);
+    setActiveView("suggestions");
+    setMobilePane("workspace");
+    closeMobileSidebar();
+  };
+  const openSuggestedListing = (id: string) => {
+    openListing(id);
+    setReturnToSuggestions(true);
+  };
 
   const handleSettingsSectionChange = (section: SettingsSectionId) => {
     setSettingsSection(section);
@@ -654,6 +670,7 @@ export function App() {
             onOpenAutomations={openAutomations}
             onOpenAssistant={openAssistant}
             onOpenSourcing={openSourcing}
+            onOpenSuggestions={openSuggestions}
             onToggleInventoryTable={toggleInventoryTable}
             onOpenMobileNav={() => setMobileNavOpen(true)}
             onCloseSettings={closeSettings}
@@ -727,10 +744,15 @@ export function App() {
               </div>
             ) : null}
           </header>
+          {activeView === "listings" && returnToSuggestions && (
+            <div className="shrink-0 border-b border-border px-3 py-2">
+              <Button variant="ghost" size="sm" className="min-h-11 sm:min-h-8" onClick={openSuggestions}><ArrowLeftIcon /> Back to suggestions</Button>
+            </div>
+          )}
           <div className="workspace-body">
             <main className="panel main-panel" ref={mainPanelRef}>
               <ErrorBoundary label="This page" resetKey={activeView === "settings" ? `settings:${settingsSection}` : activeView}>
-                {activeView === "settings" ? (
+                {activeView === "suggestions" ? null : activeView === "settings" ? (
                   <Suspense fallback={pageLoading}>
                     <SettingsPage
                       onOpenListing={openListing}
@@ -807,6 +829,7 @@ export function App() {
                   </Empty>
                 )}
               </ErrorBoundary>
+              {suggestionsVisited && <SuggestionsPage active={activeView === "suggestions"} onOpenListing={openSuggestedListing} />}
               {selectedConvId && (
                 <div hidden={activeView !== "listings"} className="listing-workspace">
                   {openListingState && (
