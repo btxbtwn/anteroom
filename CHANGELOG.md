@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.837 — 2026-11-08
+
+- See which marketplaces need the Chrome extension during setup and beside marketplace actions. Create and generate drafts without connecting Chrome.
+
 ## 0.1.836 — 2026-11-08
 
 - Fixed Scout an item showing “Not Found” on the web.
