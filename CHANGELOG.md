@@ -6,6 +6,25 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.796 — 2026-11-08
+
+- The iPhone app now runs on iPad too: the tabs open as a sidebar, and Inventory keeps your listings beside the one you're editing.
+- Unsaved edits now stay when you open another listing or switch tabs, and come back when you return to that listing.
+
+## 0.1.795 — 2026-11-08
+
+- Keep the web app and iPhone app answering while Anteroom updates, instead of showing errors for up to a few minutes.
+
+## 0.1.794 — 2026-11-08
+
+- Recording a sale on an item that has already sold is refused, so the same sale can no longer be saved twice.
+- Sales you recorded yourself can now be deleted from Sales records.
+
+## 0.1.793 — 2026-11-08
+
+- The Anteroom logo now shows at the top of the sidebar.
+- The Anteroom logo now shows on the browser tab at myanteroom.com.
+
 ## 0.1.792 — 2026-11-08
 
 - Sales records no longer lists a sold item a second or third time when clearing its other marketplace listings reported them as sold, so its count matches Analytics.

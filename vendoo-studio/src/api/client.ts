@@ -651,6 +651,8 @@ export const api = {
     list: (filters: SalesLedgerFilters, page = 1) => request<SalesLedgerPage>(`/sales-ledger?${salesLedgerParams(filters, page)}`),
     get: (saleId: string) => request<SalesLedgerRow>(`/sales-ledger/${encodeURIComponent(saleId)}`),
     save: (saleId: string, body: FinancialSave) => request<SalesLedgerRow>(`/sales-ledger/${encodeURIComponent(saleId)}/financials`, { method: "PUT", body: JSON.stringify(body) }),
+    remove: (saleId: string, expectedRevision: number) => request<{ deleted: string }>(
+      `/sales-ledger/${encodeURIComponent(saleId)}?${new URLSearchParams({ expected_revision: String(expectedRevision) })}`, { method: "DELETE" }),
     salesCsv: (filters: SalesLedgerFilters) => `${BASE}/sales-ledger/export/sales.csv?${salesLedgerParams(filters)}`,
     inventoryCsv: () => `${BASE}/sales-ledger/export/inventory.csv`,
   },

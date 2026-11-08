@@ -245,10 +245,34 @@ inside `with op.get_context().autocommit_block():`
 (`tests/test_migration_locking.py` enforces it). A concurrent build that fails
 leaves an `INVALID` index; drop it before retrying.
 
-Fly still sends SIGTERM with a 300-second grace period. Uvicorn allows active
-requests 120 seconds, then the draft worker stops claiming and has up to 120
-seconds to save the current draft. Work past that window keeps its lease and
-is not marked complete or replayed. See
+A deploy still stops the old Machine before starting the new one, so it
+answers 503 until the new one is up: on 2026-11-07 for 2 min 15 s with open
+streams (the old process drained requests for up to 120 s first), and about
+20 s when idle. Blue-green deploys, which start the new Machine first, are
+switched on separately, once every running Machine has the handoff below.
+
+When two Machines overlap, only the Machine holding the `schedulers` lease
+(`anteroom_private.process_leases`, revision `e5b81d27c4a6`) runs automations,
+eBay offers, the job watchdog, sourcing, Chrome sale checks, promotions and
+sales sync, because each treats work in progress at its startup as cut off.
+Drafts are claimed row by row and run on either Machine. The lease lasts 30 s
+and is renewed every 10 s (`services/process_handoff.py`).
+
+Fly sends SIGTERM with a 300-second grace period. On the signal
+(`vendoo_studio.hosted_server`) the old Machine at once stops claiming drafts
+and stops its schedulers, then releases the lease and its Mac and Chrome
+routes, so the new Machine takes them over within about 10 s. Uvicorn then
+allows active requests 120 seconds, and the current draft has up to 120
+seconds to save. Work past that window keeps its lease and is not marked
+complete or replayed.
+
+The server listens on one dual-stack socket: IPv4 for Fly's proxy and IPv6 for
+the private network. Until 2026-11-07 it listened on IPv4 only, so
+`http://[FLY_PRIVATE_IP]:8080` refused connections and no Machine could have
+forwarded a Mac or Chrome command to another. `ANTEROOM_PROCESS_TOKEN` must be
+set (staged with `fly secrets set --stage`) before the first blue-green
+deploy, or a command that reaches the Machine not holding the device fails
+during the overlap. See
 [deployment strategies](https://docs.fly.io/launch/deploy) and
 [health checks](https://docs.fly.io/reference/health-checks).
 
