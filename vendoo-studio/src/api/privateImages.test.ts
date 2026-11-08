@@ -127,6 +127,21 @@ it("stops a download once its only viewer scrolls away", async () => {
   await vi.waitFor(() => expect(aborted).toBe(true));
 });
 
+it("can immediately reload a cover after its warm-up is cancelled", async () => {
+  const src = "/api/photos/cancelled-warm/thumb?size=96&v=abc";
+  fetchMock.mockImplementationOnce(((_input: string, init: RequestInit) => new Promise((_resolve, reject) => {
+    init.signal?.addEventListener("abort", () => reject(new DOMException("gone", "AbortError")));
+  })) as never);
+  const warm = new AbortController();
+  const first = loadPrivateImage(src, warm.signal);
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  warm.abort();
+  const shown = loadPrivateImage(src);
+  await expect(first).rejects.toThrow();
+  await expect(shown).resolves.toMatch(/^blob:/);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it("tries a photo again when the network or server fails for a moment", async () => {
   vi.useFakeTimers();
   try {
