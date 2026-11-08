@@ -1,0 +1,1 @@
+- Make listing rows in the sidebar larger, with bigger photos and text, and keep every row the same height.
