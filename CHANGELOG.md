@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.847 — 2026-11-08
+
+- Reject incomplete photo-analysis responses instead of losing tag text and uncertainty details.
+- Keep unsupported material, age, fit and condition guesses out of listing instructions.
+
 ## 0.1.846 — 2026-11-08
 
 - Errors in the hosted app, from the server, background work and the web page, are now emailed to the operator with the error, where it happened, which request and seller it affected, and its stack trace. Repeats are grouped so one problem does not flood the inbox.

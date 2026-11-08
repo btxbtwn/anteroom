@@ -1,2 +1,0 @@
-- Reject incomplete photo-analysis responses instead of losing tag text and uncertainty details.
-- Keep unsupported material, age, fit and condition guesses out of listing instructions.
