@@ -1,1 +1,0 @@
-- Let iPads and other touch screens delete, rename and copy a listing from the sidebar with the ⋯ button.
