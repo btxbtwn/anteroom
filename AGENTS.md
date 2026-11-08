@@ -57,6 +57,10 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 
 ## Responsiveness and concurrent work
 
+- Apply [the performance goals](docs/performance.md) to every fix, feature,
+  refactor and update across web, Mac and iPhone, including backend work.
+  McMaster-Carr and NextMaster are aspirational speed and responsiveness
+  references, not visual design templates or proof of our achieved performance.
 - Use [McMaster-Carr](https://www.mcmaster.com/) and
   [NextMaster](https://github.com/stratolark/NextMaster) as ongoing references
   for the web, Mac and iOS apps: persistent usable screens, immediate feedback,

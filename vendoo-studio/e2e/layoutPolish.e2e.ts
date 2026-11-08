@@ -58,7 +58,10 @@ test.describe("layout", () => {
   });
 
   test("the chats panel shows its whole search placeholder", async ({ page }) => {
+    // History appears once there is a chat, and opens from the History button.
+    expect((await page.request.post("/api/assistant/threads")).ok()).toBe(true);
     await openPage(page, "Assistant");
+    await page.getByRole("button", { name: "Show chat history" }).click();
     const search = page.getByRole("searchbox", { name: "Search chats" });
     await expect(search).toBeVisible();
     const placeholder = (await search.getAttribute("placeholder")) ?? "";
