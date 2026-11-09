@@ -1,0 +1,1 @@
+- Stopping an assistant answer or draft task no longer shows up as an error report.

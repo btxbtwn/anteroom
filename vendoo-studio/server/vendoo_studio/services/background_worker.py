@@ -111,6 +111,9 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
             # On shutdown the durable lease expires; never mark an incomplete
             # draft complete or silently replay it after a process restart.
             raise
+        except queue.TaskStopped:
+            # Stop already settled the task and freed the draft; just end the work.
+            logging.getLogger(__name__).info('Draft task stopped by the seller')
         except Exception as exc:
             # Exception messages and formatted tracebacks can include private
             # SQL parameters. Record only the type and source locations.
