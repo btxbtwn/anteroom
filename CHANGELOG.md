@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.856 — 2026-11-09
+
+- Closing the web app while it is still loading no longer shows up as a server error.
+
 ## 0.1.855 — 2026-11-09
 
 - A seller stopping an assistant answer or draft task is no longer reported as a lost task lease.

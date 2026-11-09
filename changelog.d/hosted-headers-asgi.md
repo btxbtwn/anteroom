@@ -1,1 +1,0 @@
-- Closing the web app while it is still loading no longer shows up as a server error.
