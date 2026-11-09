@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -90,6 +91,30 @@ async def _persist_chat_result(conv_id: str, full_text: str, provider, *, field_
         db.close()
 
 
+STOPPED_NOTE = "*Stopped*"
+
+
+def stopped_prose(text: str) -> str:
+    """The part of a stopped reply a seller can read: its prose before any listing payload."""
+    payload = re.search(r"```|^[ \t]*[\[{]", text, re.M)
+    return (text[: payload.start()] if payload else text).strip()
+
+
+def _save_stopped_answer(conv_id: str, full_text: str, provider_name: str, provider_model: str) -> None:
+    """Keep what a stopped reply had said. Its listing edits are never applied."""
+    prose = stopped_prose(full_text)
+    if not prose:
+        return
+    db = SessionLocal()
+    try:
+        ConversationRepo(db).add_message(
+            conv_id, "assistant", f"{prose}\n\n{STOPPED_NOTE}", provider=provider_name, model=provider_model)
+    except Exception:
+        log.exception("failed to keep the stopped answer for %s", conv_id)
+    finally:
+        db.close()
+
+
 def _reset_status(conv_id: str, reason: str) -> None:
     db = SessionLocal()
     try:
@@ -144,6 +169,8 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
     async def stream_response():
         full_text = ""
         stream_error = ""
+        # Set once the reply is complete or failed; until then a stop keeps its prose.
+        settled = False
         work = activity.begin(conv_id, "Answering…")
         try:
             # Photo analysis and sold-comps research can take minutes; say so
@@ -182,6 +209,7 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
             if work.cancelled:
                 yield "data: [DONE]\n\n"
                 return
+            settled = True
             yield sse_event("status", "Saving listing…")
             work.label = "Saving listing…"
             persist_task = asyncio.create_task(
@@ -213,6 +241,7 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
                 yield sse_event("listing_updated", "1")
             yield "data: [DONE]\n\n"
         except Exception as e:
+            settled = True
             message = str(e).strip() or type(e).__name__
             log.exception("chat stream failed for %s: %s", conv_id, message)
             stream_error = message
@@ -220,6 +249,9 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
             _reset_status(conv_id, "chat stream error")
             yield "data: [DONE]\n\n"
         finally:
+            # Stop, or a closed connection, ends the reply where it was.
+            if not settled and full_text.strip():
+                _save_stopped_answer(conv_id, full_text, provider_name, provider_model)
             activity.end(work)
 
     return StreamingResponse(stream_response(), media_type="text/event-stream", headers=SSE_HEADERS)
