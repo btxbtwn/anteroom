@@ -219,7 +219,7 @@ def editor_form(listing: dict, market: str, *, values: dict | None = None) -> di
             value = price_for(values, market)
         name = path.rsplit(".", 1)[-1]
         if value is None and path.startswith(f"{market}_specifics.") and name in {"title", "description", "brand"}:
-            value = marketplace_text(values, market, name)
+            value = _followed_text(values, market, name)
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = _first_answer(_row_values(values, market, path, definitions))
             if value in (None, "", [], {}):
@@ -531,7 +531,7 @@ def gaps(listing: dict, market: str) -> list[dict]:
         # Shared prose and price are explicitly offered by the form, but may follow General.
         name = path.rsplit(".", 1)[-1]
         if value is None and name in {"title", "description", "brand"}:
-            value = marketplace_text(listing, market, name)
+            value = _followed_text(listing, market, name)
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = _first_answer(_row_values(listing, market, path, rows))
         if value in (None, "", [], {}) and not is_locked(listing, path):
@@ -594,6 +594,16 @@ def settings_answer(listing: dict, path: str) -> str | None:
     from vendoo_studio.services.user_settings import get_ebay_listing_defaults
 
     return str(get_ebay_listing_defaults().get(setting) or "").strip() or None
+
+
+def _followed_text(listing: dict, market: str, name: str) -> str:
+    """The title, description or brand a form follows, as that marketplace takes it."""
+    value = marketplace_text(listing, market, name)
+    if market == "depop" and name == "brand":
+        from vendoo_studio.services.depop_form import listed_brand
+
+        return listed_brand(value)
+    return value
 
 
 def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:
