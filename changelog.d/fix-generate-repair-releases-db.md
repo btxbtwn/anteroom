@@ -1,0 +1,1 @@
+- Generating listings for several drafts at once no longer fails with a database timeout while the AI fixes or finishes a listing.
