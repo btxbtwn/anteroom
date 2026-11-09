@@ -1,0 +1,1 @@
+- Filling marketplace fields is faster when a required field has no supporting evidence: Anteroom now asks the model once more for it instead of twice, then shows it as a field to fill.
