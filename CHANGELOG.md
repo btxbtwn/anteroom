@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.854 — 2026-11-09
+
+- Show Listed, Delisted, or Not listed on each marketplace rail row.
+
 ## 0.1.853 — 2026-11-09
 
 - The web eBay and Etsy workspaces no longer fail with "Secure credential storage is temporarily unavailable" or slow every other screen while Anteroom is busy.
