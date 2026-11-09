@@ -1,0 +1,1 @@
+- Use eBay's shopping-bag web mark on the marketplace rail so the logos line up evenly.
