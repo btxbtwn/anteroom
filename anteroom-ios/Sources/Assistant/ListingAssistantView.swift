@@ -10,6 +10,7 @@ struct ListingAssistantView: View {
     @State private var confirmGenerate = false
     @State private var confirmRegenerate = false
     @State private var picked: [PhotosPickerItem] = []
+    @State private var following = true
 
     /// `text` starts the composer, e.g. an Ask chat about a marketplace refusal; the seller sends it.
     init(api: AnteroomAPI, listingID: String, text: String = "") {
@@ -19,27 +20,40 @@ struct ListingAssistantView: View {
     var body: some View {
         @Bindable var model = model
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    controls
-                    ForEach(model.messages) { message in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(message.role == "user" ? "You" : "Anteroom")
-                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            Text(message.text).textSelection(.enabled)
-                            if message.attachmentCount > 0 {
-                                Label(message.attachmentCount == 1 ? "1 image attached" : "\(message.attachmentCount) images attached",
-                                      systemImage: "paperclip")
-                                    .font(.caption).foregroundStyle(.secondary)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        controls
+                        ForEach(model.messages) { message in
+                            let visible = message.role == "assistant"
+                                ? AssistantDisplay.text(message.text)
+                                : message.text
+                            // Match web ChatMessage: hide assistant turns that are only listing JSON.
+                            if message.role != "assistant" || !visible.isEmpty || message.attachmentCount > 0 {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(message.role == "user" ? "You" : "Anteroom")
+                                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                    if !visible.isEmpty {
+                                        Text(visible).textSelection(.enabled)
+                                    }
+                                    if message.attachmentCount > 0 {
+                                        Label(message.attachmentCount == 1 ? "1 image attached" : "\(message.attachmentCount) images attached",
+                                              systemImage: "paperclip")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 10))
+                                .accessibilityElement(children: .combine)
                             }
                         }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 10))
-                        .accessibilityElement(children: .combine)
+                        Color.clear.frame(height: 1).id(ChatScroll.bottomID)
                     }
+                    .padding(16)
                 }
-                .padding(16)
+                .scrollDismissesKeyboard(.interactively)
+                .followsLatest(proxy, following: $following, on: model.messages.count)
             }
             .background(WorkspaceStyle.background)
             .navigationTitle("Listing assistant")
@@ -51,6 +65,11 @@ struct ListingAssistantView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             .task { await model.load() }
+            .sensoryFeedback(.success, trigger: model.runsFinished)
+            .sensoryFeedback(.error, trigger: model.runsFailed)
+            .sensoryFeedback(.impact(weight: .light), trigger: model.runsStopped)
+            .onChange(of: model.runsFinished) { AccessibilityNotification.Announcement("Work finished. Review the saved draft.").post() }
+            .onChange(of: model.runsFailed) { AccessibilityNotification.Announcement("The assistant stopped with an error").post() }
             .reloadingOnReturn(when: !model.ready && model.error != nil) { await model.load() }
             .task(id: runID) {
                 if let action { await model.run(action) }
@@ -92,24 +111,42 @@ struct ListingAssistantView: View {
             .disabled(!model.canStart)
             .frame(minHeight: 44)
         }
+        if model.ready && model.messages.isEmpty && !model.isWorking {
+            Text("Add product photos to your listing, then generate a draft or ask for help editing it.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// What the assistant is doing, with Stop and Reconnect, docked above the composer
+    /// where it stays in view and in reach however far the conversation scrolls.
+    @ViewBuilder
+    private var progressBar: some View {
         if model.isWorking || model.serverBusy || model.needsReconnect {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(model.progress.isEmpty ? "Checking work…" : model.progress)
-                    .font(.subheadline)
-                if !model.isWorking && model.needsReconnect {
-                    Button("Reconnect", systemImage: "arrow.clockwise") { start(.reconnect) }
-                        .disabled(!model.generationAvailable)
-                }
-                if model.isWorking || model.serverBusy {
-                    Button("Stop", role: .destructive) {
-                        stopping = true
-                        Task { await model.stop(); stopping = false }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    if model.isWorking || model.serverBusy { ProgressView() }
+                    Text(stopping ? "Stopping…" : model.progress.isEmpty ? "Checking work…" : model.progress)
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !model.isWorking && model.needsReconnect {
+                        Button("Reconnect", systemImage: "arrow.clockwise") { start(.reconnect) }
+                            .disabled(!model.generationAvailable)
+                            .frame(minHeight: 44)
                     }
-                    .disabled(stopping)
+                    if model.isWorking || model.serverBusy {
+                        Button("Stop", role: .destructive) {
+                            stopping = true
+                            Task { await model.stop(); stopping = false }
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(minHeight: 44)
+                        .disabled(stopping)
+                    }
                 }
                 Text("Work runs on the server. Closing this screen doesn't stop it.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .contain)
         }
         if !model.isWorking && !model.serverBusy && !model.needsReconnect && !model.progress.isEmpty {
             Label(model.progress, systemImage: "checkmark.circle")
@@ -119,16 +156,13 @@ struct ListingAssistantView: View {
             Label(error, systemImage: "exclamationmark.triangle")
                 .font(.footnote).foregroundStyle(.red)
         }
-        if model.ready && model.messages.isEmpty && !model.isWorking {
-            Text("Add product photos to your listing, then generate a draft or ask for help editing it.")
-                .foregroundStyle(.secondary)
-        }
     }
 
     @ViewBuilder
     private var composer: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 8) {
+            progressBar
             if !model.attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -198,6 +232,8 @@ struct ListingAssistantView: View {
     }
 
     private func start(_ action: AssistantAction) {
+        // Starting work brings the conversation back to its end, to show the result.
+        following = true
         self.action = action
         runID = UUID()
     }

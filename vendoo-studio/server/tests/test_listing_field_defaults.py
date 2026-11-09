@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-from vendoo_studio.services import native_form, user_settings
+from vendoo_studio.services import etsy_form, listing_generate, native_form, user_settings
 
 
 @pytest.fixture
@@ -40,10 +42,33 @@ def test_shipping_label_keeps_the_id_and_the_label_the_seller_picked(settings_fi
     assert user_settings.get_mercari_shipping_label() is None
 
 
+def test_etsy_who_and_what_can_be_saved_as_defaults(settings_file):
+    defaults = user_settings.set_listing_field_default(
+        "etsy_specifics.whoMade", "Another company or person", "Another company or person",
+    )
+    defaults = user_settings.set_listing_field_default(
+        "etsy_specifics.whatIsIt", "A finished product", "A finished product",
+    )
+
+    assert defaults["etsy_specifics.whoMade"] == {
+        "value": "Another company or person", "label": "Another company or person",
+    }
+    assert defaults["etsy_specifics.whatIsIt"] == {
+        "value": "A finished product", "label": "A finished product",
+    }
+
+    cleared = user_settings.clear_listing_field_default("etsy_specifics.whoMade")
+    assert "etsy_specifics.whoMade" not in cleared
+    assert "etsy_specifics.whatIsIt" in cleared
+
+
 @pytest.mark.parametrize(("path", "value", "label"), [
     ("mercari_specifics.shipsFrom", "1234", None),
     ("mercari_specifics.shippingClassId", "", "USPS Ground Advantage"),
     ("mercari_specifics.shippingClassId", "2550", ""),
+    ("etsy_specifics.whoMade", "My grandma", "My grandma"),
+    ("etsy_specifics.whatIsIt", "A hat", "A hat"),
+    ("etsy_specifics.listingType", "Physical item", "Physical item"),
     ("title", "A tee", None),
 ])
 def test_only_the_fields_that_can_be_saved_as_defaults_accept_a_value(settings_file, path, value, label):
@@ -84,3 +109,37 @@ def test_vendoo_mercari_form_uses_the_saved_zip_for_ships_from(settings_file):
     )
 
     assert form["specifics"]["mercariLocalInformation"] == "70125"
+
+
+def test_generation_fills_empty_etsy_who_and_what_from_saved_defaults(settings_file):
+    user_settings.set_listing_field_default(
+        "etsy_specifics.whoMade", "Another company or person", "Another company or person",
+    )
+    user_settings.set_listing_field_default(
+        "etsy_specifics.whatIsIt", "A finished product", "A finished product",
+    )
+
+    listing = {"title": "Tee", "etsy_specifics": {}}
+    assert listing_generate.apply_send_readiness_fixes(listing) is True
+    assert listing["etsy_specifics"]["who_made"] == "Another company or person"
+    assert listing["etsy_specifics"]["what_is"] == "A finished product"
+
+    listing["etsy_specifics"]["who_made"] = "I did"
+    assert user_settings.apply_listing_field_defaults(listing) is False
+    assert listing["etsy_specifics"]["who_made"] == "I did"
+
+
+def test_etsy_form_starts_with_saved_who_and_what(settings_file):
+    user_settings.set_listing_field_default(
+        "etsy_specifics.whoMade", "Another company or person", "Another company or person",
+    )
+    user_settings.set_listing_field_default(
+        "etsy_specifics.whatIsIt", "A finished product", "A finished product",
+    )
+
+    form = asyncio.run(etsy_form.editor_form({"etsy_specifics": {}, "direct_category_ids": {}}))
+    rows = {row["path"]: row for row in form["fields"]}
+    assert rows["etsy_specifics.whoMade"]["value"] == "Another company or person"
+    assert rows["etsy_specifics.whoMade"]["save_as_default"] is True
+    assert rows["etsy_specifics.whatIsIt"]["value"] == "A finished product"
+    assert rows["etsy_specifics.whatIsIt"]["save_as_default"] is True
