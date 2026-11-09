@@ -137,9 +137,9 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
             yield chunk
         return
     history = [dict(message) for message in messages]
-    rules = TOOL_RULES
+    target_rules = ""
     if on_targets is not None:
-        rules += (
+        target_rules = (
             '\nBefore doing any work, reply ONLY with {"_field_targets":["exact.field.path"]}. '
             'Identify the fields the seller is asking you to change from the current editable forms. '
             'Use only those exact paths; respect the named marketplace. Do not lock other marketplaces '
@@ -148,12 +148,15 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
             'After the acknowledgement, complete the request, modifying only declared fields. '
             'These protocol replies are the only exception to the rule against JSON-only replies.\n'
         )
+    rules = TOOL_RULES + target_rules
     for message in history:
         if message.get("role") == "system" and isinstance(message.get("content"), str):
             message["content"] += rules
             break
     else:
-        history.insert(0, {"role": "system", "content": rules})
+        message = {"role": "system", "content": rules}
+        history.insert(0, message)
+    protocol_message = message
     searches = 0
     target_replies = 0
     targets_declared = on_targets is None
@@ -190,12 +193,20 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
             yield text
             return
         if "_field_targets" in request and on_targets is not None:
+            if targets_declared:
+                target_reply(text, "Field targets already acknowledged and cannot change. Do not declare them again. "
+                                   "Complete the request using only the previously acknowledged fields.")
+                continue
             raw = request["_field_targets"]
             paths = [_target_path(path) for path in raw] if isinstance(raw, list) else None
             rejected = [path for path in paths or [] if not isinstance(path, str) or path not in allowed_targets]
             if paths is not None and not rejected:
                 on_targets(tuple(sorted(set(paths))))
                 targets_declared = True
+                # The handshake applies once, not at the start of every model call.
+                protocol_message["content"] = protocol_message["content"].removesuffix(target_rules) + (
+                    "\nField targets have been acknowledged. Do not declare _field_targets again. "
+                    "Complete the request, modifying only the acknowledged fields.\n")
                 target_reply(text, 'Field targets acknowledged. Complete the request using only these fields.')
                 continue
             target_reply(text, 'Invalid field targets' + (f": {json.dumps(rejected, ensure_ascii=False)}" if rejected else "")

@@ -1,6 +1,7 @@
 """Direct eBay access. Hosts are fixed and tokens never reach UI or logs."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import base64
 import json
@@ -134,9 +135,12 @@ class EbayClient:
 
     @classmethod
     async def connect(cls):
-        seller = identity()
+        # On the web the account is a Vault read on a pooled connection. Waiting
+        # for one on the request loop froze every request and then answered 503.
+        # This first read fills the request's cache, so later identity checks are free.
+        seller = await asyncio.to_thread(identity)
         token = await access_token("ebay")
-        assert_identity(seller)
+        await asyncio.to_thread(assert_identity, seller)
         return cls(token, seller)
 
     async def request(self, method: str, path: str, *, params: dict | None = None, body: dict | None = None,

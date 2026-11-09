@@ -312,7 +312,7 @@ async def backfill(marketplace: str, session_factory: Callable[[], Session], lim
     from vendoo_studio.services.etsy_workspace import EtsyClient
 
     ebay = await EbayClient.connect() if marketplace == "ebay" else None
-    etsy = EtsyClient() if marketplace == "etsy" else None
+    etsy = await EtsyClient.connect() if marketplace == "etsy" else None
     observed = datetime.now(UTC).replace(tzinfo=None)
     sources: list[tuple[str, dict | None]] = []
     for order_id in order_ids:
