@@ -1,1 +1,0 @@
-- Stay on the current listing when refreshing the page, including on phones.
