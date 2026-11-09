@@ -203,3 +203,55 @@ def test_repeated_targets_do_not_expand_the_accepted_edit_scope():
     assert asyncio.run(collect()) == ['Saved size 36.']
     assert targets == [('size',)]
     assert 'already acknowledged' in provider.messages[2][-1]['content']
+
+
+def run_targets(replies, rows=None):
+    catalog = lookup.OptionCatalog({'general': {'fields': rows or [
+        {'path': 'category_path'}, {'path': 'department'}, {'path': 'title'},
+    ]}})
+    provider = Provider(replies)
+    targets = []
+
+    async def collect():
+        return [chunk async for chunk in lookup.chat_with_options(
+            provider, [{'role': 'system', 'content': 'Never reply with JSON-only output.'},
+                       {'role': 'user', 'content': 'Move it to Men'}], catalog, on_targets=targets.append)]
+
+    return asyncio.run(collect()), targets, provider
+
+
+def test_targets_rules_override_the_no_json_only_reply_rule():
+    _answer, _targets, provider = run_targets(['{"_field_targets":[]}', 'It is a men\'s shirt.'])
+    system = provider.messages[0][0]['content']
+    assert 'only exception' in system
+
+
+def test_field_targets_inside_prose_or_a_fence_are_accepted():
+    reply = 'I will move it.\n```json\n{"_field_targets":["category_path","department"]}\n```'
+    answer, targets, _provider = run_targets([reply, 'Moved it to Men.'])
+    assert answer == ['Moved it to Men.']
+    assert targets == [('category_path', 'department')]
+
+
+def test_json_patch_pointer_targets_are_accepted_as_field_paths():
+    answer, targets, _provider = run_targets(['{"_field_targets":["/category_path","/department"]}', 'Moved.'])
+    assert answer == ['Moved.']
+    assert targets == [('category_path', 'department')]
+
+
+def test_invalid_targets_feedback_names_the_rejected_paths():
+    _answer, _targets, provider = run_targets(['{"_field_targets":["gender"]}', '{"_field_targets":[]}', 'Ok.'])
+    assert 'gender' in provider.messages[1][-1]['content']
+
+
+def test_plain_answer_without_declaration_is_kept_as_a_no_change_reply():
+    answer, targets, provider = run_targets(['This shirt is a men\'s medium.'])
+    assert answer == ['This shirt is a men\'s medium.']
+    assert targets == [()]
+    assert len(provider.messages) == 1
+
+
+def test_undeclared_edits_stop_quickly_with_a_clear_message():
+    edit = 'Moved.\n```json\n[{"op":"replace","path":"/department","value":"Men"}]\n```'
+    with pytest.raises(RuntimeError, match="which fields it would change"):
+        run_targets([edit] * 20)
