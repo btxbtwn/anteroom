@@ -44,6 +44,23 @@ def test_regenerate_and_clear_wipe_only_owned_idle_items(cloud, signing_keys, mo
         db.commit()
 
     # The single price drop bulk Regenerate saves before its rewrite.
+    preview = client.post(path + '/price-drop/preview', headers=alice)
+    assert preview.status_code == 200, preview.text
+    assert preview.json()['current_price'] == 40
+    assert client.post(path + '/price-drop/preview', headers=bob).status_code == 404
+    assert client.post(path + '/price-drop/preview').status_code == 401
+
+    async def no_comps(*args):
+        for event in ():
+            yield event
+
+    monkeypatch.setattr('vendoo_studio.services.comp_research.stream_sold_comps', no_comps)
+    comps = client.post(path + '/price-drop/comps', headers=alice)
+    assert comps.status_code == 200, comps.text
+    assert 'data: [DONE]' in comps.text
+    assert client.post(path + '/price-drop/comps', headers=bob).status_code == 404
+    assert client.post(path + '/price-drop/comps').status_code == 401
+
     assert client.post(path + '/price-drop', headers=bob, json={'price': 30, 'mode': 'custom'}).status_code == 404
     dropped = client.post(path + '/price-drop', headers=alice, json={'price': 30, 'mode': 'custom'})
     assert dropped.status_code == 200, dropped.text
