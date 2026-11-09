@@ -585,3 +585,45 @@ def test_inventory_derives_status_once_and_reconciles_stale_busy_rows(cloud, sig
         stored = db.get(Conversation, identity)
         assert stored.status == 'sold'
         assert stored.settled_at is not None
+
+
+def test_generated_listing_repair_releases_the_connection_before_model_waits(single_connection, monkeypatch):
+    """JSON repair and the required-field pass wait on a model; neither may pin the hosted pool."""
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services import listing_generate, listing_persistence
+
+    waits = []
+
+    def other_session_works(step):
+        with single_connection() as other:
+            assert other.get(Conversation, 'repair-tee').title == 'Cotton tee'
+        waits.append(step)
+
+    async def repair(provider, text):
+        other_session_works('repair')
+        return {'title': 'Cotton tee', 'price': 20}
+
+    async def fill(provider, listing, **kwargs):
+        other_session_works('fill')
+        return {**listing, 'price': 25}
+
+    def persist(db, conv_id, full_text, *, parsed, expected_revision_id, **kwargs):
+        listing_persistence.save_revision(db, conv_id, parsed, source='model',
+                                          expected_revision_id=expected_revision_id)
+        return parsed
+
+    monkeypatch.setattr(listing_generate, 'repair_listing_json', repair)
+    monkeypatch.setattr(listing_generate, 'fill_validation_gaps', fill)
+    monkeypatch.setattr(listing_generate, 'persist_generated_listing', persist)
+    monkeypatch.setattr(listing_generate, '_validation_blockers', lambda listing: [] if listing.get('price') == 25 else ['price'])
+    with single_connection() as db:
+        db.add(Conversation(id='repair-tee', title='Cotton tee'))
+        db.commit()
+        # The generate run reads photos right before this call, leaving a transaction open.
+        fingerprint = listing_generate.photo_fingerprint(ConversationRepo(db).get_photos('repair-tee'))
+        listing = asyncio.run(listing_generate.persist_generated_listing_with_repair(
+            db, 'repair-tee', '{"title": "Cotton tee",,', object(), final_announce=False,
+            expected_revision_id='', expected_photo_fingerprint=fingerprint))
+    assert waits == ['repair', 'fill']
+    assert listing['price'] == 25
