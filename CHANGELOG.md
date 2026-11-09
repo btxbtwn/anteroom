@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.872 — 2026-11-09
+
+- Generating a listing no longer fails when the AI wraps its photo reading in an extra layer or writes a size or measurement as a number.
+
 ## 0.1.871 — 2026-11-09
 
 - Filling marketplace fields is faster when a required field has no supporting evidence: Anteroom now asks the model once more for it instead of twice, then shows it as a field to fill.

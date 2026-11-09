@@ -1,1 +1,0 @@
-- Generating a listing no longer fails when the AI wraps its photo reading in an extra layer or writes a size or measurement as a number.
