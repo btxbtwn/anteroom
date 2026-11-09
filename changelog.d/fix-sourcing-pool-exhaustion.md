@@ -1,1 +1,0 @@
-- Keep pages like Sourcing loading on the web while drafts are generating, instead of failing with a database timeout.
