@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import time
 import urllib.error
 import uuid
 
 import jwt
+from jwt.exceptions import PyJWKClientConnectionError
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from fastapi.testclient import TestClient
@@ -181,11 +183,15 @@ def test_unknown_key_rejected(client, signing_keys):
     assert get_account(client, token).status_code == 401
 
 
-def test_outage_fails_closed_without_exposing_diagnostics(client, signing_keys, jwks):
+def test_outage_fails_closed_without_exposing_diagnostics(client, signing_keys, jwks, caplog):
     jwks["unavailable"] = True
     token = session_token(signing_keys)
-    response = get_account(client, token)
+    with caplog.at_level(logging.ERROR, logger="vendoo_studio.http"):
+        response = get_account(client, token)
     assert response.status_code == 503
+    # The operator's report names the key fetch that failed; the seller's answer does not.
+    [record] = [r for r in caplog.records if r.name == "vendoo_studio.http"]
+    assert record.exc_info and record.exc_info[0] is PyJWKClientConnectionError
     assert response.headers["retry-after"] == "5"
     assert "Private diagnostic" not in response.text
     assert token not in response.text

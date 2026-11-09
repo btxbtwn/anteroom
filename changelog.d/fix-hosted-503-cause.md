@@ -1,0 +1,1 @@
+- When the hosted app briefly can't reach its database or sign-in keys, the error report now says why, so these outages can be traced and fixed.

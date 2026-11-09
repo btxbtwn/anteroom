@@ -58,6 +58,17 @@ request_context: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Con
 _log = logging.getLogger(__name__)
 
 
+def note_cause(exc: BaseException) -> None:
+    """Keep the failure behind a 5xx answer for the request's error report.
+
+    Routes turn database and network failures into a plain 503; without this
+    the report says only which route answered it, not why.
+    """
+    context = request_context.get()
+    if context is not None:
+        context["cause"] = exc
+
+
 def scrub(text: str, limit: int) -> str:
     """Drop SQL parameter values and mask credentials; keep the tail of long text."""
     text = _SQL_PARAMETERS.sub("[parameters: removed]", text)
