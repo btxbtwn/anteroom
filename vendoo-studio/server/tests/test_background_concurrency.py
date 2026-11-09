@@ -168,6 +168,35 @@ def test_lease_renewal_continues_until_completion_is_persisted(monkeypatch, hear
             work.result(timeout=2)
 
 
+def test_revoked_heartbeat_stops_work_without_failing_task_again(monkeypatch, caplog, heartbeat_loop):
+    stopped = threading.Event()
+    finished = []
+    sleep = asyncio.sleep
+
+    async def quick_heartbeat(seconds):
+        await sleep(.01 if seconds == 20 else seconds)
+
+    async def execute(*_args):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    def renew(*_args):
+        raise background_worker.queue.TaskLeaseExpired()
+
+    monkeypatch.setattr(background_worker.asyncio, 'sleep', quick_heartbeat)
+    monkeypatch.setattr(background_worker, '_execute', execute)
+    monkeypatch.setattr(background_worker.queue, 'renew', renew)
+    monkeypatch.setattr(background_worker.queue, 'finish', lambda *args, **kwargs: finished.append(kwargs))
+    asyncio.run(background_worker.run_claimed('draft', str(uuid.uuid4()), 'lease',
+                                             heartbeat_loop=heartbeat_loop))
+    assert stopped.is_set()
+    assert not finished, 'A worker without ownership must not attempt another terminal transition'
+    assert not [record for record in caplog.records if record.levelname == 'ERROR']
+    assert 'lease' in caplog.text.lower()
+
+
 def test_worker_cancellation_cleans_up_all_active_jobs(monkeypatch):
     async def run():
         jobs = iter([('a', 'alice', 'a'), ('b', 'bob', 'b')])

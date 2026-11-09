@@ -1,1 +1,1 @@
-- Stopping an assistant answer or draft task no longer shows up as an error report.
+- A seller stopping an assistant answer or draft task is no longer reported as a lost task lease.
