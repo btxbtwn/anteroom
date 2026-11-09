@@ -129,6 +129,8 @@ interface Props {
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  /** Esc in the box. Returns true when it acted (it stopped a running reply). */
+  onEscape?: () => boolean;
   placeholder: string;
   handleRef: RefObject<ComposerPromptEditorHandle | null>;
   /** Files pasted into the box (images). Returning true keeps them out of the text. */
@@ -142,9 +144,11 @@ interface Props {
  * inline as chips exactly where the seller dropped them, serialized back to a
  * markdown prompt whose quotes are links.
  */
-export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, handleRef, onPasteFiles, autoFocus = false }: Props) {
+export function ComposerPromptEditor({ value, onChange, onSubmit, onEscape, placeholder, handleRef, onPasteFiles, autoFocus = false }: Props) {
   const submitRef = useRef(onSubmit);
   submitRef.current = onSubmit;
+  const escapeRef = useRef(onEscape);
+  escapeRef.current = onEscape;
   const pasteFilesRef = useRef(onPasteFiles);
   pasteFilesRef.current = onPasteFiles;
   const placeholderRef = useRef(placeholder);
@@ -179,6 +183,7 @@ export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, h
             submitRef.current();
             return true;
           },
+          Escape: () => escapeRef.current?.() ?? false,
         }),
       }),
     ],
