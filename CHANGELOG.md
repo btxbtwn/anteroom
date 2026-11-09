@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.871 — 2026-11-09
+
+- Filling marketplace fields is faster when a required field has no supporting evidence: Anteroom now asks the model once more for it instead of twice, then shows it as a field to fill.
+
 ## 0.1.870 — 2026-11-09
 
 - A brief database hiccup during an automatic sharing or offer round no longer leaves that round stuck as unfinished in the activity log.

@@ -215,8 +215,29 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields":{}}')) as ask:
             saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="No style evidence")
-        self.assertEqual(ask.await_count, 3)
+        # One full pass and one focused repair. A second repair would resend the
+        # same fields, evidence and choices, so it only adds wait time.
+        self.assertEqual(ask.await_count, 2)
         self.assertTrue(any(gap["field"] == "ebay_specifics.Style" for gap in native_contract.gaps(saved, "ebay")))
+
+    async def test_partial_repair_does_not_ask_again_for_the_rest(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "11483", "fields": [
+            row("ebay_specifics.Style", "Style", ["Casual"], required=True, selection_only=False),
+            row("ebay_specifics.Rise", "Rise", ["High"], required=True)]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "11483"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
+        evidence = "Tag: Sawyer relaxed straight"
+        replies = ['{"fields":{}}', json.dumps({"fields": {"ebay_specifics.Style": {
+            "value": "Relaxed straight", "evidence": "Sawyer relaxed straight"}}}), '{"fields":{}}']
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)) as ask:
+            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence=evidence)
+        self.assertEqual(ask.await_count, 2)
+        self.assertEqual(saved["ebay_specifics"]["Style"], "Relaxed straight")
+        self.assertTrue(any(gap["field"] == "ebay_specifics.Rise" for gap in native_contract.gaps(saved, "ebay")))
 
     async def test_unproven_ebay_size_rows_still_follow_general_size(self):
         from vendoo_studio.services import native_contract

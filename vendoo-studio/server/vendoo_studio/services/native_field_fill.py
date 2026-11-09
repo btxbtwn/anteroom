@@ -287,6 +287,10 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
                                for gap in native_contract.gaps(fields, market))
         if not dependencies_changed and not missing_required:
             break
+        # Another repair would resend the same fields, evidence and choices.
+        # Ask again only when a changed answer brought new choices.
+        if required_only and not dependencies_changed:
+            break
         required_only = not dependencies_changed
         await record_forms(db, conv_id, markets)
     if strict:
