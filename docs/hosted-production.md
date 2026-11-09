@@ -177,6 +177,24 @@ request body use `hosted_database.in_seller_session`, which keeps
 `get_seller_db`'s checks on a worker-thread session. A test holds eight concurrent slow external waits on a
 one-connection pool without a timeout. Not yet measured after deploy.
 
+Production 0.1.848 exhausted the pool again on 2026-11-09 at 02:24 UTC
+(`GET /api/sourcing`, a three-millisecond read, timed out waiting). No
+connection was held across an outside wait this time. `pg_stat_activity`
+showed all 12 `idle in transaction` for 1 to 7 s between ordinary reads, and
+the one-CPU Machine ran at about 90% in the API process and 9% in the
+catalog index worker. A 30-second py-spy sample put 33% of CPU in the
+inventory and Suggestions snapshot rebuilds, about 19% in generation's form
+preparation and 8% in the catalog index rebuild. Some listings stored up to
+3 MB of `_native_forms` (saved marketplace form definitions with every
+option), and each form build and preflight deep-copied the whole listing,
+forms included, inside its transaction: once per form, then once more per
+marketplace in preflight. A 2 MB form takes about 0.6 s to copy. Snapshots
+now share the saved forms read-only (`native_contract.copy_listing`), and a
+test fails if form preparation or preflight copies them or changes them.
+Remaining: each read still decodes the full revision JSON, the snapshot
+rebuilds and catalog index still compete for the same CPU, and the pool has
+not been re-measured after deploy.
+
 Machines reach each other's `/internal/` routes at
 `http://[FLY_PRIVATE_IP]:8080` on the private network
 (`device_routes.local_base_url`), which does not pass through Fly's proxy. The

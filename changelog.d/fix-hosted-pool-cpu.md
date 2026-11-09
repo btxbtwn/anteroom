@@ -1,0 +1,1 @@
+- Opening a draft or preparing its marketplace forms no longer ties up the web app's database connections, which could make other pages fail with an error while a listing with large saved forms was open.

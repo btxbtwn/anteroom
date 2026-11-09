@@ -20,7 +20,6 @@ reading the listing back.
 from __future__ import annotations
 
 import asyncio
-import copy
 import logging
 import re
 import time
@@ -549,6 +548,7 @@ def preflight(conv_id: str, db: Session) -> dict:
     if not revision or not isinstance(revision.listing_json, dict):
         return {"revision_id": None, "marketplaces": {}}
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
+    from vendoo_studio.services.native_contract import copy_listing
     from vendoo_studio.services.native_form import attach_form
 
     prepared = prepare_listing_snapshot(db, conv, revision.listing_json)
@@ -557,7 +557,7 @@ def preflight(conv_id: str, db: Session) -> dict:
     records = MarketplaceListingRepo(db).for_conversation(conv_id)
     out = {}
     for marketplace in NAMES:
-        found = direct_preflight.gaps(attach_form(copy.deepcopy(prepared), marketplace), marketplace,
+        found = direct_preflight.gaps(attach_form(copy_listing(prepared), marketplace), marketplace,
                                       _context(db, conv_id, marketplace, body))
         left_off = marketplace_media.photos_for(prepared, photos, marketplace)[1]
         if left_off:

@@ -32,6 +32,19 @@ _EDITOR_KEYS = ("section", "section_help", "width", "control_width", "presentati
                 "save_as_default")
 
 
+def copy_listing(listing: dict) -> dict:
+    """A deep copy of a listing that shares its saved forms instead of copying them.
+
+    Saved forms can be megabytes, and every reader only reads them: changing a
+    form means capturing a new one and assigning it to the listing. Copying them
+    for each form and marketplace kept the hosted server's one CPU busy.
+    """
+    copied = copy.deepcopy({key: value for key, value in listing.items() if key != KEY})
+    if KEY in listing:
+        copied[KEY] = listing[KEY]
+    return copied
+
+
 def path_of(row: dict) -> str:
     return str(row.get("path") or row.get("key") or "")
 
