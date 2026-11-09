@@ -1,1 +1,0 @@
-- The web eBay and Etsy workspaces no longer fail with "Secure credential storage is temporarily unavailable" or slow every other screen while Anteroom is busy.
