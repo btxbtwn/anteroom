@@ -515,6 +515,17 @@ def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
             assert notes == statuses == {}
             return None
 
+        def current_revision_ids(self):
+            assert closed == []
+            return {}
+
+    def unsent_edits(db, conversations, revisions):
+        assert closed == []
+        assert conversations == []
+        assert revisions == {}
+        return set()
+
+    monkeypatch.setattr('vendoo_studio.services.unsent_edits.unsent_edits', unsent_edits)
     monkeypatch.setattr('vendoo_studio.repositories.queries.ConversationRepo', Repo)
     from vendoo_studio.services.inventory_analytics import AnalyticsInputs
     monkeypatch.setattr('vendoo_studio.services.inventory_analytics.read_analytics_inputs',

@@ -411,7 +411,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(bulk_delete_router)
     from vendoo_studio.routes.hosted_account import router as account_router
     app.include_router(account_router)
-    from vendoo_studio.routes.listings import apply_price_drop
+    from vendoo_studio.routes.listings import apply_price_drop, preview_price_drop, stream_price_drop_comps
+    app.add_api_route('/api/conversations/{conv_id}/price-drop/preview', preview_price_drop, methods=['POST'])
+    app.add_api_route('/api/conversations/{conv_id}/price-drop/comps', stream_price_drop_comps, methods=['POST'])
     app.add_api_route('/api/conversations/{conv_id}/price-drop', apply_price_drop, methods=['POST'])
     from vendoo_studio.routes.catalog import categories as catalog_categories, choice_list, dropdown_options, search as catalog_search
     app.add_api_route('/api/catalog/choice-lists/{name}', choice_list, methods=['GET'])
