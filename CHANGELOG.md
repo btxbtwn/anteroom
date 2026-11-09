@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.857 — 2026-11-09
+
+- Keep the listing assistant from repeatedly asking which fields to edit and failing before it answers.
+
 ## 0.1.856 — 2026-11-09
 
 - Closing the web app while it is still loading no longer shows up as a server error.
