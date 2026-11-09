@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.851 — 2026-11-09
+
+- Unsent edits now appear in the inventory filter on the website.
+
 ## 0.1.850 — 2026-11-09
 
 - Fixed Regenerate showing “Not Found” on the web when loading price suggestions or researching sold prices.
