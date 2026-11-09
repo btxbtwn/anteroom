@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.853 — 2026-11-09
+
+- The web eBay and Etsy workspaces no longer fail with "Secure credential storage is temporarily unavailable" or slow every other screen while Anteroom is busy.
+
 ## 0.1.852 — 2026-11-09
 
 - Stopping a draft task no longer reports a task crash when its worker notices the revoked lease.
