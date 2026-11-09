@@ -74,7 +74,7 @@ struct MarketplaceActionsTests {
         let goneRows = Dictionary(uniqueKeysWithValues: MarketplaceActions.rows(
             actionable: all, drafts: [:], live: gone, revisionID: "r2").map { ($0.marketplace, $0) })
         precondition(goneRows["etsy"]!.label == "Delisting…" && goneRows["etsy"]!.running && !goneRows["etsy"]!.canDelist)
-        precondition(goneRows["depop"]!.label == "Deleted" && goneRows["depop"]!.canList)
+        precondition(goneRows["depop"]!.label == "Delisted" && goneRows["depop"]!.canList)
         // A delisted listing keeps its ID and may still have a published record; it can be listed again.
         let delisted = try JSONDecoder().decode([String: MarketplaceLiveListing].self, from: Data(#"""
         {"mercari": {"url":"https://www.mercari.com/us/item/m1","listing_id":"m1","sold_here":false,"state":"deleted"}}
@@ -83,7 +83,7 @@ struct MarketplaceActionsTests {
         {"mercari": {"state":"published","revision_id":"r2","listing_url":"https://www.mercari.com/us/item/m1"}}
         """#.utf8))
         let relist = MarketplaceActions.rows(actionable: ["mercari"], drafts: stale, live: delisted, revisionID: "r2")[0]
-        precondition(relist.label == "Deleted" && relist.canList && !relist.canUpdate && !relist.canDelist)
+        precondition(relist.label == "Delisted" && relist.canList && !relist.canUpdate && !relist.canDelist)
 
         // Confirmations name each marketplace and say what Delist does there.
         let one = MarketplaceActions.listQuestion(title: "Blue shirt", marketplace: "ebay")
