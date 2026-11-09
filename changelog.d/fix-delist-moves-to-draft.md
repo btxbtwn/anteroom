@@ -1,1 +1,0 @@
-- Delisting an item everywhere now moves it to Drafts, even when you had marked a marketplace as listed.
