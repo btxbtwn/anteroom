@@ -1,0 +1,2 @@
+- A generated draft no longer leaves eBay Size and Size Type empty when the listing's own size answers them.
+- A brand Depop does not list shows as Other on the Depop form, the way it posts, instead of blocking the draft.
