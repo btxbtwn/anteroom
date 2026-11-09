@@ -1,0 +1,1 @@
+- Stopping a draft task no longer reports a task crash when its worker notices the revoked lease.
