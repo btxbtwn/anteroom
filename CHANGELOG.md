@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.866 — 2026-11-09
+
+- A generated draft no longer leaves eBay Size and Size Type empty when the listing's own size answers them.
+- A brand Depop does not list shows as Other on the Depop form, the way it posts, instead of blocking the draft.
+
 ## 0.1.865 — 2026-11-09
 
 - Show each word of an assistant reply as it arrives, instead of a paragraph at a time, with a caret where it is writing.
