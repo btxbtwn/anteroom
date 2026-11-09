@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import event
-from starlette.datastructures import Headers
+from starlette.datastructures import Headers, MutableHeaders
 
 from vendoo_studio.services.seller_sessions import (
     InvalidSession,
@@ -69,7 +69,7 @@ class AccessLogMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        started, status = time.perf_counter(), 0
+        started, status, failed = time.perf_counter(), 0, False
 
         async def record(message):
             nonlocal status
@@ -84,6 +84,7 @@ class AccessLogMiddleware:
         try:
             await self.app(scope, receive, record)
         except Exception:
+            failed = True
             # The route template, never the raw path: it can carry one-time codes.
             http_log.exception("Unhandled exception in %s %s",
                                scope["method"], getattr(scope.get("route"), "path", None) or "-")
@@ -94,8 +95,43 @@ class AccessLogMiddleware:
             if status >= 500:
                 http_log.error("%s %s answered %s", scope["method"], template, status)
             request_context.reset(context)
-            access_log.info("%s %s %s %dms", scope["method"], template, status or 500,
+            # 499: the client closed the connection before any response started.
+            access_log.info("%s %s %s %dms", scope["method"], template, status or (500 if failed else 499),
                             round((time.perf_counter() - started) * 1000))
+
+
+class ResponseHeadersMiddleware:
+    """Security and caching headers on every response.
+
+    Plain ASGI rather than ``BaseHTTPMiddleware``: when a browser leaves before
+    a response starts, nothing is sent, and that is not a server error.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                # A route may let the browser keep a versioned private image; nothing else is kept.
+                headers.setdefault("Cache-Control", "no-store")
+                headers["Referrer-Policy"] = "no-referrer"
+                headers["X-Content-Type-Options"] = "nosniff"
+                # pywebview builds its native API methods with Function(). WebKit
+                # applies this policy to that bootstrap as well as to page scripts.
+                headers["Content-Security-Policy"] = (
+                    "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
+                    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+                )
+            await send(message)
+
+        await self.app(scope, receive, with_headers)
 
 
 class SellerSessionMiddleware:
@@ -310,21 +346,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     # times over a phone connection. Event streams and images are left alone.
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
-    @app.middleware("http")
-    async def response_headers(request, call_next):
-        response = await call_next(request)
-        # A route may let the browser keep a versioned private image; nothing else is kept.
-        response.headers.setdefault("Cache-Control", "no-store")
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        # pywebview builds its native API methods with Function(). WebKit
-        # applies this policy to that bootstrap as well as to page scripts.
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
-            "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
-        )
-        return response
+    app.add_middleware(ResponseHeadersMiddleware)
 
     # Outermost, so a refused session or an error still gets its line.
     app.add_middleware(AccessLogMiddleware)

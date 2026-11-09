@@ -1046,6 +1046,36 @@ code {
   background: var(--app-scrollbar-thumb-hover);
 }
 
+/* A caret marks where a streaming reply is being written, at the end of its
+   last paragraph, heading or list item. It is gone the moment the reply is
+   saved. It blinks only when the seller allows motion. */
+.chat-markdown[data-streaming] > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.chat-markdown[data-streaming] > :is(ul, ol):last-child > li:last-child:not(:has(> p))::after,
+.chat-markdown[data-streaming] > :is(ul, ol):last-child > li:last-child > p:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-inline-start: 0.2em;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .chat-markdown[data-streaming] > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+  .chat-markdown[data-streaming] > :is(ul, ol):last-child > li:last-child:not(:has(> p))::after,
+  .chat-markdown[data-streaming] > :is(ul, ol):last-child > li:last-child > p:last-child::after {
+    animation: chat-caret-blink 1s steps(2, jump-none) infinite;
+  }
+}
+
+@keyframes chat-caret-blink {
+  from { opacity: 0.5; }
+  to { opacity: 0; }
+}
+
 /* Paragraphs and code blocks arrive in chunks while a response streams. Fade
    each new block in so the chunk does not pop. @starting-style only applies
    when an element is first inserted, and the rule is gated on data-streaming,
