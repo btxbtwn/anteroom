@@ -145,7 +145,7 @@ def _connection(identity, expected: str | None, connected_at: str) -> str:
 
 async def _read(marketplace: str, start: datetime, end: datetime, page: int, expected_connection: str | None, connected_at: str):
     if marketplace == "etsy":
-        client = EtsyClient()
+        client = await EtsyClient.connect()
         connection = _connection(client.identity, expected_connection, connected_at)
         payload = await client.read("/receipts", {
             "limit": PAGE_SIZE, "offset": (page - 1) * PAGE_SIZE, "sort_on": "updated", "sort_order": "desc",
