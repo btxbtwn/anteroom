@@ -123,7 +123,8 @@ enum MarketplaceActions {
             return row(.attention, "Unconfirmed", detail: draft.error ?? "Check the result before trying again.", said: said)
         }
         if live?.state == "deleting" { return row(.busy, "Delisting…") }
-        if live?.state == "deleted" { return row(.neutral, removed[marketplace] ?? "Deleted") }
+        // The web's rail too: "Delisted" whatever the marketplace calls it.
+        if live?.state == "deleted" { return row(.neutral, "Delisted") }
         if let live, live.state == "failed" {
             return row(.failed, "Not delisted", link: live.url, linkLabel: "View", detail: live.error,
                        said: live.marketplaceMessage.map { "\(name) said: \($0)" })
