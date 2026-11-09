@@ -195,6 +195,22 @@ after deploy: whether page reads stay under the pool timeout with two sellers
 generating. The stream reader's own poll (about five round trips every 0.5 s
 per open stream) is the next cost of the same kind.
 
+The same incident had a CPU cost as well. Samples a few minutes after the
+error found all 12 connections `idle in transaction` for 1 to 7 s between
+ordinary reads while the process waited for the CPU, and a 30-second py-spy
+sample put about 88% of the one vCPU in the API process and 9% in the catalog index worker,
+with 33% in the inventory and Suggestions snapshot rebuilds, about 19% in
+generation's form preparation and 8% in the catalog index rebuild. Some
+listings stored up to 3 MB of `_native_forms` (saved marketplace form
+definitions with every option), and each form build and preflight deep-copied
+the whole listing, forms included, inside its transaction: once per form,
+then once more per marketplace in preflight. A 2 MB form takes about 0.6 s to
+copy. Snapshots now share the saved forms read-only
+(`native_contract.copy_listing`), and a test fails if form preparation or
+preflight copies them or changes them. Remaining: each read still decodes the
+full revision JSON, the snapshot rebuilds and catalog index still compete for
+the same CPU, and the pool has not been re-measured after deploy.
+
 Machines reach each other's `/internal/` routes at
 `http://[FLY_PRIVATE_IP]:8080` on the private network
 (`device_routes.local_base_url`), which does not pass through Fly's proxy. The
