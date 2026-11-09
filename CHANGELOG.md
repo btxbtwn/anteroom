@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.863 — 2026-11-09
+
+- Delisting an item everywhere now moves it to Drafts, even when you had marked a marketplace as listed.
+
 ## 0.1.862 — 2026-11-09
 
 - Use eBay's shopping-bag web mark on the marketplace rail so the logos line up evenly.

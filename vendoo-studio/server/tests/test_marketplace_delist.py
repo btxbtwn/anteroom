@@ -286,6 +286,44 @@ class MarketplaceDelistTest(unittest.TestCase):
             self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["etsy"], "confirm": True}).status_code, 200)
 
 
+    def _status(self):
+        from vendoo_studio.services.item_status import status_for
+
+        self.db.expire_all()
+        conv = ConversationRepo(self.db).get(self.conv.id)
+        return status_for(self.db, conv.id, parse_notes(conv.notes)).status
+
+    def _delist_everywhere(self):
+        result = self.client.post(f"{self.base}/delist", json={"marketplaces": list(URLS), "confirm": True})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertTrue(all(entry["state"] == "deleted" for entry in result.json().values()), result.text)
+
+    def test_delist_everywhere_moves_vendoo_active_item_to_draft(self):
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooStatus": "active", "vendooMarketplaces": list(URLS)})
+        self.db.commit()
+        self.assertEqual(self._status(), "active")
+        self._delist_everywhere()
+        self.assertEqual(self._status(), "draft")
+
+    def test_delist_everywhere_moves_item_marked_listed_to_draft(self):
+        for marketplace in ("ebay", "poshmark"):
+            response = self.client.post(f"{self.base}/{marketplace}/mark", json={"state": "listed", "url": URLS[marketplace]})
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self._status(), "active")
+        self._delist_everywhere()
+        self.assertEqual(self._status(), "draft")
+
+    def test_delist_everywhere_moves_directly_listed_item_to_draft(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        for marketplace, url in URLS.items():
+            MarketplaceListingRepo(self.db).save(self.conv.id, marketplace, {
+                "state": "published", "listing_url": url, "listing_id": listing_id(marketplace, url)})
+        self.assertEqual(self._status(), "active")
+        self._delist_everywhere()
+        self.assertEqual(self._status(), "draft")
+
+
 class MarketplaceStepsTest(unittest.IsolatedAsyncioTestCase):
     async def test_etsy_checks_the_shop_then_deletes(self):
         from vendoo_studio.services import marketplace_delist as d
