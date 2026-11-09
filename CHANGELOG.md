@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.868 — 2026-11-09
+
+- When the hosted app briefly can't reach its database or sign-in keys, the error report now says why, so these outages can be traced and fixed.
+
 ## 0.1.867 — 2026-11-09
 
 - Opening a draft or preparing its marketplace forms no longer ties up the web app's database connections, which could make other pages fail with an error while a listing with large saved forms was open.
