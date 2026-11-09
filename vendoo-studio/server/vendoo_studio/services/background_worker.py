@@ -111,6 +111,11 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
             # On shutdown the durable lease expires; never mark an incomplete
             # draft complete or silently replay it after a process restart.
             raise
+        except queue.TaskLeaseExpired:
+            # Stop/terminal saves revoke the lease too. This worker no longer
+            # owns the row and must not try to mark it failed. Actual expiry
+            # is settled by the queue's claim sweep, without replaying work.
+            logging.getLogger(__name__).warning('Draft task lease lost; stopping worker')
         except Exception as exc:
             # Exception messages and formatted tracebacks can include private
             # SQL parameters. Record only the type and source locations.

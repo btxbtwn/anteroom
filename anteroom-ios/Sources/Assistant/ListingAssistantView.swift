@@ -23,20 +23,28 @@ struct ListingAssistantView: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     controls
                     ForEach(model.messages) { message in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(message.role == "user" ? "You" : "Anteroom")
-                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            Text(message.text).textSelection(.enabled)
-                            if message.attachmentCount > 0 {
-                                Label(message.attachmentCount == 1 ? "1 image attached" : "\(message.attachmentCount) images attached",
-                                      systemImage: "paperclip")
-                                    .font(.caption).foregroundStyle(.secondary)
+                        let visible = message.role == "assistant"
+                            ? AssistantDisplay.text(message.text)
+                            : message.text
+                        // Match web ChatMessage: hide assistant turns that are only listing JSON.
+                        if message.role != "assistant" || !visible.isEmpty || message.attachmentCount > 0 {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(message.role == "user" ? "You" : "Anteroom")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                if !visible.isEmpty {
+                                    Text(visible).textSelection(.enabled)
+                                }
+                                if message.attachmentCount > 0 {
+                                    Label(message.attachmentCount == 1 ? "1 image attached" : "\(message.attachmentCount) images attached",
+                                          systemImage: "paperclip")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                             }
+                            .padding(16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 10))
+                            .accessibilityElement(children: .combine)
                         }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 10))
-                        .accessibilityElement(children: .combine)
                     }
                 }
                 .padding(16)
