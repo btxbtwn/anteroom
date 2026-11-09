@@ -1505,6 +1505,8 @@ async def persist_generated_listing_with_repair(
     parsed = extract_listing_json(full_text)
     repaired = False
     if not parsed:
+        # Release the pooled connection while a model repairs the JSON.
+        db.rollback()
         repaired_json = await repair_listing_json(provider, full_text)
         if repaired_json:
             log.info("repaired malformed listing JSON for %s", conv_id)
@@ -1539,6 +1541,8 @@ async def persist_generated_listing_with_repair(
     notes = str(getattr(conv, "notes", "") or "")
     finalized = False
     if _validation_blockers(listing):
+        # The listing is saved; release the connection while a model fills the gaps.
+        db.rollback()
         updated = await fill_validation_gaps(provider, listing, analysis=analysis, notes=notes)
         if isinstance(updated, dict) and updated:
             check_photos()
