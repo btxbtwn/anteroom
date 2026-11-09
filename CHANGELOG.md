@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.859 — 2026-11-09
+
+- Generated descriptions can now use the full 1,000 characters. They were cut at 918 to leave room for a title on Depop, which Depop no longer gets.
+
+## 0.1.858 — 2026-11-09
+
+- Keep pages like Sourcing loading on the web while drafts are generating, instead of failing with a database timeout.
+
 ## 0.1.857 — 2026-11-09
 
 - Keep the listing assistant from repeatedly asking which fields to edit and failing before it answers.
