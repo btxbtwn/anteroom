@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.862 — 2026-11-09
+
+- Use eBay's shopping-bag web mark on the marketplace rail so the logos line up evenly.
+
 ## 0.1.861 — 2026-11-09
 
 - The marketplace tabs no longer show yellow "Check this answer against photo or seller evidence" warnings under filled-in required fields, and those notes no longer hold up listing.
