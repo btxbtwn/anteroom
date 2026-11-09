@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.858 — 2026-11-09
+
+- Keep pages like Sourcing loading on the web while drafts are generating, instead of failing with a database timeout.
+
 ## 0.1.857 — 2026-11-09
 
 - Keep the listing assistant from repeatedly asking which fields to edit and failing before it answers.
