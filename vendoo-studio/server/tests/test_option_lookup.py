@@ -167,3 +167,39 @@ def test_unknown_and_readonly_field_targets_are_rejected_and_empty_targets_are_a
     assert targets == [()]
     assert 'Invalid field targets' in provider.messages[1][-1]['content']
     assert 'Invalid field targets' in provider.messages[2][-1]['content']
+
+
+def test_target_handshake_is_removed_after_acknowledgement():
+    catalog = lookup.OptionCatalog({'ebay': {'fields': [{'path': 'size'}]}})
+
+    class HandshakeProvider:
+        async def chat(self, messages, stream=True):
+            system = '\n'.join(m['content'] for m in messages if m['role'] == 'system')
+            if 'Before doing any work' in system:
+                yield '{"_field_targets":["size"]}'
+            else:
+                yield 'Saved size 36.'
+
+    targets = []
+
+    async def collect():
+        return [chunk async for chunk in lookup.chat_with_options(
+            HandshakeProvider(), [], catalog, on_targets=targets.append)]
+
+    assert asyncio.run(collect()) == ['Saved size 36.']
+    assert targets == [('size',)]
+
+
+def test_repeated_targets_do_not_expand_the_accepted_edit_scope():
+    catalog = lookup.OptionCatalog({'ebay': {'fields': [{'path': 'size'}, {'path': 'brand'}]}})
+    provider = Provider(['{"_field_targets":["size"]}',
+                         '{"_field_targets":["brand"]}', 'Saved size 36.'])
+    targets = []
+
+    async def collect():
+        return [chunk async for chunk in lookup.chat_with_options(
+            provider, [], catalog, on_targets=targets.append)]
+
+    assert asyncio.run(collect()) == ['Saved size 36.']
+    assert targets == [('size',)]
+    assert 'already acknowledged' in provider.messages[2][-1]['content']
