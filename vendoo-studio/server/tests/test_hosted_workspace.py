@@ -607,3 +607,25 @@ def test_general_category_fills_each_marketplace_category_on_a_hosted_save(cloud
     assert categories.get('depop') == 'menswear_tshirts'
     assert categories.get('mercari')
     assert categories.get('poshmark')
+
+
+def test_hosted_inventory_reports_unsent_edits(cloud, signing_keys):  # noqa: F811
+    from vendoo_studio.models.marketplace_listing import MarketplaceListing
+
+    client, engine = cloud
+    auth = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=auth, json={'title': 'Edited item'}).json()['id']
+    path = f'/api/conversations/{identity}/listing'
+    first = client.put(path, headers=auth, json={'expected_revision_id': '', 'listing': {'title': 'Original', 'price': 25}}).json()
+    with Session(engine) as db:
+        db.add(MarketplaceListing(user_id=USER_ID, conversation_id=identity, marketplace='ebay',
+                                  state='published', revision_id=first['revision_id']))
+        db.commit()
+    def row():
+        return next(row for row in client.get('/api/conversations', headers=auth).json() if row['id'] == identity)
+    assert row()['unsent_edits'] is False
+    saved = client.put(path, headers=auth, json={'expected_revision_id': first['revision_id'],
+        'listing': {**first['listing'], 'price': 30}})
+    assert saved.status_code == 200
+    assert row()['unsent_edits'] is True
+    assert client.get('/api/conversations', headers=headers(signing_keys, BOB)).json() == []
