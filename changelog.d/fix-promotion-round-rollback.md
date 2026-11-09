@@ -1,1 +1,0 @@
-- A brief database hiccup during an automatic sharing or offer round no longer leaves that round stuck as unfinished in the activity log.

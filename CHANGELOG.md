@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.870 — 2026-11-09
+
+- A brief database hiccup during an automatic sharing or offer round no longer leaves that round stuck as unfinished in the activity log.
+
 ## 0.1.869 — 2026-11-09
 
 - Generating listings for several drafts at once no longer fails with a database timeout while the AI fixes or finishes a listing.
