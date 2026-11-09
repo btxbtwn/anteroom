@@ -26,7 +26,8 @@ import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketp
 type Marketplace = DelistMarketplace;
 const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop"];
 const REMOTE_DRAFT = new Set<Marketplace>(["ebay", "mercari", "depop", "etsy", "poshmark"]);
-// What Delist does on each marketplace: eBay has no delete.
+// What Delist does on each marketplace in the confirm dialog: eBay has no delete.
+// The rail itself always says "Delisted" once the listing is gone.
 const REMOVED: Record<Marketplace, string> = {
   ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted",
 };
@@ -110,7 +111,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
   }
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
-  if (live?.state === "deleted") return { tone: "neutral", label: REMOVED[marketplace] };
+  if (live?.state === "deleted") return { tone: "neutral", label: "Delisted" };
   if (live?.state === "failed") {
     return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error,
       said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };
@@ -753,7 +754,7 @@ export function MarketplacesLayout({
               {selectedStatus.tone !== "live" && (
                 <span className={cn("flex min-w-0 items-center gap-1 text-muted-foreground", selectedStatus.tone === "failed" && "text-destructive-foreground", selectedStatus.tone === "attention" && "text-warning-foreground", selectedStatus.tone === "sold" && "font-medium text-info-foreground")}>
                   {selectedStatus.tone !== "idle" && TONE_ICON[selectedStatus.tone]}
-                  <span className="truncate">{selectedStatus.tone === "idle" ? "Not listed yet" : selectedStatus.label}</span>
+                  <span className="truncate">{selectedStatus.label}</span>
                 </span>
               )}
             </span>
