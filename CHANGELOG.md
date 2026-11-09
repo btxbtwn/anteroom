@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.864 — 2026-11-09
+
+- Save Who made it and What is it as defaults for new listings with the little save button on the Etsy tab.
+
 ## 0.1.863 — 2026-11-09
 
 - Delisting an item everywhere now moves it to Drafts, even when you had marked a marketplace as listed.
