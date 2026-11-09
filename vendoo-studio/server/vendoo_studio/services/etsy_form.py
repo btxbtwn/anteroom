@@ -153,6 +153,11 @@ async def editor_form(snapshot: dict) -> dict:
     lists = list_fields(snapshot)
     weight, size = _package(snapshot)
     when = etsy_when_raw(details, snapshot)
+    from vendoo_studio.services.user_settings import get_listing_field_defaults
+
+    saved = get_listing_field_defaults()
+    who = etsy_who_raw(details) or (saved.get("etsy_specifics.whoMade") or {}).get("label", "")
+    what = etsy_what_raw(details) or (saved.get("etsy_specifics.whatIsIt") or {}).get("label", "")
     values = {
         CATEGORY_PATH: category,
         "etsy_specifics.whenMade": etsy_when_to_store(when, snapshot, etsy_when_options()) if when else "",
@@ -164,8 +169,8 @@ async def editor_form(snapshot: dict) -> dict:
         "quantity": etsy_quantity(snapshot) or snapshot.get("quantity") or "",
         "etsy_specifics.itemWeight": weight,
         "etsy_specifics.itemSize": size,
-        "etsy_specifics.whoMade": etsy_who_raw(details),
-        "etsy_specifics.whatIsIt": etsy_what_raw(details),
+        "etsy_specifics.whoMade": who,
+        "etsy_specifics.whatIsIt": what,
     }
     rows: list[dict] = []
     for captured in catalog()["fields"]:

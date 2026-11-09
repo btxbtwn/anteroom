@@ -18,6 +18,13 @@ final class BusinessAssistantModel {
     private(set) var queued: [AssistantQueuedQuestion] = []
     /// The card whose Apply, Dismiss or Confirm is in flight.
     private(set) var settling: String?
+    /// Stop was tapped and the server is saving what was written so far.
+    private(set) var stopping = false
+    /// Counts of answers that finished, failed or were stopped, for one haptic and one
+    /// VoiceOver announcement each (never per word).
+    private(set) var answersFinished = 0
+    private(set) var answersFailed = 0
+    private(set) var answersStopped = 0
     var error: String?
     var cardError: (id: String, message: String)?
     var text = ""
@@ -26,6 +33,10 @@ final class BusinessAssistantModel {
     /// The conversation the answer being followed belongs to.
     private var followThread: String?
     private var follow: Task<Void, Never>?
+    /// Frames received since the last paint; see LivePaintThrottle.
+    @ObservationIgnored private var pending: AssistantLiveTurn?
+    @ObservationIgnored private var throttle = LivePaintThrottle()
+    @ObservationIgnored private var paintLater: Task<Void, Never>?
 
     /// How often, and how many times, a dropped connection is retried before saying so.
     private static let reconnectDelay: Duration = .milliseconds(1500)
@@ -54,7 +65,7 @@ final class BusinessAssistantModel {
         if followThread != id {
             follow?.cancel()
             follow = nil
-            live = nil
+            setLive(nil)
             followThread = nil
         }
         // Follow-ups wait for the conversation they were asked in.
@@ -127,8 +138,9 @@ final class BusinessAssistantModel {
                 threadID = created.id
                 turns = []
             } catch {
-                live = nil
+                setLive(nil)
                 self.error = error.localizedDescription
+                answersFailed += 1
                 if text.isEmpty { text = question }
                 sendNextQueued()
                 return
@@ -153,9 +165,9 @@ final class BusinessAssistantModel {
         var tries = 0
         while true {
             // A resumed answer is replayed from its first word.
-            if var current = live {
+            if var current = pending ?? live {
                 current.text = ""
-                live = current
+                setLive(current)
             }
             let receive: @MainActor @Sendable (StreamFrame) -> Void = { [weak self] frame in
                 self?.receive(frame, thread: thread, asked: asked)
@@ -186,13 +198,19 @@ final class BusinessAssistantModel {
                     if threadID == thread { self.error = AssistantFormat.lostConnection }
                     break
                 }
-                if question != nil, var current = live {
+                if question != nil, var current = pending ?? live {
                     current.status = "Reconnecting…"
-                    live = current
+                    setLive(current)
                 }
                 try? await Task.sleep(for: Self.reconnectDelay)
                 if Task.isCancelled { break }
             }
+        }
+        paint()
+        // Picking a conversation back up with nothing being written is not an answer.
+        let answered = question != nil || live?.text.isEmpty == false
+        if answered, !Task.isCancelled, followThread == thread {
+            if threadID == thread, error != nil { answersFailed += 1 } else { answersFinished += 1 }
         }
         // Show the saved turns before dropping the live one, so the answer does not blink.
         if threadID == thread {
@@ -207,20 +225,42 @@ final class BusinessAssistantModel {
         await loadThreads()
         guard followThread == thread, !Task.isCancelled else { return }
         follow = nil
-        live = nil
+        setLive(nil)
         followThread = nil
         sendNextQueued()
     }
 
     private func receive(_ frame: StreamFrame, thread: String, asked: Int) {
         guard followThread == thread else { return }
-        var turn = live ?? AssistantLiveTurn(question: nil, asked: asked)
-        switch frame.event {
-        case "message": turn.text += frame.data
-        case "status": turn.status = frame.data
-        case "thinking": turn.status = "Thinking…"
-        default: break
+        var turn = pending ?? live ?? AssistantLiveTurn(question: nil, asked: asked)
+        AssistantFormat.fold(event: frame.event, data: frame.data, into: &turn)
+        pending = turn
+        if throttle.paintsNow(at: .now) {
+            paint()
+        } else if paintLater == nil {
+            paintLater = Task { [weak self] in
+                try? await Task.sleep(for: LivePaintThrottle.interval)
+                guard !Task.isCancelled else { return }
+                self?.paint()
+            }
         }
+    }
+
+    /// Show the frames held since the last paint.
+    private func paint() {
+        paintLater?.cancel()
+        paintLater = nil
+        guard let next = pending else { return }
+        pending = nil
+        live = next
+        throttle.painted(at: .now)
+    }
+
+    /// Replace the answer being written, dropping any frames not yet painted.
+    private func setLive(_ turn: AssistantLiveTurn?) {
+        paintLater?.cancel()
+        paintLater = nil
+        pending = nil
         live = turn
     }
 
@@ -233,12 +273,19 @@ final class BusinessAssistantModel {
     }
 
     func stop() async {
+        guard !stopping else { return }
+        stopping = true
+        answersStopped += 1
+        defer { stopping = false }
+        // The server saves what was written before this returns.
         try? await api.stopAssistant()
         follow?.cancel()
         follow = nil
-        live = nil
         followThread = nil
+        paint()
+        // Keep the partial answer on screen until its saved copy arrives, so it does not blink.
         if let threadID { await reloadTurns(threadID, showLoading: false) }
+        setLive(nil)
         sendNextQueued()
     }
 

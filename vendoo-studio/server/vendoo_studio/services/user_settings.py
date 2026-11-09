@@ -50,15 +50,36 @@ DEFAULT_SETTLED_SHELF_EXPANDED = True
 PACKAGE_DIMENSIONS_KEY = "package_dimensions_in"
 SHIPS_FROM_ZIP_KEY = "ships_from_zip"
 MERCARI_SHIPPING_LABEL_KEY = "mercari_shipping_label"
+LISTING_FIELD_DEFAULTS_KEY = "listing_field_defaults"
 EBAY_INVENTORY_LOCATION_KEY = "ebay_inventory_location"
 MAX_SHIPPING_CLASS_ID = 40
 MAX_SHIPPING_LABEL = 120
-# Per-field answers the seller wants every listing to start with. Each maps to
-# the setting that already owns it, so one value is never stored twice.
+MAX_LISTING_FIELD_DEFAULT = 120
+# Per-field answers the seller wants every listing to start with. Mercari ZIP
+# and shipping label keep their own settings so one value is never stored twice;
+# the Etsy detail answers live under LISTING_FIELD_DEFAULTS_KEY.
 LISTING_FIELD_DEFAULTS = frozenset({
     "mercari_specifics.shipsFrom",
     "mercari_specifics.shippingClassId",
+    "etsy_specifics.whoMade",
+    "etsy_specifics.whatIsIt",
 })
+_ETSY_FIELD_DEFAULT_CHOICES = {
+    "etsy_specifics.whoMade": frozenset({
+        "Another company or person",
+        "A member of my shop",
+        "I did",
+    }),
+    "etsy_specifics.whatIsIt": frozenset({
+        "A finished product",
+        "A supply or tool to make things",
+    }),
+}
+# Editor path → listing JSON keys that already answer the same Etsy question.
+_ETSY_FIELD_DEFAULT_KEYS = {
+    "etsy_specifics.whoMade": ("who_made", "whoMade", "whoMadeIt"),
+    "etsy_specifics.whatIsIt": ("what_is", "whatIs", "whatIsIt"),
+}
 DEFAULT_EBAY_INVENTORY_LOCATION = "70125"
 _INVENTORY_LOCATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,'#-]{0,79}$")
 DEFAULT_PACKAGE_DIMENSIONS = {"length": 13, "width": 10, "height": 3}
@@ -177,6 +198,8 @@ def get_listing_field_defaults() -> dict[str, dict[str, str]]:
             "value": shipping_label["id"],
             "label": shipping_label["label"],
         }
+    for path, saved in _stored_listing_field_defaults().items():
+        defaults[path] = saved
     return defaults
 
 
@@ -187,13 +210,68 @@ def _listing_field_default_key(path: object) -> str:
     return key
 
 
+def _stored_listing_field_defaults() -> dict[str, dict[str, str]]:
+    raw = read_settings().get(LISTING_FIELD_DEFAULTS_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for path, allowed in _ETSY_FIELD_DEFAULT_CHOICES.items():
+        row = raw.get(path)
+        if not isinstance(row, dict):
+            continue
+        value = " ".join(str(row.get("value") or "").split())
+        label = " ".join(str(row.get("label") or value).split())
+        if value not in allowed or label not in allowed:
+            continue
+        if len(value) > MAX_LISTING_FIELD_DEFAULT or len(label) > MAX_LISTING_FIELD_DEFAULT:
+            continue
+        out[path] = {"value": value, "label": label}
+    return out
+
+
+def _set_stored_listing_field_default(path: str, value: object, label: object) -> None:
+    allowed = _ETSY_FIELD_DEFAULT_CHOICES[path]
+    clean_value = " ".join(str(value or "").split())
+    clean_label = " ".join(str(label or clean_value).split())
+    if clean_value not in allowed:
+        raise ValueError("Choose one of the current answers for that field.")
+    if clean_label not in allowed:
+        clean_label = clean_value
+    saved = {"value": clean_value, "label": clean_label}
+
+    def mutator(payload: dict) -> None:
+        held = payload.get(LISTING_FIELD_DEFAULTS_KEY)
+        rows = dict(held) if isinstance(held, dict) else {}
+        rows[path] = saved
+        payload[LISTING_FIELD_DEFAULTS_KEY] = rows
+
+    update_settings(mutator)
+
+
+def _clear_stored_listing_field_default(path: str) -> None:
+    def mutator(payload: dict) -> None:
+        held = payload.get(LISTING_FIELD_DEFAULTS_KEY)
+        if not isinstance(held, dict) or path not in held:
+            return
+        rows = dict(held)
+        rows.pop(path, None)
+        if rows:
+            payload[LISTING_FIELD_DEFAULTS_KEY] = rows
+        else:
+            payload.pop(LISTING_FIELD_DEFAULTS_KEY, None)
+
+    update_settings(mutator)
+
+
 def set_listing_field_default(path: object, value: object, label: object = None) -> dict[str, dict[str, str]]:
     """Save one field's value as the default every listing starts with."""
     key = _listing_field_default_key(path)
     if key == "mercari_specifics.shipsFrom":
         set_ships_from_zip(value)
-    else:
+    elif key == "mercari_specifics.shippingClassId":
         set_mercari_shipping_label(class_id=value, label=label)
+    else:
+        _set_stored_listing_field_default(key, value, label)
     return get_listing_field_defaults()
 
 
@@ -202,9 +280,34 @@ def clear_listing_field_default(path: object) -> dict[str, dict[str, str]]:
     key = _listing_field_default_key(path)
     if key == "mercari_specifics.shipsFrom":
         set_ships_from_zip("")
-    else:
+    elif key == "mercari_specifics.shippingClassId":
         clear_mercari_shipping_label()
+    else:
+        _clear_stored_listing_field_default(key)
     return get_listing_field_defaults()
+
+
+def apply_listing_field_defaults(listing: dict) -> bool:
+    """Fill empty Etsy who/what/type answers from the seller's saved defaults."""
+    if not isinstance(listing, dict):
+        return False
+    defaults = _stored_listing_field_defaults()
+    if not defaults:
+        return False
+    specifics = listing.get("etsy_specifics")
+    specifics = dict(specifics) if isinstance(specifics, dict) else {}
+    changed = False
+    for path, aliases in _ETSY_FIELD_DEFAULT_KEYS.items():
+        saved = defaults.get(path)
+        if not saved:
+            continue
+        if any(str(specifics.get(alias) or "").strip() for alias in aliases):
+            continue
+        specifics[aliases[0]] = saved["label"]
+        changed = True
+    if changed:
+        listing["etsy_specifics"] = specifics
+    return changed
 
 
 def normalize_ebay_inventory_location(value: object) -> str:
