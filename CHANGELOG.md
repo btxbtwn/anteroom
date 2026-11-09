@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.849 — 2026-11-09
+
+- Stay on the current listing when refreshing the page, including on phones.
+
 ## 0.1.848 — 2026-11-08
 
 - Fix sourcing refreshes failing because a required provider dependency was missing from the hosted app.
