@@ -531,15 +531,23 @@ export function StructuredEditor({
       const fallback = inventoryLocation?.location || "";
       const packageHint = tab === "general" && packageDefault
         ? `${packageDefault.length}x${packageDefault.width}x${packageDefault.height}` : "";
-      if (!fallback && !packageHint) return rows;
-      return rows.map((field) => (
-        fallback && field.key === "zipCode" && !formFieldText(getListingEditorValue(listing, field.key))
-          ? { ...field, defaultValue: fallback }
-          : packageHint && field.key === "package_dimensions_in" ? { ...field, placeholder: packageHint }
-          : field
-      ));
+      const saved = savedDefaults?.defaults;
+      if (!fallback && !packageHint && !saved) return rows;
+      return rows.map((field) => {
+        if (fallback && field.key === "zipCode" && !formFieldText(getListingEditorValue(listing, field.key))) {
+          return { ...field, defaultValue: fallback };
+        }
+        if (packageHint && field.key === "package_dimensions_in") {
+          return { ...field, placeholder: packageHint };
+        }
+        if (field.saveAsDefault && saved?.[field.key]
+          && !formFieldText(getListingEditorValue(listing, field.key))) {
+          return { ...field, defaultValue: saved[field.key].label };
+        }
+        return field;
+      });
     },
-    [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location, packageDefault],
+    [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location, packageDefault, savedDefaults?.defaults],
   );
   const [drafts, setDrafts] = React.useState<Record<string, string>>({});
   // The seller's open or closed choice for "Show more" and "See … options". A saved value starts open.
@@ -1277,8 +1285,8 @@ const CATEGORY_FORM_LABELS: Record<string, string[]> = {
   mercari: ["Title", "Description", "Price", "Mercari price", "Brand", "Condition"],
   depop: ["Title", "Description", "Price", "Depop price", "Brand", "Condition", "Category", "Source",
     "Age", "Style", "Parcel Size"],
-  etsy: ["Title", "Description", "Price", "Etsy price", "Quantity", "Who Made It?", "What Is It?",
-    "When Was It Made?", "Etsy category"],
+  etsy: ["Title", "Description", "Price", "Etsy price", "Quantity", "What type of item is it?",
+    "Who Made It?", "What Is It?", "When Was It Made?", "Etsy category"],
 
 };
 

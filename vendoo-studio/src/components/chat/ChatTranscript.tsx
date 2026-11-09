@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -13,15 +13,24 @@ export function ChatTranscript({
   scroll,
   className,
   laneClassName,
+  busy = false,
+  doneMessage = "Reply finished.",
   children,
 }: {
   scroll: ReturnType<typeof useChatScroll>;
   className?: string;
   laneClassName?: string;
+  /** True while a reply or generation is running. */
+  busy?: boolean;
+  /** Said to screen readers once when the running reply ends. */
+  doneMessage?: string;
   children: ReactNode;
 }) {
   return (
     <div className={cn("relative flex min-h-0 flex-1 flex-col", className)}>
+      {/* One polite region for the whole transcript. Streamed text is never
+          announced word by word; only that the reply has finished. */}
+      <DoneAnnouncer busy={busy} doneMessage={doneMessage} />
       <div
         ref={scroll.setScrollEl}
         className="chat-scroll messages-timeline-scroll h-full min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain [overflow-anchor:none]"
@@ -51,4 +60,25 @@ export function ChatTranscript({
       ) : null}
     </div>
   );
+}
+
+/** The text for the transcript's status region: set once when a run ends, then
+ * cleared so the next run's end is announced again. */
+function DoneAnnouncer({ busy, doneMessage }: { busy: boolean; doneMessage: string }) {
+  const [wasBusy, setWasBusy] = useState(busy);
+  const [message, setMessage] = useState(doneMessage);
+  const [text, setText] = useState("");
+  // What the run was doing is read while it runs: once it ends, the caller's
+  // label has already moved on.
+  if (busy && message !== doneMessage) setMessage(doneMessage);
+  if (busy !== wasBusy) {
+    setWasBusy(busy);
+    setText(busy ? "" : message);
+  }
+  useEffect(() => {
+    if (!text) return;
+    const timer = setTimeout(() => setText(""), 4000);
+    return () => clearTimeout(timer);
+  }, [text]);
+  return <div role="status" className="sr-only">{text}</div>;
 }

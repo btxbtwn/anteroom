@@ -109,6 +109,8 @@ def test_etsy_tab_is_etsys_page_with_this_categorys_attributes(studio):
     assert {rows[path]["group"] for path in ("etsy_specifics.category_specifics.Occasion", "etsy_specifics.materials")} == {"Attributes"}
     assert rows["etsy_specifics.whoMade"]["value"] == "Another company or person"
     assert rows["etsy_specifics.whoMade"]["options"] == ["I did", "A member of my shop", "Another company or person"]
+    assert rows["etsy_specifics.whoMade"]["save_as_default"] is True
+    assert rows["etsy_specifics.whatIsIt"]["save_as_default"] is True
     assert rows["etsy_specifics.whenMade"]["value"] == "2020 - 2026 (Recently)"
     # What List decides without the seller is shown, locked, as List sends it.
     assert rows["etsy_specifics.itemWeight"]["value"] == "8 oz" and rows["etsy_specifics.itemWeight"]["locked"]

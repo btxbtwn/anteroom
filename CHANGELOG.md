@@ -6,6 +6,37 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.865 — 2026-11-09
+
+- Show each word of an assistant reply as it arrives, instead of a paragraph at a time, with a caret where it is writing.
+- Press Esc in the message box to stop a reply, and keep what the listing assistant had already written when you stop it.
+- Screen readers hear once when a reply finishes, not every word.
+- On the iPhone, the assistant no longer pulls you back to the bottom while you read, keeps the partial answer when you stop it, and keeps Stop next to the message box.
+
+## 0.1.864 — 2026-11-09
+
+- Save Who made it and What is it as defaults for new listings with the little save button on the Etsy tab.
+
+## 0.1.863 — 2026-11-09
+
+- Delisting an item everywhere now moves it to Drafts, even when you had marked a marketplace as listed.
+
+## 0.1.862 — 2026-11-09
+
+- Use eBay's shopping-bag web mark on the marketplace rail so the logos line up evenly.
+
+## 0.1.861 — 2026-11-09
+
+- The marketplace tabs no longer show yellow "Check this answer against photo or seller evidence" warnings under filled-in required fields, and those notes no longer hold up listing.
+
+## 0.1.860 — 2026-11-09
+
+- Chat edits no longer fail with "Native option lookup did not finish" when the assistant names the fields it will change in a slightly different format, and plain answers to questions come straight back.
+
+## 0.1.859 — 2026-11-09
+
+- Generated descriptions can now use the full 1,000 characters. They were cut at 918 to leave room for a title on Depop, which Depop no longer gets.
+
 ## 0.1.858 — 2026-11-09
 
 - Keep pages like Sourcing loading on the web while drafts are generating, instead of failing with a database timeout.

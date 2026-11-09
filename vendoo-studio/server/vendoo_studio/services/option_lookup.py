@@ -18,6 +18,7 @@ PAGE_SIZE = 20
 MAX_SEARCHES = 24
 MAX_ROUNDS = 12
 MAX_RESULT_CHARS = 12000
+MAX_TARGET_REPLIES = 4
 
 TOOL_RULES = (
     '\n\nNative dropdown lookup is available. For a field marked options_lookup, request choices '
@@ -101,14 +102,28 @@ class OptionCatalog:
 
 
 def _request(text: str) -> dict | None:
+    """Find a protocol request, alone or in a fenced block beside prose."""
     stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = stripped.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    try:
-        result = json.loads(stripped)
-    except ValueError:
-        return None
-    return result if isinstance(result, dict) and ("_option_search" in result or "_field_targets" in result) else None
+    candidates = [stripped]
+    if "```" in stripped:
+        # Odd pieces sit inside fences; drop each block's language tag.
+        candidates += [block.split("\n", 1)[-1] if block.lstrip().startswith(("json", "JSON")) else block
+                       for block in stripped.split("```")[1::2]]
+    for candidate in candidates:
+        try:
+            result = json.loads(candidate.strip())
+        except ValueError:
+            continue
+        if isinstance(result, dict) and ("_option_search" in result or "_field_targets" in result):
+            return result
+    return None
+
+
+def _target_path(path: Any) -> Any:
+    """Accept a JSON Patch pointer (/ebay_specifics/brand) for a dotted form path."""
+    if isinstance(path, str) and path.startswith("/"):
+        return path[1:].replace("/", ".")
+    return path
 
 
 async def chat_with_options(provider, messages: list[dict], catalog: OptionCatalog, *, stream: bool = True, on_targets=None):
@@ -130,7 +145,8 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
             'Use only those exact paths; respect the named marketplace. Do not lock other marketplaces '
             'or unrelated fields. For a question or an ambiguous request, declare [] and ask for clarification '
             'instead of changing fields. These fields are temporarily locked while you work. '
-            'After the acknowledgement, complete the request, modifying only declared fields.\n'
+            'After the acknowledgement, complete the request, modifying only declared fields. '
+            'These protocol replies are the only exception to the rule against JSON-only replies.\n'
         )
     rules = TOOL_RULES + target_rules
     for message in history:
@@ -142,9 +158,18 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
         history.insert(0, message)
     protocol_message = message
     searches = 0
+    target_replies = 0
     targets_declared = on_targets is None
     allowed_targets = {path for (_market, path), row in catalog.rows.items()
                        if path and not row.get("locked") and row.get("input_type") not in {"note", "badge"}}
+
+    def target_reply(text: str, note: str) -> None:
+        nonlocal target_replies
+        target_replies += 1
+        if target_replies > MAX_TARGET_REPLIES:
+            raise RuntimeError("The listing assistant did not say which fields it would change. Retry this prompt.")
+        history.extend([{"role": "assistant", "content": text}, {"role": "user", "content": note}])
+
     for _round in range(MAX_ROUNDS + 1):
         parts = []
         async for chunk in provider.chat(history, stream=stream):
@@ -156,34 +181,39 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
         text = "".join(parts)
         request = _request(text)
         if request is None:
-            if not targets_declared:
-                history += [{"role": "assistant", "content": text},
-                            {"role": "user", "content": 'Declare _field_targets before answering or changing fields.'}]
+            if not targets_declared and on_targets is not None:
+                if "```" not in text:
+                    # A plain answer changes nothing; an empty scope saves nothing.
+                    on_targets(())
+                    yield text
+                    return
+                target_reply(text, 'Declare _field_targets before answering or changing fields. '
+                                   'Reply ONLY with {"_field_targets":[...]} this time.')
                 continue
             yield text
             return
         if "_field_targets" in request and on_targets is not None:
             if targets_declared:
-                history += [{"role": "assistant", "content": text}, {"role": "user", "content": (
-                    "Field targets already acknowledged and cannot change. Do not declare them again. "
-                    "Complete the request using only the previously acknowledged fields.")}]
+                target_reply(text, "Field targets already acknowledged and cannot change. Do not declare them again. "
+                                   "Complete the request using only the previously acknowledged fields.")
                 continue
-            paths = request["_field_targets"]
-            valid = isinstance(paths, list) and all(isinstance(path, str) and path in allowed_targets for path in paths)
-            if valid:
+            raw = request["_field_targets"]
+            paths = [_target_path(path) for path in raw] if isinstance(raw, list) else None
+            rejected = [path for path in paths or [] if not isinstance(path, str) or path not in allowed_targets]
+            if paths is not None and not rejected:
                 on_targets(tuple(sorted(set(paths))))
                 targets_declared = True
                 # The handshake applies once, not at the start of every model call.
                 protocol_message["content"] = protocol_message["content"].removesuffix(target_rules) + (
                     "\nField targets have been acknowledged. Do not declare _field_targets again. "
                     "Complete the request, modifying only the acknowledged fields.\n")
-            history += [{"role": "assistant", "content": text}, {"role": "user", "content": (
-                'Field targets acknowledged. Complete the request using only these fields.' if valid else
-                'Invalid field targets. Declare exact editable paths from the current forms, or [] for no changes.')}]
+                target_reply(text, 'Field targets acknowledged. Complete the request using only these fields.')
+                continue
+            target_reply(text, 'Invalid field targets' + (f": {json.dumps(rejected, ensure_ascii=False)}" if rejected else "")
+                         + '. Declare exact editable path values from the current forms rows, or [] for no changes.')
             continue
         if not targets_declared:
-            history += [{"role": "assistant", "content": text},
-                        {"role": "user", "content": 'Declare _field_targets before looking up choices.'}]
+            target_reply(text, 'Declare _field_targets before looking up choices.')
             continue
         batch = request.get("_option_search")
         if not isinstance(batch, list) or not 1 <= len(batch) <= 4:

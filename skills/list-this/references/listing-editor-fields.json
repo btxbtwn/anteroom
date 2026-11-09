@@ -147,11 +147,13 @@
   "etsy": [
     {
       "key": "etsy_specifics.whoMade",
-      "label": "Who Made It?"
+      "label": "Who Made It?",
+      "saveAsDefault": true
     },
     {
       "key": "etsy_specifics.whatIsIt",
-      "label": "What Is It?"
+      "label": "What Is It?",
+      "saveAsDefault": true
     },
     {
       "key": "etsy_specifics.whenMade",
