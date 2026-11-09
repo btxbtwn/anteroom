@@ -23,12 +23,13 @@ from vendoo_studio.services.suggestions import list_suggestions
 
 @pytest.mark.parametrize('part', ['screen', 'listing', 'photos', 'messages', 'activity', 'marketplace-listings', 'copy-preview'])
 def test_editor_reads_release_connections_before_sending_json(cloud, active_connections, signing_keys, monkeypatch, part):  # noqa: F811
-    from starlette.responses import JSONResponse
+    # A route with a response_model sends a plain Response, the rest a JSONResponse.
+    from starlette.responses import Response
 
     client, _engine = cloud
     alice = headers(signing_keys)
     identity = client.post('/api/drafts', headers=alice, json={'title': 'Tee'}).json()['id']
-    send_response = JSONResponse.__call__
+    send_response = Response.__call__
     observed = []
 
     async def send_without_connection(response, scope, receive, send):
@@ -37,7 +38,7 @@ def test_editor_reads_release_connections_before_sending_json(cloud, active_conn
             assert not active_connections, 'Sending an editor response must not reserve a database connection'
         await send_response(response, scope, receive, send)
 
-    monkeypatch.setattr(JSONResponse, '__call__', send_without_connection)
+    monkeypatch.setattr(Response, '__call__', send_without_connection)
     assert client.get(f'/api/conversations/{identity}/{part}', headers=alice).status_code == 200
     assert observed
 

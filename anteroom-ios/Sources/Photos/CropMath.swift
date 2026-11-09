@@ -7,12 +7,12 @@ enum CropMath {
         ("free", "Free", nil), ("1:1", "Square", 1), ("4:5", "4:5", 4.0 / 5), ("3:4", "3:4", 3.0 / 4), ("4:3", "4:3", 4.0 / 3),
     ]
     static let minSide = 0.05
-    static let full = PhotoEdits.CropBox(x: 0, y: 0, width: 1, height: 1)
+    static let full = CropBox(x: 0, y: 0, width: 1, height: 1)
 
     enum Handle { case move, nw, ne, sw, se }
 
     /// The largest centered crop of `aspect` inside a frame of `frameAspect` (width / height).
-    static func centered(_ aspect: Double, frameAspect: Double) -> PhotoEdits.CropBox {
+    static func centered(_ aspect: Double, frameAspect: Double) -> CropBox {
         if frameAspect > aspect {
             let width = aspect / frameAspect
             return .init(x: (1 - width) / 2, y: 0, width: width, height: 1)
@@ -23,8 +23,8 @@ enum CropMath {
 
     /// Drags by `dx`/`dy` (fractions of the frame). Corners resize against the
     /// opposite corner, keep `aspect` when one is chosen, and stay inside the frame.
-    static func drag(_ box: PhotoEdits.CropBox, _ handle: Handle, dx: Double, dy: Double,
-                     aspect: Double?, frameAspect: Double) -> PhotoEdits.CropBox {
+    static func drag(_ box: CropBox, _ handle: Handle, dx: Double, dy: Double,
+                     aspect: Double?, frameAspect: Double) -> CropBox {
         func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double { min(high, max(low, value)) }
         if handle == .move {
             return .init(x: clamp(box.x + dx, 0, 1 - box.width), y: clamp(box.y + dy, 0, 1 - box.height),

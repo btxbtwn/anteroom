@@ -42,7 +42,7 @@ struct BusinessAssistantView: View {
                         .disabled(model.isEmpty)
                 }
             }
-            .navigationDestination(for: ListingSummary.self) { listing in
+            .navigationDestination(for: ConversationSummary.self) { listing in
                 ListingEditorView(api: model.api, listing: listing) {}
             }
             .navigationDestination(for: ProvidersDestination.self) { _ in
@@ -54,7 +54,7 @@ struct BusinessAssistantView: View {
             .environment(\.openURL, OpenURLAction { url in
                 // Answers link the listings they name as `#listing-<id>`; open those here.
                 guard let id = AssistantFormat.linkedListingID(url.absoluteString) else { return .systemAction }
-                path.append(ListingSummary(id: id, title: nil))
+                path.append(ConversationSummary(id: id, title: nil))
                 return .handled
             })
             .task { await model.loadThreads() }
@@ -358,7 +358,7 @@ private struct ChangesCard: View {
             Text(AssistantFormat.changesHeading(changes)).font(.subheadline.weight(.semibold))
             ForEach(items) { item in
                 VStack(alignment: .leading, spacing: 4) {
-                    NavigationLink(value: ListingSummary(id: item.listingID, title: item.title)) {
+                    NavigationLink(value: ConversationSummary(id: item.listingID, title: item.title)) {
                         Text(item.title).font(.subheadline.weight(.medium)).multilineTextAlignment(.leading)
                     }
                     ForEach(item.fields, id: \.field) { change in

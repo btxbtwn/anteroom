@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { ListingData, ListingResponse } from "./types";
+import type { ListingData, ListingDocument } from "./types";
 import { listingCategorySignature } from "../components/nativeFormStability";
 import { notifyUnsavedWork, registerUnsavedWork } from "../lib/unsavedWork";
 
@@ -65,7 +65,7 @@ class ListingEdits {
 
   save = (listing: ListingData) => {
     if (!this.state.draft) {
-      const saved = this.client.getQueryData<ListingResponse>(["listing", this.id]);
+      const saved = this.client.getQueryData<ListingDocument>(["listing", this.id]);
       this.revisionId = saved?.current_revision_id ?? "";
       this.base = saved?.listing ?? {};
     }
@@ -102,8 +102,8 @@ class ListingEdits {
         this.revisionId = result.revision_id;
         this.base = result.listing;
         const pending = this.state.draft === submitted ? null : rebase(result.listing, submitted, this.state.draft) as ListingData;
-        const previous = this.client.getQueryData<ListingResponse>(["listing", this.id]);
-        this.client.setQueryData<ListingResponse>(["listing", this.id], {
+        const previous = this.client.getQueryData<ListingDocument>(["listing", this.id]);
+        this.client.setQueryData<ListingDocument>(["listing", this.id], {
           conversation_id: this.id, current_revision_id: result.revision_id, listing: result.listing,
           revision_count: (previous?.revision_count ?? 0) + 1, can_send: result.validation.can_send,
           errors: result.validation.errors, warnings: result.validation.warnings, etsy_eligible: result.etsy_eligible,

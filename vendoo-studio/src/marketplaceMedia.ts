@@ -2,7 +2,7 @@
 // item's photos in item order until the seller changes its own pick, kept at
 // `marketplace_photos.<marketplace>` on the listing; the server resolves the same
 // pick the same way (services/marketplace_media.py) when it sends.
-import type { ListingData, Photo } from "./api/types";
+import type { ListingData, ListingPhoto } from "./api/types";
 import type { ListingVideoRules } from "./api/listingVideos";
 import { cloneListing } from "./listingPaths";
 
@@ -11,9 +11,9 @@ export const MEDIA_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari"
 
 export interface FormPhotos {
   /** What the marketplace is sent, in order, before its limit. */
-  picked: Photo[];
+  picked: ListingPhoto[];
   /** Item photos and this form's own photos it leaves off. */
-  unticked: Photo[];
+  unticked: ListingPhoto[];
   /** The form has its own pick rather than the item's photos. */
   custom: boolean;
 }
@@ -25,16 +25,16 @@ export function pickedIds(listing: ListingData | undefined, marketplace: string)
   return [...new Set(chosen.map((id) => String(id).trim()).filter(Boolean))];
 }
 
-export function formPhotos(listing: ListingData | undefined, item: Photo[], own: Photo[], marketplace: string): FormPhotos {
+export function formPhotos(listing: ListingData | undefined, item: ListingPhoto[], own: ListingPhoto[], marketplace: string): FormPhotos {
   const usable = new Map([...item, ...own].map((photo) => [photo.id, photo]));
-  const chosen = pickedIds(listing, marketplace).map((id) => usable.get(id)).filter((photo): photo is Photo => Boolean(photo));
+  const chosen = pickedIds(listing, marketplace).map((id) => usable.get(id)).filter((photo): photo is ListingPhoto => Boolean(photo));
   const picked = chosen.length ? chosen : item;
   const sent = new Set(picked.map((photo) => photo.id));
   return { picked, unticked: [...usable.values()].filter((photo) => !sent.has(photo.id)), custom: chosen.length > 0 };
 }
 
 /** The listing with this form's pick set. A pick equal to the item's photos in item order is no pick at all. */
-export function withPick(listing: ListingData, marketplace: string, ids: string[], item: Photo[]): ListingData {
+export function withPick(listing: ListingData, marketplace: string, ids: string[], item: ListingPhoto[]): ListingData {
   const updated = cloneListing(listing);
   const picks = { ...(updated.marketplace_photos as Record<string, unknown> | undefined) };
   const itemOrder = item.map((photo) => photo.id);
@@ -53,7 +53,7 @@ export function withPick(listing: ListingData, marketplace: string, ids: string[
  * stays in the seller's order; nothing is sent for a pick that only repeated the
  * item's photos anyway.
  */
-export function withoutPick(listing: ListingData, marketplace: string, photoId: string, item: Photo[]): ListingData {
+export function withoutPick(listing: ListingData, marketplace: string, photoId: string, item: ListingPhoto[]): ListingData {
   return withPick(listing, marketplace, pickedIds(listing, marketplace).filter((id) => id !== photoId), item);
 }
 

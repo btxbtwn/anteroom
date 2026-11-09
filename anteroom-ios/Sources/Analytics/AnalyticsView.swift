@@ -330,7 +330,7 @@ struct ListingLink: View {
     var valueHint: String?
 
     var body: some View {
-        NavigationLink(value: ListingSummary(id: id, title: title)) {
+        NavigationLink(value: ConversationSummary(id: id, title: title)) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.subheadline).lineLimit(2).foregroundStyle(.primary)

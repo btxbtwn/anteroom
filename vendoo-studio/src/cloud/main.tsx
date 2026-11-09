@@ -7,7 +7,8 @@ import { createStudioQueryClient } from "../api/queryClient";
 import { installHostedApiSession, studioFetch } from "../api/transport";
 import { forgetDeviceImages } from "../api/privateImages";
 import { App } from "../app/App";
-import { WorkspaceRuntimeProvider, type WorkspaceFeature } from "../app/runtime";
+import { WorkspaceRuntimeProvider } from "../app/runtime";
+import type { WorkspaceRuntime as HostedRuntime } from "../api/types";
 import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
 import { AccountMenu } from "./AccountMenu";
 import { cloudExtension } from "../api/cloudExtension";
@@ -96,8 +97,6 @@ function CloudApp() {
   if (!error && showsLanding(window.location.search, mac)) return <Landing/>;
   return <div className="cloud-auth"><SignIn client={supabase} notice={error} sandbox={sandbox}/></div>;
 }
-
-type HostedRuntime = { features: WorkspaceFeature[]; views: string[]; marketplace_forms: string[]; action_marketplaces: string[] };
 
 function HostedWorkspace({ session }: { session: Session }) {
   const [queryClient] = useState(() => {

@@ -1,6 +1,7 @@
 import { createContext, useContext, type ReactNode } from "react";
+import type { WorkspaceRuntime as HostedRuntime } from "../api/types";
 
-export type WorkspaceFeature = "inventory" | "listing_fields" | "photos" | "preferences" | "generation" | "assistant" | "suggestions" | "marketplace_actions" | "marketplace_sessions" | "photo_edits" | "photo_background" | "chat_attachments" | "bulk_actions" | "bulk_edit" | "bulk_copy" | "bulk_delete" | "bulk_regenerate" | "bulk_markdowns" | "catalog_categories" | "ebay_offers" | "account_deletion";
+export type WorkspaceFeature = HostedRuntime["features"][number];
 export interface WorkspaceRuntime {
   hosted: boolean;
   features: ReadonlySet<WorkspaceFeature>;

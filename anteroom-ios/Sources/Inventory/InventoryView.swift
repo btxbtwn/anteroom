@@ -9,18 +9,18 @@ struct InventoryView: View {
     @Environment(LiveChanges.self) private var live: LiveChanges?
     @State private var model: InventoryModel
     @State private var search = ""
-    @State private var path: [ListingSummary] = []
+    @State private var path: [ConversationSummary] = []
     /// The listing in the editor beside the list, in the side-by-side layout.
-    @State private var open: ListingSummary?
+    @State private var open: ConversationSummary?
     @State private var creatingListing = false
     @State private var bulkListing = false
-    @State private var renaming: ListingSummary?
+    @State private var renaming: ConversationSummary?
     @State private var newTitle = ""
-    @State private var deleting: ListingSummary?
+    @State private var deleting: ConversationSummary?
     @State private var selecting = false
     @State private var selected: Set<String> = []
     @State private var bulk: BulkAction?
-    @State private var templating: ListingSummary?
+    @State private var templating: ConversationSummary?
 
     init(api: AnteroomAPI) {
         _model = State(initialValue: InventoryModel(api: api))
@@ -47,7 +47,7 @@ struct InventoryView: View {
                 }
             } else {
                 NavigationStack(path: $path) {
-                    inventory.navigationDestination(for: ListingSummary.self) { editor($0) }
+                    inventory.navigationDestination(for: ConversationSummary.self) { editor($0) }
                 }
             }
         }
@@ -64,12 +64,12 @@ struct InventoryView: View {
         }
     }
 
-    private func editor(_ listing: ListingSummary) -> some View {
+    private func editor(_ listing: ConversationSummary) -> some View {
         ListingEditorView(api: model.api, listing: listing) { Task { await model.reload() } }
     }
 
     /// Opens the listing beside the list, or pushes it on iPhone.
-    private func show(_ listing: ListingSummary) {
+    private func show(_ listing: ConversationSummary) {
         if sideBySide {
             open = listing
         } else {
@@ -79,7 +79,7 @@ struct InventoryView: View {
 
     /// The web's phone row (sidebar/ListingRow.tsx): no disclosure chevron, and
     /// the row's actions behind one full-size "…" button.
-    private func link(_ listing: ListingSummary, hint: String?) -> some View {
+    private func link(_ listing: ConversationSummary, hint: String?) -> some View {
         let row = ListingRow(api: model.api, listing: listing, hint: hint, selling: model.preferredMarketplaces)
         return HStack(spacing: 0) {
             if sideBySide {
@@ -107,7 +107,7 @@ struct InventoryView: View {
     }
 
     @ViewBuilder
-    private func actions(_ listing: ListingSummary) -> some View {
+    private func actions(_ listing: ConversationSummary) -> some View {
         Button("Rename", systemImage: "pencil") {
             newTitle = listing.title ?? ""
             renaming = listing
@@ -284,7 +284,7 @@ struct InventoryView: View {
     }
 
     @ViewBuilder
-    private func emptyState(rows: [ListingSummary]) -> some View {
+    private func emptyState(rows: [ConversationSummary]) -> some View {
         if rows.isEmpty && model.hasLoaded {
             if model.listings.isEmpty {
                 ContentUnavailableView {
@@ -344,7 +344,7 @@ struct InventoryView: View {
     }
 
     /// The selection in the order the list shows it.
-    private func ordered(_ rows: [ListingSummary]) -> [String] {
+    private func ordered(_ rows: [ConversationSummary]) -> [String] {
         rows.map(\.id).filter(selected.contains)
     }
 
@@ -482,7 +482,7 @@ private struct StatusPillStyle: ViewModifier {
 
 struct ListingRow: View {
     let api: AnteroomAPI
-    let listing: ListingSummary
+    let listing: ConversationSummary
     var hint: String?
     var selling: [String] = []
     @Environment(AppearanceModel.self) private var appearance
@@ -504,14 +504,14 @@ struct ListingRow: View {
 /// The web's listing row (sidebar/ListingRow.tsx): cover, one-line name, the
 /// lifecycle dot and word, then a logo for each marketplace it is listed on.
 struct ListingRowContent<Thumbnail: View>: View {
-    let listing: ListingSummary
+    let listing: ConversationSummary
     var bySKU = false
     var hint: String?
     /// The marketplaces the seller sells on; the logos show only these.
     var selling: [String] = []
     let thumbnail: Thumbnail
 
-    init(listing: ListingSummary, bySKU: Bool = false, hint: String? = nil, selling: [String] = [],
+    init(listing: ConversationSummary, bySKU: Bool = false, hint: String? = nil, selling: [String] = [],
          @ViewBuilder thumbnail: () -> Thumbnail) {
         self.listing = listing
         self.bySKU = bySKU
@@ -543,14 +543,14 @@ struct ListingRowContent<Thumbnail: View>: View {
                         Text(listing.statusLabel)
                             .foregroundStyle(listing.inventoryStatus == "failed" ? WorkspaceStyle.destructive : WorkspaceStyle.mutedText)
                     }
-                    if listing.status == "sold", let missing = listing.missingSaleData, !missing.isEmpty {
+                    if listing.status == "sold", !listing.missingSaleData.isEmpty {
                         Text("Missing sale data")
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(WorkspaceStyle.warning)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(WorkspaceStyle.warning.opacity(0.14), in: Capsule())
-                            .accessibilityLabel("Missing sale data: \(missing.joined(separator: ", "))")
+                            .accessibilityLabel("Missing sale data: \(listing.missingSaleData.joined(separator: ", "))")
                     }
                     if let hint {
                         Text("· \(hint)").foregroundStyle(WorkspaceStyle.mutedText).lineLimit(1)

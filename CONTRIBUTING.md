@@ -25,6 +25,7 @@ The full loop (diagnose, reproduce as a failing test, fix, verify) and the rules
 | `vendoo-extension/` | `node --check` on changed JS files; `node --test 'vendoo-extension/tests/*.test.js'`; `python -m json.tool vendoo-extension/manifest.json` |
 | `skills/list-this/` | Confirm `SKILL.md` and reference JSON still parse |
 | `changelog.d/` notes | `python vendoo-studio/scripts/check-changelog.py` |
+| Shared API contract (`contracts/`, generated client models) | `python vendoo-studio/scripts/api-contract.py --check` (also run by the backend suite) |
 
 CI on every pull request and push to `main` runs these jobs and a secret scan. Merging to `main` releases: it bumps the version, builds the macOS app, uploads the iPhone app to TestFlight when it changed, and migrates and deploys the hosted API to production. Merge only when the seller asks.
 

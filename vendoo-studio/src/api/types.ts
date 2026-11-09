@@ -1,84 +1,28 @@
-/** Response shapes for the Studio FastAPI backend. Keep in sync with server/vendoo_studio/routes. */
+/** Response shapes for the Studio FastAPI backend. Keep in sync with server/vendoo_studio/routes.
+ * The shared listing contract is generated into contract.gen.ts (see contracts/README.md). */
 import type { AnalyticsAds } from "./adSpend";
 import type { LabelColor } from "../labelColors";
 
+export type {
+  Conversation,
+  ConversationInput,
+  ConversationSummary,
+  CropBox,
+  DeleteConversationResult,
+  DirectRecord,
+  ErrorDetail,
+  HTTPValidationError,
+  ListingDocument,
+  ListingPhoto,
+  ListingSave,
+  ListingSaveResult,
+  ListingValidation,
+  PhotoEdits,
+  WorkspaceRuntime,
+} from "./contract.gen";
+import type { ListingPhoto, ListingValidation } from "./contract.gen";
+
 export type ListingData = Record<string, unknown>;
-
-/** One inventory row. Notes stay on the full Conversation: the sidebar polls
- * every row, and only the open listing reads them. */
-export interface ConversationSummary {
-  id: string;
-  title: string | null;
-  status: string;
-  /** The wholesale box this item came out of. */
-  box_id?: string | null;
-  settled_at?: string | null;
-  unsettled_at?: string | null;
-  created_at: string;
-  updated_at: string;
-  cover_photo_url?: string | null;
-  vendoo_status?: string | null;
-  vendoo_cover_url?: string | null;
-  /** What the sidebar filters on: the listing's SKU and price, its Vendoo
-   * labels, and the marketplaces it is live on. */
-  sku?: string | null;
-  price?: number | null;
-  vendoo_labels?: string[];
-  vendoo_marketplaces?: string[];
-  /** Marketplaces Anteroom published directly. Vendoo may still call the item a draft. */
-  direct_marketplaces?: string[];
-  /** Anteroom's own listing record per marketplace, for the inventory table. */
-  direct_records?: Record<string, DirectRecord>;
-  /** Marketplaces Anteroom delisted directly. Vendoo may still call the item listed there. */
-  removed_marketplaces?: string[];
-  /** Units sold on Anteroom's sales ledger, and the most the item was offered with. */
-  units_sold?: number;
-  missing_sale_data?: string[];
-  quantity?: number | null;
-  /** Each marketplace listing's own page, where Vendoo recorded one. */
-  vendoo_listing_urls?: Record<string, string>;
-  /** Vendoo's own time tracking: when the item was created, last modified,
-   * last went live (a relist moves this) and sold, plus the listing and sale
-   * date per marketplace. */
-  vendoo_created_at?: string | null;
-  vendoo_modified_at?: string | null;
-  vendoo_listed_at?: string | null;
-  /** When Anteroom's sales ledger last saw a unit sell. */
-  sold_at?: string | null;
-  vendoo_listed_dates?: Record<string, string>;
-  vendoo_sold_dates?: Record<string, string>;
-  /** When the longest-standing live listing went up, counting Anteroom's own listings. */
-  oldest_listed_at?: string | null;
-  /** When Studio last wrote this listing onto its Vendoo item. A marketplace
-   * listed before this still shows the copy from before that write. */
-  vendoo_form_updated_at?: string | null;
-  /** Marketplaces owed a relist since then, kept across the delist itself. */
-  vendoo_relist_pending?: string[];
-  /** Edited here since the listing was last sent: to its live direct
-   * listings when it has any (Update them), otherwise to Vendoo. */
-  unsent_edits?: boolean;
-  /** False for modern resale: Etsy removes it, so Send leaves Etsy empty. */
-  etsy_eligible?: boolean;
-}
-
-/** One marketplace's direct listing record, as the inventory list carries it. */
-export interface DirectRecord {
-  /** not_saved, draft, saving, publishing, updating, unknown, published or pending_review. */
-  state: string;
-  listing_url?: string | null;
-  /** The last List, Update or Save draft failed. */
-  failed?: boolean;
-  /** Fields the marketplace rejected that the seller has not edited since. */
-  fields?: number;
-  /** The live listing's price on this marketplace, when Anteroom knows it. */
-  price?: number | null;
-  /** When Anteroom's last confirmed List put this listing up. */
-  listed_at?: string | null;
-}
-
-export interface Conversation extends ConversationSummary {
-  notes: string | null;
-}
 
 export interface Message {
   id: string;
@@ -117,92 +61,16 @@ export interface ConversationActivity {
   locked_fields?: string[];
 }
 
-export interface Photo {
-  id: string;
-  conversation_id: string;
-  original_filename: string;
-  mime_type: string;
-  size_bytes: number;
-  display_order: number;
-  width: number | null;
-  height: number | null;
-  created_at: string;
-  url: string;
-  /** The edits served in place of the kept original; null when unedited. */
-  edits?: PhotoEdits | null;
-  /** Set for a photo added on one marketplace's form; only that marketplace can send it. */
-  marketplace?: string | null;
-}
-
-/** A crop as fractions of the turned and straightened photo. */
-export interface CropBox {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-/** Non-destructive edits, rendered by the server from the original upload. */
-export interface PhotoEdits {
-  /** Quarter turns, clockwise. */
-  rotate: 0 | 90 | 180 | 270;
-  /** Degrees clockwise, -45 to 45. */
-  straighten: number;
-  crop: CropBox | null;
-  /** Stops, -2 to 2. */
-  exposure: number;
-  /** -100 to 100. */
-  brightness: number;
-  /** -100 to 100. */
-  contrast: number;
-  /** Colour behind the cut-out item, as #rrggbb; null keeps the photo's own background. */
-  background: string | null;
-}
-
 export interface PhotoUploadResult {
   ok: boolean;
   count: number;
-  photos: Photo[];
+  photos: ListingPhoto[];
   errors?: string[];
   message?: string;
 }
 
 export interface OkResponse {
   ok: boolean;
-}
-
-export interface DeleteConversationResult extends OkResponse {
-  deleted_jobs: number;
-  deleted_photos: number;
-}
-
-export type ValidationIssue = Record<string, string>;
-
-export interface ListingResponse {
-  conversation_id: string;
-  current_revision_id: string | null;
-  listing: ListingData;
-  revision_count: number;
-  can_send: boolean;
-  errors: ValidationIssue[];
-  warnings: ValidationIssue[];
-  /** False for modern resale: Etsy removes it, so Send leaves Etsy empty. */
-  etsy_eligible?: boolean;
-}
-
-export interface ValidationResult {
-  valid: boolean;
-  errors: ValidationIssue[];
-  warnings: ValidationIssue[];
-  info: ValidationIssue[];
-  can_send: boolean;
-}
-
-export interface ListingUpdateResult extends OkResponse {
-  revision_id: string;
-  listing: ListingData;
-  etsy_eligible: boolean;
-  validation: ValidationResult;
 }
 
 export interface ListingRevision {
@@ -292,7 +160,7 @@ export interface PriceDropApplyResult extends OkResponse {
   previous_price: number | null;
   percent: number | null;
   mode: string;
-  validation: ValidationResult;
+  validation: ListingValidation;
 }
 
 /** One listing in a batch markdown review. ``skip_reason`` set means it cannot be dropped. */

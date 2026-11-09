@@ -36,7 +36,7 @@ struct WorkspaceView: View {
         .task { await session.followChanges() }
         .task {
             // Without an answer the workspace opens with the tabs every server has.
-            let offered = (try? await api.runtime()) ?? WorkspaceRuntime()
+            let offered = (try? await api.runtime()) ?? .unavailable
             selection = offered.views.contains("assistant") ? .assistant : .inventory
             runtime = offered
         }

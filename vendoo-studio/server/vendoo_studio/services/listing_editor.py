@@ -162,6 +162,6 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         "revision_id": revision.id,
         "listing": revision.listing_json,
         "etsy_eligible": etsy_eligible(revision.listing_json),
-        "validation": validation.model_dump(),
+        "validation": {**validation.model_dump(), "can_send": validation.can_send},
     }
 
