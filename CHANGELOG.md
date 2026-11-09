@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.869 — 2026-11-09
+
+- Generating listings for several drafts at once no longer fails with a database timeout while the AI fixes or finishes a listing.
+
 ## 0.1.868 — 2026-11-09
 
 - When the hosted app briefly can't reach its database or sign-in keys, the error report now says why, so these outages can be traced and fixed.
