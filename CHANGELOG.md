@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.855 — 2026-11-09
+
+- A seller stopping an assistant answer or draft task is no longer reported as a lost task lease.
+
 ## 0.1.854 — 2026-11-09
 
 - Show Listed, Delisted, or Not listed on each marketplace rail row.
