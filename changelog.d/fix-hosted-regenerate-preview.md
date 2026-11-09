@@ -1,1 +1,0 @@
-- Fixed Regenerate showing “Not Found” on the web when loading price suggestions or researching sold prices.
