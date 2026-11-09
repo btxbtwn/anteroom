@@ -11,7 +11,7 @@ import { AssistantChangesCard } from "./AssistantChangesCard";
 import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { newQueuedChatMessage, type QueuedChatMessage } from "./chatMessageQueue";
 import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
-import { stableStreamingText } from "./streamingText";
+import { streamingDisplayText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
 import { useComposerImages } from "./chat/ComposerAttachments";
 import { ChatComposer } from "./chat/ChatComposer";
@@ -148,6 +148,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [folds, setFolds] = useState<FoldedTurn[]>(() => (threadId ? foldsFor(threadId) : []));
   const [error, setError] = useState("");
+  const [stopping, setStopping] = useState(false);
   /** True while this page follows an answer, including a reattach that has not heard anything yet. */
   const [following, setFollowing] = useState(false);
   const [queued, setQueued] = useState<QueuedQuestion[]>([]);
@@ -378,8 +379,14 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   };
 
   const stop = async () => {
-    await api.assistant.stop().catch(() => undefined);
-    controller.current?.abort();
+    // The server saves the partial answer before it answers; say so meanwhile.
+    setStopping(true);
+    try {
+      await api.assistant.stop().catch(() => undefined);
+      controller.current?.abort();
+    } finally {
+      setStopping(false);
+    }
   };
 
   // Applied changes reach every page that shows a listing, a total or a box.
@@ -410,7 +417,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   };
 
   const drawn = live ? liveParts(live, turns) : { question: false, answer: false };
-  const visible = live && drawn.answer ? stableStreamingText(live.parts.content) : "";
+  const visible = live && drawn.answer ? streamingDisplayText(live.parts.content) : "";
   const empty = !live && !turns.length && !messages.isLoading && !messages.isError;
   const needsProvider = /sign in with chatgpt/i.test(error);
   // An answer that failed, or that a restart cut off, left the last question unanswered.
@@ -435,6 +442,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         autoFocus={empty && finePointer()}
         images={images}
         busy={Boolean(live)}
+        stopping={stopping}
         onSend={() => { void ask(input); }}
         onStop={() => { void stop(); }}
         stopLabel="Stop answering"
@@ -506,7 +514,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   return (
     <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col">
-      <ChatTranscript scroll={scroll} laneClassName="max-w-208 px-4 pt-8 sm:px-8">
+      <ChatTranscript scroll={scroll} busy={Boolean(live)} doneMessage="Answer finished." laneClassName="max-w-208 px-4 pt-8 sm:px-8">
         <div className="contents" onClick={openLinkedListing}>
           {messages.isLoading && !turns.length ? (
             <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
@@ -551,7 +559,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
               {drawn.answer ? (
                 <LiveWork
                   busy
-                  stopping={false}
+                  stopping={stopping}
                   workStartedAtMs={live.startedAtMs}
                   streamTrace={live.parts.trace}
                   streamAgents={live.parts.agents}

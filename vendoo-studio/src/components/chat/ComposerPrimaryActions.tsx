@@ -73,6 +73,7 @@ export function ComposerPrimaryActions({
                   disabled={stopping}
                   onClick={onStop}
                   aria-label={stopLabel}
+                  aria-keyshortcuts="Escape"
                 />
               }
             >
@@ -80,7 +81,7 @@ export function ComposerPrimaryActions({
                 <rect x="2" y="2" width="8" height="8" rx="1.5" />
               </svg>
             </TooltipTrigger>
-            <TooltipPopup>{stopping ? "Stopping…" : stopLabel}</TooltipPopup>
+            <TooltipPopup>{stopping ? "Stopping…" : `${stopLabel ?? "Stop"} (Esc)`}</TooltipPopup>
           </Tooltip>
         ) : null}
       </div>

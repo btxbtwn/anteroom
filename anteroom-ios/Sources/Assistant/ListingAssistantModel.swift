@@ -15,6 +15,11 @@ final class ListingAssistantModel {
     private(set) var providerConfigured = false
     private(set) var progress = ""
     private(set) var needsReconnect = false
+    /// Counts of runs that finished, failed or were stopped, for one haptic and one
+    /// VoiceOver announcement each.
+    private(set) var runsFinished = 0
+    private(set) var runsFailed = 0
+    private(set) var runsStopped = 0
     var error: String?
     var text = ""
     var attachments: [ChatAttachment] = []
@@ -85,11 +90,13 @@ final class ListingAssistantModel {
             serverBusy = values.1.busy
             needsReconnect = serverBusy
             progress = serverBusy ? values.1.items.joined(separator: " · ") : "Work finished. Review the saved draft."
+            if !serverBusy { runsFinished += 1 }
         } catch is CancellationError {
             needsReconnect = true
             progress = "Reconnect to check the saved draft."
         } catch {
             self.error = error.localizedDescription
+            runsFailed += 1
             // A failed connection can happen after the server accepted work.
             // Require an explicit reconnect instead of submitting it twice.
             needsReconnect = true
@@ -97,6 +104,7 @@ final class ListingAssistantModel {
     }
 
     func stop() async {
+        runsStopped += 1
         do {
             try await api.stopTask(listingID)
             progress = "Stop requested. Reconnect to check the draft."
