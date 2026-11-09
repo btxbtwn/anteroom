@@ -526,27 +526,18 @@ def gaps(listing: dict, market: str) -> list[dict]:
         if not required_for_this_listing(row, listing, path):
             continue
         value = get_path(listing, path)
-        # A value read from General or Settings is not the model's claim, so it
-        # needs no photo evidence of its own.
-        borrowed = False
         if path == "price":
             value = price_for(listing, market)
         # Shared prose and price are explicitly offered by the form, but may follow General.
         name = path.rsplit(".", 1)[-1]
         if value is None and name in {"title", "description", "brand"}:
             value = marketplace_text(listing, market, name)
-            borrowed = True
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = _first_answer(_row_values(listing, market, path, rows))
-            # An answer stored under another spelling of this path was written
-            # before this form knew the row; it is not a new model claim.
-            borrowed = value not in (None, "", [], {})
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = shared_answer(listing, row, market, path)
-            borrowed = True
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = settings_answer(listing, path)
-            borrowed = True
         if account_resolved(row) and value in (None, "", [], {}):
             # List picks this from the seller's account, so the row is not
             # empty in any way that stops the listing.
@@ -559,13 +550,6 @@ def gaps(listing: dict, market: str) -> list[dict]:
             # is said, not refused.
             found.append(gap(path, f"{row.get('label') or path}: {error}",
                              blocking=not account_resolved(row), label=row.get("label")))
-        elif (row.get("required") and item_field(row, market) and not borrowed and value not in (None, "", [], {})
-              and not is_locked(listing, path)):
-            proof = _evidence(listing, path)
-            if proof.get("value") != value or not proof.get("quote"):
-                # Required product facts still need evidence before listing.
-                found.append(gap(path, f"{row.get('label') or path}: Check this answer against photo or seller evidence before listing.",
-                                 blocking=True, label=row.get("label")))
     return found
 
 
@@ -610,19 +594,6 @@ def settings_answer(listing: dict, path: str) -> str | None:
     from vendoo_studio.services.user_settings import get_ebay_listing_defaults
 
     return str(get_ebay_listing_defaults().get(setting) or "").strip() or None
-
-
-def _evidence(listing: dict, path: str) -> dict:
-    """The proof recorded for this row, under whichever spelling it was written."""
-    recorded = listing.get(EVIDENCE_KEY) or {}
-    proof = recorded.get(path)
-    if isinstance(proof, dict):
-        return proof
-    want = _fold(path)
-    for stored, value in recorded.items():
-        if _fold(stored) == want and isinstance(value, dict):
-            return value
-    return {}
 
 
 def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:

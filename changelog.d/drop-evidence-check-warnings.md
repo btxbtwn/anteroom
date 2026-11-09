@@ -1,0 +1,1 @@
+- The marketplace tabs no longer show yellow "Check this answer against photo or seller evidence" warnings under filled-in required fields, and those notes no longer hold up listing.
