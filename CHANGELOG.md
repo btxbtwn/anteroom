@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.860 — 2026-11-09
+
+- Chat edits no longer fail with "Native option lookup did not finish" when the assistant names the fields it will change in a slightly different format, and plain answers to questions come straight back.
+
 ## 0.1.859 — 2026-11-09
 
 - Generated descriptions can now use the full 1,000 characters. They were cut at 918 to leave room for a title on Depop, which Depop no longer gets.
