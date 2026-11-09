@@ -80,7 +80,8 @@ class AccessLogMiddleware:
         from vendoo_studio.services.error_alerts import request_context
 
         request_id = Headers(scope=scope).get("fly-request-id") or uuid.uuid4().hex
-        context = request_context.set({"scope": scope, "request_id": request_id})
+        details = {"scope": scope, "request_id": request_id}
+        context = request_context.set(details)
         try:
             await self.app(scope, receive, record)
         except Exception:
@@ -93,7 +94,8 @@ class AccessLogMiddleware:
             route = scope.get("route")
             template = getattr(route, "path", None) or "-"
             if status >= 500:
-                http_log.error("%s %s answered %s", scope["method"], template, status)
+                http_log.error("%s %s answered %s", scope["method"], template, status,
+                               exc_info=details.get("cause"))
             request_context.reset(context)
             # 499: the client closed the connection before any response started.
             access_log.info("%s %s %s %dms", scope["method"], template, status or (500 if failed else 499),
@@ -173,7 +175,10 @@ class SellerSessionMiddleware:
                 {"detail": "A valid seller session is required"}, status_code=401,
                 headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
             )
-        except SessionVerificationUnavailable:
+        except SessionVerificationUnavailable as exc:
+            from vendoo_studio.services.error_alerts import note_cause
+
+            note_cause(exc.__cause__ or exc)
             response = JSONResponse(
                 {"detail": "Session verification is temporarily unavailable"}, status_code=503,
                 headers={"Retry-After": "5", "Cache-Control": "no-store"},

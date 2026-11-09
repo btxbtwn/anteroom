@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.models.ownership import LOCAL_USER_ID, SellerOwned
 from vendoo_studio.models.seller_change import TOPIC_BY_TABLE, SellerChange
+from vendoo_studio.services.error_alerts import note_cause
 from vendoo_studio.services.seller_sessions import SellerIdentity
 
 
@@ -58,7 +59,8 @@ def seller_session(request: Request) -> Iterator[SellerDatabaseSession]:
             context.settings.read()
         with SellerDatabaseSession(user_id=identity.user_id, bind=engine) as db:
             yield db
-    except SQLAlchemyError:
+    except SQLAlchemyError as exc:
+        note_cause(exc)
         raise HTTPException(status_code=503, detail="Cloud data is temporarily unavailable",
                             headers={"Retry-After": "5"}) from None
 

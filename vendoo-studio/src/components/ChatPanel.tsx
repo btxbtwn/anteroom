@@ -211,7 +211,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   return (
     <ChatCitationRevealContext value={handleShowCitation}>
     <div className="chat-panel flex min-h-0 flex-1 flex-col">
-      <ChatTranscript scroll={scroll}>
+      <ChatTranscript scroll={scroll} busy={busy} doneMessage={generating ? "Listing generation finished." : "Reply finished."}>
         {isLoading && !hasMessages ? (
           <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
         ) : null}

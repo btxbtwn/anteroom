@@ -34,6 +34,29 @@ def brand_choices() -> dict:
 
 
 @lru_cache(maxsize=1)
+def _brands_by_fold() -> dict[str, str]:
+    return {brand.strip().casefold(): brand for brand in catalog()["brands"]}
+
+
+def listed_brand(name: str) -> str:
+    """The Depop brand a brand name posts as, the way the extension picks it.
+
+    A listed brand, or the one listed brand the name starts ("Columbia" is
+    Columbia Sportswear). Unbranded, and anything Depop does not list, is Other.
+    """
+    wanted = str(name or "").strip().casefold()
+    if not wanted:
+        return ""
+    if wanted in {"unbranded", "no brand"}:
+        return "Other"
+    brands = _brands_by_fold()
+    if wanted in brands:
+        return brands[wanted]
+    starts = [brand for fold, brand in brands.items() if fold.startswith(wanted + " ")]
+    return starts[0] if len(starts) == 1 else "Other"
+
+
+@lru_cache(maxsize=1)
 def _by_id() -> dict:
     return {row["id"]: row for row in catalog()["categories"]}
 
@@ -98,9 +121,7 @@ def form(listing: dict) -> dict:
                                category_specific=True, help=f"Select up to {maximum}"))
         elif key == "brand":
             row = choice("depop_specifics.brand", label, brand_choices()["options"])
-            row["value"] = text("brand")
-            if str(row["value"]).strip().casefold() in {"unbranded", "no brand"}:
-                row["value"] = "Other"
+            row["value"] = listed_brand(text("brand"))
             rows.append(row)
         elif key in fixed_keys:
             enhance = key in {"source", "age", "style"}
