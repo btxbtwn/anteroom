@@ -59,7 +59,8 @@ def _evidence_shape(value: dict) -> dict:
     for name in _VALUE_FIELDS:
         if isinstance(field := value.get(name), dict) and "value" in field:
             field["value"] = _as_text(field["value"])
-    for item in value.get("measurements") if isinstance(value.get("measurements"), list) else []:
+    measurements = value.get("measurements")
+    for item in measurements if isinstance(measurements, list) else []:
         if isinstance(item, dict) and "value" in item:
             item["value"] = _as_text(item["value"])
     return value
