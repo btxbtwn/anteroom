@@ -50,6 +50,15 @@ EVIDENCE = {
 
 REPLY = "Sandbox reply: no model was called."
 STALL_MARKER = "[sandbox:stall]"
+# Streams a long markdown reply a word at a time, so browser tests can watch a
+# reply arrive and stop it part way through.
+SLOW_MARKER = "[sandbox:slow]"
+SLOW_REPLY = (
+    "**Sandbox** is streaming this reply slowly, one word at a time, so a test can watch it arrive. "
+    + "Each sentence adds a few more words to the paragraph being written. " * 12
+    + "\n\n- A list item arrives\n- Then another one\n\nThe end."
+)
+SLOW_WORD_SECONDS = 0.05
 
 
 async def _stall() -> None:
@@ -82,6 +91,11 @@ class SandboxProvider:
         prompt = _prompt_text(messages)
         if STALL_MARKER in prompt:
             await _stall()
+        if SLOW_MARKER in prompt:
+            for word in SLOW_REPLY.split(" "):
+                await asyncio.sleep(SLOW_WORD_SECONDS)
+                yield word + " "
+            return
         if "json" in prompt.lower():
             yield "```json\n" + json.dumps(LISTING, indent=2) + "\n```"
         else:

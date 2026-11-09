@@ -20,7 +20,7 @@ const SSE_FLUSH_MS = 50;
  *
  * The server streams one event per token, and every event carries the whole
  * message so far. Each call re-scans that cumulative text in
- * stableStreamingText and re-renders the chat, so a long reply costs O(n^2)
+ * streamingDisplayText and re-renders the chat, so a long reply costs O(n^2)
  * scanning and hundreds of renders -- enough memory churn on a small machine
  * to get the WebKit content process killed mid-reply. Only the newest event of
  * each type carries new information, so a window collapses to one call per

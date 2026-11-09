@@ -124,3 +124,43 @@ class SendMessageStreamTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("data: Error: Photo analysis failed.", response.text)
         self.assertEqual(self.status(), "draft")
+
+
+class StoppedChatAnswerIsKeptTest(SendMessageStreamTest):
+    """Stop keeps what the assistant had already written, as ChatGPT and Claude do.
+
+    The stream returned at Stop without saving anything, so the reply the seller
+    had been reading vanished from the chat. Only its prose is kept: half a
+    listing edit is never applied.
+    """
+
+    def messages(self):
+        from vendoo_studio.repositories.queries import ConversationRepo
+
+        return [(m.role, m.text) for m in ConversationRepo(self.Session()).get_messages(self.conv_id)]
+
+    def test_stop_saves_the_partial_prose_and_applies_nothing(self):
+        from vendoo_studio.services import activity
+
+        conv_id = self.conv_id
+
+        class Provider:
+            name = "chatgpt"
+            model = "test"
+
+            async def chat(self, messages, stream=True):
+                yield "Blue suits it. I'll change the color"
+                yield "\n\n```json\n{\"color\": \"Bl"
+                activity.cancel(conv_id)
+                yield "ue\"}\n```"
+
+        async def build(conv_id, db, text, option_catalog=None):
+            return [{"role": "user", "content": text}]
+
+        response = self.send(build, Provider())
+        self.assertEqual(response.status_code, 200)
+        assistant = [text for role, text in self.messages() if role == "assistant"]
+        self.assertEqual(len(assistant), 1)
+        self.assertTrue(assistant[0].startswith("Blue suits it. I'll change the color"))
+        self.assertIn("Stopped", assistant[0])
+        self.assertNotIn("json", assistant[0])

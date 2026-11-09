@@ -83,6 +83,27 @@ def test_cancelled_worker_cannot_write_and_expired_work_is_never_replayed(storag
         assert db.scalar(select(Conversation.title).where(Conversation.id == identity)) == 'My draft'
 
 
+def test_a_stopped_task_is_told_apart_from_a_lost_lease(storage):  # noqa: F811
+    engine, sessions, owner, _other, identity, task_id = prepare(storage)
+    _, _, token = queue.claim(engine)
+    with sessions(owner)() as db:
+        queue.cancel(db, task_id)
+    with service_context.use(replace(runtime(owner), session_factory=sessions(owner))):
+        with pytest.raises(queue.TaskStopped):
+            queue.renew(task_id, token)
+        with pytest.raises(queue.TaskStopped):
+            queue.append_events(task_id, token, ['data: late\n\n'])
+        with sessions(owner)() as db:
+            task_id = queue.enqueue(db, identity, 'generate', {}).id
+        _, _, token = queue.claim(engine)
+        with engine.begin() as connection:
+            connection.execute(update(BackgroundTask).where(BackgroundTask.id == task_id)
+                               .values(leased_until=datetime.now(UTC) - timedelta(seconds=1)))
+        with pytest.raises(queue.TaskLeaseExpired) as lost:
+            queue.renew(task_id, token)
+        assert not isinstance(lost.value, queue.TaskStopped)
+
+
 @pytest.mark.parametrize('outcome', ['completed', 'failed', 'cancelled'])
 def test_lease_renewal_does_not_refresh_every_open_editor(storage, outcome):  # noqa: F811
     from vendoo_studio.models.seller_change import SellerChange
@@ -126,3 +147,43 @@ def test_assistant_task_finishes_without_a_listing(storage):  # noqa: F811
         queue.finish(task_id, token, error='Interrupted')
     with sessions(owner)() as db:
         assert db.get(BackgroundTask, task_id).status == 'failed'
+
+
+@pytest.mark.parametrize('leased_session', [True, False])
+def test_progress_events_check_the_lease_once_per_write(storage, leased_session):  # noqa: F811
+    """Each generating draft writes progress a few times a second; every extra
+    round trip there keeps a pooled connection away from the seller's pages."""
+    from sqlalchemy import event
+
+    engine, sessions, owner, _other, _identity, task_id = prepare(storage)
+    _, _, token = queue.claim(engine)
+
+    def worker_sessions():
+        # The worker's sessions carry its lease, as hosted_context.for_seller sets it.
+        session = sessions(owner)()
+        if leased_session:
+            session.info['background_lease'] = (task_id, token)
+        return session
+
+    lease_checks = []
+
+    def count(_conn, _cursor, statement, *_args):
+        if 'FROM background_tasks' in statement and 'lease_token' in statement:
+            lease_checks.append(statement)
+
+    event.listen(engine, 'before_cursor_execute', count)
+    try:
+        with service_context.use(replace(runtime(owner), session_factory=worker_sessions)):
+            queue.append_events(task_id, token, ['data: one\n\n', 'data: two\n\n'])
+            queue.append_events(task_id, token, ['data: three\n\n'])
+    finally:
+        event.remove(engine, 'before_cursor_execute', count)
+    assert len(lease_checks) == 2
+    with sessions(owner)() as db:
+        assert queue.journal(db, task_id) == ['data: one\n\n', 'data: two\n\n', 'data: three\n\n']
+        queue.cancel(db, task_id)
+    with service_context.use(replace(runtime(owner), session_factory=worker_sessions)):
+        with pytest.raises(queue.TaskLeaseExpired):
+            queue.append_events(task_id, token, ['data: late\n\n'])
+    with sessions(owner)() as db:
+        assert queue.journal(db, task_id)[-1] == 'data: three\n\n'

@@ -320,7 +320,7 @@ describe("marketplaces section", () => {
     // Items delisted before the record was reset still read published.
     for (const drafts of [{}, { mercari: { state: "published", revision_id: "current", listing_url: live.url } }] as NativeDrafts[]) {
       const html = render(drafts, { mercari: deleted }, { selected: "mercari" });
-      expect(row(html, "Mercari")).toContain("Deleted");
+      expect(row(html, "Mercari")).toContain("Delisted");
       expect(enabledButton(html, "List…")).toBe(true);
       expect(html).not.toContain(">Update…</button>");
     }
@@ -478,10 +478,12 @@ describe("marketplaces section", () => {
     expect(rowStatus("ebay", undefined, draft, "newer", true).detail).toBe("Changes in Anteroom have not been saved to eBay.");
   });
 
-  it("derives removal wording per marketplace", () => {
-    expect(rowStatus("ebay", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Ended");
-    expect(rowStatus("mercari", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Deleted");
-    expect(rowStatus("depop", { ...live, state: "deleted", url: "https://www.depop.com/products/x/", listing_id: "x" }, undefined, "current", true).label).toBe("Deleted");
+  it("shows Delisted after a delist, Listed while live, and Not listed when never listed", () => {
+    expect(rowStatus("ebay", undefined, undefined, "current", true).label).toBe("Not listed");
+    expect(rowStatus("mercari", live, undefined, "current", true).label).toBe("Listed");
+    expect(rowStatus("ebay", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Delisted");
+    expect(rowStatus("mercari", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Delisted");
+    expect(rowStatus("depop", { ...live, state: "deleted", url: "https://www.depop.com/products/x/", listing_id: "x" }, undefined, "current", true).label).toBe("Delisted");
     expect(render({}, { depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).not.toContain("Delist everywhere…");
     expect(render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/y/", listing_id: "y" } })).toContain("Delist everywhere…");
     expect(deletable({ ...live, state: "failed" })).toBe(true);

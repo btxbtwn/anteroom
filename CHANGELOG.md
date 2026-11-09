@@ -6,6 +6,70 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.868 — 2026-11-09
+
+- When the hosted app briefly can't reach its database or sign-in keys, the error report now says why, so these outages can be traced and fixed.
+
+## 0.1.867 — 2026-11-09
+
+- Opening a draft or preparing its marketplace forms no longer ties up the web app's database connections, which could make other pages fail with an error while a listing with large saved forms was open.
+
+## 0.1.866 — 2026-11-09
+
+- A generated draft no longer leaves eBay Size and Size Type empty when the listing's own size answers them.
+- A brand Depop does not list shows as Other on the Depop form, the way it posts, instead of blocking the draft.
+
+## 0.1.865 — 2026-11-09
+
+- Show each word of an assistant reply as it arrives, instead of a paragraph at a time, with a caret where it is writing.
+- Press Esc in the message box to stop a reply, and keep what the listing assistant had already written when you stop it.
+- Screen readers hear once when a reply finishes, not every word.
+- On the iPhone, the assistant no longer pulls you back to the bottom while you read, keeps the partial answer when you stop it, and keeps Stop next to the message box.
+
+## 0.1.864 — 2026-11-09
+
+- Save Who made it and What is it as defaults for new listings with the little save button on the Etsy tab.
+
+## 0.1.863 — 2026-11-09
+
+- Delisting an item everywhere now moves it to Drafts, even when you had marked a marketplace as listed.
+
+## 0.1.862 — 2026-11-09
+
+- Use eBay's shopping-bag web mark on the marketplace rail so the logos line up evenly.
+
+## 0.1.861 — 2026-11-09
+
+- The marketplace tabs no longer show yellow "Check this answer against photo or seller evidence" warnings under filled-in required fields, and those notes no longer hold up listing.
+
+## 0.1.860 — 2026-11-09
+
+- Chat edits no longer fail with "Native option lookup did not finish" when the assistant names the fields it will change in a slightly different format, and plain answers to questions come straight back.
+
+## 0.1.859 — 2026-11-09
+
+- Generated descriptions can now use the full 1,000 characters. They were cut at 918 to leave room for a title on Depop, which Depop no longer gets.
+
+## 0.1.858 — 2026-11-09
+
+- Keep pages like Sourcing loading on the web while drafts are generating, instead of failing with a database timeout.
+
+## 0.1.857 — 2026-11-09
+
+- Keep the listing assistant from repeatedly asking which fields to edit and failing before it answers.
+
+## 0.1.856 — 2026-11-09
+
+- Closing the web app while it is still loading no longer shows up as a server error.
+
+## 0.1.855 — 2026-11-09
+
+- A seller stopping an assistant answer or draft task is no longer reported as a lost task lease.
+
+## 0.1.854 — 2026-11-09
+
+- Show Listed, Delisted, or Not listed on each marketplace rail row.
+
 ## 0.1.853 — 2026-11-09
 
 - The web eBay and Etsy workspaces no longer fail with "Secure credential storage is temporarily unavailable" or slow every other screen while Anteroom is busy.

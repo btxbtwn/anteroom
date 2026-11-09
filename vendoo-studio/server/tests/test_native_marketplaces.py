@@ -88,12 +88,47 @@ class NativeMarketplacesTest(unittest.TestCase):
                 memo[id(self)] = result
                 return result
 
-        original = ListingInput(copy.deepcopy(LISTING))
-        saved = copy.deepcopy(dict(original))
+        original = copy.deepcopy(LISTING)
+        original['mercari_specifics'] = ListingInput(original['mercari_specifics'])
+        saved = copy.deepcopy(original)
+        copies.clear()
         snapshot = prepare(self.db, self.conv, original, 'mercari')
         self.assertEqual(len(copies), 1)
         snapshot['mercari_specifics']['shipsFrom'] = '10001'
         self.assertEqual(original, saved)
+
+    def test_form_preparation_and_preflight_share_saved_native_forms(self):
+        # Saved forms can be megabytes. Copying them for every form and every
+        # marketplace kept a single CPU busy inside open transactions, until the
+        # hosted connection pool ran out (2026-11-09).
+        import copy
+        from vendoo_studio.services import native_contract
+        from vendoo_studio.services.direct_preflight import prepare
+
+        listing = copy.deepcopy(LISTING)
+        form = {"category_id": "menswear_tshirts", "page_labels": True, "fields": [
+            {"path": "depop_specifics.size", "label": "Size", "required": True,
+             "selection_only": True, "options": ["M", "L"]}]}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
+        revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "native_schema")
+        forms = revision.listing_json[native_contract.KEY]
+        saved = copy.deepcopy(forms)
+
+        for marketplace in native.NAMES:
+            snapshot = prepare(self.db, self.conv, revision.listing_json, marketplace)
+            self.assertIs(snapshot[native_contract.KEY], forms)
+        seen = []
+        gaps = native.direct_preflight.gaps
+
+        def observe(snapshot, marketplace, context=None):
+            seen.append(snapshot[native_contract.KEY])
+            return gaps(snapshot, marketplace, context)
+
+        with patch.object(native.direct_preflight, "gaps", observe):
+            native.preflight(self.conv.id, self.db)
+        self.assertEqual(len(seen), len(native.NAMES))
+        self.assertTrue(all(shared is forms for shared in seen))
+        self.assertEqual(forms, saved)
 
     def test_preflight_reads_photos_once_for_all_marketplaces(self):
         from sqlalchemy import event

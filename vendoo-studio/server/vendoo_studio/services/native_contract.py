@@ -32,6 +32,19 @@ _EDITOR_KEYS = ("section", "section_help", "width", "control_width", "presentati
                 "save_as_default")
 
 
+def copy_listing(listing: dict) -> dict:
+    """A deep copy of a listing that shares its saved forms instead of copying them.
+
+    Saved forms can be megabytes, and every reader only reads them: changing a
+    form means capturing a new one and assigning it to the listing. Copying them
+    for each form and marketplace kept the hosted server's one CPU busy.
+    """
+    copied = copy.deepcopy({key: value for key, value in listing.items() if key != KEY})
+    if KEY in listing:
+        copied[KEY] = listing[KEY]
+    return copied
+
+
 def path_of(row: dict) -> str:
     return str(row.get("path") or row.get("key") or "")
 
@@ -219,7 +232,7 @@ def editor_form(listing: dict, market: str, *, values: dict | None = None) -> di
             value = price_for(values, market)
         name = path.rsplit(".", 1)[-1]
         if value is None and path.startswith(f"{market}_specifics.") and name in {"title", "description", "brand"}:
-            value = marketplace_text(values, market, name)
+            value = _followed_text(values, market, name)
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = _first_answer(_row_values(values, market, path, definitions))
             if value in (None, "", [], {}):
@@ -526,27 +539,18 @@ def gaps(listing: dict, market: str) -> list[dict]:
         if not required_for_this_listing(row, listing, path):
             continue
         value = get_path(listing, path)
-        # A value read from General or Settings is not the model's claim, so it
-        # needs no photo evidence of its own.
-        borrowed = False
         if path == "price":
             value = price_for(listing, market)
         # Shared prose and price are explicitly offered by the form, but may follow General.
         name = path.rsplit(".", 1)[-1]
         if value is None and name in {"title", "description", "brand"}:
-            value = marketplace_text(listing, market, name)
-            borrowed = True
+            value = _followed_text(listing, market, name)
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = _first_answer(_row_values(listing, market, path, rows))
-            # An answer stored under another spelling of this path was written
-            # before this form knew the row; it is not a new model claim.
-            borrowed = value not in (None, "", [], {})
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = shared_answer(listing, row, market, path)
-            borrowed = True
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = settings_answer(listing, path)
-            borrowed = True
         if account_resolved(row) and value in (None, "", [], {}):
             # List picks this from the seller's account, so the row is not
             # empty in any way that stops the listing.
@@ -559,13 +563,6 @@ def gaps(listing: dict, market: str) -> list[dict]:
             # is said, not refused.
             found.append(gap(path, f"{row.get('label') or path}: {error}",
                              blocking=not account_resolved(row), label=row.get("label")))
-        elif (row.get("required") and item_field(row, market) and not borrowed and value not in (None, "", [], {})
-              and not is_locked(listing, path)):
-            proof = _evidence(listing, path)
-            if proof.get("value") != value or not proof.get("quote"):
-                # Required product facts still need evidence before listing.
-                found.append(gap(path, f"{row.get('label') or path}: Check this answer against photo or seller evidence before listing.",
-                                 blocking=True, label=row.get("label")))
     return found
 
 
@@ -612,17 +609,14 @@ def settings_answer(listing: dict, path: str) -> str | None:
     return str(get_ebay_listing_defaults().get(setting) or "").strip() or None
 
 
-def _evidence(listing: dict, path: str) -> dict:
-    """The proof recorded for this row, under whichever spelling it was written."""
-    recorded = listing.get(EVIDENCE_KEY) or {}
-    proof = recorded.get(path)
-    if isinstance(proof, dict):
-        return proof
-    want = _fold(path)
-    for stored, value in recorded.items():
-        if _fold(stored) == want and isinstance(value, dict):
-            return value
-    return {}
+def _followed_text(listing: dict, market: str, name: str) -> str:
+    """The title, description or brand a form follows, as that marketplace takes it."""
+    value = marketplace_text(listing, market, name)
+    if market == "depop" and name == "brand":
+        from vendoo_studio.services.depop_form import listed_brand
+
+        return listed_brand(value)
+    return value
 
 
 def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:
