@@ -122,9 +122,9 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
             yield chunk
         return
     history = [dict(message) for message in messages]
-    rules = TOOL_RULES
+    target_rules = ""
     if on_targets is not None:
-        rules += (
+        target_rules = (
             '\nBefore doing any work, reply ONLY with {"_field_targets":["exact.field.path"]}. '
             'Identify the fields the seller is asking you to change from the current editable forms. '
             'Use only those exact paths; respect the named marketplace. Do not lock other marketplaces '
@@ -132,12 +132,15 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
             'instead of changing fields. These fields are temporarily locked while you work. '
             'After the acknowledgement, complete the request, modifying only declared fields.\n'
         )
+    rules = TOOL_RULES + target_rules
     for message in history:
         if message.get("role") == "system" and isinstance(message.get("content"), str):
             message["content"] += rules
             break
     else:
-        history.insert(0, {"role": "system", "content": rules})
+        message = {"role": "system", "content": rules}
+        history.insert(0, message)
+    protocol_message = message
     searches = 0
     targets_declared = on_targets is None
     allowed_targets = {path for (_market, path), row in catalog.rows.items()
@@ -160,11 +163,20 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
             yield text
             return
         if "_field_targets" in request and on_targets is not None:
+            if targets_declared:
+                history += [{"role": "assistant", "content": text}, {"role": "user", "content": (
+                    "Field targets already acknowledged and cannot change. Do not declare them again. "
+                    "Complete the request using only the previously acknowledged fields.")}]
+                continue
             paths = request["_field_targets"]
             valid = isinstance(paths, list) and all(isinstance(path, str) and path in allowed_targets for path in paths)
             if valid:
                 on_targets(tuple(sorted(set(paths))))
                 targets_declared = True
+                # The handshake applies once, not at the start of every model call.
+                protocol_message["content"] = protocol_message["content"].removesuffix(target_rules) + (
+                    "\nField targets have been acknowledged. Do not declare _field_targets again. "
+                    "Complete the request, modifying only the acknowledged fields.\n")
             history += [{"role": "assistant", "content": text}, {"role": "user", "content": (
                 'Field targets acknowledged. Complete the request using only these fields.' if valid else
                 'Invalid field targets. Declare exact editable paths from the current forms, or [] for no changes.')}]

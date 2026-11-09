@@ -83,6 +83,27 @@ def test_cancelled_worker_cannot_write_and_expired_work_is_never_replayed(storag
         assert db.scalar(select(Conversation.title).where(Conversation.id == identity)) == 'My draft'
 
 
+def test_a_stopped_task_is_told_apart_from_a_lost_lease(storage):  # noqa: F811
+    engine, sessions, owner, _other, identity, task_id = prepare(storage)
+    _, _, token = queue.claim(engine)
+    with sessions(owner)() as db:
+        queue.cancel(db, task_id)
+    with service_context.use(replace(runtime(owner), session_factory=sessions(owner))):
+        with pytest.raises(queue.TaskStopped):
+            queue.renew(task_id, token)
+        with pytest.raises(queue.TaskStopped):
+            queue.append_events(task_id, token, ['data: late\n\n'])
+        with sessions(owner)() as db:
+            task_id = queue.enqueue(db, identity, 'generate', {}).id
+        _, _, token = queue.claim(engine)
+        with engine.begin() as connection:
+            connection.execute(update(BackgroundTask).where(BackgroundTask.id == task_id)
+                               .values(leased_until=datetime.now(UTC) - timedelta(seconds=1)))
+        with pytest.raises(queue.TaskLeaseExpired) as lost:
+            queue.renew(task_id, token)
+        assert not isinstance(lost.value, queue.TaskStopped)
+
+
 @pytest.mark.parametrize('outcome', ['completed', 'failed', 'cancelled'])
 def test_lease_renewal_does_not_refresh_every_open_editor(storage, outcome):  # noqa: F811
     from vendoo_studio.models.seller_change import SellerChange

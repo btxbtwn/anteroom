@@ -6,6 +6,26 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.857 — 2026-11-09
+
+- Keep the listing assistant from repeatedly asking which fields to edit and failing before it answers.
+
+## 0.1.856 — 2026-11-09
+
+- Closing the web app while it is still loading no longer shows up as a server error.
+
+## 0.1.855 — 2026-11-09
+
+- A seller stopping an assistant answer or draft task is no longer reported as a lost task lease.
+
+## 0.1.854 — 2026-11-09
+
+- Show Listed, Delisted, or Not listed on each marketplace rail row.
+
+## 0.1.853 — 2026-11-09
+
+- The web eBay and Etsy workspaces no longer fail with "Secure credential storage is temporarily unavailable" or slow every other screen while Anteroom is busy.
+
 ## 0.1.852 — 2026-11-09
 
 - Stopping a draft task no longer reports a task crash when its worker notices the revoked lease.

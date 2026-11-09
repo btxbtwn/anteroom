@@ -76,3 +76,45 @@ def test_sign_in_blames_the_relay_only_when_it_cannot_be_reached(monkeypatch):
     monkeypatch.setattr(marketplace_accounts, "start_sign_in", storage_busy)
     with pytest.raises(CredentialStorageUnavailable):
         asyncio.run(accounts_route.connect("etsy"))
+
+
+def _saved_accounts(threads):
+    saved = {name: {"accessToken": "t", "expiresAt": time.time() + 3600, "accountId": "123", "connectedAt": 1}
+             for name in ("ebay", "etsy")}
+
+    def read():
+        threads.append(threading.get_ident())
+        return {name: dict(account) for name, account in saved.items()}
+    return read
+
+
+def test_ebay_client_reads_the_connected_account_in_a_worker_thread(monkeypatch):
+    """The hosted eBay workspace answered 503 when this read waited for a pooled
+    connection on the request loop and froze every other request meanwhile."""
+    from vendoo_studio.services import ebay_client
+
+    threads = []
+    read = _saved_accounts(threads)
+    monkeypatch.setattr(ebay_client, "get_marketplace_accounts", read)
+    monkeypatch.setattr(marketplace_accounts, "get_marketplace_accounts", read)
+
+    async def run():
+        return await ebay_client.EbayClient.connect(), threading.get_ident()
+
+    client, loop_thread = asyncio.run(run())
+    assert client.seller == ("123", "1")
+    assert threads and loop_thread not in threads
+
+
+def test_etsy_client_reads_the_connected_account_in_a_worker_thread(monkeypatch):
+    from vendoo_studio.services import etsy_workspace, keychain
+
+    threads = []
+    monkeypatch.setattr(keychain, "get_marketplace_accounts", _saved_accounts(threads))
+
+    async def run():
+        return await etsy_workspace.EtsyClient.connect(), threading.get_ident()
+
+    client, loop_thread = asyncio.run(run())
+    assert client.shop_id == "123"
+    assert threads and loop_thread not in threads

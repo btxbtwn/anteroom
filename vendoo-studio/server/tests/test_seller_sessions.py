@@ -229,3 +229,38 @@ def test_large_json_is_compressed_for_phones(client, signing_keys):
     assert response.status_code == 200, response.text
     assert response.headers["content-encoding"] == "gzip"
     assert int(response.headers["content-length"]) < len(response.content) / 2
+
+
+def test_web_page_carries_security_headers(jwks, tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "cloud.html").write_text("<!doctype html><title>Anteroom</title>")
+    with TestClient(create_app(PROJECT_URL, web_dir=tmp_path)) as client:
+        response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+
+
+def test_browser_leaving_before_the_page_loads_is_not_a_server_error(jwks, tmp_path, caplog):
+    """A visitor who closes the tab mid-load gets nothing sent and no error alert."""
+    import anyio
+
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "cloud.html").write_text("<!doctype html><title>Anteroom</title>")
+    app = create_app(PROJECT_URL, web_dir=tmp_path)
+    sent = []
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"}, "http_version": "1.1",
+             "method": "GET", "scheme": "https", "path": "/", "raw_path": b"/", "root_path": "",
+             "query_string": b"", "headers": [(b"host", b"myanteroom.com")], "app": app,
+             "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 443)}
+    anyio.run(app, scope, receive, send)
+    assert not [r for r in caplog.records if r.name == "vendoo_studio.http" and r.levelname == "ERROR"]
