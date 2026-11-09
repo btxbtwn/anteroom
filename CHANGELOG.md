@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.865 — 2026-11-09
+
+- Show each word of an assistant reply as it arrives, instead of a paragraph at a time, with a caret where it is writing.
+- Press Esc in the message box to stop a reply, and keep what the listing assistant had already written when you stop it.
+- Screen readers hear once when a reply finishes, not every word.
+- On the iPhone, the assistant no longer pulls you back to the bottom while you read, keeps the partial answer when you stop it, and keeps Stop next to the message box.
+
 ## 0.1.864 — 2026-11-09
 
 - Save Who made it and What is it as defaults for new listings with the little save button on the Etsy tab.
