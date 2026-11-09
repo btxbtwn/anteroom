@@ -268,4 +268,40 @@ enum AssistantFormat {
 
     /// Asking while an answer is being written holds the question until it ends.
     static func sendsNow(busy: Bool, queued: Int) -> Bool { !busy && queued == 0 }
+
+    /// Add one streamed frame to the answer being written.
+    static func fold(event: String, data: String, into turn: inout AssistantLiveTurn) {
+        switch event {
+        case "message": turn.text += data
+        case "status": turn.status = data
+        case "thinking": turn.status = "Thinking…"
+        default: break
+        }
+    }
+}
+
+/// Paints a streamed answer at most once per interval, as the web does (sseCoalesce.ts),
+/// so a burst of frames redraws the transcript once instead of once per word.
+struct LivePaintThrottle: Sendable {
+    static let interval: Duration = .milliseconds(50)
+    private(set) var lastPaint: ContinuousClock.Instant?
+
+    /// The first frame paints at once; later ones wait out the rest of the interval.
+    func paintsNow(at now: ContinuousClock.Instant) -> Bool {
+        guard let lastPaint else { return true }
+        return now - lastPaint >= Self.interval
+    }
+
+    mutating func painted(at now: ContinuousClock.Instant) { lastPaint = now }
+}
+
+/// Where a chat transcript is scrolled to.
+enum ChatScroll {
+    /// How close to the end still counts as reading the newest line (useChatScroll.ts uses the same).
+    static let nearBottomDistance: Double = 96
+
+    /// Whether the reader is at the end: offset and sizes as ScrollGeometry reports them.
+    static func nearBottom(offsetY: Double, containerHeight: Double, bottomInset: Double, contentHeight: Double) -> Bool {
+        offsetY + containerHeight - bottomInset >= contentHeight - nearBottomDistance
+    }
 }

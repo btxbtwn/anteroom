@@ -6,6 +6,30 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.869 — 2026-11-09
+
+- Generating listings for several drafts at once no longer fails with a database timeout while the AI fixes or finishes a listing.
+
+## 0.1.868 — 2026-11-09
+
+- When the hosted app briefly can't reach its database or sign-in keys, the error report now says why, so these outages can be traced and fixed.
+
+## 0.1.867 — 2026-11-09
+
+- Opening a draft or preparing its marketplace forms no longer ties up the web app's database connections, which could make other pages fail with an error while a listing with large saved forms was open.
+
+## 0.1.866 — 2026-11-09
+
+- A generated draft no longer leaves eBay Size and Size Type empty when the listing's own size answers them.
+- A brand Depop does not list shows as Other on the Depop form, the way it posts, instead of blocking the draft.
+
+## 0.1.865 — 2026-11-09
+
+- Show each word of an assistant reply as it arrives, instead of a paragraph at a time, with a caret where it is writing.
+- Press Esc in the message box to stop a reply, and keep what the listing assistant had already written when you stop it.
+- Screen readers hear once when a reply finishes, not every word.
+- On the iPhone, the assistant no longer pulls you back to the bottom while you read, keeps the partial answer when you stop it, and keeps Stop next to the message box.
+
 ## 0.1.864 — 2026-11-09
 
 - Save Who made it and What is it as defaults for new listings with the little save button on the Etsy tab.

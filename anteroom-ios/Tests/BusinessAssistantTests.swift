@@ -85,6 +85,29 @@ struct BusinessAssistantTests {
         let grouped = AssistantFormat.groupChats(chats, now: now, calendar: calendar)
         precondition(grouped.map(\.group) == ["Today", "Yesterday", "Older"])
         precondition(grouped[0].threads.map(\.id) == ["late", "early"])
+        // Streamed frames build the answer; reasoning only changes the status.
+        var live = AssistantLiveTurn(question: "How are sales?", asked: 0)
+        AssistantFormat.fold(event: "status", data: "Reading your shop…", into: &live)
+        AssistantFormat.fold(event: "message", data: "Sales are ", into: &live)
+        AssistantFormat.fold(event: "thinking", data: "hmm", into: &live)
+        AssistantFormat.fold(event: "message", data: "up.", into: &live)
+        AssistantFormat.fold(event: "agent", data: "{}", into: &live)
+        precondition(live.text == "Sales are up." && live.status == "Thinking…")
+
+        // The first frame paints at once, then at most one paint per interval.
+        var throttle = LivePaintThrottle()
+        let start = ContinuousClock.now
+        precondition(throttle.paintsNow(at: start))
+        throttle.painted(at: start)
+        precondition(!throttle.paintsNow(at: start + .milliseconds(20)))
+        precondition(throttle.paintsNow(at: start + LivePaintThrottle.interval))
+
+        // Following the newest line: at the end (the composer covers the bottom inset), near it, and well above it.
+        precondition(ChatScroll.nearBottom(offsetY: 1060, containerHeight: 800, bottomInset: 60, contentHeight: 1800))
+        precondition(ChatScroll.nearBottom(offsetY: 1000, containerHeight: 800, bottomInset: 60, contentHeight: 1800))
+        precondition(!ChatScroll.nearBottom(offsetY: 600, containerHeight: 800, bottomInset: 60, contentHeight: 1800))
+        // A short conversation is always at its end.
+        precondition(ChatScroll.nearBottom(offsetY: 0, containerHeight: 800, bottomInset: 60, contentHeight: 300))
         print("Business assistant tests passed")
     }
 

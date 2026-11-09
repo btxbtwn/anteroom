@@ -160,6 +160,19 @@ class NativeContractTest(unittest.TestCase):
         self.assertLess(len(text), 20000)
         self.assertEqual(contracts, before)
 
+    def test_general_brand_depop_does_not_list_is_its_other_brand(self):
+        from vendoo_studio.services import depop_form
+
+        listing = {"brand": "Miami Style"}
+        listing[contract.KEY] = contract.capture(listing, {"depop": depop_form.form(listing)}, ["depop"])
+        # Posting sends a brand Depop does not list as Other (depop-native.js),
+        # so the form shows that and the draft is not blocked on it.
+        self.assertFalse(any(gap["field"] == "depop_specifics.brand" for gap in contract.gaps(listing, "depop")))
+        field = next(row for row in contract.editor_form(listing, "depop")["fields"]
+                     if row["path"] == "depop_specifics.brand")
+        self.assertEqual(field["value"], "Other")
+        self.assertEqual(listing["brand"], "Miami Style")
+
     def test_large_brand_catalog_stays_in_editor_and_is_searchable_in_prompt(self):
         from vendoo_studio.services import depop_form
 
