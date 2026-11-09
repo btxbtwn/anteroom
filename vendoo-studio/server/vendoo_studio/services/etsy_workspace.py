@@ -5,6 +5,7 @@ No marketplace writes or local persistence take place here.
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import re
 from datetime import UTC, date, datetime, time, timedelta
@@ -41,6 +42,11 @@ class EtsyClient:
     def __init__(self):
         self.identity = _identity()
         self.shop_id = self.identity[0]
+
+    @classmethod
+    async def connect(cls) -> EtsyClient:
+        # The account read is a Vault query on the web; keep it off the request loop.
+        return await asyncio.to_thread(cls)
 
     def assert_current(self) -> None:
         if _identity() != self.identity:
