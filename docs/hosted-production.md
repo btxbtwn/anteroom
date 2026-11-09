@@ -177,6 +177,24 @@ request body use `hosted_database.in_seller_session`, which keeps
 `get_seller_db`'s checks on a worker-thread session. A test holds eight concurrent slow external waits on a
 one-connection pool without a timeout. Not yet measured after deploy.
 
+Production 0.1.848 exhausted the pool again on 2026-11-09 at 02:24 UTC
+(`GET /api/sourcing`, then most page reads at 3–20 s). Sampling
+`pg_stat_activity` showed no long holder: Postgres sessions were idle or
+`idle in transaction` on `ClientRead` for about 0.1 s, so connections were
+spent on round trips, not on queries. Four `py-spy dump`s of the process showed
+2–3 connections in every sample writing draft progress
+(`background_tasks.append_events`), beside 5–7 page requests and the
+schedulers, on one vCPU at load 1.1–1.5. Each running draft or assistant answer
+wrote its progress every 0.25 s in a transaction of about seven round trips
+(begin, seller `set_config`, lease check, sequence read, the same lease check
+again in `before_flush`, insert, commit), while open streams read it only
+every 0.5 s. Writers and readers now share `background_tasks.EVENT_INTERVAL`
+(0.5 s) and a leased worker session checks its lease once per write: about
+12 round trips a second per running draft instead of 28. Not yet measured
+after deploy: whether page reads stay under the pool timeout with two sellers
+generating. The stream reader's own poll (about five round trips every 0.5 s
+per open stream) is the next cost of the same kind.
+
 Machines reach each other's `/internal/` routes at
 `http://[FLY_PRIVATE_IP]:8080` on the private network
 (`device_routes.local_base_url`), which does not pass through Fly's proxy. The

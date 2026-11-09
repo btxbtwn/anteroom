@@ -147,3 +147,43 @@ def test_assistant_task_finishes_without_a_listing(storage):  # noqa: F811
         queue.finish(task_id, token, error='Interrupted')
     with sessions(owner)() as db:
         assert db.get(BackgroundTask, task_id).status == 'failed'
+
+
+@pytest.mark.parametrize('leased_session', [True, False])
+def test_progress_events_check_the_lease_once_per_write(storage, leased_session):  # noqa: F811
+    """Each generating draft writes progress a few times a second; every extra
+    round trip there keeps a pooled connection away from the seller's pages."""
+    from sqlalchemy import event
+
+    engine, sessions, owner, _other, _identity, task_id = prepare(storage)
+    _, _, token = queue.claim(engine)
+
+    def worker_sessions():
+        # The worker's sessions carry its lease, as hosted_context.for_seller sets it.
+        session = sessions(owner)()
+        if leased_session:
+            session.info['background_lease'] = (task_id, token)
+        return session
+
+    lease_checks = []
+
+    def count(_conn, _cursor, statement, *_args):
+        if 'FROM background_tasks' in statement and 'lease_token' in statement:
+            lease_checks.append(statement)
+
+    event.listen(engine, 'before_cursor_execute', count)
+    try:
+        with service_context.use(replace(runtime(owner), session_factory=worker_sessions)):
+            queue.append_events(task_id, token, ['data: one\n\n', 'data: two\n\n'])
+            queue.append_events(task_id, token, ['data: three\n\n'])
+    finally:
+        event.remove(engine, 'before_cursor_execute', count)
+    assert len(lease_checks) == 2
+    with sessions(owner)() as db:
+        assert queue.journal(db, task_id) == ['data: one\n\n', 'data: two\n\n', 'data: three\n\n']
+        queue.cancel(db, task_id)
+    with service_context.use(replace(runtime(owner), session_factory=worker_sessions)):
+        with pytest.raises(queue.TaskLeaseExpired):
+            queue.append_events(task_id, token, ['data: late\n\n'])
+    with sessions(owner)() as db:
+        assert queue.journal(db, task_id)[-1] == 'data: three\n\n'

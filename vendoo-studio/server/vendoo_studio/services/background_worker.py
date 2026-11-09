@@ -74,7 +74,7 @@ async def _execute(task_id, token):
             failed = True
         if frame.strip() and not frame.startswith(':'):
             frames.append(frame)
-        if frames and time.monotonic() - flushed_at >= .25:
+        if frames and time.monotonic() - flushed_at >= queue.EVENT_INTERVAL:
             await asyncio.to_thread(queue.append_events, task_id, token, frames)
             frames, flushed_at = [], time.monotonic()
     await asyncio.to_thread(queue.append_events, task_id, token, frames)
