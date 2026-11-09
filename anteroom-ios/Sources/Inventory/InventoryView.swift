@@ -153,7 +153,6 @@ struct InventoryView: View {
         }
         .listStyle(.plain)
         .environment(\.editMode, .constant(selecting ? .active : .inactive))
-
         .overlay { emptyState(rows: rows) }
         .navigationTitle("Inventory")
         .navigationBarTitleDisplayMode(.inline)
@@ -164,6 +163,8 @@ struct InventoryView: View {
         .searchable(text: $search, prompt: "Search title or SKU")
         .refreshable { await model.reload() }
         }
+        // The status pills sit above the list, so the whole column needs the sidebar color, not only the list.
+        .background(WorkspaceStyle.sidebar)
         .task { if !model.hasLoaded { await model.reload() } }
         .reloadingOnReturn(when: !model.hasLoaded && model.error != nil) { await model.reload() }
         // Listings change on other devices; catch up when the app comes back
