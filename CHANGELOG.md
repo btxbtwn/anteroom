@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.867 — 2026-11-09
+
+- Opening a draft or preparing its marketplace forms no longer ties up the web app's database connections, which could make other pages fail with an error while a listing with large saved forms was open.
+
 ## 0.1.866 — 2026-11-09
 
 - A generated draft no longer leaves eBay Size and Size Type empty when the listing's own size answers them.
