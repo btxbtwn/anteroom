@@ -1306,23 +1306,10 @@ def _ready_note(*, repaired: bool, finalized: bool, blockers: list) -> str:
     return "Listing extracted and ready for review."
 
 
-# Mercari caps the description at 1,000. Poshmark caps it at 1,500. Depop caps
-# the title, a blank line, and the description together at 1,000, and a title
-# is at most 80 characters. 918 is the longest description that still fits.
-MERCARI_DESCRIPTION_MAX = 1000
-POSHMARK_DESCRIPTION_MAX = 1500
-DEPOP_POST_MAX = 1000
-TITLE_MAX_FOR_DESCRIPTION = 80
-_DEPOP_TITLE_GAP = 2
+# Mercari and Depop cap the description at 1,000 and Poshmark at 1,500. Depop
+# has no title, so the whole 1,000 is the description.
+DESCRIPTION_MAX = 1000
 _MEASUREMENTS_HEAD = re.compile(r"(?is)^measurements\s*:")
-
-
-def description_character_limit(title: str) -> int:
-    """How long this description can be and still list on every marketplace."""
-    title_len = len(str(title or "").strip())
-    gap = _DEPOP_TITLE_GAP if title_len else 0
-    depop_room = DEPOP_POST_MAX - title_len - gap
-    return max(0, min(MERCARI_DESCRIPTION_MAX, POSHMARK_DESCRIPTION_MAX, depop_room))
 
 
 def _cut_at_word(text: str, limit: int) -> str:
@@ -1373,10 +1360,9 @@ def cap_listing_description(listing: dict) -> bool:
     if not isinstance(listing, dict):
         return False
     description = str(listing.get("description") or "")
-    limit = description_character_limit(str(listing.get("title") or ""))
-    if len(description.strip()) <= limit:
+    if len(description.strip()) <= DESCRIPTION_MAX:
         return False
-    listing["description"] = fit_description(description, limit)
+    listing["description"] = fit_description(description, DESCRIPTION_MAX)
     return listing["description"] != description
 
 

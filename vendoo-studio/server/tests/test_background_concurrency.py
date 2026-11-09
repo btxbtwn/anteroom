@@ -67,6 +67,30 @@ def test_worker_failure_logs_location_without_private_exception_text(monkeypatch
     assert 'private database credential' not in caplog.text
 
 
+def test_seller_stop_ends_the_task_without_reporting_a_failure(monkeypatch, caplog, heartbeat_loop):
+    finished, sleep = [], asyncio.sleep
+
+    async def quick_heartbeat(seconds):
+        await sleep(.01 if seconds == 20 else seconds)
+
+    async def wait_for_provider(*_args):
+        await asyncio.Event().wait()
+
+    def stopped(*_args):
+        raise background_worker.queue.TaskStopped()
+
+    monkeypatch.setattr(background_worker.asyncio, 'sleep', quick_heartbeat)
+    monkeypatch.setattr(background_worker, '_execute', wait_for_provider)
+    monkeypatch.setattr(background_worker.queue, 'renew', stopped)
+    monkeypatch.setattr(background_worker.queue, 'finish', lambda *args, **kwargs: finished.append(args))
+    caplog.set_level('INFO', logger=background_worker.__name__)
+    asyncio.run(asyncio.wait_for(background_worker.run_claimed('task', str(uuid.uuid4()), 'lease',
+                                                               heartbeat_loop=heartbeat_loop), 2))
+    assert not finished, 'A stopped task already settled; the worker must not finish it again'
+    assert not [record for record in caplog.records if record.levelname == 'ERROR']
+    assert 'stopped by the seller' in caplog.text
+
+
 def test_lease_renewal_survives_blocking_draft_work_and_preserves_seller_context(monkeypatch, heartbeat_loop):
     from vendoo_studio.services.service_context import current
 
@@ -142,6 +166,35 @@ def test_lease_renewal_continues_until_completion_is_persisted(monkeypatch, hear
         finally:
             release.set()
             work.result(timeout=2)
+
+
+def test_revoked_heartbeat_stops_work_without_failing_task_again(monkeypatch, caplog, heartbeat_loop):
+    stopped = threading.Event()
+    finished = []
+    sleep = asyncio.sleep
+
+    async def quick_heartbeat(seconds):
+        await sleep(.01 if seconds == 20 else seconds)
+
+    async def execute(*_args):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    def renew(*_args):
+        raise background_worker.queue.TaskLeaseExpired()
+
+    monkeypatch.setattr(background_worker.asyncio, 'sleep', quick_heartbeat)
+    monkeypatch.setattr(background_worker, '_execute', execute)
+    monkeypatch.setattr(background_worker.queue, 'renew', renew)
+    monkeypatch.setattr(background_worker.queue, 'finish', lambda *args, **kwargs: finished.append(kwargs))
+    asyncio.run(background_worker.run_claimed('draft', str(uuid.uuid4()), 'lease',
+                                             heartbeat_loop=heartbeat_loop))
+    assert stopped.is_set()
+    assert not finished, 'A worker without ownership must not attempt another terminal transition'
+    assert not [record for record in caplog.records if record.levelname == 'ERROR']
+    assert 'lease' in caplog.text.lower()
 
 
 def test_worker_cancellation_cleans_up_all_active_jobs(monkeypatch):

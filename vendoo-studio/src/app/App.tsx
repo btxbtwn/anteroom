@@ -1,5 +1,5 @@
 import { useWorkspaceRuntime } from "./runtime";
-import { MOBILE_LAYOUT_QUERY, useMobileLayout } from "../lib/useMobileLayout";
+import { useMobileLayout } from "../lib/useMobileLayout";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useReducer, type CSSProperties } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -104,8 +104,8 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<"workspace" | "editor">(runtime.hosted ? "editor" : "workspace");
-  // On mobile the listings start open only when a listing link opened the app; home is the assistant.
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => listingFromUrl && window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
+  // A listing link opens the listing itself on phones, with inventory closed.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const phoneInventory = isMobile && activeView === "listings" && mobileSidebarOpen;
   const inventoryScroll = useRef(0);
   useLayoutEffect(() => {
@@ -241,13 +241,15 @@ export function App() {
   }, [queryClient]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.get("listing")) return;
     const url = new URL(window.location.href);
-    url.searchParams.delete("listing");
+    if (activeView === "listings" && selectedConvId) {
+      url.searchParams.set("listing", selectedConvId);
+    } else {
+      url.searchParams.delete("listing");
+    }
     const next = url.pathname + url.search + url.hash;
-    window.history.replaceState({}, "", next);
-  }, []);
+    window.history.replaceState(window.history.state, "", next);
+  }, [activeView, selectedConvId]);
 
   useEffect(() => {
     if (setupGuideAutoOpen !== null) return;

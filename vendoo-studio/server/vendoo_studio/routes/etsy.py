@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/etsy", tags=["etsy"])
 async def _read_workspace(operation, response: Response):
     response.headers["Cache-Control"] = "no-store"
     try:
-        return await operation(etsy_workspace.EtsyClient())
+        return await operation(await etsy_workspace.EtsyClient.connect())
     except etsy_workspace.EtsyFailure as exc:
         raise HTTPException(exc.status, str(exc)) from None
     except SignInRequired:
