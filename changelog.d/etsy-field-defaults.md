@@ -1,0 +1,1 @@
+- Save Who made it and What is it as defaults for new listings with the little save button on the Etsy tab.

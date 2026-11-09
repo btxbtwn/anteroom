@@ -988,6 +988,10 @@ def apply_send_readiness_fixes(listing: dict) -> bool:
         if location:
             listing["zipCode"] = location
             changed = True
+    from vendoo_studio.services.user_settings import apply_listing_field_defaults
+
+    if apply_listing_field_defaults(listing):
+        changed = True
     return changed
 
 
