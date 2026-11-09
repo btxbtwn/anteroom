@@ -13,6 +13,10 @@ from vendoo_studio.services.service_context import current
 DRAFT_KINDS = frozenset({'generate', 'chat'})
 ASSISTANT = 'assistant'
 ACTIVE = ('queued', 'running')
+# How often a running task stores its progress and an open stream reads it.
+# Each store is a short transaction on a shared pooled connection, so writing
+# more often than readers poll only takes connections from the seller's pages.
+EVENT_INTERVAL = .5
 
 
 class TaskLeaseExpired(RuntimeError):
@@ -141,7 +145,9 @@ def append_events(task_id, token, frames):
     if not frames:
         return
     with _sessions()() as db:
-        check_write_lease(db, task_id, token)
+        # A worker's session checks its lease when the events flush (before_flush).
+        if db.info.get('background_lease') != (task_id, token):
+            check_write_lease(db, task_id, token)
         sequence = db.scalar(select(func.max(BackgroundTaskEvent.sequence))
                              .where(BackgroundTaskEvent.task_id == task_id)) or 0
         for offset, frame in enumerate(frames, 1):
