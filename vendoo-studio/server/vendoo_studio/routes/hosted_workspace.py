@@ -182,6 +182,9 @@ def inventory_response(db):
     from vendoo_studio.services.sales_records import read_sale_lines, records_from_lines, missing_from_records
 
     sales = read_sale_lines(db)
+    from vendoo_studio.services.unsent_edits import unsent_edits
+
+    unsent = unsent_edits(db, rows, ConversationRepo(db).current_revision_ids())
     # Ledger validation, cost allocation and hashing are CPU work over loaded
     # values. Keep scarce connections available while that work runs.
     db.close()
@@ -190,6 +193,7 @@ def inventory_response(db):
     for row in rows:
         summary = conversation_response(row, current.get(row.id), direct.get(row.id), notes=notes.get(row.id, {}), include_notes=False,
                                         missing_sale_data=missing.get(row.id, []), sold=analytics.statuses.get(row.id))
+        summary['unsent_edits'] = row.id in unsent
         if row.id in covers:
             from vendoo_studio.services.photos import cover_thumb_url
             summary['cover_photo_url'] = cover_thumb_url(*covers[row.id])
