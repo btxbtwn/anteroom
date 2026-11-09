@@ -13,11 +13,25 @@ from vendoo_studio.services.service_context import current
 DRAFT_KINDS = frozenset({'generate', 'chat'})
 ASSISTANT = 'assistant'
 ACTIVE = ('queued', 'running')
+# How often a running task stores its progress and an open stream reads it.
+# Each store is a short transaction on a shared pooled connection, so writing
+# more often than readers poll only takes connections from the seller's pages.
+EVENT_INTERVAL = .5
 
 
 class TaskLeaseExpired(RuntimeError):
     def __init__(self):
         super().__init__('This task no longer owns the draft. Refresh to see its saved state.')
+
+
+class TaskStopped(TaskLeaseExpired):
+    """The seller stopped the task: an expected end, not a failure."""
+
+
+def _lost(db, task_id):
+    if db.scalar(select(BackgroundTask.status).where(BackgroundTask.id == task_id)) == 'cancelled':
+        return TaskStopped()
+    return TaskLeaseExpired()
 
 
 def require_idle(db, conversation_id):
@@ -84,8 +98,8 @@ def renew(task_id, token):
             BackgroundTask.lease_token == token, BackgroundTask.leased_until > func.now(),
         ).values(leased_until=func.now() + text("interval '2 minutes'"), updated_at=func.now())).rowcount
         db.commit()
-    if changed != 1:
-        raise TaskLeaseExpired()
+        if changed != 1:
+            raise _lost(db, task_id)
 
 
 def finish(task_id, token, *, error=None):
@@ -100,8 +114,8 @@ def finish(task_id, token, *, error=None):
             db.execute(update(Conversation).where(Conversation.id == finished.conversation_id, Conversation.status == 'in_progress')
                        .values(status='draft'))
         db.commit()
-    if finished is None:
-        raise TaskLeaseExpired()
+        if finished is None:
+            raise _lost(db, task_id)
 
 
 def cancel(db, task_id):
@@ -124,14 +138,16 @@ def check_write_lease(db, task_id, token):
         BackgroundTask.lease_token == token, BackgroundTask.leased_until > func.now(),
     ).with_for_update())
     if valid is None:
-        raise TaskLeaseExpired()
+        raise _lost(db, task_id)
 
 
 def append_events(task_id, token, frames):
     if not frames:
         return
     with _sessions()() as db:
-        check_write_lease(db, task_id, token)
+        # A worker's session checks its lease when the events flush (before_flush).
+        if db.info.get('background_lease') != (task_id, token):
+            check_write_lease(db, task_id, token)
         sequence = db.scalar(select(func.max(BackgroundTaskEvent.sequence))
                              .where(BackgroundTaskEvent.task_id == task_id)) or 0
         for offset, frame in enumerate(frames, 1):

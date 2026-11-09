@@ -68,7 +68,7 @@ def task_stream(task_id):
                 yield 'data: [DONE]\n\n'
                 return
             yield KEEPALIVE
-            await asyncio.sleep(.5)
+            await asyncio.sleep(queue.EVENT_INTERVAL)
     return StreamingResponse(stream(), media_type='text/event-stream', headers=SSE_HEADERS)
 
 

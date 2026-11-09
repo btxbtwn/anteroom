@@ -74,7 +74,7 @@ async def _execute(task_id, token):
             failed = True
         if frame.strip() and not frame.startswith(':'):
             frames.append(frame)
-        if frames and time.monotonic() - flushed_at >= .25:
+        if frames and time.monotonic() - flushed_at >= queue.EVENT_INTERVAL:
             await asyncio.to_thread(queue.append_events, task_id, token, frames)
             frames, flushed_at = [], time.monotonic()
     await asyncio.to_thread(queue.append_events, task_id, token, frames)
@@ -111,10 +111,13 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
             # On shutdown the durable lease expires; never mark an incomplete
             # draft complete or silently replay it after a process restart.
             raise
+        except queue.TaskStopped:
+            # Stop already settled the task and freed the draft; just end the work.
+            logging.getLogger(__name__).info('Draft task stopped by the seller')
         except queue.TaskLeaseExpired:
-            # Stop/terminal saves revoke the lease too. This worker no longer
-            # owns the row and must not try to mark it failed. Actual expiry
-            # is settled by the queue's claim sweep, without replaying work.
+            # Terminal saves revoke the lease too. This worker no longer owns
+            # the row and must not try to mark it failed. Actual expiry is
+            # settled by the queue's claim sweep, without replaying work.
             logging.getLogger(__name__).warning('Draft task lease lost; stopping worker')
         except Exception as exc:
             # Exception messages and formatted tracebacks can include private

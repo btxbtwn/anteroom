@@ -43,7 +43,7 @@ _FALLBACK_FORMULAS = f"""## Formula Reference (NON-NEGOTIABLE)
 {DEFAULT_DESCRIPTION_FORMULA}
 ```
 - Include the Flaws line only when the item has flaws; leave it out entirely when there are none.
-- Max 918 characters, so the description still fits Mercari, Poshmark, and Depop together with the title.
+- Max 1,000 characters, so the description fits Mercari, Poshmark, and Depop.
 
 ### PRICING Formula
 ```

@@ -6,6 +6,42 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.861 — 2026-11-09
+
+- The marketplace tabs no longer show yellow "Check this answer against photo or seller evidence" warnings under filled-in required fields, and those notes no longer hold up listing.
+
+## 0.1.860 — 2026-11-09
+
+- Chat edits no longer fail with "Native option lookup did not finish" when the assistant names the fields it will change in a slightly different format, and plain answers to questions come straight back.
+
+## 0.1.859 — 2026-11-09
+
+- Generated descriptions can now use the full 1,000 characters. They were cut at 918 to leave room for a title on Depop, which Depop no longer gets.
+
+## 0.1.858 — 2026-11-09
+
+- Keep pages like Sourcing loading on the web while drafts are generating, instead of failing with a database timeout.
+
+## 0.1.857 — 2026-11-09
+
+- Keep the listing assistant from repeatedly asking which fields to edit and failing before it answers.
+
+## 0.1.856 — 2026-11-09
+
+- Closing the web app while it is still loading no longer shows up as a server error.
+
+## 0.1.855 — 2026-11-09
+
+- A seller stopping an assistant answer or draft task is no longer reported as a lost task lease.
+
+## 0.1.854 — 2026-11-09
+
+- Show Listed, Delisted, or Not listed on each marketplace rail row.
+
+## 0.1.853 — 2026-11-09
+
+- The web eBay and Etsy workspaces no longer fail with "Secure credential storage is temporarily unavailable" or slow every other screen while Anteroom is busy.
+
 ## 0.1.852 — 2026-11-09
 
 - Stopping a draft task no longer reports a task crash when its worker notices the revoked lease.
