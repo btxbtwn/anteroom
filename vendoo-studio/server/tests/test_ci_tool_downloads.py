@@ -15,10 +15,17 @@ import pytest
 WORKFLOW = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
 
 
+def _gnu_sha256sum() -> bool:
+    if not shutil.which("sha256sum"):
+        return False
+    version = subprocess.run(["sha256sum", "--version"], capture_output=True, text=True, check=False)
+    return "GNU coreutils" in version.stdout
+
+
 @pytest.mark.parametrize("download_fails", [False, True])
 def test_gitleaks_download_has_bounded_retries_and_never_extracts_unverified_bytes(tmp_path, download_fails):
-    if not shutil.which("sha256sum"):
-        pytest.skip("The Linux repo-check workflow uses sha256sum.")
+    if not _gnu_sha256sum():
+        pytest.skip("The Linux repo-check workflow uses GNU sha256sum (macOS ships one without --strict).")
     step = WORKFLOW.read_text().split("      - name: Install gitleaks\n", 1)[1].split("      - name:", 1)[0]
     version_match = re.search(r'GITLEAKS_VERSION: "([^"]+)"', step)
     asset_match = re.search(r'GITLEAKS_ASSET_ID: "([0-9]+)"', step)
