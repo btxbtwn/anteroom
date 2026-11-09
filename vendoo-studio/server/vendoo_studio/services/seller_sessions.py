@@ -61,8 +61,8 @@ class SessionVerifier:
                 raise InvalidSession
             user_id = str(UUID(claims["sub"]))
             UUID(claims["session_id"])
-        except PyJWKClientConnectionError:
-            raise SessionVerificationUnavailable from None
+        except PyJWKClientConnectionError as exc:
+            raise SessionVerificationUnavailable from exc
         except (jwt.PyJWTError, ValueError, TypeError, AttributeError):
             raise InvalidSession from None
         return SellerIdentity(user_id=user_id)
