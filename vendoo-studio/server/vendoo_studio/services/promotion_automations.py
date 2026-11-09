@@ -426,6 +426,13 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
     except PromotionError as exc:
         db.rollback()
         stop_note = str(exc)
+    except Exception:
+        # A failed commit (a pool timeout during flush) leaves the session
+        # unusable until rolled back. Roll back so the round is still closed
+        # below and the original error, not PendingRollbackError, is reported.
+        # Sends already handed to Chrome were journaled in their own sessions.
+        db.rollback()
+        raise
     finally:
         run.sent, run.skipped, run.failed = counts["sent"], counts["skipped"], counts["failed"]
         run.finished_at = _now()
