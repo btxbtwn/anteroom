@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import event
-from starlette.datastructures import Headers
+from starlette.datastructures import Headers, MutableHeaders
 
 from vendoo_studio.services.seller_sessions import (
     InvalidSession,
@@ -45,6 +45,46 @@ def from_public_edge(scope) -> bool:
 
 access_log = logging.getLogger("vendoo_studio.access")
 http_log = logging.getLogger("vendoo_studio.http")
+
+# Applied to every hosted HTTP response. Kept in one place so the pure ASGI
+# middleware and the tests agree on the policy.
+HOSTED_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
+    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+)
+
+
+class ResponseHeadersMiddleware:
+    """Attach browser security headers without Starlette's BaseHTTPMiddleware.
+
+    ``@app.middleware("http")`` wraps BaseHTTPMiddleware. When a client drops
+    the connection (or the inner app ends without a response), that wrapper
+    raises ``RuntimeError: No response returned.`` and AccessLogMiddleware
+    reports it as an unhandled GET. Pure ASGI header rewriting does not.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                # A route may let the browser keep a versioned private image; nothing else is kept.
+                headers.setdefault("Cache-Control", "no-store")
+                headers["Referrer-Policy"] = "no-referrer"
+                headers["X-Content-Type-Options"] = "nosniff"
+                # pywebview builds its native API methods with Function(). WebKit
+                # applies this policy to that bootstrap as well as to page scripts.
+                headers["Content-Security-Policy"] = HOSTED_CONTENT_SECURITY_POLICY
+            await send(message)
+
+        await self.app(scope, receive, send_headers)
 
 
 class AccessLogMiddleware:
@@ -309,23 +349,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     # JSON forms and choice lists (Depop's brands are about 300 KB) shrink several
     # times over a phone connection. Event streams and images are left alone.
     app.add_middleware(GZipMiddleware, minimum_size=1024)
-
-    @app.middleware("http")
-    async def response_headers(request, call_next):
-        response = await call_next(request)
-        # A route may let the browser keep a versioned private image; nothing else is kept.
-        response.headers.setdefault("Cache-Control", "no-store")
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        # pywebview builds its native API methods with Function(). WebKit
-        # applies this policy to that bootstrap as well as to page scripts.
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
-            "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
-        )
-        return response
-
+    app.add_middleware(ResponseHeadersMiddleware)
     # Outermost, so a refused session or an error still gets its line.
     app.add_middleware(AccessLogMiddleware)
 

@@ -1,0 +1,1 @@
+- Stop false error alerts when a browser drops a request before the hosted API finishes answering.
