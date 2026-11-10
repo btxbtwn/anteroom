@@ -21,7 +21,13 @@ on:
 
 concurrency:
   group: studio-macos-${{ github.ref }}
-  cancel-in-progress: true
+  # A release build takes about seven minutes and merges often land faster
+  # than that. Cancelling the running build on every push to main meant no
+  # release finished at all, so the Mac app saw no update. On main, let the
+  # running build finish; GitHub keeps only the newest push waiting behind it,
+  # so the next build always packages the latest version. Pull requests still
+  # cancel stale runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
