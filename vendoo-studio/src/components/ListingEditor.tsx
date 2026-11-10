@@ -633,7 +633,12 @@ export function StructuredEditor({
     if (!key) return;
     const row = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-row]") || [])].find((element) => element.dataset.listingRow === key);
     if (!row) return;
-    const input = row.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex="0"]');
+    // The label row puts "Save as default" and "Ask chat" before the control, so
+    // look for the field's own control first.
+    const focusable = 'input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex="0"]';
+    const control = row.querySelector<HTMLElement>("[data-listing-field]");
+    const input = (control?.matches(focusable) ? control : control?.querySelector<HTMLElement>(focusable))
+      ?? row.querySelector<HTMLElement>(focusable);
     reachedTarget.current = target.sequence;
     row.scrollIntoView({ block: "center" });
     (input ?? row).focus({ preventScroll: true });
