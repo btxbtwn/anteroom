@@ -1,1 +1,0 @@
-- Group repeated error emails about different jobs or listings into one, so a few failures no longer use up the hourly email limit.

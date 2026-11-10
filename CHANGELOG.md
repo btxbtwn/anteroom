@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.905 — 2026-11-10
+
+- Group repeated error emails about different jobs or listings into one, so a few failures no longer use up the hourly email limit.
+
 ## 0.1.904 — 2026-11-10
 
 - Edit on a marketplace error now puts the cursor in that field, not on its Ask chat button.
