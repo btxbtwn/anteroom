@@ -11,49 +11,53 @@ struct GeneralListingFields: View {
     var options = GeneralOptions()
     /// Loads the shared category tree. Without it, Category is a text field.
     var api: AnteroomAPI?
+    var focusPath: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsMoreDetails = false
 
     var body: some View {
         ListingInspectorSection("Item") {
-            GeneralCategoryField(path: $form.fields.categoryPath, api: api)
+            GeneralCategoryField(path: $form.fields.categoryPath, api: api).fieldAnchor("category_path")
             WorkspaceField("Title") {
-                TextField("Title", text: $form.fields.title, axis: .vertical).lineLimit(1...3)
-                    .accessibilityIdentifier("listing-title")
+                TextField("What buyers search for", text: $form.fields.title, axis: .vertical).lineLimit(1...3)
+                    .accessibilityIdentifier("listing-title").fieldAnchor("title")
             }
         }
         ListingInspectorSection("Condition & details") {
-            OptionField("Condition", value: $form.fields.condition, options: options.condition)
-            OptionField("Size", value: $form.fields.size, options: options.size)
-            TextRow("Brand", text: $form.fields.brand)
+            OptionField("Condition", value: $form.fields.condition, options: options.condition).fieldAnchor("condition")
+            OptionField("Size", value: $form.fields.size, options: options.size).fieldAnchor("size")
+            TextRow("Brand", text: $form.fields.brand, placeholder: "e.g. Levi's").fieldAnchor("brand")
         }
         ListingInspectorSection("Pricing") {
-            NumberField("Price", text: $form.price, prefix: "$")
+            NumberField("Price", text: $form.price, prefix: "$", placeholder: "Asking price").fieldAnchor("price")
         }
         ListingInspectorSection("Description") {
             WorkspaceField("Description") {
-                TextField("Describe your item", text: $form.fields.description, axis: .vertical).lineLimit(5...16)
+                TextField("Describe your item", text: $form.fields.description, axis: .vertical).lineLimit(5...16).fieldAnchor("description")
             }
         }
         ListingInspectorSection("Color & department") {
-            OptionField("Primary Color", value: $form.fields.primaryColor, options: options.primaryColor)
-            OptionField("Secondary Color", value: $form.fields.secondaryColor, options: options.secondaryColor)
-            TextRow("Department", text: $form.fields.department)
+            OptionField("Primary Color", value: $form.fields.primaryColor, options: options.primaryColor).fieldAnchor("primaryColor")
+            OptionField("Secondary Color", value: $form.fields.secondaryColor, options: options.secondaryColor).fieldAnchor("secondaryColor")
+            TextRow("Department", text: $form.fields.department, placeholder: "e.g. Women, Men, Kids").fieldAnchor("department")
         }
+        SellerMeasurementFields(inputs: $form.sellerInputs)
         ListingInspectorSection("Shipping") {
-            pair {
-                NumberField("Package Weight (oz)", text: $form.weightOz)
-                TextRow("Package Dimensions (LxWxH in)", text: $form.fields.packageDimensionsIn)
-            }
-            TextRow("Inventory location", text: $form.fields.zipCode)
+            NumberField("Package Weight (oz)", text: $form.weightOz, placeholder: "Ounces").fieldAnchor("weight_oz")
+            TextRow("Package Dimensions (LxWxH in)", text: $form.fields.packageDimensionsIn, placeholder: "L × W × H").fieldAnchor("package_dimensions_in")
+            TextRow("Inventory location", text: $form.fields.zipCode, placeholder: "ZIP code").fieldAnchor("zipCode")
         }
         ListingInspectorSection("More details", isExpanded: $showsMoreDetails) {
             pair {
-                NumberField("Cost", text: $form.cost, prefix: "$")
-                TextRow("SKU", text: $form.fields.sku)
+                NumberField("Cost", text: $form.cost, prefix: "$", placeholder: "What you paid").fieldAnchor("cost")
+                TextRow("SKU", text: $form.fields.sku, placeholder: "Your stock code").fieldAnchor("sku")
             }
-            WorkspaceField("Quantity") { TextField("1", text: $form.quantity).keyboardType(.numberPad) }
+            WorkspaceField("Quantity") { TextField("1", text: $form.quantity).keyboardType(.numberPad) }.fieldAnchor("quantity")
         }
+        SellerNoteFields(inputs: $form.sellerInputs)
+            .onChange(of: focusPath, initial: true) { _, path in
+                if ["cost", "sku", "quantity"].contains(path ?? "") { showsMoreDetails = true }
+            }
     }
 
     /// Two related fields side by side; stacked at accessibility text sizes.
@@ -153,4 +157,17 @@ struct ListingInspectorSection<Content: View>: View {
         .padding(.vertical, 16)
         .overlay(alignment: .bottom) { WorkspaceStyle.border.frame(height: 1) }
     }
+}
+
+enum FieldAnchor {
+    /// The General form's listing paths.
+    static let general: Set<String> = ["title", "description", "price", "cost", "category_path", "brand", "department",
+                                       "condition", "size", "primaryColor", "secondaryColor", "weight_oz",
+                                       "package_dimensions_in", "zipCode", "quantity", "sku"]
+
+    static func id(_ path: String) -> String { "field:\(path)" }
+}
+
+extension View {
+    func fieldAnchor(_ path: String) -> some View { id(FieldAnchor.id(path)) }
 }

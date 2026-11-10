@@ -683,3 +683,107 @@ final class PolishScreenshotTests: XCTestCase {
         add(attachment)
     }
 }
+
+/// The listing's core flows: a new draft left untouched leaves nothing behind,
+/// Generate listing sits under the photos and the reply is a summary, and a
+/// marketplace tab carries its own List button behind the confirmation.
+@MainActor
+final class CoreFlowSandboxTests: XCTestCase {
+    func testBackingOutOfANewDraftLeavesNothing() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        let placeholder = app.staticTexts.matching(identifier: "New Listing")
+        XCTAssertTrue(app.buttons["New listing"].firstMatch.waitForExistence(timeout: 30))
+        let before = placeholder.count
+        openNewListing(app)
+        XCTAssertFalse(app.staticTexts["Saved"].exists, "A new draft says nothing about saving before any edit")
+        XCTAssertFalse(app.staticTexts["Unsaved changes"].exists)
+        keep(app, "New draft")
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Inventory"].waitForExistence(timeout: 15))
+        // Pull to refresh so the list is the server's, not the phone's.
+        sleep(2)
+        app.collectionViews.firstMatch.swipeDown()
+        sleep(2)
+        XCTAssertEqual(placeholder.count, before, "Backing out of an untouched draft removes it")
+    }
+
+    func testGenerateFromTheEditorShowsASummary() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        let listing = app.staticTexts["Sandbox photos only"].firstMatch
+        XCTAssertTrue(listing.waitForExistence(timeout: 30))
+        let generate = app.buttons["generate-listing"]
+        // A tap that lands while the list is still settling can miss; open it again if so.
+        for _ in 0..<3 where !generate.waitForExistence(timeout: 20) {
+            if listing.exists && listing.isHittable { listing.tap() }
+        }
+        XCTAssertTrue(generate.exists, "A draft with photos and no copy offers Generate listing")
+        // The editor ignores taps while it reloads the listing; wait until it takes them.
+        expectation(for: NSPredicate(format: "enabled == true AND hittable == true"), evaluatedWith: generate)
+        waitForExpectations(timeout: 30)
+        keep(app, "Generate listing under photos")
+        let assistant = app.navigationBars["Listing assistant"]
+        for _ in 0..<3 where !assistant.exists {
+            if generate.exists && generate.isHittable { generate.tap() }
+            _ = assistant.waitForExistence(timeout: 10)
+        }
+        XCTAssertTrue(assistant.exists, "Generate listing opens the assistant")
+        // No confirmation: there is no copy to replace.
+        let review = app.buttons["Review in editor"]
+        XCTAssertTrue(review.waitForExistence(timeout: 180), "The reply offers the editor")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '```' OR label CONTAINS '\"title\"'")).firstMatch.exists,
+                       "The generated JSON is never shown")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'filled.'")).firstMatch.exists)
+        // The editor's own Generate listing sits under the sheet, so check for Regenerate only.
+        XCTAssertTrue(app.buttons["Regenerate"].exists, "After a first run the assistant offers Regenerate")
+        keep(app, "Assistant summary")
+        review.tap()
+        // The editor reloads the saved draft on return; then it has copy and no Generate listing.
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["generate-listing"])
+        waitForExpectations(timeout: 30)
+    }
+
+    func testMarketplaceTabHasItsOwnListButton() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        let listing = app.staticTexts["Free People S Pink Floral Midi Dress"].firstMatch
+        XCTAssertTrue(listing.waitForExistence(timeout: 30))
+        let formMenu = app.buttons["Form, General"]
+        for _ in 0..<3 where !formMenu.waitForExistence(timeout: 20) {
+            if listing.exists && listing.isHittable { listing.tap() }
+        }
+        XCTAssertTrue(formMenu.exists)
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: formMenu)
+        waitForExpectations(timeout: 30)
+        formMenu.tap()
+        keep(app, "Form menu")
+        // The sample dress is live on Poshmark and Etsy, not on eBay.
+        let ebay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'eBay'")).firstMatch
+        XCTAssertTrue(ebay.waitForExistence(timeout: 10))
+        ebay.tap()
+        let list = app.buttons["List on eBay"]
+        XCTAssertTrue(list.waitForExistence(timeout: 60), "The marketplace tab has its own List button")
+        keep(app, "eBay tab action")
+        if list.isEnabled {
+            list.tap()
+            // The confirmation names the marketplace; Cancel leaves everything as it was.
+            let cancel = app.buttons["Cancel"].firstMatch
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'on eBay?'")).firstMatch.waitForExistence(timeout: 10))
+            cancel.tap()
+        }
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}

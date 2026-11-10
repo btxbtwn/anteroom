@@ -136,6 +136,12 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("DELETE", "api/conversations/\(id)"))
     }
 
+    func discardBlankListing(_ id: String) async throws -> Bool {
+        struct Answer: Decodable { let discarded: Bool }
+        let answer: Answer = try await decode(request("POST", "api/conversations/\(id)/discard-blank"))
+        return answer.discarded
+    }
+
     /// Settings → Listings → Where you list, in the seller's order. Screens
     /// asking within 30 seconds share one answer; changing it asks again.
     func selectedMarketplaces() async throws -> [String] {

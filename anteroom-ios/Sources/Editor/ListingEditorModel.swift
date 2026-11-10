@@ -68,6 +68,22 @@ final class ListingEditorModel {
     var hasChanges: Bool { hasLoaded && !isLoading && (form != saved || !pending.isEmpty) }
     var isDraft: Bool { status == "draft" }
     var title: String { form.fields.title }
+    /// The saved listing has copy that generating would replace: a description,
+    /// or a title other than the placeholder a new draft starts with. Before
+    /// anything is saved the server fills the title with the draft's name,
+    /// which is not copy.
+    var hasCopy: Bool {
+        Self.hasCopy(title: document["title"]?.text ?? "", description: document["description"]?.text ?? "", revisionID: revisionID)
+    }
+    /// No description yet: the editor offers Generate listing.
+    var needsGenerating: Bool { (document["description"]?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    nonisolated static func hasCopy(title: String, description: String, revisionID: String?) -> Bool {
+        guard revisionID != nil else { return false }
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !(title.isEmpty || title == "New Listing")
+    }
 
     /// Reads the listing, its notes and photos in one request. The General
     /// lists and the marketplace tabs load beside it and never hold the editor
@@ -163,7 +179,7 @@ final class ListingEditorModel {
 
     // MARK: Readiness and List everywhere
 
-    static let listMarketplaces = ["ebay", "etsy", "poshmark", "mercari", "depop"]
+    static let listMarketplaces = MarketplaceActions.order
 
     func choice(_ marketplace: String) -> ListChoice? {
         choices.first { $0.marketplace == marketplace }

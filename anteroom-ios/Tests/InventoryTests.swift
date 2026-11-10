@@ -112,9 +112,10 @@ struct InventoryTests {
         let missing = [MissingField(field: "price", label: "Item price", message: "Depop needs a price."),
                        MissingField(field: "depop_specifics.condition", label: "Condition", message: "Condition is empty.")]
         let ready = tracked.marketplaceBadges(missing: ["etsy": missing, "ebay": missing, "depop": missing, "poshmark": missing])
-        precondition(ready.map(\.label) == ["Listed", "Needs 2 fields", "Needs 2 fields", "Working", "Needs 2 fields"],
+        precondition(ready.map(\.label) == ["Listed", "Needs 2 fields", "Working", "Needs 2 fields", "Needs 2 fields"],
                      "Live and running keep their state; draft, failed and not listed read the server's count")
-        precondition(ready.map(\.marketplace) == ["ebay", "etsy", "poshmark", "mercari", "depop"])
+        // The web editor's marketplace order, the same on every screen.
+        precondition(ready.map(\.marketplace) == ["ebay", "poshmark", "mercari", "depop", "etsy"])
         precondition(rows[0].marketplaceBadges(missing: ["depop": []]).isEmpty, "Nothing missing and no record says nothing")
         precondition(MarketplaceBadge(marketplace: "etsy", record: DirectRecord(state: "not_saved", failed: true, fields: 1),
                                       missing: missing)?.label == "Needs 2 fields", "Rejected fields are already in the count")

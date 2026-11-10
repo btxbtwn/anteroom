@@ -62,7 +62,6 @@ private struct EditorLayoutReview: View {
                         }
                     }
                 }
-                SellerInputFields(inputs: $form.sellerInputs)
                 GeneralListingFields(form: $form)
             }
             .padding(16)
