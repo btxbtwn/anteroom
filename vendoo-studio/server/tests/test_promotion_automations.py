@@ -504,6 +504,32 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(self.promoted(), [])
         self.assertIn("Poshmark refused the request: This item is reserved for a buyer. (1)", self.db.query(PromotionRun).one().note)
 
+    def test_overdue_enabled_round_is_logged_without_sending(self):
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.next_run_at = _now() - timedelta(hours=1)
+        self.db.commit()
+        with self.assertLogs("vendoo_studio.promotion_automations", level="ERROR") as errors:
+            promotion_automations.report_overdue(self.db)
+
+        self.assertIn(row.id, " ".join(errors.output))
+        self.assertIn("overdue", " ".join(errors.output))
+        self.assertTrue(row.enabled)
+        self.assertEqual(self.promoted(), [])
+        row.enabled = False
+        self.db.commit()
+        with self.assertNoLogs("vendoo_studio.promotion_automations", level="ERROR"):
+            promotion_automations.report_overdue(self.db)
+
+    def test_failed_job_reports_once_even_when_error_was_handled(self):
+        job = JobRepo(self.db).create(self.items[0][0].id, "", {})
+        with self.assertLogs("vendoo_studio.jobs", level="ERROR") as errors:
+            JobRepo(self.db).update_status(job.id, "failed", error="Chrome refused the action")
+        self.assertIn("Chrome refused the action", " ".join(errors.output))
+        with self.assertNoLogs("vendoo_studio.jobs", level="ERROR"):
+            JobRepo(self.db).update_status(job.id, "failed", error="Chrome refused the action")
+
     def test_review_refusal_keeps_listing_and_sanitized_reason_in_activity(self):
         conv, post = self.items[0]
         detail = "HTTP 400, code 1003: " + "No recipient was returned. " * 8
@@ -514,7 +540,10 @@ class PromotionAutomationsTest(unittest.TestCase):
         saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
         self.enable(saved["id"])
         self.due(saved["id"])
-        self.tick()
+        with self.assertLogs("vendoo_studio.listing_promotions", level="ERROR") as errors:
+            self.tick()
+        self.assertIn("1003", " ".join(errors.output))
+        self.assertNotIn("private-token", " ".join(errors.output))
         activity = self.client.get(f"/api/promotion-automations/{saved['id']}/activity").json()
         self.assertEqual(len(activity["sends"]), 1)
         skipped = activity["sends"][0]

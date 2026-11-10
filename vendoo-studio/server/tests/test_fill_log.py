@@ -207,6 +207,24 @@ class FillLogServiceTest(unittest.TestCase):
         self.db.close()
         self.tmp.cleanup()
 
+    def test_field_failures_reach_error_reports_without_values_or_selectors(self):
+        service = FillLogService(self.db)
+        for marketplace in ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild"):
+            with self.subTest(marketplace=marketplace), self.assertLogs("vendoo_studio.marketplaces", level="ERROR") as errors:
+                service.save_step(self.job, f"filling_{marketplace}", {
+                    "marketplace": marketplace, "entries": [
+                        {"field": "Size", "status": "invalid", "reason": "Marketplace rejected option",
+                         "value_preview": "private-value", "selector": "private-selector"},
+                        {"field": "Title", "status": "filled"},
+                        {"field": "Optional", "status": "skipped"},
+                    ],
+                })
+            self.assertEqual(len(errors.output), 1)
+            self.assertIn(marketplace, errors.output[0])
+            self.assertIn("Marketplace rejected option", errors.output[0])
+            self.assertNotIn("private-value", errors.output[0])
+            self.assertNotIn("private-selector", errors.output[0])
+
     def test_save_step_persists_markdown_and_new_registry_fields(self):
         service = FillLogService(self.db)
         service.save_step(self.job, "filling_general", {

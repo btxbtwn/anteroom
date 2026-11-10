@@ -11,6 +11,7 @@ import uuid
 from typing import Any
 
 from vendoo_studio.models.protocol import ProtocolMessage
+from vendoo_studio.services.marketplace_errors import report_exception, report_result
 
 READ_TIMEOUT_SEC = 20.0
 
@@ -26,6 +27,17 @@ def _manager():
 
 
 async def request(job, message_type: str, payload: dict[str, Any] | None = None, *, timeout: float = READ_TIMEOUT_SEC) -> dict:
+    marketplace = str((payload or {}).get("marketplace") or "chrome")
+    try:
+        result = await _request(job, message_type, payload, timeout=timeout)
+    except Exception as exc:
+        report_exception(marketplace, message_type, exc)
+        raise
+    report_result(marketplace, message_type, result)
+    return result
+
+
+async def _request(job, message_type: str, payload: dict[str, Any] | None = None, *, timeout: float = READ_TIMEOUT_SEC) -> dict:
     if message_type in {"job.vendoo_api", "marketplace.execute", "marketplace.delete", "marketplace.promote"}:
         from vendoo_studio.services import listing_mode
 

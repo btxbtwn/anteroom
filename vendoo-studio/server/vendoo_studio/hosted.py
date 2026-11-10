@@ -96,6 +96,8 @@ class AccessLogMiddleware:
             if status >= 500:
                 http_log.error("%s %s answered %s", scope["method"], template, status,
                                exc_info=details.get("cause"))
+            elif status >= 400:
+                http_log.warning("%s %s answered %s", scope["method"], template, status)
             request_context.reset(context)
             # 499: the client closed the connection before any response started.
             access_log.info("%s %s %s %dms", scope["method"], template, status or (500 if failed else 499),

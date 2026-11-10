@@ -1,13 +1,13 @@
 """Email the operator a structured report for every distinct hosted error.
 
-Every ERROR record from Anteroom's loggers, uvicorn, asyncio and uncaught
+Every WARNING or ERROR record from Anteroom's loggers, uvicorn, asyncio and uncaught
 thread or process exceptions becomes one report: what failed (exception type
 and message), where (stack and call site), when, on which release and Machine,
 for which request (method, route template, request id) and seller id. Browser
 crashes arrive through ``routes/error_reports.py`` and are reported the same way.
 
 Reports group by fingerprint (exception type and code location, or call site
-when there is no exception). The first of a group is emailed straight away;
+and message shape when there is no exception). The first of a group is emailed straight away;
 repeats within ``REPEAT_WINDOW`` are counted and summarised in the next email
 for that group. A global hourly cap keeps a crash loop from flooding the inbox.
 
@@ -80,7 +80,13 @@ def scrub(text: str, limit: int) -> str:
 def _request() -> dict[str, Any] | None:
     context = request_context.get()
     if not context:
-        return None
+        from vendoo_studio.services.service_context import current
+
+        try:
+            seller = current()
+        except RuntimeError:
+            seller = None
+        return {"method": None, "route": "-", "request_id": None, "seller_id": seller.seller_id} if seller else None
     scope = context["scope"]
     route = scope.get("route")
     seller = (scope.get("state") or {}).get("seller")
@@ -95,7 +101,7 @@ def _request() -> dict[str, Any] | None:
 def build_report(record: logging.LogRecord) -> dict[str, Any]:
     exc_type = exc_message = stack = None
     location = f"{Path(record.pathname).name}:{record.lineno} in {record.funcName}"
-    identity: tuple = (record.name, location)
+    identity: tuple = (record.name, location, _VOLATILE.sub("#", scrub(record.getMessage(), MAX_MESSAGE)))
     if record.exc_info and record.exc_info[0] and record.exc_info[1]:
         etype, value, tb = record.exc_info
         assert etype is not None
@@ -194,7 +200,7 @@ class AlertHandler(logging.Handler):
     """Hands records to one mail thread; emit never blocks or raises."""
 
     def __init__(self, send=send_email, *, sleep=time.sleep, clock=time.monotonic):
-        super().__init__(logging.ERROR)
+        super().__init__(logging.WARNING)
         self.send, self.sleep, self.clock = send, sleep, clock
         self.pending: queue.Queue = queue.Queue(maxsize=500)
         self.dropped = 0

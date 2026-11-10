@@ -28,6 +28,7 @@ import uuid
 from collections import deque
 
 from vendoo_studio.services import bridge_approvals
+from vendoo_studio.services.marketplace_errors import report_exception, report_result
 from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, ReplyWaits
 
 # Each named read has its own Bridge capability, so a later read never changes
@@ -235,6 +236,16 @@ class BrowserRelay(ReplyWaits):
         return result if isinstance(result, dict) else {"ok": False}
 
     async def read(self, command: str, payload: dict, timeout: float) -> dict:
+        marketplace = str(payload.get('marketplace') or 'chrome')
+        try:
+            result = await self._read(command, payload, timeout)
+        except Exception as exc:
+            report_exception(marketplace, command, exc)
+            raise
+        report_result(marketplace, command, result)
+        return result
+
+    async def _read(self, command: str, payload: dict, timeout: float) -> dict:
         try:
             return await self.read_local(command, payload, timeout)
         except ChromeReadError as local_error:
