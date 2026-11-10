@@ -1,4 +1,5 @@
 import { listingScreenRead } from "./listingScreen";
+import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
 import { ApiRequestError, retryAfterMs, studioFetch, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
@@ -173,7 +174,14 @@ async function requestWithTimeout<T>(
   try {
     return await request<T>(path, { ...options, signal: controller.signal });
   } catch (error) {
-    if (controller.signal.aborted) throw new Error(timeoutMessage);
+    if (controller.signal.aborted) {
+      const failure = new Error(timeoutMessage);
+      // Route shape only: never send listing IDs, request bodies or query values.
+      const action = path.endsWith("/reset") ? "reset"
+        : path.endsWith("/price-drop") ? "price confirmation" : "batch price confirmation";
+      reportError("mutation", new Error(`${action} timed out after ${timeoutMs}ms. The server may still complete the save.`));
+      throw failure;
+    }
     throw error;
   } finally {
     clearTimeout(timer);
