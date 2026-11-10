@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.890 — 2026-11-10
+
+- Backend fixes no longer wait for unchanged frontend builds, and test-only changes skip unrelated browser runs. Dependency security checks run when Python dependencies change and every day.
+
 ## 0.1.889 — 2026-11-10
 
 - Keep a completed chat reply from showing a connection error when the connection closes.
