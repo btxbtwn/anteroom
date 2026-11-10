@@ -1,0 +1,1 @@
+- Backend fixes no longer wait for unchanged frontend builds, and test-only changes skip unrelated browser runs. Dependency security checks run when Python dependencies change and every day.

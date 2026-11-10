@@ -11,6 +11,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / ".github" / "scripts" / "changed-components.py"
+GROUPS = ("frontend", "backend", "browser", "health", "audit", "extension", "relay")
+
+
+def flags(*enabled: str) -> dict[str, str]:
+    return {name: "true" if name in enabled else "false" for name in GROUPS}
 
 
 def git(root: Path, *args: str) -> str:
@@ -64,14 +69,14 @@ def test_a_release_commit_skips_every_test_job(repository: tuple[Path, str]) -> 
     (root / "changelog.d" / "feature.md").unlink()
     git(root, "add", "-A")
     git(root, "commit", "-qm", "Release Anteroom 1.0.1")
-    assert components(root, "--base", base) == {"studio": "false", "extension": "false", "relay": "false"}
+    assert components(root, "--base", base) == flags()
 
 
 @pytest.mark.parametrize(
     ("path", "expected"),
     [
-        ("vendoo-studio/package.json", {"studio": "true", "extension": "true", "relay": "false"}),
-        ("vendoo-studio/uv.lock", {"studio": "true", "extension": "false", "relay": "false"}),
+        ("vendoo-studio/package.json", flags("frontend", "backend", "browser", "health", "extension")),
+        ("vendoo-studio/uv.lock", flags("backend", "browser", "health", "audit")),
     ],
 )
 def test_a_dependency_change_beside_the_version_still_runs(
@@ -88,7 +93,7 @@ def test_a_dependency_change_beside_the_version_still_runs(
 
 def test_without_a_known_base_everything_runs(repository: tuple[Path, str]) -> None:
     root, _ = repository
-    everything = {"studio": "true", "extension": "true", "relay": "true"}
+    everything = flags(*GROUPS)
     assert components(root, "--base", "") == everything
     assert components(root, "--base", "0" * 40) == everything
     assert components(root, "--base", "f" * 40) == everything
@@ -97,17 +102,57 @@ def test_without_a_known_base_everything_runs(repository: tuple[Path, str]) -> N
 @pytest.mark.parametrize(
     ("paths", "expected"),
     [
-        ("docs/hosted-production.md\nREADME.md\n", {"studio": "false", "extension": "false", "relay": "false"}),
-        ("webhook-relay/src/index.js\n", {"studio": "false", "extension": "false", "relay": "true"}),
-        ("anteroom-ios/project.yml\n", {"studio": "false", "extension": "false", "relay": "false"}),
+        ("docs/hosted-production.md\nREADME.md\n", flags()),
+        ("webhook-relay/src/index.js\n", flags("relay")),
+        ("anteroom-ios/project.yml\n", flags()),
         # The shared API contract and the Swift generated from it are checked by Studio's suite.
-        ("contracts/anteroom-api.json\n", {"studio": "true", "extension": "false", "relay": "false"}),
-        ("anteroom-ios/Sources/API/Generated/APIContract.swift\n", {"studio": "true", "extension": "false", "relay": "false"}),
+        ("contracts/anteroom-api.json\n", flags("backend", "health")),
+        ("anteroom-ios/Sources/API/Generated/APIContract.swift\n", flags("backend", "health")),
         # Backend tests read the extension and skills.
-        ("vendoo-extension/background.js\n", {"studio": "true", "extension": "true", "relay": "false"}),
-        ("skills/list-this/SKILL.md\n", {"studio": "true", "extension": "false", "relay": "false"}),
-        (".github/workflows/ci.yml\n", {"studio": "true", "extension": "true", "relay": "true"}),
+        ("vendoo-extension/background.js\n", flags("backend", "browser", "health", "extension")),
+        ("skills/list-this/SKILL.md\n", flags("backend", "browser", "health")),
+        (".github/workflows/ci.yml\n", flags(*GROUPS)),
+        (".github/workflows/dependency-audit.yml\n", flags(*GROUPS)),
+        ("check.sh\n", flags(*GROUPS)),
+        ("vendoo-studio/src/App.tsx\n", flags("frontend", "backend", "browser", "health")),
+        ("vendoo-studio/src/App.test.tsx\n", flags("frontend", "backend", "health")),
+        ("vendoo-studio/e2e/editor.e2e.ts\n", flags("frontend", "backend", "browser", "health")),
+        ("vendoo-studio/vite.config.ts\n", flags("frontend", "backend", "browser", "health")),
+        ("unknown-input.json\n", flags("frontend", "backend", "browser", "health")),
+        ("vendoo-studio/pyproject.toml\n", flags("backend", "browser", "health", "audit")),
+        ("vendoo-studio/scripts/install-locked.sh\n", flags("backend", "browser", "health", "audit")),
     ],
 )
 def test_paths_choose_components(tmp_path: Path, paths: str, expected: dict[str, str]) -> None:
     assert components(tmp_path, "--stdin", stdin=paths) == expected
+
+
+def test_backend_fix_does_not_build_frontend_or_audit_dependencies(tmp_path: Path) -> None:
+    selected = components(tmp_path, "--stdin", stdin="vendoo-studio/server/vendoo_studio/routes/listings.py\n")
+    assert selected["backend"] == "true"
+    assert selected["browser"] == "true"
+    assert selected["frontend"] == "false"
+    assert selected["audit"] == "false"
+
+
+def test_test_only_change_does_not_run_browser_suites(tmp_path: Path) -> None:
+    selected = components(tmp_path, "--stdin", stdin="vendoo-studio/server/tests/test_listing.py\n")
+    assert selected["backend"] == "true"
+    assert selected["health"] == "true"
+    assert selected["browser"] == "false"
+    assert selected["frontend"] == "false"
+
+
+def test_a_rename_runs_both_components(repository: tuple[Path, str]) -> None:
+    root, _ = repository
+    source = root / "vendoo-studio" / "src" / "moved.ts"
+    source.parent.mkdir()
+    source.write_text("export const value = 1;\n", encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "Add source")
+    base = git(root, "rev-parse", "HEAD")
+    destination = root / "webhook-relay" / "moved.ts"
+    destination.parent.mkdir()
+    git(root, "mv", str(source), str(destination))
+    git(root, "commit", "-qm", "Move source to relay")
+    assert components(root, "--base", base) == flags("frontend", "backend", "browser", "health", "relay")
