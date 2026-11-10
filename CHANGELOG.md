@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.887 — 2026-11-10
+
+- Show item names in the queue tray when marketplace jobs have no shared title.
+
 ## 0.1.886 — 2026-11-10
 
 - Measurements sit beside item details; notes and labels move to the end of the General form.
