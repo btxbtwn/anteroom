@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy.pool import NullPool
 
 from vendoo_studio.config import DATABASE_URL
+from vendoo_studio.database_pool import DiagnosticQueuePool
 
 # SQLite serialises writers. Studio writes from the request path *and* from
 # background sweeps (Vendoo label sync, watch, bulk import), so a chat send can
@@ -59,6 +60,7 @@ def make_engine(url: str):
         # to one connection per seller.
         return create_engine(
             url,
+            poolclass=DiagnosticQueuePool,
             pool_size=int(os.environ.get("ANTEROOM_DB_POOL_SIZE", "8")),
             max_overflow=int(os.environ.get("ANTEROOM_DB_MAX_OVERFLOW", "4")),
             pool_timeout=float(os.environ.get("ANTEROOM_DB_POOL_TIMEOUT", "3")),

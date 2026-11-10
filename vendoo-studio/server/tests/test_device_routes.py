@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from sqlalchemy import text
+from sqlalchemy.pool import QueuePool
 from sqlalchemy.exc import DBAPIError
 
 from test_hosted_service_storage import storage  # noqa: F401
@@ -29,7 +30,7 @@ def test_hosted_process_reuses_a_few_postgres_connections(monkeypatch):
     monkeypatch.setenv('ANTEROOM_HOSTED', '1')
     pooled = make_engine('postgresql+psycopg://anteroom_api:secret@127.0.0.1:6543/postgres')
     try:
-        assert pooled.pool.__class__.__name__ == 'QueuePool'
+        assert isinstance(pooled.pool, QueuePool)
         assert pooled.pool._pool.maxsize == 8
         assert pooled.pool._max_overflow == 4
     finally:
