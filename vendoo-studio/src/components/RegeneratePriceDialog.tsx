@@ -122,12 +122,16 @@ export function RegeneratePriceDialog({
   const preview = comps.preview ?? previewQuery.data;
 
   const [selection, setSelection] = useState<Selection | null>(null);
+  // A refreshed preview or late comps result must not attach a newer revision
+  // to a price the seller picked from an older snapshot.
+  const [selectionPreview, setSelectionPreview] = useState<PriceDropPreview | null>(null);
   const [customText, setCustomText] = useState("");
   // Once the seller picks a price, comps arriving must not move it.
   const [picked, setPicked] = useState(false);
 
   const choose = (next: Selection, text = String(next.price)) => {
     setSelection(next);
+    setSelectionPreview(preview ?? null);
     setCustomText(text);
     setPicked(true);
   };
@@ -136,6 +140,7 @@ export function RegeneratePriceDialog({
     if (!open) {
       setCompsRequested(false);
       setSelection(null);
+      setSelectionPreview(null);
       setCustomText("");
       setPicked(false);
       return;
@@ -143,6 +148,7 @@ export function RegeneratePriceDialog({
     if (!preview || picked) return;
     const next = defaultSelection(preview);
     setSelection(next);
+    setSelectionPreview(preview);
     setCustomText(String(next.price));
   }, [open, preview, picked]);
 
@@ -163,27 +169,29 @@ export function RegeneratePriceDialog({
 
   const apply = useMutation({
     mutationFn: async () => {
-      if (selectedPrice == null || !preview) {
+      if (selectedPrice == null || !selectionPreview) {
         throw new Error("Choose a price first.");
       }
       // Typing the current price back in is a rewrite at today's price, not an
       // error: there is nothing to record, so skip straight to the rewrite.
-      if (selectedPrice >= preview.current_price) return null;
+      if (selectedPrice >= selectionPreview.current_price) return null;
       const percent =
         selection?.kind === "percent"
           ? selection.percent
-          : Math.round((1 - selectedPrice / preview.current_price) * 1000) / 10;
+          : Math.round((1 - selectedPrice / selectionPreview.current_price) * 1000) / 10;
       const mode =
         selection?.kind === "comps"
           ? "comps"
           : selection?.kind === "percent"
             ? "percent"
-            : selection?.kind === "suggested" && preview.suggested_mode === "comps"
+            : selection?.kind === "suggested" && selectionPreview.suggested_mode === "comps"
               ? "comps"
               : selection?.kind === "suggested"
                 ? "percent"
                 : "custom";
-      return api.listings.applyPriceDrop(convId, { price: selectedPrice, percent, mode });
+      return api.listings.applyPriceDrop(convId, {
+        price: selectedPrice, percent, mode, expected_revision_id: selectionPreview.revision_id,
+      });
     },
     onSuccess: (result) => {
       onClose();
