@@ -505,7 +505,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 # LOCAL so a reused connection does not keep the one-second limit.
                 connection.execute(text("SET LOCAL statement_timeout = '1000'"))
                 revision = connection.scalar(text("SELECT anteroom_private.schema_revision()"))
-        except SQLAlchemyError:
+        except SQLAlchemyError as exc:
+            from vendoo_studio.services.error_alerts import note_cause
+            note_cause(exc)
             return JSONResponse({"status": "unavailable"}, status_code=503, headers={"Cache-Control": "no-store"})
         if revision != built_revision():
             # Revisions are not echoed: this route needs no session.
