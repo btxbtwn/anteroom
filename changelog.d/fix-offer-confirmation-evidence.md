@@ -1,2 +1,0 @@
-- See whether an offer request was accepted, a Depop batch completed, or Mercari confirmed recipient offers, without mistaking likes for delivered offers.
-- Check interrupted Depop jobs without sending them again, and check every listing fairly without changing price floors or repeat-offer safeguards.

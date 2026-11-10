@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.876 — 2026-11-10
+
+- See whether an offer request was accepted, a Depop batch completed, or Mercari confirmed recipient offers, without mistaking likes for delivered offers.
+- Check interrupted Depop jobs without sending them again, and check every listing fairly without changing price floors or repeat-offer safeguards.
+
 ## 0.1.875 — 2026-11-10
 
 - Stopping a hosted draft no longer reports rejected cleanup saves as crashes. Workers still cannot save after losing ownership of a draft.
