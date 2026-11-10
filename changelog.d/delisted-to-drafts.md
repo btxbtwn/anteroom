@@ -1,1 +1,0 @@
-- A listing you delist from every marketplace now moves to Drafts and is labeled Inactive, even when the Vendoo import also named a marketplace Anteroom can't delist, such as Sellwild.

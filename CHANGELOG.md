@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.893 — 2026-11-10
+
+- A listing you delist from every marketplace now moves to Drafts and is labeled Inactive, even when the Vendoo import also named a marketplace Anteroom can't delist, such as Sellwild.
+
 ## 0.1.892 — 2026-11-10
 
 - Fixed a build error that stopped the latest updates from reaching myanteroom.com.
