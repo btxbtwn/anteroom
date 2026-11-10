@@ -1,25 +1,29 @@
 import { useState } from "react";
 import type { SalesOverview as Overview } from "../api/salesLedger";
 import { cn } from "../lib/utils";
-import { axisTicks, type BreakdownMetric, formatMoney, overviewFigures, rankBreakdown, weekLabel } from "./analyticsFormat";
+import {
+  axisTicks, type BreakdownMetric, compactMoney, dayRange, formatCurrency, overviewFigures, rankBreakdown, weekLabel,
+} from "./analyticsFormat";
 import { Stat } from "./AnalyticsStat";
 import { marketplaceName } from "./marketplaceNames";
 import { PageNote, Panel } from "./WorkspacePage";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 
 /** The figures and charts above Sales records, for the toolbar's period and marketplace. */
-export function SalesOverview({ data, marketplaceChosen }: { data: Overview; marketplaceChosen: boolean }) {
+export function SalesOverview({ data, period, marketplaceChosen }: { data: Overview; period: string; marketplaceChosen: boolean }) {
   // The weekly chart's switch also orders and scales the marketplace breakdown beside it.
   const [metric, setMetric] = useState<BreakdownMetric>("count");
   return (
     <section aria-label="Sales overview" className="flex flex-col gap-3">
+      {/* The period sits by the figures: Inventory analytics may show another one. */}
+      <h2 className="text-sm font-medium text-foreground">{period}</h2>
       <div className="grid grid-cols-2 gap-3 *:last:col-span-2 @3xl/page:grid-cols-5 @3xl/page:*:last:col-span-1">
         {overviewFigures(data.current, data.previous, marketplaceChosen).map((figure) => (
           <Stat key={figure.label} {...figure} />
         ))}
       </div>
       {data.previous ? (
-        <PageNote>Changes compare with {dayRange(data.previous.start, data.previous.end)}, the period of the same length before.</PageNote>
+        <PageNote>Compared with {dayRange(data.previous.start, data.previous.end)}.</PageNote>
       ) : null}
       <div className="grid gap-3 @3xl/page:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <WeeklyChart weeks={data.weeks} truncated={data.weeks_truncated} undated={data.undated_sales} metric={metric} onMetricChange={setMetric} />
@@ -37,8 +41,8 @@ function WeeklyChart({ weeks, truncated, undated, metric, onMetricChange }: {
   const ticks = axisTicks(peak, metric === "count");
   const top = ticks[ticks.length - 1];
   const describe = (week: Overview["weeks"][number]) =>
-    `Week of ${weekLabel(week.start)}: ${week.count === 1 ? "1 sale" : `${week.count} sales`}, ${
-      week.revenue_known === 0 && week.count > 0 ? "revenue not recorded" : `${formatMoney(week.revenue)} revenue`}`;
+    `Week of ${weekLabel(week.start)}: ${week.count} sold, ${
+      week.revenue_known === 0 && week.count > 0 ? "revenue not recorded" : `${formatCurrency(week.revenue)} revenue`}`;
   const shown = active ?? (weeks.length ? weeks.length - 1 : null);
   // Label about six weeks along the axis, always including the last.
   const every = Math.max(1, Math.ceil(weeks.length / 6));
@@ -120,7 +124,7 @@ function MarketplaceBreakdown({ rows, metric }: { rows: Overview["marketplaces"]
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               <th scope="col" className="pb-2 font-normal">Marketplace</th>
-              <th scope="col" className="pb-2 text-right font-normal">Sold</th>
+              <th scope="col" className="pb-2 text-right font-normal">Items sold</th>
               <th scope="col" className="pb-2 text-right font-normal">Revenue</th>
             </tr>
           </thead>
@@ -135,7 +139,7 @@ function MarketplaceBreakdown({ rows, metric }: { rows: Overview["marketplaces"]
                 </th>
                 <td className="py-2 text-right align-top tabular-nums text-foreground">{row.count}</td>
                 <td className="py-2 pl-3 text-right align-top tabular-nums text-foreground">
-                  {row.revenue_known === 0 ? <span className="text-xs text-muted-foreground">Not recorded</span> : formatMoney(row.revenue)}
+                  {row.revenue_known === 0 ? <span className="text-xs text-muted-foreground">Not recorded</span> : formatCurrency(row.revenue)}
                 </td>
               </tr>
             ))}
@@ -144,14 +148,4 @@ function MarketplaceBreakdown({ rows, metric }: { rows: Overview["marketplaces"]
       )}
     </Panel>
   );
-}
-
-function compactMoney(value: number): string {
-  return value >= 1000 ? `$${(value / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 })}K` : `$${value}`;
-}
-
-function dayRange(start: string, end: string): string {
-  const format = (value: string) =>
-    new Date(`${value}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-  return `${format(start)} – ${format(end)}`;
 }
