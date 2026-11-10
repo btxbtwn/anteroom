@@ -6,6 +6,23 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.890 — 2026-11-10
+
+- Backend fixes no longer wait for unchanged frontend builds, and test-only changes skip unrelated browser runs. Dependency security checks run when Python dependencies change and every day.
+
+## 0.1.889 — 2026-11-10
+
+- Keep a completed chat reply from showing a connection error when the connection closes.
+
+## 0.1.888 — 2026-11-10
+
+- When Poshmark refuses a listing because Smart Sell's Lowest Price is too low, Anteroom now says so and offers Edit Lowest Price, instead of a vague "Invalid Input Error".
+- A listing that fails after being delisted now shows the failure and its reason, not just "Delisted".
+
+## 0.1.887 — 2026-11-10
+
+- Show item names in the queue tray when marketplace jobs have no shared title.
+
 ## 0.1.886 — 2026-11-10
 
 - Measurements sit beside item details; notes and labels move to the end of the General form.
