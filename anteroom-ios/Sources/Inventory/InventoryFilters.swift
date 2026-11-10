@@ -195,18 +195,24 @@ extension ConversationSummary {
         return (imported + directMarketplaces).filter { seen.insert($0).inserted }
     }
 
+    /// The marketplaces Anteroom can delist. The imported history also names
+    /// others it cannot reach (Sellwild, Facebook), which do not keep a
+    /// delisted item live.
+    private static let delistable: Set<String> = ["ebay", "etsy", "poshmark", "mercari", "depop"]
+
     /// A listing Anteroom published reads Active even if it was a draft, and one
-    /// Anteroom delisted everywhere reads Draft; a sale and a send in progress
-    /// keep their own labels.
+    /// Anteroom delisted from every marketplace it can reach reads Inactive,
+    /// under Drafts; a sale and a send in progress keep their own labels.
     var inventoryStatus: String {
         let status = self.status
         if status == "sold" || status == "listing" { return status }
         if !directMarketplaces.isEmpty, ["draft", "in_progress", "failed"].contains(status) { return "active" }
-        if status == "active", !removed.isEmpty, liveMarketplaces.isEmpty { return "draft" }
+        if status == "active" || status == "draft", !removed.isEmpty,
+           !liveMarketplaces.contains(where: Self.delistable.contains) { return "inactive" }
         return status
     }
 
-    var statusTab: String { inventoryStatus == "in_progress" ? "draft" : inventoryStatus }
+    var statusTab: String { ["in_progress", "inactive"].contains(inventoryStatus) ? "draft" : inventoryStatus }
     var statusLabel: String { inventoryStatus.replacingOccurrences(of: "_", with: " ").capitalized }
 
     fileprivate var activeAnchor: Double {

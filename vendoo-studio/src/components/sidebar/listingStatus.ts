@@ -6,6 +6,7 @@ import { formatMoney } from "../analyticsFormat";
 
 const STATUS_HINTS: Record<string, string> = {
   draft: "Not listed on any marketplace",
+  inactive: "Delisted from every marketplace",
   active: "Listed on a marketplace",
   sold: "Sold",
   failed: "The last send failed",
@@ -24,6 +25,10 @@ const MARKETPLACE_STATUS_ORDER = [
   "whatnot",
   "vestiaire",
 ];
+// The marketplaces Anteroom can delist. Vendoo's import also names others it
+// cannot reach (Sellwild, Facebook); once the seller has delisted from Anteroom,
+// those leftovers do not keep the item live.
+const DELISTABLE_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari", "depop"]);
 // Vendoo keys Vestiaire's API integration separately; Settings treats it as one marketplace.
 const MARKETPLACE_ID_ALIASES: Record<string, string> = { vestiaireApi: "vestiaire" };
 
@@ -52,10 +57,11 @@ export function liveMarketplaces(listing: {
 
 /**
  * The inventory label. Vendoo can still say draft after Anteroom published the
- * item itself; that row reads Active, the same as any other live listing. It
- * can also still say active after Anteroom delisted the item everywhere; that
- * row reads Draft. A sale and a send in progress keep their own labels; an
- * earlier failed Vendoo send cannot hide a listing now live from Anteroom.
+ * item itself; that row reads Active, the same as any other live listing. Once
+ * Anteroom has delisted it from every marketplace it can reach, the row reads
+ * Inactive and sits under Drafts. A sale and a send in progress keep their own
+ * labels; an earlier failed Vendoo send cannot hide a listing now live from
+ * Anteroom.
  */
 export function inventoryStatus(listing: {
   status?: string | null;
@@ -66,7 +72,11 @@ export function inventoryStatus(listing: {
   const status = String(listing.status || "draft");
   if (status === "sold" || status === "listing") return status;
   if ((listing.direct_marketplaces || []).length && ["draft", "in_progress", "failed"].includes(status)) return "active";
-  if (status === "active" && (listing.removed_marketplaces || []).length && !liveMarketplaces(listing).length) return "draft";
+  if (
+    (status === "active" || status === "draft")
+    && (listing.removed_marketplaces || []).length
+    && !liveMarketplaces(listing).some((id) => DELISTABLE_MARKETPLACES.has(id))
+  ) return "inactive";
   return status;
 }
 

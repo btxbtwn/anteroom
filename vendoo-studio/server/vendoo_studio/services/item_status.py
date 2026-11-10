@@ -195,7 +195,7 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
     if not conversations:
         return {}
 
-    from vendoo_studio.services.marketplace_delist import removed_marketplaces
+    from vendoo_studio.services.marketplace_delist import MARKETPLACES, removed_marketplaces
 
     ids = {conv_id for conv_id, _notes in conversations}
     if not ids:
@@ -260,7 +260,11 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
         # A delete Anteroom confirmed after the seller marked a listing live ends that listing.
         listed_marks = [name for name, mark in marks.items()
                         if isinstance(mark, dict) and mark.get("state") == "listed" and name not in removed]
-        vendoo_live = [str(name) for name in notes.get("vendooMarketplaces") or [] if str(name) not in removed] \
+        # Only marketplaces Anteroom can delist count: Vendoo's import also names
+        # ones it cannot reach (Sellwild, Facebook), which would otherwise keep
+        # an item the seller delisted everywhere active.
+        vendoo_live = [str(name) for name in notes.get("vendooMarketplaces") or []
+                       if str(name) in MARKETPLACES and str(name) not in removed] \
             if isinstance(notes.get("vendooMarketplaces"), list) else []
         if live_direct or listed_marks:
             status = "active"

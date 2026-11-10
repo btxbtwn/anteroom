@@ -49,17 +49,29 @@ describe("inventoryStatus", () => {
     expect(inventoryStatus({ status: "draft" })).toBe("draft");
   });
 
-  it("reads a Vendoo active as draft once Anteroom delisted every marketplace", () => {
+  it("reads a listing as inactive once Anteroom delisted every marketplace", () => {
     const delisted = {
       status: "active",
       vendoo_marketplaces: ["depop", "ebay", "mercari", "poshmark"],
       removed_marketplaces: ["ebay", "etsy", "poshmark", "mercari", "depop"],
     };
-    expect(inventoryStatus(delisted)).toBe("draft");
+    expect(inventoryStatus(delisted)).toBe("inactive");
+    expect(inventoryStatus({ ...delisted, status: "draft" })).toBe("inactive");
     expect(inventoryStatus({ ...delisted, removed_marketplaces: ["ebay"] })).toBe("active");
-    expect(inventoryStatus({ ...delisted, vendoo_marketplaces: [...delisted.vendoo_marketplaces, "facebook"] })).toBe("active");
     expect(inventoryStatus({ ...delisted, direct_marketplaces: ["depop"] })).toBe("active");
     expect(inventoryStatus({ status: "active", vendoo_marketplaces: ["ebay"] })).toBe("active");
+    expect(inventoryStatus({ status: "draft" })).toBe("draft");
+  });
+
+  it("ignores imported marketplaces Anteroom cannot delist once the rest are delisted", () => {
+    const delisted = {
+      status: "active",
+      vendoo_marketplaces: ["depop", "ebay", "mercari", "poshmark", "sellwild", "facebook"],
+      removed_marketplaces: ["ebay", "poshmark", "mercari", "depop"],
+    };
+    expect(inventoryStatus(delisted)).toBe("inactive");
+    expect(inventoryStatus({ ...delisted, removed_marketplaces: ["ebay", "poshmark", "mercari"] })).toBe("active");
+    expect(inventoryStatus({ status: "active", vendoo_marketplaces: ["sellwild"] })).toBe("active");
   });
 
   it("keeps a sale and a failed send without direct listings", () => {
