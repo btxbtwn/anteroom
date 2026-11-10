@@ -276,6 +276,11 @@ describe("marketplaces section", () => {
       error_fields: [{ field: "settings.ebay.merchant_location_key", message: "Choose the inventory location." }] } },
       {}, { selected: "ebay", onEditField: vi.fn() });
     expect(enabledButton(location, "Edit Inventory location")).toBe(true);
+    // Depop's shipping refusal opens the Package size row, the form's own name for it.
+    const shipping = render({ depop: { state: "draft", error: "Depop needs shipping.", error_code: "missing_fields",
+      error_fields: [{ field: "depop_specifics.parcelSize", message: "Depop needs shipping" }] } },
+      {}, { selected: "depop", onEditField: vi.fn() });
+    expect(enabledButton(shipping, "Edit Package size")).toBe(true);
     expect(enabledButton(missing, "Ask chat")).toBe(true);
     const signedOut = render({ etsy: { state: "not_saved", error: "Reconnect Etsy.", error_code: "signed_out" } }, {}, { selected: "etsy", etsyReady: true });
     expect(enabledButton(signedOut, "Reconnect Etsy")).toBe(true);

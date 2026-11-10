@@ -241,7 +241,7 @@ async function depopShippingFields(listing, category, deadline) {
   params.set('item_currency', 'USD');
   const providers = await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline);
   const parcel = depopParcelSize(depopParcelRows(providers), listing);
-  if (!from || !parcel?.id) return { from, parcel, fields: {} };
+  if (!from || !parcel?.id) return { from, parcel, fields: {}, problem: depopShippingProblem(from, parcel, listing) };
   const fields = {
     // The draft's shipping entry uses parcel_size. parcel_size_id is the partner
     // API's name, and Depop refuses a draft that carries it.
@@ -256,11 +256,42 @@ async function depopShippingFields(listing, category, deadline) {
   return { from, parcel, fields };
 }
 
+// Why Anteroom could not give a draft shipping, said so the seller knows where to
+// fix it: a ship-from address lives in the Depop account, a package size in the form.
+function depopShippingProblem(from, parcel, listing) {
+  if (!from) {
+    return { address: true, message: 'Depop has no ship-from address Anteroom can use. Add or choose a default '
+      + 'shipping address in Depop (Settings → Shipping), then List again.' };
+  }
+  if (!parcel?.id) {
+    const wanted = String(listing?.depop_specifics?.parcelSize || listing?.depop_specifics?.parcel_size || '').trim();
+    return { needs: wanted ? `a package size it offers for this item (it does not offer ${wanted})` : 'a package size' };
+  }
+  return null;
+}
+
+// Depop's shipping answers all come from the Package size row of the form.
+const DEPOP_SHIPPING_FIELDS = new Set(['national_shipping', 'national_shipping_cost', 'shipping', 'shipping_methods', 'parcel_size']);
+const DEPOP_PARCEL_FIELD = 'depop_specifics.parcelSize';
+
+// The fields Depop says a draft lacks, named as the form names them, so the
+// seller is taken to a row that exists. Shipping is said once, with its cause.
+function depopMissingEntries(missing, shippingProblem) {
+  const entries = [];
+  for (const field of missing) {
+    const shipping = DEPOP_SHIPPING_FIELDS.has(field);
+    const entry = shipping
+      ? { field: DEPOP_PARCEL_FIELD, needs: shippingProblem?.needs || (field === 'parcel_size' ? 'a package size' : 'shipping') }
+      : { field, needs: depopFieldNeeds(field) };
+    if (!entries.some(other => other.field === entry.field)) entries.push(entry);
+  }
+  return entries;
+}
+
 // Depop's names for the fields a draft still lacks, in plain words.
 const DEPOP_FIELD_NEEDS = { brand: 'a brand', brand_id: 'a brand', category: 'a category', category_id: 'a category',
   product_type: 'a category', group: 'a category', condition: 'a condition', colour: 'a colour', size: 'a size',
-  variants: 'a size', variant_set: 'a size', shipping: 'shipping', shipping_methods: 'shipping',
-  national_shipping: 'shipping', parcel_size: 'a parcel size', location: 'a location',
+  variants: 'a size', variant_set: 'a size', location: 'a location',
   address: 'a shipping address', age: 'an age', style: 'a style', source: 'a source', gender: 'a gender', pictures: 'photos',
   photos: 'photos', price: 'a price', price_amount: 'a price', description: 'a description', quantity: 'a quantity' };
 
@@ -504,6 +535,7 @@ async function depopResolvedFields(payload) {
   fields.international_shipping_cost = worldwide?.enabled === true ? internationalPrice.toFixed(2) : null;
   const shipping = await depopShippingFields(listing, category, payload.deadline);
   Object.assign(fields, shipping.fields);
+  payload.depop_shipping_problem = shipping.problem || null;
   return fields;
 }
 
@@ -1283,8 +1315,13 @@ async function depopApiAction(action, payload) {
         ...(!draft.pictures?.length ? ['photos'] : []), ...(!(Number(draft.price_amount) > 0) ? ['price'] : [])];
       if (missing.length || !Array.isArray(draft.missing_fields)) {
         const named = Array.isArray(draft.missing_fields) ? draft.missing_fields.map(String).join(', ') : '';
-        throw marketplaceMissing('depop', [...new Set(missing.length ? missing : ['details'])]
-          .map(field => ({ field, needs: depopFieldNeeds(field) })), named ? `missing_fields: ${named}` : '');
+        const problem = payload.depop_shipping_problem;
+        // A missing ship-from address is fixed in the Depop account, not in any row here.
+        if (problem?.address && missing.some(field => DEPOP_SHIPPING_FIELDS.has(field))) {
+          throw marketplaceError(problem.message, { code: 'rejected', marketplace_message: named ? `missing_fields: ${named}` : '' });
+        }
+        throw marketplaceMissing('depop', depopMissingEntries([...new Set(missing.length ? missing : ['details'])], problem),
+          named ? `missing_fields: ${named}` : '');
       }
       // The editor document is the one the draft page reads, and the one that shows
       // whether the package size is still there. Only a summary that does not report

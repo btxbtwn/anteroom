@@ -75,6 +75,7 @@ export function chatCanFix(draft: NativeDraft): boolean {
 
 function fieldLabel(field: string): string {
   if (field === "settings.ebay.merchant_location_key") return "Inventory location";
+  if (field === "depop_specifics.parcelSize") return "Package size";
   if (field === "poshmark_specifics.smartSell.minimumPrice") return "Lowest Price";
   const last = field.split(".").pop() || field;
   return last.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
