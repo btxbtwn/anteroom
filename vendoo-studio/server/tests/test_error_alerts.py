@@ -334,3 +334,32 @@ def test_unavailable_answer_reports_the_failure_behind_it():
     assert report["exception"]["type"] == "sqlalchemy.exc.TimeoutError"
     assert "QueuePool limit" in report["exception"]["message"]
     assert report["request"]["route"] == "/api/settings/ui"
+
+
+def test_promotion_preview_refusals_group_across_listings_but_keep_the_failure():
+    def preview(listing, automation, reason='Depop refused preview', marketplace='depop',
+                explanation='marketplace explanation', logger='vendoo_studio.listing_promotions'):
+        record = logging.LogRecord(logger, logging.ERROR, 'listing_promotions.py', 265,
+                                  '%s offer preview rejected for listing %s, automation %s: %s; %s',
+                                  (marketplace, listing, automation, reason, explanation), None)
+        return build_report(record)
+
+    first = preview('seller-vintage-shirt-abcd', 'aabb12345678')
+    second = preview('seller-cotton-trousers-efab', 'ccdd87654321')
+    assert first['fingerprint'] == second['fingerprint']
+    assert 'seller-vintage-shirt-abcd' in first['message']
+    assert 'seller-cotton-trousers-efab' in second['message']
+    assert first['fingerprint'] != preview('seller-vintage-shirt-abcd', 'aabb12345678', 'Account disconnected')['fingerprint']
+    assert first['fingerprint'] != preview('seller-vintage-shirt-abcd', 'aabb12345678', marketplace='mercari')['fingerprint']
+    assert first['fingerprint'] != preview('seller-vintage-shirt-abcd', 'aabb12345678', explanation='Not authorized')['fingerprint']
+    assert preview('one-shirt', 'aabb12345678', logger='vendoo_studio.other')['fingerprint'] != preview(
+        'two-shirt', 'aabb12345678', logger='vendoo_studio.other')['fingerprint']
+    sent = []
+    h = handler(lambda subject, body: sent.append((subject, body)))
+    try:
+        h.process(first)
+        h.process(second)
+        assert len(sent) == 1
+        assert h.groups[first['fingerprint']]['repeats'] == 1
+    finally:
+        h.close()
