@@ -33,6 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from vendoo_studio.services.marketplace_diagnostics import sanitize_context
 from vendoo_studio.services.redaction import redact
 from vendoo_studio.version import app_version
 
@@ -142,6 +143,7 @@ def build_report(record: logging.LogRecord) -> dict[str, Any]:
             "process": os.getpid(),
             "thread": record.threadName,
         },
+        "marketplace_context": sanitize_context(getattr(record, "marketplace_context", None)),
         "stack": stack,
     }
 
@@ -170,6 +172,9 @@ def render_email(report: dict[str, Any], repeats: int, first_seen: str | None) -
     lines += [f"Release      {env['release']}",
               f"Machine      {env['machine'] or '-'} ({env['region'] or '-'}, role {env['process_role']}, pid {env['process']}, {env['thread']})",
               "", "Message", "-------", report["message"] or "-"]
+    if report.get("marketplace_context"):
+        lines += ["", "Marketplace failure context (selected inputs; not proof of submitted values)",
+                  "------------------------------------------------------------------------", json.dumps(report["marketplace_context"], sort_keys=True)]
     if report["exception"]:
         lines += ["", "Exception", "---------", f"{report['exception']['type']}: {report['exception']['message']}"]
     if report["stack"]:
