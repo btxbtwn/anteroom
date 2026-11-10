@@ -1,0 +1,1 @@
+- iPhone: leaving a new draft keeps unsaved edits before checking whether the blank draft can be removed.
