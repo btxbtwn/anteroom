@@ -159,3 +159,27 @@ def test_pool_fingerprint_matches_pre_diagnostic_pool():
             fingerprints.append(build_report(exhaust(engine))['fingerprint'])
         engine.dispose()
     assert fingerprints[0] == fingerprints[1]
+
+
+def test_async_holder_and_reporting_failure_preserve_pool_behavior(monkeypatch):
+    import asyncio
+
+    engine = pool_engine()
+
+    async def hold():
+        with engine.connect():
+            report = build_report(exhaust(engine))
+            assert report['database_pool']['holders'][0]['execution'] == 'async_task'
+    asyncio.run(hold())
+
+    def broken_snapshot():
+        raise RuntimeError('diagnostics failed')
+
+    monkeypatch.setattr(engine.pool, '_timeout_snapshot', broken_snapshot)
+    with engine.connect():
+        report = build_report(exhaust(engine))
+        assert report['exception']['type'] == 'sqlalchemy.exc.TimeoutError'
+        assert report['database_pool'] is None
+    with engine.connect():
+        pass
+    engine.dispose()
