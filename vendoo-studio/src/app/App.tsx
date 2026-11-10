@@ -35,7 +35,7 @@ import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
 import { toastManager } from "../components/ui/toast";
 import { takeMarketplaceSignIn } from "../lib/marketplaceSignIn";
 import { Button } from "../components/ui/button";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
+import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import {
   groupImageFilesByFolder,
   listingTitleForFolder,

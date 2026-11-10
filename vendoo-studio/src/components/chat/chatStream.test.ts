@@ -2,6 +2,21 @@ import { describe, expect, it } from "vitest";
 import { consumeResponseSse } from "./chatStream";
 
 describe("consumeResponseSse", () => {
+  it("finishes at DONE without reading a failing connection teardown", async () => {
+    let reads = 0;
+    const reader = {
+      read: async () => {
+        if (reads++ === 0) return { done: false, value: new TextEncoder().encode("data: Saved\n\ndata: [DONE]\n\n") };
+        throw new TypeError("Load failed");
+      },
+      cancel: async () => {},
+    };
+    const response = { body: { getReader: () => reader } } as unknown as Response;
+    const result = await consumeResponseSse(response, () => {});
+    expect(result.sawDone).toBe(true);
+    expect(result.parts.content).toBe("Saved");
+    expect(reads).toBe(1);
+  });
   it("keeps agent events out of the reply text", async () => {
     const agent = JSON.stringify({
       id: "comps-sold-1",
