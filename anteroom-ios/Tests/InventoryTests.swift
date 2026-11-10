@@ -141,6 +141,12 @@ struct InventoryTests {
         precondition(tracked.rowLogos().map(\.marketplace) == ["ebay"])
         precondition(imported.rowLogos(selling: ["ebay", "poshmark"]).map(\.marketplace) == ["ebay"], "Only the marketplaces the seller sells on")
         precondition(imported.inventoryStatus == "active")
+        // Delisted from every marketplace Anteroom can reach: Inactive, under Drafts, whatever else the import names.
+        let delisted = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
+        {"id":"t","title":"Tank","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00",
+         "vendoo_marketplaces":["ebay","poshmark","sellwild"],"removed_marketplaces":["ebay","poshmark"]}
+        """#.utf8))
+        precondition(delisted.inventoryStatus == "inactive" && delisted.statusTab == "draft" && delisted.statusLabel == "Inactive")
         // Each marketplace's live price, marked when it is not the item price; unknown stays unknown.
         let priced = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
         {"id":"g","title":"Tee","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","price":25,"direct_records":{

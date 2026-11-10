@@ -95,6 +95,7 @@ describe("filterListings", () => {
 
   it("keeps an in-progress listing in the Draft tab", () => {
     expect(listingStatusTab("in_progress")).toBe("draft");
+    expect(listingStatusTab("inactive")).toBe("draft");
     expect(filterListings([...inventory, inProgress], "", withFilters({ status: "draft" }))).toEqual([
       draft,
       inProgress,

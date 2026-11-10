@@ -628,7 +628,7 @@ struct ListingRowContent<Thumbnail: View>: View {
     /// The web's status dots (ListingBits.tsx): the word stays muted.
     private var statusColor: Color {
         switch listing.inventoryStatus {
-        case "draft": WorkspaceStyle.mutedText
+        case "draft", "inactive": WorkspaceStyle.mutedText
         case "in_progress", "listing": WorkspaceStyle.info
         case "active": WorkspaceStyle.success
         case "sold": WorkspaceStyle.accent

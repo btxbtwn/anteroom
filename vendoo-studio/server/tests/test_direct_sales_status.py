@@ -261,6 +261,14 @@ def test_a_direct_listing_reads_active_and_delisting_everywhere_reads_draft(env)
     assert status(env.db, "gone").status == "draft"
 
 
+def test_an_imported_marketplace_anteroom_cannot_delist_does_not_keep_a_delisted_item_active(env):
+    # Vendoo's import also names Sellwild, which Anteroom neither shows nor delists.
+    item(env.db, "tank", notes={"vendooStatus": "active", "vendooMarketplaces": ["poshmark", "sellwild"],
+                                "vendooListingUrls": {"poshmark": POSH_URL},
+                                "marketplaceDelists": {"poshmark": {"state": "deleted", "listing_id": "65a1b2c3d4e5f6a7b8c9d0e1"}}})
+    assert status(env.db, "tank").status == "draft"
+
+
 def test_analytics_counts_ledger_sales_with_their_recorded_amounts(env):
     item(env.db, "coat")
     line(env.db, "coat", financials={"item_revenue": "40", "fees": "5", "shipping_cost": "3", "shipping_credit": "2", "refunds": "0"})

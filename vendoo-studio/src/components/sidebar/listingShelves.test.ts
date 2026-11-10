@@ -148,10 +148,10 @@ describe("sidebar search", () => {
     expect(search("zzz")).toEqual([]);
   });
 
-  it("files a delisted-everywhere item under Draft and an Anteroom publish under Active", () => {
+  it("files a delisted-everywhere item under Draft as Inactive and an Anteroom publish under Active", () => {
     const tab = (status: "draft" | "active") =>
       filterListings(listings, "", { ...DEFAULT_LISTING_FILTERS, status }).map((l) => l.id);
-    expect(inventoryStatus(listings[2])).toBe("draft");
+    expect(inventoryStatus(listings[2])).toBe("inactive");
     expect(tab("draft")).toEqual(["2", "3"]);
     expect(tab("active")).toEqual(["1", "4"]);
   });

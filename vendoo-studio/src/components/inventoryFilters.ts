@@ -112,7 +112,7 @@ export const DEFAULT_LISTING_FILTERS: ListingFilters = {
 /** The inventory tab a listing belongs to while preserving its detailed row status. */
 export function listingStatusTab(status?: string | null): string {
   const value = String(status || "draft");
-  return value === "in_progress" ? "draft" : value;
+  return value === "in_progress" || value === "inactive" ? "draft" : value;
 }
 
 /**

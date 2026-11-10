@@ -72,6 +72,7 @@ export function SelectCheckbox({
 // stays quiet. Only a failure colors the word itself.
 const STATUS_DOTS: Record<string, string> = {
   draft: "bg-muted-foreground/50",
+  inactive: "bg-muted-foreground/50",
   "in-progress": "bg-info",
   listing: "bg-info",
   active: "bg-success",
