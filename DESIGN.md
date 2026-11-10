@@ -159,6 +159,17 @@ spinner and the step's name are enough. Longer work shows the current step
 ("Uploading photos", "Saving the listing") or a count ("3 of 8"). Use a
 determinate progress bar only when the number is real.
 
+**Streaming replies.** A reply shows each word as it arrives: finished
+blocks render as markdown, and the block being written shows up to its last
+whole word, with any bold, italic or code the model has opened closed for it,
+so the seller never sees raw `**` turn into bold. Tables appear once whole. A
+caret marks where text is arriving; it blinks only when motion is allowed. Stop
+sits where Send was, Esc in the message box does the same, and both keep what
+was already written. The transcript follows new text only while the reader is
+at the end; scrolling up to read stops it and shows **Scroll to end**. Screen
+readers hear that a reply has finished, once, never each word. On the iPhone,
+one haptic marks finished, failed or stopped, never each word.
+
 **Busy is a state, not an error.** When something the seller asked for has to
 wait its turn (a marketplace already working on another item, a provider at
 its limit), accept the request, show it as *Waiting* with the reason ("Waiting

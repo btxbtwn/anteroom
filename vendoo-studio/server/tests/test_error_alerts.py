@@ -224,3 +224,48 @@ def test_route_crash_is_reported_once_with_request_context():
     assert crash["request"] == {"method": "GET", "route": "/api/items/{item_id}", "request_id": "r-1", "seller_id": None}
     assert "secret" not in str(crash)
     assert unavailable_report["message"] == "GET /api/unavailable answered 503"
+
+
+def test_unavailable_answer_reports_the_failure_behind_it():
+    """A 503 from a pool timeout names the timeout, not only the status."""
+    from fastapi import Depends, FastAPI
+    from fastapi.testclient import TestClient
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+    from vendoo_studio.hosted import AccessLogMiddleware
+    from vendoo_studio.services import hosted_database
+    from vendoo_studio.services.seller_sessions import SellerIdentity
+
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def seller(request, call_next):
+        request.scope.setdefault("state", {})["seller"] = SellerIdentity("aaa1abaf-ee00-4d3a-9d73-c20fb0a6f267")
+        return await call_next(request)
+
+    @app.get("/api/settings/ui")
+    def ui(db=Depends(hosted_database.get_seller_db, scope="function")):
+        return {}
+
+    app.add_middleware(AccessLogMiddleware)
+
+    def exhausted(**_):
+        raise PoolTimeout("QueuePool limit of size 8 overflow 4 reached, connection timed out, timeout 3.00")
+
+    reports = []
+    handler = logging.Handler(logging.ERROR)
+    handler.emit = lambda record: reports.append(build_report(record))
+    logging.getLogger("vendoo_studio.http").addHandler(handler)
+    postgres = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    try:
+        with patch("vendoo_studio.database.engine", postgres), \
+                patch.object(hosted_database, "SellerDatabaseSession", exhausted):
+            response = TestClient(app, raise_server_exceptions=False).get("/api/settings/ui")
+    finally:
+        logging.getLogger("vendoo_studio.http").removeHandler(handler)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Cloud data is temporarily unavailable"}
+    [report] = reports
+    assert report["message"] == "GET /api/settings/ui answered 503"
+    assert report["exception"]["type"] == "sqlalchemy.exc.TimeoutError"
+    assert "QueuePool limit" in report["exception"]["message"]
+    assert report["request"]["route"] == "/api/settings/ui"

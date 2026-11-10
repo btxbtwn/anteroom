@@ -11,6 +11,7 @@ struct BusinessAssistantView: View {
     @State private var path = NavigationPath()
     @State private var showingChats = false
     @State private var picked: [PhotosPickerItem] = []
+    @State private var following = true
 
     init(api: AnteroomAPI, attachmentsAvailable: Bool) {
         self.attachmentsAvailable = attachmentsAvailable
@@ -58,6 +59,12 @@ struct BusinessAssistantView: View {
                 return .handled
             })
             .task { await model.loadThreads() }
+            // One haptic and one announcement per answer, never per word (Apple HIG).
+            .sensoryFeedback(.success, trigger: model.answersFinished)
+            .sensoryFeedback(.error, trigger: model.answersFailed)
+            .sensoryFeedback(.impact(weight: .light), trigger: model.answersStopped)
+            .onChange(of: model.answersFinished) { AccessibilityNotification.Announcement("Answer finished").post() }
+            .onChange(of: model.answersFailed) { AccessibilityNotification.Announcement("The answer stopped with an error").post() }
             // Pick an answer back up after locking the phone or leaving the app.
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await model.refresh() } }
@@ -167,13 +174,17 @@ struct BusinessAssistantView: View {
                         if drawn.answer {
                             VStack(alignment: .leading, spacing: 8) {
                                 if !live.text.isEmpty {
-                                    Text(live.text).frame(maxWidth: .infinity, alignment: .leading)
+                                    // Drawn as the saved answer will be, so it does not change look when saved.
+                                    Text(AnswerView.markdown(live.text))
+                                        .tint(WorkspaceStyle.accent)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 HStack(spacing: 8) {
                                     ProgressView()
-                                    Text(live.status.isEmpty ? "Answering…" : live.status)
+                                    Text(model.stopping ? "Stopping…" : live.status.isEmpty ? "Answering…" : live.status)
                                         .font(.footnote).foregroundStyle(.secondary)
                                 }
+                                .accessibilityElement(children: .combine)
                             }
                         }
                     }
@@ -192,14 +203,19 @@ struct BusinessAssistantView: View {
                         .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 12))
                     }
                     errorRow
-                    Color.clear.frame(height: 1).id("bottom")
+                    Color.clear.frame(height: 1).id(ChatScroll.bottomID)
                 }
                 .padding(16)
             }
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: model.turns.count) { proxy.scrollTo("bottom", anchor: .bottom) }
-            .onChange(of: model.live?.text.count) { proxy.scrollTo("bottom", anchor: .bottom) }
-            .onChange(of: model.live?.question) { proxy.scrollTo("bottom", anchor: .bottom) }
+            .followsLatest(proxy, following: $following,
+                           on: [model.turns.count, model.live?.text.count ?? -1, model.queued.count, model.error == nil ? 0 : 1])
+            // Asking a question always brings the conversation back to its end.
+            .onChange(of: model.live?.question) { _, question in
+                guard question != nil else { return }
+                following = true
+                proxy.scrollTo(ChatScroll.bottomID, anchor: .bottom)
+            }
         }
     }
 
@@ -262,10 +278,11 @@ struct BusinessAssistantView: View {
                     }
                     Spacer()
                     if model.live != nil {
-                        Button("Stop answering", systemImage: "stop.circle.fill") { Task { await model.stop() } }
+                        Button(model.stopping ? "Stopping" : "Stop answering", systemImage: "stop.circle.fill") { Task { await model.stop() } }
                             .labelStyle(.iconOnly).font(.title2)
                             .foregroundStyle(WorkspaceStyle.mutedText)
                             .frame(minWidth: 44, minHeight: 44)
+                            .disabled(model.stopping)
                     }
                     ComposerSendButton(
                         label: model.busy ? "Send when this answer is finished" : "Send",

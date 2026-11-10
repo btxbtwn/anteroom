@@ -256,8 +256,10 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
             continue
         sold_at = max(filter(None, [*(sale_moment(line) for line in own), *mark_moments]), default=None)
         live_direct = direct.get(conv_id, {})
-        listed_marks = [name for name, mark in marks.items() if isinstance(mark, dict) and mark.get("state") == "listed"]
         removed = set(removed_marketplaces(notes, live_direct))
+        # A delete Anteroom confirmed after the seller marked a listing live ends that listing.
+        listed_marks = [name for name, mark in marks.items()
+                        if isinstance(mark, dict) and mark.get("state") == "listed" and name not in removed]
         vendoo_live = [str(name) for name in notes.get("vendooMarketplaces") or [] if str(name) not in removed] \
             if isinstance(notes.get("vendooMarketplaces"), list) else []
         if live_direct or listed_marks:

@@ -88,9 +88,9 @@ export function MarketplaceLogo({
   const reactId = useId().replace(/:/g, "");
   const prefix = `mpl-${reactId}`;
   const logo = OFFICIAL_LOGOS[id];
-  // In a square, Etsy and Depop draw their one-letter marks (the letters on their
-  // app icons): their wordmarks squeezed into 14-20px were a few pixels tall.
-  // eBay has no such mark, so its wordmark keeps its own proportions instead.
+  // In a square, eBay draws its Favicon 2.0 shopping bag and Etsy/Depop draw
+  // their one-letter marks (the letters on their app icons): their wordmarks
+  // squeezed into 14-20px were a few pixels tall or wider than the rail.
   const mark = logo && fit === "square" ? logo.compact : undefined;
   const box = marketplaceLogoBox(id, size, fit === "square" && !mark ? "wordmark" : fit);
   const wide = box.width !== size || box.height !== size;

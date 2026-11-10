@@ -93,7 +93,15 @@ Every run, in this order:
      browser tools cannot connect, drive it with a Playwright script kept
      outside `e2e/` (a running suite would pick it up) and its own config;
      `e2e/fixtures.ts` shows the selectors. On a phone the editor stages
-     photos in the composer and its send button starts generation;
+     photos in the composer and its send button starts generation.
+     Wait for generation to finish (the chat says "Listing generated." and
+     nothing is still filling) before editing: an edit made while it is still
+     saving gets "Edits not saved: This listing changed", which is the
+     stale-edit guard working. Check for that banner before a reload, because
+     a scripted reload skips the unsaved-edits prompt and drops the edit.
+     The sandbox's fake model can't answer the marketplace field fill, so
+     "The agent returned an unreadable marketplace field response" in the
+     chat is expected there;
    - hosted web (`./sandbox.sh --hosted`, UI 5175, sign in as
      `alice@sandbox.test` / `sandbox`);
    - iPhone in the Simulator against the hosted sandbox, driven with the T3
@@ -126,7 +134,7 @@ list remembers.
 
 | Day | Area | Where to look |
 |---|---|---|
-| Monday | Listing editor, every marketplace tab (eBay, Poshmark, Mercari, Depop, Sellwild, Etsy, Vinted), category selection, item details, variations | `src/components/ListingEditor.tsx`, `NativeInventoryEditor.tsx`, `anteroom-ios/Sources/Editor/` |
+| Monday | Listing editor, every marketplace tab (the list is `FORM_ORDER` in `src/components/editorTabs.ts`), category selection, item details, variations. Neither sandbox can load eBay's category fields once a listing has a category (they come from eBay's API), so the eBay tab shows "could not be loaded" there; record eBay item specifics and variations as **not run** until the sandbox seeds them | `src/components/ListingEditor.tsx`, `NativeInventoryEditor.tsx`, `editorTabs.ts`, `anteroom-ios/Sources/Editor/` |
 | Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
 | Wednesday | Photos: upload, drop, reorder, crop and edit, thumbnails, camera on iPhone, measurements from ruler photos | `src/components/Photo*`, `anteroom-ios/Sources/Photos/` |
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |

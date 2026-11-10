@@ -141,6 +141,12 @@ export function ChatComposer({
                   value={input}
                   onChange={onInputChange}
                   onSubmit={submit}
+                  onEscape={() => {
+                    // Esc in the box stops the run, as in ChatGPT and Claude.
+                    if (!busy || stopping || !onStop) return false;
+                    onStop();
+                    return true;
+                  }}
                   placeholder={placeholder}
                   autoFocus={autoFocus}
                   onPasteFiles={(files) => {

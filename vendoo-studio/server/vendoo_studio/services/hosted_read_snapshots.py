@@ -14,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from vendoo_studio.models.seller_change import SellerChange
 from vendoo_studio.models.background_task import BackgroundTask
 from vendoo_studio.services.background_tasks import ACTIVE
+from vendoo_studio.services.error_alerts import note_cause
 from vendoo_studio.services.service_context import current
 
 
@@ -85,5 +86,6 @@ class SellerReadSnapshots:
                 # The build owns its session. Disconnecting one tab cannot
                 # close it underneath other tabs waiting for the same result.
                 return await asyncio.shield(task)
-        except SQLAlchemyError:
+        except SQLAlchemyError as exc:
+            note_cause(exc)
             raise HTTPException(503, 'Cloud data is temporarily unavailable', headers={'Retry-After': '5'}) from None

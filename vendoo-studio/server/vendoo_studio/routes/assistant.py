@@ -530,7 +530,7 @@ async def answer_task(task_id: str, token: str, task) -> bool:
             task.assistant_thread_id, settle=settle,
         ))
         while not work.done():
-            await asyncio.wait({work}, timeout=.25)
+            await asyncio.wait({work}, timeout=background_tasks.EVENT_INTERVAL)
             if not settled and (frames := journal.take()):
                 # Fails once the seller stops the answer, which ends the work below.
                 await asyncio.to_thread(background_tasks.append_events, task_id, token, frames)

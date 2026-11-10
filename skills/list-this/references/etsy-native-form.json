@@ -198,6 +198,7 @@
       "section": "How it's made",
       "required": true,
       "selection_only": true,
+      "save_as_default": true,
       "options": [
         "I did",
         "A member of my shop",
@@ -210,6 +211,7 @@
       "section": "How it's made",
       "required": true,
       "selection_only": true,
+      "save_as_default": true,
       "options": [
         "A finished product",
         "A supply or tool to make things"
