@@ -14,7 +14,7 @@ struct SettingsRootView: View {
     @State private var deleteError: String?
 
     var body: some View {
-        NavigationStack {
+        Group {
             List {
                 Group {
                     // General's rows sit on this screen; a theme change rebuilds
