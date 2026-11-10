@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.897 — 2026-11-10
+
+- Marketplace error emails include safe action timing, retry-safety facts and selected offer or Smart Sell inputs to help diagnose refusals without exposing listing contents.
+
 ## 0.1.896 — 2026-11-10
 
 - iPhone: leaving a new draft keeps unsaved edits before checking whether the blank draft can be removed.
