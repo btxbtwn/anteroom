@@ -100,11 +100,15 @@ def _request() -> dict[str, Any] | None:
 
 def build_report(record: logging.LogRecord) -> dict[str, Any]:
     exc_type = exc_message = stack = None
+    database_pool = None
     location = f"{Path(record.pathname).name}:{record.lineno} in {record.funcName}"
     identity: tuple = (record.name, location, _VOLATILE.sub("#", scrub(record.getMessage(), MAX_MESSAGE)))
     if record.exc_info and record.exc_info[0] and record.exc_info[1]:
         etype, value, tb = record.exc_info
         assert etype is not None
+        from sqlalchemy.exc import TimeoutError as PoolTimeout
+        if isinstance(value, PoolTimeout):
+            database_pool = getattr(value, "database_pool", None)
         exc_type = f"{etype.__module__}.{etype.__qualname__}".removeprefix("builtins.")
         exc_message = scrub(str(value), MAX_MESSAGE)
         stack = scrub("".join(traceback.format_exception(etype, value, tb)), MAX_STACK)
@@ -112,7 +116,9 @@ def build_report(record: logging.LogRecord) -> dict[str, Any]:
         if frames:
             last = frames[-1]
             location = f"{Path(last.filename).name}:{last.lineno} in {last.name}"
-        identity = (exc_type, tuple((Path(f.filename).name, f.name) for f in frames[-8:]))
+        # Diagnostic plumbing must not split existing pool-error groups.
+        identity_frames = [f for f in frames if not f.filename.replace("\\", "/").endswith("/vendoo_studio/database_pool.py")]
+        identity = (exc_type, tuple((Path(f.filename).name, f.name) for f in identity_frames[-8:]))
     browser = getattr(record, "browser", None)
     if browser:
         # Browser stacks are minified and per-release; group by kind and message shape.
@@ -143,6 +149,7 @@ def build_report(record: logging.LogRecord) -> dict[str, Any]:
             "thread": record.threadName,
         },
         "stack": stack,
+        "database_pool": database_pool,
     }
 
 
@@ -172,6 +179,10 @@ def render_email(report: dict[str, Any], repeats: int, first_seen: str | None) -
               "", "Message", "-------", report["message"] or "-"]
     if report["exception"]:
         lines += ["", "Exception", "---------", f"{report['exception']['type']}: {report['exception']['message']}"]
+    if report.get("database_pool"):
+        lines += ["", "Database pool at timeout", "------------------------",
+                  "Checkout sites and ages, not live queries. Best-effort process-local snapshot; concurrent counts may differ and connecting slots may have no holder yet.",
+                  json.dumps(report["database_pool"], indent=2)]
     if report["stack"]:
         lines += ["", "Stack trace", "-----------", report["stack"]]
     lines += ["", "Structured report", "-----------------", json.dumps(report, indent=2, default=str)]
