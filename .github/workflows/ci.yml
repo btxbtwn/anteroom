@@ -18,12 +18,17 @@ jobs:
   # skipped, and the CI job below counts a skip as a pass. Release commits from
   # the Version workflow only change version numbers, so they run the checks
   # in Changelog and Repo checks and skip the rest; their code was tested on
-  # the pull request, which main requires to be up to date before it merges.
+  # the pull request. Code merges still run affected suites on main to catch
+  # interactions between independently tested PRs.
   changes:
     name: Changed components
     runs-on: ubuntu-latest
     outputs:
-      studio: ${{ steps.changes.outputs.studio }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+      backend: ${{ steps.changes.outputs.backend }}
+      browser: ${{ steps.changes.outputs.browser }}
+      health: ${{ steps.changes.outputs.health }}
+      audit: ${{ steps.changes.outputs.audit }}
       extension: ${{ steps.changes.outputs.extension }}
       relay: ${{ steps.changes.outputs.relay }}
     steps:
@@ -41,7 +46,7 @@ jobs:
             push) base="$BEFORE" ;;
             *) base="" ;;
           esac
-          python3 .github/scripts/changed-components.py --base "$base" | tee -a "$GITHUB_OUTPUT"
+          python3 .github/scripts/changed-components.py --base "$base" >> "$GITHUB_OUTPUT"
 
   changelog:
     name: Changelog
@@ -164,7 +169,7 @@ jobs:
   studio-frontend:
     name: Studio frontend
     needs: changes
-    if: needs.changes.outputs.studio == 'true'
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -194,7 +199,7 @@ jobs:
   studio-browser:
     name: Studio browser tests (${{ matrix.suite.name }})
     needs: changes
-    if: needs.changes.outputs.studio == 'true'
+    if: needs.changes.outputs.browser == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -260,7 +265,7 @@ jobs:
   studio-code-health:
     name: Studio code health
     needs: changes
-    if: needs.changes.outputs.studio == 'true'
+    if: needs.changes.outputs.health == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -293,18 +298,17 @@ jobs:
         run: .venv/bin/python scripts/check-design.py
       - name: Python lint
         run: .venv/bin/ruff check server
-      - name: Lock matches pyproject.toml
-        run: uv lock --check
-      - name: Audit locked Python dependencies (dev, hosted image and Mac app)
-        run: |
-          uv export --frozen --no-emit-project --all-extras --format requirements-txt --hashes \
-            --quiet --output-file "$RUNNER_TEMP/locked.txt"
-          .venv/bin/python -m pip_audit --disable-pip --require-hashes -r "$RUNNER_TEMP/locked.txt"
+
+  dependency-audit:
+    name: Dependency audit
+    needs: changes
+    if: needs.changes.outputs.audit == 'true'
+    uses: ./.github/workflows/dependency-audit.yml
 
   studio-backend:
     name: Studio backend (${{ matrix.group }}/2)
     needs: changes
-    if: needs.changes.outputs.studio == 'true'
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -339,7 +343,7 @@ jobs:
   studio-backend-postgres:
     name: Studio backend Postgres (${{ matrix.group }}/2)
     needs: changes
-    if: needs.changes.outputs.studio == 'true'
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -456,6 +460,7 @@ jobs:
       - studio-frontend
       - studio-browser
       - studio-code-health
+      - dependency-audit
       - studio-backend
       - studio-backend-postgres
       - extension

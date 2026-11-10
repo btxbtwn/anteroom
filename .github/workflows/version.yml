@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
-          # main requires CI on an up-to-date branch; only this deploy key may
+          # main requires passing CI; only this deploy key may
           # push to it directly. Its pushes also start workflows, so the push
           # below starts the macOS release build on its own.
           ssh-key: ${{ secrets.VERSION_PUSH_KEY }}
