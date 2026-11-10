@@ -126,9 +126,18 @@ function poshmarkRefusal(error, what) {
   const own = marketplaceBodyMessage({ error });
   const code = /auth|session|login|signin/i.test(type) ? 'signed_out' : /rate|limit|toomany/i.test(type) ? 'rate_limited' : 'rejected';
   // A validation refusal names what the listing lacks; Anteroom can ask for it.
+  // Poshmark's own words lead, since they say what to change. Smart Sell's
+  // refusal names no field, so it is pointed at Lowest Price here; any other
+  // refusal without a field gets none (its error type is not a field).
+  const said = marketplaceScrub(own);
+  const smartSell = /smart\s*sell/i.test(own);
+  const field = smartSell ? 'poshmark_specifics.smartSell.minimumPrice' : String(error.field || error.param || '');
   const refusal = /validation|missing|invalid(?:input|param|field)/i.test(type)
-    ? marketplaceError('Poshmark needs more details before it can list this.', { code: 'missing_fields', marketplace_message: own,
-      fields: [{ field: String(error.field || error.param || type), message: marketplaceScrub(own) || 'Poshmark needs more details' }] })
+    ? marketplaceError(smartSell
+      ? 'Poshmark won\'t turn on Smart Sell at this Lowest Price: it has to cover Poshmark\'s fee and shipping. Raise the Lowest Price, or turn Smart Sell off.'
+      : `Poshmark needs more details before it can list this${said && said !== type ? `: ${said}` : '.'}`,
+    { code: 'missing_fields', marketplace_message: own,
+      fields: field ? [{ field, message: said || 'Poshmark needs more details' }] : null })
     : marketplaceError(code === 'signed_out' ? 'Poshmark asked to sign in again. Reconnect Poshmark in Anteroom.'
       : `Poshmark refused ${what}.`, { code, marketplace_message: own });
   return Object.assign(refusal, { marketplace_type: type });
