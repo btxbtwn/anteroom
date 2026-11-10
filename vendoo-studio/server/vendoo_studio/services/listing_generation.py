@@ -10,6 +10,7 @@ import time
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.repositories.queries import ConversationRepo, RevisionConflict
 from vendoo_studio.services import activity, generation_timing, live_trace, model_slots, model_usage
+from vendoo_studio.services.background_tasks import TaskLeaseExpired
 from vendoo_studio.services.brave_search import item_fields
 from vendoo_studio.services.chat_prompts import (
     listing_generation_messages,
@@ -391,10 +392,17 @@ async def run_listing_generation(
                     expected_revision_id=expected_revision_id,
                     expected_photo_fingerprint=analysis_fingerprint,
                 )
+            except TaskLeaseExpired:
+                stream_db.rollback()
+                log.warning("cancelled listing %s no longer owns its task lease; skipping cleanup", conv_id)
+                raise asyncio.CancelledError() from None
             except Exception:
                 log.exception("failed to persist cancelled listing for %s", conv_id)
         try:
             stream_repo.update_status(conv_id, "draft")
+        except TaskLeaseExpired:
+            stream_db.rollback()
+            log.warning("skipped cancelled listing status reset for %s after its task lease ended", conv_id)
         except Exception:
             log.exception("failed to reset status after cancelled listing for %s", conv_id)
         raise

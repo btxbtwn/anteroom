@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.models.generation_timing import GenerationTiming
+from vendoo_studio.services.background_tasks import TaskLeaseExpired
 
 log = logging.getLogger("vendoo_studio.generation_timing")
 
@@ -46,6 +47,11 @@ def record_run(conv_id: str, stages: dict[str, float], *, total_sec: float, outc
         db.add(row)
         db.commit()
         return row.id
+    except TaskLeaseExpired:
+        # Timing is best effort; a stopped/replaced worker must stay fenced.
+        db.rollback()
+        log.warning("skipped generation timing for %s after its task lease ended", conv_id)
+        return None
     except Exception:
         log.exception("could not save generation timing for %s", conv_id)
         db.rollback()
@@ -70,6 +76,9 @@ def add_stages(timing_id: str | None, stages: dict[str, float], *, total_sec: fl
             row.calls = list(calls)
         row.total_sec = round(max(row.total_sec or 0.0, total_sec), 2)
         db.commit()
+    except TaskLeaseExpired:
+        db.rollback()
+        log.warning("skipped generation timing update %s after its task lease ended", timing_id)
     except Exception:
         log.exception("could not update generation timing %s", timing_id)
         db.rollback()
