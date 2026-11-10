@@ -1,1 +1,0 @@
-- Slow responses and price-save timeouts now leave diagnostic reports, even when the price finishes saving.

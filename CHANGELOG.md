@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.882 — 2026-11-10
+
+- Slow responses and price-save timeouts now leave diagnostic reports, even when the price finishes saving.
+
 ## 0.1.881 — 2026-11-10
 
 - iPhone: the tab bar shows each tab's name and no longer stays shrunk after you leave a listing.
