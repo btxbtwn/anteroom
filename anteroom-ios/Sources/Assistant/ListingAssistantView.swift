@@ -2,7 +2,6 @@ import PhotosUI
 import SwiftUI
 
 struct ListingAssistantView: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var model: ListingAssistantModel
     @State private var action: AssistantAction?
     @State private var runID = UUID()
@@ -13,15 +12,18 @@ struct ListingAssistantView: View {
     @State private var hasCopy: Bool
     @State private var autoGenerate: Bool
     private let photoCount: Int
+    private let onClose: () -> Void
 
     /// `text` starts the composer, e.g. an Ask chat about a marketplace refusal; the seller sends it.
     /// `generate` starts generating as soon as the assistant is ready: the
     /// editor's Generate listing button has already asked when it had to.
-    init(api: AnteroomAPI, listingID: String, photoCount: Int, hasCopy: Bool, generate: Bool = false, text: String = "") {
+    init(api: AnteroomAPI, listingID: String, photoCount: Int, hasCopy: Bool, generate: Bool = false,
+         text: String = "", onClose: @escaping () -> Void) {
         _model = State(initialValue: ListingAssistantModel(api: api, listingID: listingID, text: text))
         _hasCopy = State(initialValue: hasCopy)
         _autoGenerate = State(initialValue: generate)
         self.photoCount = photoCount
+        self.onClose = onClose
     }
 
     var body: some View {
@@ -42,7 +44,7 @@ struct ListingAssistantView: View {
                                     if !visible.isEmpty {
                                         Text(visible).textSelection(.enabled)
                                         if reply?.isListing == true {
-                                            Button("Review in editor") { dismiss() }
+                                            Button("Review in editor", action: onClose)
                                                 .buttonStyle(.bordered).frame(minHeight: 44)
                                         }
                                     }
@@ -70,7 +72,7 @@ struct ListingAssistantView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done", action: onClose)
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }

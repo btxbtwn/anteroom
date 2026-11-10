@@ -1,1 +1,3 @@
 - iPhone: leaving a new draft keeps unsaved edits before checking whether the blank draft can be removed.
+- iPhone: Review in editor and Done close the listing assistant and reload the saved draft.
+- iPhone: returning from another tab keeps the editor's unsaved changes.

@@ -689,7 +689,7 @@ final class PolishScreenshotTests: XCTestCase {
 /// marketplace tab carries its own List button behind the confirmation.
 @MainActor
 final class CoreFlowSandboxTests: XCTestCase {
-    func testLeavingANewDraftKeepsUnsavedEdits() {
+    func testHidingANewDraftKeepsUnsavedEdits() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
@@ -698,15 +698,15 @@ final class CoreFlowSandboxTests: XCTestCase {
         let title = "Unsaved draft \(UUID().uuidString.prefix(8))"
         enterListingTitle(title, app: app)
         XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 15))
-        app.navigationBars[title].buttons.firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["Inventory"].waitForExistence(timeout: 15))
-        let row = app.staticTexts["New Listing"].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 15), "Unsaved edits keep their new draft")
-        row.tap()
-        let notice = app.alerts["Unsaved changes"]
-        XCTAssertTrue(notice.waitForExistence(timeout: 30))
-        notice.buttons["OK"].tap()
+        let more = app.tabBars.buttons["More"]
+        for _ in 0..<3 where !more.isSelected { more.tap() }
+        XCTAssertTrue(more.isSelected)
+        XCTAssertTrue(app.navigationBars["More"].waitForExistence(timeout: 15))
+        let inventory = app.tabBars.buttons["Inventory"]
+        for _ in 0..<3 where !inventory.isSelected { inventory.tap() }
+        XCTAssertTrue(inventory.isSelected)
         XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 15), "The unsaved title is restored")
+        XCTAssertTrue(app.staticTexts["Unsaved changes"].exists)
     }
 
     func testBackingOutOfANewDraftLeavesNothing() {
@@ -763,6 +763,7 @@ final class CoreFlowSandboxTests: XCTestCase {
         XCTAssertTrue(app.buttons["Regenerate"].exists, "After a first run the assistant offers Regenerate")
         keep(app, "Assistant summary")
         review.tap()
+        XCTAssertTrue(assistant.waitForNonExistence(timeout: 15), "Review closes the assistant sheet")
         // The editor reloads the saved draft on return; then it has copy and no Generate listing.
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["generate-listing"])
         waitForExpectations(timeout: 30)

@@ -196,7 +196,7 @@ struct ListingEditorView: View {
             }
         }) { opening in
             ListingAssistantView(api: model.api, listingID: model.listingID, photoCount: photoCount,
-                                 hasCopy: model.hasCopy, generate: opening.generate, text: opening.text)
+                                 hasCopy: model.hasCopy, generate: opening.generate, text: opening.text) { assistant = nil }
         }
         .sheet(isPresented: $showingHistory, onDismiss: {
             Task {
@@ -237,7 +237,9 @@ struct ListingEditorView: View {
                 }
             }
         }
-        .task { await model.load() }
+        .task {
+            if !model.hasLoaded { await model.load() }
+        }
         // Pick up changes from other devices, but never over unsaved edits.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && !model.hasChanges && !model.isSaving && !model.isLoading { Task { await model.load() } }
