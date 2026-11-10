@@ -16,6 +16,7 @@ from vendoo_studio.routes import health, conversations, photos, listings, jobs, 
 from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
 from vendoo_studio.services.local_requests import LocalRequestMiddleware
+from vendoo_studio.services.request_timing import RequestTimingMiddleware
 from vendoo_studio.routes import marketplace_listings, marketplace_schemas, native_marketplaces
 from vendoo_studio.routes import listing_readiness as listing_readiness_route
 from vendoo_studio.routes import ebay_offers, listing_promotions, promotion_automations
@@ -226,6 +227,7 @@ app.add_middleware(
 # Live event streams and photos are left alone by the middleware's defaults.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(LocalRequestMiddleware)
+app.add_middleware(RequestTimingMiddleware)
 
 app.include_router(health.router)
 app.include_router(account_move.router)
