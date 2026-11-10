@@ -11,7 +11,7 @@ struct BulkListingView: View {
     let onFinished: () -> Void
 
     private struct Created: Sendable {
-        let listing: ListingSummary
+        let listing: ConversationSummary
         let photos: Int
     }
 
@@ -37,10 +37,10 @@ struct BulkListingView: View {
     @State private var problems: [String] = []
     @State private var confirmDiscard = false
     /// Drafts to generate once they exist; shows the generate progress.
-    @State private var generating: [ListingSummary]?
+    @State private var generating: [ConversationSummary]?
     /// Set when some items had problems: the drafts with photos, and whether
     /// the seller asked to generate them. The setup can't be sent twice.
-    @State private var outcome: (drafts: [ListingSummary], generate: Bool)?
+    @State private var outcome: (drafts: [ConversationSummary], generate: Bool)?
 
     var body: some View {
         if let generating {
@@ -301,7 +301,7 @@ struct BulkListingView: View {
 
     /// What was created when not everything worked. The drafts are saved;
     /// missing photos are added from each draft.
-    private func results(_ drafts: [ListingSummary], generate: Bool) -> some View {
+    private func results(_ drafts: [ConversationSummary], generate: Bool) -> some View {
         NavigationStack {
             List {
                 Group {
@@ -437,7 +437,7 @@ struct BulkListingView: View {
 
     private func createDraft(_ item: BulkListingPlan.Item, number: Int) async -> Created? {
         defer { progress += 1 }
-        let listing: ListingSummary
+        let listing: ConversationSummary
         do {
             let notes = try BulkListingPlan.notes(cog: cog, labels: labels, item: item)
             listing = try await api.createListing(notes: notes, boxID: boxID)

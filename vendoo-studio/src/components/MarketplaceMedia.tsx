@@ -11,7 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImagePlusIcon, PlayIcon, PlusIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { api } from "../api/client";
 import { videoProblem, type ListingVideo } from "../api/listingVideos";
-import type { ListingData, Photo } from "../api/types";
+import type { ListingData, ListingPhoto } from "../api/types";
 import { cn } from "../lib/utils";
 import { cloneListing, formFieldText, getListingEditorValue, setListingEditorValue } from "../listingPaths";
 import { COVER_LIMIT, formPhotos, isVideoFile, pastSlots, pickedIds, videoRuleText, withPick, withoutPick } from "../marketplaceMedia";
@@ -140,7 +140,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     }
   };
 
-  const deleteOwn = async (photo: Photo) => {
+  const deleteOwn = async (photo: ListingPhoto) => {
     setBusy(true);
     try {
       await api.conversations.deletePhoto(convId, photo.id);
@@ -192,7 +192,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const reorderable = !locked && picked.length > 1;
   // A phone cannot drop files.
   const touchScreen = typeof window !== "undefined" && Boolean(window.matchMedia?.("(hover: none)").matches);
-  const leaveOff = (photo: Photo, index: number) => (custom || late.includes(index) ? dropPick(photo.id) : setPick(ids.filter((id) => id !== photo.id)));
+  const leaveOff = (photo: ListingPhoto, index: number) => (custom || late.includes(index) ? dropPick(photo.id) : setPick(ids.filter((id) => id !== photo.id)));
   const movePick = (from: number, to: number) => {
     const next = moveItem(ids, from, to);
     if (next !== ids) setPick(next);

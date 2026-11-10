@@ -1,51 +1,15 @@
 import Foundation
 
-/// One inventory row from `GET /api/conversations`, the list the desktop
-/// sidebar filters and sorts locally. Timestamps stay as the server's strings.
-struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
-    let id: String
-    var title: String?
-    var status: String?
-    var settledAt: String?
-    var unsettledAt: String?
-    var createdAt: String?
-    var updatedAt: String?
-    var sku: String?
-    var price: Double?
-    var quantity: Int?
-    var directMarketplaces: [String]?
-    var coverPhotoURL: String?
-    var missingSaleData: [String]?
-    /// Anteroom's own listing of the item, per marketplace.
-    var directRecords: [String: DirectRecord]?
-    /// What the imported history says: where the item is live, each listing's
-    /// link, where it sold, and where Anteroom has delisted it since.
-    var vendooMarketplaces: [String]?
-    var vendooListingURLs: [String: String]?
-    var vendooSoldDates: [String: String]?
-    var removedMarketplaces: [String]?
-    /// When the item's longest-standing live listing went up, for the
-    /// staleness sorts. The server counts Anteroom's own listings, so a relist
-    /// starts its marketplace over. And when the sales ledger last saw it sell.
-    var oldestListedAt: String?
-    var soldAt: String?
+// The listing contract's models (ConversationSummary, Conversation, DirectRecord,
+// ListingDocument, ListingSave, ListingSaveResult, ListingPhoto, PhotoEdits, CropBox,
+// WorkspaceRuntime) are generated into Generated/APIContract.swift; this file adds
+// the phone's own behavior to them.
 
-    enum CodingKeys: String, CodingKey {
-        case id, title, status, sku, price, quantity
-        case settledAt = "settled_at"
-        case unsettledAt = "unsettled_at"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-        case directMarketplaces = "direct_marketplaces"
-        case coverPhotoURL = "cover_photo_url"
-        case missingSaleData = "missing_sale_data"
-        case directRecords = "direct_records"
-        case vendooMarketplaces = "vendoo_marketplaces"
-        case vendooListingURLs = "vendoo_listing_urls"
-        case vendooSoldDates = "vendoo_sold_dates"
-        case removedMarketplaces = "removed_marketplaces"
-        case oldestListedAt = "oldest_listed_at"
-        case soldAt = "sold_at"
+extension ConversationSummary {
+    /// A listing known only by its id and title, enough to open it from another
+    /// screen; the editor loads the rest.
+    init(id: String, title: String?, coverPhotoURL: String? = nil) {
+        self.init(id: id, title: title, status: "", createdAt: "", updatedAt: "", coverPhotoURL: coverPhotoURL)
     }
 
     var displayTitle: String {
@@ -67,59 +31,16 @@ struct ListingSummary: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
-/// One marketplace's direct listing record, as the inventory list carries it.
-struct DirectRecord: Codable, Hashable, Sendable {
-    /// not_saved, draft, saving, publishing, updating, unknown, published or pending_review.
-    var state: String
-    var listingURL: String?
-    /// The last List, Update or Save draft failed.
-    var failed = false
-    /// Fields the marketplace rejected that the seller has not edited since.
-    var fields = 0
-    /// The live listing's price on this marketplace, when Anteroom knows it.
-    var price: Double?
-
-    enum CodingKeys: String, CodingKey {
-        case state, failed, fields, price
-        case listingURL = "listing_url"
-    }
-
-    init(state: String, listingURL: String? = nil, failed: Bool = false, fields: Int = 0, price: Double? = nil) {
-        self.state = state
-        self.listingURL = listingURL
-        self.failed = failed
-        self.fields = fields
-        self.price = price
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        state = try container.decode(String.self, forKey: .state)
-        listingURL = try container.decodeIfPresent(String.self, forKey: .listingURL)
-        failed = try container.decodeIfPresent(Bool.self, forKey: .failed) ?? false
-        fields = try container.decodeIfPresent(Int.self, forKey: .fields) ?? 0
-        price = try container.decodeIfPresent(Double.self, forKey: .price)
-    }
-}
-
-/// `GET /api/conversations/{id}`: the summary plus the seller's notes.
-struct ConversationDetail: Decodable, Sendable {
-    let id: String
-    let title: String?
-    let status: String?
-    let notes: String?
-}
-
 /// `GET /api/conversations/{id}/screen`: the editor's core reads in one
 /// request, as the web app batches them (`listingScreen.ts`).
 struct ListingScreen: Decodable, Sendable {
-    let conversation: ConversationDetail
+    let conversation: Conversation
     let listing: ListingDocument
     let photos: [ListingPhoto]
 }
 
 /// Any JSON value, so a listing's marketplace data survives an edit untouched.
-enum JSONValue: Codable, Equatable, Sendable {
+enum JSONValue: Codable, Hashable, Sendable {
     case null
     case bool(Bool)
     case int(Int)
@@ -176,37 +97,6 @@ enum JSONValue: Codable, Equatable, Sendable {
         case .string(let value): return Double(value)
         default: return nil
         }
-    }
-}
-
-/// `GET /api/conversations/{id}/listing`: the current revision and its pointer.
-struct ListingDocument: Decodable, Sendable {
-    let currentRevisionID: String?
-    let listing: [String: JSONValue]
-
-    enum CodingKeys: String, CodingKey {
-        case listing
-        case currentRevisionID = "current_revision_id"
-    }
-}
-
-struct ListingSave: Encodable, Sendable {
-    let listing: [String: JSONValue]
-    let expectedRevisionID: String
-
-    enum CodingKeys: String, CodingKey {
-        case listing
-        case expectedRevisionID = "expected_revision_id"
-    }
-}
-
-struct ListingSaveResult: Decodable, Sendable {
-    let revisionID: String?
-    let listing: [String: JSONValue]
-
-    enum CodingKeys: String, CodingKey {
-        case listing
-        case revisionID = "revision_id"
     }
 }
 
@@ -275,23 +165,11 @@ struct GeneralFields: Equatable, Sendable, Codable {
     }
 }
 
-struct ListingPhoto: Codable, Identifiable, Hashable, Sendable {
-    let id: String
-    let width: Int?
-    let height: Int?
-    let sizeBytes: Int?
-    var url: String?
-    var edits: PhotoEdits?
-
-    enum CodingKeys: String, CodingKey {
-        case id, width, height, url, edits
-        case sizeBytes = "size_bytes"
-    }
-
+extension ListingPhoto {
     /// The content checksum the server puts in the photo URL; it changes when
     /// an edit renders a new file, so caches key on it.
     var version: String? {
-        url.flatMap { URLComponents(string: $0)?.queryItems?.first { $0.name == "v" }?.value }
+        URLComponents(string: url)?.queryItems?.first { $0.name == "v" }?.value
     }
 
     var isEdited: Bool { !(edits ?? PhotoEdits()).isOriginal }
@@ -299,32 +177,7 @@ struct ListingPhoto: Codable, Identifiable, Hashable, Sendable {
 
 /// The desktop photo editor's adjustments (`services/photo_edits.py`). They
 /// always render from the original upload, which the server keeps.
-struct PhotoEdits: Codable, Hashable, Sendable {
-    struct CropBox: Codable, Hashable, Sendable {
-        var x: Double, y: Double, width: Double, height: Double
-    }
-
-    var rotate = 0
-    var straighten = 0.0
-    var crop: CropBox?
-    var exposure = 0.0
-    var brightness = 0.0
-    var contrast = 0.0
-    var background: String?
-
-    init() {}
-
-    init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        rotate = try values.decodeIfPresent(Int.self, forKey: .rotate) ?? 0
-        straighten = try values.decodeIfPresent(Double.self, forKey: .straighten) ?? 0
-        crop = try values.decodeIfPresent(CropBox.self, forKey: .crop)
-        exposure = try values.decodeIfPresent(Double.self, forKey: .exposure) ?? 0
-        brightness = try values.decodeIfPresent(Double.self, forKey: .brightness) ?? 0
-        contrast = try values.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
-        background = try values.decodeIfPresent(String.self, forKey: .background)
-    }
-
+extension PhotoEdits {
     var isOriginal: Bool {
         let fullFrame = crop.map { $0.width >= 0.9999 && $0.height >= 0.9999 } ?? true
         var plain = PhotoEdits()

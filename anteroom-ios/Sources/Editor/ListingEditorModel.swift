@@ -55,10 +55,10 @@ final class ListingEditorModel {
     /// Each marketplace tab's state for the saved listing: ready, fields missing, listed or sold.
     private(set) var choices: [ListChoice] = []
 
-    init(api: AnteroomAPI, listing: ListingSummary) {
+    init(api: AnteroomAPI, listing: ConversationSummary) {
         self.api = api
         listingID = listing.id
-        status = listing.status ?? "draft"
+        status = listing.status.isEmpty ? "draft" : listing.status
         coverPhotoID = listing.coverPhotoID
         coverPhotoVersion = listing.coverPhotoVersion
         form.fields.title = listing.title ?? ""
@@ -90,7 +90,7 @@ final class ListingEditorModel {
     }
 
     private func apply(_ screen: ListingScreen) {
-        status = screen.conversation.status ?? "draft"
+        status = screen.conversation.status
         document = screen.listing.listing
         revisionID = screen.listing.currentRevisionID
         pending = [:]
@@ -402,7 +402,7 @@ final class ListingEditorModel {
         } else if let value = Int(quantity), value >= 1 {
             fields.quantity = value
         } else {
-            throw ValidationError("Quantity must be a whole number of 1 or more.")
+            throw InputError("Quantity must be a whole number of 1 or more.")
         }
         fields.labels = form.labels
             .split(separator: ",")
@@ -426,13 +426,13 @@ final class ListingEditorModel {
             : trimmed.replacingOccurrences(of: ",", with: ".")
         if trimmed.isEmpty { return nil }
         guard let value = Double(trimmed), value >= 0, value.isFinite else {
-            throw ValidationError("\(name) must be a number.")
+            throw InputError("\(name) must be a number.")
         }
         return value
     }
 }
 
-struct ValidationError: LocalizedError {
+struct InputError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }

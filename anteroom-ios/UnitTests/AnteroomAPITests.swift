@@ -14,7 +14,7 @@ final class AnteroomAPITests: XCTestCase {
     // MARK: Request building
 
     func testReadCarriesTokenAndPath() async throws {
-        StubProtocol.answer(.init(status: 200, body: #"[{"id":"a","title":"Blue shirt","status":"draft"}]"#))
+        StubProtocol.answer(.init(status: 200, body: #"[{"id":"a","title":"Blue shirt","status":"draft","created_at":"2026-11-01T10:00:00","updated_at":"2026-11-01T10:00:00"}]"#))
         let rows = try await api.listings()
         XCTAssertEqual(rows.map(\.id), ["a"])
         let sent = try XCTUnwrap(StubProtocol.requests.first)
@@ -25,7 +25,7 @@ final class AnteroomAPITests: XCTestCase {
     }
 
     func testSaveSendsJSONBodyWithExpectedRevision() async throws {
-        StubProtocol.answer(.init(status: 200, body: #"{"listing":{"title":"New"},"revision_id":"r2"}"#))
+        StubProtocol.answer(.init(status: 200, body: #"{"ok":true,"listing":{"title":"New"},"revision_id":"r2","etsy_eligible":true,"validation":{"valid":true,"errors":[],"warnings":[],"info":[],"can_send":true}}"#))
         _ = try? await api.saveListing("a", ListingSave(listing: ["title": .string("New")], expectedRevisionID: "r1"))
         let sent = try XCTUnwrap(StubProtocol.requests.first)
         XCTAssertEqual(sent.httpMethod, "PUT")
@@ -36,14 +36,14 @@ final class AnteroomAPITests: XCTestCase {
     }
 
     func testCreateListingSendsNoTitleAndOptionalNotes() async throws {
-        StubProtocol.answer(.init(status: 200, body: #"{"id":"n","status":"draft"}"#))
+        StubProtocol.answer(.init(status: 200, body: #"{"id":"n","title":"New Listing","status":"draft","created_at":"2026-11-01T10:00:00","updated_at":"2026-11-01T10:00:00","notes":""}"#))
         _ = try await api.createListing()
         let plain = try XCTUnwrap(StubProtocol.requests.last)
         XCTAssertEqual(plain.httpMethod, "POST")
         XCTAssertEqual(plain.url?.path, "/api/conversations")
         XCTAssertEqual(plain.json?.count, 0)
 
-        StubProtocol.answer(.init(status: 200, body: #"{"id":"m","status":"draft"}"#))
+        StubProtocol.answer(.init(status: 200, body: #"{"id":"m","title":"New Listing","status":"draft","created_at":"2026-11-01T10:00:00","updated_at":"2026-11-01T10:00:00","notes":""}"#))
         _ = try await api.createListing(notes: #"{"sku":"BX-1"}"#)
         let withNotes = try XCTUnwrap(StubProtocol.requests.last)
         XCTAssertEqual(withNotes.json?["notes"] as? String, #"{"sku":"BX-1"}"#)
@@ -51,7 +51,7 @@ final class AnteroomAPITests: XCTestCase {
     }
 
     func testCreateListingCarriesTheBox() async throws {
-        StubProtocol.answer(.init(status: 200, body: #"{"id":"n","status":"draft"}"#))
+        StubProtocol.answer(.init(status: 200, body: #"{"id":"n","title":"New Listing","status":"draft","created_at":"2026-11-01T10:00:00","updated_at":"2026-11-01T10:00:00","notes":""}"#))
         _ = try await api.createListing(boxID: "box-1")
         XCTAssertEqual(StubProtocol.requests.last?.json?["box_id"] as? String, "box-1")
     }
@@ -94,7 +94,7 @@ final class AnteroomAPITests: XCTestCase {
     }
 
     func testValidationIssuesAreJoined() async {
-        StubProtocol.answer(.init(status: 422, body: #"{"detail":[{"msg":"Price is required"},{"msg":"Title is too long"}]}"#))
+        StubProtocol.answer(.init(status: 422, body: #"{"detail":[{"loc":["body","listing","price"],"msg":"Price is required","type":"missing"},{"loc":["body","listing","title"],"msg":"Title is too long","type":"string_too_long"}]}"#))
         await assertMessage("Price is required\nTitle is too long") { _ = try await self.api.listing("a") }
     }
 
@@ -207,7 +207,7 @@ final class AnteroomAPITests: XCTestCase {
     // MARK: Runtime
 
     func testRuntimeIsAskedOnceForScreensOpeningTogether() async throws {
-        StubProtocol.answer(.init(status: 200, body: #"{"views":["assistant"],"features":["generation"],"marketplace_forms":["ebay"],"action_marketplaces":["ebay","etsy"]}"#))
+        StubProtocol.answer(.init(status: 200, body: #"{"mode":"hosted","views":["assistant"],"features":["generation"],"marketplace_forms":["ebay"],"action_marketplaces":["ebay","etsy"]}"#))
         async let first = api.runtime()
         async let second = api.runtime()
         let (a, b) = try await (first, second)

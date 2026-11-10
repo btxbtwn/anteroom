@@ -155,24 +155,24 @@ struct MarketplaceBadge: Hashable, Sendable {
     }
 }
 
-extension ListingSummary {
+extension ConversationSummary {
     /// The imported history keys Vestiaire's API integration separately; it is one marketplace.
     private static func canonical(_ id: String) -> String { id == "vestiaireApi" ? "vestiaire" : id }
 
-    private var importedMarketplaces: Set<String> { Set((vendooMarketplaces ?? []).map(Self.canonical)) }
-    private var removed: Set<String> { Set((removedMarketplaces ?? []).map(Self.canonical)) }
+    private var importedMarketplaces: Set<String> { Set(vendooMarketplaces.map(Self.canonical)) }
+    private var removed: Set<String> { Set(removedMarketplaces.map(Self.canonical)) }
 
     /// Each marketplace with something to say, in marketplace order: Anteroom's
     /// records, fields still needed, the imported history, sales and delists.
     func marketplaceBadges(missing: [String: [MissingField]] = [:]) -> [MarketplaceBadge] {
-        let records = directRecords ?? [:]
-        let sold = vendooSoldDates ?? [:]
+        let records = directRecords
+        let sold = vendooSoldDates
         let ids = Set(records.keys).union(missing.filter { !$0.value.isEmpty }.keys)
             .union(importedMarketplaces).union(removed).union(sold.keys)
         return Marketplaces.sorted(ids).compactMap { id in
             MarketplaceBadge(marketplace: id, record: records[id], missing: missing[id] ?? [], basePrice: price,
                              imported: importedMarketplaces.contains(id), removed: removed.contains(id),
-                             sold: sold[id] != nil, importedURL: vendooListingURLs?[id])
+                             sold: sold[id] != nil, importedURL: vendooListingURLs[id])
         }
     }
 
@@ -191,17 +191,17 @@ extension ListingSummary {
     /// publishes, less what Anteroom delisted.
     var liveMarketplaces: [String] {
         var seen = Set<String>()
-        let imported = (vendooMarketplaces ?? []).map(Self.canonical).filter { !removed.contains($0) }
-        return (imported + (directMarketplaces ?? [])).filter { seen.insert($0).inserted }
+        let imported = vendooMarketplaces.map(Self.canonical).filter { !removed.contains($0) }
+        return (imported + directMarketplaces).filter { seen.insert($0).inserted }
     }
 
     /// A listing Anteroom published reads Active even if it was a draft, and one
     /// Anteroom delisted everywhere reads Draft; a sale and a send in progress
     /// keep their own labels.
     var inventoryStatus: String {
-        let status = self.status ?? "draft"
+        let status = self.status
         if status == "sold" || status == "listing" { return status }
-        if !(directMarketplaces ?? []).isEmpty, ["draft", "in_progress", "failed"].contains(status) { return "active" }
+        if !directMarketplaces.isEmpty, ["draft", "in_progress", "failed"].contains(status) { return "active" }
         if status == "active", !removed.isEmpty, liveMarketplaces.isEmpty { return "draft" }
         return status
     }
@@ -237,24 +237,24 @@ enum InventoryQuery {
     }
 
     /// A row generating, or saving, listing or updating on a marketplace, moves on as its job does.
-    static func hasWorkInProgress(_ listings: [ListingSummary]) -> Bool {
+    static func hasWorkInProgress(_ listings: [ConversationSummary]) -> Bool {
         listings.contains { listing in
             listing.status == "in_progress"
-                || (listing.directRecords ?? [:]).values.contains { ["saving", "publishing", "updating", "unknown"].contains($0.state) }
+                || listing.directRecords.values.contains { ["saving", "publishing", "updating", "unknown"].contains($0.state) }
         }
     }
 
     /// Title and SKU, as the desktop search reads them.
-    static func matchesSearch(_ listing: ListingSummary, _ needle: String) -> Bool {
+    static func matchesSearch(_ listing: ConversationSummary, _ needle: String) -> Bool {
         guard !needle.isEmpty else { return true }
         return listing.displayTitle.lowercased().contains(needle) || (listing.sku ?? "").lowercased().contains(needle)
     }
 
-    static func inTab(_ listing: ListingSummary, _ tab: StatusTab) -> Bool {
+    static func inTab(_ listing: ConversationSummary, _ tab: StatusTab) -> Bool {
         tab == .all || listing.statusTab == tab.rawValue
     }
 
-    static func matchesFilters(_ listing: ListingSummary, _ filters: InventoryFilters) -> Bool {
+    static func matchesFilters(_ listing: ConversationSummary, _ filters: InventoryFilters) -> Bool {
         guard inTab(listing, filters.status) else { return false }
         let listed = listing.liveMarketplaces
         if filters.notListed {
@@ -265,13 +265,13 @@ enum InventoryQuery {
     }
 
     /// Finished listings stay out of the working list; search and Sold still find them.
-    static func visible(_ listing: ListingSummary, tab: StatusTab, searching: Bool) -> Bool {
+    static func visible(_ listing: ConversationSummary, tab: StatusTab, searching: Bool) -> Bool {
         listing.settledAt == nil || searching || tab == .sold
     }
 
     /// The rows the list shows: working listings by recent activity, then
     /// settled ones by when they settled, unless another sort replaces both.
-    static func rows(_ listings: [ListingSummary], search: String, filters: InventoryFilters) -> [ListingSummary] {
+    static func rows(_ listings: [ConversationSummary], search: String, filters: InventoryFilters) -> [ConversationSummary] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let matching = listings
             .filter { matchesSearch($0, needle) && matchesFilters($0, filters) }
@@ -285,7 +285,7 @@ enum InventoryQuery {
     }
 
     /// Tab counts over the searched inventory.
-    static func counts(_ listings: [ListingSummary], search: String) -> [StatusTab: Int] {
+    static func counts(_ listings: [ConversationSummary], search: String) -> [StatusTab: Int] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var counts: [StatusTab: Int] = [.all: 0]
         for listing in listings where matchesSearch(listing, needle) {
@@ -299,14 +299,14 @@ enum InventoryQuery {
 
     /// Settings order first, then any other marketplace the inventory uses. An
     /// unused marketplace is only offered when asking what is missing from it.
-    static func marketplaceOptions(_ listings: [ListingSummary], preferred: [String], includeUnused: Bool) -> [String] {
+    static func marketplaceOptions(_ listings: [ConversationSummary], preferred: [String], includeUnused: Bool) -> [String] {
         let used = Set(listings.flatMap(\.liveMarketplaces))
         let ordered = includeUnused ? preferred : preferred.filter(used.contains)
         return ordered + Marketplaces.sorted(used.subtracting(preferred))
     }
 
     /// What each marketplace row would keep: listed there, or missing under Not listed.
-    static func marketplaceCounts(_ listings: [ListingSummary], options: [String], notListed: Bool) -> [String: Int] {
+    static func marketplaceCounts(_ listings: [ConversationSummary], options: [String], notListed: Bool) -> [String: Int] {
         var carried: [String: Int] = [:]
         for listing in listings {
             for id in Set(listing.liveMarketplaces) { carried[id, default: 0] += 1 }
@@ -315,7 +315,7 @@ enum InventoryQuery {
         return Dictionary(uniqueKeysWithValues: options.map { ($0, listings.count - (carried[$0] ?? 0)) })
     }
 
-    static func notListedCount(_ listings: [ListingSummary]) -> Int {
+    static func notListedCount(_ listings: [ConversationSummary]) -> Int {
         listings.filter { $0.liveMarketplaces.isEmpty }.count
     }
 
@@ -331,7 +331,7 @@ enum InventoryQuery {
     /// thousands of pairs; parsing dates inside each comparison made every
     /// redraw of a large inventory take about a second.
     private struct SortKeys {
-        let listing: ListingSummary
+        let listing: ConversationSummary
         let active: Double
         let settled: Double
         let created: Double
@@ -339,14 +339,14 @@ enum InventoryQuery {
         let oldestLive: Double
         let sold: Double
 
-        init(_ listing: ListingSummary) {
+        init(_ listing: ConversationSummary) {
             self.listing = listing
             active = listing.activeAnchor
             settled = listing.settledAnchor
-            created = ListingSummary.stamp(listing.createdAt)
-            modified = ListingSummary.stamp(listing.updatedAt)
+            created = ConversationSummary.stamp(listing.createdAt)
+            modified = ConversationSummary.stamp(listing.updatedAt)
             oldestLive = listing.oldestLiveListed
-            sold = ListingSummary.stamp(listing.soldAt)
+            sold = ConversationSummary.stamp(listing.soldAt)
         }
     }
 

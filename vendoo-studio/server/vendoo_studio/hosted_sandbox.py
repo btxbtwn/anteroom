@@ -174,7 +174,11 @@ async def serve(port: int):
     from vendoo_studio import sandbox
 
     outer = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    server = HostedSandboxServer(uvicorn.Config(outer, host='127.0.0.1', port=port))
+    # The phone and browsers talk to this server directly, not through Fly's
+    # proxy. Uvicorn's default 5-second keep-alive closes a connection the
+    # client is about to reuse, and a write sent on it fails as "network
+    # connection lost" (it is never resent). Hold idle connections longer.
+    server = HostedSandboxServer(uvicorn.Config(outer, host='127.0.0.1', port=port, timeout_keep_alive=75))
     # Keep handlers active while starting and cleaning up the private database.
     with server.capture_signals():
         # Ignore inherited production URLs: this command owns a new database and

@@ -5,6 +5,8 @@ on:
     paths:
       - "anteroom-ios/**"
       - ".github/workflows/ios.yml"
+      # The shared API contract the app's generated models come from.
+      - "contracts/**"
       - "vendoo-studio/server/**"
       - "vendoo-studio/pyproject.toml"
   push:
@@ -70,7 +72,7 @@ jobs:
           "$RUNNER_TEMP/seller-input-tests"
       - name: Test inventory rules and lossless listing edits
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/API/MarketplaceReadiness.swift Sources/Inventory/InventoryFilters.swift Sources/Inventory/Suggestions.swift Tests/InventoryTests.swift -o "$RUNNER_TEMP/inventory-tests"
+          xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/API/MarketplaceReadiness.swift Sources/Inventory/InventoryFilters.swift Sources/Inventory/Suggestions.swift Tests/InventoryTests.swift -o "$RUNNER_TEMP/inventory-tests"
           "$RUNNER_TEMP/inventory-tests"
       - name: Test thumbnail sizes and cache keys
         run: |
@@ -78,31 +80,31 @@ jobs:
           "$RUNNER_TEMP/thumbnail-size-tests"
       - name: Test native marketplace forms
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/API/NativeFormModels.swift Sources/API/EbayFormModels.swift Tests/NativeFormTests.swift -o "$RUNNER_TEMP/native-form-tests"
+          xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/API/NativeFormModels.swift Sources/API/EbayFormModels.swift Tests/NativeFormTests.swift -o "$RUNNER_TEMP/native-form-tests"
           "$RUNNER_TEMP/native-form-tests"
       - name: Test eBay form rules, variations and categories
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/API/NativeFormModels.swift Sources/API/EbayFormModels.swift Tests/EbayFormTests.swift -o "$RUNNER_TEMP/ebay-form-tests"
+          xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/API/NativeFormModels.swift Sources/API/EbayFormModels.swift Tests/EbayFormTests.swift -o "$RUNNER_TEMP/ebay-form-tests"
           "$RUNNER_TEMP/ebay-form-tests"
       - name: Test analytics contract and wording
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/Analytics/AnalyticsModels.swift Tests/AnalyticsTests.swift -o "$RUNNER_TEMP/analytics-tests"
+          xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Analytics/AnalyticsModels.swift Tests/AnalyticsTests.swift -o "$RUNNER_TEMP/analytics-tests"
           "$RUNNER_TEMP/analytics-tests"
       - name: Test photo crop arithmetic
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/Photos/CropMath.swift Tests/CropMathTests.swift -o "$RUNNER_TEMP/crop-tests"
+          xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Photos/CropMath.swift Tests/CropMathTests.swift -o "$RUNNER_TEMP/crop-tests"
           "$RUNNER_TEMP/crop-tests"
       - name: Test automation requests
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/Automations/AutomationModels.swift Tests/AutomationTests.swift -o "$RUNNER_TEMP/automation-tests"
+          xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Automations/AutomationModels.swift Tests/AutomationTests.swift -o "$RUNNER_TEMP/automation-tests"
           "$RUNNER_TEMP/automation-tests"
       - name: Test eBay offers, sharing and offers-to-likers setup
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/Automations/AutomationModels.swift Tests/MarketplaceAutomationTests.swift -o "$RUNNER_TEMP/marketplace-automation-tests"
+          xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Automations/AutomationModels.swift Tests/MarketplaceAutomationTests.swift -o "$RUNNER_TEMP/marketplace-automation-tests"
           "$RUNNER_TEMP/marketplace-automation-tests"
       - name: Test business assistant contract and wording
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/API/AssistantModels.swift Sources/Automations/AutomationModels.swift Sources/Assistant/BusinessAssistantModels.swift Tests/BusinessAssistantTests.swift -o "$RUNNER_TEMP/business-assistant-tests"
+          xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/API/AssistantModels.swift Sources/Automations/AutomationModels.swift Sources/Assistant/BusinessAssistantModels.swift Tests/BusinessAssistantTests.swift -o "$RUNNER_TEMP/business-assistant-tests"
           "$RUNNER_TEMP/business-assistant-tests"
       - name: Test listing assistant JSON display
         run: |
@@ -114,7 +116,7 @@ jobs:
           "$RUNNER_TEMP/appearance-tests"
       - name: Test List, Update, Save draft and Delist rows and confirmations
         run: |
-          xcrun swiftc Sources/API/Models.swift Sources/Inventory/InventoryFilters.swift Sources/API/MarketplaceReadiness.swift Sources/API/MarketplaceActionModels.swift Tests/MarketplaceActionsTests.swift -o "$RUNNER_TEMP/marketplace-action-tests"
+          xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Inventory/InventoryFilters.swift Sources/API/MarketplaceReadiness.swift Sources/API/MarketplaceActionModels.swift Tests/MarketplaceActionsTests.swift -o "$RUNNER_TEMP/marketplace-action-tests"
           "$RUNNER_TEMP/marketplace-action-tests"
       - name: Test sign-in messages
         run: |

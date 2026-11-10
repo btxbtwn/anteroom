@@ -70,22 +70,14 @@ final class AnteroomAPI: Sendable {
 
     /// The whole inventory; like the desktop sidebar, the phone filters and
     /// sorts it locally.
-    func listings() async throws -> [ListingSummary] {
+    func listings() async throws -> [ConversationSummary] {
         try await decode(request("GET", "api/conversations"))
     }
 
     /// An untitled draft, like the web's New listing; generation names it.
     /// Bulk listing passes each item's Item Details notes and its box.
-    func createListing(notes: String? = nil, boxID: String? = nil) async throws -> ListingSummary {
-        struct Body: Encodable {
-            let notes: String?
-            let boxID: String?
-            enum CodingKeys: String, CodingKey {
-                case notes
-                case boxID = "box_id"
-            }
-        }
-        return try await decode(request("POST", "api/conversations", json: Body(notes: notes, boxID: boxID)))
+    func createListing(notes: String? = nil, boxID: String? = nil) async throws -> ConversationSummary {
+        try await decode(request("POST", "api/conversations", json: ConversationInput(notes: notes, boxID: boxID)))
     }
 
     /// The boxes the seller bought stock in, newest first as the server orders them.
@@ -119,7 +111,7 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/conversations/\(id)/screen"))
     }
 
-    func conversation(_ id: String) async throws -> ConversationDetail {
+    func conversation(_ id: String) async throws -> Conversation {
         try await decode(request("GET", "api/conversations/\(id)"))
     }
 
@@ -132,11 +124,11 @@ final class AnteroomAPI: Sendable {
     }
 
     func saveNotes(_ id: String, notes: String) async throws {
-        _ = try await send(request("PATCH", "api/conversations/\(id)", json: ["notes": notes]))
+        _ = try await send(request("PATCH", "api/conversations/\(id)", json: ConversationInput(notes: notes)))
     }
 
     func rename(_ id: String, title: String) async throws {
-        _ = try await send(request("PATCH", "api/conversations/\(id)", json: ["title": title]))
+        _ = try await send(request("PATCH", "api/conversations/\(id)", json: ConversationInput(title: title)))
     }
 
     /// The server only deletes listings that were never sent anywhere.
@@ -746,13 +738,13 @@ final class AnteroomAPI: Sendable {
 
     /// Creates one local draft copy. Returns the new listing's id.
     func copyListing(_ id: String, _ body: CopyRequest) async throws -> String {
-        let created: ConversationDetail = try await decode(request("POST", "api/conversations/\(id)/copy", json: body))
+        let created: Conversation = try await decode(request("POST", "api/conversations/\(id)/copy", json: body))
         return created.id
     }
 
     /// Whether an earlier copy request finished, for a reply that was lost.
     func copyResult(_ id: String, requestID: String) async throws -> String {
-        let created: ConversationDetail = try await decode(request("GET", "api/conversations/\(id)/copy-result/\(requestID)"))
+        let created: Conversation = try await decode(request("GET", "api/conversations/\(id)/copy-result/\(requestID)"))
         return created.id
     }
 
@@ -1142,54 +1134,26 @@ final class AnteroomAPI: Sendable {
 
     /// The hosted API's own refusals name the seller session; a marketplace's 401 does not.
     private static func isSessionRefusal(_ data: Data) -> Bool {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let detail = object["detail"] as? String else { return true }
-        return detail.localizedCaseInsensitiveContains("session")
+        guard let refusal = try? JSONDecoder().decode(ErrorDetail.self, from: data) else { return true }
+        return refusal.detail.localizedCaseInsensitiveContains("session")
     }
 
-    /// FastAPI errors carry `detail` as a sentence or a list of validation issues.
+    /// The contract's errors carry `detail` as a sentence (`ErrorDetail`) or,
+    /// for a request FastAPI rejected, a list of validation issues.
     private static func message(from data: Data, status: Int) -> String {
         if status == 401 && isSessionRefusal(data) { return APIError.signInEnded }
-        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if let detail = object["detail"] as? String { return detail }
-            if let issues = object["detail"] as? [[String: Any]] {
-                let messages = issues.compactMap { $0["msg"] as? String }
-                if !messages.isEmpty { return messages.joined(separator: "\n") }
-            }
+        if let refusal = try? JSONDecoder().decode(ErrorDetail.self, from: data) { return refusal.detail }
+        if let invalid = try? JSONDecoder().decode(HTTPValidationError.self, from: data) {
+            let messages = (invalid.detail ?? []).map(\.msg)
+            if !messages.isEmpty { return messages.joined(separator: "\n") }
         }
         return "Something went wrong (\(status)). Try again."
     }
 }
 
-/// What `/api/runtime` says this workspace offers.
-struct WorkspaceRuntime: Decodable, Sendable, Equatable {
-    var views: [String] = []
-    var features: [String] = []
-    /// Marketplace tabs this workspace can edit natively.
-    var marketplaceForms: [String] = []
-    /// Marketplaces this workspace can list on now; empty while it cannot.
-    var actionMarketplaces: [String] = []
-
-    enum CodingKeys: String, CodingKey {
-        case views, features
-        case marketplaceForms = "marketplace_forms"
-        case actionMarketplaces = "action_marketplaces"
-    }
-
-    init(views: [String] = [], features: [String] = [], marketplaceForms: [String] = [], actionMarketplaces: [String] = []) {
-        self.views = views
-        self.features = features
-        self.marketplaceForms = marketplaceForms
-        self.actionMarketplaces = actionMarketplaces
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        views = try container.decodeIfPresent([String].self, forKey: .views) ?? []
-        features = try container.decodeIfPresent([String].self, forKey: .features) ?? []
-        marketplaceForms = try container.decodeIfPresent([String].self, forKey: .marketplaceForms) ?? []
-        actionMarketplaces = try container.decodeIfPresent([String].self, forKey: .actionMarketplaces) ?? []
-    }
+extension WorkspaceRuntime {
+    /// What the phone assumes when `/api/runtime` cannot be read: no optional features.
+    static let unavailable = WorkspaceRuntime(mode: "hosted", features: [], views: [], marketplaceForms: [], actionMarketplaces: [])
 }
 
 /// One answer shared by the screens that ask for it within `maxAge` seconds

@@ -118,7 +118,7 @@ struct SalesRecordsView: View {
             }
             HStack {
                 if let id = row.conversationID {
-                    NavigationLink("Open item", value: ListingSummary(id: id, title: row.title))
+                    NavigationLink("Open item", value: ConversationSummary(id: id, title: row.title))
                         .font(.footnote)
                 }
                 Spacer()

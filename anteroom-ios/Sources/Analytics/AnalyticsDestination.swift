@@ -27,7 +27,7 @@ struct AnalyticsDestination: View {
             }
             .navigationTitle("Analytics")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: ListingSummary.self) { listing in
+            .navigationDestination(for: ConversationSummary.self) { listing in
                 ListingEditorView(api: api, listing: listing) {}
             }
         }

@@ -21,7 +21,7 @@ final class ReadRetryTests: XCTestCase {
 
     func testAReadWaitsOutAServerThatIsRestarting() async throws {
         StubProtocol.answer(Self.unavailable, .init(status: 502, body: ""), .init(status: 504, body: ""),
-                            .init(status: 200, body: #"[{"id":"a","status":"draft"}]"#))
+                            .init(status: 200, body: #"[{"id":"a","title":null,"status":"draft","created_at":"2026-11-01T10:00:00","updated_at":"2026-11-01T10:00:00"}]"#))
         let rows = try await api.listings()
         XCTAssertEqual(rows.map(\.id), ["a"])
         XCTAssertEqual(StubProtocol.requests.count, 4)

@@ -11,6 +11,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
+from vendoo_studio.routes.api_contract import (
+    CONFLICT,
+    NOT_FOUND,
+    ListingDocument,
+    ListingSave,
+    ListingSaveResult,
+    ListingValidation,
+)
 from vendoo_studio.services.etsy_fields import etsy_eligible
 from vendoo_studio.services.validation import validate_listing
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
@@ -22,33 +30,7 @@ from vendoo_studio.services.price_markdown import PriceDropError, current_listin
 router = APIRouter(tags=["listings"])
 
 
-class ListingUpdate(BaseModel):
-    listing: dict
-    # Empty only when the editor has not yet saved a first revision.
-    expected_revision_id: str = Field(max_length=100)
-
-
-class ListingResponse(BaseModel):
-    conversation_id: str
-    current_revision_id: str | None
-    listing: dict
-    revision_count: int
-    can_send: bool
-    errors: list[dict[str, str]] = []
-    warnings: list[dict[str, str]] = []
-    # False for modern resale, which Send leaves off Etsy.
-    etsy_eligible: bool = True
-
-
-class ValidationResponse(BaseModel):
-    valid: bool
-    errors: list[dict[str, str]]
-    warnings: list[dict[str, str]]
-    info: list[dict[str, str]]
-    can_send: bool
-
-
-@router.get("/api/conversations/{conv_id}/listing")
+@router.get("/api/conversations/{conv_id}/listing", response_model=ListingDocument, responses=NOT_FOUND)
 def get_listing(conv_id: str, db: Session = Depends(get_db)):
     conv_repo = ConversationRepo(db)
     if not conv_repo.get(conv_id):
@@ -69,7 +51,7 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
     # opening a listing must not look like a seller edit on the next save.
     validation = validate_listing(copy.deepcopy(listing_data), photo_count, require_photos=True)
 
-    return ListingResponse(
+    return ListingDocument(
         conversation_id=conv_id,
         current_revision_id=revision_id,
         listing=listing_data,
@@ -81,8 +63,8 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.put("/api/conversations/{conv_id}/listing")
-def update_listing(conv_id: str, body: ListingUpdate, db: Session = Depends(get_db)):
+@router.put("/api/conversations/{conv_id}/listing", response_model=ListingSaveResult, responses={**NOT_FOUND, **CONFLICT})
+def update_listing(conv_id: str, body: ListingSave, db: Session = Depends(get_db)):
     from vendoo_studio.repositories.queries import RevisionConflict
     from vendoo_studio.services.listing_editor import save_listing_edit
 
@@ -92,7 +74,7 @@ def update_listing(conv_id: str, body: ListingUpdate, db: Session = Depends(get_
         raise HTTPException(409, "This listing changed. Reload it before saving your edits.") from exc
 
 
-@router.post("/api/conversations/{conv_id}/listing/validate")
+@router.post("/api/conversations/{conv_id}/listing/validate", response_model=ListingValidation)
 def validate(conv_id: str, db: Session = Depends(get_db)):
     conv_repo = ConversationRepo(db)
     if not conv_repo.get(conv_id):
@@ -104,7 +86,7 @@ def validate(conv_id: str, db: Session = Depends(get_db)):
     photo_count = len(conv_repo.get_photos(conv_id))
     result = validate_listing(listing_data, photo_count, require_photos=True)
 
-    return ValidationResponse(
+    return ListingValidation(
         valid=result.valid,
         errors=result.errors,
         warnings=result.warnings,
@@ -153,7 +135,7 @@ def restore_revision(conv_id: str, revision_id: str, body: RevisionRestoreReques
         raise HTTPException(409, "This listing changed while you were comparing revisions. Review it again before restoring.")
     if listing_busy(conv_id, db):
         raise HTTPException(409, "Wait for generation or sending to finish before restoring a revision.")
-    result = update_listing(conv_id, ListingUpdate(listing=copy.deepcopy(target.listing_json),
+    result = update_listing(conv_id, ListingSave(listing=copy.deepcopy(target.listing_json),
                                                  expected_revision_id=body.expected_revision_id), db)
     restored_revision = listing_repo.get_revision(result["revision_id"])
     assert restored_revision is not None

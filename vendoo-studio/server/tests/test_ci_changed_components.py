@@ -100,6 +100,9 @@ def test_without_a_known_base_everything_runs(repository: tuple[Path, str]) -> N
         ("docs/hosted-production.md\nREADME.md\n", {"studio": "false", "extension": "false", "relay": "false"}),
         ("webhook-relay/src/index.js\n", {"studio": "false", "extension": "false", "relay": "true"}),
         ("anteroom-ios/project.yml\n", {"studio": "false", "extension": "false", "relay": "false"}),
+        # The shared API contract and the Swift generated from it are checked by Studio's suite.
+        ("contracts/anteroom-api.json\n", {"studio": "true", "extension": "false", "relay": "false"}),
+        ("anteroom-ios/Sources/API/Generated/APIContract.swift\n", {"studio": "true", "extension": "false", "relay": "false"}),
         # Backend tests read the extension and skills.
         ("vendoo-extension/background.js\n", {"studio": "true", "extension": "true", "relay": "false"}),
         ("skills/list-this/SKILL.md\n", {"studio": "true", "extension": "false", "relay": "false"}),
