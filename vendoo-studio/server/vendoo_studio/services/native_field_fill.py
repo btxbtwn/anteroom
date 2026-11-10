@@ -202,6 +202,21 @@ def write_value(listing: dict, path: str, value: Any) -> None:
     set_path(listing, path, value)
 
 
+def clear_value(listing: dict, path: str) -> None:
+    """Drop a form answer and any differently spelled copy, so the row is unanswered.
+
+    A stored blank reads as the seller clearing the row, which stops General
+    (size, brand) from answering it. Only the seller's own edit stores one.
+    """
+    parts = path.split(".")
+    parent = get_path(listing, ".".join(parts[:-1]))
+    if not isinstance(parent, dict):
+        return
+    want = fold_key(parts[-1]) if len(parts) == 2 and parts[0].endswith("_specifics") else None
+    for name in [name for name in parent if name == parts[-1] or want is not None and fold_key(name) == want]:
+        del parent[name]
+
+
 DEPOP_AGE = "depop_specifics.age"
 
 
@@ -271,6 +286,10 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
         missing_required = any(gap["field"] in required_paths for market in markets
                                for gap in native_contract.gaps(fields, market))
         if not dependencies_changed and not missing_required:
+            break
+        # Another repair would resend the same fields, evidence and choices.
+        # Ask again only when a changed answer brought new choices.
+        if required_only and not dependencies_changed:
             break
         required_only = not dependencies_changed
         await record_forms(db, conv_id, markets)
@@ -447,7 +466,7 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
     if strict:
         # An omitted or unsupported earlier guess must not survive the evidence check.
         for path in rows:
-            write_value(updated, path, "")
+            clear_value(updated, path)
             (updated.get(native_contract.EVIDENCE_KEY) or {}).pop(path, None)
     for path, (value, _labels) in accepted.items():
         write_value(updated, path, value)

@@ -81,7 +81,7 @@ def _ebay_variations(info: dict, result: dict) -> dict:
 
 
 async def _etsy(listing_id: str) -> dict:
-    client = EtsyClient()
+    client = await EtsyClient.connect()
     item = await client.listing(listing_id)
     if str(item.get("listing_id")) != listing_id or str(item.get("shop_id")) != client.shop_id:
         raise InventoryCheckError("This listing does not belong to the connected Etsy shop.")

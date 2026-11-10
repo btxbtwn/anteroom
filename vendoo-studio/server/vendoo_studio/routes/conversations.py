@@ -7,6 +7,16 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from vendoo_studio.routes.api_contract import (
+    CONFLICT,
+    NOT_FOUND,
+    REFUSED,
+    Conversation,
+    ConversationSummary,
+    DeleteConversationResult,
+    ListingPhoto,
+)
+from vendoo_studio.services.unsent_edits import unsent_edits
 from vendoo_studio.services import inventory_facets
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import get_db, in_worker_session
@@ -33,103 +43,7 @@ class ConversationCreate(BaseModel):
     box_id: str | None = None
 
 
-class DirectRecord(BaseModel):
-    """Anteroom's own listing of the item on one marketplace."""
-
-    # A marketplace_listings state: not_saved, draft, saving, publishing,
-    # updating, unknown, published or pending_review.
-    state: str
-    listing_url: str | None = None
-    # The last List, Update or Save draft failed.
-    failed: bool = False
-    # Fields the marketplace rejected and the seller has not edited since.
-    fields: int = 0
-    # The live listing's price on this marketplace, when Anteroom knows it.
-    price: float | None = None
-    # When Anteroom's last confirmed List put this listing up.
-    listed_at: str | None = None
-
-
-class ConversationSummary(BaseModel):
-    """One inventory row. The sidebar polls the whole inventory, so the seller's
-    notes stay out: they are most of the payload and only the open listing reads them."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    title: str | None
-    status: str
-    # The wholesale box this item came out of.
-    box_id: str | None = None
-    settled_at: str | None = None
-    unsettled_at: str | None = None
-    created_at: str
-    updated_at: str
-    cover_photo_url: str | None = None
-    # Imported from Vendoo: the item's status label there, and its image as a
-    # thumbnail fallback.
-    vendoo_status: str | None = None
-    vendoo_cover_url: str | None = None
-    # What the sidebar filters on: the listing's own SKU and price, the labels
-    # it wears, and the marketplaces it was imported as live on.
-    sku: str | None = None
-    price: float | None = None
-    vendoo_labels: list[str] = []
-    vendoo_marketplaces: list[str] = []
-    # Marketplaces Anteroom published directly.
-    direct_marketplaces: list[str] = []
-    # Every direct listing record by marketplace, for the inventory table.
-    direct_records: dict[str, DirectRecord] = {}
-    # Marketplaces Anteroom delisted directly, though imported history says listed.
-    removed_marketplaces: list[str] = []
-    # Units sold on Anteroom's sales ledger, and the most the item was offered
-    # with. An Active row with some sold reads "1 of 3 sold".
-    units_sold: int = 0
-    quantity: int | None = None
-    # When Anteroom's sales ledger last saw a unit of this item sell.
-    sold_at: str | None = None
-    # Each marketplace listing's own page, where the imported history recorded one.
-    vendoo_listing_urls: dict[str, str] = {}
-    # Imported Vendoo time tracking for the item: when it was created, last
-    # modified, last went live and sold, plus the listing date per marketplace.
-    vendoo_created_at: str | None = None
-    vendoo_modified_at: str | None = None
-    vendoo_listed_at: str | None = None
-    vendoo_listed_dates: dict[str, str] = {}
-    vendoo_sold_dates: dict[str, str] = {}
-    # When the item's longest-standing live listing went up, counting Anteroom's
-    # own listings: what "listed N days ago", the staleness filter and sort read.
-    oldest_listed_at: str | None = None
-    # Edited here since the item's live direct listings were written: Update
-    # is the step that is owed.
-    unsent_edits: bool = False
-    # False for modern resale: Etsy removes those.
-    etsy_eligible: bool = True
-    missing_sale_data: list[str] = []
-
-
-class ConversationResponse(ConversationSummary):
-    notes: str | None
-
-
-class PhotoResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    conversation_id: str
-    original_filename: str
-    mime_type: str
-    size_bytes: int
-    display_order: int
-    width: int | None
-    height: int | None
-    created_at: str
-    url: str
-    edits: dict | None = None
-    marketplace: str | None = None
-
-
-@router.post("", response_model=ConversationResponse)
+@router.post("", response_model=Conversation, responses=NOT_FOUND)
 def create_conversation(body: ConversationCreate, db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
     if body.box_id and boxes.get_box(db, body.box_id) is None:
@@ -146,7 +60,7 @@ def list_conversations(db: Session = Depends(get_db)):
     facets = inventory_facets.listing_facets(repo.db)
     revisions = repo.current_revision_ids()
     conversations = repo.list_all()
-    unsent = _unsent_edits(db, conversations, revisions)
+    unsent = unsent_edits(db, conversations, revisions)
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 
     direct = MarketplaceListingRepo(db).summaries()
@@ -165,7 +79,7 @@ def list_conversations(db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/{conv_id}", response_model=ConversationResponse)
+@router.get("/{conv_id}", response_model=Conversation, responses=NOT_FOUND)
 def get_conversation(conv_id: str, db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
@@ -185,7 +99,7 @@ def preview_copy(conv_id: str, response: Response, db: Session = Depends(get_db,
         raise HTTPException(exc.status, str(exc), headers={"Cache-Control": "no-store"}) from exc
 
 
-@router.post("/{conv_id}/copy", response_model=ConversationResponse)
+@router.post("/{conv_id}/copy", response_model=Conversation)
 def copy_conversation(conv_id: str, body: CopyRequest, db: Session = Depends(get_db)):
     from vendoo_studio.services import listing_copy
 
@@ -196,7 +110,7 @@ def copy_conversation(conv_id: str, body: CopyRequest, db: Session = Depends(get
     return _conv_response(ConversationRepo(db).get(new_id), _extras_for(db, new_id))
 
 
-@router.get("/{conv_id}/copy-result/{request_id}", response_model=ConversationResponse)
+@router.get("/{conv_id}/copy-result/{request_id}", response_model=Conversation)
 def copy_result(conv_id: str, request_id: str, response: Response, db: Session = Depends(get_db, scope="function")):
     from vendoo_studio.services import listing_copy
 
@@ -219,13 +133,7 @@ class ConversationUpdate(BaseModel):
     box_id: str | None = None
 
 
-class DeleteConversationResponse(BaseModel):
-    ok: bool
-    deleted_jobs: int
-    deleted_photos: int
-
-
-@router.post("/{conv_id}/settle", response_model=ConversationResponse)
+@router.post("/{conv_id}/settle", response_model=Conversation)
 def settle_conversation(conv_id: str, db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
@@ -236,7 +144,7 @@ def settle_conversation(conv_id: str, db: Session = Depends(get_db)):
     return _conv_response(repo.settle(conv_id), _extras_for(db, conv_id))
 
 
-@router.post("/{conv_id}/unsettle", response_model=ConversationResponse)
+@router.post("/{conv_id}/unsettle", response_model=Conversation)
 def unsettle_conversation(conv_id: str, db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
@@ -245,7 +153,7 @@ def unsettle_conversation(conv_id: str, db: Session = Depends(get_db)):
     return _conv_response(repo.unsettle(conv_id), _extras_for(db, conv_id))
 
 
-@router.patch("/{conv_id}")
+@router.patch("/{conv_id}", response_model=Conversation, responses={**REFUSED, **NOT_FOUND, **CONFLICT})
 def update_conversation(conv_id: str, body: ConversationUpdate, db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
@@ -399,7 +307,7 @@ def _stop_conversation_jobs(db: Session, conv_id: str) -> dict:
     return {"count": len(jobs), "requests": requests}
 
 
-@router.get("/{conv_id}/photos")
+@router.get("/{conv_id}/photos", response_model=list[ListingPhoto], responses=NOT_FOUND)
 def get_photos(conv_id: str, marketplace: str | None = None, db: Session = Depends(get_db)):
     """The item's photos, or with ``marketplace`` the photos added on that marketplace's form only."""
     repo = ConversationRepo(db)
@@ -436,7 +344,7 @@ class ResetRequest(BaseModel):
     keep_inputs: bool = False
 
 
-@router.post("/{conv_id}/reset", response_model=ConversationResponse)
+@router.post("/{conv_id}/reset", response_model=Conversation)
 async def reset_conversation(conv_id: str, body: ResetRequest | None = None):
     keep_inputs = bool(body and body.keep_inputs)
     notes = await in_worker_session(_reset_check, conv_id)
@@ -511,14 +419,14 @@ def _wipe(db: Session, conv_id: str, keep_inputs: bool, notes: str | None) -> No
     db.commit()
 
 
-def _conversation_view(db: Session, conv_id: str) -> ConversationResponse:
+def _conversation_view(db: Session, conv_id: str) -> Conversation:
     conv = ConversationRepo(db).get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
     return _conv_response(conv, _extras_for(db, conv_id))
 
 
-@router.delete("/{conv_id}", response_model=DeleteConversationResponse)
+@router.delete("/{conv_id}", response_model=DeleteConversationResult, responses={**REFUSED, **NOT_FOUND, **CONFLICT})
 def delete_conversation(conv_id: str, db: Session = Depends(get_db)):
     try:
         deleted_jobs, deleted_photos = delete_listing(db, conv_id)
@@ -526,7 +434,7 @@ def delete_conversation(conv_id: str, db: Session = Depends(get_db)):
         raise HTTPException(400, str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
-    return DeleteConversationResponse(ok=True, deleted_jobs=deleted_jobs, deleted_photos=deleted_photos)
+    return DeleteConversationResult(ok=True, deleted_jobs=deleted_jobs, deleted_photos=deleted_photos)
 
 
 def _msg_response(msg) -> dict:
@@ -580,7 +488,7 @@ def _extras_for(db: Session, conv_id: str) -> dict:
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     revision_id = repo.current_revision_id(conv_id)
-    unsent = _unsent_edits(db, [conv] if conv else [], {conv_id: revision_id} if revision_id else {})
+    unsent = unsent_edits(db, [conv] if conv else [], {conv_id: revision_id} if revision_id else {})
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 
     from vendoo_studio.services.item_status import sold_units
@@ -597,74 +505,12 @@ def _extras_for(db: Session, conv_id: str) -> dict:
     )
 
 
-# Revisions are never rewritten, so whether two of them hold the same listing
-# is settled the first time it is asked. Normalizing both sides costs about a
-# millisecond per listing, and the sidebar polls the whole inventory: answered
-# fresh every time, it held the GIL for over a second per poll and stalled
-# every other request behind it.
-_REVISIONS_MATCH: dict[tuple[str, str], bool] = {}
-_REVISIONS_MATCH_MAX = 20_000
-
-
-def _unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -> set[str]:
-    """Conversations whose listing moved on after it was last listed.
-
-    A listing live on a marketplace through Anteroom is measured against the
-    revisions those listings were written from; Update is where its edits go.
-    A differing revision only counts when its content differs too, so a
-    revision that only normalized the same listing is not an edit. A listing
-    live nowhere has nothing to be ahead of.
-    """
-    from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
-
-    ids = [conv.id for conv in conversations]
-    direct = MarketplaceListingRepo(db).live_revisions(ids[0] if len(ids) == 1 else None)
-    pairs: dict[str, set[tuple[str, str]]] = {}
-    for conv in conversations:
-        current = revisions.get(conv.id)
-        sent = direct.get(conv.id, set())
-        differing = {(current, rev) for rev in sent if current and rev != current}
-        if differing:
-            pairs[conv.id] = differing
-    wanted = {pair for group in pairs.values() for pair in group}
-    unknown = wanted - _REVISIONS_MATCH.keys()
-    if len(_REVISIONS_MATCH) + len(unknown) > _REVISIONS_MATCH_MAX:
-        _REVISIONS_MATCH.clear()
-        unknown = wanted
-    if unknown:
-        bodies = ListingRepo(db).revision_bodies({rev for pair in unknown for rev in pair})
-        for current, sent in unknown:
-            _REVISIONS_MATCH[(current, sent)] = _listings_match(bodies.get(current), bodies.get(sent))
-    return {conv_id for conv_id, group in pairs.items() if not all(_REVISIONS_MATCH[pair] for pair in group)}
-
-
-def _listings_match(a: dict | None, b: dict | None) -> bool:
-    """Compare content after normalizing sizes and dropdowns, as revision saves do."""
-    import copy
-    import hashlib
-    import json
-
-    from vendoo_studio.services.listing_generate import align_size_fields
-    from vendoo_studio.services.validation import normalize_listing_dropdowns
-
-    if not isinstance(a, dict) or not isinstance(b, dict):
-        return False
-    shaped = []
-    for listing in (a, b):
-        listing = copy.deepcopy(listing)
-        align_size_fields(listing)
-        normalize_listing_dropdowns(listing)
-        raw = json.dumps(listing, sort_keys=True, default=str, separators=(",", ":"))
-        shaped.append(hashlib.sha256(raw.encode()).hexdigest())
-    return shaped[0] == shaped[1]
-
-
-def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
+def _conv_response(conv, extras: dict | None = None) -> Conversation:
     from vendoo_studio.services.imported_listing import imported_fields
     from vendoo_studio.services.vendoo_import import parse_notes
 
     row = extras or {}
-    return ConversationResponse(
+    return Conversation(
         id=conv.id,
         title=conv.title,
         notes=conv.notes,
@@ -689,8 +535,8 @@ def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
     )
 
 
-def _photo_response(photo) -> PhotoResponse:
-    return PhotoResponse(
+def _photo_response(photo) -> ListingPhoto:
+    return ListingPhoto(
         id=photo.id,
         conversation_id=photo.conversation_id,
         original_filename=photo.original_filename,

@@ -11,6 +11,7 @@ import logging
 import threading
 import time
 import traceback
+import uuid
 from pathlib import Path
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import event
-from starlette.datastructures import Headers
+from starlette.datastructures import Headers, MutableHeaders
 
 from vendoo_studio.services.seller_sessions import (
     InvalidSession,
@@ -43,6 +44,7 @@ def from_public_edge(scope) -> bool:
 
 
 access_log = logging.getLogger("vendoo_studio.access")
+http_log = logging.getLogger("vendoo_studio.http")
 
 
 class AccessLogMiddleware:
@@ -67,7 +69,7 @@ class AccessLogMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        started, status = time.perf_counter(), 0
+        started, status, failed = time.perf_counter(), 0, False
 
         async def record(message):
             nonlocal status
@@ -75,13 +77,63 @@ class AccessLogMiddleware:
                 status = message["status"]
             await send(message)
 
+        from vendoo_studio.services.error_alerts import request_context
+
+        request_id = Headers(scope=scope).get("fly-request-id") or uuid.uuid4().hex
+        details = {"scope": scope, "request_id": request_id}
+        context = request_context.set(details)
         try:
             await self.app(scope, receive, record)
+        except Exception:
+            failed = True
+            # The route template, never the raw path: it can carry one-time codes.
+            http_log.exception("Unhandled exception in %s %s",
+                               scope["method"], getattr(scope.get("route"), "path", None) or "-")
+            raise
         finally:
             route = scope.get("route")
             template = getattr(route, "path", None) or "-"
-            access_log.info("%s %s %s %dms", scope["method"], template, status or 500,
+            if status >= 500:
+                http_log.error("%s %s answered %s", scope["method"], template, status,
+                               exc_info=details.get("cause"))
+            request_context.reset(context)
+            # 499: the client closed the connection before any response started.
+            access_log.info("%s %s %s %dms", scope["method"], template, status or (500 if failed else 499),
                             round((time.perf_counter() - started) * 1000))
+
+
+class ResponseHeadersMiddleware:
+    """Security and caching headers on every response.
+
+    Plain ASGI rather than ``BaseHTTPMiddleware``: when a browser leaves before
+    a response starts, nothing is sent, and that is not a server error.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                # A route may let the browser keep a versioned private image; nothing else is kept.
+                headers.setdefault("Cache-Control", "no-store")
+                headers["Referrer-Policy"] = "no-referrer"
+                headers["X-Content-Type-Options"] = "nosniff"
+                # pywebview builds its native API methods with Function(). WebKit
+                # applies this policy to that bootstrap as well as to page scripts.
+                headers["Content-Security-Policy"] = (
+                    "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
+                    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+                )
+            await send(message)
+
+        await self.app(scope, receive, with_headers)
 
 
 class SellerSessionMiddleware:
@@ -123,7 +175,10 @@ class SellerSessionMiddleware:
                 {"detail": "A valid seller session is required"}, status_code=401,
                 headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
             )
-        except SessionVerificationUnavailable:
+        except SessionVerificationUnavailable as exc:
+            from vendoo_studio.services.error_alerts import note_cause
+
+            note_cause(exc.__cause__ or exc)
             response = JSONResponse(
                 {"detail": "Session verification is temporarily unavailable"}, status_code=503,
                 headers={"Retry-After": "5", "Cache-Control": "no-store"},
@@ -169,6 +224,8 @@ class AccountResponse(BaseModel):
 def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, session_verifier: SessionVerifier | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        from vendoo_studio.services.error_alerts import install_alerts, uninstall_alerts
+        install_alerts()
         # ORM relationship names must resolve before a route constructs its
         # first query, which happens before the session's after_begin hook.
         from vendoo_studio.database import load_models
@@ -274,6 +331,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
             finally:
                 await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
+                await asyncio.to_thread(uninstall_alerts)
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,
@@ -286,26 +344,14 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.state.background_worker_enabled = (
         os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1' and app.state.process_role != 'web'
     )
+    from vendoo_studio.routes.error_reports import router as error_reports_router
+    app.include_router(error_reports_router)
     app.add_middleware(SellerSessionMiddleware)
     # JSON forms and choice lists (Depop's brands are about 300 KB) shrink several
     # times over a phone connection. Event streams and images are left alone.
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
-    @app.middleware("http")
-    async def response_headers(request, call_next):
-        response = await call_next(request)
-        # A route may let the browser keep a versioned private image; nothing else is kept.
-        response.headers.setdefault("Cache-Control", "no-store")
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        # pywebview builds its native API methods with Function(). WebKit
-        # applies this policy to that bootstrap as well as to page scripts.
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
-            "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
-        )
-        return response
+    app.add_middleware(ResponseHeadersMiddleware)
 
     # Outermost, so a refused session or an error still gets its line.
     app.add_middleware(AccessLogMiddleware)
@@ -345,8 +391,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from vendoo_studio.routes.hosted_attachments import router as attachment_router
     app.include_router(attachment_router)
     from vendoo_studio.routes import analytics, boxes, sale_calendar, sales_ledger
-    from vendoo_studio.routes import sourcing
-    for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router, sourcing.router):
+    from vendoo_studio.routes import scout, sourcing
+    for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router, sourcing.router, scout.router):
         app.include_router(shared_router)
     from vendoo_studio.routes.photos import edit_router
     app.include_router(edit_router)
@@ -392,17 +438,19 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(bulk_delete_router)
     from vendoo_studio.routes.hosted_account import router as account_router
     app.include_router(account_router)
-    from vendoo_studio.routes.listings import apply_price_drop
+    from vendoo_studio.routes.listings import apply_price_drop, preview_price_drop, stream_price_drop_comps
+    app.add_api_route('/api/conversations/{conv_id}/price-drop/preview', preview_price_drop, methods=['POST'])
+    app.add_api_route('/api/conversations/{conv_id}/price-drop/comps', stream_price_drop_comps, methods=['POST'])
     app.add_api_route('/api/conversations/{conv_id}/price-drop', apply_price_drop, methods=['POST'])
     from vendoo_studio.routes.catalog import categories as catalog_categories, choice_list, dropdown_options, search as catalog_search
     app.add_api_route('/api/catalog/choice-lists/{name}', choice_list, methods=['GET'])
     app.add_api_route('/api/catalog/dropdown-options', dropdown_options, methods=['GET'])
     app.add_api_route('/api/catalog/categories', catalog_categories, methods=['GET'])
     app.add_api_route('/api/catalog/search', catalog_search, methods=['GET'])
-    from vendoo_studio.routes.conversations import preview_copy, copy_conversation, copy_result, ConversationResponse
+    from vendoo_studio.routes.conversations import preview_copy, copy_conversation, copy_result, Conversation
     app.add_api_route('/api/conversations/{conv_id}/copy-preview', preview_copy, methods=['GET'])
-    app.add_api_route('/api/conversations/{conv_id}/copy', copy_conversation, methods=['POST'], response_model=ConversationResponse)
-    app.add_api_route('/api/conversations/{conv_id}/copy-result/{request_id}', copy_result, methods=['GET'], response_model=ConversationResponse)
+    app.add_api_route('/api/conversations/{conv_id}/copy', copy_conversation, methods=['POST'], response_model=Conversation)
+    app.add_api_route('/api/conversations/{conv_id}/copy-result/{request_id}', copy_result, methods=['GET'], response_model=Conversation)
     if web_dir is not None:
         app.mount("/assets", StaticFiles(directory=web_dir / "assets"), name="cloud-assets")
 

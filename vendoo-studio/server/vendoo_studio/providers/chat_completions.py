@@ -16,8 +16,9 @@ import re
 from dataclasses import dataclass
 
 import httpx
+from jsonschema import Draft202012Validator
 
-from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
+from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM, PHOTO_EVIDENCE_SCHEMA
 from vendoo_studio.providers.xiaomi_mimo import (
     VISION_MAX_SIDE,
     StreamChunk,
@@ -43,6 +44,28 @@ def _has_images(messages: list[dict]) -> bool:
     )
 
 
+_VALUE_FIELDS = ("brand", "size", "color", "material", "style", "graphic", "category", "department")
+
+
+def _as_text(value):
+    """A number the model wrote as a number (a waist of 32, 22.5 inches) is still the read value."""
+    return str(value) if isinstance(value, int | float) and not isinstance(value, bool) else value
+
+
+def _evidence_shape(value: dict) -> dict:
+    """Unwrap ``{"evidence": {...}}`` and read numeric values as text before validating."""
+    if set(value) == {"evidence"} and isinstance(value["evidence"], dict):
+        value = value["evidence"]
+    for name in _VALUE_FIELDS:
+        if isinstance(field := value.get(name), dict) and "value" in field:
+            field["value"] = _as_text(field["value"])
+    measurements = value.get("measurements")
+    for item in measurements if isinstance(measurements, list) else []:
+        if isinstance(item, dict) and "value" in item:
+            item["value"] = _as_text(item["value"])
+    return value
+
+
 def parse_evidence(content: str) -> dict:
     """``{"evidence": {...}}`` from a reply that should be one JSON object."""
     candidates = [content]
@@ -55,6 +78,9 @@ def parse_evidence(content: str) -> dict:
         except json.JSONDecodeError:
             continue
         if isinstance(value, dict):
+            value = _evidence_shape(value)
+            if not Draft202012Validator(PHOTO_EVIDENCE_SCHEMA).is_valid(value):
+                return {"evidence": {}, "error": "The AI returned incomplete or malformed photo evidence. Retry photo analysis."}
             return {"evidence": value}
     return {"evidence": {}, "raw": content}
 

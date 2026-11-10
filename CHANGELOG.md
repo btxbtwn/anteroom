@@ -6,6 +6,169 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.873 — 2026-11-10
+
+- The iPhone app and the web app now read listings, photos and saves through one shared definition, so they stay in step with each other and with Anteroom's server.
+- Saving a listing in the Mac app now reports whether it is ready to send, as the web app already expected.
+
+## 0.1.872 — 2026-11-09
+
+- Generating a listing no longer fails when the AI wraps its photo reading in an extra layer or writes a size or measurement as a number.
+
+## 0.1.871 — 2026-11-09
+
+- Filling marketplace fields is faster when a required field has no supporting evidence: Anteroom now asks the model once more for it instead of twice, then shows it as a field to fill.
+
+## 0.1.870 — 2026-11-09
+
+- A brief database hiccup during an automatic sharing or offer round no longer leaves that round stuck as unfinished in the activity log.
+
+## 0.1.869 — 2026-11-09
+
+- Generating listings for several drafts at once no longer fails with a database timeout while the AI fixes or finishes a listing.
+
+## 0.1.868 — 2026-11-09
+
+- When the hosted app briefly can't reach its database or sign-in keys, the error report now says why, so these outages can be traced and fixed.
+
+## 0.1.867 — 2026-11-09
+
+- Opening a draft or preparing its marketplace forms no longer ties up the web app's database connections, which could make other pages fail with an error while a listing with large saved forms was open.
+
+## 0.1.866 — 2026-11-09
+
+- A generated draft no longer leaves eBay Size and Size Type empty when the listing's own size answers them.
+- A brand Depop does not list shows as Other on the Depop form, the way it posts, instead of blocking the draft.
+
+## 0.1.865 — 2026-11-09
+
+- Show each word of an assistant reply as it arrives, instead of a paragraph at a time, with a caret where it is writing.
+- Press Esc in the message box to stop a reply, and keep what the listing assistant had already written when you stop it.
+- Screen readers hear once when a reply finishes, not every word.
+- On the iPhone, the assistant no longer pulls you back to the bottom while you read, keeps the partial answer when you stop it, and keeps Stop next to the message box.
+
+## 0.1.864 — 2026-11-09
+
+- Save Who made it and What is it as defaults for new listings with the little save button on the Etsy tab.
+
+## 0.1.863 — 2026-11-09
+
+- Delisting an item everywhere now moves it to Drafts, even when you had marked a marketplace as listed.
+
+## 0.1.862 — 2026-11-09
+
+- Use eBay's shopping-bag web mark on the marketplace rail so the logos line up evenly.
+
+## 0.1.861 — 2026-11-09
+
+- The marketplace tabs no longer show yellow "Check this answer against photo or seller evidence" warnings under filled-in required fields, and those notes no longer hold up listing.
+
+## 0.1.860 — 2026-11-09
+
+- Chat edits no longer fail with "Native option lookup did not finish" when the assistant names the fields it will change in a slightly different format, and plain answers to questions come straight back.
+
+## 0.1.859 — 2026-11-09
+
+- Generated descriptions can now use the full 1,000 characters. They were cut at 918 to leave room for a title on Depop, which Depop no longer gets.
+
+## 0.1.858 — 2026-11-09
+
+- Keep pages like Sourcing loading on the web while drafts are generating, instead of failing with a database timeout.
+
+## 0.1.857 — 2026-11-09
+
+- Keep the listing assistant from repeatedly asking which fields to edit and failing before it answers.
+
+## 0.1.856 — 2026-11-09
+
+- Closing the web app while it is still loading no longer shows up as a server error.
+
+## 0.1.855 — 2026-11-09
+
+- A seller stopping an assistant answer or draft task is no longer reported as a lost task lease.
+
+## 0.1.854 — 2026-11-09
+
+- Show Listed, Delisted, or Not listed on each marketplace rail row.
+
+## 0.1.853 — 2026-11-09
+
+- The web eBay and Etsy workspaces no longer fail with "Secure credential storage is temporarily unavailable" or slow every other screen while Anteroom is busy.
+
+## 0.1.852 — 2026-11-09
+
+- Stopping a draft task no longer reports a task crash when its worker notices the revoked lease.
+
+## 0.1.851 — 2026-11-09
+
+- Unsent edits now appear in the inventory filter on the website.
+
+## 0.1.850 — 2026-11-09
+
+- Fixed Regenerate showing “Not Found” on the web when loading price suggestions or researching sold prices.
+
+## 0.1.849 — 2026-11-09
+
+- Stay on the current listing when refreshing the page, including on phones.
+
+## 0.1.848 — 2026-11-08
+
+- Fix sourcing refreshes failing because a required provider dependency was missing from the hosted app.
+
+## 0.1.847 — 2026-11-08
+
+- Reject incomplete photo-analysis responses instead of losing tag text and uncertainty details.
+- Keep unsupported material, age, fit and condition guesses out of listing instructions.
+
+## 0.1.846 — 2026-11-08
+
+- Errors in the hosted app, from the server, background work and the web page, are now emailed to the operator with the error, where it happened, which request and seller it affected, and its stack trace. Repeats are grouped so one problem does not flood the inbox.
+
+## 0.1.845 — 2026-11-08
+
+- On the web and iPhone browser, reopening Anteroom shows your inventory and pages right away from your last visit, then refreshes them. Signing out erases what was kept on the device.
+
+## 0.1.844 — 2026-11-08
+
+- Find the Vendoo switch under Settings → Experimental, alongside a coming-soon hosted marketplace browser option.
+
+## 0.1.843 — 2026-11-08
+
+- Use Liquid Glass pills for the iPhone inventory status filters, with a clear selected state and room for larger text.
+
+## 0.1.842 — 2026-11-08
+
+- Sourcing, Automations, Marketplaces, Analytics and Settings open with their data already loaded, with no spinner or placeholder first.
+
+## 0.1.841 — 2026-11-08
+
+- The Etsy tab now follows Etsy's own listing form: Photo & video, Category, Item details, Item options, Pricing & shipping, How it's made and Settings, with your category's Etsy attributes.
+- Pick the Etsy category on the Etsy tab. Your pick stays put when the listing is generated again.
+- A price or tags you change on the Etsy tab are now what Etsy gets, without changing General.
+
+## 0.1.840 — 2026-11-08
+
+- A category set on General now fills the closest Poshmark, Mercari and Depop category when no exact match exists, instead of leaving it blank. That marketplace tab shows "Suggested: check it" until you pick a category or press Looks right.
+- Kids' sets and gloves no longer land in Mercari's Fragrance or Cleaning categories, and Etsy no longer picks Pet Supplies for women's tops, dresses or men's hats.
+
+## 0.1.839 — 2026-11-08
+
+- The General form now follows the order you fill it in: category, then title, condition, size and brand, then price, description, colors and department, and shipping.
+- Cost, SKU and quantity sit under More details at the bottom, folded until you open it. Its heading still shows how many are filled.
+- The iPhone app's General form uses the same order.
+
+## 0.1.838 — 2026-11-08
+
+- Choosing a category on the General form on iPhone or the web app now fills the matching category on eBay, Poshmark, Mercari, Depop and Etsy, as it already did on the Mac.
+
+## 0.1.837 — 2026-11-08
+
+- See which marketplaces need the Chrome extension during setup and beside marketplace actions. Create and generate drafts without connecting Chrome.
+
+## 0.1.836 — 2026-11-08
+
+- Fixed Scout an item showing “Not Found” on the web.
+
 ## 0.1.835 — 2026-11-08
 
 - Sourcing retries brief supplier rate limits and avoids unnecessary catalog requests.

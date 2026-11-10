@@ -1,7 +1,7 @@
 import React from "react";
 import { type QueryClient } from "@tanstack/react-query";
 import { type SseParts } from "../sseCoalesce";
-import { stableStreamingText } from "../streamingText";
+import { streamingDisplayText } from "../streamingText";
 import { settleAgents, type LiveAgents, type LiveTraceEntry } from "../liveTrace";
 import { turnHasWork, type FoldedTurn } from "./workLogModel";
 import { isStreamError } from "./assistantDisplay";
@@ -191,9 +191,9 @@ export function patchLive(convId: string, patch: Partial<Omit<LiveStream, "liste
   if (patch.streamText !== undefined && patch.streamDisplayText === undefined) {
     live.streamDisplayText = isStreamError(patch.streamText)
       ? patch.streamText
-      : busy ? stableStreamingText(patch.streamText) : patch.streamText;
+      : busy ? streamingDisplayText(patch.streamText) : patch.streamText;
   } else if (wasBusy && !busy && live.streamText) {
-    // Completion flushes the active paragraph, just as T3 Code flushes its
+    // Completion flushes the partial word and any markup held back, as T3 Code flushes its
     // paragraph buffer when the provider ends the turn.
     live.streamDisplayText = live.streamText;
   }
@@ -219,7 +219,7 @@ export function applySseToLive(convId: string, event: string, parts: SseParts) {
   if (event === "status") live.streamStatus = parts.status;
   if (event !== "thinking" && event !== "status" && event !== "listing_updated" && !TRACE_ONLY_EVENTS.has(event)) {
     live.streamText = parts.content;
-    live.streamDisplayText = stableStreamingText(parts.content);
+    live.streamDisplayText = streamingDisplayText(parts.content);
     if (live.streamDisplayText === previousDisplayText && !traceChanged) return;
   }
   emitLive(convId);

@@ -1,5 +1,5 @@
 import { useWorkspaceRuntime } from "./runtime";
-import { MOBILE_LAYOUT_QUERY, useMobileLayout } from "../lib/useMobileLayout";
+import { useMobileLayout } from "../lib/useMobileLayout";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useReducer, type CSSProperties } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -53,19 +53,16 @@ import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSess
 
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
 import { initialOpenListing, openListingReducer } from "./openListing";
-import { loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode } from "./pageLoaders";
+import {
+  AnalyticsPage, AssistantPage, AutomationsPage, InventoryTablePage, MarketplacesPage, SettingsPage, SourcingPage,
+  loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode,
+} from "./pageLoaders";
 import { ListingChatPane, ListingEditorPane, pageLoading, type ListingPaneActions } from "./ListingPanes";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { setListingSearch, useListingSearch } from "../components/sidebar/listingSearch";
 import { prefetchListingReads } from "../api/navigationQueries";
+import { prefetchPageReads } from "../api/pageQueries";
 
-const SettingsPage = lazy(pageLoaders.settings);
-const AnalyticsPage = lazy(pageLoaders.analytics);
-const AssistantPage = lazy(pageLoaders.assistant);
-const MarketplacesPage = lazy(pageLoaders.marketplaces);
-const AutomationsPage = lazy(pageLoaders.automations);
-const SourcingPage = lazy(pageLoaders.sourcing);
-const InventoryTablePage = lazy(pageLoaders.inventory);
 // A page's code is fetched the first time it is opened. Fetching it once the
 // app has settled means a tap does not wait on the network for it.
 const PAGE_LOADERS = [...Object.values(pageLoaders), loadListingEditor, loadChatPanel];
@@ -107,8 +104,8 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<"workspace" | "editor">(runtime.hosted ? "editor" : "workspace");
-  // On mobile the listings start open only when a listing link opened the app; home is the assistant.
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => listingFromUrl && window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
+  // A listing link opens the listing itself on phones, with inventory closed.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const phoneInventory = isMobile && activeView === "listings" && mobileSidebarOpen;
   const inventoryScroll = useRef(0);
   useLayoutEffect(() => {
@@ -170,12 +167,18 @@ export function App() {
       pollMs(hasOpenJob(query.state.data?.jobs) || query.state.data?.work.length ? BUSY_POLL_MS : IDLE_POLL_MS),
   });
   const inventoryLoaded = conversations !== undefined;
+  // The runtime object is rebuilt on every render; its names are what matter here.
+  const pageViews = [...runtime.views].join(" ");
+  const pageFeatures = [...runtime.features].join(" ");
   useEffect(() => {
     if (!inventoryLoaded) return;
     let cancelled = false;
     let idleId: number | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const remaining = [...PAGE_LOADERS];
+    // The pages' first reads go first, so their data is in before a tap
+    // opens them; the page code then loads behind them.
+    const readPages = () => { void prefetchPageReads(queryClient, { views: new Set(pageViews.split(" ")), features: new Set(pageFeatures.split(" ")) }).catch(() => {}); return Promise.resolve(); };
+    const remaining = [readPages, ...PAGE_LOADERS];
     const schedule = () => {
       if (cancelled || !remaining.length) return;
       const next = () => {
@@ -197,7 +200,7 @@ export function App() {
       if (idleId !== undefined) window.cancelIdleCallback(idleId);
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [inventoryLoaded]);
+  }, [inventoryLoaded, queryClient, pageViews, pageFeatures]);
   const previousQueueJobs = useRef<Map<string, string> | null>(null);
   useEffect(() => {
     if (!queue.data) return;
@@ -238,13 +241,15 @@ export function App() {
   }, [queryClient]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.get("listing")) return;
     const url = new URL(window.location.href);
-    url.searchParams.delete("listing");
+    if (activeView === "listings" && selectedConvId) {
+      url.searchParams.set("listing", selectedConvId);
+    } else {
+      url.searchParams.delete("listing");
+    }
     const next = url.pathname + url.search + url.hash;
-    window.history.replaceState({}, "", next);
-  }, []);
+    window.history.replaceState(window.history.state, "", next);
+  }, [activeView, selectedConvId]);
 
   useEffect(() => {
     if (setupGuideAutoOpen !== null) return;

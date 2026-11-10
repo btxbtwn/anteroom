@@ -23,12 +23,13 @@ from vendoo_studio.services.suggestions import list_suggestions
 
 @pytest.mark.parametrize('part', ['screen', 'listing', 'photos', 'messages', 'activity', 'marketplace-listings', 'copy-preview'])
 def test_editor_reads_release_connections_before_sending_json(cloud, active_connections, signing_keys, monkeypatch, part):  # noqa: F811
-    from starlette.responses import JSONResponse
+    # A route with a response_model sends a plain Response, the rest a JSONResponse.
+    from starlette.responses import Response
 
     client, _engine = cloud
     alice = headers(signing_keys)
     identity = client.post('/api/drafts', headers=alice, json={'title': 'Tee'}).json()['id']
-    send_response = JSONResponse.__call__
+    send_response = Response.__call__
     observed = []
 
     async def send_without_connection(response, scope, receive, send):
@@ -37,7 +38,7 @@ def test_editor_reads_release_connections_before_sending_json(cloud, active_conn
             assert not active_connections, 'Sending an editor response must not reserve a database connection'
         await send_response(response, scope, receive, send)
 
-    monkeypatch.setattr(JSONResponse, '__call__', send_without_connection)
+    monkeypatch.setattr(Response, '__call__', send_without_connection)
     assert client.get(f'/api/conversations/{identity}/{part}', headers=alice).status_code == 200
     assert observed
 
@@ -515,6 +516,17 @@ def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
             assert notes == statuses == {}
             return None
 
+        def current_revision_ids(self):
+            assert closed == []
+            return {}
+
+    def unsent_edits(db, conversations, revisions):
+        assert closed == []
+        assert conversations == []
+        assert revisions == {}
+        return set()
+
+    monkeypatch.setattr('vendoo_studio.services.unsent_edits.unsent_edits', unsent_edits)
     monkeypatch.setattr('vendoo_studio.repositories.queries.ConversationRepo', Repo)
     from vendoo_studio.services.inventory_analytics import AnalyticsInputs
     monkeypatch.setattr('vendoo_studio.services.inventory_analytics.read_analytics_inputs',
@@ -574,3 +586,45 @@ def test_inventory_derives_status_once_and_reconciles_stale_busy_rows(cloud, sig
         stored = db.get(Conversation, identity)
         assert stored.status == 'sold'
         assert stored.settled_at is not None
+
+
+def test_generated_listing_repair_releases_the_connection_before_model_waits(single_connection, monkeypatch):
+    """JSON repair and the required-field pass wait on a model; neither may pin the hosted pool."""
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services import listing_generate, listing_persistence
+
+    waits = []
+
+    def other_session_works(step):
+        with single_connection() as other:
+            assert other.get(Conversation, 'repair-tee').title == 'Cotton tee'
+        waits.append(step)
+
+    async def repair(provider, text):
+        other_session_works('repair')
+        return {'title': 'Cotton tee', 'price': 20}
+
+    async def fill(provider, listing, **kwargs):
+        other_session_works('fill')
+        return {**listing, 'price': 25}
+
+    def persist(db, conv_id, full_text, *, parsed, expected_revision_id, **kwargs):
+        listing_persistence.save_revision(db, conv_id, parsed, source='model',
+                                          expected_revision_id=expected_revision_id)
+        return parsed
+
+    monkeypatch.setattr(listing_generate, 'repair_listing_json', repair)
+    monkeypatch.setattr(listing_generate, 'fill_validation_gaps', fill)
+    monkeypatch.setattr(listing_generate, 'persist_generated_listing', persist)
+    monkeypatch.setattr(listing_generate, '_validation_blockers', lambda listing: [] if listing.get('price') == 25 else ['price'])
+    with single_connection() as db:
+        db.add(Conversation(id='repair-tee', title='Cotton tee'))
+        db.commit()
+        # The generate run reads photos right before this call, leaving a transaction open.
+        fingerprint = listing_generate.photo_fingerprint(ConversationRepo(db).get_photos('repair-tee'))
+        listing = asyncio.run(listing_generate.persist_generated_listing_with_repair(
+            db, 'repair-tee', '{"title": "Cotton tee",,', object(), final_announce=False,
+            expected_revision_id='', expected_photo_fingerprint=fingerprint))
+    assert waits == ['repair', 'fill']
+    assert listing['price'] == 25

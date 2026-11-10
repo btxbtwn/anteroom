@@ -20,7 +20,7 @@ struct ListingEditorView: View {
     @State private var seenLiveChanges: Int?
     private let onSaved: () -> Void
 
-    init(api: AnteroomAPI, listing: ListingSummary, onSaved: @escaping () -> Void) {
+    init(api: AnteroomAPI, listing: ConversationSummary, onSaved: @escaping () -> Void) {
         _model = State(initialValue: ListingEditorModel(api: api, listing: listing))
         self.onSaved = onSaved
     }

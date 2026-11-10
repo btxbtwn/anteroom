@@ -170,6 +170,20 @@ photo illustrations are placeholders, not uploaded product photos. Review
 light/dark appearance and larger text sizes; live cover-photo loading, uploads
 and edits still need configured-account verification.
 
+## Generated API models
+
+The inventory row, listing, photo, save, runtime and error models in
+`Sources/API/Generated/APIContract.swift` are generated from the backend's
+shared contract (see [`contracts/README.md`](../contracts/README.md)); the
+web app's TypeScript types come from the same source. Never edit that file:
+change `vendoo-studio/server/vendoo_studio/routes/api_contract.py` and run
+`python vendoo-studio/scripts/api-contract.py`. Behavior the phone adds to
+those models (display titles, cover photo ids, photo edit checks) lives in
+extensions in `Sources/API/Models.swift`. A field with a default decodes to
+that default when a response leaves it out, and a literal (a runtime feature,
+a photo turn) decodes as a plain string or number, so a value a newer server
+adds never fails to decode on an older build.
+
 ## Listing and delisting
 
 Listing actions → List everywhere… lists on several marketplaces at once.

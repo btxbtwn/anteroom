@@ -1,4 +1,4 @@
-import type { Photo, PhotoUploadResult } from "./api/types";
+import type { ListingPhoto, PhotoUploadResult } from "./api/types";
 import type { PhotoFolderGroup } from "./photoDrop";
 import { listingTitleForFolder } from "./photoDrop";
 import { joinLabels, splitLabels } from "./components/itemLabels";
@@ -35,7 +35,7 @@ export interface BulkUploadItem extends PhotoFolderGroup {
 interface BulkUploadApi {
   create: (body: { title: string; notes?: string; box_id?: string }) => Promise<{ id: string }>;
   uploadPhotos: (convId: string, files: File[]) => Promise<PhotoUploadResult>;
-  rotatePhoto: (convId: string, photoId: string, degrees: PhotoRotation) => Promise<Photo>;
+  rotatePhoto: (convId: string, photoId: string, degrees: PhotoRotation) => Promise<ListingPhoto>;
 }
 
 export interface BulkListingUploadResult {

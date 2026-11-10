@@ -20,7 +20,9 @@ def prepare_listing_snapshot(
     from vendoo_studio.services.registry import RegistryService, align_listing_gender
     from vendoo_studio.services.vendoo_import import parse_notes, split_vendoo_labels
 
-    listing_snapshot = copy.deepcopy(listing_json or {})
+    from vendoo_studio.services.native_contract import copy_listing
+
+    listing_snapshot = copy_listing(listing_json or {})
     conv_notes = parse_notes(getattr(conv, "notes", None))
     labels = split_vendoo_labels(conv_notes.get("vendooLabels"))
     if labels:

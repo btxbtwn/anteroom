@@ -160,6 +160,19 @@ class NativeContractTest(unittest.TestCase):
         self.assertLess(len(text), 20000)
         self.assertEqual(contracts, before)
 
+    def test_general_brand_depop_does_not_list_is_its_other_brand(self):
+        from vendoo_studio.services import depop_form
+
+        listing = {"brand": "Miami Style"}
+        listing[contract.KEY] = contract.capture(listing, {"depop": depop_form.form(listing)}, ["depop"])
+        # Posting sends a brand Depop does not list as Other (depop-native.js),
+        # so the form shows that and the draft is not blocked on it.
+        self.assertFalse(any(gap["field"] == "depop_specifics.brand" for gap in contract.gaps(listing, "depop")))
+        field = next(row for row in contract.editor_form(listing, "depop")["fields"]
+                     if row["path"] == "depop_specifics.brand")
+        self.assertEqual(field["value"], "Other")
+        self.assertEqual(listing["brand"], "Miami Style")
+
     def test_large_brand_catalog_stays_in_editor_and_is_searchable_in_prompt(self):
         from vendoo_studio.services import depop_form
 
@@ -344,12 +357,14 @@ class NativeContractTest(unittest.TestCase):
         listing["marketplace_category_ids"] = {"mercari": "a-different-vendoo-category"}
         self.assertEqual(contract.gaps(listing, "mercari"), [])
 
-    def test_a_valid_looking_option_without_evidence_still_blocks_listing(self):
+    def test_a_valid_required_answer_without_recorded_evidence_is_not_flagged(self):
+        # The seller reviews the filled form themselves; a valid answer is not
+        # flagged just because no photo quote was stored for it.
         listing = seed()
         listing["mercari_specifics"]["material"] = "cotton"
-        self.assertIn("evidence", contract.gaps(listing, "mercari")[0]["message"])
+        self.assertEqual(contract.gaps(listing, "mercari"), [])
         listing[contract.EVIDENCE_KEY] = {"mercari_specifics.material": {"value": "wool", "quote": "100% wool"}}
-        self.assertIn("evidence", contract.gaps(listing, "mercari")[0]["message"])
+        self.assertEqual(contract.gaps(listing, "mercari"), [])
 
     def test_optional_answers_do_not_repeat_evidence_reminders(self):
         listing = seed()
@@ -519,7 +534,6 @@ class NativeContractRevisionTest(unittest.TestCase):
             contract.EVIDENCE_KEY: {"mercari_specifics.material": {"value": "cotton", "quote": "invented"}},
         }, "generation_finalize")
         self.assertNotIn("seller_fields", result.listing_json)
-        self.assertIn("evidence", contract.gaps(result.listing_json, "mercari")[0]["message"])
 
     def test_seller_category_edit_keeps_a_blocker_until_its_form_is_reloaded(self):
         listing = seed()

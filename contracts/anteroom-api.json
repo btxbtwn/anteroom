@@ -1,0 +1,1734 @@
+{
+  "components": {
+    "schemas": {
+      "Conversation": {
+        "description": "One listing with the seller's notes.",
+        "properties": {
+          "box_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The wholesale box this item came out of.",
+            "title": "Box Id"
+          },
+          "cover_photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Photo Url"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "direct_marketplaces": {
+            "default": [],
+            "description": "Marketplaces Anteroom published directly.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Direct Marketplaces",
+            "type": "array"
+          },
+          "direct_records": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DirectRecord"
+            },
+            "default": {},
+            "description": "Every direct listing record by marketplace, for the inventory table.",
+            "title": "Direct Records",
+            "type": "object"
+          },
+          "etsy_eligible": {
+            "default": true,
+            "description": "False for modern resale: Etsy removes those.",
+            "title": "Etsy Eligible",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "missing_sale_data": {
+            "default": [],
+            "description": "Sale details the sales ledger still needs from the seller.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Sale Data",
+            "type": "array"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "oldest_listed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the item's longest-standing live listing went up, counting Anteroom's own listings:\nwhat \"listed N days ago\", the staleness filter and sort read.",
+            "title": "Oldest Listed At"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most units the item was offered with.",
+            "title": "Quantity"
+          },
+          "removed_marketplaces": {
+            "default": [],
+            "description": "Marketplaces Anteroom delisted directly, though imported history says listed.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Marketplaces",
+            "type": "array"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled At"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "sold_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When Anteroom's sales ledger last saw a unit of this item sell.",
+            "title": "Sold At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "units_sold": {
+            "default": 0,
+            "description": "Units sold on Anteroom's sales ledger. An Active row with some sold reads \"1 of 3 sold\".",
+            "title": "Units Sold",
+            "type": "integer"
+          },
+          "unsent_edits": {
+            "default": false,
+            "description": "Edited here since the item's live direct listings were written: Update is the step that is owed.",
+            "title": "Unsent Edits",
+            "type": "boolean"
+          },
+          "unsettled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsettled At"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "vendoo_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The imported image, a thumbnail fallback.",
+            "title": "Vendoo Cover Url"
+          },
+          "vendoo_created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Imported time tracking: when the item was created.",
+            "title": "Vendoo Created At"
+          },
+          "vendoo_labels": {
+            "default": [],
+            "description": "The labels the item wears.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Vendoo Labels",
+            "type": "array"
+          },
+          "vendoo_listed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Imported time tracking: when the item last went live.",
+            "title": "Vendoo Listed At"
+          },
+          "vendoo_listed_dates": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Imported listing date by marketplace.",
+            "title": "Vendoo Listed Dates",
+            "type": "object"
+          },
+          "vendoo_listing_urls": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Each marketplace listing's own page, where the imported history recorded one.",
+            "title": "Vendoo Listing Urls",
+            "type": "object"
+          },
+          "vendoo_marketplaces": {
+            "default": [],
+            "description": "Marketplaces the item was imported as live on.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Vendoo Marketplaces",
+            "type": "array"
+          },
+          "vendoo_modified_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Imported time tracking: when the item was last modified.",
+            "title": "Vendoo Modified At"
+          },
+          "vendoo_sold_dates": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Imported sale date by marketplace.",
+            "title": "Vendoo Sold Dates",
+            "type": "object"
+          },
+          "vendoo_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The item's status label in its imported history.",
+            "title": "Vendoo Status"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "created_at",
+          "updated_at",
+          "notes"
+        ],
+        "title": "Conversation",
+        "type": "object"
+      },
+      "ConversationInput": {
+        "additionalProperties": false,
+        "description": "A new listing, or the fields of one to change. A field left out stays as it is;\na null ``box_id`` takes the listing out of its box.",
+        "properties": {
+          "box_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Box Id"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 50000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "ConversationInput",
+        "type": "object"
+      },
+      "ConversationSummary": {
+        "description": "One inventory row. The sidebar polls the whole inventory, so the seller's\nnotes stay out: they are most of the payload and only the open listing reads them.",
+        "properties": {
+          "box_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The wholesale box this item came out of.",
+            "title": "Box Id"
+          },
+          "cover_photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Photo Url"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "direct_marketplaces": {
+            "default": [],
+            "description": "Marketplaces Anteroom published directly.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Direct Marketplaces",
+            "type": "array"
+          },
+          "direct_records": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DirectRecord"
+            },
+            "default": {},
+            "description": "Every direct listing record by marketplace, for the inventory table.",
+            "title": "Direct Records",
+            "type": "object"
+          },
+          "etsy_eligible": {
+            "default": true,
+            "description": "False for modern resale: Etsy removes those.",
+            "title": "Etsy Eligible",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "missing_sale_data": {
+            "default": [],
+            "description": "Sale details the sales ledger still needs from the seller.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Sale Data",
+            "type": "array"
+          },
+          "oldest_listed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the item's longest-standing live listing went up, counting Anteroom's own listings:\nwhat \"listed N days ago\", the staleness filter and sort read.",
+            "title": "Oldest Listed At"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most units the item was offered with.",
+            "title": "Quantity"
+          },
+          "removed_marketplaces": {
+            "default": [],
+            "description": "Marketplaces Anteroom delisted directly, though imported history says listed.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Marketplaces",
+            "type": "array"
+          },
+          "settled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settled At"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "sold_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When Anteroom's sales ledger last saw a unit of this item sell.",
+            "title": "Sold At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "units_sold": {
+            "default": 0,
+            "description": "Units sold on Anteroom's sales ledger. An Active row with some sold reads \"1 of 3 sold\".",
+            "title": "Units Sold",
+            "type": "integer"
+          },
+          "unsent_edits": {
+            "default": false,
+            "description": "Edited here since the item's live direct listings were written: Update is the step that is owed.",
+            "title": "Unsent Edits",
+            "type": "boolean"
+          },
+          "unsettled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsettled At"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "vendoo_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The imported image, a thumbnail fallback.",
+            "title": "Vendoo Cover Url"
+          },
+          "vendoo_created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Imported time tracking: when the item was created.",
+            "title": "Vendoo Created At"
+          },
+          "vendoo_labels": {
+            "default": [],
+            "description": "The labels the item wears.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Vendoo Labels",
+            "type": "array"
+          },
+          "vendoo_listed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Imported time tracking: when the item last went live.",
+            "title": "Vendoo Listed At"
+          },
+          "vendoo_listed_dates": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Imported listing date by marketplace.",
+            "title": "Vendoo Listed Dates",
+            "type": "object"
+          },
+          "vendoo_listing_urls": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Each marketplace listing's own page, where the imported history recorded one.",
+            "title": "Vendoo Listing Urls",
+            "type": "object"
+          },
+          "vendoo_marketplaces": {
+            "default": [],
+            "description": "Marketplaces the item was imported as live on.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Vendoo Marketplaces",
+            "type": "array"
+          },
+          "vendoo_modified_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Imported time tracking: when the item was last modified.",
+            "title": "Vendoo Modified At"
+          },
+          "vendoo_sold_dates": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "description": "Imported sale date by marketplace.",
+            "title": "Vendoo Sold Dates",
+            "type": "object"
+          },
+          "vendoo_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The item's status label in its imported history.",
+            "title": "Vendoo Status"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConversationSummary",
+        "type": "object"
+      },
+      "CropBox": {
+        "additionalProperties": false,
+        "description": "A crop as fractions of the turned and straightened photo.",
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Height",
+            "type": "number"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Width",
+            "type": "number"
+          },
+          "x": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "CropBox",
+        "type": "object"
+      },
+      "DeleteConversationResult": {
+        "properties": {
+          "deleted_jobs": {
+            "title": "Deleted Jobs",
+            "type": "integer"
+          },
+          "deleted_photos": {
+            "title": "Deleted Photos",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "deleted_jobs",
+          "deleted_photos"
+        ],
+        "title": "DeleteConversationResult",
+        "type": "object"
+      },
+      "DirectRecord": {
+        "description": "Anteroom's own listing of the item on one marketplace.",
+        "properties": {
+          "failed": {
+            "default": false,
+            "description": "The last List, Update or Save draft failed.",
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "fields": {
+            "default": 0,
+            "description": "Fields the marketplace rejected and the seller has not edited since.",
+            "title": "Fields",
+            "type": "integer"
+          },
+          "listed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When Anteroom's last confirmed List put this listing up.",
+            "title": "Listed At"
+          },
+          "listing_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing Url"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The live listing's price on this marketplace, when Anteroom knows it.",
+            "title": "Price"
+          },
+          "state": {
+            "description": "A marketplace_listings state: not_saved, draft, saving, publishing, updating, unknown,\npublished or pending_review.",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "DirectRecord",
+        "type": "object"
+      },
+      "ErrorDetail": {
+        "description": "What a refused request answers: one sentence for the seller.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorDetail",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ListingDocument": {
+        "description": "The listing's current revision, its revision pointer and its validation.",
+        "properties": {
+          "can_send": {
+            "title": "Can Send",
+            "type": "boolean"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "current_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The revision a save must name as ``expected_revision_id``; null before the first save.",
+            "title": "Current Revision Id"
+          },
+          "errors": {
+            "default": [],
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "etsy_eligible": {
+            "default": true,
+            "description": "False for modern resale, which Send leaves off Etsy.",
+            "title": "Etsy Eligible",
+            "type": "boolean"
+          },
+          "listing": {
+            "additionalProperties": true,
+            "title": "Listing",
+            "type": "object"
+          },
+          "revision_count": {
+            "title": "Revision Count",
+            "type": "integer"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "current_revision_id",
+          "listing",
+          "revision_count",
+          "can_send"
+        ],
+        "title": "ListingDocument",
+        "type": "object"
+      },
+      "ListingPhoto": {
+        "description": "One photo of a listing. ``url`` carries a content version (``v=``) that\nchanges when an edit renders a new file.",
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_order": {
+            "title": "Display Order",
+            "type": "integer"
+          },
+          "edits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhotoEdits"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The edits served in place of the kept original; null when unedited."
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "marketplace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set for a photo added on one marketplace's form; only that marketplace can send it.",
+            "title": "Marketplace"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "original_filename",
+          "mime_type",
+          "size_bytes",
+          "display_order",
+          "width",
+          "height",
+          "created_at",
+          "url"
+        ],
+        "title": "ListingPhoto",
+        "type": "object"
+      },
+      "ListingSave": {
+        "additionalProperties": false,
+        "description": "A seller's edit, saved only if the listing is still at ``expected_revision_id``.",
+        "properties": {
+          "expected_revision_id": {
+            "description": "Empty only when the editor has not yet saved a first revision.",
+            "maxLength": 100,
+            "title": "Expected Revision Id",
+            "type": "string"
+          },
+          "listing": {
+            "additionalProperties": true,
+            "title": "Listing",
+            "type": "object"
+          }
+        },
+        "required": [
+          "listing",
+          "expected_revision_id"
+        ],
+        "title": "ListingSave",
+        "type": "object"
+      },
+      "ListingSaveResult": {
+        "properties": {
+          "etsy_eligible": {
+            "title": "Etsy Eligible",
+            "type": "boolean"
+          },
+          "listing": {
+            "additionalProperties": true,
+            "title": "Listing",
+            "type": "object"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "revision_id": {
+            "description": "The new current revision: the next save's ``expected_revision_id``.",
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/ListingValidation"
+          }
+        },
+        "required": [
+          "ok",
+          "revision_id",
+          "listing",
+          "etsy_eligible",
+          "validation"
+        ],
+        "title": "ListingSaveResult",
+        "type": "object"
+      },
+      "ListingValidation": {
+        "properties": {
+          "can_send": {
+            "title": "Can Send",
+            "type": "boolean"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "info": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Info",
+            "type": "array"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "valid",
+          "errors",
+          "warnings",
+          "info",
+          "can_send"
+        ],
+        "title": "ListingValidation",
+        "type": "object"
+      },
+      "PhotoEdits": {
+        "additionalProperties": false,
+        "properties": {
+          "background": {
+            "anyOf": [
+              {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background"
+          },
+          "brightness": {
+            "default": 0,
+            "maximum": 100.0,
+            "minimum": -100.0,
+            "title": "Brightness",
+            "type": "number"
+          },
+          "contrast": {
+            "default": 0,
+            "maximum": 100.0,
+            "minimum": -100.0,
+            "title": "Contrast",
+            "type": "number"
+          },
+          "crop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CropBox"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exposure": {
+            "default": 0,
+            "maximum": 2.0,
+            "minimum": -2.0,
+            "title": "Exposure",
+            "type": "number"
+          },
+          "rotate": {
+            "default": 0,
+            "enum": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "title": "Rotate",
+            "type": "integer"
+          },
+          "straighten": {
+            "default": 0,
+            "maximum": 45.0,
+            "minimum": -45.0,
+            "title": "Straighten",
+            "type": "number"
+          }
+        },
+        "title": "PhotoEdits",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkspaceRuntime": {
+        "description": "What this hosted server offers the signed-in seller.",
+        "properties": {
+          "action_marketplaces": {
+            "description": "Marketplaces this server can list on, update and delist from.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Action Marketplaces",
+            "type": "array"
+          },
+          "features": {
+            "items": {
+              "enum": [
+                "inventory",
+                "listing_fields",
+                "photos",
+                "preferences",
+                "generation",
+                "assistant",
+                "suggestions",
+                "marketplace_actions",
+                "marketplace_sessions",
+                "photo_edits",
+                "photo_background",
+                "chat_attachments",
+                "bulk_actions",
+                "bulk_edit",
+                "bulk_copy",
+                "bulk_delete",
+                "bulk_regenerate",
+                "bulk_markdowns",
+                "catalog_categories",
+                "ebay_offers",
+                "account_deletion"
+              ],
+              "type": "string"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "marketplace_forms": {
+            "description": "Marketplaces whose native form the editor can show.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Marketplace Forms",
+            "type": "array"
+          },
+          "mode": {
+            "const": "hosted",
+            "title": "Mode",
+            "type": "string"
+          },
+          "views": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Views",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "features",
+          "views",
+          "marketplace_forms",
+          "action_marketplaces"
+        ],
+        "title": "WorkspaceRuntime",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Generated from vendoo_studio/routes/api_contract.py by python vendoo-studio/scripts/api-contract.py. Do not edit.",
+    "title": "Anteroom listing API contract",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/conversations": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConversationSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Conversations"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Conversation"
+      }
+    },
+    "/api/conversations/{identity}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity",
+            "required": true,
+            "schema": {
+              "title": "Identity",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteConversationResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The change was refused, such as an empty title or a busy listing."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing changed elsewhere or is busy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Conversation"
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity",
+            "required": true,
+            "schema": {
+              "title": "Identity",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Conversation"
+      },
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity",
+            "required": true,
+            "schema": {
+              "title": "Identity",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The change was refused, such as an empty title or a busy listing."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing changed elsewhere or is busy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Conversation"
+      }
+    },
+    "/api/conversations/{identity}/listing": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity",
+            "required": true,
+            "schema": {
+              "title": "Identity",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Listing"
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity",
+            "required": true,
+            "schema": {
+              "title": "Identity",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListingSave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingSaveResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing changed elsewhere or is busy."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Listing"
+      }
+    },
+    "/api/conversations/{identity}/photos": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity",
+            "required": true,
+            "schema": {
+              "title": "Identity",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "marketplace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Marketplace"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ListingPhoto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Photos"
+      }
+    },
+    "/api/runtime": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceRuntime"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Runtime"
+      }
+    }
+  }
+}

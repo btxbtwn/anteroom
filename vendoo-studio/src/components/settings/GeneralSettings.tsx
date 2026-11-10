@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
+import { settingsUiQuery } from "../../api/pageQueries";
 import type { ListingNames } from "../../api/types";
 import { frontendBuildState } from "../buildStamp";
 import { useStudioUpdate } from "../UpdateButton";
 import { ChangelogDialog } from "../ChangelogDialog";
 import { PreviousVersionsDialog } from "../PreviousVersionsDialog";
 import { applyTheme, normalizeTheme, type ThemePreference } from "../../theme";
-import { Switch } from "../ui/switch";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection, SettingsSelect } from "./SettingsLayout";
@@ -15,10 +15,7 @@ import { useWorkspaceRuntime } from "../../app/runtime";
 
 function AppearanceSection() {
   const queryClient = useQueryClient();
-  const { data, isPending } = useQuery({
-    queryKey: ["settings-ui"],
-    queryFn: api.settings.ui,
-  });
+  const { data, isPending } = useQuery(settingsUiQuery);
   const mutation = useMutation({
     mutationFn: (theme: ThemePreference) => api.settings.setUi({ theme }),
     onSuccess: (payload) => {
@@ -73,26 +70,6 @@ function AppearanceSection() {
       ) : null}
     </SettingsSection>
   );
-}
-
-function ListingModeSection() {
-  const client = useQueryClient();
-  const prefs = useQuery({ queryKey: ["settings-ui"], queryFn: api.settings.ui });
-  const save = useMutation({
-    mutationFn: (enabled: boolean) => api.settings.setUi({ listing_mode: enabled ? "vendoo" : "direct" }),
-    onSuccess: result => {
-      client.setQueryData(["settings-ui"], result);
-      void client.invalidateQueries({ queryKey: ["listing-fields"] });
-      void client.invalidateQueries({ queryKey: ["native-editor-form"] });
-    },
-  });
-  return <SettingsSection id="listing-mode" title="Listing workflow">
-    <SettingsRow title="Use Vendoo"
-      description="On uses Vendoo for draft review and listing. Off uses direct marketplace forms and actions."
-      control={<Switch aria-label="Use Vendoo" checked={prefs.data?.listing_mode === "vendoo"}
-        disabled={prefs.isPending || save.isPending} onCheckedChange={value => save.mutate(value)} />} />
-    {save.error && <SettingsNote tone="error">{save.error.message}</SettingsNote>}
-  </SettingsSection>;
 }
 
 function DesktopAboutVersionRow({ version }: { version: string }) {
@@ -184,7 +161,6 @@ export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () =>
   return (
     <>
       <AppearanceSection />
-      <ListingModeSection />
       {!hosted ? <SettingsSection id="setup-guide" title="Setup guide">
         <SettingsRow
           title="First-run tutorial"

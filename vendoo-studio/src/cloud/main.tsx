@@ -1,12 +1,14 @@
+import { installErrorReports } from "../api/errorReports";
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient, type Session } from "@supabase/supabase-js";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { createStudioQueryClient } from "../api/queryClient";
 import { installHostedApiSession, studioFetch } from "../api/transport";
 import { forgetDeviceImages } from "../api/privateImages";
 import { App } from "../app/App";
-import { WorkspaceRuntimeProvider, type WorkspaceFeature } from "../app/runtime";
+import { WorkspaceRuntimeProvider } from "../app/runtime";
+import type { WorkspaceRuntime as HostedRuntime } from "../api/types";
 import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
 import { AccountMenu } from "./AccountMenu";
 import { cloudExtension } from "../api/cloudExtension";
@@ -22,6 +24,7 @@ import { SIGN_IN_PATH, showsLanding } from "./landingRoute";
 import { linkOpenedElsewhere } from "./authMessages";
 import { followSellerChanges } from "./liveUpdates";
 import { StartupScreen } from "./StartupScreen";
+import { DEVICE_BUSTER, DEVICE_MAX_AGE_MS, devicePersister, forgetDeviceWorkspace, keepReadsForDevice, keepsOnDevice, saveRuntime, savedRuntime } from "./deviceCache";
 import "./workspace.css";
 
 const url = import.meta.env.VITE_SUPABASE_URL;
@@ -35,6 +38,7 @@ supabase.auth.onAuthStateChange(event => { if (event === "PASSWORD_RECOVERY") re
 // A link from another browser or the Mac app carries a code this browser cannot use.
 const openedElsewhere = linkOpenedElsewhere(window.location.search);
 const sandbox = import.meta.env.DEV && import.meta.env.VITE_ANTEROOM_SANDBOX === "1" && new URL(url).hostname === "127.0.0.1";
+installErrorReports();
 applyTheme();
 installSoftwareKeyboard(window);
 markMacApp();
@@ -68,8 +72,8 @@ function CloudApp() {
         // Let the Bridge revoke remembered approval before navigation unloads
         // the content script and can discard the disconnect message. Signing out
         // returns to the sign-in form, not the landing page.
-        // The last seller's thumbnails kept on this device go with them.
-        void Promise.allSettled([cloudExtension({ id: previous, email: "" }).disconnect(), forgetDeviceImages()]).finally(() => {
+        // The last seller's thumbnails and workspace kept on this device go with them.
+        void Promise.allSettled([cloudExtension({ id: previous, email: "" }).disconnect(), forgetDeviceImages(), forgetDeviceWorkspace()]).finally(() => {
           window.location.replace(new URL(SIGN_IN_PATH, window.location.origin).href);
         });
         return;
@@ -95,11 +99,27 @@ function CloudApp() {
 }
 
 function HostedWorkspace({ session }: { session: Session }) {
-  const [queryClient] = useState(createStudioQueryClient);
-  const [runtime, setRuntime] = useState<{ features: WorkspaceFeature[]; views: string[]; marketplace_forms: string[]; action_marketplaces: string[] } | null>(null);
+  const [queryClient] = useState(() => {
+    const client = createStudioQueryClient();
+    keepReadsForDevice(client);
+    return client;
+  });
+  const [persistOptions] = useState(() => ({
+    persister: devicePersister(session.user.id),
+    maxAge: DEVICE_MAX_AGE_MS,
+    buster: DEVICE_BUSTER,
+    dehydrateOptions: { shouldDehydrateQuery: keepsOnDevice },
+  }));
+  const [runtime, setRuntime] = useState<HostedRuntime | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
+    let fresh = false;
+    let shown = false;
+    // Open on the workspace saved from the last visit while the server confirms it.
+    void savedRuntime<HostedRuntime>(session.user.id).then(saved => {
+      if (active && saved && !fresh) { shown = true; setRuntime(saved); }
+    });
     const remove = installHostedApiSession({
       origin: window.location.origin,
       seller: session.user.id,
@@ -113,8 +133,11 @@ function HostedWorkspace({ session }: { session: Session }) {
     void studioFetch("/api/runtime").then(async response => {
       if (!response.ok) throw new Error("Could not open your workspace. Reload to try again.");
       const value = await response.json();
+      fresh = true;
       if (active) setRuntime(value);
-    }).catch(error => { if (active) setError(error.message); });
+      void saveRuntime(session.user.id, value);
+    // Once the saved workspace is open, each screen reports its own failed refresh.
+    }).catch(error => { if (active && !shown) setError(error.message); });
     return () => { active = false; remove(); queryClient.clear(); };
   }, [session.user.id, session.user.email, queryClient]);
   // Changes from the seller's other devices arrive live; polling covers any gap.
@@ -126,9 +149,9 @@ function HostedWorkspace({ session }: { session: Session }) {
   const controls = <div className="cloud-account"><AccountMenu account={{ id: session.user.id, email: session.user.email || "" }} chrome={!isMacApp()} canDelete={!!runtime?.features.includes("account_deletion")} onSignOut={() => void supabase.auth.signOut({ scope: "local" }).then(({ error }) => { if (error) setError("Could not sign out. Please try again."); })}/></div>;
   if (!runtime) return <StartupScreen error={error}/>;
   return <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(runtime.features), views: new Set(runtime.views), marketplaceForms: new Set(runtime.marketplace_forms), actionMarketplaces: new Set(runtime.action_marketplaces), accountControls: controls }}>
-    <QueryClientProvider client={queryClient}><ToastProvider><AnchoredToastProvider>
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}><ToastProvider><AnchoredToastProvider>
       {error && <div role="alert">{error}</div>}<App/>
-    </AnchoredToastProvider></ToastProvider></QueryClientProvider>
+    </AnchoredToastProvider></ToastProvider></PersistQueryClientProvider>
   </WorkspaceRuntimeProvider>;
 }
 

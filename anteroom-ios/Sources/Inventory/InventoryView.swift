@@ -9,18 +9,18 @@ struct InventoryView: View {
     @Environment(LiveChanges.self) private var live: LiveChanges?
     @State private var model: InventoryModel
     @State private var search = ""
-    @State private var path: [ListingSummary] = []
+    @State private var path: [ConversationSummary] = []
     /// The listing in the editor beside the list, in the side-by-side layout.
-    @State private var open: ListingSummary?
+    @State private var open: ConversationSummary?
     @State private var creatingListing = false
     @State private var bulkListing = false
-    @State private var renaming: ListingSummary?
+    @State private var renaming: ConversationSummary?
     @State private var newTitle = ""
-    @State private var deleting: ListingSummary?
+    @State private var deleting: ConversationSummary?
     @State private var selecting = false
     @State private var selected: Set<String> = []
     @State private var bulk: BulkAction?
-    @State private var templating: ListingSummary?
+    @State private var templating: ConversationSummary?
 
     init(api: AnteroomAPI) {
         _model = State(initialValue: InventoryModel(api: api))
@@ -47,7 +47,7 @@ struct InventoryView: View {
                 }
             } else {
                 NavigationStack(path: $path) {
-                    inventory.navigationDestination(for: ListingSummary.self) { editor($0) }
+                    inventory.navigationDestination(for: ConversationSummary.self) { editor($0) }
                 }
             }
         }
@@ -64,12 +64,12 @@ struct InventoryView: View {
         }
     }
 
-    private func editor(_ listing: ListingSummary) -> some View {
+    private func editor(_ listing: ConversationSummary) -> some View {
         ListingEditorView(api: model.api, listing: listing) { Task { await model.reload() } }
     }
 
     /// Opens the listing beside the list, or pushes it on iPhone.
-    private func show(_ listing: ListingSummary) {
+    private func show(_ listing: ConversationSummary) {
         if sideBySide {
             open = listing
         } else {
@@ -79,7 +79,7 @@ struct InventoryView: View {
 
     /// The web's phone row (sidebar/ListingRow.tsx): no disclosure chevron, and
     /// the row's actions behind one full-size "…" button.
-    private func link(_ listing: ListingSummary, hint: String?) -> some View {
+    private func link(_ listing: ConversationSummary, hint: String?) -> some View {
         let row = ListingRow(api: model.api, listing: listing, hint: hint, selling: model.preferredMarketplaces)
         return HStack(spacing: 0) {
             if sideBySide {
@@ -107,7 +107,7 @@ struct InventoryView: View {
     }
 
     @ViewBuilder
-    private func actions(_ listing: ListingSummary) -> some View {
+    private func actions(_ listing: ConversationSummary) -> some View {
         Button("Rename", systemImage: "pencil") {
             newTitle = listing.title ?? ""
             renaming = listing
@@ -123,7 +123,9 @@ struct InventoryView: View {
         let rows = model.rows(search: search)
         let hints = Suggestion.hints(model.suggestions)
         let stale = model.staleListingIDs
-        return List(selection: $selected) {
+        return VStack(spacing: 0) {
+            StatusTabs(tabs: model.tabs(counts: counts), counts: counts, selection: $model.filters.status)
+            List(selection: $selected) {
             // Suggestions show on each listing's own row; only the batch markdown needs a place of its own.
             if !selecting && !stale.isEmpty {
                 Button(stale.count == 1 ? "Mark down 1 stale listing" : "Mark down \(stale.count) stale listings",
@@ -151,9 +153,6 @@ struct InventoryView: View {
         }
         .listStyle(.plain)
         .environment(\.editMode, .constant(selecting ? .active : .inactive))
-        .safeAreaInset(edge: .top, spacing: 0) {
-            StatusTabs(tabs: model.tabs(counts: counts), counts: counts, selection: $model.filters.status)
-        }
         .overlay { emptyState(rows: rows) }
         .navigationTitle("Inventory")
         .navigationBarTitleDisplayMode(.inline)
@@ -163,6 +162,9 @@ struct InventoryView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .searchable(text: $search, prompt: "Search title or SKU")
         .refreshable { await model.reload() }
+        }
+        // The status pills sit above the list, so the whole column needs the sidebar color, not only the list.
+        .background(WorkspaceStyle.sidebar)
         .task { if !model.hasLoaded { await model.reload() } }
         .reloadingOnReturn(when: !model.hasLoaded && model.error != nil) { await model.reload() }
         // Listings change on other devices; catch up when the app comes back
@@ -282,7 +284,7 @@ struct InventoryView: View {
     }
 
     @ViewBuilder
-    private func emptyState(rows: [ListingSummary]) -> some View {
+    private func emptyState(rows: [ConversationSummary]) -> some View {
         if rows.isEmpty && model.hasLoaded {
             if model.listings.isEmpty {
                 ContentUnavailableView {
@@ -342,7 +344,7 @@ struct InventoryView: View {
     }
 
     /// The selection in the order the list shows it.
-    private func ordered(_ rows: [ListingSummary]) -> [String] {
+    private func ordered(_ rows: [ConversationSummary]) -> [String] {
         rows.map(\.id).filter(selected.contains)
     }
 
@@ -417,9 +419,22 @@ private struct StatusTabs: View {
     @Binding var selection: StatusTab
 
     var body: some View {
-        // The web's status tabs (ListingFilters.tsx): one bordered track
-        // with the selected tab raised inside it.
-        HStack(spacing: 2) {
+        ScrollView(.horizontal) {
+            if #available(iOS 26, *) {
+                GlassEffectContainer(spacing: 8) {
+                    pills
+                }
+            } else {
+                pills
+            }
+        }
+        .scrollIndicators(.hidden)
+        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .padding(.vertical, 6)
+    }
+
+    private var pills: some View {
+        HStack(spacing: 8) {
             ForEach(tabs) { tab in
                 let count = counts[tab] ?? 0
                 let isSelected = selection == tab
@@ -428,34 +443,46 @@ private struct StatusTabs: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(tab.label).lineLimit(1)
-                        Text(InventoryQuery.compactCount(count)).foregroundStyle(WorkspaceStyle.mutedText).monospacedDigit()
+                        Text(InventoryQuery.compactCount(count)).opacity(0.7).monospacedDigit()
                     }
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(isSelected ? Color.primary : WorkspaceStyle.mutedText)
-                    // The highlight fills the tab, 2 points in from the track on every side, as on the web.
-                    // With the track's padding the tab bar stays 44 points tall.
-                    .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(isSelected ? WorkspaceStyle.selected : .clear,
-                                in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius - 2, style: .continuous))
-                    .contentShape(Rectangle())
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 32)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
-                .buttonStyle(.plain)
+                .modifier(StatusPillStyle(selected: isSelected))
+                .controlSize(.small)
+                .frame(minHeight: 44)
                 .accessibilityLabel("\(tab.label), \(count) listings")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
-        .padding(2)
-        .background(WorkspaceStyle.groupedBackground, in: RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.controlRadius, style: .continuous).stroke(WorkspaceStyle.border, lineWidth: 1))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .background(WorkspaceStyle.sidebar)
+    }
+}
+
+private struct StatusPillStyle: ViewModifier {
+    let selected: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            if selected {
+                content.buttonStyle(.glassProminent).buttonBorderShape(.capsule)
+            } else {
+                content.buttonStyle(.glass).buttonBorderShape(.capsule)
+            }
+        } else {
+            content
+                .buttonStyle(.plain)
+                .foregroundStyle(selected ? Color.primary : Color.secondary)
+                .background(selected ? WorkspaceStyle.selected : WorkspaceStyle.surface, in: Capsule())
+        }
     }
 }
 
 struct ListingRow: View {
     let api: AnteroomAPI
-    let listing: ListingSummary
+    let listing: ConversationSummary
     var hint: String?
     var selling: [String] = []
     @Environment(AppearanceModel.self) private var appearance
@@ -477,14 +504,14 @@ struct ListingRow: View {
 /// The web's listing row (sidebar/ListingRow.tsx): cover, one-line name, the
 /// lifecycle dot and word, then a logo for each marketplace it is listed on.
 struct ListingRowContent<Thumbnail: View>: View {
-    let listing: ListingSummary
+    let listing: ConversationSummary
     var bySKU = false
     var hint: String?
     /// The marketplaces the seller sells on; the logos show only these.
     var selling: [String] = []
     let thumbnail: Thumbnail
 
-    init(listing: ListingSummary, bySKU: Bool = false, hint: String? = nil, selling: [String] = [],
+    init(listing: ConversationSummary, bySKU: Bool = false, hint: String? = nil, selling: [String] = [],
          @ViewBuilder thumbnail: () -> Thumbnail) {
         self.listing = listing
         self.bySKU = bySKU
@@ -516,14 +543,14 @@ struct ListingRowContent<Thumbnail: View>: View {
                         Text(listing.statusLabel)
                             .foregroundStyle(listing.inventoryStatus == "failed" ? WorkspaceStyle.destructive : WorkspaceStyle.mutedText)
                     }
-                    if listing.status == "sold", let missing = listing.missingSaleData, !missing.isEmpty {
+                    if listing.status == "sold", !listing.missingSaleData.isEmpty {
                         Text("Missing sale data")
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(WorkspaceStyle.warning)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(WorkspaceStyle.warning.opacity(0.14), in: Capsule())
-                            .accessibilityLabel("Missing sale data: \(missing.joined(separator: ", "))")
+                            .accessibilityLabel("Missing sale data: \(listing.missingSaleData.joined(separator: ", "))")
                     }
                     if let hint {
                         Text("· \(hint)").foregroundStyle(WorkspaceStyle.mutedText).lineLimit(1)

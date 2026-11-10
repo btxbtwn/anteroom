@@ -125,7 +125,7 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None, leases: JobLe
 
             promotions_interrupted(db, job.id)
         failed.append(job.id)
-        log.warning("Failed %s job %s at %s after %ds", reason, job.id, step, int(quiet.total_seconds()))
+        log.error("Failed %s job %s at %s after %ds", reason, job.id, step, int(quiet.total_seconds()))
     return failed
 
 

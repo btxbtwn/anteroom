@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import time
 import urllib.error
 import uuid
 
 import jwt
+from jwt.exceptions import PyJWKClientConnectionError
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from fastapi.testclient import TestClient
@@ -181,11 +183,15 @@ def test_unknown_key_rejected(client, signing_keys):
     assert get_account(client, token).status_code == 401
 
 
-def test_outage_fails_closed_without_exposing_diagnostics(client, signing_keys, jwks):
+def test_outage_fails_closed_without_exposing_diagnostics(client, signing_keys, jwks, caplog):
     jwks["unavailable"] = True
     token = session_token(signing_keys)
-    response = get_account(client, token)
+    with caplog.at_level(logging.ERROR, logger="vendoo_studio.http"):
+        response = get_account(client, token)
     assert response.status_code == 503
+    # The operator's report names the key fetch that failed; the seller's answer does not.
+    [record] = [r for r in caplog.records if r.name == "vendoo_studio.http"]
+    assert record.exc_info and record.exc_info[0] is PyJWKClientConnectionError
     assert response.headers["retry-after"] == "5"
     assert "Private diagnostic" not in response.text
     assert token not in response.text
@@ -229,3 +235,38 @@ def test_large_json_is_compressed_for_phones(client, signing_keys):
     assert response.status_code == 200, response.text
     assert response.headers["content-encoding"] == "gzip"
     assert int(response.headers["content-length"]) < len(response.content) / 2
+
+
+def test_web_page_carries_security_headers(jwks, tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "cloud.html").write_text("<!doctype html><title>Anteroom</title>")
+    with TestClient(create_app(PROJECT_URL, web_dir=tmp_path)) as client:
+        response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+
+
+def test_browser_leaving_before_the_page_loads_is_not_a_server_error(jwks, tmp_path, caplog):
+    """A visitor who closes the tab mid-load gets nothing sent and no error alert."""
+    import anyio
+
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "cloud.html").write_text("<!doctype html><title>Anteroom</title>")
+    app = create_app(PROJECT_URL, web_dir=tmp_path)
+    sent = []
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"}, "http_version": "1.1",
+             "method": "GET", "scheme": "https", "path": "/", "raw_path": b"/", "root_path": "",
+             "query_string": b"", "headers": [(b"host", b"myanteroom.com")], "app": app,
+             "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 443)}
+    anyio.run(app, scope, receive, send)
+    assert not [r for r in caplog.records if r.name == "vendoo_studio.http" and r.levelname == "ERROR"]

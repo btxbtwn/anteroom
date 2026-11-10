@@ -177,6 +177,40 @@ request body use `hosted_database.in_seller_session`, which keeps
 `get_seller_db`'s checks on a worker-thread session. A test holds eight concurrent slow external waits on a
 one-connection pool without a timeout. Not yet measured after deploy.
 
+Production 0.1.848 exhausted the pool again on 2026-11-09 at 02:24 UTC
+(`GET /api/sourcing`, then most page reads at 3–20 s). Sampling
+`pg_stat_activity` showed no long holder: Postgres sessions were idle or
+`idle in transaction` on `ClientRead` for about 0.1 s, so connections were
+spent on round trips, not on queries. Four `py-spy dump`s of the process showed
+2–3 connections in every sample writing draft progress
+(`background_tasks.append_events`), beside 5–7 page requests and the
+schedulers, on one vCPU at load 1.1–1.5. Each running draft or assistant answer
+wrote its progress every 0.25 s in a transaction of about seven round trips
+(begin, seller `set_config`, lease check, sequence read, the same lease check
+again in `before_flush`, insert, commit), while open streams read it only
+every 0.5 s. Writers and readers now share `background_tasks.EVENT_INTERVAL`
+(0.5 s) and a leased worker session checks its lease once per write: about
+12 round trips a second per running draft instead of 28. Not yet measured
+after deploy: whether page reads stay under the pool timeout with two sellers
+generating. The stream reader's own poll (about five round trips every 0.5 s
+per open stream) is the next cost of the same kind.
+
+The same incident had a CPU cost as well. Samples a few minutes after the
+error found all 12 connections `idle in transaction` for 1 to 7 s between
+ordinary reads while the process waited for the CPU, and a 30-second py-spy
+sample put about 88% of the one vCPU in the API process and 9% in the catalog index worker,
+with 33% in the inventory and Suggestions snapshot rebuilds, about 19% in
+generation's form preparation and 8% in the catalog index rebuild. Some
+listings stored up to 3 MB of `_native_forms` (saved marketplace form
+definitions with every option), and each form build and preflight deep-copied
+the whole listing, forms included, inside its transaction: once per form,
+then once more per marketplace in preflight. A 2 MB form takes about 0.6 s to
+copy. Snapshots now share the saved forms read-only
+(`native_contract.copy_listing`), and a test fails if form preparation or
+preflight copies them or changes them. Remaining: each read still decodes the
+full revision JSON, the snapshot rebuilds and catalog index still compete for
+the same CPU, and the pool has not been re-measured after deploy.
+
 Machines reach each other's `/internal/` routes at
 `http://[FLY_PRIVATE_IP]:8080` on the private network
 (`device_routes.local_base_url`), which does not pass through Fly's proxy. The
@@ -352,3 +386,38 @@ current Bridge refuses.
 | 3: Tune database access | Hosted pool is 8 plus 4 overflow, 3 s wait. SSE and inventory list release before long waits/bodies. On 0.1.708: inventory list ~2.1 s; idle draft GET p50/p95 571/698 ms; under two generates, overlapping draft GET p50/p95 1.8/5.8 s; QueuePool still timed out once—stack was suggestions nested settings while native form refreshes held checkouts across eBay/Chrome waits. Native `editor_form` now rollbacks before those waits. | Re-measure two concurrent generates after deploy; expect no QueuePool errors. Do not raise the pool further. |
 | 4: Operational readiness | Request concurrency is explicit. Readiness exists and is not the only Machine's routing check. Seller asked to keep the existing database password (no rotation). | Dashboard review of plan, backups, Auth delivery, and storage egress. |
 | 5: Release load | Partial on 0.1.702. Seller A Mac ChatGPT connected (`gpt-6.1-sol`). Two generate streams returned keepalives while draft reads continued. QueuePool still timed out under that overlap. One Mac worker still serves one hosted account. | Second seller ChatGPT on another Mac. Sustained session with zero QueuePool errors. Only then add a Machine (token + migration first). |
+
+## Operator error emails
+
+Every distinct error in the hosted app is emailed to `ccanizares@myanteroom.com`
+by `vendoo-studio/server/vendoo_studio/services/error_alerts.py`, switched on by
+`ANTEROOM_ERROR_EMAIL = '1'` in `deploy/fly/fly.toml`. Sandboxes and the Mac app
+never send.
+
+**What is reported:** every ERROR log from Anteroom, uvicorn and asyncio; a
+route's unhandled exception and any 5xx response (with method, route template,
+Fly request id and seller id); uncaught thread and process exceptions; failed
+draft tasks and generations; and browser crashes, unhandled promise rejections
+and render failures from the web app (`POST /api/error-reports`, signed-in only).
+
+**Each email:** a subject with environment, severity, exception type and
+message; then severity, time, fingerprint, occurrence count, code location,
+logger, request, browser, release, Machine/region/process, the message, the
+exception, the stack trace, and the same report as JSON. Credentials are masked
+by `services/redaction.py` and SQL parameter values are removed.
+
+**Noise control:** reports group by fingerprint (exception type plus code path,
+or call site). The first is sent immediately; repeats in the next 15 minutes are
+counted and reported with the next email for that group, or at shutdown. At most
+60 emails per hour per process; anything over is counted in the next email and
+remains in `fly logs`. Failed sends retry after 5 s, 30 s and 2 min.
+
+**Delivery:** Google Workspace SMTP relay (`smtp-relay.gmail.com:587`, TLS
+required), which accepts mail only from the app's static egress addresses
+`209.71.113.242` and `2a09:8280:e633:1:0:1d6:a261:0` (`fly ips list`, region
+`sjc`). These are app-scoped, so they survive deploys. A new region needs its
+own egress address added to the relay rule.
+
+**Not covered:** the Mac app (its errors stay in Settings → Logs), the iPhone
+app, the Chrome extension, the webhook relay, and errors that code catches
+without logging. Warnings are not emailed.

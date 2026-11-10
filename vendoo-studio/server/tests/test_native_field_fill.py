@@ -215,8 +215,47 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields":{}}')) as ask:
             saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="No style evidence")
-        self.assertEqual(ask.await_count, 3)
+        # One full pass and one focused repair. A second repair would resend the
+        # same fields, evidence and choices, so it only adds wait time.
+        self.assertEqual(ask.await_count, 2)
         self.assertTrue(any(gap["field"] == "ebay_specifics.Style" for gap in native_contract.gaps(saved, "ebay")))
+
+    async def test_partial_repair_does_not_ask_again_for_the_rest(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "11483", "fields": [
+            row("ebay_specifics.Style", "Style", ["Casual"], required=True, selection_only=False),
+            row("ebay_specifics.Rise", "Rise", ["High"], required=True)]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "11483"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
+        evidence = "Tag: Sawyer relaxed straight"
+        replies = ['{"fields":{}}', json.dumps({"fields": {"ebay_specifics.Style": {
+            "value": "Relaxed straight", "evidence": "Sawyer relaxed straight"}}}), '{"fields":{}}']
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)) as ask:
+            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence=evidence)
+        self.assertEqual(ask.await_count, 2)
+        self.assertEqual(saved["ebay_specifics"]["Style"], "Relaxed straight")
+        self.assertTrue(any(gap["field"] == "ebay_specifics.Rise" for gap in native_contract.gaps(saved, "ebay")))
+
+    async def test_unproven_ebay_size_rows_still_follow_general_size(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "15724", "fields": [
+            row("ebay_specifics.Size Type", "Size Type", ["Regular", "Petites"], required=True, category_specific=True),
+            row("ebay_specifics.Size", "Size", ["S", "M", "L"], required=True, category_specific=True)]}
+        listing = {"title": "Tee", "size": "M", "sizeType": "Regular", "direct_category_ids": {"ebay": "15724"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields":{}}')):
+            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="Raglan tee", markets={"ebay"})
+        # A guess the photos cannot prove is dropped, not stored as a blank
+        # that would read as the seller clearing the row.
+        self.assertNotIn("Size", saved.get("ebay_specifics") or {})
+        self.assertNotIn("Size Type", saved.get("ebay_specifics") or {})
+        self.assertEqual(native_contract.gaps(saved, "ebay"), [])
 
     async def test_large_dropdown_lookup_saves_native_id_and_evidence_end_to_end(self):
         from test_option_lookup import Provider
@@ -286,7 +325,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"mercari": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
             updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Tag reads 100% cotton.")
-        self.assertEqual(updated["mercari_specifics"]["material"], "")
+        self.assertNotIn("material", updated["mercari_specifics"])
         self.assertTrue(any(item["field"] == "mercari_specifics.material" for item in native_contract.gaps(updated, "mercari")))
 
     async def test_depop_age_keeps_its_modern_default_when_no_decade_is_shown(self):

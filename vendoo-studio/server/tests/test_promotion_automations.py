@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text, update
+from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy.sql.dml import Update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -586,6 +587,37 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(activity["runs"][0]["skipped"], 1)
         self.assertFalse(self.db.get(PromotionAutomation, saved["id"]).enabled)
         self.assertEqual(self.promoted(), [])
+
+    def test_failed_commit_during_round_still_closes_the_round_without_pending_rollback(self):
+        # Production 4605eb294eb3: saving a review skip failed (pool timeout during
+        # flush), then the round's closing commit hit PendingRollbackError.
+        conv, post = self.items[0]
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        engine = self.db.get_bind()
+        failures = []
+
+        def fail_skip_insert(_conn, _cursor, statement, _params, _context, _many):
+            if not failures and statement.lstrip().upper().startswith("INSERT INTO LISTING_PROMOTIONS"):
+                failures.append(statement)
+                raise sqlalchemy_exc.TimeoutError("QueuePool limit of size 8 overflow 4 reached")
+
+        event.listen(engine, "before_cursor_execute", fail_skip_insert)
+        self.addCleanup(event.remove, engine, "before_cursor_execute", fail_skip_insert)
+        with patch.object(listing_promotions, "review", new_callable=AsyncMock) as review:
+            review.side_effect = listing_promotions.PromotionError(409, "Nobody has liked this listing yet.")
+            with self.assertRaises(sqlalchemy_exc.TimeoutError):
+                self.tick()
+        self.assertEqual(len(failures), 1)
+        self.db.expire_all()
+        run = self.db.query(PromotionRun).one()
+        self.assertIsNotNone(run.finished_at)
+        self.assertEqual(run.skipped, 1)
+        self.assertEqual(self.db.query(ListingPromotion).count(), 0)
+        self.assertEqual(self.promoted(), [])
+        self.assertIsNone(listing_promotions.blocking(self.db, "poshmark", post, "offer"))
+        self.assertTrue(self.db.get(PromotionAutomation, saved["id"]).enabled)
 
     def test_deleted_draft_during_review_keeps_skip_without_a_dangling_reference(self):
         conv, post = self.items[0]

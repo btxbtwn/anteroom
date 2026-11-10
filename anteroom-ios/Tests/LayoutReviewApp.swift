@@ -30,7 +30,7 @@ struct LayoutReviewApp: App {
 
     private func sample(_ title: String, status: String, price: Double? = nil, live: [String] = [],
                         icon: String, color: Color) -> some View {
-        let listing = ListingSummary(id: title, title: title, status: status, price: price, directMarketplaces: live)
+        let listing = ConversationSummary(id: title, title: title, status: status, price: price, directMarketplaces: live)
         return NavigationLink {
             EditorLayoutReview(title: title)
         } label: {

@@ -35,7 +35,7 @@ def photo_analysis_failure(reason: object) -> PhotoAnalysisError:
     detail = " ".join(str(reason or "").split())[:240].strip()
     if not detail:
         return PhotoAnalysisError(PHOTO_ANALYSIS_RETRY_MESSAGE)
-    log.warning("photo analysis failed: %s", detail)
+    log.error("photo analysis failed: %s", detail)
     stop = "" if detail.endswith((".", "!", "?", '"')) else "."
     return PhotoAnalysisError(f"Photo analysis failed: {detail}{stop} Retry to analyze the photos again.")
 
@@ -988,6 +988,10 @@ def apply_send_readiness_fixes(listing: dict) -> bool:
         if location:
             listing["zipCode"] = location
             changed = True
+    from vendoo_studio.services.user_settings import apply_listing_field_defaults
+
+    if apply_listing_field_defaults(listing):
+        changed = True
     return changed
 
 
@@ -1306,23 +1310,10 @@ def _ready_note(*, repaired: bool, finalized: bool, blockers: list) -> str:
     return "Listing extracted and ready for review."
 
 
-# Mercari caps the description at 1,000. Poshmark caps it at 1,500. Depop caps
-# the title, a blank line, and the description together at 1,000, and a title
-# is at most 80 characters. 918 is the longest description that still fits.
-MERCARI_DESCRIPTION_MAX = 1000
-POSHMARK_DESCRIPTION_MAX = 1500
-DEPOP_POST_MAX = 1000
-TITLE_MAX_FOR_DESCRIPTION = 80
-_DEPOP_TITLE_GAP = 2
+# Mercari and Depop cap the description at 1,000 and Poshmark at 1,500. Depop
+# has no title, so the whole 1,000 is the description.
+DESCRIPTION_MAX = 1000
 _MEASUREMENTS_HEAD = re.compile(r"(?is)^measurements\s*:")
-
-
-def description_character_limit(title: str) -> int:
-    """How long this description can be and still list on every marketplace."""
-    title_len = len(str(title or "").strip())
-    gap = _DEPOP_TITLE_GAP if title_len else 0
-    depop_room = DEPOP_POST_MAX - title_len - gap
-    return max(0, min(MERCARI_DESCRIPTION_MAX, POSHMARK_DESCRIPTION_MAX, depop_room))
 
 
 def _cut_at_word(text: str, limit: int) -> str:
@@ -1373,10 +1364,9 @@ def cap_listing_description(listing: dict) -> bool:
     if not isinstance(listing, dict):
         return False
     description = str(listing.get("description") or "")
-    limit = description_character_limit(str(listing.get("title") or ""))
-    if len(description.strip()) <= limit:
+    if len(description.strip()) <= DESCRIPTION_MAX:
         return False
-    listing["description"] = fit_description(description, limit)
+    listing["description"] = fit_description(description, DESCRIPTION_MAX)
     return listing["description"] != description
 
 
@@ -1505,6 +1495,8 @@ async def persist_generated_listing_with_repair(
     parsed = extract_listing_json(full_text)
     repaired = False
     if not parsed:
+        # Release the pooled connection while a model repairs the JSON.
+        db.rollback()
         repaired_json = await repair_listing_json(provider, full_text)
         if repaired_json:
             log.info("repaired malformed listing JSON for %s", conv_id)
@@ -1539,6 +1531,8 @@ async def persist_generated_listing_with_repair(
     notes = str(getattr(conv, "notes", "") or "")
     finalized = False
     if _validation_blockers(listing):
+        # The listing is saved; release the connection while a model fills the gaps.
+        db.rollback()
         updated = await fill_validation_gaps(provider, listing, analysis=analysis, notes=notes)
         if isinstance(updated, dict) and updated:
             check_photos()

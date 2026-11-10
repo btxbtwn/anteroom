@@ -26,6 +26,10 @@ vendoo-studio/server/*
 !vendoo-studio/public/
 vendoo-studio/public/*
 !vendoo-studio/public/favicon.png
+# The startup screen shows the app icon.
+!vendoo-studio/desktop/
+vendoo-studio/desktop/*
+!vendoo-studio/desktop/AppIcon.png
 # Hosted generation and native forms use the same canonical public rules.
 !skills/
 skills/*

@@ -474,7 +474,7 @@ async def run_automation() -> None:
         _checks[_seller()] = (checked, str(exc))
     except Exception:
         _checks[_seller()] = (checked, "Could not complete the eBay offer check. Check your connection and try a preview.")
-        log.warning("eBay offer check failed; no unconfirmed sends will be retried")
+        log.error("eBay offer check failed; no unconfirmed sends will be retried")
 
 
 async def _timer() -> None:

@@ -162,7 +162,7 @@ describe("marketplace form fields", () => {
   });
 
   it("never substitutes a Vendoo or reference form for a direct marketplace", () => {
-    for (const tab of ["ebay", "poshmark", "mercari", "depop"]) {
+    for (const tab of ["ebay", "poshmark", "mercari", "depop", "etsy"]) {
       expect(fieldsForMarketplaceForm(listing, tab, undefined)).toEqual([]);
       expect(fieldsForMarketplaceForm(listing, tab, [{ marketplace: tab, known: true, category_id: "1", fields: [] }])).toEqual([]);
     }
@@ -201,14 +201,6 @@ describe("marketplace form fields", () => {
     const general = fieldsForMarketplaceForm(listing, "general", undefined);
     expect(general.filter((field) => field.key === "title")).toHaveLength(1);
     expect(general.some((field) => field.key === "category_path")).toBe(true);
-    const etsy = fieldsForMarketplaceForm({ ...listing, etsy_specifics: { whoMade: "Another company or person" } }, "etsy", undefined);
-    expect(etsy.find((field) => field.key === "etsy_specifics.whoMade")?.label).toBe("Who Made It?");
-    expect(etsy.filter((field) => field.key === "etsy_specifics.title")).toHaveLength(1);
-    expect(etsy.find((field) => field.key === "etsy_specifics.description")).toBeTruthy();
-    expect(etsy.find((field) => field.key === "etsy_specifics.brand")?.label.replace(/\s*\*$/, "")).toBe("Brand");
-    expect(etsy.find((field) => field.key === "title")).toBeUndefined();
-    expect(etsy.find((field) => field.key === "brand")).toBeUndefined();
-    expect(etsy.find((field) => field.key === "condition")?.key).toBe("condition");
   });
 
   it("adds no measurement rows to Depop, whose sell page has none", () => {
@@ -233,22 +225,39 @@ describe("marketplace form fields", () => {
     expect(fieldsForMarketplaceForm(pants, "etsy", [formFor("etsy", [["size", "Size"]])])
       .find((field) => field.key === "etsy_specifics.size")?.options).toEqual(expect.arrayContaining(["0", "8", "24"]));
     // A direct marketplace's own form is shown as it came: no reference choices, no extra rows.
-    for (const tab of ["ebay", "poshmark", "mercari", "depop"]) {
+    for (const tab of ["ebay", "poshmark", "mercari", "depop", "etsy"]) {
       const fields = fieldsForMarketplaceForm(pants, tab, [formFor(tab, [["size", "Size"]], true)]);
       expect(fields.map((field) => [field.key, field.options])).toEqual([[`${tab}_specifics.size`, []]]);
     }
   });
 
 
-  it("shows a marketplace's own controls until its category schema arrives", () => {
-    const etsy = fieldsForMarketplaceForm({
-      ...listing,
-      etsy_specifics: { whoMade: "I did", clothingStyle: "Casual", sleeveLength: "Short" },
-    }, "etsy", undefined);
-    const labels = etsy.map((field) => field.label);
-    expect(labels).toContain("Who Made It?");
-    expect(labels).not.toContain("Clothing style");
-    expect(labels).not.toContain("Sleeve length");
+  it("shows Etsy's own form row for row, under its sections, with Price as Etsy's own price", () => {
+    const row = (path: string, label: string, section: string, extra: Partial<MarketplaceForm["fields"][number]> = {}) => ({
+      key: path, path, label, value: "", required: false, multi: false, selection_only: false, options: [], section, ...extra,
+    });
+    const form: MarketplaceForm = { marketplace: "etsy", native: true, known: true, page_labels: true, category_id: "449", fields: [
+      row("marketplace_photos.etsy", "", "Photo & video", { input_type: "photos" }),
+      row("direct_category_ids.etsy", "Category", "Category", { required: true, selection_only: true,
+        options: ["Clothing > Men's Clothing > Shirts & Tees > T-shirts"],
+        option_values: { "Clothing > Men's Clothing > Shirts & Tees > T-shirts": "449" } }),
+      row("etsy_specifics.title", "Title", "Item details", { required: true, max_length: 140 }),
+      row("etsy_specifics.category_specifics.Primary color", "Primary color", "Item options",
+        { group: "Attributes", category_specific: true, options: ["Blue"], options_source: "marketplace" }),
+      row("price", "Price", "Pricing & shipping", { group: "Price and inventory", required: true, input_type: "number" }),
+      row("etsy_specifics.whoMade", "Who made it?", "How it's made", { required: true }),
+    ] };
+    const fields = fieldsForMarketplaceForm({ ...listing, etsy_specifics: { whoMade: "I did", clothingStyle: "Casual" } }, "etsy", [form]);
+    expect(fields.map((field) => [field.key, field.label])).toEqual([
+      ["marketplace_photos.etsy", ""], ["direct_category_ids.etsy", "Category"], ["etsy_specifics.title", "Title"],
+      ["etsy_specifics.category_specifics.Primary color", "Primary color"], ["etsy_specifics.price", "Price"],
+      ["etsy_specifics.whoMade", "Who made it?"],
+    ]);
+    expect(fields.find((field) => field.key === "etsy_specifics.category_specifics.Primary color")).toMatchObject({
+      categorySpecific: true, group: "Attributes" });
+    expect(nativeFormSections(fields).map((section) => section.title)).toEqual([
+      "Photo & video", "Category", "Item details", "Item options", "Pricing & shipping", "How it's made",
+    ]);
   });
 
   it("shows each marketplace's category fields and that marketplace's choices", () => {

@@ -5,7 +5,7 @@ import Observation
 @Observable
 final class InventoryModel {
     let api: AnteroomAPI
-    private(set) var listings: [ListingSummary] = []
+    private(set) var listings: [ConversationSummary] = []
     private(set) var preferredMarketplaces: [String] = []
     private(set) var suggestions: [Suggestion] = []
     private(set) var isLoading = false
@@ -18,7 +18,7 @@ final class InventoryModel {
     @ObservationIgnored private var markdownPreview: MarkdownPreview?
     /// Counts changes to `listings`; the cached queries recompute when it moves.
     private var revision = 0
-    @ObservationIgnored private var rowsMemo = QueryMemo<RowsKey, [ListingSummary]>()
+    @ObservationIgnored private var rowsMemo = QueryMemo<RowsKey, [ConversationSummary]>()
     @ObservationIgnored private var countsMemo = QueryMemo<CountsKey, [StatusTab: Int]>()
 
     private struct RowsKey: Equatable {
@@ -119,13 +119,13 @@ final class InventoryModel {
     var hasWorkInProgress: Bool { InventoryQuery.hasWorkInProgress(listings) }
 
     /// Every change to the rows goes through here, so the cached queries recompute.
-    private func changeListings(_ change: (inout [ListingSummary]) -> Void) {
+    private func changeListings(_ change: (inout [ConversationSummary]) -> Void) {
         change(&listings)
         revision += 1
     }
 
     /// Cached: the screen redraws on every selection tap.
-    func rows(search: String) -> [ListingSummary] {
+    func rows(search: String) -> [ConversationSummary] {
         rowsMemo.value(for: RowsKey(revision: revision, search: search, filters: filters)) {
             InventoryQuery.rows(listings, search: search, filters: filters)
         }
@@ -143,7 +143,7 @@ final class InventoryModel {
     }
 
     /// Facet counts are taken over the tab in front of the seller.
-    func facetSource(search: String) -> [ListingSummary] {
+    func facetSource(search: String) -> [ConversationSummary] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return listings.filter { InventoryQuery.matchesSearch($0, needle) && InventoryQuery.inTab($0, filters.status) }
     }
@@ -161,7 +161,7 @@ final class InventoryModel {
     }
 
     /// Creates an untitled draft and returns it for the editor to open.
-    func createListing() async -> ListingSummary? {
+    func createListing() async -> ConversationSummary? {
         do {
             let listing = try await api.createListing()
             changeListings { rows in
@@ -175,7 +175,7 @@ final class InventoryModel {
         }
     }
 
-    func rename(_ listing: ListingSummary, to title: String) async {
+    func rename(_ listing: ConversationSummary, to title: String) async {
         do {
             try await api.rename(listing.id, title: title)
             await reload()
@@ -184,7 +184,7 @@ final class InventoryModel {
         }
     }
 
-    func delete(_ listing: ListingSummary) async {
+    func delete(_ listing: ConversationSummary) async {
         do {
             try await api.deleteListing(listing.id)
             changeListings { rows in rows.removeAll { $0.id == listing.id } }

@@ -116,6 +116,8 @@ Review all photos and extract:
 
 Mark any field as uncertain if unclear.
 
+**Evidence before copy:** A model's confidence is not verification. Support each product claim with visible photo evidence, verbatim label text, seller instructions, or reliable exact-model research. Keep inference distinct from observation. Do not turn a tentative photo analysis into a confirmed fact. Never add an era (such as Y2K), fiber composition, tactile claim (such as soft), fit, or overall condition merely to satisfy a title or description formula. Use only supported descriptors; leave unsupported fields empty and required facts as blockers. Label/detail photos alone cannot establish overall condition, and a clean appearance does not establish new condition. Preserve printed label errors verbatim. A brand tab or product code is not a size tag. Seller-provided measurements and tag sizes must retain their distinct sources.
+
 ### Step 2: Verifier (tag confirmation)
 Find clearest tag/label photo.
 Confirm **brand + size** from visible text only.
@@ -266,13 +268,13 @@ Measurements: {See photos OR specific measurements}
 - Include the Flaws block only when the item has flaws. When there are none, leave the block out entirely — never write "none noted" or any other no-flaws filler.
 - Put each flaw on its own line, starting with "- ". Do not run several flaws together on one line with semicolons or commas.
 - Keep the first line short and keyword-driven (vibe, decade/trend, fit, fabric) — not two separate sentences.
-- Max 918 characters. Mercari allows 1,000, Poshmark allows 1,500, and Depop allows 1,000 for the title, a blank line, and this description together. Titles are at most 80 characters, so 918 is the longest description that still fits all three.
+- Max 1,000 characters. Mercari and Depop allow 1,000 and Poshmark allows 1,500. Depop has no title, so the description gets the full 1,000.
 - Do not add Size, a full condition write-up, shipping speed, or bundle/discount lines — those are covered by marketplace fields and marketplace-level promos already.
 - Do not count lint or wrinkles as flaws or mention them in the description. If those are the only visible issues, leave the Flaws block out. Continue to disclose actual damage such as stains, holes, or tears.
 - NEVER include pricing details in the description: no prices, dollar amounts, comps, sold-listing counts, market or resale value, MSRP, discounts, offers, or notes about pricing confidence. Pricing belongs in the price field only.
 
 ### eBay Jackets and Coats: Required Outer Shell Material
-Fill `ebay_specifics.category_specifics["Outer Shell Material"]` for jackets/coats (use the live schema key if supplied). Prefer readable shell composition or seller notes; otherwise make the best guess from photos, texture, construction, and reliable exact-model research. Choose a supported eBay value; never blank. Estimate the shell, not lining/down fill; never invent percentages or claim leather over faux leather without evidence. Material/fabricType does not replace this field. Flag estimates in the description: "Outer shell estimated as polyester; tag not visible." Preserve description structure; do not copy estimates into Depop's tag-only Material. Never ask the seller.
+Fill `ebay_specifics.category_specifics["Outer Shell Material"]` for jackets/coats (use the live schema key if supplied). Prefer readable shell composition or seller notes; otherwise use reliable exact-model research with a verified match. Choose a supported eBay value only when evidence establishes the shell; leave unsupported required shell material as a blocker. Estimate the shell, not lining/down fill; never invent percentages or claim leather over faux leather without evidence. Material/fabricType does not replace this field. Do not insert a guessed composition or missing-tag commentary into the description. Preserve description structure; do not copy unverified research into Depop's tag-only Material. Never ask the seller.
 
 ### Etsy Digital Download Description Formula
 Use this override only when the Etsy listing is a digital product.

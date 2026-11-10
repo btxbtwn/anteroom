@@ -135,12 +135,16 @@ tabs before a working form exists. Within General preserve this distinction:
 
 1. Photos and seller evidence: Notes & Labels, Pricing & Shipping and
    Measurements (in), including the garment-specific measurements.
-2. Generated General fields: Listing, Pricing, Condition, Item, **Size & fit**,
-   Color & material, Shipping, Inventory & identifiers.
+2. Generated General fields, in the order a seller fills them in by hand
+   (`generalFormSections` in `listingFieldSections.ts`): Item (Category,
+   Title), Condition & details (Condition, Size, Brand), Pricing (Price),
+   Description, Color & department (Primary Color, Secondary Color,
+   Department), Shipping (Package Weight, Package Dimensions, Inventory
+   location), then More details (Cost, SKU, Quantity), folded until the seller
+   opens it. The order of `general` in `listing-editor-fields.json` matches.
 3. Contextual assistant, history and actionable validation/recovery.
 
-Within Shipping, the observed General order is Package Weight, Package
-Dimensions, then Inventory location. A direct marketplace form must instead
+Phones show General in one column, and tab order follows screen order. A direct marketplace form must instead
 follow its native server/extension schema, including sections and half-width
 rows; never apply General grouping rules to a native marketplace form.
 

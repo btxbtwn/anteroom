@@ -284,7 +284,7 @@ struct SavedTemplatesView: View {
     @State private var newName = ""
     @State private var deleting: ListingTemplate?
     @State private var drafting: ListingTemplate?
-    @State private var created: ListingSummary?
+    @State private var created: ConversationSummary?
     @State private var error: String?
 
     var body: some View {
@@ -351,7 +351,7 @@ struct SavedTemplatesView: View {
         .sheet(item: $drafting) { template in
             TemplateDraftSheet(api: api, template: template) { id in
                 drafting = nil
-                created = ListingSummary(id: id, title: nil)
+                created = ConversationSummary(id: id, title: nil)
             }
         }
         .navigationDestination(item: $created) { listing in
