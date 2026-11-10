@@ -50,7 +50,16 @@ def get_queue(db: Session = Depends(get_db)):
     jobs = JobRepo(db).list_all()
     active = JobRepo(db).get_active()
     recent = [j for j in jobs if j.status in {"completed", "failed", "cancelled"}][:30]
-    return {"work": work, "jobs": [_job_response(j) for j in active + recent]}
+    queue_jobs = active + recent
+    titles = dict(db.query(Conversation.id, Conversation.title).filter(
+        Conversation.id.in_({job.conversation_id for job in queue_jobs}),
+    ).all())
+    responses = []
+    for job in queue_jobs:
+        response = _job_response(job)
+        response.listing_title = titles.get(job.conversation_id) or response.listing_title
+        responses.append(response)
+    return {"work": work, "jobs": responses}
 
 
 @router.get("", response_model=list[JobResponse])

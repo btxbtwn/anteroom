@@ -64,6 +64,16 @@ class JobsListConversationTest(unittest.TestCase):
         ids = {job["id"] for job in response.json()}
         self.assertNotIn(self.keep_job.id, ids)
 
+    def test_queue_uses_item_title_when_snapshot_has_no_title(self):
+        self.keep_job.listing_snapshot = {"ebay_specifics": {"title": "Marketplace title"}}
+        self.keep_job.status = "dispatched"
+        self.keep_job.current_step = "native_ebay_list"
+        self.db.commit()
+        response = self.client.get("/api/jobs/queue")
+        self.assertEqual(response.status_code, 200, response.text)
+        job = next(row for row in response.json()["jobs"] if row["id"] == self.keep_job.id)
+        self.assertEqual(job["listing_title"], "Keep")
+
     def test_conversation_filter_returns_bound_draft_job(self):
         response = self.client.get(f"/api/jobs?conversation_id={self.keep.id}")
         self.assertEqual(response.status_code, 200, response.text)
