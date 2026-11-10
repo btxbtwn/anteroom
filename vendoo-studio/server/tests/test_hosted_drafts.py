@@ -76,12 +76,18 @@ def test_public_web_assets_do_not_expose_data_routes(jwks, tmp_path):  # noqa: F
     (tmp_path/'assets'/'cloud.js').write_text('console.log("cloud")')
     (tmp_path/'cloud.html').write_text('<!doctype html><title>Anteroom</title>')
     (tmp_path/'favicon.png').write_bytes(b'\x89PNG')
+    (tmp_path/'privacy.html').write_text('<!doctype html><title>Privacy</title>')
     with TestClient(create_app(PROJECT_URL, web_dir=Path(tmp_path))) as client:
         assert client.get('/').status_code == 200
         # The browser fetches the tab icon without a session.
         icon = client.get('/favicon.png')
         assert icon.status_code == 200
         assert icon.headers['content-type'] == 'image/png'
+        # The Chrome Web Store listing links the privacy policy; reviewers have no session.
+        privacy = client.get('/privacy')
+        assert privacy.status_code == 200
+        assert privacy.headers['content-type'].startswith('text/html')
+        assert client.get('/privacy.html').status_code == 401
         assert client.head('/').status_code == 405  # GET-only index, no SPA fallback.
         assert client.get('/assets/cloud.js').status_code == 200
         for path in ['/api/drafts','/api/account','/api/conversations','/docs','/cloud.html','/api/health/']:

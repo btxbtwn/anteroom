@@ -1,0 +1,1 @@
+- Add a public privacy policy page at myanteroom.com/privacy for the Chrome Web Store listing.
