@@ -48,7 +48,7 @@ struct AutomationsView: View {
     }
 
     private var screen: some View {
-        NavigationStack {
+        Group {
             List {
                 Group {
                     if !approvals.isEmpty {
