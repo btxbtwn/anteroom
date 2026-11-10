@@ -1,0 +1,1 @@
+- Stopping a hosted draft no longer reports rejected cleanup saves as crashes. Workers still cannot save after losing ownership of a draft.
