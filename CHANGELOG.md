@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.874 — 2026-11-10
+
+- Email handled web errors, failed jobs, marketplace offer refusals and warnings, so failures do not disappear from the operator error reports.
+- Report overdue offer checks for sellers seen by the running scheduler, including when their Chrome disconnects.
+- Include errors from all marketplace operations in email reports, including listing, updating, delisting, imports, sales checks and browser reads, even when the error arrives inside a successful web response.
+- Include marketplace form-field failures even when the rest of the job succeeds, without emailing entered field values.
+
 ## 0.1.873 — 2026-11-10
 
 - The iPhone app and the web app now read listings, photos and saves through one shared definition, so they stay in step with each other and with Anteroom's server.

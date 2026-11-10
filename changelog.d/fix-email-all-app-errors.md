@@ -1,4 +1,0 @@
-- Email handled web errors, failed jobs, marketplace offer refusals and warnings, so failures do not disappear from the operator error reports.
-- Report overdue offer checks for sellers seen by the running scheduler, including when their Chrome disconnects.
-- Include errors from all marketplace operations in email reports, including listing, updating, delisting, imports, sales checks and browser reads, even when the error arrives inside a successful web response.
-- Include marketplace form-field failures even when the rest of the job succeeds, without emailing entered field values.
