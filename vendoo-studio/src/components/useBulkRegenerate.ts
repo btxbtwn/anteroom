@@ -115,14 +115,8 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
             await api.conversations.reset(id, { keepInputs: true });
             await queryClient.cancelQueries({ queryKey: ["listing", id] });
             await queryClient.cancelQueries({ queryKey: ["messages", id] });
-            const [listing, messages] = await Promise.all([
-              api.listings.get(id),
-              api.conversations.messages(id),
-            ]);
-            queryClient.setQueryData(["listing", id], listing);
-            queryClient.setQueryData(["messages", id], messages);
-            // Fresh listing/messages are already cached above. Sidebar and
-            // photo refetches must not delay starting the confirmed rewrite.
+            // The reset is saved. Editor reads may stall independently, so
+            // refresh the caches without blocking the confirmed generation.
             void refreshAfterReset(queryClient, id);
           } catch (err) {
             if (showWipe) markChatResetting(id, false);
