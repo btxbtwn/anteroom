@@ -179,3 +179,34 @@ def test_release_commits_resolve_to_the_merge_they_ship(tmp_path: Path, monkeypa
     gate = _load_gate()
     assert gate.code_commit(release) == merge
     assert gate.code_commit(merge) == merge
+
+
+@pytest.mark.parametrize("release", [False, True])
+@pytest.mark.parametrize("conclusion", ["success", "failure", "cancelled", "skipped"])
+def test_deploy_checks_ci_even_for_a_manual_code_commit(monkeypatch, release, conclusion) -> None:
+    gate = _load_gate()
+    head = "release-head" if release else "code-head"
+    queried = []
+    monkeypatch.setattr(sys, "argv", ["gate", "--repo", "example/repo"])
+    monkeypatch.setattr(gate, "git", lambda *args: head)
+    monkeypatch.setattr(gate, "code_commit", lambda sha: "code-head")
+
+    def ci_state(repo, sha):
+        queried.append((repo, sha))
+        return "completed", conclusion
+
+    monkeypatch.setattr(gate, "ci_state", ci_state)
+    assert gate.main() == (0 if conclusion == "success" else 1)
+    assert queried == [("example/repo", "code-head")]
+
+
+@pytest.mark.parametrize("status", ["missing", "queued", "in_progress"])
+def test_manual_deploy_times_out_without_successful_ci(monkeypatch, status) -> None:
+    gate = _load_gate()
+    monkeypatch.setattr(sys, "argv", ["gate", "--repo", "example/repo", "--timeout", "0"])
+    monkeypatch.setattr(gate, "git", lambda *args: "code-head")
+    monkeypatch.setattr(gate, "code_commit", lambda sha: sha)
+    monkeypatch.setattr(gate, "ci_state", lambda repo, sha: (status, ""))
+    ticks = iter([1, 2, 3, 4])
+    monkeypatch.setattr(gate.time, "monotonic", lambda: next(ticks))
+    assert gate.main() == 1

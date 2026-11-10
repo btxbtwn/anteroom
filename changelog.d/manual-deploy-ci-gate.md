@@ -1,0 +1,1 @@
+- Manual hosted deployments now wait for successful code checks instead of skipping them.

@@ -5,7 +5,8 @@ A "Release Anteroom" commit from the Version workflow only changes version
 numbers, and its CI skips the component checks. The code it ships was checked
 by CI on the merge just before it, which can still be running when the release
 commit's CI passes. This walks back over release commits to that merge and
-waits for its CI run. It exits 1 if that check fails, is
+waits for its CI run. Non-release commits must pass the same check, including
+manual deployments that have no successful workflow_run event. It exits 1 if that check fails, is
 cancelled, never appears or does not finish in time.
 """
 
@@ -57,10 +58,9 @@ def main() -> int:
     head = git("rev-parse", args.head)
     sha = code_commit(head)
     if sha == head:
-        print(f"{sha[:8]} is the code commit and its CI started this deploy.")
-        return 0
-
-    print(f"{head[:8]} is a release commit; checking CI on the code it ships, {sha[:8]}.")
+        print(f"Checking CI on code commit {sha[:8]}, including manual deployments.")
+    else:
+        print(f"{head[:8]} is a release commit; checking CI on the code it ships, {sha[:8]}.")
     deadline = time.monotonic() + args.timeout
     missing_since = None
     while True:
