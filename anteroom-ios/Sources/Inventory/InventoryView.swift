@@ -65,20 +65,15 @@ struct InventoryView: View {
         .onChange(of: model.listings.map(\.id)) { _, ids in
             if let listing = open, !ids.contains(listing.id) { open = nil }
         }
-        // Leaving a new draft (Back, or opening another listing beside the
-        // list) removes it when nothing was added. A layout switch keeps it open.
-        .onChange(of: path) { old, new in
-            guard !sideBySide else { return }
-            left(Set(old.map(\.id)).subtracting(new.map(\.id)))
-        }
-        .onChange(of: open) { old, new in
-            guard sideBySide, let old, old.id != new?.id else { return }
-            left([old.id])
-        }
     }
 
     private func editor(_ listing: ConversationSummary) -> some View {
-        ListingEditorView(api: model.api, listing: listing) { Task { await model.reload() } }
+        ListingEditorView(api: model.api, listing: listing, onLeave: { hasChanges in
+            // The editor has stashed its changes before cleanup. A pushed
+            // picker, tab switch or layout change can hide it while it stays selected.
+            guard !hasChanges, !path.contains(where: { $0.id == listing.id }), open?.id != listing.id else { return }
+            left([listing.id])
+        }) { Task { await model.reload() } }
     }
 
     /// Opens the listing beside the list, or pushes it on iPhone.

@@ -25,10 +25,13 @@ struct ListingEditorView: View {
     /// The live-change count when this editor opened, or when it last reloaded for one.
     @State private var seenLiveChanges: Int?
     private let onSaved: () -> Void
+    private let onLeave: (Bool) -> Void
 
-    init(api: AnteroomAPI, listing: ConversationSummary, onSaved: @escaping () -> Void) {
+    init(api: AnteroomAPI, listing: ConversationSummary, onLeave: @escaping (Bool) -> Void = { _ in },
+         onSaved: @escaping () -> Void) {
         _model = State(initialValue: ListingEditorModel(api: api, listing: listing))
         self.onSaved = onSaved
+        self.onLeave = onLeave
     }
 
     var body: some View {
@@ -47,7 +50,10 @@ struct ListingEditorView: View {
             // The editor also closes without Save or Discard: on iPad when the
             // seller opens another listing or the window changes size, and on
             // either device when they switch tabs. Keep the edits until it reopens.
-            .onDisappear { model.stashEdits() }
+            .onDisappear {
+                model.stashEdits()
+                onLeave(model.hasChanges)
+            }
             // Back on screen with the edits still in memory (from a tab switch or
             // a pushed picker): the copy on disk is no longer needed.
             .onAppear { if model.hasLoaded { model.forgetStash() } }

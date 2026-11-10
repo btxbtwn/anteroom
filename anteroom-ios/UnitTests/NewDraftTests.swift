@@ -5,6 +5,21 @@ import XCTest
 /// a draft with anything in it is never deleted.
 @MainActor
 final class NewDraftTests: XCTestCase {
+    func testUnsavedLocalEditsSendNoDiscardRequest() async throws {
+        let id = "unsaved-\(UUID().uuidString)"
+        var form = ListingEditorModel.Form()
+        form.fields.title = "Seller's unsaved title"
+        EditorDraftStore.save(EditorDraft(listingID: id, revisionID: nil, baselineInputs: SellerInputs(),
+                                          form: form, pending: [:], savedAt: Date()))
+        defer { EditorDraftStore.remove(id) }
+        XCTAssertNotNil(EditorDraftStore.load(id))
+        StubProtocol.answer(.init(status: 200, body: #"{"discarded":true}"#))
+        let model = InventoryModel(api: StubSignIn().api())
+        await model.discardIfUntouched(id)
+        XCTAssertTrue(StubProtocol.requests.isEmpty)
+        XCTAssertEqual(EditorDraftStore.load(id)?.form.fields.title, "Seller's unsaved title")
+    }
+
     func testBlankDraftUsesOneAtomicServerRequest() async {
         StubProtocol.answer([{ request in
             let path = request.url?.path ?? ""

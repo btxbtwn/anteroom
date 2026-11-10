@@ -689,6 +689,26 @@ final class PolishScreenshotTests: XCTestCase {
 /// marketplace tab carries its own List button behind the confirmation.
 @MainActor
 final class CoreFlowSandboxTests: XCTestCase {
+    func testLeavingANewDraftKeepsUnsavedEdits() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        openNewListing(app)
+        let title = "Unsaved draft \(UUID().uuidString.prefix(8))"
+        enterListingTitle(title, app: app)
+        XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 15))
+        app.navigationBars[title].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Inventory"].waitForExistence(timeout: 15))
+        let row = app.staticTexts["New Listing"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "Unsaved edits keep their new draft")
+        row.tap()
+        let notice = app.alerts["Unsaved changes"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 30))
+        notice.buttons["OK"].tap()
+        XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 15), "The unsaved title is restored")
+    }
+
     func testBackingOutOfANewDraftLeavesNothing() {
         continueAfterFailure = false
         let app = XCUIApplication()
