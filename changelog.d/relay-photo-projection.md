@@ -1,1 +1,0 @@
-- Reduce database load during marketplace photo uploads by reading only approved photo metadata instead of decoding the full listing snapshot for every image.

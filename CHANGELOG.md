@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.902 — 2026-11-10
+
+- Reduce database load during marketplace photo uploads by reading only approved photo metadata instead of decoding the full listing snapshot for every image.
+
 ## 0.1.901 — 2026-11-10
 
 - When Depop refuses to list because of shipping, the fix button now opens Package size instead of offering to edit a "National shipping" field that doesn't exist. The message also says why: Depop doesn't offer the package size you chose for this item, or your Depop account has no ship-from address to use.
