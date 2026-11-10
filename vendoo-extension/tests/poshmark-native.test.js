@@ -616,8 +616,23 @@ test('a Poshmark validation refusal names what is missing and removes the unlist
   assert.equal(result.error_code, 'missing_fields');
   assert.equal(result.safe_to_retry, true);
   assert.equal(result.marketplace_message, 'Please select a brand.');
-  assert.deepEqual(JSON.parse(JSON.stringify(result.fields)), [{ field: 'ValidationError', message: 'Please select a brand.' }]);
+  assert.equal(result.error, 'Poshmark needs more details before it can list this: Please select a brand.');
+  assert.equal(result.fields, undefined, 'an error type is not a field the seller can edit');
   assert.equal(requests.at(-1).method, 'DELETE');
+});
+
+test('a Smart Sell refusal says so and points at Lowest Price', async () => {
+  const { c, msg } = setup();
+  const said = 'Your minimum price is too low to be able to turn on Smart Sell while covering shipping and fees. Try raising the minimum price.';
+  const original = c.fetch;
+  c.fetch = async (url, options = {}) => (options.method === 'POST' && new URL(url).pathname === `/vm-rest/posts/${POST}`
+    ? response(200, { error: { errorType: 'InvalidInputError', userMessage: said } }) : original(url, options));
+  const result = await c.runPoshmarkApi(msg);
+  assert.equal(result.error_code, 'missing_fields');
+  assert.match(result.error, /Smart Sell/);
+  assert.match(result.error, /Lowest Price/);
+  assert.equal(result.marketplace_message, said);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.fields)), [{ field: 'poshmark_specifics.smartSell.minimumPrice', message: said }]);
 });
 
 // A slice of Poshmark's live catalog_v2 (read 2026-10-25).

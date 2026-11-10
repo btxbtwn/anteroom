@@ -482,6 +482,12 @@ describe("marketplaces section", () => {
     expect(rowStatus("ebay", undefined, undefined, "current", true).label).toBe("Not listed");
     expect(rowStatus("mercari", live, undefined, "current", true).label).toBe("Listed");
     expect(rowStatus("ebay", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Delisted");
+    // Delisting clears old errors, so an error after it is from a newer List and must show.
+    const refused = rowStatus("poshmark", { ...live, state: "deleted" },
+      { state: "draft", error: "Poshmark won't turn on Smart Sell at this Lowest Price.", marketplace_message: "Your minimum price is too low" } as NativeDraft,
+      "current", true);
+    expect(refused).toMatchObject({ tone: "failed", label: "Not listed", detail: "Poshmark won't turn on Smart Sell at this Lowest Price." });
+    expect(refused.said).toBe("Poshmark said: Your minimum price is too low");
     expect(rowStatus("mercari", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Delisted");
     expect(rowStatus("depop", { ...live, state: "deleted", url: "https://www.depop.com/products/x/", listing_id: "x" }, undefined, "current", true).label).toBe("Delisted");
     expect(render({}, { depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).not.toContain("Delist everywhere…");

@@ -1,0 +1,2 @@
+- When Poshmark refuses a listing because Smart Sell's Lowest Price is too low, Anteroom now says so and offers Edit Lowest Price, instead of a vague "Invalid Input Error".
+- A listing that fails after being delisted now shows the failure and its reason, not just "Delisted".
