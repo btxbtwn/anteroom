@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.services.validation import normalize_listing_dropdowns, validate_listing
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo, RevisionConflict
 from vendoo_studio.services.price_drop import (
     PRICE_DROP_SOURCE,
     apply_price_to_listing,
@@ -76,7 +76,7 @@ def apply_price_drop(
     price: float,
     db: Session,
     *,
-    expected_revision_id: str | None = None,
+    expected_revision_id: str,
 ) -> dict[str, Any]:
     """Save a confirmed whole-dollar price as a ``price_drop`` revision and commit."""
     from vendoo_studio.services.listing_generate import (
@@ -95,7 +95,7 @@ def apply_price_drop(
         raise PriceDropError(BUSY, 409)
 
     listing, revisions = current_listing(conv_id, db)
-    if expected_revision_id is not None and revisions[0].id != expected_revision_id:
+    if not expected_revision_id or revisions[0].id != expected_revision_id:
         raise PriceDropError(CHANGED, 409)
     current = listing_price(listing)
     target = whole_dollars(price)
@@ -111,12 +111,17 @@ def apply_price_drop(
 
     photo_count = len(ConversationRepo(db).get_photos(conv_id))
     validation = validate_listing(updated, photo_count, require_photos=True)
-    revision = listing_persistence.save_revision(listing_repo.db,
-        conv_id=conv_id,
-        listing_json=updated,
-        source=PRICE_DROP_SOURCE,
-        parent_revision_id=current_row.current_revision_id if current_row else None,
-    )
+    try:
+        revision = listing_persistence.save_revision(listing_repo.db,
+            conv_id=conv_id,
+            listing_json=updated,
+            source=PRICE_DROP_SOURCE,
+            parent_revision_id=expected_revision_id,
+            expected_revision_id=expected_revision_id,
+        )
+    except RevisionConflict as exc:
+        db.rollback()
+        raise PriceDropError(CHANGED, 409) from exc
     if current_row:
         current_row.validation_status = "valid" if validation.valid else "error"
         current_row.validation_errors = validation.errors + validation.warnings
@@ -242,7 +247,7 @@ def batch_preview(conv_ids: list[str], db: Session) -> list[dict[str, Any]]:
 def batch_apply(drops: list[dict[str, Any]], db: Session) -> dict[str, list[dict[str, Any]]]:
     """Save each confirmed drop; report the ones that could not be saved instead of stopping.
 
-    Each drop is ``{"conversation_id", "price", "expected_revision_id"?}``.
+    Each drop is ``{"conversation_id", "price", "expected_revision_id"}``.
     """
     applied: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -260,7 +265,7 @@ def batch_apply(drops: list[dict[str, Any]], db: Session) -> dict[str, list[dict
                 conv_id,
                 drop["price"],
                 db,
-                expected_revision_id=drop.get("expected_revision_id"),
+                expected_revision_id=drop["expected_revision_id"],
             )
         except PriceDropError as exc:
             db.rollback()
