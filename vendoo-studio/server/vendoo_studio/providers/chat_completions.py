@@ -387,6 +387,14 @@ def openrouter_sources(payload: dict) -> list[dict]:
 class OpenRouterProvider(ChatCompletionsProvider):
     """OpenRouter runs model-directed web searches through its server tool."""
 
+    def _body(self, messages: list[dict], model: str, *, reasoning: bool = True, **extra) -> dict:
+        # One model is served by several hosts, and default routing spreads
+        # requests across them at random. A slow host turned a 1,600-token
+        # field reply into an 81-second wait, so try the fastest host for the
+        # same model first. Fallback to the other hosts stays on.
+        # https://openrouter.ai/docs/guides/routing/provider-selection
+        return {**super()._body(messages, model, reasoning=reasoning, **extra), "provider": {"sort": "throughput"}}
+
     async def web_search(self, messages: list[dict]) -> dict:
         from vendoo_studio.providers.chatgpt_codex import web_search_answer
 
