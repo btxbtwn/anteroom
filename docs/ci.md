@@ -16,6 +16,8 @@ the old and new paths. An unavailable base runs every check group.
 | Frontend runtime | Frontend tests and both builds, backend, code health, both browser suites |
 | Frontend tests only | Frontend tests and both builds, backend, code health |
 | Extension or listing skills | Backend, code health, browser suites; extension checks for extension changes |
+| Skill references (`skills/list-this/references/`) or the extension manifest | Also frontend and extension checks: the editor imports the field list and the manifest's version, and the extension's value matrix reads the option lists |
+| iPhone tool installer or `ios.yml` | Backend, code health (a backend test reads them) |
 | Python dependencies or their installer | Backend, code health, browser suites, dependency audit |
 | npm dependencies | Frontend, backend, code health, browser suites, extension checks |
 | Relay | Relay checks |
