@@ -11,7 +11,7 @@
       (function () {
         try {
           var pref = localStorage.getItem("vendoo-studio:theme");
-          if (pref !== "light" && pref !== "dark" && pref !== "system") pref = "dark";
+          if (pref !== "light" && pref !== "dark" && pref !== "system") pref = "system";
           var light =
             pref === "light" ||
             (pref === "system" && window.matchMedia("(prefers-color-scheme: light)").matches);

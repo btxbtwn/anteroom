@@ -629,6 +629,20 @@ class RefreshTest(unittest.TestCase):
         self.assertEqual(state["prefs"]["budget"], 180)
         self.assertTrue(box_scout.refresh_is_due())
 
+    def test_a_failed_refresh_is_reported_until_one_succeeds(self):
+        # Without this, the page showed "Getting your first list ready…" forever after a failure.
+        from vendoo_studio.routes.sourcing import _response
+
+        with mock.patch.object(box_scout, "_own_sales", side_effect=OSError("offline")), self.assertRaises(OSError):
+            box_scout.refresh()
+        response = _response()
+        self.assertIsNone(response.snapshot)
+        self.assertEqual(response.refresh_error, box_scout.REFRESH_FAILED)
+        self.assertFalse(response.refreshing)
+        with self._models():
+            box_scout.refresh()
+        self.assertIsNone(_response().refresh_error)
+
     def test_a_snapshot_from_another_build_is_dropped_before_the_page_reads_it(self):
         # 0.1.219 served a snapshot whose lots lacked a field the page's model requires,
         # and the whole Sourcing request failed with a 500 until the next refresh.

@@ -68,18 +68,15 @@ test("hosted Chrome imports, saved-off rules and sale switches are available", a
   for (const name of ["Poshmark", "Mercari", "Depop"]) {
     await expect(page.getByRole("switch", { name: `Sale detection for ${name}`, exact: true })).toBeVisible();
   }
+  // Chrome isn't connected in the sandbox: the switch shows off with the reason, and the saved choice is kept.
   const detection = page.getByRole("switch", { name: "Sale detection for Poshmark", exact: true });
-  await expect(detection).toBeChecked({ checked: initialDetection.enabled.poshmark !== false });
-  const wasChecked = await detection.isChecked();
-  const saved = page.waitForResponse(response => response.url().endsWith("/api/settings/sale-detection") && response.request().method() === "PUT");
-  await detection.click();
-  const response = await saved;
-  expect(response.ok()).toBeTruthy();
-  expect((await response.json()).enabled.poshmark).toBe(!wasChecked);
-  await expect(detection).toBeChecked({ checked: !wasChecked });
+  await expect(detection).not.toBeChecked();
+  await expect(detection).toBeDisabled();
+  await expect(page.locator("#chrome-poshmark")).toContainText("Connect Chrome to detect sales");
+  const reloaded = page.waitForResponse(response => response.url().endsWith("/api/settings/sale-detection") && response.request().method() === "GET" && response.ok());
   await page.reload();
   await openConnections(page, phone);
-  await expect(page.getByRole("switch", { name: "Sale detection for Poshmark", exact: true })).toBeChecked({ checked: !wasChecked });
+  expect((await (await reloaded).json()).enabled).toEqual(initialDetection.enabled);
   await page.locator("#chrome-poshmark").scrollIntoViewIfNeeded();
   await page.screenshot({ path: `e2e/results/hosted/session-settings-${info.project.name}.png`, fullPage: true });
   expect(macReads).toEqual([]);
