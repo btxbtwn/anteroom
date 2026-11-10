@@ -1,0 +1,1 @@
+- Keep sales catch-up database reads from blocking navigation and other requests.

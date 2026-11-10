@@ -302,10 +302,14 @@ def _backlog(db: Session, marketplace: str, limit: int) -> list[str]:
             if needs_amounts(marketplace, lines) and now >= _checked.get((key, marketplace, order_id), float("-inf")) + RECHECK_S][:limit]
 
 
+def _read_backlog(session_factory: Callable[[], Session], marketplace: str, limit: int) -> list[str]:
+    with session_factory() as db:
+        return _backlog(db, marketplace, limit)
+
+
 async def backfill(marketplace: str, session_factory: Callable[[], Session], limit: int = BACKFILL_ORDERS) -> int:
     """Fill amounts for older recorded sales, newest first, a few orders at a time."""
-    with session_factory() as db:
-        order_ids = _backlog(db, marketplace, limit)
+    order_ids = await asyncio.to_thread(_read_backlog, session_factory, marketplace, limit)
     if not order_ids:
         return 0
     from vendoo_studio.services.ebay_client import EbayClient
