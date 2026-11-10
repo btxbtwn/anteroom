@@ -1,4 +1,0 @@
-- On a phone, the web app now opens on your inventory list instead of an empty "Select a listing" screen.
-- While your listings load, the sidebar and inventory table show placeholder rows instead of saying you have no listings, and the counts wait until they are known.
-- New listing no longer leaves an empty "New Listing" draft behind: if you leave it without adding a photo or typing anything, it is removed.
-- The "All" tab is now called "Open": it holds your drafts and active listings, and sold listings stay under Sold.

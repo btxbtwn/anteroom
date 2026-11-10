@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.880 — 2026-11-10
+
+- On a phone, the web app now opens on your inventory list instead of an empty "Select a listing" screen.
+- While your listings load, the sidebar and inventory table show placeholder rows instead of saying you have no listings, and the counts wait until they are known.
+- New listing no longer leaves an empty "New Listing" draft behind: if you leave it without adding a photo or typing anything, it is removed.
+- The "All" tab is now called "Open": it holds your drafts and active listings, and sold listings stay under Sold.
+
 ## 0.1.879 — 2026-11-10
 
 - Listings made with an OpenRouter model finish sooner: Anteroom now asks OpenRouter for the fastest host serving your chosen model, instead of whichever one it picks. Your model and settings stay the same.
