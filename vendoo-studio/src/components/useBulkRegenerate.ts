@@ -95,6 +95,7 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
           if (!drop) return;
           await api.listings.applyPriceDrop(id, {
             price: drop.price,
+            expected_revision_id: drop.expected_revision_id,
             percent: drop.percent,
             mode: drop.mode,
           });
