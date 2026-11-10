@@ -263,11 +263,19 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 
 **Pull requests:** After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while required checks are pending or red. PRs never bump the version or edit `CHANGELOG.md`; do not run `bump-version.sh` in a PR. A PR that changes `vendoo-studio/` adds one note file, `changelog.d/<branch-slug>.md`, holding `- ` bullets in the seller's words (`<slug>.minor.md` or `<slug>.major.md` only when the seller asks for that bump; see `changelog.d/README.md`). After merge, the **Version** workflow turns each merged PR's notes into one patch bump and a `## <version> — <YYYY-MM-DD>` section at the top of `CHANGELOG.md`, which the app shows under Settings → General → About → What's new, and then starts the macOS release build. The UI reads the version from the API; never hardcode it. CI's **Changelog** job (`vendoo-studio/scripts/check-changelog.py`) fails when a PR changes `VERSION` or `CHANGELOG.md`, or when a note is malformed; run it locally with `python vendoo-studio/scripts/check-changelog.py`.
 
-When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduce the failure locally with the same command or `./check.sh`, and fix the cause before pushing again. Do not push guesses at CI. Several Anteroom PRs are often open at once. Because none of them touch `VERSION` or `CHANGELOG.md`, they do not conflict over versions; merge `origin/main` in only when CI or a real code conflict calls for it. `main` only takes a PR that is up to date with it. Queue a ready PR with
-`gh pr merge <n> --auto --merge` instead of updating it by hand: the **Auto-update
-PRs** workflow merges `main` into the oldest queued PR that is behind, one at a
-time, and GitHub merges it when CI passes. Keep merge commits: release notes are
-grouped by them.
+When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduce the failure locally with the same command or `./check.sh`, and fix the cause before pushing again. Do not push guesses at CI. Several Anteroom PRs are often open at once. Because none of them touch `VERSION` or `CHANGELOG.md`, they do not conflict over versions.
+
+`main` requires passing CI but does not require a branch to be up to date.
+Do not update a PR or restart CI solely because another PR merged. Update only
+for real conflicts, failed checks or a needed dependency. When asked to merge
+a ready PR, use `gh pr merge <n> --auto --merge`; GitHub merges it when required
+checks pass. Do not automatically update other open PRs. Keep merge commits:
+release notes are grouped by them. CI on `main` still checks the merged result
+for interactions between independently tested PRs.
+
+CI job selection and dependency-audit scheduling are documented in
+[docs/ci.md](docs/ci.md). Keep `check.sh` and CI on the shared selector; preserve
+backend tests that inspect frontend, extension and skill sources.
 
 ## Security and Product Invariants
 

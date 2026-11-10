@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Say which components a change touches, so CI runs only their jobs.
 
-Prints ``studio=``, ``extension=`` and ``relay=`` lines (``true``/``false``)
+Prints one ``name=true`` or ``name=false`` line per check group
 in the format of ``$GITHUB_OUTPUT``. With no base commit, or one git cannot
 find, every component counts as changed.
 
@@ -22,10 +22,10 @@ import re
 import subprocess
 import sys
 
-COMPONENTS = ("studio", "extension", "relay")
+COMPONENTS = ("frontend", "backend", "browser", "health", "audit", "extension", "relay")
 
 # Files every job reads: a change here runs everything.
-CI_FILES = (".github/workflows/ci.yml", ".github/scripts/")
+CI_FILES = (".github/workflows/ci.yml", ".github/workflows/dependency-audit.yml", ".github/scripts/", "check.sh")
 
 # Changes that no test job reads. Release notes and the changelog are checked
 # by the Changelog job, which always runs.
@@ -84,21 +84,42 @@ def version_only(base: str, head: str, path: str) -> bool:
 
 
 def components(files: list[str]) -> dict[str, bool]:
-    ci = any(path.startswith(CI_FILES) for path in files)
-    root_docs = [path for path in files if "/" not in path and path.endswith(".md")]
-    return {
-        "studio": ci or any(
-            (not path.startswith(NOT_STUDIO) and path not in root_docs) or path.startswith(STUDIO_GENERATED)
-            for path in files
-        ),
-        "extension": ci or any(
-            path.startswith("vendoo-extension/")
-            # The extension lint uses vendoo-studio's oxlint.
-            or path in {"vendoo-studio/package.json", "vendoo-studio/package-lock.json"}
-            for path in files
-        ),
-        "relay": ci or any(path.startswith("webhook-relay/") for path in files),
-    }
+    selected: set[str] = set()
+    for path in files:
+        if path.startswith(CI_FILES):
+            selected.update(COMPONENTS)
+        elif path.startswith("webhook-relay/"):
+            selected.add("relay")
+        elif path.startswith(STUDIO_GENERATED) or path.startswith("contracts/"):
+            selected.update(("backend", "health"))
+        elif path.startswith(NOT_STUDIO) or ("/" not in path and path.endswith(".md")):
+            continue
+        elif path in {"vendoo-studio/pyproject.toml", "vendoo-studio/uv.lock", "vendoo-studio/scripts/install-locked.sh"}:
+            selected.update(("backend", "browser", "health", "audit"))
+        elif path in {"vendoo-studio/package.json", "vendoo-studio/package-lock.json"}:
+            # The extension linter comes from Studio's npm dependencies.
+            selected.update(("frontend", "backend", "browser", "health", "extension"))
+        elif path.startswith("vendoo-studio/server/tests/"):
+            selected.update(("backend", "health"))
+        elif path.startswith("vendoo-studio/server/"):
+            selected.update(("backend", "browser", "health"))
+        elif path.startswith(("vendoo-studio/src/", "vendoo-studio/public/")):
+            # Backend tests inspect frontend source; retain both suites.
+            selected.update(("frontend", "backend", "health"))
+            if not path.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")):
+                selected.add("browser")
+        elif path.startswith(("vendoo-studio/e2e/", "vendoo-studio/hosted-e2e/", "vendoo-studio/playwright")):
+            # knip also scans e2e imports as part of the frontend job.
+            selected.update(("frontend", "backend", "browser", "health"))
+        elif path.startswith("vendoo-extension/"):
+            selected.update(("extension", "backend", "browser", "health"))
+        elif path.startswith("skills/"):
+            selected.update(("backend", "browser", "health"))
+        else:
+            # Unknown inputs run every Studio suite rather than silently
+            # dropping coverage. Audits depend on the locked Python packages.
+            selected.update(("frontend", "backend", "browser", "health"))
+    return {name: name in selected for name in COMPONENTS}
 
 
 def main() -> int:
@@ -122,7 +143,9 @@ def main() -> int:
         print(f"No usable base commit ({base or 'none'}); running every component.", file=sys.stderr)
         result = dict.fromkeys(COMPONENTS, True)
     else:
-        changed = [path for path in git("diff", "--name-only", base, args.head).splitlines() if path]
+        # A rename must count both the removed and added path, including when
+        # it moves a file between components.
+        changed = [path for path in git("diff", "--no-renames", "--name-only", base, args.head).splitlines() if path]
         files = [path for path in changed if not version_only(base, args.head, path)]
         print(f"{len(changed)} changed file(s), {len(files)} beyond the version:", file=sys.stderr)
         for path in files:

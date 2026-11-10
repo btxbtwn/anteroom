@@ -28,7 +28,7 @@ BASE="$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD)"
 CHANGED="$( { git diff --name-only "$BASE"; git ls-files --others --exclude-standard; } | sort -u)"
 export CHANGED
 
-COMPONENTS="$(python3 .github/scripts/changed-components.py --stdin <<<"$CHANGED")"
+COMPONENTS="$(python3 .github/scripts/changed-components.py --stdin <<<"$CHANGED")" || exit 1
 component() {
   [[ "$ALL" == "1" ]] || grep -qx "$1=true" <<<"$COMPONENTS"
 }
@@ -73,12 +73,17 @@ else
   skip "Secrets" "gitleaks is not installed: https://github.com/gitleaks/gitleaks#installing"
 fi
 
-# Backend tests read frontend source, so any Anteroom change runs both suites.
-if component studio; then
-  run "Anteroom version and changelog" bash -c "'$PY' vendoo-studio/scripts/check-version-sync.py && '$PY' vendoo-studio/scripts/check-changelog.py"
-  run "Anteroom frontend" bash -c "cd vendoo-studio && npm run lint && npm test && npm run build"
+run "Anteroom version and changelog" bash -c "'$PY' vendoo-studio/scripts/check-version-sync.py && '$PY' vendoo-studio/scripts/check-changelog.py"
+
+if component frontend; then
+  run "Anteroom frontend" bash -c "cd vendoo-studio && npm run lint && npm run knip && npm test && npm run build"
   run "Anteroom hosted build" bash -c "cd vendoo-studio && ANTEROOM_HOSTED_BUILD=1 VITE_SUPABASE_URL=https://build-validation.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=public-build-validation npm run build"
-  run "Anteroom backend" bash -c "cd vendoo-studio && '$PY' -m ruff check server && VENDOO_STUDIO_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
+fi
+
+# Backend tests also inspect frontend, extension and skill sources. The shared
+# selector retains those dependencies without rebuilding an unchanged frontend.
+if component backend; then
+  run "Anteroom backend" bash -c "cd vendoo-studio && VENDOO_STUDIO_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
   if [[ "$FAST" == "1" ]]; then
     skip "Anteroom backend on Postgres" "--fast"
   elif [[ -n "${ANTEROOM_TEST_DATABASE_URL:-}" ]]; then
@@ -95,8 +100,14 @@ with tempfile.TemporaryDirectory(prefix='anteroom-check-postgres-') as root:
     sys.exit(subprocess.call([sys.executable, '-m', 'pytest', '-q', '-n', 'auto'], env=env))
 PY"
   fi
-  run "Anteroom code health" bash -c "cd vendoo-studio && npm run knip && '$BIN/lint-imports' && '$PY' scripts/check-dead-code.py && '$PY' scripts/check-design.py"
+fi
+
+if component health; then
+  run "Anteroom code health" bash -c "cd vendoo-studio && '$PY' -m ruff check server && '$BIN/lint-imports' && '$PY' scripts/check-dead-code.py && '$PY' scripts/check-design.py"
   run "Anteroom types" bash -c "cd vendoo-studio && CI=true '$PY' -m basedpyright"
+fi
+
+if component audit; then
   if command -v uv >/dev/null 2>&1; then
     run "Anteroom Python lock and audit" bash -c "
       cd vendoo-studio && uv lock --check
@@ -107,8 +118,11 @@ PY"
   else
     skip "Anteroom Python lock and audit" "uv is not installed: https://docs.astral.sh/uv/getting-started/installation/"
   fi
+fi
+
+if component browser; then
   if [[ "$FAST" == "0" ]]; then
-    run "Anteroom browser tests (sandbox)" bash -c "cd vendoo-studio && node scripts/check-bridge-connection.mjs && npm run e2e && npm run e2e:hosted"
+    run "Anteroom browser tests (sandbox)" bash -c "cd vendoo-studio && node scripts/check-bridge-network.mjs && node scripts/check-bridge-connection.mjs && npm run e2e && npm run e2e:hosted"
   else
     skip "Anteroom browser tests" "--fast"
   fi
