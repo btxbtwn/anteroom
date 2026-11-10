@@ -26,6 +26,7 @@ vendoo-studio/server/*
 !vendoo-studio/public/
 vendoo-studio/public/*
 !vendoo-studio/public/favicon.png
+!vendoo-studio/public/privacy.html
 # The startup screen shows the app icon.
 !vendoo-studio/desktop/
 vendoo-studio/desktop/*

@@ -30,3 +30,5 @@ def test_hosted_image_carries_the_favicon_the_server_serves():
     dockerignore = (ROOT / '.dockerignore').read_text(encoding='utf-8').splitlines()
     assert '!vendoo-studio/public/' in dockerignore
     assert '!vendoo-studio/public/favicon.png' in dockerignore
+    assert 'web_dir / "privacy.html"' in hosted
+    assert '!vendoo-studio/public/privacy.html' in dockerignore
