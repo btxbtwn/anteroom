@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.875 — 2026-11-10
+
+- Stopping a hosted draft no longer reports rejected cleanup saves as crashes. Workers still cannot save after losing ownership of a draft.
+
 ## 0.1.874 — 2026-11-10
 
 - Email handled web errors, failed jobs, marketplace offer refusals and warnings, so failures do not disappear from the operator error reports.
