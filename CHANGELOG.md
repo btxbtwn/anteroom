@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.886 — 2026-11-10
+
+- Measurements sit beside item details; notes and labels move to the end of the General form.
+- "Ask chat" is now a small chat button beside each field's name. It shows when you point at or tap into the field, so the form is easier to read.
+- Measurement boxes are blank until you fill them, instead of showing sample numbers that looked like real ones.
+- Jeans, pants, shorts and skirts open their measurements on the right type instead of Top.
+- Etsy's status in the marketplace list now fits ("May not qualify"); point at it to read the reason.
+
 ## 0.1.885 — 2026-11-10
 
 - Confirmed delists wait in the activity tray while another marketplace action runs, so you can move on to other items.
