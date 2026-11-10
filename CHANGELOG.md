@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.904 — 2026-11-10
+
+- Edit on a marketplace error now puts the cursor in that field, not on its Ask chat button.
+
 ## 0.1.903 — 2026-11-10
 
 - Automatic offer preview error emails now include the selected discount, minimum price and timing, so a refusal can be investigated without retrying the offer.

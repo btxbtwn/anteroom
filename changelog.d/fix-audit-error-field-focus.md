@@ -1,1 +1,0 @@
-- Edit on a marketplace error now puts the cursor in that field, not on its Ask chat button.
