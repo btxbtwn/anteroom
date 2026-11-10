@@ -719,6 +719,9 @@ export const api = {
       request<Conversation>("/conversations", { method: "POST", body: JSON.stringify(body || {}) }),
     update: (id: string, body: ConversationInput) =>
       request<Conversation>(`/conversations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    /** Deletes a new listing only while it is still blank; the server decides. `keepalive` outlives a closing tab. */
+    discardBlank: (id: string, options?: { keepalive?: boolean }) =>
+      request<{ discarded: boolean }>(`/conversations/${id}/discard-blank`, { method: "POST", keepalive: options?.keepalive }),
     settle: (id: string) =>
       request<Conversation>(`/conversations/${id}/settle`, { method: "POST" }),
     unsettle: (id: string) =>
