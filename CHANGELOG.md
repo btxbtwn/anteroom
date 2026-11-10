@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.903 — 2026-11-10
+
+- Automatic offer preview error emails now include the selected discount, minimum price and timing, so a refusal can be investigated without retrying the offer.
+
 ## 0.1.902 — 2026-11-10
 
 - Reduce database load during marketplace photo uploads by reading only approved photo metadata instead of decoding the full listing snapshot for every image.
