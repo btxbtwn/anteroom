@@ -42,7 +42,7 @@ struct BulkDeleteView: View {
                         }
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                 }
                 .listRowBackground(WorkspaceStyle.surface)
@@ -103,7 +103,7 @@ struct BulkDeleteView: View {
                     if let reason = row.skipReason {
                         Text(reason).font(.caption).foregroundStyle(.secondary)
                     } else if let warning = row.warning {
-                        Text(warning).font(.caption).foregroundStyle(.orange)
+                        Text(warning).font(.caption).foregroundStyle(WorkspaceStyle.warning)
                     }
                 }
             }

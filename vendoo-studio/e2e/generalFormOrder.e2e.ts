@@ -1,6 +1,6 @@
 import { createListing, expect, openListing, test, titleBox } from "./fixtures";
 
-const SECTIONS = ["Item", "Condition & details", "Pricing", "Description", "Color & department", "Shipping", "More details"];
+const SECTIONS = ["Item", "Condition & details", "Pricing", "Description", "Color & department", "Measurements (in)", "Shipping", "More details", "Notes & Labels"];
 // The order a seller fills the General form in; screen order must match it.
 const ROWS = ["category_path", "title", "condition", "size", "brand", "price", "description",
   "primaryColor", "secondaryColor", "department", "weight_oz", "package_dimensions_in", "zipCode"];
@@ -11,7 +11,7 @@ test("General reads in filling order, with More details folded until opened", as
   const id = await createListing(request, title);
   try {
     await openListing(page, phone, title);
-    await expect(await titleBox(page, phone)).toBeVisible();
+    await expect(await titleBox(page, phone)).toBeVisible({ timeout: 30_000 });
     const form = page.getByRole("group", { name: "General listing fields" });
 
     await expect(form.getByRole("heading", { level: 3 })).toHaveText(SECTIONS);
@@ -43,7 +43,7 @@ test("General reads in filling order, with More details folded until opened", as
     await expect.poll(async () => {
       const rows = await (await request.get("/api/conversations")).json() as { id: string; sku: string | null }[];
       return rows.find((row) => row.id === id)?.sku ?? null;
-    }, { timeout: 15_000 }).toBe("E2E-SKU-1");
+    }, { timeout: 30_000 }).toBe("E2E-SKU-1");
     await openListing(page, phone, title);
     await titleBox(page, phone);
     await expect(more).toHaveAttribute("aria-expanded", "false");

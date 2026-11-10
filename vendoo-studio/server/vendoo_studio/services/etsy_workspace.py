@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from vendoo_studio.services import keychain, marketplace_accounts
 from vendoo_studio.services.marketplace_accounts import SignInRequired
+from vendoo_studio.services.marketplace_errors import marketplace_call
 
 PAGE_SIZE = 25
 
@@ -44,6 +45,7 @@ class EtsyClient:
         self.shop_id = self.identity[0]
 
     @classmethod
+    @marketplace_call("etsy")
     async def connect(cls) -> EtsyClient:
         # The account read is a Vault query on the web; keep it off the request loop.
         return await asyncio.to_thread(cls)
@@ -52,6 +54,7 @@ class EtsyClient:
         if _identity() != self.identity:
             raise EtsyFailure("The Etsy connection changed. Refresh this view.", 409)
 
+    @marketplace_call("etsy")
     async def _get(self, path: str, params: dict | None = None) -> dict:
         self.assert_current()
         result = await marketplace_accounts.etsy_api("GET", path, params=params)

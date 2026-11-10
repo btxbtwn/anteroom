@@ -59,10 +59,10 @@ describe("native row layout", () => {
     ];
     const html = render();
     expect(html).toContain("@xl:grid-cols-12");
-    expect(html).toMatch(/data-listing-row="mercari_specifics.categoryId" class="min-w-0 @xl:col-span-6"/);
-    expect(html).toMatch(/data-listing-row="mercari_specifics.price" class="min-w-0 @xl:col-span-4"/);
-    expect(html).toMatch(/data-listing-row="mercari_specifics.weight" class="min-w-0 @xl:col-span-3"/);
-    expect(html).toMatch(/data-listing-row="mercari_specifics.description" class="min-w-0 col-span-full"/);
+    expect(html).toMatch(/data-listing-row="mercari_specifics.categoryId" class="group\/field min-w-0 @xl:col-span-6"/);
+    expect(html).toMatch(/data-listing-row="mercari_specifics.price" class="group\/field min-w-0 @xl:col-span-4"/);
+    expect(html).toMatch(/data-listing-row="mercari_specifics.weight" class="group\/field min-w-0 @xl:col-span-3"/);
+    expect(html).toMatch(/data-listing-row="mercari_specifics.description" class="group\/field min-w-0 col-span-full"/);
     const positions = state.fields.map((row) => html.indexOf(`data-listing-row="${row.path}"`));
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
@@ -72,7 +72,7 @@ describe("native row layout", () => {
   it("keeps a half-width control on its own full-width row", () => {
     state.fields = [field("mercari_specifics.price", { control_width: "half" })];
     const html = render();
-    expect(html).toContain('data-listing-row="mercari_specifics.price" class="min-w-0 col-span-full"');
+    expect(html).toContain('data-listing-row="mercari_specifics.price" class="group/field min-w-0 col-span-full"');
     expect(html).toContain('class="@xl:w-1/2"');
   });
 });

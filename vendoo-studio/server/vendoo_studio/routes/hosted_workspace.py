@@ -581,6 +581,24 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
     return {'ok': True, 'deleted_jobs': 0, 'deleted_photos': photos}
 
 
+@router.post('/conversations/{identity}/discard-blank')
+def discard_blank_conversation(identity: str, request: Request, db=Depends(get_seller_db, scope="function")):
+    """Delete a new listing the seller left without adding anything; keep it otherwise."""
+    from vendoo_studio.services import blank_drafts, hosted_listing_delete
+    row = conversation(db, identity, lock=True)
+    if not blank_drafts.is_blank(db, row):
+        return {'discarded': False}
+    try:
+        keys = hosted_listing_delete.remove_unsent_draft(db, identity)
+    except ValueError:
+        # Something is running on it, so it is not untouched.
+        db.rollback()
+        return {'discarded': False}
+    db.commit()
+    hosted_listing_delete.release(keys, request.headers['authorization'].partition(' ')[2])
+    return {'discarded': True}
+
+
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
 def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
                         revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):

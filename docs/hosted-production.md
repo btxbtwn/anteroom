@@ -394,11 +394,32 @@ by `vendoo-studio/server/vendoo_studio/services/error_alerts.py`, switched on by
 `ANTEROOM_ERROR_EMAIL = '1'` in `deploy/fly/fly.toml`. Sandboxes and the Mac app
 never send.
 
-**What is reported:** every ERROR log from Anteroom, uvicorn and asyncio; a
-route's unhandled exception and any 5xx response (with method, route template,
+**What is reported:** every WARNING and ERROR log from Anteroom, uvicorn and asyncio; a
+route's unhandled exception and any 4xx or 5xx response (with method, route template,
 Fly request id and seller id); uncaught thread and process exceptions; failed
 draft tasks and generations; and browser crashes, unhandled promise rejections
 and render failures from the web app (`POST /api/error-reports`, signed-in only).
+Handled query and mutation failures use that endpoint too, even when the screen
+shows its own error message. Marketplace offer preview refusals include the
+scrubbed marketplace reason; all jobs transitioning to failed are logged.
+Promotion checks report enabled rules more than 30 minutes overdue, including
+previously connected sellers whose Chrome has disconnected. This monitoring
+remembers sellers within the scheduler process; after a restart it starts
+monitoring a seller when their capable Chrome connects again. A stopped process
+cannot report its own outage. Reading the automation list also reports overdue
+rules, even after a restart before Chrome reconnects. Background reports carry
+the seller execution id.
+
+Marketplace reporting applies to every operation through the Chrome bridge,
+hosted Chrome reads, and direct eBay and Etsy API clients: listing, saving
+drafts, updates, delisting, imports, sales reads, form inspection, offers and
+other API operations. Rejected replies and unconfirmed results are logged even
+inside HTTP 200 responses, including nested action results and individual bulk
+API failures. Reports keep the operation, marketplace, error code and scrubbed
+marketplace message; they never include the request payload, photos or order
+records. Reporting does not retry an operation or change its result.
+Form-fill entries marked failed, invalid, not found or uncertain are reported
+even if another field succeeds. Entered values and selectors are excluded.
 
 **Each email:** a subject with environment, severity, exception type and
 message; then severity, time, fingerprint, occurrence count, code location,
@@ -407,7 +428,7 @@ exception, the stack trace, and the same report as JSON. Credentials are masked
 by `services/redaction.py` and SQL parameter values are removed.
 
 **Noise control:** reports group by fingerprint (exception type plus code path,
-or call site). The first is sent immediately; repeats in the next 15 minutes are
+or call site and message shape). The first is sent immediately; repeats in the next 15 minutes are
 counted and reported with the next email for that group, or at shutdown. At most
 60 emails per hour per process; anything over is counted in the next email and
 remains in `fly logs`. Failed sends retry after 5 s, 30 s and 2 min.
@@ -420,4 +441,6 @@ own egress address added to the relay rule.
 
 **Not covered:** the Mac app (its errors stay in Settings → Logs), the iPhone
 app, the Chrome extension, the webhook relay, and errors that code catches
-without logging. Warnings are not emailed.
+without logging outside the shared request, query, mutation and job paths.
+Device failures returned to a hosted job are covered by the failed-job report;
+standalone device crashes still need device-side reporting.

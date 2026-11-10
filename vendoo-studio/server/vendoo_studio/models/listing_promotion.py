@@ -52,6 +52,9 @@ class ListingPromotion(SellerOwned, Base):
     shipping_discount_id: Mapped[str | None] = mapped_column(String, nullable=True)
     shipping_discount_label: Mapped[str | None] = mapped_column(String, nullable=True)
     like_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Marketplace evidence, distinct from pre-send likes. Unknown counts stay null.
+    confirmation: Mapped[str | None] = mapped_column(String, nullable=True)
+    recipient_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     state: Mapped[str] = mapped_column(String, nullable=False, default="preview")
     note: Mapped[str | None] = mapped_column(String, nullable=True)
     marketplace_message: Mapped[str | None] = mapped_column(String, nullable=True)

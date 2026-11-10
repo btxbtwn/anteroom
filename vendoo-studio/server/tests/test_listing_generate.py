@@ -1882,6 +1882,23 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revisions, [])
         self.assertIsNone(streaming.active_generation(self.conv_id))
 
+    async def test_cancelled_partial_save_stays_fenced_without_a_crash_alert(self):
+        from vendoo_studio.services.background_tasks import TaskLeaseExpired
+
+        persist = AsyncMock(side_effect=[asyncio.CancelledError(), TaskLeaseExpired()])
+        with (
+            patch.object(listing_generation, "persist_generated_listing_with_repair", persist),
+            patch.object(listing_generation.ConversationRepo, "update_status") as update_status,
+            self.assertLogs("vendoo_studio.chat", level="WARNING") as captured,
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client:
+                await client.post(f"/api/conversations/{self.conv_id}/generate")
+            await streaming.wait_generation(self.conv_id)
+        self.assertEqual(persist.await_count, 2)
+        self.assertFalse(any(record.levelname == "ERROR" for record in captured.records))
+        # Once the partial save loses the lease, don't try another fenced write.
+        self.assertNotIn(unittest.mock.call(self.conv_id, "draft"), update_status.call_args_list)
+
     async def test_resume_after_run_finished_does_not_start_a_second_run(self):
         """A dropped connection reconnects; it must not generate the listing twice."""
         transport = ASGITransport(app=app)

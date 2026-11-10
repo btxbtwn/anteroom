@@ -190,6 +190,8 @@ def sale_records(db: Session, start: date, end: date, marketplace: str | None = 
 
 
 def summary(rows) -> dict:
+    from vendoo_studio.services.sales_records import missing_counts
+
     groups = {}
     count, unmatched, unrecorded, stale_count = 0, 0, 0, 0
     for row in rows:
@@ -213,7 +215,13 @@ def summary(rows) -> dict:
     for group in groups.values():
         group["net_revenue"] = format(group["net_revenue"], "f") if group["net_known"] else None
         group["profit"] = format(group["profit"], "f") if group["profit_known"] else None
-    return {"lines": count, "unmatched": unmatched, "unrecorded": unrecorded, "needs_review": stale_count,
+    return {"lines": count, "unmatched": unmatched, "needs_review": stale_count,
+            # Sales missing any amount, and which amounts: what the Missing sale data filter shows.
+            "missing_records": sum(1 for row in rows if row["missing_sale_data"]),
+            "missing_counts": missing_counts([row["missing_sale_data"] for row in rows]),
+            # Removal note: lines with no amount at all. Replaced by missing_records and
+            # missing_counts; kept until 2027-02-01 for iPhone builds that still read it.
+            "unrecorded": unrecorded,
             "currencies": [groups[key] for key in sorted(groups)]}
 
 

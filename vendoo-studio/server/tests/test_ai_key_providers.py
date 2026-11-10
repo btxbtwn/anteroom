@@ -530,3 +530,24 @@ def test_responses_search_requests_are_included_in_call_metrics(fake_http):
     assert len(calls) == 1
     assert calls[0]["input_tokens"] == 12
     assert calls[0]["output_tokens"] == 3
+
+
+def test_openrouter_routes_every_request_to_its_fastest_host(fake_http):
+    # OpenRouter serves one model from several hosts; unsorted, a slow host
+    # can take minutes over a reply a fast one returns in seconds.
+    calls = fake_http(lambda request: httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "listing-m", "high")
+    run(collect(provider.quick_chat([{"role": "user", "content": "hi"}])))
+    run(collect(provider.vision_chat(IMAGE_TURN)))
+    run(collect(provider.structured_chat([{"role": "user", "content": "hi"}], {"type": "object"})))
+    for call in calls:
+        body = json.loads(call.content)
+        assert body["provider"] == {"sort": "throughput"}
+        assert body["model"] in {"vision-m", "listing-m"}
+
+
+def test_other_chat_completions_providers_get_no_openrouter_routing(fake_http):
+    calls = fake_http(lambda request: httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+    provider = ChatCompletionsProvider(KEY_PROVIDERS["xai"], "xai-key", "grok-vision", "grok-listing")
+    run(collect(provider.quick_chat([{"role": "user", "content": "hi"}])))
+    assert "provider" not in json.loads(calls[0].content)

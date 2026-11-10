@@ -48,7 +48,7 @@ struct BulkCopyView: View {
                         ForEach(rows) { row in copySection(row) }
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                 }
                 .listRowBackground(WorkspaceStyle.surface)
@@ -80,7 +80,7 @@ struct BulkCopyView: View {
                     .disabled((row.photoCount ?? 0) == 0)
                 Toggle("Copy recorded cost", isOn: draft.includeCost)
                 if let problem = Self.problem(row, draft.wrappedValue) {
-                    Text(problem).font(.footnote).foregroundStyle(.red)
+                    Text(problem).font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
                 }
             }
         }
@@ -99,7 +99,7 @@ struct BulkCopyView: View {
                     Text(task.title)
                     Text(task.state == "saved" ? "Local draft created" : task.state == "failed" ? (task.error ?? "Failed") : running ? "Waiting…" : "Not copied")
                         .font(.caption)
-                        .foregroundStyle(task.state == "failed" ? .red : .secondary)
+                        .foregroundStyle(task.state == "failed" ? WorkspaceStyle.destructive : .secondary)
                 }
             }
         } footer: {

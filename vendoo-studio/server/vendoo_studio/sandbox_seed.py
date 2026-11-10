@@ -152,7 +152,46 @@ def _seed_automations(client: httpx.Client) -> None:
     for sample in AUTOMATIONS:
         client.post("/api/automations", json=sample).raise_for_status()
     for sample in PROMOTION_AUTOMATIONS:
-        client.post("/api/promotion-automations", json=sample).raise_for_status()
+        saved = client.post("/api/promotion-automations", json=sample).raise_for_status().json()
+        from vendoo_studio import sandbox
+        if sample["action"] == "offer" and sandbox.enabled():
+            _seed_offer_activity(saved["id"])
+
+
+def _seed_offer_activity(automation_id: str) -> None:
+    """Sample terminal history only; never enable a rule or contact a marketplace."""
+    from sqlalchemy.orm import Session
+
+    from vendoo_studio import sandbox
+    from vendoo_studio.database import engine, load_models
+    from vendoo_studio.models.listing_promotion import ListingPromotion
+    from vendoo_studio.models.promotion_automation import PromotionAutomation, PromotionRun
+
+    if not sandbox.enabled():
+        raise RuntimeError("Offer activity fixtures require sandbox mode")
+    # The CLI seed runs separately from the API, which normally registers the
+    # complete mapper graph. Register it here without migrating or starting it.
+    load_models()
+    with Session(engine) as db:
+        rule = db.get(PromotionAutomation, automation_id)
+        if rule is None or rule.enabled or rule.marketplace != "poshmark" or rule.action != "offer":
+            raise RuntimeError("Offer activity fixtures require a paused Poshmark offer rule")
+        now = datetime.now(UTC).replace(tzinfo=None)
+        batch_id = str(uuid.uuid4())
+        for index, confirmation in enumerate(("request_accepted", "legacy_unverified")):
+            at = now - timedelta(minutes=index + 1)
+            db.add(ListingPromotion(
+                user_id=rule.user_id, automation_id=rule.id, batch_id=batch_id,
+                marketplace="poshmark", action="offer", listing_id=f"sandbox-offer-{index + 1}",
+                title=f"Sample offer {index + 1}", state="done", confirmation=confirmation,
+                recipient_count=None, offer_price_cents=2700, created_at=at, sent_at=at,
+                finished_at=at, expires_at=at + timedelta(days=1),
+                note="Sample history for layout review. No offer was sent.",
+            ))
+        db.add(PromotionRun(user_id=rule.user_id, automation_id=rule.id, started_at=now,
+                            finished_at=now, sent=2, skipped=0, failed=0,
+                            note="Sample completed actions; buyer delivery is unverified."))
+        db.commit()
 
 
 # Items that already sold, so Analytics has figures and charts to show:

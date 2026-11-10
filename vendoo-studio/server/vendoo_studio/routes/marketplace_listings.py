@@ -46,7 +46,8 @@ async def delist(conv_id: str, body: DelistRequest):
     try:
         return await marketplace_delist.delist(conv_id, body.marketplaces, body.confirm)
     except marketplace_delist.DelistError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        headers = {"X-Anteroom-Reason": "marketplace_busy"} if str(exc) == "Another automation job is queued or running. Wait for it to finish." else None
+        raise HTTPException(exc.status_code, str(exc), headers=headers) from exc
 
 
 @router.post("/check-sales")

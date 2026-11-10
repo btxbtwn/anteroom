@@ -130,9 +130,16 @@ class AnalyticsAds(BaseModel):
     marketplaces: list[AnalyticsAdMarketplace]
 
 
+class MissingCount(BaseModel):
+    label: str
+    count: int
+
+
 class AnalyticsResponse(BaseModel):
     range: str
     incomplete_sales: list[AnalyticsIncompleteSale]
+    # How many of those sales lack each amount; Sales records' summary uses the same counts.
+    missing_counts: list[MissingCount]
     undated_sales: int
     periods_truncated: bool
     inventory: AnalyticsInventory
@@ -173,6 +180,8 @@ class OverviewFigures(BaseModel):
     profit: float | None
     profit_known: int
     fees_known: int
+    median_days: int | None
+    # Removal note: replaced by median_days; kept until 2027-02-01 for iPhone builds that read it.
     average_days: float | None
     days_known: int
     sell_through: float | None

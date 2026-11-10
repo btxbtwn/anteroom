@@ -124,7 +124,7 @@ struct ListingsSettingsView: View {
                 Button(saving == "dimensions" ? "Saving…" : "Save dimensions") { saveDimensions() }
                     .disabled(parsedDimensions == nil || parsedDimensions == dimensions || saving == "dimensions")
                 if parsedDimensions == nil {
-                    Text("Use whole inches from 1 to 120.").font(.footnote).foregroundStyle(.red)
+                    Text("Use whole inches from 1 to 120.").font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
                 }
             } else {
                 loadingRow("dimensions", "Loading package dimensions")
@@ -137,7 +137,7 @@ struct ListingsSettingsView: View {
                 }
                 Button(saving == "zip" ? "Saving…" : "Save ZIP") { saveZip() }
                     .disabled(!zipValid || zipDraft == zip || saving == "zip")
-                if !zipValid { Text("A ZIP code is five digits.").font(.footnote).foregroundStyle(.red) }
+                if !zipValid { Text("A ZIP code is five digits.").font(.footnote).foregroundStyle(WorkspaceStyle.destructive) }
             } else {
                 loadingRow("zip", "Loading ZIP")
             }
@@ -222,7 +222,7 @@ struct ListingsSettingsView: View {
     @ViewBuilder
     private func errorRow(_ key: String) -> some View {
         if let error = errors[key] {
-            Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
+            Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
         }
     }
 

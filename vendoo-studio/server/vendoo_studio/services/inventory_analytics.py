@@ -124,7 +124,7 @@ def inventory_analytics(
         raise ValueError(range_id)
     from vendoo_studio.services.ad_spend import list_entries, summarize_ads
     from vendoo_studio.services.sale_events import windows
-    from vendoo_studio.services.sales_records import incomplete_sales
+    from vendoo_studio.services.sales_records import incomplete_sales, missing_counts
 
 
     clock = now or datetime.now(UTC)
@@ -133,9 +133,11 @@ def inventory_analytics(
     rows = load_rows(db) if rows is None else rows
     payload = summarize(rows, range_id=range_id, now=clock, events=windows(db), start=start, end=end)
     window_start, window_end = _window(range_id, clock, start, end)
+    incomplete = incomplete_sales(db, rows)
     return {
         **payload,
-        "incomplete_sales": incomplete_sales(db, rows),
+        "incomplete_sales": incomplete,
+        "missing_counts": missing_counts([row["missing"] for row in incomplete]),
         "ads": summarize_ads(
             list_entries(db),
             start=window_start,

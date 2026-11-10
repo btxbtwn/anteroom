@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialOpenListing, isBrowserLinkClick, listingHref, openListingReducer } from "./openListing";
+import { initialOpenListing, isBrowserLinkClick, listingHref, openListingReducer, phonePaneOnOpen } from "./openListing";
 
 describe("open listing", () => {
   it("opens a deep-linked listing immediately", () => {
@@ -57,5 +57,19 @@ describe("open listing", () => {
     expect(isBrowserLinkClick({ ...click, metaKey: true })).toBe(true);
     expect(isBrowserLinkClick({ ...click, ctrlKey: true })).toBe(true);
     expect(isBrowserLinkClick({ ...click, button: 1 })).toBe(true);
+  });
+});
+
+describe("phone pane on open", () => {
+  it("opens a listing that already has copy on its form", () => {
+    expect(phonePaneOnOpen({ status: "active", price: 38 }, undefined)).toBe("editor");
+    expect(phonePaneOnOpen({ status: "sold", price: null }, undefined)).toBe("editor");
+    expect(phonePaneOnOpen({ status: "draft", price: 25 }, undefined)).toBe("editor");
+    expect(phonePaneOnOpen({ status: "draft", price: null }, { listing: { title: "Jeans", description: "Black" } })).toBe("editor");
+  });
+  it("opens a draft waiting to be generated on chat", () => {
+    expect(phonePaneOnOpen({ status: "draft", price: null }, undefined)).toBe("workspace");
+    expect(phonePaneOnOpen({ status: "draft", price: null }, { listing: { title: "New Listing" } })).toBe("workspace");
+    expect(phonePaneOnOpen(undefined, undefined)).toBe("workspace");
   });
 });

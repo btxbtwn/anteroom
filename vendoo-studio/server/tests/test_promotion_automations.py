@@ -488,6 +488,48 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.tick()
         self.assertEqual(self.promoted(), [])
 
+    def test_bounded_offer_scans_rotate_skipped_listings_across_sessions(self):
+        saved = self.create({**OFFER, "min_likes": 10})
+        self.enable(saved["id"])
+        checked = []
+        # An unlucky random order used to revisit the same two listings forever.
+        with patch.object(promotion_automations, "OFFER_READS", 2), patch.object(
+                promotion_automations.random, "sample", side_effect=lambda targets, _count: targets):
+            for _ in range(3):
+                self.due(saved["id"])
+                self.bridge.reset_mock()
+                self.tick()
+                checked.append([call.args[2]["listing_id"] for call in self.bridge.call_args_list
+                                if call.args[1] == "marketplace.promotion_check"])
+                engine = self.db.get_bind()
+                self.db.close()
+                self.db = sessionmaker(bind=engine)()
+        posts = sorted(post for _conv, post in self.items)
+        self.assertEqual(checked, [posts[:2], [posts[2], posts[0]], posts[1:]])
+        self.assertEqual(self.db.query(ListingPromotion).filter_by(state="skipped").count(), 6)
+        self.assertEqual(self.db.query(ListingPromotion).filter(ListingPromotion.sent_at.is_not(None)).count(), 0)
+
+    def test_offer_scan_uses_latest_check_for_this_rule_and_marketplace_only(self):
+        saved = self.create(OFFER)
+        other = self.create(OFFER)
+        now = _now()
+        first, second, unseen = [post for _conv, post in self.items]
+        for post, days, rule, marketplace, action in (
+            (first, 4, saved["id"], "poshmark", "offer"),
+            (first, 1, saved["id"], "poshmark", "offer"),
+            (second, 2, saved["id"], "poshmark", "offer"),
+            (unseen, 0, other["id"], "poshmark", "offer"),
+            (unseen, 0, saved["id"], "depop", "offer"),
+            (unseen, 0, saved["id"], "poshmark", "share"),
+        ):
+            self.db.add(ListingPromotion(batch_id="test", listing_id=post, marketplace=marketplace,
+                                         action=action, automation_id=rule, state="skipped",
+                                         created_at=now - timedelta(days=days), expires_at=now))
+        self.db.commit()
+        row = self.db.get(PromotionAutomation, saved["id"])
+        ordered = promotion_automations._order(self.db, row, promotion_automations._covered(self.db, row))
+        self.assertEqual([target[1] for target in ordered], [unseen, second, first])
+
     def test_a_skip_names_the_marketplaces_own_reason(self):
         conv, post = self.items[0]
 
@@ -504,6 +546,32 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(self.promoted(), [])
         self.assertIn("Poshmark refused the request: This item is reserved for a buyer. (1)", self.db.query(PromotionRun).one().note)
 
+    def test_overdue_enabled_round_is_logged_without_sending(self):
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.next_run_at = _now() - timedelta(hours=1)
+        self.db.commit()
+        with self.assertLogs("vendoo_studio.promotion_automations", level="ERROR") as errors:
+            promotion_automations.report_overdue(self.db)
+
+        self.assertIn(row.id, " ".join(errors.output))
+        self.assertIn("overdue", " ".join(errors.output))
+        self.assertTrue(row.enabled)
+        self.assertEqual(self.promoted(), [])
+        row.enabled = False
+        self.db.commit()
+        with self.assertNoLogs("vendoo_studio.promotion_automations", level="ERROR"):
+            promotion_automations.report_overdue(self.db)
+
+    def test_failed_job_reports_once_even_when_error_was_handled(self):
+        job = JobRepo(self.db).create(self.items[0][0].id, "", {})
+        with self.assertLogs("vendoo_studio.jobs", level="ERROR") as errors:
+            JobRepo(self.db).update_status(job.id, "failed", error="Chrome refused the action")
+        self.assertIn("Chrome refused the action", " ".join(errors.output))
+        with self.assertNoLogs("vendoo_studio.jobs", level="ERROR"):
+            JobRepo(self.db).update_status(job.id, "failed", error="Chrome refused the action")
+
     def test_review_refusal_keeps_listing_and_sanitized_reason_in_activity(self):
         conv, post = self.items[0]
         detail = "HTTP 400, code 1003: " + "No recipient was returned. " * 8
@@ -514,7 +582,10 @@ class PromotionAutomationsTest(unittest.TestCase):
         saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
         self.enable(saved["id"])
         self.due(saved["id"])
-        self.tick()
+        with self.assertLogs("vendoo_studio.listing_promotions", level="ERROR") as errors:
+            self.tick()
+        self.assertIn("1003", " ".join(errors.output))
+        self.assertNotIn("private-token", " ".join(errors.output))
         activity = self.client.get(f"/api/promotion-automations/{saved['id']}/activity").json()
         self.assertEqual(len(activity["sends"]), 1)
         skipped = activity["sends"][0]

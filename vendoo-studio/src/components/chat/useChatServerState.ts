@@ -22,7 +22,8 @@ export function useChatServerState(convId: string, localBusy: boolean) {
         : false,
   });
   const serverBusy = Boolean(activity?.busy);
-  const busy = localBusy || serverBusy;
+  // Listing jobs still drive refreshes, but only a chat request drives its spinner.
+  const busy = localBusy;
 
   const { data: messages, isLoading } = useQuery({
     queryKey: ["messages", convId],

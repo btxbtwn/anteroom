@@ -659,7 +659,8 @@ export interface AnalyticsSale {
 export interface InventoryAnalytics {
   range: AnalyticsRange;
   incomplete_sales: { id: string; conversation_id: string | null; title: string; missing: string[] }[];
-
+  /** How many of those sales lack each amount, in form order. */
+  missing_counts: { label: string; count: number }[];
   undated_sales: number;
   periods_truncated: boolean;
   inventory: AnalyticsInventory;
@@ -880,6 +881,8 @@ export interface SourcingPrefs {
 
 export interface SourcingState {
   refreshing: boolean;
+  /** Why the last refresh failed, until one succeeds. */
+  refresh_error: string | null;
   ebay_connected: boolean;
   prefs: SourcingPrefs;
   trend: { terms: string[]; updated_at: string | null; source: string | null };

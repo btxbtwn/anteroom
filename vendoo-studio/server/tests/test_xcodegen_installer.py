@@ -103,3 +103,15 @@ def test_xcodegen_installer_never_unpacks_or_adds_failed_download_to_path(tmp_pa
     assert [call["tool"] for call in calls] == expected
     assert not (destination / "xcodegen/bin/xcodegen").exists()
     assert not path_file.exists()
+
+
+def test_ios_workflow_passes_read_only_token_only_to_installer():
+    workflow = INSTALLER.parents[2] / ".github/workflows/ios.yml"
+    text = workflow.read_text()
+    assert "permissions:\n  contents: read" in text
+    steps = text.split("      - name: Install the pinned XcodeGen\n")[1:]
+    assert len(steps) == 3
+    for step in steps:
+        installer_step = step.split("      - ", 1)[0]
+        assert "GITHUB_TOKEN: ${{ github.token }}" in installer_step
+    assert text.count("GITHUB_TOKEN: ${{ github.token }}") == 3

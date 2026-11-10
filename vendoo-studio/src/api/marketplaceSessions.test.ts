@@ -27,7 +27,7 @@ describe("chrome marketplace sign-in", () => {
   it("asks for a new sign-in when the session expired", () => {
     expect(chromeSessionPresentation(session({ state: "expired", expires_at: 10 }), true, now)).toEqual({
       tone: "error",
-      label: "Sign in again",
+      label: "Sign-in expired",
     });
     expect(sessionNotification("depop", "Depop", session({ state: "expired", expires_at: 10 }), "signed_in")).toMatchObject({
       key: "depop:expired:10",

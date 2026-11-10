@@ -13,7 +13,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./u
 
 const FIELD = "h-8 rounded-md border border-border bg-background px-2 text-sm";
 const NOTES: Record<PromotionMarketplace, string> = {
-  poshmark: "Share to followers, or send an offer to everyone who liked a listing.",
+  poshmark: "Share to followers, or send offers to eligible likers.",
   mercari: "Offer to likers: up to 50 recent likers, at least 10% below the lowest price the item has had.",
   depop: "Send offer to likers in your country. Depop has no free refresh.",
 };
@@ -30,7 +30,7 @@ export function promotionMarketplaces(supported: PromotionSupport = DEFAULT_SUPP
 }
 const ACTIONS: { value: PromotionAction; label: string; note: (name: string) => string }[] = [
   { value: "share", label: "Share to followers", note: (name) => `Shares each listing to your ${name} followers, a few seconds apart.` },
-  { value: "offer", label: "Offer to likers", note: (name) => `Sends a private offer to everyone who liked each listing. ${name} sets the minimum discount; your floor is never crossed.` },
+  { value: "offer", label: "Offer to likers", note: (name) => `Sends private offers to eligible likers. ${name} sets the minimum discount; your floor is never crossed.` },
 ];
 const risk = (name: string) => `This uses your signed-in ${name} session in Chrome. Marketplaces can limit or review accounts that act too quickly, so Anteroom spaces actions out and stops at the first limit ${name} reports.`;
 
@@ -118,7 +118,7 @@ export function PromotionDialog({ conversationIds, onClose }: { conversationIds:
     description="Nothing is sent until you review each item and confirm. Items run one at a time, each once; nothing is retried, listed or delisted.">
     {error ? <PageError message={error.message || "Could not review these items"} /> : null}
     {tasks ? <div className="space-y-3" aria-live="polite">
-      <PageNote>{tasks.filter((task) => task.state === "done").length} done · {tasks.filter((task) => task.state !== "done" && task.state !== "pending").length} not done</PageNote>
+      <PageNote>{tasks.filter((task) => task.state === "done").length} listing actions completed · {tasks.filter((task) => task.state !== "done" && task.state !== "pending").length} not done</PageNote>
       {tasks.map((task) => <div key={task.id} className="min-w-0 break-words rounded-lg border p-3">
         <p className="font-medium">{task.title}</p>
         <p className="text-xs">{activeId === task.id ? (reviewedAction === "share" ? "Sharing…" : "Sending offer…") : task.state === "pending" ? "Not started" : task.note}</p>
@@ -135,7 +135,7 @@ export function PromotionDialog({ conversationIds, onClose }: { conversationIds:
         {row.state !== "preview" ? <p className="text-xs text-muted-foreground">{row.note}</p>
           : row.action === "share" ? <p className="text-xs">Share to followers · ${row.price}</p>
           : <div className="space-y-1 text-xs">
-            <p>Offer ${row.offer_price} to {row.like_count} {row.like_count === 1 ? "liker" : "likers"} · price ${row.price} · your floor ${row.floor}</p>
+            <p>Offer ${row.offer_price} · {row.like_count ?? "Unknown"} {row.like_count === 1 ? "like" : "likes"} · current price ${row.price} · minimum ${row.floor}</p>
             {needsShippingChoice(row) ? <label className="flex flex-wrap items-center gap-2">Shipping discount
               <Select value={shipping[row.id] || ""} disabled={busy}
                 onValueChange={(value) => { setConfirmed(false); setShipping((previous) => ({ ...previous, [row.id]: value ?? "" })); }}>

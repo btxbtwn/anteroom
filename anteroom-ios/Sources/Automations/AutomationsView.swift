@@ -5,6 +5,7 @@ import SwiftUI
 /// hosted API; sharing and offers to likers run in the seller's own Chrome, so
 /// the iPhone saves them and says where they run.
 struct AutomationsView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let api: AnteroomAPI
     /// Approving runs a marketplace action, which needs the seller's marketplace sessions.
     let canApprove: Bool
@@ -47,7 +48,7 @@ struct AutomationsView: View {
     }
 
     private var screen: some View {
-        NavigationStack {
+        Group {
             List {
                 Group {
                     if !approvals.isEmpty {
@@ -87,7 +88,7 @@ struct AutomationsView: View {
                         }
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                     Section {
                         if let automations {
@@ -192,7 +193,12 @@ struct AutomationsView: View {
                     if task.actions.contains(where: { $0.type == "price" }) {
                         Text(AutomationFormat.actions(task.actions)).font(.caption).foregroundStyle(.secondary)
                     }
-                    Text(runs(task)).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                    if let note = AutomationFormat.approvalNote(task.actions) {
+                        Label(note, systemImage: "hand.raised").font(.caption).foregroundStyle(WorkspaceStyle.warning)
+                    }
+                    if let runs = runs(task) {
+                        Text(runs).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -286,24 +292,38 @@ struct AutomationsView: View {
     /// The same row as a scheduled task: name, what and when, runs, a switch and a menu.
     private func marketRow(_ view: AutomationRowModel, open: @escaping () -> Void,
                            @ViewBuilder control: () -> some View, @ViewBuilder menu: () -> some View) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Button(action: open) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(view.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                    Text(view.type == view.name ? view.when : "\(view.type) · \(view.when)").font(.caption).foregroundStyle(.secondary)
-                    if !view.note.isEmpty { Text(view.note).font(.caption).foregroundStyle(.secondary) }
-                    Text("Last run \(view.lastRun) · Next \(view.nextRun)").font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+        let headerLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return VStack(alignment: .leading, spacing: 8) {
+            headerLayout {
+                Button(action: open) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(view.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                        if !view.name.localizedCaseInsensitiveContains(view.type) {
+                            Text(view.type).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                control()
+                Menu(content: menu) {
+                    Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("More for \(view.name)")
             }
-            .buttonStyle(.plain)
-            control()
-            Menu(content: menu) {
-                Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
+            Text(view.when).font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !view.note.isEmpty { Text(view.note).font(.footnote).foregroundStyle(.secondary) }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Last check: \(view.lastRun == "—" ? "Not recorded" : view.lastRun)")
+                Text("Next check: \(view.nextRun == "—" ? "Not scheduled" : view.nextRun)")
             }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("More for \(view.name)")
+            .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
         }
         .padding(.vertical, 2)
     }
@@ -330,9 +350,9 @@ struct AutomationsView: View {
         }
     }
 
-    private func runs(_ task: Automation) -> String {
+    private func runs(_ task: Automation) -> String? {
         let next = task.status == "active" ? AutomationFormat.runTime(task.nextRunAt, timezone: task.timezone) : "—"
-        return "Last run \(AutomationFormat.runTime(task.lastRunAt, timezone: task.timezone)) · Next \(next)"
+        return AutomationFormat.runsLine(last: AutomationFormat.runTime(task.lastRunAt, timezone: task.timezone), next: next)
     }
 
     /// On resumes a paused automation, off pauses it. Neither runs anything now.
@@ -550,7 +570,7 @@ private struct AutomationEditorView: View {
                     }
                     if let preview { previewSection(preview) }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                     Section {
                         Button(working == "preview" ? "Checking…" : "Preview") { showPreview() }.disabled(working != nil)

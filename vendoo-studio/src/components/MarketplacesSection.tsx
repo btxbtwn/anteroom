@@ -135,7 +135,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   if (draft?.state === "draft" && marketplace === "ebay") return { tone: "neutral", label: "Saved on eBay",
     detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to eBay." : "Not listed. Buyers cannot see it until you List." };
   // The listing check says why and how to fix it, under the header.
-  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Review eligibility" };
+  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "May not qualify" };
   return { tone: "idle", label: "Not listed" };
 }
 
@@ -156,8 +156,8 @@ export function listChoice(marketplace: NativeMarketplace, { status, canAct, lis
   /** The saved listing's field check, or null while it is unknown. */
   check: PreflightCheck | null;
 }): ListChoice {
-  const choice = (label: string, tone: ListChoice["tone"], selectable = false, detail?: string): ListChoice =>
-    ({ marketplace, label, tone, selectable, ...(detail ? { detail } : {}) });
+  const choice = (label: string, tone: ListChoice["tone"], selectable = false, missing?: ListChoice["missing"]): ListChoice =>
+    ({ marketplace, label, tone, selectable, ...(missing?.length ? { missing } : {}) });
   if (status.tone === "sold") return choice("Sold", "sold");
   if (status.tone === "live" && status.label === "Listed") return choice("Listed", "listed");
   if (!canAct) return choice("Not available here", "muted");
@@ -166,7 +166,7 @@ export function listChoice(marketplace: NativeMarketplace, { status, canAct, lis
   if (retryIn > 0) return choice(`Retry in ${retryIn}s`, "muted");
   // Missing fields are advice, as on List…: the seller may still try.
   const missing = check?.missing ?? [];
-  if (missing.length) return choice(needsText(missing.length), "needs", true, missing.map((item) => item.label).join(", "));
+  if (missing.length) return choice(needsText(missing.length), "needs", true, missing);
   if (marketplace === "etsy" && status.tone === "attention") return choice(status.label, "needs", true);
   return check?.ready ? choice("Ready", "ready", true) : choice("Not checked", "muted", true);
 }
@@ -176,7 +176,7 @@ function waitingStatus(action: WaitingAction, ahead: number): Status {
   const name = marketplaceName(action.marketplace);
   if (action.error) return { tone: "failed", label: "Didn't start", detail: action.error };
   if (action.starting) return { tone: "busy", label: "Starting…" };
-  const verb = action.kind === "update" ? "Update" : action.kind === "save_draft" ? "Save draft" : "List";
+  const verb = action.kind === "delist" ? "Delist" : action.kind === "update" ? "Update" : action.kind === "save_draft" ? "Save draft" : "List";
   return { tone: "waiting", label: `Waiting for ${name}`,
     detail: `${verb} starts when ${name} finishes its current action${ahead > 1 ? ` (${ahead} ahead)` : ""}. Keep Anteroom open.` };
 }
@@ -385,9 +385,13 @@ export function MarketplacesLayout({
     },
   });
   const delist = useMutation({
-    mutationFn: (marketplaces: Marketplace[]) => api.marketplaceListings.delist(convId, marketplaces),
+    mutationFn: async (marketplaces: Marketplace[]) => {
+      for (const marketplace of marketplaces) {
+        waitlist.add({ convId, title, marketplace, kind: "delist", revisionId: "" });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["queue"] });
+    },
     retry: false,
-    onSuccess: (data) => queryClient.setQueryData(liveKey, data),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: liveKey });
       // The sidebar row drops the delisted marketplaces and may read Draft.
@@ -703,11 +707,12 @@ export function MarketplacesLayout({
     const missing = check?.missing.length ?? 0;
     const line = <>
       {status && !quiet && (
-        <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground",
+        // A narrow rail wraps a status instead of cutting it off; the row's tooltip names it too.
+        <span role="status" className={cn("flex items-start gap-1 text-xs text-muted-foreground",
           status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
           status.tone === "sold" && "text-info-foreground")}>
           {TONE_ICON[status.tone]}
-          <span className="truncate">{status.label}</span>
+          <span className="min-w-0 text-pretty">{status.label}</span>
         </span>
       )}
       {status && quiet && !check && <span className="sr-only">{status.label}</span>}
@@ -731,7 +736,8 @@ export function MarketplacesLayout({
 
   const pane = <>
     {picking && <ListEverywhereDialog title={title} choices={choices} onClose={() => setPicking(false)}
-      onConfirm={(marketplaces) => { for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" }); }} />}
+      onConfirm={(marketplaces) => { for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" }); }}
+      onEditField={onEditField} />}
     {/* Content stops at a readable line length; the pane still scrolls edge to edge. */}
     <div ref={paneRef} onScroll={event => scrollPositions.current.set(selected, event.currentTarget.scrollTop)}
       className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">
@@ -847,6 +853,7 @@ export function MarketplacesLayout({
               <MenuSeparator />
               {showListEverywhere && <MenuItem disabled={busy} onClick={() => setPicking(true)}><SendIcon />List everywhere…</MenuItem>}
               {!soldSomewhere && <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</MenuItem>}
+              {showDelistEverywhere && <MenuSeparator />}
               {showDelistEverywhere && <MenuItem variant="destructive" disabled={busy} onClick={() => void runDelist(removable)}>
                 <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
               </MenuItem>}
@@ -897,24 +904,30 @@ export function MarketplacesLayout({
           })}
         </ul>
         {/* Listing-wide actions sit apart from the marketplaces, pinned to the
-            rail's foot: quiet rows that match it, the destructive one last.
-            The overflow menu shares the first row, like a marketplace row's. */}
-        <div className={cn("relative mt-auto flex flex-col gap-0.5 border-t pt-1.5 [&>[data-slot=button]]:w-full [&>[data-slot=button]]:justify-start",
-          railMenu && "[&>[data-slot=button]:first-of-type]:pe-7")}>
+            rail's foot. List everywhere is the one primary action. Quiet rows
+            follow, with the overflow menu on the first. Delist, the destructive
+            one, stands last behind its own divider, away from List. */}
+        <div className="relative mt-auto flex flex-col gap-0.5 border-t pt-1.5 [&_[data-slot=button]]:justify-start">
           {railStatus && <div className="pointer-events-none absolute bottom-full end-1 mb-1 flex items-center gap-1.5">{railStatus}</div>}
-          {railMenu && <span className="absolute end-0.5 top-1.5 z-10">{railMenu}</span>}
-          {railActions}
           {showListEverywhere && (
-            <Button size="xs" variant="ghost" disabled={busy} title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
+            <Button size="xs" variant="default" disabled={busy} className="mb-1 w-full" title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
               onClick={() => setPicking(true)}><SendIcon />List everywhere…</Button>
           )}
+          {(railActions || railMenu) && (
+            <div className="flex min-w-0 items-center gap-0.5 [&>[data-slot=button]:not([aria-haspopup])]:min-w-0 [&>[data-slot=button]:not([aria-haspopup])]:flex-1">
+              {railActions}
+              {railMenu && <span className="ms-auto shrink-0">{railMenu}</span>}
+            </div>
+          )}
           {/* A sold item's sale is already recorded; change its amounts in Sales records. */}
-          {!soldSomewhere && <Button size="xs" variant="ghost-muted" disabled={busy} title="A sale in person or anywhere off these marketplaces"
+          {!soldSomewhere && <Button size="xs" variant="ghost-muted" className="w-full" disabled={busy} title="A sale in person or anywhere off these marketplaces"
             onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>}
           {showDelistEverywhere && (
-            <Button size="xs" variant="ghost-destructive" disabled={busy} onClick={() => void runDelist(removable)}>
-              <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
-            </Button>
+            <div className="mt-1 border-t pt-1.5">
+              <Button size="xs" variant="ghost-destructive" className="w-full text-destructive-foreground" disabled={busy} onClick={() => void runDelist(removable)}>
+                <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
+              </Button>
+            </div>
           )}
         </div>
       </nav>

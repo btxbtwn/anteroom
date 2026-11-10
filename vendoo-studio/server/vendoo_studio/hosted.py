@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import event
 from starlette.datastructures import Headers, MutableHeaders
+from vendoo_studio.services.request_timing import RequestTimingMiddleware
 
 from vendoo_studio.services.seller_sessions import (
     InvalidSession,
@@ -96,6 +97,8 @@ class AccessLogMiddleware:
             if status >= 500:
                 http_log.error("%s %s answered %s", scope["method"], template, status,
                                exc_info=details.get("cause"))
+            elif status >= 400:
+                http_log.warning("%s %s answered %s", scope["method"], template, status)
             request_context.reset(context)
             # 499: the client closed the connection before any response started.
             access_log.info("%s %s %s %dms", scope["method"], template, status or (500 if failed else 499),
@@ -354,6 +357,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.add_middleware(ResponseHeadersMiddleware)
 
     # Outermost, so a refused session or an error still gets its line.
+    app.add_middleware(RequestTimingMiddleware)
     app.add_middleware(AccessLogMiddleware)
 
     from fastapi.exceptions import RequestValidationError

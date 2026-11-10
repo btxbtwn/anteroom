@@ -50,6 +50,12 @@ struct AutomationTests {
                      == "Weekly on Mon, Fri at 09:00 (UTC)")
         precondition(AutomationFormat.actions([AutomationAction(type: "price", mode: "amount", value: 5, floor: 15, repeatMode: "once"),
                                                AutomationAction(type: "relist")]) == "drop $5 once, floor $15, relist")
+        precondition(AutomationFormat.runsLine(last: "—", next: "—") == nil)
+        precondition(AutomationFormat.runsLine(last: "—", next: "Nov 9, 8:00 AM") == "Next Nov 9, 8:00 AM")
+        precondition(AutomationFormat.runsLine(last: "Nov 2, 9:00 AM", next: "—") == "Last run Nov 2, 9:00 AM")
+        precondition(AutomationFormat.approvalNote([AutomationAction(type: "price"), AutomationAction(type: "relist")])
+                     == "Waits for your approval before relisting")
+        precondition(AutomationFormat.approvalNote([AutomationAction(type: "regenerate")]) == nil)
         precondition(AutomationFormat.money(12) == "$12" && AutomationFormat.money(12.5) == "$12.50" && AutomationFormat.money(nil) == "—")
 
         // Rows say when an automation runs and what it picks, like the web list.
@@ -93,7 +99,7 @@ struct AutomationTests {
         let share = AutomationRowModel(promotion: promotions.automations[0], name: name)
         precondition(share.type == "Poshmark sharing" && share.when == "Every day 9:00 AM, 8:30 PM · all live listings" && share.on == false)
         let likers = AutomationRowModel(promotion: promotions.automations[1], name: name)
-        precondition(likers.type == "Offers to likers" && likers.when == "New likers on Mercari · 10% off 1 chosen listing")
+        precondition(likers.type == "Mercari offers" && likers.when == "10% off · 1 chosen listing · new likers")
         precondition(likers.note == "Mercari offers are not available in Anteroom yet")
         print("Automation tests passed")
     }

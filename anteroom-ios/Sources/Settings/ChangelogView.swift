@@ -33,7 +33,7 @@ struct ChangelogView: View {
                         }
                     }
                 } else if let error {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive)
                 }
             }
             .listRowBackground(WorkspaceStyle.surface)

@@ -220,7 +220,9 @@ describe("marketplaces section", () => {
     const message = "Etsy generally requires vintage (20+ years), handmade or craft supplies. If it is vintage or handmade, set When made.";
     const html = render({}, {}, { etsyEligible: false, etsyReady: true, selected: "etsy",
       preflight: { marketplaces: { etsy: { ready: false, gaps: [{ field: "etsy_specifics.when_made", message, blocking: true }] } } } });
-    expect(row(html, "Etsy")).toContain("Review eligibility");
+    // Short enough for the narrow rail, and named in full by the row's tooltip.
+    expect(row(html, "Etsy")).toContain(">May not qualify<");
+    expect(row(html, "Etsy")).toContain('title="May not qualify"');
     expect(html.split("Etsy generally requires").length - 1).toBe(1);
     expect(enabledButton(html, "List…")).toBe(true);
   });
@@ -400,6 +402,19 @@ describe("marketplaces section", () => {
     expect(render({}, sold)).not.toContain("List everywhere…");
   });
 
+  it("makes List everywhere the rail's one primary action and keeps Delist everywhere apart from it, last", () => {
+    // Two live listings and three ready marketplaces: both listing-wide actions show.
+    const html = render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } }, { etsyReady: true });
+    const button = (label: string) => html.match(new RegExp(`<button[^>]*>(?:(?!</button>).)*${label}(?:(?!</button>).)*</button>`))?.[0] ?? "";
+    expect(button("List everywhere…")).toContain("bg-primary");
+    for (const label of ["Record a sale…", "Delist everywhere…"]) expect(button(label)).not.toContain("bg-primary");
+    const order = ["List everywhere…", "Record a sale…", "Delist everywhere…"].map((label) => html.indexOf(label));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // A divider stands between the other actions and Delist.
+    const between = html.slice(html.indexOf("Record a sale…"), html.indexOf("Delist everywhere…"));
+    expect(between).toMatch(/<div class="[^"]*border-t/);
+  });
+
   it("says on every tab not listed yet whether it is ready, or how many fields the server says it needs", () => {
     const html = render({}, { mercari: live }, { preflight: { marketplaces: {
       ebay: { ready: false, gaps: [
@@ -433,7 +448,8 @@ describe("marketplaces section", () => {
     const sold = listChoice("poshmark", { ...base, status: rowStatus("poshmark", { ...live, sold_here: true }, undefined, "current", true), listable: false });
     const waiting = listChoice("etsy", { ...base, retryIn: 12 });
     expect(ready).toMatchObject({ label: "Ready", tone: "ready", selectable: true });
-    expect(needs).toMatchObject({ label: "Needs 2 fields", tone: "needs", selectable: true, detail: "Size, Price" });
+    expect(needs).toMatchObject({ label: "Needs 2 fields", tone: "needs", selectable: true });
+    expect(needs.missing?.map((item) => item.label)).toEqual(["Size", "Price"]);
     expect(listed).toMatchObject({ label: "Listed", selectable: false });
     expect(sold).toMatchObject({ label: "Sold", selectable: false });
     expect(waiting).toMatchObject({ label: "Retry in 12s", selectable: false });

@@ -23,6 +23,8 @@ export interface Promotion {
   state: PromotionState;
   note: string | null;
   marketplace_message: string | null;
+  confirmation?: "request_accepted" | "job_completed" | "recipients_created" | "legacy_unverified" | null;
+  recipient_count?: number | null;
   automation_id?: string | null;
   created_at: string | null;
   expires_at: string | null;

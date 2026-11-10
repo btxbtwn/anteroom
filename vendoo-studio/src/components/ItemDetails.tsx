@@ -8,7 +8,7 @@ import { GARMENTS, type Garment } from "./garmentMeasurements";
 import { applyReading, readingSuggestion } from "../measurementReading";
 import { useWorkspaceRuntime } from "../app/runtime";
 import type { MeasurementReadResult } from "../api/types";
-import { DEFAULTS, applyDetailsPatch, changedDetails, parseNotes, type ItemDetailsData } from "./itemDetailsData";
+import { DEFAULTS, applyDetailsPatch, changedDetails, parseNotes, savedGarment, type ItemDetailsData } from "./itemDetailsData";
 import { itemDetailsEdits } from "../api/itemDetailsEdits";
 import { XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -22,6 +22,10 @@ import { toggleVariants } from "./ui/toggle";
 
 interface Props {
   convId: string;
+  /** Measurements sit with the item's details; notes and labels close the form. */
+  part: "measurements" | "notes";
+  /** The listing's category and title, which pick the garment until the seller chooses one. */
+  garmentHint?: { category?: string; title?: string };
 }
 
 type TextKey = Exclude<keyof ItemDetailsData, "garment" | "measurements">;
@@ -53,7 +57,7 @@ function clearLegacyStoredLabels() {
   }
 }
 
-export function ItemDetails({ convId }: Props) {
+export function ItemDetails({ convId, part, garmentHint }: Props) {
   const queryClient = useQueryClient();
   const runtime = useWorkspaceRuntime();
   const edits = useMemo(() => itemDetailsEdits(queryClient, convId), [queryClient, convId]);
@@ -91,7 +95,7 @@ export function ItemDetails({ convId }: Props) {
     : DEFAULTS.packageDimensions;
 
   useEffect(() => {
-    if (!uiPrefs || migratedLabelsRef.current) return;
+    if (part !== "notes" || !uiPrefs || migratedLabelsRef.current) return;
     migratedLabelsRef.current = true;
     const legacy = readLegacyStoredLabels();
     if (!legacy.length) return;
@@ -108,7 +112,7 @@ export function ItemDetails({ convId }: Props) {
       .catch(() => {
         migratedLabelsRef.current = false;
       });
-  }, [uiPrefs, queryClient]);
+  }, [part, uiPrefs, queryClient]);
 
   const hiddenLabelKeys = useMemo(
     () => new Set((uiPrefs?.hidden_vendoo_labels || []).map((label) => label.toLowerCase())),
@@ -131,8 +135,14 @@ export function ItemDetails({ convId }: Props) {
     return ordered;
   }, [conversations, uiPrefs?.recent_vendoo_labels, hiddenLabelKeys]);
 
-  const details = useMemo(() => applyDetailsPatch(parseNotes(conv?.notes ?? null, defaultPackageDimensions), editState.patch),
-    [conv?.notes, defaultPackageDimensions, editState.patch]);
+  const category = garmentHint?.category ?? "";
+  const title = garmentHint?.title ?? "";
+  const details = useMemo(() => applyDetailsPatch(
+    parseNotes(conv?.notes ?? null, defaultPackageDimensions, { category, title }), editState.patch),
+  [conv?.notes, defaultPackageDimensions, editState.patch, category, title]);
+  const storedGarment = savedGarment(conv?.notes ?? null);
+  // Both parts share one save queue; each shows the saving state for its own edits.
+  const [editedHere, setEditedHere] = useState(false);
   const detailsRef = useRef<ItemDetailsData>(details);
   useEffect(() => { detailsRef.current = details; }, [details]);
 
@@ -144,16 +154,18 @@ export function ItemDetails({ convId }: Props) {
   }, [convId]);
 
   const save = useCallback((updated: ItemDetailsData) => {
-    const patch = changedDetails(detailsRef.current, updated);
+    const patch = changedDetails(detailsRef.current, updated, storedGarment);
     detailsRef.current = updated;
+    setEditedHere(true);
     edits.change(patch, true);
-  }, [edits]);
+  }, [edits, storedGarment]);
 
   const scheduleSave = useCallback((updated: ItemDetailsData) => {
-    const patch = changedDetails(detailsRef.current, updated);
+    const patch = changedDetails(detailsRef.current, updated, storedGarment);
     detailsRef.current = updated;
+    setEditedHere(true);
     edits.change(patch);
-  }, [edits]);
+  }, [edits, storedGarment]);
 
   const f = (key: TextKey, type = "text") => ({
     type,
@@ -194,7 +206,7 @@ export function ItemDetails({ convId }: Props) {
     setReading(null);
   };
 
-  const { data: boxData } = useQuery({ queryKey: BOXES_QUERY_KEY, queryFn: api.boxes.list });
+  const { data: boxData } = useQuery({ queryKey: BOXES_QUERY_KEY, queryFn: api.boxes.list, enabled: part === "notes" });
   const boxes = boxData?.boxes ?? [];
   const box = boxes.find((row) => row.id === conv?.box_id);
   const chooseBox = async (boxId: string) => {
@@ -256,9 +268,26 @@ export function ItemDetails({ convId }: Props) {
       .finally(() => queryClient.invalidateQueries({ queryKey: ["settings-ui"] }));
   };
 
-  return (
-    <div className="@container relative flex min-w-0 flex-col">
-      <InspectorSection title="Notes & Labels" titleId={`item-section-listing-${convId}`} className="gap-2">
+  const status = <>
+    {saving && editedHere && (
+      <span className="absolute right-0 bottom-0 flex items-center gap-1 text-2xs text-muted-foreground" role="status">
+        <Spinner aria-hidden="true" role={undefined} className="size-3" />
+        Saving…
+      </span>
+    )}
+    {(saveError || (editedHere && editState.error)) && (
+      <span className="flex items-center gap-2 text-destructive-foreground text-xs" role="alert">
+        {saveError || editState.error}
+        {editedHere && editState.error && <Button variant="ghost" size="xs" onClick={edits.retry}>
+          Retry
+        </Button>}
+      </span>
+    )}
+  </>;
+
+  // Each part is a section of the General form, spaced like the sections around it.
+  return part === "notes" ? (
+      <InspectorSection title="Notes & Labels" titleId={`item-section-listing-${convId}`} className="relative gap-3 py-4">
         <div>
           <FieldLabel htmlFor={`item-notes-${convId}`}>Notes</FieldLabel>
           <Textarea
@@ -426,10 +455,11 @@ export function ItemDetails({ convId }: Props) {
             )}
           </div>
         ) : null}
+        {status}
       </InspectorSection>
-
-
+  ) : (
       <InspectorSection
+        className="relative gap-3 py-4"
         title="Measurements (in)"
         titleId={`item-section-measurements-${convId}`}
         actions={
@@ -467,7 +497,6 @@ export function ItemDetails({ convId }: Props) {
                 id={`item-measure-${convId}-${field.key}`}
                 type="number"
                 step="0.25"
-                placeholder={field.placeholder}
                 value={details.measurements[garment.id][field.key] || ""}
                 onChange={(e) => setMeasurement(field.key, e.target.value)}
               />
@@ -517,22 +546,7 @@ export function ItemDetails({ convId }: Props) {
             ) : null}
           </div>
         )}
+        {status}
       </InspectorSection>
-
-      {saving && (
-        <span className="absolute right-0 bottom-0 flex items-center gap-1 text-2xs text-muted-foreground" role="status">
-          <Spinner aria-hidden="true" role={undefined} className="size-3" />
-          Saving…
-        </span>
-      )}
-      {(saveError || editState.error) && (
-        <span className="flex items-center gap-2 text-destructive-foreground text-xs" role="alert">
-          {saveError || editState.error}
-          {editState.error && <Button variant="ghost" size="xs" onClick={edits.retry}>
-            Retry
-          </Button>}
-        </span>
-      )}
-    </div>
   );
 }

@@ -78,14 +78,6 @@
                     "endColumn": 81,
                     "lineCount": 1
                 }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 33,
-                    "endColumn": 54,
-                    "lineCount": 1
-                }
             }
         ],
         "./server/vendoo_studio/services/macos_keychain.py": [

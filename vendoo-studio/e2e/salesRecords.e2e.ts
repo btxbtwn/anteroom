@@ -1,5 +1,8 @@
 import { expect, recordSale, test } from "./fixtures";
 
+// These flows create and amend several sales before exercising the screen.
+test.setTimeout(120_000);
+
 test("sales search, completeness and loss filters update records and exports", async ({ page, request, phone, createConversation }, info) => {
   const prefix = `Filter sale ${info.project.name} ${Date.now()}`;
   for (const [suffix, fees] of [["missing", null], ["loss", 2]] as const) {
@@ -14,6 +17,8 @@ test("sales search, completeness and loss filters update records and exports", a
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Analytics", exact: true }).click();
   } else await page.getByRole("button", { name: "Analytics", exact: true }).click();
+  // Phones keep search and the other filters behind Filters, so the figures come first.
+  if (phone) await page.getByRole("button", { name: "Filters" }).click();
   await page.getByRole("searchbox", { name: "Search sales" }).fill(prefix);
   await expect(page.getByText("1–2 of 2 records · Page 1", { exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "Sales completeness" }).click();
@@ -22,7 +27,10 @@ test("sales search, completeness and loss filters update records and exports", a
   const panel = page.getByRole("tabpanel", { name: "Sales records", exact: true });
   await expect(panel.getByText(`${prefix} loss`, { exact: true })).toBeVisible();
   await expect(panel.getByText(`${prefix} missing`, { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Export sales CSV" })).toHaveAttribute("href", /attention=loss/);
+  const exported = page.waitForRequest(/\/api\/sales-ledger\/export\/sales\.csv\?.*attention=loss/);
+  await page.getByRole("button", { name: "Export CSV" }).click();
+  await page.getByRole("menuitem", { name: "Export sales CSV" }).click();
+  await exported;
   await page.screenshot({ path: info.outputPath("sales-records-dark.png"), fullPage: true });
   await page.evaluate(() => document.documentElement.classList.remove("dark"));
   await page.screenshot({ path: info.outputPath("sales-records-light.png"), fullPage: true });
@@ -90,13 +98,13 @@ test("recorded amounts appear in sales records and missing data marks sold inven
     await page.getByRole("button", { name: "Analytics", exact: true }).click();
   }
   const record = page.getByRole("listitem").filter({ has: page.getByText(title, { exact: true }) });
-  await expect(record.getByText("Missing: fees", { exact: true })).toBeVisible();
+  await expect(record.getByText("Missing fees", { exact: true })).toBeVisible();
   await record.getByRole("button", { name: "Record amounts" }).click();
   await expect(page.getByLabel("Sale price", { exact: true })).toHaveValue("40");
-  await expect(page.getByText("Cost of goods: USD 5, from the item's form.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Cost of goods: $5.00, from the item's form.", { exact: false })).toBeVisible();
   await page.getByLabel("Fees", { exact: true }).fill("8");
   await page.getByRole("button", { name: "Save amounts", exact: true }).click();
-  await expect(record.getByText("Profit: USD 23", { exact: true })).toBeVisible();
+  await expect(record.getByText("Profit: $23.00", { exact: true })).toBeVisible();
   const updated = await (await request.get(`/api/conversations/${id}`)).json();
   expect(updated.missing_sale_data).toEqual([]);
   await page.screenshot({ path: info.outputPath("vendoo-sale-amounts.png") });
@@ -123,16 +131,18 @@ test("historical sales can be corrected entirely in Anteroom", async ({ page, re
     await page.getByRole("button", { name: "Analytics", exact: true }).click();
   }
   await page.getByRole("tab", { name: "Inventory analytics", exact: true }).click();
-  await expect(page.getByText("Track sales performance and find inventory that needs attention.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Inventory today", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Missing sales data", exact: true })).toHaveCount(0);
   await page.getByRole("tab", { name: "Sales records", exact: true }).click();
   await page.getByRole("combobox", { name: "Sales period" }).click();
   await page.getByRole("option", { name: "All time", exact: true }).click();
+  if (phone) await page.getByRole("button", { name: /^Filters/ }).click();
   await page.getByRole("combobox", { name: "Sales completeness" }).click();
   await page.getByRole("option", { name: "Missing sale data", exact: true }).click();
   await page.screenshot({ path: info.outputPath("sales-records-missing.png"), fullPage: true });
   const row = page.getByRole("listitem").filter({ has: page.getByText(title, { exact: true }) });
-  await expect(row.getByText("Profit: USD 23", { exact: true })).toBeVisible();
+  await expect(row.getByText("Profit: $23.00", { exact: true })).toBeVisible();
+  await expect(row.getByText("Missing sale date", { exact: true })).toBeVisible();
   await row.getByRole("button", { name: "Record amounts", exact: true }).click();
   await expect(page.getByLabel("Fees", { exact: true })).toHaveValue("8");
   await expect(page.getByLabel("Sale price", { exact: true })).toHaveValue("40");
@@ -142,8 +152,8 @@ test("historical sales can be corrected entirely in Anteroom", async ({ page, re
   await page.getByRole("button", { name: "Save amounts", exact: true }).click();
   await page.getByRole("combobox", { name: "Sales completeness" }).click();
   await page.getByRole("option", { name: "All records", exact: true }).click();
-  await expect(row.getByText("Profit: USD 22", { exact: true })).toBeVisible();
-  await expect(row.getByText("Missing:", { exact: false })).toHaveCount(0);
+  await expect(row.getByText("Profit: $22.00", { exact: true })).toBeVisible();
+  await expect(row.getByText(/^Missing /)).toHaveCount(0);
   await page.reload();
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();
@@ -151,5 +161,5 @@ test("historical sales can be corrected entirely in Anteroom", async ({ page, re
   } else {
     await page.getByRole("button", { name: "Analytics", exact: true }).click();
   }
-  await expect(row.getByText("Profit: USD 22", { exact: true })).toBeVisible();
+  await expect(row.getByText("Profit: $22.00", { exact: true })).toBeVisible();
 });
