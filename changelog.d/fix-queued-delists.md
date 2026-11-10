@@ -1,1 +1,0 @@
-- Confirmed delists wait in the activity tray while another marketplace action runs, so you can move on to other items.

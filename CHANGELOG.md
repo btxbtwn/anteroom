@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.885 — 2026-11-10
+
+- Confirmed delists wait in the activity tray while another marketplace action runs, so you can move on to other items.
+
 ## 0.1.884 — 2026-11-10
 
 - Anteroom now follows your device's light or dark setting until you pick a theme, and a saved theme no longer flips back to dark while the app loads.
