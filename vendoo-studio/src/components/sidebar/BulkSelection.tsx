@@ -9,9 +9,14 @@ import { RegenerateReviewDialog } from "../RegenerateReviewDialog";
 import type { BulkRegenerate, BulkRegenerateRun } from "../useBulkRegenerate";
 import type { ListingSelection } from "./useListingSelection";
 import { useWorkspaceRuntime } from "../../app/runtime";
+import { ChevronDownIcon } from "lucide-react";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 
-/** The bar under the list while selecting or while a bulk run is going. */
+/** The bar under the list while selecting or while a bulk run is going.
+ *  Like Polaris's bulk actions: the count leads, the common actions sit in
+ *  the bar, the rest wait in More, and only Delete is styled destructive.
+ *  Nothing acts until a listing is selected. */
 export function BulkActionBar({
   bulk,
   selection,
@@ -23,55 +28,27 @@ export function BulkActionBar({
 }) {
   const { features } = useWorkspaceRuntime();
   const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, setEditIds, setCopyIds, setMarketIds, setPromoteIds, setDeleteIds, exitSelecting } = selection;
+  const count = selectedIds.size;
+  const picked = () => eligibleIds.filter((id) => selectedIds.has(id));
+  const none = count === 0;
+  const allPicked = eligibleIds.length > 0 && eligibleIds.every((id) => selectedIds.has(id));
+  const share = features.has("marketplace_actions");
+  const regenerate = features.has("bulk_regenerate");
+  const remove = features.has("bulk_delete");
   return (
     <div
-      className="flex shrink-0 flex-col gap-1.5 border-t border-sidebar-border px-(--sidebar-content-inset) py-2 max-[900px]:sticky max-[900px]:bottom-0 max-[900px]:z-10 max-[900px]:bg-sidebar max-[900px]:pb-[max(8px,env(safe-area-inset-bottom,0px))]"
+      className="flex shrink-0 flex-col gap-2 border-t border-sidebar-border px-(--sidebar-content-inset) py-2 max-[900px]:sticky max-[900px]:bottom-0 max-[900px]:z-10 max-[900px]:bg-sidebar max-[900px]:pb-[max(8px,env(safe-area-inset-bottom,0px))]"
       data-bulk-bar
       role="region"
       aria-label="Bulk listing actions"
     >
-      <p className="min-w-0 px-1 text-xs font-medium leading-snug text-sidebar-foreground">
-        {bulkStatusLabel(bulk.run, selectedIds.size, eligibleIds.length)}
-      </p>
-      <div className="flex flex-wrap gap-1.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          disabled={eligibleIds.length === 0}
-          onClick={toggleSelectAll}
-        >
-          {eligibleIds.length > 0 && eligibleIds.every((id) => selectedIds.has(id)) ? "None" : "All"}
+      <div className="flex min-w-0 items-center gap-1.5">
+        <p role="status" className="min-w-0 flex-1 px-1 text-xs font-medium leading-snug text-sidebar-foreground tabular-nums">
+          {bulkStatusLabel(bulk.run, count, eligibleIds.length)}
+        </p>
+        <Button type="button" variant="ghost" size="xs" disabled={eligibleIds.length === 0} onClick={toggleSelectAll}>
+          {allPicked ? "Select none" : "Select all"}
         </Button>
-        {features.has("bulk_edit") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 300}
-          title="Review local field and label changes for up to 300 listings" onClick={() => setEditIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Edit fields</Button>)}
-        {features.has("bulk_copy") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 300}
-          title="Review separate draft copies of up to 300 selected items" onClick={() => setCopyIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Copy items</Button>)}
-        {features.has("marketplace_actions") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 100}
-          title="Review List, Delist, Relist, Update or Mark as not listed on named marketplaces for up to 100 listings" onClick={() => setMarketIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Marketplaces</Button>)}
-        {features.has("marketplace_actions") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 100}
-          title="Review sharing or offers to likers for up to 100 live listings" onClick={() => setPromoteIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Share / offers</Button>)}
-        {features.has("bulk_delete") && (<Button type="button" variant="outline" size="xs" disabled={selectedIds.size === 0 || selectedIds.size > 300}
-          title="Review deleting up to 300 items from Anteroom. Nothing is delisted." onClick={() => setDeleteIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Delete</Button>)}
-        {features.has("bulk_regenerate") && (<Button
-          type="button"
-          variant="destructive"
-          size="xs"
-          disabled={selection.regenerateIds.length === 0}
-          onClick={() => { void regenerateSelected(); }}
-        >
-          Regenerate
-        </Button>)}
-        {features.has("bulk_markdowns") && (<Button
-          type="button"
-          variant="outline"
-          size="xs"
-          title="Review a lower price for each selected listing. Saves in Anteroom only."
-          disabled={selectedIds.size === 0}
-          onClick={() => setMarkdownIds(eligibleIds.filter((id) => selectedIds.has(id)))}
-        >
-          Mark down
-        </Button>)}
         <Button
           type="button"
           variant="ghost"
@@ -84,6 +61,29 @@ export function BulkActionBar({
         >
           {bulk.running ? (bulk.run?.cancelRequested ? "Finishing…" : "Stop batch") : "Cancel"}
         </Button>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {features.has("marketplace_actions") && (<Button type="button" variant="outline" size="xs" disabled={none || count > 100}
+          title="Review List, Delist, Relist, Update or Mark as not listed on named marketplaces for up to 100 listings" onClick={() => setMarketIds(picked())}>Marketplaces</Button>)}
+        {features.has("bulk_edit") && (<Button type="button" variant="outline" size="xs" disabled={none || count > 300}
+          title="Review local field and label changes for up to 300 listings" onClick={() => setEditIds(picked())}>Edit fields</Button>)}
+        {features.has("bulk_markdowns") && (<Button type="button" variant="outline" size="xs" disabled={none}
+          title="Review a lower price for each selected listing. Saves in Anteroom only." onClick={() => setMarkdownIds(picked())}>Mark down</Button>)}
+        {features.has("bulk_copy") && (<Button type="button" variant="outline" size="xs" disabled={none || count > 300}
+          title="Review separate draft copies of up to 300 selected items" onClick={() => setCopyIds(picked())}>Copy items</Button>)}
+        {(share || regenerate || remove) && (
+          <Menu>
+            <MenuTrigger disabled={none} render={<Button type="button" variant="outline" size="xs" />}>
+              More<ChevronDownIcon aria-hidden />
+            </MenuTrigger>
+            <MenuPopup align="start" side="top" width="content">
+              {share && <MenuItem disabled={count > 100} onClick={() => setPromoteIds(picked())}>Share / offers</MenuItem>}
+              {regenerate && <MenuItem disabled={selection.regenerateIds.length === 0} onClick={() => { void regenerateSelected(); }}>Regenerate…</MenuItem>}
+              {remove && (share || regenerate) && <MenuSeparator />}
+              {remove && <MenuItem variant="destructive" disabled={count > 300} onClick={() => setDeleteIds(picked())}>Delete…</MenuItem>}
+            </MenuPopup>
+          </Menu>
+        )}
       </div>
     </div>
   );

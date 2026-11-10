@@ -52,7 +52,8 @@ import { ThemeSync } from "../components/ThemeSync";
 import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSessionNotice";
 
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
-import { initialOpenListing, openListingReducer } from "./openListing";
+import type { ListingDocument } from "../api/types";
+import { initialOpenListing, openListingReducer, phonePaneOnOpen } from "./openListing";
 import {
   AnalyticsPage, AssistantPage, AutomationsPage, InventoryTablePage, MarketplacesPage, SettingsPage, SourcingPage,
   loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode,
@@ -104,6 +105,8 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<"workspace" | "editor">(runtime.hosted ? "editor" : "workspace");
+  /** A late listing read must not override a newer pane choice. */
+  const paneChoice = useRef(0);
   // A listing link opens the listing itself on phones, with inventory closed.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const phoneInventory = isMobile && activeView === "listings" && mobileSidebarOpen;
@@ -381,9 +384,21 @@ export function App() {
     void prefetchListingReads(queryClient, id);
     dispatchOpenListing({ type: "open", id, tab });
     goListings();
-    setMobilePane(runtime.hosted ? "editor" : "workspace");
+    const row = conversations?.find((item) => item.id === id);
+    const cached = queryClient.getQueryData<ListingDocument>(["listing", id]);
+    const pane = runtime.hosted ? "editor" : phonePaneOnOpen(row, cached);
+    const choice = ++paneChoice.current;
+    setMobilePane(pane);
+    // A draft not read yet may already have copy: once its listing loads, move
+    // to the form, unless the seller picked a tab or another listing first.
+    if (pane === "workspace" && !cached) {
+      void queryClient.fetchQuery({ queryKey: ["listing", id], queryFn: ({ signal }) => api.listings.get(id, { signal }), retry: false })
+        .then((listing) => {
+          if (paneChoice.current === choice && phonePaneOnOpen(row, listing) === "editor") setMobilePane("editor");
+        }, () => {});
+    }
     closeMobileSidebar();
-  }, [goListings, closeMobileSidebar, queryClient, runtime.hosted]);
+  }, [goListings, closeMobileSidebar, queryClient, runtime.hosted, conversations]);
 
   const openSuggestions = () => {
     if (!runtime.features.has("suggestions")) return;
@@ -760,7 +775,7 @@ export function App() {
                   role="tab"
                   aria-selected={mobilePane === "workspace"}
                   className={mobilePane === "workspace" ? "selected" : ""}
-                  onClick={() => setMobilePane("workspace")}
+                  onClick={() => { paneChoice.current++; setMobilePane("workspace"); }}
                 >
                   Chat
                 </button></>}
@@ -769,7 +784,7 @@ export function App() {
                   role="tab"
                   aria-selected={mobilePane === "editor"}
                   className={mobilePane === "editor" ? "selected" : ""}
-                  onClick={() => setMobilePane("editor")}
+                  onClick={() => { paneChoice.current++; setMobilePane("editor"); }}
                 >
                   Listing
                 </button>
