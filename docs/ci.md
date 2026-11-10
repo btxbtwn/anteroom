@@ -37,4 +37,7 @@ The repository rules require passing `CI`, without requiring the PR branch to
 be up to date with `main`. Update a PR for actual conflicts, failed checks or
 a needed dependency, not solely because another PR merged. A passing PR can
 still interact badly with another change; the checks on `main` verify the
-merged result. The automatic branch-update workflow is disabled.
+merged result. Pushes to `main` never cancel each other's CI, and the hosted
+deploy of a `Release Anteroom` commit waits for CI to pass on the merge before
+it (`.github/scripts/wait-for-tested-code.py`), so a broken combination stops
+before production. The automatic branch-update workflow is disabled.

@@ -8,8 +8,9 @@ Monorepo combining the `list-this` skill family, the Bridge Chrome extension, an
 patch bump per merged PR with a `changelog.d/` note), the macOS release build,
 an iPhone TestFlight upload when `anteroom-ios/` changed, and `deploy-hosted.yml`,
 which runs `alembic upgrade head` on the production database and deploys the
-hosted API to Fly.io. Agents open PRs and get CI green; they merge only when the
-seller asks.
+hosted API to Fly.io. Agents queue every PR they open for auto-merge
+(`gh pr merge <n> --auto --merge`) right after opening it, then stay with it
+until CI is green and it merges. GitHub merges only a PR whose CI passed.
 
 **Invariant:** Automation must never publish listings. Generation, category
 resolution and draft creation run unattended and stop at a saved draft.
@@ -126,8 +127,8 @@ Every bug fix, feature and refactor follows the same loop. Component details
    changed, browser tests included (`--fast` skips those while iterating). For
    a visible change, look at it in the sandbox at desktop and phone sizes,
    put screenshots in the PR and show them to the seller in your reply.
-6. **Open the PR** (see **Pull requests** below) and stay with it until CI is
-   green.
+6. **Open the PR and queue it** with `gh pr merge <n> --auto --merge` (see
+   **Pull requests** below). Stay with it until CI is green and it merges.
 
 The type check in `./check.sh` uses CI's locked baseline mode. After fixing a
 recorded type error, regenerate the baseline with `basedpyright --writebaseline`,
@@ -267,11 +268,13 @@ When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduc
 
 `main` requires passing CI but does not require a branch to be up to date.
 Do not update a PR or restart CI solely because another PR merged. Update only
-for real conflicts, failed checks or a needed dependency. When asked to merge
-a ready PR, use `gh pr merge <n> --auto --merge`; GitHub merges it when required
-checks pass. Do not automatically update other open PRs. Keep merge commits:
-release notes are grouped by them. CI on `main` still checks the merged result
-for interactions between independently tested PRs.
+for real conflicts, failed checks or a needed dependency. Queue every PR with
+`gh pr merge <n> --auto --merge` as soon as it is open; GitHub merges it when
+required checks pass. Do not automatically update other open PRs. Keep merge
+commits: release notes are grouped by them. CI on `main` checks the merged
+result for interactions between independently tested PRs: it runs every push
+to completion, and the hosted deploy waits for it to pass on the merge it
+ships. Never turn off the required `CI` check.
 
 CI job selection and dependency-audit scheduling are documented in
 [docs/ci.md](docs/ci.md). Keep `check.sh` and CI on the shared selector; preserve

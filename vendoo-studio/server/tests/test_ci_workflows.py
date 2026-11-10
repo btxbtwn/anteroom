@@ -137,3 +137,45 @@ def test_local_check_driver_uses_selected_groups(
     assert ("-m pytest" in invoked) == backend
     assert ("npm run e2e" in invoked) == browser
     assert ("-m pip_audit" in invoked) == audit
+
+
+def test_pushes_to_main_never_cancel_each_others_ci() -> None:
+    concurrency = workflow("ci.yml")["concurrency"]
+    assert "github.sha" in concurrency["group"]
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+
+
+def test_deploy_builds_and_waits_for_tested_code_before_migrating() -> None:
+    steps = [step.get("name", step.get("uses", "")) for step in workflow("deploy-hosted.yml")["jobs"]["deploy"]["steps"]]
+    wait = steps.index("Wait for CI on the code being shipped")
+    build = steps.index("Build the image")
+    migrate = steps.index("Apply pending migrations")
+    deploy = steps.index("Deploy to Fly.io")
+    assert wait < build < migrate < deploy
+
+
+def _load_gate():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("wait_for_tested_code", ROOT / ".github" / "scripts" / "wait-for-tested-code.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_release_commits_resolve_to_the_merge_they_ship(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def commit(message: str) -> str:
+        subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", message], cwd=tmp_path, check=True)
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    commit("Release Anteroom 0.1.1")
+    merge = commit("Merge pull request #1 from x/y")
+    release = commit("Release Anteroom 0.1.2")
+    monkeypatch.chdir(tmp_path)
+    gate = _load_gate()
+    assert gate.code_commit(release) == merge
+    assert gate.code_commit(merge) == merge
