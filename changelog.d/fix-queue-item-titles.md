@@ -1,0 +1,1 @@
+- Show item names in the queue tray when marketplace jobs have no shared title.
