@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.898 — 2026-11-10
+
+- Add a public privacy policy page at myanteroom.com/privacy for the Chrome Web Store listing.
+
 ## 0.1.897 — 2026-11-10
 
 - Marketplace error emails include safe action timing, retry-safety facts and selected offer or Smart Sell inputs to help diagnose refusals without exposing listing contents.
