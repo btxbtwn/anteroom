@@ -1,1 +1,0 @@
-- Include connection checkout locations and hold times in hosted database timeout emails, and show the database failure behind readiness errors.
