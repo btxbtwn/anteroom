@@ -712,7 +712,33 @@ struct PromotionActivity: Decodable, Sendable {
         let offerPrice: String?
         let state: String
         let note: String?
-        enum CodingKeys: String, CodingKey { case id, action, title, state, note, listingID = "listing_id", offerPrice = "offer_price" }
+        let confirmation: String?
+        let recipientCount: Int?
+        enum CodingKeys: String, CodingKey {
+            case id, action, title, state, note, confirmation
+            case listingID = "listing_id", offerPrice = "offer_price", recipientCount = "recipient_count"
+        }
+
+        var resultLabel: String {
+            switch state {
+            case "done":
+                if action == "share" { return "Share completed" }
+                switch confirmation {
+                case "recipients_created" where (recipientCount ?? 0) > 0:
+                    let count = recipientCount ?? 0
+                    return "Offer created for \(count) \(count == 1 ? "buyer" : "buyers")"
+                case "request_accepted": return "Request accepted · delivery unverified"
+                case "job_completed": return "Offer job completed · buyer count unknown"
+                default: return "Completed · delivery unverified"
+                }
+            case "unknown": return "Result not confirmed"
+            case "skipped": return "Skipped"
+            case "failed": return "Failed"
+            case "checked": return "Manually checked"
+            case "sending": return "Awaiting marketplace result"
+            default: return "Result pending"
+            }
+        }
     }
     let runs: [PromotionAutomation.Run]
     let sends: [Send]
@@ -934,8 +960,8 @@ struct AutomationRowModel: Equatable, Sendable {
         let scope = row.scope == "all" ? "all live listings" : "\(count) chosen listing\(count == 1 ? "" : "s")"
         let when = row.action == "share"
             ? "Every day \(row.times.map(AutomationFormat.clockLabel).joined(separator: ", ")) · \(scope)"
-            : "New likers on \(market(row.marketplace)) · \(row.discountPercent ?? 0)% off \(scope)"
-        self.init(name: row.name, type: row.action == "share" ? "\(market(row.marketplace)) sharing" : "Offers to likers",
+            : "\(row.discountPercent ?? 0)% off · \(scope) · new likers"
+        self.init(name: row.name, type: row.action == "share" ? "\(market(row.marketplace)) sharing" : "\(market(row.marketplace)) offers",
                   when: when, lastRun: AutomationFormat.runTime(row.lastRun?.startedAt, timezone: timezone),
                   nextRun: row.enabled ? AutomationFormat.runTime(row.nextRunAt, timezone: timezone) : "—", on: row.enabled,
                   note: row.enabled ? "" : row.pausedReason ?? (row.available ? "" : "\(market(row.marketplace)) offers are not available in Anteroom yet"))

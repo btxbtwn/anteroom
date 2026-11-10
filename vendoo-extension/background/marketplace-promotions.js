@@ -16,9 +16,26 @@ const POSHMARK_SHARE_GAP_MS = 4000;
 const POSHMARK_SHARE_GAP_MAX_MS = 30000;
 const POSHMARK_SHARE_JITTER_MS = 3000;
 const POSHMARK_LAST_SHARE_KEY = 'poshmark_last_share_at';
+const promotionSettlements = new Map();
 
 function promotionKey(actionId) {
   return `promotion_${actionId}`;
+}
+
+// Result checks and the original polling call can finish concurrently. Keep a
+// confirmed completion monotonic even if the older call later times out.
+async function settlePromotionJournal(key, result) {
+  const previous = promotionSettlements.get(key) || Promise.resolve();
+  const pending = previous.catch(() => {}).then(async () => {
+    const stored = (await chrome.storage.local.get(key))[key];
+    if (stored?.finished && stored.result?.ok === true && stored.result.state === 'done') return stored;
+    const settled = { ...stored, finished: true, at: Date.now(), result };
+    await chrome.storage.local.set({ [key]: settled });
+    return settled;
+  });
+  promotionSettlements.set(key, pending);
+  try { return await pending; }
+  finally { if (promotionSettlements.get(key) === pending) promotionSettlements.delete(key); }
 }
 
 function poshmarkCents(amount) {
@@ -121,6 +138,9 @@ async function offerPoshmark(payload, deadline) {
   if (offer > poshmarkOfferCents(Number(payload.price_cents), rules.minimum)) {
     throw marketplaceError(`Poshmark needs offers to likers at least ${rules.minimum}% below the price. Review the offer again.`);
   }
+  if (offer < poshmarkOfferCents(Number(payload.price_cents), rules.maximum)) {
+    throw marketplaceError(`Poshmark needs offers no more than ${rules.maximum}% below the price. Review the offer again.`);
+  }
   const body = { offer_amount: { val: String(offer / 100), currency_code: 'USD' }, offer_api_version: 3 };
   // No extra discount keeps the listing's own shipping discount, as Poshmark's
   // offer form does; leaving it out makes Poshmark refuse the offer.
@@ -130,7 +150,9 @@ async function offerPoshmark(payload, deadline) {
     body.seller_shipping_discount = { id: String(discount) };
   }
   await client.call('POST', `/vm-rest/posts/${payload.listing_id}/likes/users/offers`, body, { step: 'offer', what: 'the offer to likers' });
-  return { ok: true, state: 'done', recipient_count: Number(post.like_count) || 0 };
+  // A successful request is not a receipt for every liker: Poshmark may
+  // exclude buyers based on prior offers. Never invent a delivered count.
+  return { ok: true, state: 'done', confirmation: 'request_accepted' };
 }
 
 // Mercari's and Depop's offers to likers. Their rules come from their help
@@ -282,7 +304,7 @@ async function offerMercari(payload, deadline) {
     throw marketplaceError('Mercari did not confirm the offer.', { code: 'uncertain', rejected: false });
   }
   if (created === 0) throw marketplaceError('Mercari sent this offer to no one. Its likers may already have an offer.');
-  return { ok: true, state: 'done', recipient_count: created };
+  return { ok: true, state: 'done', confirmation: 'recipients_created', recipient_count: created };
 }
 
 // All bulk-offer replies are JSON, including the job ID and status.
@@ -393,10 +415,15 @@ async function offerDepop(payload, deadline) {
   try {
     const id = data?.job_id;
     if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw depopOfferDrift('offer job');
+    // Persist before polling so a worker restart can resume GETs, never POST.
+    const key = promotionKey(payload.action_id);
+    const stored = (await chrome.storage.local.get(key))[key];
+    await chrome.storage.local.set({ [key]: { ...stored, depop_job: { id, product_id: String(state.product.id),
+      account_id: String(state.product.user_id ?? state.product.seller?.id ?? state.product.user?.id) } } });
     while (Date.now() < deadline) {
       const { data: job } = await depopOfferCall('GET', requests.job.path(state.product, id), deadline, 'offer-status');
       // The web client treats SUCCESS as completion, but exposes no delivered count.
-      if (job?.status === 'SUCCESS') return { ok: true, state: 'done' };
+      if (job?.status === 'SUCCESS') return { ok: true, state: 'done', confirmation: 'job_completed' };
       if (!['QUEUED', 'PROCESSING'].includes(job?.status)) throw depopOfferDrift('offer job status');
       await marketplaceSleep(1000);
     }
@@ -446,7 +473,7 @@ async function runMarketplacePromotion(payload) {
 async function handleMarketplacePromotion(msg, respond = result => sendBrowserResult(msg, result)) {
   const payload = msg.payload || {};
   if (msg.type === 'marketplace.promotion_result') {
-    const stored = (await chrome.storage.local.get(promotionKey(payload.action_id)))[promotionKey(payload.action_id)];
+    const stored = await reconcilePromotionResult(payload.action_id);
     respond(stored?.finished ? { finished: true, result: stored.result } : { finished: false, known: Boolean(stored) });
     return;
   }
@@ -471,7 +498,28 @@ async function handleMarketplacePromotion(msg, respond = result => sendBrowserRe
     }
     await chrome.storage.local.set({ [key]: { finished: false, at: Date.now(), marketplace: payload.marketplace, action: payload.action } });
     const result = await runMarketplacePromotion(payload);
-    await chrome.storage.local.set({ [key]: { finished: true, at: Date.now(), result } });
-    respond(result);
+    const settled = await settlePromotionJournal(key, result);
+    respond(settled.result);
   } finally { releaseNativeOperation(operation); }
+}
+
+// A result check may reconcile an existing Depop job, but can never create an
+// offer. An unresolved/malformed/refused job retains the original no-resend gate.
+async function reconcilePromotionResult(actionId) {
+  const key = promotionKey(actionId);
+  const stored = (await chrome.storage.local.get(key))[key];
+  const job = stored?.depop_job;
+  if (stored?.marketplace !== 'depop' || stored.action !== 'offer' || !job || stored.result?.ok === true
+      || !/^[a-zA-Z0-9_-]{1,128}$/.test(String(job.id || '')) || !/^\d{1,15}$/.test(String(job.product_id || ''))
+      || !/^\d{1,15}$/.test(String(job.account_id || ''))) return stored;
+  try {
+    const deadline = Date.now() + 15000;
+    const { data: me } = await depopOfferCall('GET', '/presentation/api/v1/users/me/', deadline, 'account');
+    if (String(me?.id) !== job.account_id) return (await chrome.storage.local.get(key))[key];
+    const { data } = await depopOfferCall('GET', PENDING_OFFER_REQUESTS.depop.job.path({ id: job.product_id }, job.id), deadline, 'offer-status');
+    if (data?.status !== 'SUCCESS') return (await chrome.storage.local.get(key))[key];
+    return await settlePromotionJournal(key, { ok: true, state: 'done', confirmation: 'job_completed' });
+  } catch {
+    return (await chrome.storage.local.get(key))[key];
+  }
 }

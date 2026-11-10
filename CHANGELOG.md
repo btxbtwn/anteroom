@@ -6,6 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.878 — 2026-11-10
+
+- Opening a listing that already has its copy no longer offers Generate, which would overwrite it: chat invites questions and edits, Regenerate asks first, and on a phone the listing opens on its form.
+- List everywhere is the editor's main button; Delist everywhere sits apart from it at the bottom.
+- List everywhere names each missing field in full, and clicking one opens that field on its marketplace's form.
+- In Select mode, actions stay off until you pick a listing, Delete is the only red action, and the less common ones sit under More.
+
+## 0.1.877 — 2026-11-10
+
+- Keep chat from showing a loading indicator during listing actions or opening automatically when empty.
+
+## 0.1.876 — 2026-11-10
+
+- See whether an offer request was accepted, a Depop batch completed, or Mercari confirmed recipient offers, without mistaking likes for delivered offers.
+- Check interrupted Depop jobs without sending them again, and check every listing fairly without changing price floors or repeat-offer safeguards.
+
 ## 0.1.875 — 2026-11-10
 
 - Stopping a hosted draft no longer reports rejected cleanup saves as crashes. Workers still cannot save after losing ownership of a draft.

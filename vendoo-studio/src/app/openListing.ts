@@ -1,4 +1,6 @@
 import type { ListingReviewTab } from "../components/ListingReviewTabs";
+import type { ConversationSummary, ListingDocument } from "../api/types";
+import { isListingJson } from "../components/chat/assistantDisplay";
 
 export interface OpenListing {
   id: string;
@@ -50,4 +52,20 @@ export function listingHref(id: string): string {
 /* Cmd/Ctrl/Shift/Alt or a non-primary button: let the browser handle the link. */
 export function isBrowserLinkClick(event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): boolean {
   return event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+}
+
+/**
+ * The phone pane a listing opens on. A listing that already has copy (live,
+ * sold, priced, or with a saved title and description) opens on its form;
+ * chat's Generate would overwrite that copy. A draft still waiting to be
+ * generated opens on chat, where Generate is the next step.
+ */
+export function phonePaneOnOpen(
+  row: Pick<ConversationSummary, "status" | "price"> | undefined,
+  saved: Pick<ListingDocument, "listing"> | undefined,
+): "workspace" | "editor" {
+  if (row && row.status !== "draft") return "editor";
+  if ((row?.price ?? 0) > 0) return "editor";
+  if (saved?.listing && isListingJson(JSON.stringify(saved.listing))) return "editor";
+  return "workspace";
 }

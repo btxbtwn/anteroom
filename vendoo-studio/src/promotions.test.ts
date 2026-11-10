@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Promotion, PromotionResult } from "./api/promotions";
-import { promotionTasks, runPromotionTasks } from "./promotions";
+import { promotionOutcomeLabel, promotionTasks, runPromotionTasks } from "./promotions";
 
 const row = (id: string, overrides: Partial<Promotion> = {}): Promotion => ({
   id, batch_id: "b", conversation_id: id, marketplace: "poshmark", action: "share", listing_id: "x", title: id, price: "50.00",
@@ -34,5 +34,18 @@ describe("promotion tasks", () => {
     const result = await runPromotionTasks(promotionTasks([row("a"), row("b")], new Set(), {}), perform, () => false, () => {});
     expect(perform).toHaveBeenCalledTimes(1);
     expect(result.map((task) => task.state)).toEqual(["unconfirmed", "stopped"]);
+  });
+});
+
+describe("offer confirmation labels", () => {
+  it.each([
+    ["request_accepted", null, "Request accepted"],
+    ["job_completed", null, "Offer batch completed"],
+    ["recipients_created", 1, "Offers created for 1 buyer"],
+    ["recipients_created", 0, "Delivery not verified"],
+    ["legacy_unverified", null, "Delivery not verified"],
+    [null, null, "Delivery not verified"],
+  ] as const)("describes %s evidence without overstating it", (confirmation, recipient_count, label) => {
+    expect(promotionOutcomeLabel({ state: "done", action: "offer", confirmation, recipient_count })).toBe(label);
   });
 });

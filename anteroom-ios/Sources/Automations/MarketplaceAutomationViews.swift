@@ -504,6 +504,7 @@ struct PromotionEditorView: View {
 
 /// One sharing schedule or offer rule: which listings it covers, their minimums, and what its rounds did.
 struct PromotionDetailsView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let api: AnteroomAPI
     let automation: PromotionAutomation
     let maxDailyCap: Int
@@ -602,35 +603,49 @@ struct PromotionDetailsView: View {
     }
 
     @ViewBuilder private var activitySection: some View {
-        Section("Activity") {
-            ForEach((activity?.sends ?? []).filter { $0.state == "unknown" }) { send in
+        Section {
+            ForEach(activity?.sends ?? []) { send in
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(send.title ?? send.listingID) · \(send.action == "share" ? "share" : "offer $\(send.offerPrice ?? "?")") · not confirmed")
-                        .font(.subheadline)
-                    if let note = send.note { Text(note).font(.caption).foregroundStyle(.secondary) }
-                    HStack {
-                        Button("Check result") { settle(send.id, check: true) }.buttonStyle(.bordered)
-                        Button("I checked it") { settle(send.id, check: false) }.buttonStyle(.borderless)
+                    if let title = send.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                        Text(title).font(.subheadline)
                     }
-                    .font(.caption)
-                    .disabled(working != nil)
-                }
-            }
-            ForEach((activity?.sends ?? []).filter { $0.state == "skipped" }) { send in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(send.title ?? send.listingID) · skipped").font(.subheadline)
                     Text(send.listingID).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    if let note = send.note { Text(note).font(.caption).foregroundStyle(.secondary) }
+                    if send.action == "offer", let price = send.offerPrice {
+                        Text("Offer: $\(price)").font(.subheadline).monospacedDigit()
+                    }
+                    Text(send.resultLabel).font(.footnote.weight(.medium))
+                    if let note = send.note { Text(note).font(.footnote).foregroundStyle(.secondary) }
+                    if send.state == "unknown" {
+                        let actionLayout = dynamicTypeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                            : AnyLayout(HStackLayout(spacing: 12))
+                        actionLayout {
+                            Button { settle(send.id, check: true) } label: {
+                                Text("Check result").frame(minHeight: 44)
+                            }.buttonStyle(.bordered)
+                            Button { settle(send.id, check: false) } label: {
+                                Text("I checked it").frame(minHeight: 44)
+                            }.buttonStyle(.borderless)
+                        }
+                        .font(.footnote)
+                        .disabled(working != nil)
+                    }
                 }
             }
             ForEach(activity?.runs ?? []) { run in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(AutomationFormat.runTime(run.startedAt, timezone: automation.timezone ?? TimeZone.current.identifier)) · \(run.sent) sent · \(run.skipped) skipped · \(run.failed) not done")
-                        .font(.caption).monospacedDigit()
+                    Text(AutomationFormat.runTime(run.startedAt, timezone: automation.timezone ?? TimeZone.current.identifier))
+                        .font(.subheadline).monospacedDigit()
+                    Text("\(run.sent) actions completed · \(run.skipped) skipped · \(run.failed) not completed")
+                        .font(.footnote).monospacedDigit()
                     if let note = run.note { Text(note).font(.caption).foregroundStyle(.secondary) }
                 }
             }
             if let activity, activity.runs.isEmpty { Text("No rounds yet.").font(.footnote).foregroundStyle(.secondary) }
+        } header: {
+            Text("Activity")
+        } footer: {
+            Text("Completed actions are not a count of buyers reached. Check each offer's result for marketplace confirmation.")
         }
     }
 

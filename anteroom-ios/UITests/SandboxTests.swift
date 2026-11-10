@@ -2,6 +2,20 @@ import UIKit
 import XCTest
 
 @MainActor
+private func openMorePage(_ name: String, app: XCUIApplication) {
+    app.tabBars.buttons["More"].tap()
+    if app.navigationBars[name].isHittable { return }
+    let destination = app.buttons[name].firstMatch
+    if !destination.isHittable {
+        let back = app.navigationBars.buttons["More"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        back.tap()
+    }
+    XCTAssertTrue(destination.waitForExistence(timeout: 10))
+    destination.tap()
+}
+
+@MainActor
 final class SandboxTests: XCTestCase {
     func testCreateAndReopenDraft() {
         continueAfterFailure = false
@@ -159,8 +173,11 @@ final class AppearanceSandboxTests: XCTestCase {
     }
 
     private func openSettings(_ app: XCUIApplication) {
-        let settings = app.tabBars.buttons["Settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 30))
+        let more = app.tabBars.buttons["More"]
+        XCTAssertTrue(more.waitForExistence(timeout: 30))
+        more.tap()
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
         settings.tap()
         XCTAssertTrue(app.buttons["appearance-picker"].waitForExistence(timeout: 10))
     }
@@ -211,7 +228,20 @@ final class DestinationSandboxTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Inventory today"].waitForExistence(timeout: 30))
         keep(app, "Inventory analytics")
 
-        app.tabBars.buttons["Settings"].tap()
+        app.tabBars.buttons["Marketplaces"].tap()
+        let connect = app.buttons["Connect eBay"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 30), "Marketplaces offers to connect eBay")
+        keep(app, "Marketplaces eBay")
+        connect.tap()
+        XCTAssertTrue(app.switches.matching(NSPredicate(format: "label BEGINSWITH 'Buyer messages'")).firstMatch.waitForExistence(timeout: 10),
+                      "The connection sheet lists the tools to authorize")
+        keep(app, "eBay connection")
+        app.buttons["Close"].tap()
+
+        app.tabBars.buttons["More"].tap()
+        let settings = app.buttons["Settings"].firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
 
         let listings = app.buttons["Listings"].firstMatch
         XCTAssertTrue(listings.waitForExistence(timeout: 10))
@@ -242,7 +272,7 @@ final class AccountDeletionSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        app.tabBars.buttons["Settings"].tap()
+        openMorePage("Settings", app: app)
         let delete = app.buttons["delete-account"]
         for _ in 0..<4 where !delete.isHittable { app.swipeUp() }
         XCTAssertTrue(delete.waitForExistence(timeout: 15))
@@ -379,6 +409,96 @@ final class EbayFormSandboxTests: XCTestCase {
         XCTAssertTrue(app.buttons["Men"].firstMatch.waitForExistence(timeout: 10), "Categories open one level at a time")
         keep(app, "eBay categories")
         app.buttons["Cancel"].firstMatch.tap()
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
+/// Actual automation views with sandbox-only terminal history. These tests
+/// never toggle a rule, send an offer, or check a live marketplace result.
+@MainActor
+final class AutomationOffersSandboxTests: XCTestCase {
+    func testOfferOverviewAndEvidence() {
+        reviewOffers(accessibilityText: false)
+    }
+
+    func testOfferOverviewAndEvidenceWithAccessibilityText() {
+        reviewOffers(accessibilityText: true)
+    }
+
+    private func reviewOffers(accessibilityText: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        if accessibilityText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName",
+                                    UIContentSizeCategory.accessibilityExtraExtraExtraLarge.rawValue]
+        }
+        launchSandbox(app)
+        openMorePage("Automations", app: app)
+        XCTAssertTrue(app.navigationBars["Automations"].waitForExistence(timeout: 15))
+
+        let menu = app.buttons["More for Likers get 10% off"]
+        reveal(menu, app: app)
+        let size = accessibilityText ? "Accessibility text" : "Default text"
+        keep(app, "Offer automation overview - \(size)")
+        menu.tap()
+        let details = app.buttons["Listings and activity"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        details.tap()
+        XCTAssertTrue(app.navigationBars["Likers get 10% off"].waitForExistence(timeout: 15))
+
+        let accepted = app.staticTexts["Request accepted · delivery unverified"]
+        reveal(accepted, app: app)
+        XCTAssertTrue(app.staticTexts["sandbox-offer-1"].exists, "The sample listing ID remains visible to accessibility")
+        keep(app, "Accepted offer evidence - \(size)")
+
+        let legacy = app.staticTexts["Completed · delivery unverified"]
+        reveal(legacy, app: app)
+        XCTAssertTrue(app.staticTexts["sandbox-offer-2"].exists)
+        keep(app, "Legacy offer evidence - \(size)")
+
+        let totals = app.staticTexts["2 actions completed · 0 skipped · 0 not completed"]
+        reveal(totals, app: app)
+        keep(app, "Offer action totals - \(size)")
+        app.navigationBars["Likers get 10% off"].buttons["Done"].tap()
+        XCTAssertTrue(app.navigationBars["Automations"].waitForExistence(timeout: 10), "Done returns to the overview")
+    }
+
+    private func reveal(_ element: XCUIElement, app: XCUIApplication) {
+        // Hittable can mean only one line is onscreen. Screenshots need the
+        // whole label, especially the multiline totals at accessibility sizes.
+        var viewport = app.frame.insetBy(dx: 8, dy: 8)
+        let navigationBar = app.navigationBars.firstMatch
+        if navigationBar.exists {
+            let top = navigationBar.frame.maxY + 8
+            viewport.size.height -= top - viewport.minY
+            viewport.origin.y = top
+        }
+        let tabBar = app.tabBars.firstMatch
+        if tabBar.exists, tabBar.isHittable {
+            viewport.size.height = min(viewport.maxY, tabBar.frame.minY - 8) - viewport.minY
+        }
+        for _ in 0..<20 {
+            if element.waitForExistence(timeout: 1), element.isHittable,
+               viewport.contains(element.frame) { return }
+            // Small drags avoid skipping a tall label. Reverse only when the
+            // target has moved above the unobscured content area.
+            let scrollDown = element.exists && !element.frame.isEmpty
+                && element.frame.minY < viewport.minY
+            let startY = scrollDown ? 0.45 : 0.75
+            let endY = scrollDown ? 0.70 : 0.50
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+                .press(forDuration: 0.05, thenDragTo:
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY)))
+        }
+        XCTAssertTrue(element.isHittable && viewport.contains(element.frame),
+                      "Expected offer content must be fully visible without horizontal scrolling")
     }
 
     private func keep(_ app: XCUIApplication, _ name: String) {
@@ -527,10 +647,10 @@ final class PolishScreenshotTests: XCTestCase {
             app.buttons["Inventory analytics"].tap()
             XCTAssertTrue(app.staticTexts["Median days to sell"].waitForExistence(timeout: 30))
             keep(app, "\(theme): Inventory analytics")
-            app.tabBars.buttons["Automations"].tap()
+            openMorePage("Automations", app: app)
             _ = app.staticTexts["Your automations"].waitForExistence(timeout: 30)
             keep(app, "\(theme): Automations")
-            app.tabBars.buttons["Settings"].tap()
+            openMorePage("Settings", app: app)
             XCTAssertTrue(app.staticTexts["About"].waitForExistence(timeout: 10) || app.buttons["What's new"].exists)
             keep(app, "\(theme): Settings")
         }
@@ -545,7 +665,7 @@ final class PolishScreenshotTests: XCTestCase {
     }
 
     private func choose(_ theme: String, _ app: XCUIApplication) {
-        app.tabBars.buttons["Settings"].tap()
+        openMorePage("Settings", app: app)
         let picker = app.buttons["appearance-picker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 15))
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: picker)

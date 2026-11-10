@@ -88,6 +88,7 @@ def out(row: ListingPromotion) -> dict:
         "action": row.action, "listing_id": row.listing_id, "title": row.title, "price": _money(row.price_cents),
         "offer_price": _money(row.offer_price_cents), "floor": _money(row.floor_cents), "discount_percent": row.discount_percent,
         "like_count": row.like_count, "shipping_options": row.shipping_options or [],
+        "confirmation": row.confirmation, "recipient_count": row.recipient_count,
         "shipping_discount_id": row.shipping_discount_id, "shipping_discount_label": row.shipping_discount_label,
         "state": row.state, "note": row.note, "marketplace_message": row.marketplace_message,
         "automation_id": row.automation_id, "created_at": _iso(row.created_at), "expires_at": _iso(row.expires_at), "finished_at": _iso(row.finished_at),
@@ -130,7 +131,7 @@ def blocking(db: Session, marketplace: str, listing_id: str, action: str, *, new
 
 
 def likes_at_last_offer(db: Session, marketplace: str, listing_id: str) -> int | None:
-    """How many likers the last confirmed offer on this listing reached."""
+    """Pre-send like snapshot for the last completed action, not delivered offers."""
     row = db.query(ListingPromotion).filter_by(marketplace=marketplace, listing_id=listing_id, action="offer", state="done").order_by(
         ListingPromotion.sent_at.desc()).first()
     return row.like_count if row else None
@@ -508,10 +509,30 @@ def _settle(row: ListingPromotion, result: dict | None) -> None:
         row.state, row.note = "unknown", UNKNOWN_NOTE
     elif result.get("ok") is True and result.get("state") == "done":
         row.state = "done"
-        if row.action != "share":
-            assert row.offer_price_cents is not None
-        row.note = "Shared to your followers." if row.action == "share" else (
-            f"Offer of ${dollars(row.offer_price_cents)} sent to likers.")
+        if row.action == "share":
+            row.note = "Shared to your followers."
+            return
+        assert row.offer_price_cents is not None
+        price = dollars(row.offer_price_cents)
+        # Bridge <0.2.60 transition ends 2027-02-08: after that, require explicit
+        # confirmation for new replies. Keep legacy_unverified for historical
+        # rows. Until then, a missing receipt never becomes a delivery claim;
+        # retain the done gate so it cannot trigger a resend.
+        row.confirmation, row.recipient_count = "legacy_unverified", None
+        row.note = f"Chrome reported completion of the ${price} offer. Recipient delivery was not verified."
+        if row.marketplace == "poshmark" and result.get("confirmation") == "request_accepted":
+            row.confirmation = "request_accepted"
+            row.note = f"Poshmark accepted the ${price} offer request. Recipient delivery was not verified."
+        elif row.marketplace == "depop" and result.get("confirmation") == "job_completed":
+            row.confirmation = "job_completed"
+            row.note = f"Depop completed the ${price} bulk-offer job. The recipient count was not provided."
+        elif row.marketplace == "mercari" and result.get("confirmation") == "recipients_created":
+            count = result.get("recipient_count")
+            if type(count) is int and count > 0:
+                row.confirmation, row.recipient_count = "recipients_created", count
+                row.note = f"Mercari confirmed {count} recipient offers created at ${price}."
+            else:
+                row.state, row.note = "unknown", UNKNOWN_NOTE
     elif result.get("safe_to_retry") is True:
         row.state = "failed"
         row.note = str(result.get("error") or "The marketplace refused this.")[:300]
@@ -544,11 +565,22 @@ def _check_target(db: Session, promotion_id: str) -> tuple[dict | None, str]:
 
 def _record_check(db: Session, promotion_id: str, answer: dict) -> dict:
     row = _get(db, promotion_id)
+    if row.state != "unknown":
+        return out(row)
+    # Check replies can arrive out of order. Stage their changes separately,
+    # then fence the write so a verified completion or manual check wins.
+    staged = ListingPromotion(action=row.action, marketplace=row.marketplace, offer_price_cents=row.offer_price_cents,
+                              state=row.state, note=row.note, marketplace_message=row.marketplace_message,
+                              confirmation=row.confirmation, recipient_count=row.recipient_count, finished_at=row.finished_at)
     if answer.get("finished") and isinstance(answer.get("result"), dict):
-        _settle(row, answer["result"])
+        _settle(staged, answer["result"])
     else:
-        row.note = ("Chrome started this but has no result. " if answer.get("known") else "Chrome has no record of this. ") + UNKNOWN_NOTE
+        staged.note = ("Chrome started this but has no result. " if answer.get("known") else "Chrome has no record of this. ") + UNKNOWN_NOTE
+    db.execute(update(ListingPromotion).where(ListingPromotion.id == promotion_id, ListingPromotion.state == "unknown").values(
+        state=staged.state, note=staged.note, marketplace_message=staged.marketplace_message,
+        confirmation=staged.confirmation, recipient_count=staged.recipient_count, finished_at=staged.finished_at))
     db.commit()
+    db.refresh(row)
     return out(row)
 
 

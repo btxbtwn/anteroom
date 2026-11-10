@@ -55,19 +55,17 @@ struct WorkspaceView: View {
                     BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
                 } label: { Label("Assistant", systemImage: "bubble.left.and.text.bubble.right.fill") }
             }
+            if views.contains("marketplaces") {
+                Tab(value: WorkspaceTab.marketplaces) {
+                    MarketplacesView(api: api)
+                } label: { Label("Marketplaces", systemImage: "storefront.fill") }
+            }
             Tab(value: WorkspaceTab.analytics) {
                 AnalyticsDestination(api: api)
             } label: { Label("Analytics", systemImage: "chart.bar.fill") }
-            if views.contains("automations") {
-                Tab(value: WorkspaceTab.automations) {
-                    AutomationsView(api: api, canApprove: features.contains("marketplace_actions"),
-                                    showsEbayOffers: features.contains("ebay_offers"),
-                                    showsPromotions: features.contains("marketplace_sessions"))
-                } label: { Label("Automations", systemImage: "calendar.badge.clock") }
-            }
-            Tab(value: WorkspaceTab.settings) {
-                SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
-            } label: { Label("Settings", systemImage: "gearshape.fill") }
+            Tab(value: WorkspaceTab.more) {
+                MoreView(api: api, views: views, features: features)
+            } label: { Label("More", systemImage: "ellipsis.circle.fill") }
         }
         // Tabs keep their names and the bar stays full size (HIG, Tab bars):
         // a bar minimized on scroll stayed collapsed after leaving the editor.
@@ -76,7 +74,7 @@ struct WorkspaceView: View {
 }
 
 enum WorkspaceTab: Hashable {
-    case inventory, assistant, analytics, automations, settings
+    case inventory, assistant, marketplaces, analytics, more
 }
 
 extension AppearanceTheme {

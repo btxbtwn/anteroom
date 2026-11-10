@@ -22,6 +22,7 @@ import { useChatServerState } from "./chat/useChatServerState";
 import { useChatStream, useGenerateRecovery } from "./chat/useChatStream";
 import { useLiveChat } from "./chat/useLiveChat";
 import { placeTurnFolds } from "./chat/workLogModel";
+import { RegenerateListingButton } from "./ClearListingButton";
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { Spinner } from "./ui/spinner";
@@ -186,7 +187,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     ? "Upload photos to begin"
     : awaitingSellerAnswers
       ? "Answer the questions above..."
-      : hasMessages
+      : hasMessages || hasListingJson
         ? "Refine the listing..."
         : "Add a note, or generate the listing...";
 
@@ -216,7 +217,23 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
           <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
         ) : null}
 
-        {!isLoading && !hasMessages && !busy && !streamFailed ? (
+        {!isLoading && !hasMessages && !busy && !streamFailed && hasListingJson ? (
+          // The listing already has copy: Generate would overwrite it, so chat
+          // invites questions and edits, and Regenerate asks before it rewrites.
+          <Empty className="py-8">
+            <EmptyHeader>
+              <EmptyTitle>Ask about this listing</EmptyTitle>
+              <EmptyDescription>Ask a question or describe a change, like a shorter title or a new price.</EmptyDescription>
+            </EmptyHeader>
+            {hasPhotos ? (
+              <EmptyContent>
+                <RegenerateListingButton convId={convId} />
+              </EmptyContent>
+            ) : null}
+          </Empty>
+        ) : null}
+
+        {!isLoading && !hasMessages && !busy && !streamFailed && !hasListingJson ? (
           <Empty className="py-8">
             <EmptyHeader>
               <EmptyTitle>Generate a listing</EmptyTitle>

@@ -23,6 +23,36 @@ DISCOUNT = "c" * 24
 URL = f"https://poshmark.com/listing/Vintage-Tee-{POST}"
 
 
+class OfferConfirmationTest(unittest.TestCase):
+    def settle(self, marketplace, **result):
+        row = ListingPromotion(marketplace=marketplace, action="offer", offer_price_cents=4000, like_count=99)
+        listing_promotions._settle(row, {"ok": True, "state": "done", **result})
+        return row
+
+    def test_marketplace_evidence_is_distinct_from_preview_likes(self):
+        cases = [
+            ("poshmark", "request_accepted", None, "Recipient delivery was not verified."),
+            ("depop", "job_completed", None, "The recipient count was not provided."),
+            ("mercari", "recipients_created", 2, "2 recipient offers created"),
+        ]
+        for marketplace, confirmation, count, note in cases:
+            with self.subTest(marketplace=marketplace):
+                row = self.settle(marketplace, confirmation=confirmation, recipient_count=2)
+                self.assertEqual((row.state, row.confirmation, row.recipient_count), ("done", confirmation, count))
+                self.assertIn(note, row.note)
+
+    def test_legacy_or_wrong_marketplace_evidence_never_claims_delivery(self):
+        for evidence in ({}, {"recipient_count": 99}, {"confirmation": "recipients_created", "recipient_count": 99}):
+            row = self.settle("poshmark", **evidence)
+            self.assertEqual((row.state, row.confirmation, row.recipient_count), ("done", "legacy_unverified", None))
+            self.assertIn("not verified", row.note)
+
+    def test_invalid_mercari_receipt_stays_unknown(self):
+        for count in (None, 0, -1, True, "2", 1.5):
+            row = self.settle("mercari", confirmation="recipients_created", recipient_count=count)
+            self.assertEqual((row.state, row.recipient_count), ("unknown", None))
+
+
 class ListingPromotionsTest(unittest.TestCase):
     def setUp(self):
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -101,7 +131,9 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual((row["state"], row["listing_id"], row["offer_price"], row["like_count"]), ("preview", "seller-vintage-tee", "42.50", 4))
         done = self.client.post(f"/api/promotions/{row['id']}/perform", json={"confirm": True}).json()
         self.assertEqual(done["state"], "done")
-        self.assertEqual(done["note"], "Offer of $42.50 sent to likers.")
+        self.assertEqual(done["note"], "Chrome reported completion of the $42.50 offer. Recipient delivery was not verified.")
+        self.assertEqual(done["confirmation"], "legacy_unverified")
+        self.assertIsNone(done["recipient_count"])
         payload = self.calls("marketplace.promote")[0].args[2]
         self.assertEqual((payload["marketplace"], payload["offer_price_cents"], payload["floor_cents"]), ("depop", 4250, 4000))
         self.assertEqual(len(self.calls("marketplace.promote")), 1)
@@ -194,6 +226,16 @@ class ListingPromotionsTest(unittest.TestCase):
         self.bridge.side_effect = None
         self.bridge.return_value = {"finished": True, "result": {"ok": True, "state": "done"}}
         self.assertEqual(self.client.post(f"/api/promotions/{row['id']}/check").json()["state"], "done")
+        stale = {"finished": True, "result": {"ok": False, "safe_to_retry": False, "error_code": "uncertain"}}
+        self.assertEqual(listing_promotions._record_check(self.db, row["id"], stale)["state"], "done")
+
+    def test_late_check_reply_does_not_overwrite_manual_acknowledgment(self):
+        row = self.preview(action="share")
+        self.sent = {"ok": False, "safe_to_retry": False, "error_code": "uncertain"}
+        self.client.post(f"/api/promotions/{row['id']}/perform", json={"confirm": True})
+        self.client.post(f"/api/promotions/{row['id']}/checked", json={"confirm": True})
+        stale = {"finished": True, "result": {"ok": False, "safe_to_retry": False}}
+        self.assertEqual(listing_promotions._record_check(self.db, row["id"], stale)["state"], "checked")
 
     def test_a_refusal_is_failed_and_a_rate_limit_stops_the_batch(self):
         row = self.preview(action="share")

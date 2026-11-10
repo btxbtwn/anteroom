@@ -488,6 +488,48 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.tick()
         self.assertEqual(self.promoted(), [])
 
+    def test_bounded_offer_scans_rotate_skipped_listings_across_sessions(self):
+        saved = self.create({**OFFER, "min_likes": 10})
+        self.enable(saved["id"])
+        checked = []
+        # An unlucky random order used to revisit the same two listings forever.
+        with patch.object(promotion_automations, "OFFER_READS", 2), patch.object(
+                promotion_automations.random, "sample", side_effect=lambda targets, _count: targets):
+            for _ in range(3):
+                self.due(saved["id"])
+                self.bridge.reset_mock()
+                self.tick()
+                checked.append([call.args[2]["listing_id"] for call in self.bridge.call_args_list
+                                if call.args[1] == "marketplace.promotion_check"])
+                engine = self.db.get_bind()
+                self.db.close()
+                self.db = sessionmaker(bind=engine)()
+        posts = sorted(post for _conv, post in self.items)
+        self.assertEqual(checked, [posts[:2], [posts[2], posts[0]], posts[1:]])
+        self.assertEqual(self.db.query(ListingPromotion).filter_by(state="skipped").count(), 6)
+        self.assertEqual(self.db.query(ListingPromotion).filter(ListingPromotion.sent_at.is_not(None)).count(), 0)
+
+    def test_offer_scan_uses_latest_check_for_this_rule_and_marketplace_only(self):
+        saved = self.create(OFFER)
+        other = self.create(OFFER)
+        now = _now()
+        first, second, unseen = [post for _conv, post in self.items]
+        for post, days, rule, marketplace, action in (
+            (first, 4, saved["id"], "poshmark", "offer"),
+            (first, 1, saved["id"], "poshmark", "offer"),
+            (second, 2, saved["id"], "poshmark", "offer"),
+            (unseen, 0, other["id"], "poshmark", "offer"),
+            (unseen, 0, saved["id"], "depop", "offer"),
+            (unseen, 0, saved["id"], "poshmark", "share"),
+        ):
+            self.db.add(ListingPromotion(batch_id="test", listing_id=post, marketplace=marketplace,
+                                         action=action, automation_id=rule, state="skipped",
+                                         created_at=now - timedelta(days=days), expires_at=now))
+        self.db.commit()
+        row = self.db.get(PromotionAutomation, saved["id"])
+        ordered = promotion_automations._order(self.db, row, promotion_automations._covered(self.db, row))
+        self.assertEqual([target[1] for target in ordered], [unseen, second, first])
+
     def test_a_skip_names_the_marketplaces_own_reason(self):
         conv, post = self.items[0]
 

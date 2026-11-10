@@ -99,7 +99,7 @@ struct AutomationTests {
         let share = AutomationRowModel(promotion: promotions.automations[0], name: name)
         precondition(share.type == "Poshmark sharing" && share.when == "Every day 9:00 AM, 8:30 PM · all live listings" && share.on == false)
         let likers = AutomationRowModel(promotion: promotions.automations[1], name: name)
-        precondition(likers.type == "Offers to likers" && likers.when == "New likers on Mercari · 10% off 1 chosen listing")
+        precondition(likers.type == "Mercari offers" && likers.when == "10% off · 1 chosen listing · new likers")
         precondition(likers.note == "Mercari offers are not available in Anteroom yet")
         print("Automation tests passed")
     }
