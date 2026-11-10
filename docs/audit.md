@@ -76,13 +76,18 @@ Every run, in this order:
    it while nothing else heavy runs: under load its 5 to 30 second waits time
    out on different tests each run. Before reporting a failure, rerun it alone
    and compare with the latest iPhone job on `main` (`gh run list --workflow ios.yml --branch main`).
+   If several tests fail at their first step and the UI hierarchy shows the
+   app still on the Assistant tab, the launch helper's tab tap was dropped
+   (fixed by #1417); check that fix is on `main` before reporting them.
 5. Mac app:
    `vendoo-studio/.venv/bin/python vendoo-studio/scripts/smoke-packaged-sandbox.py /Applications/Anteroom.app`.
    This checks the installed release in sandbox mode on a temporary data
    folder. Note its version. The release may be behind `main`; that is expected.
    Before and after, check that
    `~/Library/Application Support/Anteroom/logs/Anteroom.log` was not created
-   or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). Unset
+   or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). The
+   seller's own app may be running and writing that log, so compare its size
+   and time with `stat` and look for sandbox paths in any new lines. Unset
    any leftover `VENDOO_STUDIO_PORT` / `ANTEROOM_SANDBOX` from that run before
    starting `./sandbox.sh --hosted` (hosted defaults to 4320; an inherited
    `4321` makes it fail to bind).
@@ -101,9 +106,11 @@ Every run, in this order:
      a scripted reload skips the unsaved-edits prompt and drops the edit.
      The sandbox's fake model can't answer the marketplace field fill, so
      "The agent returned an unreadable marketplace field response" in the
-     chat is expected there;
+     chat is expected there. Find the New listing button with an exact name:
+     a blank "New Listing" draft's row menu also matches it;
    - hosted web (`./sandbox.sh --hosted`, UI 5175, sign in as
-     `alice@sandbox.test` / `sandbox`);
+     `alice@sandbox.test` / `sandbox`). On a phone a new draft opens on its
+     Listing tab; switch to Chat before staging photos in the composer;
    - iPhone in the Simulator against the hosted sandbox, driven with the T3
      device tools (`device_list`, `device_open`, `device_screenshot`), never
      raw `simctl` input. If `device_list` reports `simctl` missing even when
@@ -135,7 +142,7 @@ list remembers.
 | Day | Area | Where to look |
 |---|---|---|
 | Monday | Listing editor, every marketplace tab (the list is `FORM_ORDER` in `src/components/editorTabs.ts`), category selection, item details, variations. Neither sandbox can load eBay's category fields once a listing has a category (they come from eBay's API), so the eBay tab shows "could not be loaded" there; record eBay item specifics and variations as **not run** until the sandbox seeds them | `src/components/ListingEditor.tsx`, `NativeInventoryEditor.tsx`, `editorTabs.ts`, `anteroom-ios/Sources/Editor/` |
-| Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
+| Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import. Closing any bulk dialog, Cancel included, leaves selection mode, so select again before the next dialog. Hosted web has no bulk Marketplaces button | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
 | Wednesday | Photos: upload, drop, reorder, crop and edit, thumbnails, camera on iPhone, measurements from ruler photos | `src/components/Photo*`, `anteroom-ios/Sources/Photos/` |
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |
 | Friday | Settings, providers, labels, sign-in, sign-up, password reset, account menu, analytics, sales records, mark sold; Mac app first run, backups and restore, migration of a database from the previous release | `src/components/SettingsPage.tsx`, `src/components/settings/`, `src/cloud/`, `anteroom-ios/Sources/Settings/`, `Session/`, `Analytics/`, `services/backups.py` |
