@@ -11,6 +11,7 @@ import httpx
 
 from vendoo_studio.services.ebay_client import TRADING_XML_DECLARATION
 from vendoo_studio.services.marketplace_accounts import SignInRequired, access_token
+from vendoo_studio.services.marketplace_errors import marketplace_call
 
 API_URL = "https://api.ebay.com"
 NS = {"e": "urn:ebay:apis:eBLBaseComponents"}
@@ -47,6 +48,7 @@ def _check_response(response: httpx.Response) -> None:
         raise EbayError("eBay did not accept the request. Check the listing in Seller Hub.")
 
 
+@marketplace_call("ebay")
 async def eligible_items() -> set[str]:
     token = await access_token("ebay")
     ids: set[str] = set()
@@ -68,6 +70,7 @@ async def eligible_items() -> set[str]:
     raise EbayError("There are too many eligible listings to check safely.")
 
 
+@marketplace_call("ebay")
 async def listing_price(listing_id: str) -> int:
     """Read the live fixed price; never calculate offers from a cached Vendoo price."""
     if not listing_id.isdigit():
@@ -107,6 +110,7 @@ async def listing_price(listing_id: str) -> int:
         raise EbayError("eBay returned an unreadable price. Try previewing again.") from exc
 
 
+@marketplace_call("ebay")
 async def send_offer(listing_id: str, price_cents: int, *, token: str) -> int:
     # Authentication must complete before the caller revalidates approval and
     # reserves the send. Refreshing here would allow a pause to be overlooked.
