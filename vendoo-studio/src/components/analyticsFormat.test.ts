@@ -1,5 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { formatChange, formatDays, formatMoney } from "./analyticsFormat";
+import { compactMoney, dayRange, formatChange, formatCurrency, formatDays, formatMoney } from "./analyticsFormat";
+
+describe("formatCurrency", () => {
+  it("always shows cents and the currency symbol", () => {
+    expect(formatCurrency(502)).toBe("$502.00");
+    expect(formatCurrency(279.04)).toBe("$279.04");
+    expect(formatCurrency("7.2")).toBe("$7.20");
+    expect(formatCurrency(-15)).toBe("-$15.00");
+    expect(formatCurrency("10.0001", "EUR")).toBe("€10.00");
+  });
+
+  it("keeps an unknown currency's code and never shows a made-up number", () => {
+    expect(formatCurrency("5", "XYZW")).toBe("XYZW 5.00");
+    expect(formatCurrency(Number.NaN)).toBe("—");
+  });
+});
+
+describe("compactMoney", () => {
+  it("shortens chart labels", () => {
+    expect(compactMoney(163.5)).toBe("$164");
+    expect(compactMoney(1250)).toBe("$1.3K");
+    expect(compactMoney(0.5)).toBe("$0.5");
+    expect(compactMoney(-40)).toBe("-$40");
+  });
+});
+
+describe("dayRange", () => {
+  it("names the year once when both days share it", () => {
+    expect(dayRange("2026-09-10", "2026-10-09")).toBe("Sep 10 – Oct 9, 2026");
+    expect(dayRange("2025-12-20", "2026-01-18")).toBe("Dec 20, 2025 – Jan 18, 2026");
+  });
+});
 
 describe("formatMoney", () => {
   it("drops cents on a whole dollar", () => {

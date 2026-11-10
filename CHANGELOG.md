@@ -6,6 +6,73 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.889 — 2026-11-10
+
+- Keep a completed chat reply from showing a connection error when the connection closes.
+
+## 0.1.888 — 2026-11-10
+
+- When Poshmark refuses a listing because Smart Sell's Lowest Price is too low, Anteroom now says so and offers Edit Lowest Price, instead of a vague "Invalid Input Error".
+- A listing that fails after being delisted now shows the failure and its reason, not just "Delisted".
+
+## 0.1.887 — 2026-11-10
+
+- Show item names in the queue tray when marketplace jobs have no shared title.
+
+## 0.1.886 — 2026-11-10
+
+- Measurements sit beside item details; notes and labels move to the end of the General form.
+- "Ask chat" is now a small chat button beside each field's name. It shows when you point at or tap into the field, so the form is easier to read.
+- Measurement boxes are blank until you fill them, instead of showing sample numbers that looked like real ones.
+- Jeans, pants, shorts and skirts open their measurements on the right type instead of Top.
+- Etsy's status in the marketplace list now fits ("May not qualify"); point at it to read the reason.
+
+## 0.1.885 — 2026-11-10
+
+- Confirmed delists wait in the activity tray while another marketplace action runs, so you can move on to other items.
+
+## 0.1.884 — 2026-11-10
+
+- Anteroom now follows your device's light or dark setting until you pick a theme, and a saved theme no longer flips back to dark while the app loads.
+- The sign-in screen is simpler: no all-caps label, and Sign in is the main button.
+- One ships-from ZIP in Settings → Listings now covers eBay, Mercari and Depop. A ZIP you saved for eBay carries over.
+- Detect sales shows off, with what to do, until the marketplace is connected or signed in; your choice comes back once it is.
+- Saved templates load with a placeholder row and no longer need a Reload button.
+- On phones, settings switches sit at the end of their row.
+- The empty listing pane says what to do next in one line.
+- Sourcing shows an error with Try again when your buy list can't be built, instead of loading forever.
+- Gray labels in light mode are a little darker, so they're easier to read.
+
+## 0.1.883 — 2026-11-10
+
+- Analytics uses the same names on both tabs: Revenue, Profit, Items sold, Median days to sell and Sell-through, with the period shown next to the figures.
+- Amounts on Analytics always show cents and the currency symbol ($68.00, not "USD 68").
+- Analytics says exactly which amounts are missing, such as "shipping you paid (8)", once, with a button to show those sales, instead of a yellow warning on every sale.
+- On a phone, Analytics shows the figures first: period, Filters and Export sit on one row.
+- Analytics no longer repeats its title under the tabs.
+
+## 0.1.882 — 2026-11-10
+
+- Slow responses and price-save timeouts now leave diagnostic reports, even when the price finishes saving.
+
+## 0.1.881 — 2026-11-10
+
+- iPhone: the tab bar shows each tab's name and no longer stays shrunk after you leave a listing.
+- iPhone: Inventory's first tab is now "Open" (everything not sold), as on the web; VoiceOver says "1 listing" instead of "1 listings".
+- iPhone: the Filters menu lists marketplaces as checkmarked rows without blank gaps, and Sort is split into "Sort by" and "Order" so the whole menu fits.
+- iPhone: status text, warnings and the selected inventory tab are easier to read in light mode, and the inventory tabs and rows keep their full words at the largest text sizes.
+- iPhone: on marketplace forms, "Show more", "See title options" and "Add custom item specific" look like links, a choice list that didn't load (such as eBay's policies) shows one message with Retry instead of repeating under every field, and an item listed on a marketplace without a saved category says so.
+- iPhone: Business Assistant answers keep their paragraphs, lists and code blocks.
+- iPhone: Analytics uses the same figure names as Sales records (Revenue, Profit, Items sold, Median days to sell, Sell-through), shows money with cents, and has an easier-to-read chart. Sales records shows figures first, with 7, 30 and 90 day ranges, and Export moved to a menu at the top.
+- iPhone: Settings lists Appearance, Selling and Account before About, with explanations under each group, and Automations say when one waits for your approval and leave out empty "Last run — · Next —" lines.
+
+## 0.1.880 — 2026-11-10
+
+- On a phone, the web app now opens on your inventory list instead of an empty "Select a listing" screen.
+- While your listings load, the sidebar and inventory table show placeholder rows instead of saying you have no listings, and the counts wait until they are known.
+- New listing no longer leaves an empty "New Listing" draft behind: if you leave it without adding a photo or typing anything, it is removed.
+- The "All" tab is now called "Open": it holds your drafts and active listings, and sold listings stay under Sold.
+
 ## 0.1.879 — 2026-11-10
 
 - Listings made with an OpenRouter model finish sooner: Anteroom now asks OpenRouter for the fastest host serving your chosen model, instead of whichever one it picks. Your model and settings stay the same.

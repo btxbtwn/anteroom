@@ -54,7 +54,7 @@ struct ProvidersSettingsView: View {
                                 Spacer()
                                 Text(order?.mimoConfigured == true ? "Key saved" : "Not set")
                                     .font(.footnote)
-                                    .foregroundStyle(order?.mimoConfigured == true ? .green : .secondary)
+                                    .foregroundStyle(order?.mimoConfigured == true ? WorkspaceStyle.success : .secondary)
                             }
                         }
                         ForEach(providers) { provider in
@@ -66,7 +66,7 @@ struct ProvidersSettingsView: View {
                                     Spacer()
                                     Text(provider.configured ? "Key saved" : "Not set")
                                         .font(.footnote)
-                                        .foregroundStyle(provider.configured ? .green : .secondary)
+                                        .foregroundStyle(provider.configured ? WorkspaceStyle.success : .secondary)
                                 }
                             }
                         }
@@ -77,7 +77,7 @@ struct ProvidersSettingsView: View {
                     }
                 }
                 if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                 }
             }
             .listRowBackground(WorkspaceStyle.surface)
@@ -192,10 +192,10 @@ private struct ProviderKeyView: View {
                     modelSection
                 }
                 if let message {
-                    Section { Label(message, systemImage: "checkmark.circle").foregroundStyle(.green) }
+                    Section { Label(message, systemImage: "checkmark.circle").foregroundStyle(WorkspaceStyle.success) }
                 }
                 if let failure {
-                    Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                 }
             }
             .listRowBackground(WorkspaceStyle.surface)
@@ -217,7 +217,7 @@ private struct ProviderKeyView: View {
         Section("Models") {
             if let models {
                 if let error = models.error {
-                    Text(error).font(.footnote).foregroundStyle(.red)
+                    Text(error).font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
                 }
                 if !models.models.isEmpty {
                     Picker("Listing model", selection: Binding(get: { models.listingModel ?? "" }, set: { choose(listing: $0) })) {
@@ -333,8 +333,8 @@ private struct MimoKeyView: View {
                         Button("Remove key", role: .destructive) { confirmRemove = true }.disabled(working)
                     }
                 }
-                if let message { Section { Label(message, systemImage: "checkmark.circle").foregroundStyle(.green) } }
-                if let failure { Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
+                if let message { Section { Label(message, systemImage: "checkmark.circle").foregroundStyle(WorkspaceStyle.success) } }
+                if let failure { Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) } }
             }
             .listRowBackground(WorkspaceStyle.surface)
         }

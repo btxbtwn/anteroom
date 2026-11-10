@@ -88,6 +88,7 @@ export function SettingsRow({
   description,
   status,
   control,
+  inlineControl = false,
   children,
   className,
   ...rowProps
@@ -96,6 +97,8 @@ export function SettingsRow({
   description?: ReactNode;
   status?: ReactNode;
   control?: ReactNode;
+  /** A compact control (a switch) that stays at the row's end on phones too, as in iOS and Material lists. */
+  inlineControl?: boolean;
   children?: ReactNode;
 }) {
   return (
@@ -109,7 +112,14 @@ export function SettingsRow({
         className,
       )}
     >
-      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
+      <div
+        data-inline-control={inlineControl || undefined}
+        className={cn(
+          inlineControl
+            ? "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 @min-[32rem]/settings-row:gap-8"
+            : "flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8",
+        )}
+      >
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-h-5 items-center gap-1.5">
             <h3 className="flex items-center gap-2 text-sm font-medium text-foreground">{title}</h3>
@@ -120,7 +130,12 @@ export function SettingsRow({
           {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
         </div>
         {control ? (
-          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
+          <div
+            className={cn(
+              "flex min-w-0 shrink-0 items-center gap-2",
+              inlineControl ? "justify-end" : "w-full @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end",
+            )}
+          >
             {control}
           </div>
         ) : null}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { PackageSearchIcon } from "lucide-react";
+import { CircleAlertIcon, PackageSearchIcon } from "lucide-react";
 import { api } from "../api/client";
 import { boxesQuery, sourcingQuery } from "../api/pageQueries";
 import { pollMs } from "../api/polling";
@@ -9,7 +9,7 @@ import { cn } from "../lib/utils";
 import { toastManager } from "./ui/toast";
 import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 import { Spinner } from "./ui/spinner";
 import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
 import "./ebay/ebay.css";
@@ -35,6 +35,7 @@ import {
   planMetrics,
   planNeedsUpdate,
   saleDate,
+  sourcingNeedsPoll,
   storeName,
   whyNotPicked,
 } from "./boxScout";
@@ -92,7 +93,7 @@ function BoxSourcing({ onOpenListing }: Props) {
     // Keep watching until the list catches up with saved shipping and budget settings.
     refetchInterval: (current) => {
       const state = current.state.data;
-      return state && (state.refreshing || planNeedsUpdate(state)) ? pollMs(3000) : false;
+      return state && sourcingNeedsPoll(state) ? pollMs(3000) : false;
     },
   });
   const onSaved = (state: SourcingState) => queryClient.setQueryData(QUERY_KEY, state);
@@ -112,8 +113,9 @@ function BoxSourcing({ onOpenListing }: Props) {
     store_picks: choice === "all" ? snapshot.store_picks : { [choice]: snapshot.store_picks[choice] ?? [] },
     lots: snapshot.lots.filter((lot) => choice === "all" || lot.store === choice),
   } : null;
-  const updating = !!data && (data.refreshing || refresh.isPending || savePrefs.isPending
-    || planNeedsUpdate(data));
+  const refreshing = !!data && (data.refreshing || refresh.isPending);
+  const failed = !!data?.refresh_error && !refreshing && !savePrefs.isPending;
+  const updating = !!data && !failed && (refreshing || savePrefs.isPending || planNeedsUpdate(data));
 
   return (
     <>
@@ -136,9 +138,31 @@ function BoxSourcing({ onOpenListing }: Props) {
       </PageHeader>
 
       {query.isLoading ? <PageSkeleton label="Loading your buy list…" cards={3} /> : null}
-      {query.isError ? <PageError message={(query.error as Error).message || "Could not load your buy list."} /> : null}
+      {query.isError && !data ? (
+        <div className="flex flex-col items-start gap-3">
+          <PageError message={(query.error as Error).message || "Could not load your buy list."} />
+          <Button size="sm" variant="outline" disabled={query.isFetching} onClick={() => void query.refetch()}>
+            {query.isFetching ? <Spinner size="xs" aria-hidden role={undefined} /> : null}
+            Try again
+          </Button>
+        </div>
+      ) : null}
 
-      {data && !snapshot ? (
+      {data && !snapshot && failed ? (
+        <Panel divided={false}>
+          <Empty size="compact">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><CircleAlertIcon aria-hidden /></EmptyMedia>
+              <EmptyTitle>Your buy list isn’t ready</EmptyTitle>
+              <EmptyDescription>{data.refresh_error}</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button size="sm" onClick={() => refresh.mutate()}>Try again</Button>
+            </EmptyContent>
+          </Empty>
+        </Panel>
+      ) : null}
+      {data && !snapshot && !failed ? (
         <Panel divided={false}>
           <Empty size="compact">
             <EmptyHeader>
@@ -153,6 +177,7 @@ function BoxSourcing({ onOpenListing }: Props) {
 
       {data && snapshot ? (
         <>
+          {failed ? <PageError message={`${data.refresh_error} Showing the list from ${clockTime(snapshot.updated_at)}.`} /> : null}
           <StoreProblems snapshot={snapshot} />
           <SeasonalContext snapshot={snapshot} />
           <ResearchCoverage snapshot={snapshot} ebayConnected={data.ebay_connected} />

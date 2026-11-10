@@ -3,7 +3,6 @@ export type Garment = "top" | "pants" | "skirt";
 export interface MeasurementField {
   key: string;
   label: string;
-  placeholder: string;
 }
 
 // Keys and labels mirror GARMENT_MEASUREMENTS in server listing_generate.py.
@@ -12,9 +11,9 @@ export const GARMENTS: { id: Garment; label: string; fields: MeasurementField[] 
     id: "top",
     label: "Top",
     fields: [
-      { key: "pitToPit", label: "Pit to Pit", placeholder: "22.5" },
-      { key: "length", label: "Length", placeholder: "27" },
-      { key: "sleeve", label: "Sleeve", placeholder: "9" },
+      { key: "pitToPit", label: "Pit to Pit" },
+      { key: "length", label: "Length" },
+      { key: "sleeve", label: "Sleeve" },
     ],
   },
   // Pants cover shorts too: same waist, rise, inseam and leg opening.
@@ -22,19 +21,19 @@ export const GARMENTS: { id: Garment; label: string; fields: MeasurementField[] 
     id: "pants",
     label: "Pants",
     fields: [
-      { key: "waist", label: "Waist", placeholder: "16" },
-      { key: "rise", label: "Rise", placeholder: "11" },
-      { key: "inseam", label: "Inseam", placeholder: "30" },
-      { key: "legOpening", label: "Leg Opening", placeholder: "8" },
+      { key: "waist", label: "Waist" },
+      { key: "rise", label: "Rise" },
+      { key: "inseam", label: "Inseam" },
+      { key: "legOpening", label: "Leg Opening" },
     ],
   },
   {
     id: "skirt",
     label: "Skirt",
     fields: [
-      { key: "waist", label: "Waist", placeholder: "14" },
-      { key: "hip", label: "Hip", placeholder: "19" },
-      { key: "length", label: "Length", placeholder: "22" },
+      { key: "waist", label: "Waist" },
+      { key: "hip", label: "Hip" },
+      { key: "length", label: "Length" },
     ],
   },
 ];
@@ -53,6 +52,11 @@ const SKIRT_WORDS = /\b(skirts?|skorts?)\b/i;
 export function guessGarment(title: string): Garment {
   if (SKIRT_WORDS.test(title)) return "skirt";
   return PANTS_WORDS.test(title) ? "pants" : "top";
+}
+
+/** The garment a listing reads as: its category decides when it has one, otherwise its title. */
+export function garmentForListing({ category, title }: { category?: string; title?: string }): Garment {
+  return guessGarment(category?.trim() ? category : title ?? "");
 }
 
 /** Only the chosen garment's typed values, with blanks dropped. */

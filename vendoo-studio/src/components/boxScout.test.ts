@@ -12,6 +12,7 @@ import {
   pickNote,
   planMetrics,
   planNeedsUpdate,
+  sourcingNeedsPoll,
   piecesLabel,
   whyNotPicked,
   exclusionSummary,
@@ -99,7 +100,7 @@ function state(): SourcingState {
   };
   const plan = { budget: 300, total: 132, expected_profit: 388, carts: [cart({ lots: [lot()] })], exclusions: {} };
   return {
-    refreshing: false, ebay_connected: true, prefs,
+    refreshing: false, refresh_error: null, ebay_connected: true, prefs,
     trend: { terms: [], updated_at: null, source: null },
     snapshot: {
       updated_at: "2026-10-05T12:00:00Z", destination_zip: "70115",
@@ -142,6 +143,14 @@ describe("planning settings", () => {
       expect(planNeedsUpdate({ ...original, prefs: { ...original.prefs, [key]: value } }), key).toBe(true);
     }
     expect(planNeedsUpdate({ ...original, prefs: { ...original.prefs, recent_zips: ["10001", "70115"] } })).toBe(false);
+  });
+
+  it("stops reading after a failed refresh so the page can offer Try again", () => {
+    const first = { ...state(), snapshot: null };
+    expect(sourcingNeedsPoll(first)).toBe(true);
+    expect(sourcingNeedsPoll({ ...first, refresh_error: "Anteroom couldn’t build your buy list." })).toBe(false);
+    expect(sourcingNeedsPoll({ ...first, refreshing: true, refresh_error: "Anteroom couldn’t build your buy list." })).toBe(true);
+    expect(sourcingNeedsPoll(state())).toBe(false);
   });
 
   it("shows operating cash separately from the purchase budget", () => {

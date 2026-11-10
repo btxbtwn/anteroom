@@ -8,6 +8,7 @@ import { PriceDialog } from "../PriceDropParts";
 import { PageError, PageNote } from "../WorkspacePage";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Skeleton } from "../ui/skeleton";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
 export function ListingTemplatesSettings({onOpenListing}:{onOpenListing:(id:string)=>void}) {
@@ -18,16 +19,24 @@ export function ListingTemplatesSettings({onOpenListing}:{onOpenListing:(id:stri
   const remove=useMutation({mutationFn:(row:ListingTemplate)=>api.templates.remove(row.id,row.revision),retry:false,
     onSuccess:()=>void client.invalidateQueries({queryKey:["listing-templates"]})});
   return <SettingsSection id="listing-templates" title="Saved templates">
-    <SettingsRow title="Reusable listing fields" description="Save fields from an item’s Templates action, never including SKU, private notes, photos or marketplace links."
-      control={<Button size="sm" variant="outline" disabled={query.isFetching} onClick={()=>void query.refetch()}>Reload templates</Button>} />
-    {query.isPending?<SettingsNote>Loading templates…</SettingsNote>:null}
-    {query.data&&!query.data.templates.length?<SettingsNote>No saved templates yet.</SettingsNote>:null}
+    <SettingsRow title="Reusable listing fields" description="Save fields from an item’s Templates action, never including SKU, private notes, photos or marketplace links." />
+    {query.isPending?<TemplateRowSkeleton/>:null}
+    {query.data&&!query.data.templates.length?<div className="px-3 py-3 sm:px-4"><SettingsNote>No saved templates yet.</SettingsNote></div>:null}
     {query.data?.templates.map(row=><SettingsRow key={row.id} title={row.name} description={templateFieldGroups(row.fields).map(group=>group.name).join(", ")}
       control={<div className="flex flex-wrap gap-2"><Button size="sm" onClick={()=>setDraft(row)}>Create draft</Button><Button size="sm" variant="outline" onClick={()=>setRenaming(row)}>Rename</Button><Button size="sm" variant="ghost" disabled={remove.isPending} onClick={async()=>{if(await confirmDialog(`Delete template “${row.name}”? Existing items stay as they are.`,{variant:"destructive",confirmLabel:"Delete template"}))remove.mutate(row);}}>Delete</Button></div>} />)}
-    {query.error||remove.error?<SettingsNote tone="error">{remove.error?.message||query.error?.message}</SettingsNote>:null}
+    {query.error&&!query.data?<div className="flex flex-wrap items-center gap-3 px-3 py-3 sm:px-4"><SettingsNote tone="error">{query.error.message||"Could not load your templates."}</SettingsNote>
+      <Button size="xs" variant="outline" disabled={query.isFetching} onClick={()=>void query.refetch()}>Try again</Button></div>:null}
+    {remove.error?<div className="px-3 py-3 sm:px-4"><SettingsNote tone="error">{remove.error.message}</SettingsNote></div>:null}
     {draft?<TemplateDraftDialog template={draft} onClose={()=>setDraft(null)} onCreated={id=>{setDraft(null);onOpenListing(id);}}/>:null}
     {renaming?<RenameTemplateDialog template={renaming} onClose={()=>setRenaming(null)}/>:null}
   </SettingsSection>;
+}
+/** Stands in for the template rows on the first load, in the same shape. */
+function TemplateRowSkeleton() {
+  return <div role="status" aria-label="Loading templates" aria-busy="true" className="flex items-center gap-4 px-3 py-3 sm:px-4">
+    <div className="min-w-0 flex-1 space-y-2"><Skeleton className="h-4 w-36"/><Skeleton className="h-3 w-56 max-w-full"/></div>
+    <Skeleton shape="card" className="h-8 w-24"/>
+  </div>;
 }
 function RenameTemplateDialog({template,onClose}:{template:ListingTemplate;onClose:()=>void}) {
   const client=useQueryClient();

@@ -9,6 +9,34 @@ const free = () => false;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("marketplace waitlist", () => {
+  it("queues confirmed delists across items and keeps every other action out until they finish", async () => {
+    let finish!: () => void;
+    const send = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const waitlist = new MarketplaceWaitlist(send);
+    waitlist.add({ ...item("a"), kind: "delist" });
+    waitlist.add({ ...item("b", "mercari"), kind: "delist" });
+    waitlist.add(item("c", "ebay"));
+    waitlist.setBusy((marketplace) => marketplace === "etsy");
+    expect(send).not.toHaveBeenCalled();
+    expect(waitlist.snapshot()).toHaveLength(3);
+    waitlist.setBusy(free);
+    waitlist.tick();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]).toBeDefined();
+    finish();
+    await settle();
+    waitlist.setBusy(free);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(waitlist.snapshot()[0]).toMatchObject({ convId: "b", starting: true });
+    finish();
+    await settle();
+    waitlist.setBusy(free);
+    expect(send).toHaveBeenCalledTimes(3);
+    finish();
+    await settle();
+    expect(waitlist.snapshot()).toEqual([]);
+  });
+
   it("tells a busy refusal apart from other refusals", () => {
     expect(isBusyRefusal(busyRefusal())).toBe(true);
     expect(isBusyRefusal(new ApiRequestError("This item is already listed on Depop.", 409, false))).toBe(false);

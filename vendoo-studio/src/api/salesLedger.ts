@@ -41,8 +41,10 @@ export interface SalesLedgerPage {
   summary: {
     lines: number;
     unmatched: number;
-    unrecorded: number;
     needs_review: number;
+    /** Sales missing any amount, and how many lack each one. */
+    missing_records: number;
+    missing_counts: { label: string; count: number }[];
     currencies: { currency: string; lines: number; net_known: number; profit_known: number; net_revenue: string | null; profit: string | null }[];
   };
 }
@@ -61,7 +63,7 @@ export interface SalesOverviewFigures {
   profit: number | null;
   profit_known: number;
   fees_known: number;
-  average_days: number | null;
+  median_days: number | null;
   days_known: number;
   sell_through: number | null;
 }

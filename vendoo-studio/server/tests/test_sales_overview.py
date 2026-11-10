@@ -102,3 +102,11 @@ def test_route_reads_the_sellers_sales():
     assert bad.status_code == 400
     unknown = client.get("/api/analytics/overview", params={"end": "2026-10-30", "marketplace": "nowhere"})
     assert unknown.status_code == 400
+
+
+def test_days_to_sell_is_the_median_both_tabs_show():
+    rows = [_sale(1, days_listed=2), _sale(2, days_listed=4), _sale(3, days_listed=90)]
+    current = sales_overview(rows, start=date(2026, 10, 1), end=date(2026, 10, 30))["current"]
+    assert current["median_days"] == 4
+    # Kept for iPhone builds that still read it; see OverviewFigures.
+    assert current["average_days"] == 32

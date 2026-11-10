@@ -23,14 +23,18 @@ struct InventoryTests {
         precondition(rows[0].coverPhotoVersion == "abc" && rows[1].coverPhotoVersion == nil)
         precondition(rows[3].displayTitle == "Untitled")
 
-        // Settled listings stay out of All, appear in Sold and in search.
+        // Open holds what is not sold; settled listings appear in Sold and in search.
         var filters = InventoryFilters()
         precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["d", "a", "b", "e"])
         let counts = InventoryQuery.counts(rows, search: "")
-        precondition(counts[.all] == 4 && counts[.draft] == 2 && counts[.active] == 1 && counts[.sold] == 1 && counts[.failed] == 1)
+        precondition(counts[.open] == 4 && counts[.draft] == 2 && counts[.active] == 1 && counts[.sold] == 1 && counts[.failed] == 1)
+        // A sold item not yet settled is out of Open too, unless the seller searches.
+        let soldNow = ConversationSummary(id: "s", title: "Sold tee", status: "sold", createdAt: "", updatedAt: "")
+        precondition(!InventoryQuery.inTab(soldNow, .open) && InventoryQuery.inTab(soldNow, .open, searching: true))
+        precondition(InventoryQuery.inTab(rows[0], .open) && InventoryQuery.inTab(rows[3], .open))
         filters.status = .sold
         precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["c"])
-        filters.status = .all
+        filters.status = .open
         precondition(ids(InventoryQuery.rows(rows, search: "coat", filters: filters)) == ["c"])
         precondition(ids(InventoryQuery.rows(rows, search: "b-1", filters: filters)) == ["d"])
 
@@ -69,9 +73,10 @@ struct InventoryTests {
         ]
         """#.utf8))
         filters = InventoryFilters(sort: .stalest)
-        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["q", "p", "r", "s", "t"])
+        // Open leaves out the sold items s and t.
+        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["q", "p", "r"])
         filters.sort = .freshest
-        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["p", "q", "r", "s", "t"])
+        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["p", "q", "r"])
         filters.choose(.soldDesc)
         precondition(filters.status == .sold, "sorting by sale date opens Sold")
         precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["t", "s"])
@@ -206,6 +211,12 @@ struct InventoryTests {
         precondition(searched("") == ["d", "a", "b", "e"] && computed == 1, "same inputs: no recompute")
         precondition(searched("coat") == ["c"] && computed == 2)
         precondition(searched("") == ["d", "a", "b", "e"] && computed == 3)
+        // Sort by, then Order: every sort sits under one field, and switching field keeps the direction.
+        precondition(Set(ListingSort.Field.allCases.flatMap { $0.orders.map(\.sort) }) == Set(ListingSort.allCases))
+        precondition(ListingSort.createdAsc.field == .created && ListingSort.stalest.field == .listed)
+        precondition(ListingSort.createdAsc.switching(to: .price) == .priceAsc)
+        precondition(ListingSort.priceDesc.switching(to: .sold) == .soldDesc)
+        precondition(ListingSort.recent.switching(to: .title) == .titleAsc)
         print("Inventory tests passed")
     }
 

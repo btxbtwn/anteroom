@@ -14,7 +14,7 @@ import { useWorkspaceRuntime } from "../app/runtime";
 import { cn } from "../lib/utils";
 import { editorTabs } from "./editorTabs";
 import { formatMoney } from "./analyticsFormat";
-import { LISTING_SORTS, LISTING_STATUS_TABS, statusCounts, matchesSearch, statusForSort, type ListingSortId, type ListingStatusFilter } from "./inventoryFilters";
+import { LISTING_SORTS, LISTING_STATUS_LABELS, LISTING_STATUS_TABS, statusCounts, matchesSearch, statusForSort, type ListingSortId, type ListingStatusFilter } from "./inventoryFilters";
 import { marketplacePrice, marketplacePriceDescription } from "./inventoryPrices";
 import { inventoryRows, listedCounts, marketplaceCell, type MarketplaceCellKind } from "./inventoryTable";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -23,6 +23,7 @@ import { ListingThumb } from "./sidebar/ListingBits";
 import { displayCoverUrl } from "./sidebar/coverSrc";
 import type { Listing } from "./sidebar/listingShelves";
 import { Badge } from "./ui/badge";
+import { Skeleton } from "./ui/skeleton";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
@@ -36,7 +37,6 @@ const ITEM_MIN = "min(13rem, 42vw)";
 // Room for a status badge and the live price beside it. Marketplace columns
 // stay this wide; the item column takes whatever the page has left.
 const CELL_WIDTH = "9.5rem";
-const STATUS_LABELS: Record<ListingStatusFilter, string> = { all: "All", draft: "Draft", active: "Active", sold: "Sold", failed: "Failed" };
 const BADGE_VARIANT: Record<MarketplaceCellKind, "success" | "info" | "warning" | "error" | "outline" | null> = {
   listed: "success",
   sold: "info",
@@ -50,12 +50,15 @@ const BADGE_VARIANT: Record<MarketplaceCellKind, "success" | "info" | "warning" 
 
 export function InventoryTablePage({
   conversations,
+  loadFailed = false,
   onOpenListing,
   sidebarSearch = false,
 }: {
   conversations: Listing[] | undefined;
   /** The listings sidebar is open beside the table; its search box already filters the table. */
   sidebarSearch?: boolean;
+  /** The inventory could not be read yet. */
+  loadFailed?: boolean;
   /** Opens the listing's editor, on a marketplace's tab when one is named. */
   onOpenListing: (id: string, tab?: string) => void;
 }) {
@@ -71,6 +74,8 @@ export function InventoryTablePage({
     () => editorTabs(marketplaceSettings?.selected, runtime).filter((id) => id !== "general"),
     [marketplaceSettings?.selected, runtime],
   );
+  // Until the inventory arrives nothing is known: no counts and no "No listings yet".
+  const loading = conversations === undefined;
   const all = useMemo(() => conversations ?? [], [conversations]);
   const searched = useMemo(() => all.filter((listing) => matchesSearch(listing, needle)), [all, needle]);
   const counts = useMemo(() => statusCounts(searched, Boolean(needle)), [searched, needle]);
@@ -122,8 +127,9 @@ export function InventoryTablePage({
         >
           {tabs.map((tab) => (
             <Toggle key={tab} value={tab}>
-              {STATUS_LABELS[tab]}
-              <span className="text-2xs text-muted-foreground tabular-nums">{counts[tab] ?? 0}</span>
+              {LISTING_STATUS_LABELS[tab]}
+              {loading ? null : " "}
+              {loading ? null : <span className="text-2xs text-muted-foreground tabular-nums">{counts[tab] ?? 0}</span>}
             </Toggle>
           ))}
         </ToggleGroup>
@@ -150,11 +156,15 @@ export function InventoryTablePage({
                 <div key={id} role="columnheader" className="flex items-center gap-1.5 px-3 py-2.5">
                   <MarketplaceLogo id={id} label="" size={16} />
                   <span className="truncate text-foreground">{marketplaceName(id)}</span>
-                  <span className="tabular-nums" aria-label={`${listed[id]} listed`}>{listed[id]}</span>
+                  {loading ? null : <span className="tabular-nums" aria-label={`${listed[id]} listed`}>{listed[id]}</span>}
                 </div>
               ))}
             </div>
-            {rows.length === 0 ? (
+            {loading && loadFailed ? (
+              <EmptyRow>Could not load listings. Retrying…</EmptyRow>
+            ) : loading ? (
+              <InventoryRowsSkeleton columns={columns} marketplaces={marketplaces.length} />
+            ) : rows.length === 0 ? (
               <EmptyRow>{all.length ? "No matching listings" : "No listings yet"}</EmptyRow>
             ) : (
               <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
@@ -256,6 +266,26 @@ function MarketplaceCellView({ listing, marketplace, title, onOpen, missing }: {
           <ExternalLinkIcon className="size-3.5" />
         </a>
       ) : null}
+    </div>
+  );
+}
+
+/** Table rows while the inventory loads, in the same grid and height as the real ones. */
+function InventoryRowsSkeleton({ columns, marketplaces }: { columns: CSSProperties; marketplaces: number }) {
+  return (
+    <div role="status" aria-label="Loading listings" aria-busy="true">
+      {Array.from({ length: 6 }, (_, index) => (
+        <div key={index} aria-hidden="true" className="grid border-b border-border/40" style={{ ...columns, height: ROW_HEIGHT }}>
+          <div className="flex min-w-0 items-center gap-3 px-4">
+            <Skeleton className="size-9 flex-none rounded-md" />
+            <Skeleton className={cn("h-4", index % 2 ? "w-1/2" : "w-2/3")} />
+          </div>
+          <div className="flex items-center justify-end px-3"><Skeleton className="h-4 w-10" /></div>
+          {Array.from({ length: marketplaces }, (_, cell) => (
+            <div key={cell} className="flex items-center px-3"><Skeleton shape="pill" className="h-5 w-16" /></div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

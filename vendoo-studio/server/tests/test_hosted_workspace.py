@@ -212,7 +212,7 @@ def test_account_preferences_do_not_share_settings(cloud, signing_keys):  # noqa
     assert client.put('/api/settings/ui', headers=alice, json={'theme': 'light'}).status_code == 200
     assert client.put('/api/settings/ui', headers=alice, json={'listing_names': 'sku'}).status_code == 200
     assert client.get('/api/settings/ui', headers=alice).json()['theme'] == 'light'
-    assert client.get('/api/settings/ui', headers=bob).json()['theme'] == 'dark'
+    assert client.get('/api/settings/ui', headers=bob).json()['theme'] == 'system'
     assert client.put('/api/settings/ui', headers=alice, json={'vendoo_enabled': True}).status_code == 422
     assert client.put('/api/settings/ui', headers=alice, json={'user_id': BOB}).status_code == 422
 
@@ -629,3 +629,16 @@ def test_hosted_inventory_reports_unsent_edits(cloud, signing_keys):  # noqa: F8
     assert saved.status_code == 200
     assert row()['unsent_edits'] is True
     assert client.get('/api/conversations', headers=headers(signing_keys, BOB)).json() == []
+
+
+def test_discard_blank_removes_only_an_untouched_new_listing(cloud, signing_keys):  # noqa: F811
+    client, _ = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    blank = client.post('/api/conversations', headers=alice, json={'title': 'New Listing'}).json()['id']
+    typed = client.post('/api/conversations', headers=alice, json={'title': 'New Listing'}).json()['id']
+    assert client.patch('/api/conversations/' + typed, headers=alice, json={'notes': 'Stain on cuff'}).status_code == 200
+    assert client.post(f'/api/conversations/{blank}/discard-blank', headers=bob).status_code == 404
+    assert client.post(f'/api/conversations/{blank}/discard-blank', headers=alice).json() == {'discarded': True}
+    assert client.get('/api/conversations/' + blank, headers=alice).status_code == 404
+    assert client.post(f'/api/conversations/{typed}/discard-blank', headers=alice).json() == {'discarded': False}
+    assert client.get('/api/conversations/' + typed, headers=alice).status_code == 200

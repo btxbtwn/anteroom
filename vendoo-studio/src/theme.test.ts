@@ -8,7 +8,8 @@ describe("normalizeTheme", () => {
     expect(normalizeTheme("system")).toBe("system");
   });
 
-  it("falls back to dark for unknown values", () => {
+  it("follows the device for unknown values", () => {
+    expect(DEFAULT_THEME).toBe("system");
     expect(normalizeTheme(undefined)).toBe(DEFAULT_THEME);
     expect(normalizeTheme("solarized")).toBe(DEFAULT_THEME);
     expect(normalizeTheme(1)).toBe(DEFAULT_THEME);

@@ -33,7 +33,7 @@ function AppearanceSection() {
     <SettingsSection id="appearance" title="Appearance">
       <SettingsRow
         title="Theme"
-        description="System follows your Mac’s appearance."
+        description="System follows your device’s light or dark setting."
         control={
           <SettingsSelect<ThemePreference>
             aria-label="Theme"

@@ -14,12 +14,13 @@ import { toastManager } from "./ui/toast";
 
 /** The page's one waitlist. It sends only the action the seller confirmed on that item. */
 export const waitlist = new MarketplaceWaitlist((action) => {
+  if (action.kind === "delist") return api.marketplaceListings.delist(action.convId, [action.marketplace]);
   if (action.kind === "save_draft") return api.nativeMarketplaces.saveDraft(action.convId, action.marketplace, action.revisionId);
   if (action.kind === "update") return api.nativeMarketplaces.update(action.convId, action.marketplace, action.revisionId);
   return api.nativeMarketplaces.list(action.convId, action.marketplace, action.revisionId);
 });
 
-const VERB: Record<WaitingAction["kind"], string> = { list: "List", update: "Update", save_draft: "Save draft" };
+const VERB: Record<WaitingAction["kind"], string> = { list: "List", update: "Update", save_draft: "Save draft", delist: "Delist" };
 
 const NATIVE_STEP = /^native_(ebay|etsy|poshmark|mercari|depop)_(.+)$/;
 
@@ -79,6 +80,8 @@ export function MarketplaceActivity({ jobs, checkedAt, onOpen }: {
   useEffect(() => {
     waitlist.listener = {
       started: (action) => {
+        void queryClient.invalidateQueries({ queryKey: ["marketplace-listings", action.convId] });
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["native-marketplaces", action.convId] });
         void queryClient.invalidateQueries({ queryKey: ["jobs", action.convId] });
         void queryClient.invalidateQueries({ queryKey: ["queue"] });
@@ -121,7 +124,7 @@ export function MarketplaceActivity({ jobs, checkedAt, onOpen }: {
             return (
               <ActivityRow key={action.id} title={action.title} onOpen={() => onOpen(action.convId)}
                 icon={action.starting ? <Spinner size="sm" tone="muted" /> : <ClockIcon aria-hidden className="size-3.5 text-muted-foreground" />}
-                label={action.starting ? `Starting ${VERB[action.kind].toLowerCase()} on ${name}…`
+                label={action.starting ? action.kind === "delist" ? `Delisting from ${name}…` : `Starting ${VERB[action.kind].toLowerCase()} on ${name}…`
                   : `${VERB[action.kind]} waits for ${name}${ahead > 0 ? ` · ${ahead} ahead` : ""}`}
                 action={<Button size="xs" variant="ghost" disabled={action.starting} onClick={() => waitlist.remove(action.id)}>Cancel</Button>} />
             );

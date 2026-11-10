@@ -28,9 +28,9 @@ describe("searchSettings", () => {
     expect(searchSettings("claude desktop").map((item) => item.id)).toEqual(["agent-cli"]);
     expect(searchSettings("vendoo")).toContainEqual(expect.objectContaining({section: "experimental", targetId: "listing-mode"}));
     expect(SETTINGS_SEARCH_ITEMS.find((item) => item.id === "chrome")?.title).toBe("Chrome");
-    expect(searchSettings("inventory location").map((item) => item.id)).toEqual(["ebay-inventory-location"]);
+    expect(searchSettings("inventory location").map((item) => item.id)).toEqual(["ships-from-zip"]);
     expect(searchSettings("ships from").map((item) => item.id)).toEqual(["ships-from-zip"]);
-    expect(searchSettings("zip").map((item) => item.id).sort()).toEqual(["ebay-inventory-location", "ships-from-zip"]);
+    expect(searchSettings("zip").map((item) => item.id)).toEqual(["ships-from-zip"]);
     expect(searchSettings("automatic offers")).toEqual([]);
     expect(isSettingsSectionId("billing")).toBe(false);
   });

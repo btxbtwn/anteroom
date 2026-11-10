@@ -75,6 +75,7 @@ export function chatCanFix(draft: NativeDraft): boolean {
 
 function fieldLabel(field: string): string {
   if (field === "settings.ebay.merchant_location_key") return "Inventory location";
+  if (field === "poshmark_specifics.smartSell.minimumPrice") return "Lowest Price";
   const last = field.split(".").pop() || field;
   return last.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 }
@@ -111,7 +112,8 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
   }
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
-  if (live?.state === "deleted") return { tone: "neutral", label: "Delisted" };
+  // Delisting clears the draft's error, so an error now is from a later List and wins.
+  if (live?.state === "deleted" && !draft?.error) return { tone: "neutral", label: "Delisted" };
   if (live?.state === "failed") {
     return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error,
       said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };
@@ -120,7 +122,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   // moved on. Without that record (listed elsewhere, or marked by hand) it can't tell.
   const behind = draft?.state === "published" && Boolean(draft.revision_id) && draft.revision_id !== _revisionId
     ? `Your latest edits aren't on ${marketplaceName(marketplace)} yet.` : null;
-  if (live?.listing_id) {
+  if (live?.listing_id && live.state !== "deleted") {
     return { tone: "live", label: "Listed", href: live.url ?? undefined, hrefLabel: "View listing", detail: draft?.state === "published" ? draft.error || behind : null, said };
   }
   if (draft && draft.state !== "draft") {
@@ -135,7 +137,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   if (draft?.state === "draft" && marketplace === "ebay") return { tone: "neutral", label: "Saved on eBay",
     detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to eBay." : "Not listed. Buyers cannot see it until you List." };
   // The listing check says why and how to fix it, under the header.
-  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Review eligibility" };
+  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "May not qualify" };
   return { tone: "idle", label: "Not listed" };
 }
 
@@ -176,7 +178,7 @@ function waitingStatus(action: WaitingAction, ahead: number): Status {
   const name = marketplaceName(action.marketplace);
   if (action.error) return { tone: "failed", label: "Didn't start", detail: action.error };
   if (action.starting) return { tone: "busy", label: "Starting…" };
-  const verb = action.kind === "update" ? "Update" : action.kind === "save_draft" ? "Save draft" : "List";
+  const verb = action.kind === "delist" ? "Delist" : action.kind === "update" ? "Update" : action.kind === "save_draft" ? "Save draft" : "List";
   return { tone: "waiting", label: `Waiting for ${name}`,
     detail: `${verb} starts when ${name} finishes its current action${ahead > 1 ? ` (${ahead} ahead)` : ""}. Keep Anteroom open.` };
 }
@@ -385,9 +387,13 @@ export function MarketplacesLayout({
     },
   });
   const delist = useMutation({
-    mutationFn: (marketplaces: Marketplace[]) => api.marketplaceListings.delist(convId, marketplaces),
+    mutationFn: async (marketplaces: Marketplace[]) => {
+      for (const marketplace of marketplaces) {
+        waitlist.add({ convId, title, marketplace, kind: "delist", revisionId: "" });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["queue"] });
+    },
     retry: false,
-    onSuccess: (data) => queryClient.setQueryData(liveKey, data),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: liveKey });
       // The sidebar row drops the delisted marketplaces and may read Draft.
@@ -703,11 +709,12 @@ export function MarketplacesLayout({
     const missing = check?.missing.length ?? 0;
     const line = <>
       {status && !quiet && (
-        <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground",
+        // A narrow rail wraps a status instead of cutting it off; the row's tooltip names it too.
+        <span role="status" className={cn("flex items-start gap-1 text-xs text-muted-foreground",
           status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
           status.tone === "sold" && "text-info-foreground")}>
           {TONE_ICON[status.tone]}
-          <span className="truncate">{status.label}</span>
+          <span className="min-w-0 text-pretty">{status.label}</span>
         </span>
       )}
       {status && quiet && !check && <span className="sr-only">{status.label}</span>}

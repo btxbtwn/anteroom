@@ -220,7 +220,9 @@ describe("marketplaces section", () => {
     const message = "Etsy generally requires vintage (20+ years), handmade or craft supplies. If it is vintage or handmade, set When made.";
     const html = render({}, {}, { etsyEligible: false, etsyReady: true, selected: "etsy",
       preflight: { marketplaces: { etsy: { ready: false, gaps: [{ field: "etsy_specifics.when_made", message, blocking: true }] } } } });
-    expect(row(html, "Etsy")).toContain("Review eligibility");
+    // Short enough for the narrow rail, and named in full by the row's tooltip.
+    expect(row(html, "Etsy")).toContain(">May not qualify<");
+    expect(row(html, "Etsy")).toContain('title="May not qualify"');
     expect(html.split("Etsy generally requires").length - 1).toBe(1);
     expect(enabledButton(html, "List…")).toBe(true);
   });
@@ -496,6 +498,12 @@ describe("marketplaces section", () => {
     expect(rowStatus("ebay", undefined, undefined, "current", true).label).toBe("Not listed");
     expect(rowStatus("mercari", live, undefined, "current", true).label).toBe("Listed");
     expect(rowStatus("ebay", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Delisted");
+    // Delisting clears old errors, so an error after it is from a newer List and must show.
+    const refused = rowStatus("poshmark", { ...live, state: "deleted" },
+      { state: "draft", error: "Poshmark won't turn on Smart Sell at this Lowest Price.", marketplace_message: "Your minimum price is too low" } as NativeDraft,
+      "current", true);
+    expect(refused).toMatchObject({ tone: "failed", label: "Not listed", detail: "Poshmark won't turn on Smart Sell at this Lowest Price." });
+    expect(refused.said).toBe("Poshmark said: Your minimum price is too low");
     expect(rowStatus("mercari", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Delisted");
     expect(rowStatus("depop", { ...live, state: "deleted", url: "https://www.depop.com/products/x/", listing_id: "x" }, undefined, "current", true).label).toBe("Delisted");
     expect(render({}, { depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).not.toContain("Delist everywhere…");

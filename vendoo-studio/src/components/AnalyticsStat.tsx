@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "../lib/utils";
 
-/** One figure on the Analytics page, with what it covers and how it moved. */
+/** One figure on the Analytics page: label, value, how it moved, then what it covers. */
 export function Stat({
   label,
   value,
@@ -28,8 +28,8 @@ export function Stat({
       >
         {value ?? "Not enough data"}
       </div>
-      {hint ? <div className="text-xs leading-relaxed text-muted-foreground">{hint}</div> : null}
-      {change ? <div className="mt-auto pt-1 text-xs font-medium text-foreground/80">{change}</div> : null}
+      {change ? <div className="text-xs font-medium text-foreground/80 tabular-nums">{change}</div> : null}
+      {hint ? <div className="text-xs text-muted-foreground">{hint}</div> : null}
     </div>
   );
 }

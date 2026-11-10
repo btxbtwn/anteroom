@@ -28,7 +28,7 @@ def test_listing_preferences_persist_without_changing_another_seller(cloud, sign
     assert client.get('/api/settings/ships-from-zip', headers=alice).json()['zip'] == '70126'
     assert client.delete('/api/settings/listing-defaults?path=mercari_specifics.shipsFrom', headers=alice).status_code == 200
     assert 'mercari_specifics.shipsFrom' not in client.get('/api/settings/listing-defaults', headers=alice).json()['defaults']
-    assert client.put('/api/settings/ebay-inventory-location', headers=alice, json={'location': '70125'}).status_code == 200
+    assert client.put('/api/settings/ships-from-zip', headers=alice, json={'zip': '70125'}).status_code == 200
     assert client.get('/api/settings/ebay-inventory-location', headers=alice).json()['location'] == '70125'
     formulas = client.get('/api/settings/formulas', headers=alice).json()
     custom = {'title': formulas['default_title'] + ' Custom', 'description': formulas['default_description']}
