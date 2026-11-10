@@ -138,6 +138,7 @@ export interface PriceDropSellThrough {
 }
 
 export interface PriceDropPreview {
+  revision_id: string;
   current_price: number;
   sell_through: PriceDropSellThrough | null;
   age_days: number | null;
@@ -181,7 +182,7 @@ export interface MarkdownPreviewRow {
 export interface MarkdownDropRequest {
   conversation_id: string;
   price: number;
-  expected_revision_id?: string | null;
+  expected_revision_id: string;
 }
 
 export interface MarkdownApplyResult {
