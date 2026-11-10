@@ -30,7 +30,8 @@ test("all five rewrites start before slow editor reads finish", async ({ page, r
   for (const draft of drafts) {
     await page.getByRole("checkbox", { name: `Select ${draft.title}`, exact: true }).click();
   }
-  await page.getByRole("region", { name: "Bulk listing actions" }).getByRole("button", { name: "Regenerate", exact: true }).click();
+  await page.getByRole("region", { name: "Bulk listing actions" }).getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Regenerate…", exact: true }).click();
   await expect(page.getByRole("button", { name: "Rewrite 5", exact: true })).toBeEnabled();
   const reset = new Set<string>();
   const started = new Set<string>();
