@@ -19,6 +19,7 @@ from sqlalchemy.engine import CursorResult
 import asyncio
 import contextlib
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from types import SimpleNamespace
@@ -35,6 +36,7 @@ from vendoo_studio.services import browser_bridge, listing_mode
 from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_result import scrub
+from vendoo_studio.services.marketplace_diagnostics import failure_context
 
 log = logging.getLogger("vendoo_studio.listing_promotions")
 
@@ -245,19 +247,26 @@ def _review_local(db: Session, row: ListingPromotion, conv: Conversation, floor_
 async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
     """Ask Chrome for the listing's live facts and fill them in. Uses no database session."""
     name = NAMES.get(row.marketplace, row.marketplace)
+    payload = {
+        "marketplace": row.marketplace, "action": row.action, "listing_id": listing_id,
+        **({"discount_percent": row.discount_percent} if row.action == "offer" else {}),
+    }
+    diagnostic_inputs = {**payload, "floor_cents": row.floor_cents}
+    started = time.monotonic()
     try:
-        facts = await browser_bridge.request(SimpleNamespace(id=f"promotion-{row.batch_id}"), "marketplace.promotion_check", {
-            "marketplace": row.marketplace, "action": row.action, "listing_id": listing_id,
-            **({"discount_percent": row.discount_percent} if row.action == "offer" else {}),
-        }, timeout=90)
+        facts = await browser_bridge.request(SimpleNamespace(id=f"promotion-{row.batch_id}"), "marketplace.promotion_check", payload, timeout=90)
     except browser_bridge.BrowserBridgeError as exc:
-        log.error("%s %s preview failed for listing %s: %s", row.marketplace, row.action, listing_id, scrub(str(exc)), exc_info=True)
+        log.error("%s %s preview failed for listing %s: %s", row.marketplace, row.action, listing_id, scrub(str(exc)), exc_info=True,
+                  extra={"marketplace_context": failure_context("marketplace.promotion_check", diagnostic_inputs, None,
+                                                               time.monotonic() - started, 90)})
         raise PromotionError(502, str(exc), "network") from exc
     if facts.get("ok") is not True:
         row.marketplace_message = scrub(facts.get("marketplace_message"))
         log.error("%s %s preview rejected for listing %s, automation %s: %s; %s",
                   row.marketplace, row.action, listing_id, row.automation_id,
-                  scrub(str(facts.get("error") or "The marketplace did not answer.")), row.marketplace_message or "-")
+                  scrub(str(facts.get("error") or "The marketplace did not answer.")), row.marketplace_message or "-",
+                  extra={"marketplace_context": failure_context("marketplace.promotion_check", diagnostic_inputs, facts,
+                                                               time.monotonic() - started, 90)})
         raise PromotionError(409, str(facts.get("error") or "The marketplace did not answer."), facts.get("error_code"))
     row.price_cents = int(facts["price_cents"])
     row.like_count = int(facts.get("like_count") or 0)
