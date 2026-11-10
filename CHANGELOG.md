@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.895 — 2026-11-10
+
+- Updates to myanteroom.com now wait until every check has passed on the exact code being shipped.
+
 ## 0.1.894 — 2026-11-10
 
 - Include connection checkout locations and hold times in hosted database timeout emails, and show the database failure behind readiness errors.
