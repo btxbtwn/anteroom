@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.878 — 2026-11-10
+
+- Opening a listing that already has its copy no longer offers Generate, which would overwrite it: chat invites questions and edits, Regenerate asks first, and on a phone the listing opens on its form.
+- List everywhere is the editor's main button; Delist everywhere sits apart from it at the bottom.
+- List everywhere names each missing field in full, and clicking one opens that field on its marketplace's form.
+- In Select mode, actions stay off until you pick a listing, Delete is the only red action, and the less common ones sit under More.
+
 ## 0.1.877 — 2026-11-10
 
 - Keep chat from showing a loading indicator during listing actions or opening automatically when empty.
