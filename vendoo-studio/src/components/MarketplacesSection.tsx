@@ -176,7 +176,7 @@ function waitingStatus(action: WaitingAction, ahead: number): Status {
   const name = marketplaceName(action.marketplace);
   if (action.error) return { tone: "failed", label: "Didn't start", detail: action.error };
   if (action.starting) return { tone: "busy", label: "Starting…" };
-  const verb = action.kind === "update" ? "Update" : action.kind === "save_draft" ? "Save draft" : "List";
+  const verb = action.kind === "delist" ? "Delist" : action.kind === "update" ? "Update" : action.kind === "save_draft" ? "Save draft" : "List";
   return { tone: "waiting", label: `Waiting for ${name}`,
     detail: `${verb} starts when ${name} finishes its current action${ahead > 1 ? ` (${ahead} ahead)` : ""}. Keep Anteroom open.` };
 }
@@ -385,9 +385,13 @@ export function MarketplacesLayout({
     },
   });
   const delist = useMutation({
-    mutationFn: (marketplaces: Marketplace[]) => api.marketplaceListings.delist(convId, marketplaces),
+    mutationFn: async (marketplaces: Marketplace[]) => {
+      for (const marketplace of marketplaces) {
+        waitlist.add({ convId, title, marketplace, kind: "delist", revisionId: "" });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["queue"] });
+    },
     retry: false,
-    onSuccess: (data) => queryClient.setQueryData(liveKey, data),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: liveKey });
       // The sidebar row drops the delisted marketplaces and may read Draft.
