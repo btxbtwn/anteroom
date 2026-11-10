@@ -2,6 +2,20 @@ import UIKit
 import XCTest
 
 @MainActor
+private func openMorePage(_ name: String, app: XCUIApplication) {
+    app.tabBars.buttons["More"].tap()
+    if app.navigationBars[name].isHittable { return }
+    let destination = app.buttons[name].firstMatch
+    if !destination.isHittable {
+        let back = app.navigationBars.buttons["More"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        back.tap()
+    }
+    XCTAssertTrue(destination.waitForExistence(timeout: 10))
+    destination.tap()
+}
+
+@MainActor
 final class SandboxTests: XCTestCase {
     func testCreateAndReopenDraft() {
         continueAfterFailure = false
@@ -189,7 +203,7 @@ final class DestinationSandboxTests: XCTestCase {
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
 
-        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'All,'")).firstMatch
+        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch
         XCTAssertTrue(allTab.waitForExistence(timeout: 30), "Inventory shows its status tabs")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Draft,'")).firstMatch.exists)
         keep(app, "Inventory with status tabs")
@@ -236,7 +250,7 @@ final class DestinationSandboxTests: XCTestCase {
                       "Where you list shows the marketplaces")
         keep(app, "Settings Listings")
         app.navigationBars.buttons.firstMatch.tap()
-        app.buttons["Providers"].firstMatch.tap()
+        app.buttons["AI providers"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Xiaomi MiMo"].waitForExistence(timeout: 20))
         keep(app, "Settings Providers")
     }
@@ -258,8 +272,7 @@ final class AccountDeletionSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        app.tabBars.buttons["More"].tap()
-        app.buttons["Settings"].firstMatch.tap()
+        openMorePage("Settings", app: app)
         let delete = app.buttons["delete-account"]
         for _ in 0..<4 where !delete.isHittable { app.swipeUp() }
         XCTAssertTrue(delete.waitForExistence(timeout: 15))
@@ -287,7 +300,7 @@ final class AnalyticsSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'All,'")).firstMatch
+        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch
         XCTAssertTrue(allTab.waitForExistence(timeout: 30), "Inventory has loaded")
         let analytics = app.tabBars.buttons["Analytics"]
         analytics.tap()
@@ -427,9 +440,7 @@ final class AutomationOffersSandboxTests: XCTestCase {
                                     UIContentSizeCategory.accessibilityExtraExtraExtraLarge.rawValue]
         }
         launchSandbox(app)
-        let tab = app.tabBars.buttons["Automations"]
-        XCTAssertTrue(tab.waitForExistence(timeout: 30))
-        tab.tap()
+        openMorePage("Automations", app: app)
         XCTAssertTrue(app.navigationBars["Automations"].waitForExistence(timeout: 15))
 
         let menu = app.buttons["More for Likers get 10% off"]
@@ -609,5 +620,66 @@ fileprivate extension XCTestCase {
             expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: introduction)
             waitForExpectations(timeout: 5)
         }
+    }
+}
+
+/// The polished screens in light and dark, and Inventory at an accessibility
+/// text size, kept as screenshots for review. Ends on the System appearance.
+@MainActor
+final class PolishScreenshotTests: XCTestCase {
+    func testPolishedScreensInLightAndDark() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        for theme in ["Light", "Dark"] {
+            choose(theme, app)
+            app.tabBars.buttons["Inventory"].tap()
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch.waitForExistence(timeout: 30))
+            keep(app, "\(theme): Inventory")
+            app.buttons["Sort listings, Recent activity"].firstMatch.tap()
+            XCTAssertTrue(app.buttons["Date created"].waitForExistence(timeout: 10), "Sort by lists the fields")
+            keep(app, "\(theme): Sort menu")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.6)).tap()
+            app.tabBars.buttons["Analytics"].tap()
+            XCTAssertTrue(app.staticTexts["Items sold"].waitForExistence(timeout: 30))
+            keep(app, "\(theme): Sales records")
+            app.buttons["Inventory analytics"].tap()
+            XCTAssertTrue(app.staticTexts["Median days to sell"].waitForExistence(timeout: 30))
+            keep(app, "\(theme): Inventory analytics")
+            openMorePage("Automations", app: app)
+            _ = app.staticTexts["Your automations"].waitForExistence(timeout: 30)
+            keep(app, "\(theme): Automations")
+            openMorePage("Settings", app: app)
+            XCTAssertTrue(app.staticTexts["About"].waitForExistence(timeout: 10) || app.buttons["What's new"].exists)
+            keep(app, "\(theme): Settings")
+        }
+        choose("System", app)
+        app.terminate()
+
+        // The largest text sizes keep whole words on the status tabs and rows.
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
+        launchSandbox(app)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch.waitForExistence(timeout: 30))
+        keep(app, "Accessibility L: Inventory")
+    }
+
+    private func choose(_ theme: String, _ app: XCUIApplication) {
+        openMorePage("Settings", app: app)
+        let picker = app.buttons["appearance-picker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 15))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: picker)
+        waitForExpectations(timeout: 15)
+        picker.tap()
+        app.buttons[theme].tap()
+        expectation(for: NSPredicate(format: "value == %@ AND enabled == true", theme), evaluatedWith: picker)
+        waitForExpectations(timeout: 15)
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

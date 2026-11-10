@@ -1,0 +1,8 @@
+- iPhone: the tab bar shows each tab's name and no longer stays shrunk after you leave a listing.
+- iPhone: Inventory's first tab is now "Open" (everything not sold), as on the web; VoiceOver says "1 listing" instead of "1 listings".
+- iPhone: the Filters menu lists marketplaces as checkmarked rows without blank gaps, and Sort is split into "Sort by" and "Order" so the whole menu fits.
+- iPhone: status text, warnings and the selected inventory tab are easier to read in light mode, and the inventory tabs and rows keep their full words at the largest text sizes.
+- iPhone: on marketplace forms, "Show more", "See title options" and "Add custom item specific" look like links, a choice list that didn't load (such as eBay's policies) shows one message with Retry instead of repeating under every field, and an item listed on a marketplace without a saved category says so.
+- iPhone: Business Assistant answers keep their paragraphs, lists and code blocks.
+- iPhone: Analytics uses the same figure names as Sales records (Revenue, Profit, Items sold, Median days to sell, Sell-through), shows money with cents, and has an easier-to-read chart. Sales records shows figures first, with 7, 30 and 90 day ranges, and Export moved to a menu at the top.
+- iPhone: Settings lists Appearance, Selling and Account before About, with explanations under each group, and Automations say when one waits for your approval and leave out empty "Last run — · Next —" lines.

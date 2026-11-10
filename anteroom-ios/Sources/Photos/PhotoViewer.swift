@@ -197,7 +197,7 @@ struct PhotoAdjustSheet: View {
                     default: adjustControls
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                 }
                 .listRowBackground(WorkspaceStyle.surface)
@@ -491,7 +491,7 @@ struct ArrangePhotosSheet: View {
                         Text("The first photo is the cover marketplaces show.")
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                 }
                 .listRowBackground(WorkspaceStyle.surface)

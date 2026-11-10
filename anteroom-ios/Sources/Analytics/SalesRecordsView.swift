@@ -17,23 +17,31 @@ struct SalesRecordsView: View {
     @State private var error: String?
     @State private var editing: SalesLedgerRow?
     @State private var export: URL?
+    /// The quick range in days, or nil for Custom dates.
+    @State private var quick: Int? = 30
 
     var body: some View {
         List {
             Group {
+                // The period first, as quick choices; dates only for Custom.
                 Section {
-                    DatePicker("Sales from (UTC)", selection: $start, in: ...end, displayedComponents: .date)
-                    DatePicker("Through (UTC)", selection: $end, in: start...Date(), displayedComponents: .date)
+                    Picker("Period", selection: $quick) {
+                        Text("7 days").tag(Int?.some(7))
+                        Text("30 days").tag(Int?.some(30))
+                        Text("90 days").tag(Int?.some(90))
+                        Text("Custom").tag(Int?.none)
+                    }
+                    .pickerStyle(.segmented)
+                    if quick == nil {
+                        DatePicker("From", selection: $start, in: ...end, displayedComponents: .date)
+                        DatePicker("Through", selection: $end, in: start...Date(), displayedComponents: .date)
+                    }
                     Picker("Marketplace", selection: $marketplace) {
                         Text("All marketplaces").tag("all")
                         ForEach(Self.markets, id: \.self) { Text(Marketplaces.name($0)).tag($0) }
                     }
-                    Menu("Export CSV") {
-                        Button("Export inventory CSV") { exportCSV(inventory: true) }
-                        Button("Export sales CSV") { exportCSV(inventory: false) }
-                    }
                 } footer: {
-                    Text("How your sales are doing, and every sale with its price, fees and profit.")
+                    if quick == nil { Text("Days run midnight to midnight UTC, as on the web.") }
                 }
 
                 if let overview {
@@ -83,12 +91,28 @@ struct SalesRecordsView: View {
                     ProgressView("Loading sales records…")
                 }
                 if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                 }
             }
             .listRowBackground(WorkspaceStyle.surface)
         }
         .workspaceGroupedList()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Sales CSV", systemImage: "doc.text") { exportCSV(inventory: false) }
+                    Button("Inventory CSV", systemImage: "shippingbox") { exportCSV(inventory: true) }
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+                .accessibilityHint("Exports a CSV to share or save")
+            }
+        }
+        .onChange(of: quick) { _, days in
+            guard let days else { return }
+            end = Date()
+            start = Calendar.current.date(byAdding: .day, value: -(days - 1), to: end) ?? end
+        }
         .refreshable { await load() }
         .task(id: "\(start)|\(end)|\(marketplace)|\(page)") { await load() }
         .onChange(of: marketplace) { page = 1 }
@@ -111,10 +135,10 @@ struct SalesRecordsView: View {
             Text("Order \(row.orderID) · line \(row.lineID)").font(.caption).foregroundStyle(.secondary)
             Text("Profit: \(SalesLedgerFormat.money(row.profit, row.currency))").font(.caption)
             if !row.missingSaleData.isEmpty {
-                Text("Missing: \(row.missingSaleData.joined(separator: ", "))").font(.caption).foregroundStyle(.orange)
+                Text("Missing: \(row.missingSaleData.joined(separator: ", "))").font(.caption).foregroundStyle(WorkspaceStyle.warning)
             }
             if row.financialsStale {
-                Text("Order changed or recorded amounts need review.").font(.caption).foregroundStyle(.orange)
+                Text("Order changed or recorded amounts need review.").font(.caption).foregroundStyle(WorkspaceStyle.warning)
             }
             HStack {
                 if let id = row.conversationID {
@@ -204,7 +228,7 @@ private struct SaleAmountsSheet: View {
                         Text("Sold on \(Marketplaces.name(row.marketplace)) · quantity \(row.quantity.map(String.init) ?? "unknown") · \(row.orderStatus.replacingOccurrences(of: "_", with: " "))")
                             .font(.footnote).foregroundStyle(.secondary)
                         if row.financialsStale {
-                            Text("This order changed. Review every amount before saving again.").font(.footnote).foregroundStyle(.orange)
+                            Text("This order changed. Review every amount before saving again.").font(.footnote).foregroundStyle(WorkspaceStyle.warning)
                         }
                     }
                     Section {
@@ -226,7 +250,7 @@ private struct SaleAmountsSheet: View {
                     .disabled(working)
                     Section { Button("Reload record") { reload() }.disabled(working) }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                 }
                 .listRowBackground(WorkspaceStyle.surface)

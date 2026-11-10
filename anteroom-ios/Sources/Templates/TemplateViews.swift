@@ -86,7 +86,7 @@ private struct SaveTemplateView: View {
                 }
                 if let error {
                     Section {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive)
                         Button("Reload item and templates") { Task { await load() } }
                     }
                 }
@@ -210,7 +210,7 @@ private struct ApplyTemplateView: View {
                 }
                 if let error {
                     Section {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive)
                         Button("Reload templates") { Task { await load() } }
                     }
                 }
@@ -321,7 +321,7 @@ struct SavedTemplatesView: View {
                     Text("Save fields from a listing’s Templates action, never including SKU, private notes, photos or marketplace links.")
                 }
                 if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                 }
             }
             .listRowBackground(WorkspaceStyle.surface)
@@ -413,7 +413,7 @@ private struct TemplateDraftSheet: View {
                     }
                     if let error {
                         Section {
-                            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive)
                             if failed { Button("Check draft result") { check() }.disabled(working) }
                         }
                     }
