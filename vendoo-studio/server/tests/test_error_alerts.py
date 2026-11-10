@@ -68,6 +68,17 @@ def test_distinct_handled_errors_at_one_call_site_are_not_grouped_together():
     assert failure("Job 123: network unavailable")["fingerprint"] == failure("Job 456: network unavailable")["fingerprint"]
 
 
+def test_anteroom_ids_in_a_handled_error_do_not_split_its_group():
+    def failure(*args):
+        return build_report(logging.LogRecord("vendoo_studio.jobs", logging.ERROR, __file__, 1,
+                                              "Job %s failed at %s (seller %s): %s", args, None))
+
+    first = failure("e9b3c7c2227b", "fill", "4f1a9c0d2b7e4c5d8e6f0a1b2c3d4e5f", "network unavailable")
+    second = failure("80678405bba2", "fill", "0a1b2c3d4e5f4a5b8c7d9e0f1a2b3c4d", "network unavailable")
+    assert first["fingerprint"] == second["fingerprint"]
+    assert first["fingerprint"] != failure("80678405bba2", "fill", "x", "marketplace refused")["fingerprint"]
+
+
 def test_browser_reports_carry_page_and_release():
     record = logging.LogRecord("vendoo_studio.browser", logging.ERROR, __file__, 1, "Browser crash", (), None)
     record.browser = {"kind": "crash", "name": "TypeError", "message": "x is undefined at row 42",
