@@ -196,7 +196,12 @@ async function consumeSse(
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
       for (const raw of lines) {
-        if (applySseLine(raw, state, emit)) sawDone = true;
+        if (applySseLine(raw, state, emit)) {
+          // DONE is application completion; transport teardown may still fail
+          // on mobile. It must not turn an already saved reply into an error.
+          void reader.cancel().catch(() => undefined);
+          return { parts: state.parts, sawDone: true };
+        }
       }
     }
     if (buffer && applySseLine(buffer, state, emit)) sawDone = true;

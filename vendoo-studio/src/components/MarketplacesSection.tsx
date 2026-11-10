@@ -75,6 +75,7 @@ export function chatCanFix(draft: NativeDraft): boolean {
 
 function fieldLabel(field: string): string {
   if (field === "settings.ebay.merchant_location_key") return "Inventory location";
+  if (field === "poshmark_specifics.smartSell.minimumPrice") return "Lowest Price";
   const last = field.split(".").pop() || field;
   return last.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 }
@@ -111,7 +112,8 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
   }
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
-  if (live?.state === "deleted") return { tone: "neutral", label: "Delisted" };
+  // Delisting clears the draft's error, so an error now is from a later List and wins.
+  if (live?.state === "deleted" && !draft?.error) return { tone: "neutral", label: "Delisted" };
   if (live?.state === "failed") {
     return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error,
       said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };
@@ -120,7 +122,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   // moved on. Without that record (listed elsewhere, or marked by hand) it can't tell.
   const behind = draft?.state === "published" && Boolean(draft.revision_id) && draft.revision_id !== _revisionId
     ? `Your latest edits aren't on ${marketplaceName(marketplace)} yet.` : null;
-  if (live?.listing_id) {
+  if (live?.listing_id && live.state !== "deleted") {
     return { tone: "live", label: "Listed", href: live.url ?? undefined, hrefLabel: "View listing", detail: draft?.state === "published" ? draft.error || behind : null, said };
   }
   if (draft && draft.state !== "draft") {
