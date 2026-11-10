@@ -52,7 +52,10 @@ LOGGERS = ("vendoo_studio", "uvicorn.error", "asyncio")
 _UVICORN_DUPLICATE = "Exception in ASGI application"
 _SQL_PARAMETERS = re.compile(r"\[parameters: .*?\](?=\s*(?:\(Background|$))", re.DOTALL)
 _SQL_STATEMENT = re.compile(r"\[SQL: .*?\](?=\s*(?:\[parameters|\(Background|$))", re.DOTALL)
-_VOLATILE = re.compile(r"0x[0-9a-f]+|\b[0-9a-f]{8}-[0-9a-f-]{27}\b|\d+", re.IGNORECASE)
+# Anteroom's own IDs are 12 to 32 hex characters (uuid4().hex, often cut to 12);
+# they must not split one failure into a group per job or field.
+_VOLATILE = re.compile(
+    r"0x[0-9a-f]+|\b[0-9a-f]{8}-[0-9a-f-]{27}\b|\b(?=[0-9a-f]*\d)[0-9a-f]{12,32}\b|\d+", re.IGNORECASE)
 
 # Set per request by the hosted access middleware: {"scope": ..., "request_id": ...}.
 request_context: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("request_context", default=None)
