@@ -1,1 +1,0 @@
-- Listings made with an OpenRouter model finish sooner: Anteroom now asks OpenRouter for the fastest host serving your chosen model, instead of whichever one it picks. Your model and settings stay the same.
