@@ -1,0 +1,3 @@
+- Show Depop listing errors after a previous delist and expand the marketplace's exact reply.
+- Remove the repeated Chrome extension text from marketplace forms.
+- Scroll to and highlight fields when choosing Edit from a marketplace error.
