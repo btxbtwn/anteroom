@@ -6,6 +6,47 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.888 — 2026-11-10
+
+- When Poshmark refuses a listing because Smart Sell's Lowest Price is too low, Anteroom now says so and offers Edit Lowest Price, instead of a vague "Invalid Input Error".
+- A listing that fails after being delisted now shows the failure and its reason, not just "Delisted".
+
+## 0.1.887 — 2026-11-10
+
+- Show item names in the queue tray when marketplace jobs have no shared title.
+
+## 0.1.886 — 2026-11-10
+
+- Measurements sit beside item details; notes and labels move to the end of the General form.
+- "Ask chat" is now a small chat button beside each field's name. It shows when you point at or tap into the field, so the form is easier to read.
+- Measurement boxes are blank until you fill them, instead of showing sample numbers that looked like real ones.
+- Jeans, pants, shorts and skirts open their measurements on the right type instead of Top.
+- Etsy's status in the marketplace list now fits ("May not qualify"); point at it to read the reason.
+
+## 0.1.885 — 2026-11-10
+
+- Confirmed delists wait in the activity tray while another marketplace action runs, so you can move on to other items.
+
+## 0.1.884 — 2026-11-10
+
+- Anteroom now follows your device's light or dark setting until you pick a theme, and a saved theme no longer flips back to dark while the app loads.
+- The sign-in screen is simpler: no all-caps label, and Sign in is the main button.
+- One ships-from ZIP in Settings → Listings now covers eBay, Mercari and Depop. A ZIP you saved for eBay carries over.
+- Detect sales shows off, with what to do, until the marketplace is connected or signed in; your choice comes back once it is.
+- Saved templates load with a placeholder row and no longer need a Reload button.
+- On phones, settings switches sit at the end of their row.
+- The empty listing pane says what to do next in one line.
+- Sourcing shows an error with Try again when your buy list can't be built, instead of loading forever.
+- Gray labels in light mode are a little darker, so they're easier to read.
+
+## 0.1.883 — 2026-11-10
+
+- Analytics uses the same names on both tabs: Revenue, Profit, Items sold, Median days to sell and Sell-through, with the period shown next to the figures.
+- Amounts on Analytics always show cents and the currency symbol ($68.00, not "USD 68").
+- Analytics says exactly which amounts are missing, such as "shipping you paid (8)", once, with a button to show those sales, instead of a yellow warning on every sale.
+- On a phone, Analytics shows the figures first: period, Filters and Export sit on one row.
+- Analytics no longer repeats its title under the tabs.
+
 ## 0.1.882 — 2026-11-10
 
 - Slow responses and price-save timeouts now leave diagnostic reports, even when the price finishes saving.

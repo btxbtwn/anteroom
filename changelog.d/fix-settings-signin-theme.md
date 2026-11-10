@@ -1,9 +1,0 @@
-- Anteroom now follows your device's light or dark setting until you pick a theme, and a saved theme no longer flips back to dark while the app loads.
-- The sign-in screen is simpler: no all-caps label, and Sign in is the main button.
-- One ships-from ZIP in Settings → Listings now covers eBay, Mercari and Depop. A ZIP you saved for eBay carries over.
-- Detect sales shows off, with what to do, until the marketplace is connected or signed in; your choice comes back once it is.
-- Saved templates load with a placeholder row and no longer need a Reload button.
-- On phones, settings switches sit at the end of their row.
-- The empty listing pane says what to do next in one line.
-- Sourcing shows an error with Try again when your buy list can't be built, instead of loading forever.
-- Gray labels in light mode are a little darker, so they're easier to read.
