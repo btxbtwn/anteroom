@@ -31,13 +31,13 @@ struct EbayOffersView: View {
                         if let lastCheck = status?.lastCheck {
                             LabeledContent("Last automatic check", value: AutomationFormat.runTime(lastCheck, timezone: TimeZone.current.identifier))
                         }
-                        if let lastError = status?.lastError { Text(lastError).font(.footnote).foregroundStyle(.red) }
+                        if let lastError = status?.lastError { Text(lastError).font(.footnote).foregroundStyle(WorkspaceStyle.destructive) }
                         Button(status?.connected == true ? "Reconnect eBay" : "Connect eBay") { connect() }.disabled(busy)
                     } footer: {
                         Text("Every 15 minutes, at most one offer per listing a day; US fixed-price listings only.")
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                     if let notice {
                         Section { Text(notice).font(.footnote) }
@@ -164,7 +164,7 @@ struct EbayOffersView: View {
             .disabled(busy || form.preview(status) == nil)
         } footer: {
             if picked.count > EbayOffersForm.maxPreview {
-                Text("Select at most 50 listings per preview.").foregroundStyle(.red)
+                Text("Select at most 50 listings per preview.").foregroundStyle(WorkspaceStyle.destructive)
             }
         }
     }
@@ -391,7 +391,7 @@ struct PromotionEditorView: View {
                         Text("Saved off. Turn it on from the list; any edit turns it off again.")
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                     Section {
                         Picker("Listings", selection: $form.scope) {
@@ -540,7 +540,7 @@ struct PromotionDetailsView: View {
                         Text(PromotionRunsOn.note)
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                     listings
                     activitySection

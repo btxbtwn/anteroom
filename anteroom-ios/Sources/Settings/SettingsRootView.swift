@@ -19,13 +19,15 @@ struct SettingsRootView: View {
                 Group {
                     // General's rows sit on this screen; a theme change rebuilds
                     // the window's colours and must not pop a pushed page.
+                    // The order of iOS Settings: what the seller changes most,
+                    // then the account, and About last (HIG, Settings).
                     GeneralSettingsSections(api: api)
-                    Section {
+                    Section("Selling") {
                         NavigationLink { ListingsSettingsView(api: api) } label: {
                             Label("Listings", systemImage: "tag")
                         }
                         NavigationLink { ProvidersSettingsView(api: api) } label: {
-                            Label("Providers", systemImage: "sparkles")
+                            Label("AI providers", systemImage: "sparkles")
                         }
                     }
                     Section {
@@ -56,6 +58,7 @@ struct SettingsRootView: View {
                             Text("Deleting your account removes your Anteroom data. Listings that are live on marketplaces stay there.")
                         }
                     }
+                    AboutSettingsSection(api: api)
                 }
                 .listRowBackground(WorkspaceStyle.surface)
             }
@@ -122,8 +125,6 @@ struct GeneralSettingsSections: View {
                 .accessibilityIdentifier("appearance-picker")
                 .accessibilityValue(appearance.theme.label)
                 .disabled(!appearance.hasLoaded || appearance.isLoading || appearance.isSaving)
-                Text("System follows this iPhone’s appearance.")
-                    .font(.footnote).foregroundStyle(.secondary)
                 Picker("Listing names", selection: Binding(
                     get: { appearance.listingNames },
                     set: { choice in Task { await appearance.setListingNames(choice) } }
@@ -133,24 +134,31 @@ struct GeneralSettingsSections: View {
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("listing-names-picker")
                 .disabled(!appearance.hasLoaded || appearance.isLoading || appearance.isSaving)
-                Text("What the inventory calls each listing. By SKU, a listing without a SKU keeps its title.")
-                    .font(.footnote).foregroundStyle(.secondary)
                 if appearance.isLoading { ProgressView("Loading appearance…") }
                 if appearance.isSaving { ProgressView("Saving…") }
                 if let error = appearance.error, !appearance.isLoading {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive)
                     Button("Reload appearance") { Task { await appearance.refresh() } }
                         .disabled(appearance.isLoading || appearance.isSaving)
                 }
             } header: {
                 Text("Appearance")
             } footer: {
-                Text("Saved to your Anteroom account, so the web app and this iPhone match.")
+                // Explanations sit under the group, not as rows of their own.
+                Text("System follows this iPhone’s appearance. Listing names sets what the inventory calls each listing; by SKU, a listing without a SKU keeps its title. Saved to your Anteroom account, so the web app and this iPhone match.")
             }
-            Section("About") {
-                LabeledContent("Version", value: version)
-                NavigationLink("What's new") { ChangelogView(api: api) }
-            }
+        }
+    }
+}
+
+/// Version and What's new, last in Settings.
+struct AboutSettingsSection: View {
+    let api: AnteroomAPI
+
+    var body: some View {
+        Section("About") {
+            LabeledContent("Version", value: version)
+            NavigationLink("What's new") { ChangelogView(api: api) }
         }
     }
 

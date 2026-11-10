@@ -50,11 +50,39 @@ describe("Connections settings", () => {
     expect(section).toContain("Detect sales");
     expect(section).toContain("Where the sign-in lives");
     expect(html).toContain("Marketplaces → eBay → Offers");
-    expect(html).toContain('id="ebay-inventory-location"');
-    expect(html).toContain("eBay inventory location");
+    // The ships-from ZIP lives once, under Settings → Listings.
+    expect(html).not.toContain('id="ebay-inventory-location"');
+    expect(html).not.toContain("ZIP");
     expect(html).not.toContain("Chrome sign-in");
     expect(html).not.toContain("ebay-offers");
     expect(html).not.toContain("Automatic offers check every 15 minutes");
+  });
+
+  it("shows Detect sales off, with the reason, until the account can be checked, and keeps the saved choice", () => {
+    const html = renderToStaticMarkup(<ConnectionsSettings />);
+    const row = (id: string) => html.slice(html.indexOf(`id="${id}"`), html.indexOf("</div></div>", html.indexOf(`aria-label="Sale detection for`, html.indexOf(`id="${id}"`))));
+    // Nothing is saved for any marketplace, so every one is on by preference.
+    expect(row("direct-ebay")).toContain("Connect to detect sales");
+    expect(row("chrome-poshmark")).toContain("Sign in to detect sales");
+    expect(row("chrome-mercari")).toContain("Sign in to detect sales");
+    expect(row("chrome-mercari")).toContain("Sign-in expired");
+    expect(row("chrome-mercari")).toContain("Sign in again</button>");
+    expect(row("chrome-depop")).toContain("Detect sales");
+    expect(row("chrome-depop")).not.toContain("to detect sales");
+    const switches = [...html.matchAll(/<[a-z]+ [^>]*aria-label="Sale detection for (\w+)"[^>]*>/g)];
+    const state = Object.fromEntries(switches.map(([tag, name]) => [name, { checked: tag.includes('aria-checked="true"'), disabled: / data-disabled(="")?[ >]|aria-disabled="true"/.test(tag) }]));
+    expect(state.Depop).toEqual({ checked: true, disabled: false });
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari"]) expect(state[name]).toEqual({ checked: false, disabled: true });
+  });
+
+  it("asks to connect Chrome before sales can be detected on Chrome marketplaces", () => {
+    const base = useQuery.getMockImplementation()!;
+    useQuery.mockImplementation((options: { queryKey: string[] }) => {
+      if (options.queryKey[0] === "extension-status") return { data: { connected: false } };
+      return base(options);
+    });
+    const html = renderToStaticMarkup(<ConnectionsSettings />);
+    expect(html.match(/Connect Chrome to detect sales/g)).toHaveLength(3);
   });
 
   it("offers to reconnect eBay when eBay refuses the listing policies", () => {

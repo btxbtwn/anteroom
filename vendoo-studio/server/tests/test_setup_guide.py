@@ -63,7 +63,7 @@ class SetupGuideSettingsTest(unittest.TestCase):
                 "recent_vendoo_labels": [],
                 "settled_shelf_expanded": True,
                 "hidden_vendoo_labels": [],
-                "theme": "dark",
+                "theme": "system",
                 "listing_names": "title",
                 "listing_mode": "direct",
                 "model_favorites": [],
@@ -114,14 +114,29 @@ class SetupGuideSettingsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             user_settings.set_package_dimensions(length=0, width=10, height=3)
 
-    def test_ebay_inventory_location_persists(self):
+    def test_one_ships_from_zip_serves_every_marketplace(self):
+        self.assertEqual(user_settings.get_ships_from_zip(), "")
         self.assertEqual(user_settings.get_ebay_inventory_location(), "")
-        self.assertEqual(user_settings.set_ebay_inventory_location("New Orleans, LA"), "New Orleans, LA")
-        self.assertEqual(user_settings.get_ebay_inventory_location(), "New Orleans, LA")
+        self.assertEqual(user_settings.set_ships_from_zip("70125"), "70125")
+        self.assertEqual(user_settings.get_ebay_inventory_location(), "70125")
         stored = json.loads(Path(self.tmp.name, "settings.json").read_text())
-        self.assertEqual(stored["ebay_inventory_location"], "New Orleans, LA")
-        self.assertEqual(user_settings.set_ebay_inventory_location("  "), "")
+        self.assertEqual(stored["ships_from_zip"], "70125")
+        self.assertEqual(stored["ebay_inventory_location"], "70125")
+        self.assertEqual(user_settings.set_ships_from_zip(""), "")
         self.assertEqual(user_settings.get_ebay_inventory_location(), "")
+        self.assertFalse(hasattr(user_settings, "set_ebay_inventory_location"))
+
+    def test_a_zip_saved_only_for_ebay_becomes_the_ships_from_zip(self):
+        Path(self.tmp.name, "settings.json").write_text(json.dumps({"ebay_inventory_location": "70125-1234"}))
+        self.assertEqual(user_settings.get_ships_from_zip(), "70125")
+        self.assertEqual(user_settings.get_ebay_inventory_location(), "70125")
+
+    def test_ebay_keeps_a_saved_place_name_until_a_zip_is_saved(self):
+        Path(self.tmp.name, "settings.json").write_text(json.dumps({"ebay_inventory_location": "New Orleans, LA"}))
+        self.assertEqual(user_settings.get_ships_from_zip(), "")
+        self.assertEqual(user_settings.get_ebay_inventory_location(), "New Orleans, LA")
+        user_settings.set_ships_from_zip("70125")
+        self.assertEqual(user_settings.get_ebay_inventory_location(), "70125")
 
     def test_forgotten_label_stays_hidden_until_restored(self):
         user_settings.remember_vendoo_labels("Vintage, Nike")
@@ -185,7 +200,7 @@ class SetupGuideRouteTest(unittest.TestCase):
         ui = self.client.get("/api/settings/ui")
         self.assertEqual(ui.status_code, 200)
         self.assertEqual(ui.json()["settled_shelf_expanded"], True)
-        self.assertEqual(ui.json()["theme"], "dark")
+        self.assertEqual(ui.json()["theme"], "system")
 
         saved = self.client.put(
             "/api/settings/ui",
@@ -234,17 +249,14 @@ class SetupGuideRouteTest(unittest.TestCase):
         )
         self.assertEqual(rejected.status_code, 400)
 
-    def test_ebay_inventory_location_endpoint(self):
+    def test_ebay_inventory_location_reads_the_ships_from_zip(self):
         default = self.client.get("/api/settings/ebay-inventory-location")
         self.assertEqual(default.status_code, 200)
         self.assertEqual(default.json(), {"location": ""})
-        saved = self.client.put("/api/settings/ebay-inventory-location", json={"location": "10001"})
+        saved = self.client.put("/api/settings/ships-from-zip", json={"zip": "10001"})
         self.assertEqual(saved.status_code, 200)
-        self.assertEqual(saved.json(), {"ok": True, "location": "10001"})
         self.assertEqual(self.client.get("/api/settings/ebay-inventory-location").json(), {"location": "10001"})
-        blank = self.client.put("/api/settings/ebay-inventory-location", json={"location": "  "})
-        self.assertEqual(blank.status_code, 200)
-        self.assertEqual(blank.json(), {"ok": True, "location": ""})
+        self.assertEqual(self.client.put("/api/settings/ebay-inventory-location", json={"location": "10002"}).status_code, 405)
 
     def test_listing_formulas_endpoint_defaults_and_persists(self):
         from vendoo_studio.services.skill_formulas import (

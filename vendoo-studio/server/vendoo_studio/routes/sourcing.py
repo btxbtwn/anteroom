@@ -259,6 +259,8 @@ class SourcingTrend(BaseModel):
 
 class SourcingResponse(BaseModel):
     refreshing: bool
+    # Why the last refresh failed, until one succeeds.
+    refresh_error: str | None = None
     ebay_connected: bool
     prefs: SourcingPrefs
     trend: SourcingTrend
@@ -283,8 +285,10 @@ class SourcingPrefsUpdate(BaseModel):
 
 def _response() -> SourcingResponse:
     state = box_scout.read_state()
+    error = state.get("refresh_error")
     return SourcingResponse(
         refreshing=box_scout.refreshing(),
+        refresh_error=error.get("message") if isinstance(error, dict) else None,
         ebay_connected=sold_listings.ebay_ready(),
         prefs=SourcingPrefs.model_validate(state["prefs"]),
         trend=SourcingTrend.model_validate(state["trend"]),

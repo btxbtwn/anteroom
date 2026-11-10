@@ -139,7 +139,7 @@ private struct RevisionPreviewView: View {
                 }
                 if let error {
                     Section {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive)
                         if conflict {
                             Text("Go back and pull to refresh history before choosing a version again.")
                         } else if snapshot == nil {
