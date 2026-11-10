@@ -1,1 +1,0 @@
-- Start every selected regeneration without waiting for editor refreshes after clearing the listings.

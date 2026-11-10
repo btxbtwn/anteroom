@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.899 — 2026-11-10
+
+- Start every selected regeneration without waiting for editor refreshes after clearing the listings.
+
 ## 0.1.898 — 2026-11-10
 
 - Add a public privacy policy page at myanteroom.com/privacy for the Chrome Web Store listing.
