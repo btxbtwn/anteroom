@@ -2,6 +2,25 @@ import { MutationObserver, onlineManager } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStudioQueryClient, readRetryDelay, retryRead, UNAVAILABLE_RETRIES } from "./queryClient";
 import { ApiRequestError } from "./transport";
+import { reportError } from "./errorReports";
+
+vi.mock("./errorReports", () => ({ reportError: vi.fn() }));
+
+it("reports handled read and mutation failures even with local error callbacks", async () => {
+  const client = createStudioQueryClient();
+  const error = new Error("Marketplace refused the request");
+  const onError = vi.fn();
+  try {
+    await expect(client.fetchQuery({ queryKey: ["failure"], queryFn: () => Promise.reject(error), retry: false })).rejects.toBe(error);
+    const mutation = new MutationObserver(client, { mutationFn: () => Promise.reject(error), onError, retry: false });
+    await expect(mutation.mutate(undefined)).rejects.toBe(error);
+    expect(onError).toHaveBeenCalledWith(error, undefined, undefined, expect.anything());
+    expect(reportError).toHaveBeenCalledWith("query", error);
+    expect(reportError).toHaveBeenCalledWith("mutation", error);
+  } finally {
+    client.clear();
+  }
+});
 
 afterEach(() => {
   onlineManager.setOnline(true);

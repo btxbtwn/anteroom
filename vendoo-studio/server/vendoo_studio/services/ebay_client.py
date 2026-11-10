@@ -14,6 +14,7 @@ import httpx
 from vendoo_studio.services.keychain import get_marketplace_accounts
 from vendoo_studio.services.marketplace_accounts import SignInRequired, access_token
 from vendoo_studio.services.relay_client import relay_request
+from vendoo_studio.services.marketplace_errors import marketplace_call
 
 API = "https://api.ebay.com"
 APIZ = "https://apiz.ebay.com"
@@ -134,6 +135,7 @@ class EbayClient:
         self.seller = seller
 
     @classmethod
+    @marketplace_call("ebay")
     async def connect(cls):
         # On the web the account is a Vault read on a pooled connection. Waiting
         # for one on the request loop froze every request and then answered 503.
@@ -143,6 +145,7 @@ class EbayClient:
         await asyncio.to_thread(assert_identity, seller)
         return cls(token, seller)
 
+    @marketplace_call("ebay")
     async def request(self, method: str, path: str, *, params: dict | None = None, body: dict | None = None,
                       app: bool = False, xml: str | None = None, call: str | None = None, upload: dict | None = None,
                       raw: bool = False, binary: bytes | None = None) -> dict:

@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 async def check_seller(owner: str, recovered: set[str]) -> None:
     with use(for_seller(owner)), SessionLocal() as db:
+        promotion_automations.report_overdue(db)
         if owner not in recovered:
             fail_stalled_jobs(db)
             promotion_automations.recover(db)
@@ -31,14 +32,23 @@ async def check_seller(owner: str, recovered: set[str]) -> None:
 
 
 async def check_ready_sellers(recovered: set[str]) -> None:
+    ready = set(ready_sellers(MARKETPLACE_PROMOTIONS))
+
+    def check_disconnected(owner):
+        with use(for_seller(owner)), SessionLocal() as db:
+            promotion_automations.report_overdue(db)
+
     async def check(owner):
         try:
-            await check_seller(owner, recovered)
+            if owner in ready:
+                await check_seller(owner, recovered)
+            else:
+                await asyncio.to_thread(check_disconnected, owner)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - a seller's failed round must not stop others
             log.exception('Promotion check failed for one seller; unknown sends are never retried')
-    await asyncio.gather(*(check(owner) for owner in ready_sellers(MARKETPLACE_PROMOTIONS)))
+    await asyncio.gather(*(check(owner) for owner in ready | recovered))
 
 
 async def serve() -> None:
