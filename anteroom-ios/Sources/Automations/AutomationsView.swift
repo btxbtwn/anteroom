@@ -54,7 +54,7 @@ struct AutomationsView: View {
                         Section {
                             ForEach(approvals) { row in
                                 VStack(alignment: .leading, spacing: 4) {
-                                    NavigationLink(value: ListingSummary(id: row.conversationID, title: row.title)) {
+                                    NavigationLink(value: ConversationSummary(id: row.conversationID, title: row.title)) {
                                         Text(row.title ?? row.conversationID)
                                     }
                                     Text(([row.action == "publish" ? "List" : row.action == "delist" ? "Delist" : "Relist",
@@ -76,7 +76,7 @@ struct AutomationsView: View {
                     if !gaps.isEmpty {
                         Section("Down, needs relist") {
                             ForEach(gaps) { gap in
-                                NavigationLink(value: ListingSummary(id: gap.conversationID, title: gap.title)) {
+                                NavigationLink(value: ConversationSummary(id: gap.conversationID, title: gap.title)) {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(gap.title ?? gap.conversationID)
                                         Text(([Marketplaces.name(gap.marketplace), gap.state] + (gap.error.map { [$0] } ?? [])).joined(separator: " · "))
@@ -122,7 +122,7 @@ struct AutomationsView: View {
             }
             .refreshable { await load() }
             .task { await load() }
-            .navigationDestination(for: ListingSummary.self) { listing in
+            .navigationDestination(for: ConversationSummary.self) { listing in
                 ListingEditorView(api: api, listing: listing) {}
             }
             .sheet(item: $editing) { target in

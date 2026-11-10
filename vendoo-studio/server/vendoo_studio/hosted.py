@@ -449,10 +449,10 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.add_api_route('/api/catalog/dropdown-options', dropdown_options, methods=['GET'])
     app.add_api_route('/api/catalog/categories', catalog_categories, methods=['GET'])
     app.add_api_route('/api/catalog/search', catalog_search, methods=['GET'])
-    from vendoo_studio.routes.conversations import preview_copy, copy_conversation, copy_result, ConversationResponse
+    from vendoo_studio.routes.conversations import preview_copy, copy_conversation, copy_result, Conversation
     app.add_api_route('/api/conversations/{conv_id}/copy-preview', preview_copy, methods=['GET'])
-    app.add_api_route('/api/conversations/{conv_id}/copy', copy_conversation, methods=['POST'], response_model=ConversationResponse)
-    app.add_api_route('/api/conversations/{conv_id}/copy-result/{request_id}', copy_result, methods=['GET'], response_model=ConversationResponse)
+    app.add_api_route('/api/conversations/{conv_id}/copy', copy_conversation, methods=['POST'], response_model=Conversation)
+    app.add_api_route('/api/conversations/{conv_id}/copy-result/{request_id}', copy_result, methods=['GET'], response_model=Conversation)
     if web_dir is not None:
         app.mount("/assets", StaticFiles(directory=web_dir / "assets"), name="cloud-assets")
 

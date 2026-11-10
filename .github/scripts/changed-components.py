@@ -36,6 +36,9 @@ NOT_STUDIO = (
     "changelog.d/",
     ".github/workflows/ios.yml",
 )
+# Studio's contract check regenerates these from the backend, so it must run
+# when they change (contracts/ is not in NOT_STUDIO, so it already counts).
+STUDIO_GENERATED = ("anteroom-ios/Sources/API/Generated/",)
 
 # Files the Version workflow rewrites with nothing but the new version.
 VERSION_ONLY = {"CHANGELOG.md", "vendoo-studio/VERSION"}
@@ -85,7 +88,8 @@ def components(files: list[str]) -> dict[str, bool]:
     root_docs = [path for path in files if "/" not in path and path.endswith(".md")]
     return {
         "studio": ci or any(
-            not path.startswith(NOT_STUDIO) and path not in root_docs for path in files
+            (not path.startswith(NOT_STUDIO) and path not in root_docs) or path.startswith(STUDIO_GENERATED)
+            for path in files
         ),
         "extension": ci or any(
             path.startswith("vendoo-extension/")

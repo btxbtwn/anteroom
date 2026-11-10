@@ -11,7 +11,7 @@ import { CropIcon, EraserIcon, RotateCcwIcon, RotateCwIcon, SunIcon, Undo2Icon, 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useWorkspaceRuntime } from "../app/runtime";
 import { api } from "../api/client";
-import type { CropBox, Photo, PhotoEdits } from "../api/types";
+import type { CropBox, ListingPhoto } from "../api/types";
 import { cn } from "../lib/utils";
 import {
   CROP_ASPECTS,
@@ -22,6 +22,7 @@ import {
   turnEdits,
   withDefaults,
   type CropHandle,
+  type EditRecipe,
 } from "../photoEdits";
 import { Button } from "./ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "./ui/dialog";
@@ -41,16 +42,16 @@ const BACKGROUNDS: { color: string; label: string }[] = [
 
 interface Props {
   convId: string;
-  photo: Photo;
+  photo: ListingPhoto;
   index: number;
-  onSaved: (photo: Photo) => void;
+  onSaved: (photo: ListingPhoto) => void;
   onClose: () => void;
 }
 
 export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
   const runtime = useWorkspaceRuntime();
   const saved = withDefaults(photo.edits);
-  const [edits, setEdits] = useState<PhotoEdits>(saved);
+  const [edits, setEdits] = useState<EditRecipe>(saved);
   const [tool, setTool] = useState<Tool>("crop");
   const [aspectId, setAspectId] = useState("free");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -88,7 +89,7 @@ export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
     };
   }, [convId, photo.id, edits, showWholeFrame]);
 
-  const update = (patch: Partial<PhotoEdits>) => setEdits((current) => ({ ...current, ...patch }));
+  const update = (patch: Partial<EditRecipe>) => setEdits((current) => ({ ...current, ...patch }));
   const aspect = CROP_ASPECTS.find((option) => option.id === aspectId)?.aspect ?? null;
 
   const chooseAspect = (id: string) => {
@@ -163,7 +164,7 @@ export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
               <div className="relative max-w-full leading-none">
                 <StudioImage
                   src={previewUrl}
-                  alt={`Photo ${index + 1} with edits`}
+                  alt={`ListingPhoto ${index + 1} with edits`}
                   draggable={false}
                   className="block max-h-[calc(min(92vh,860px)-170px)] max-w-full select-none object-contain"
                   onLoad={(event) => {

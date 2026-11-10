@@ -21,7 +21,7 @@ struct SimilarItem: Decodable, Identifiable, Sendable {
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    var listing: ListingSummary { ListingSummary(id: id, title: title, coverPhotoURL: coverURL) }
+    var listing: ConversationSummary { ConversationSummary(id: id, title: title, coverPhotoURL: coverURL) }
 }
 
 struct SimilarPair: Decodable, Identifiable, Sendable {
@@ -103,7 +103,7 @@ struct SimilarItemsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
-        .navigationDestination(for: ListingSummary.self) { listing in
+        .navigationDestination(for: ConversationSummary.self) { listing in
             ListingEditorView(api: api, listing: listing) {}
         }
         .confirmationDialog(mergeTitle, isPresented: Binding(get: { merging != nil }, set: { if !$0 { merging = nil } }),

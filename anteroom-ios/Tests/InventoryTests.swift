@@ -5,7 +5,7 @@ import Foundation
 @main
 struct InventoryTests {
     static func main() throws {
-        let rows = try JSONDecoder().decode([ListingSummary].self, from: Data(#"""
+        let rows = try JSONDecoder().decode([ConversationSummary].self, from: Data(#"""
         [
           {"id":"a","title":"Blue shirt","status":"draft","created_at":"2026-10-01T10:00:00","updated_at":"2026-10-30T10:00:00.123456","sku":"B-2","price":12.5,"quantity":1,"direct_marketplaces":[],"cover_photo_url":"/api/photos/p1/thumb?size=192&v=abc"},
           {"id":"b","title":"Red bag","status":"draft","created_at":"2026-10-02T10:00:00","updated_at":"2026-10-29T10:00:00","sku":null,"price":40,"direct_marketplaces":["poshmark","ebay"]},
@@ -59,13 +59,13 @@ struct InventoryTests {
 
         // The desktop's listing-date and sale-date sorts, by the server's oldest
         // live listing date; one never listed or never sold sorts last.
-        let dated = try JSONDecoder().decode([ListingSummary].self, from: Data(#"""
+        let dated = try JSONDecoder().decode([ConversationSummary].self, from: Data(#"""
         [
-          {"id":"p","title":"P","status":"active","oldest_listed_at":"2026-09-01T00:00:00+00:00"},
-          {"id":"q","title":"Q","status":"active","oldest_listed_at":"2026-08-01T00:00:00Z"},
-          {"id":"r","title":"R","status":"draft"},
-          {"id":"s","title":"S","status":"sold","sold_at":"2026-10-05T00:00:00Z"},
-          {"id":"t","title":"T","status":"sold","sold_at":"2026-10-09T00:00:00.5Z"}
+          {"id":"p","title":"P","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","oldest_listed_at":"2026-09-01T00:00:00+00:00"},
+          {"id":"q","title":"Q","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","oldest_listed_at":"2026-08-01T00:00:00Z"},
+          {"id":"r","title":"R","status":"draft","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00"},
+          {"id":"s","title":"S","status":"sold","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","sold_at":"2026-10-05T00:00:00Z"},
+          {"id":"t","title":"T","status":"sold","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","sold_at":"2026-10-09T00:00:00.5Z"}
         ]
         """#.utf8))
         filters = InventoryFilters(sort: .stalest)
@@ -85,8 +85,8 @@ struct InventoryTests {
                      && InventoryQuery.compactCount(2000) == "2k" && InventoryQuery.compactCount(150_000) == "150k")
 
         // Per-marketplace badges: what Anteroom's own records say, in marketplace order.
-        let tracked = try JSONDecoder().decode(ListingSummary.self, from: Data(#"""
-        {"id":"f","title":"Levi's","status":"active","direct_marketplaces":["ebay"],"direct_records":{
+        let tracked = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
+        {"id":"f","title":"Levi's","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","direct_marketplaces":["ebay"],"direct_records":{
           "poshmark":{"state":"not_saved","listing_url":null,"failed":true,"fields":2},
           "ebay":{"state":"published","listing_url":"https://www.ebay.com/itm/1","failed":false,"fields":0},
           "depop":{"state":"draft","failed":false,"fields":0},
@@ -115,8 +115,8 @@ struct InventoryTests {
                                       missing: missing)?.label == "Needs 2 fields", "Rejected fields are already in the count")
 
         // Imported listings read Listed with their own link; a sale and Anteroom's delist outrank the import.
-        let imported = try JSONDecoder().decode(ListingSummary.self, from: Data(#"""
-        {"id":"g","title":"Tee","status":"active","direct_marketplaces":[],"direct_records":{
+        let imported = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
+        {"id":"g","title":"Tee","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","direct_marketplaces":[],"direct_records":{
           "depop":{"state":"draft","failed":false,"fields":0}},
          "vendoo_marketplaces":["ebay","poshmark","mercari","vestiaireApi"],
          "vendoo_listing_urls":{"ebay":"https://www.ebay.com/itm/2"},
@@ -136,8 +136,8 @@ struct InventoryTests {
         precondition(imported.rowLogos(selling: ["ebay", "poshmark"]).map(\.marketplace) == ["ebay"], "Only the marketplaces the seller sells on")
         precondition(imported.inventoryStatus == "active")
         // Each marketplace's live price, marked when it is not the item price; unknown stays unknown.
-        let priced = try JSONDecoder().decode(ListingSummary.self, from: Data(#"""
-        {"id":"g","title":"Tee","status":"active","price":25,"direct_records":{
+        let priced = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
+        {"id":"g","title":"Tee","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","price":25,"direct_records":{
           "ebay":{"state":"published","price":25},
           "poshmark":{"state":"published","price":30},
           "mercari":{"state":"published","price":null},
@@ -209,5 +209,5 @@ struct InventoryTests {
         print("Inventory tests passed")
     }
 
-    private static func ids(_ rows: [ListingSummary]) -> [String] { rows.map(\.id) }
+    private static func ids(_ rows: [ConversationSummary]) -> [String] { rows.map(\.id) }
 }

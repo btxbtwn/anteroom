@@ -118,9 +118,11 @@ final class FastLoadingTests: XCTestCase {
 
     func testTheEditorReadsListingNotesAndPhotosInOneRequest() async throws {
         StubProtocol.answer(.init(status: 200, body: #"""
-        {"conversation":{"id":"a","title":"Blue shirt","status":"draft","notes":"{}"},
-         "listing":{"listing":{"title":"Blue shirt","price":12},"current_revision_id":"r1"},
-         "photos":[{"id":"p1","url":"/api/photos/p1?v=abc"}],
+        {"conversation":{"id":"a","title":"Blue shirt","status":"draft","created_at":"2026-11-01T10:00:00","updated_at":"2026-11-01T10:00:00","notes":"{}"},
+         "listing":{"conversation_id":"a","listing":{"title":"Blue shirt","price":12},"current_revision_id":"r1",
+                    "revision_count":1,"can_send":false},
+         "photos":[{"id":"p1","conversation_id":"a","original_filename":"p1.jpg","mime_type":"image/jpeg","size_bytes":1,
+                    "display_order":0,"width":null,"height":null,"created_at":"2026-11-01T10:00:00","url":"/api/photos/p1?v=abc"}],
          "messages":[],"jobs":[],"activity":{}}
         """#))
         let screen = try await api.listingScreen("a")

@@ -7,7 +7,7 @@ struct BulkRegenerateView: View {
     enum Mode { case rewrite, generate }
 
     let api: AnteroomAPI
-    let listings: [ListingSummary]
+    let listings: [ConversationSummary]
     var mode: Mode = .rewrite
     let onFinished: () -> Void
 
@@ -83,7 +83,7 @@ struct BulkRegenerateView: View {
         return "\(done) \(mode == .generate ? "generated" : "rewritten") · \(failed) need attention · \(listings.count - done - failed) remaining"
     }
 
-    private func caption(_ listing: ListingSummary) -> String {
+    private func caption(_ listing: ConversationSummary) -> String {
         switch states[listing.id] ?? .waiting {
         case .waiting: return mode == .rewrite && listing.coverPhotoID == nil ? "No photos; will be skipped" : (started ? "Waiting" : "Ready")
         case .working(let step): return step
@@ -93,7 +93,7 @@ struct BulkRegenerateView: View {
         }
     }
 
-    private func captionColor(_ listing: ListingSummary) -> Color {
+    private func captionColor(_ listing: ConversationSummary) -> Color {
         if case .failed = states[listing.id] { return .red }
         return .secondary
     }
@@ -131,7 +131,7 @@ struct BulkRegenerateView: View {
     }
 
     @MainActor
-    private func rewrite(_ listing: ListingSummary) async {
+    private func rewrite(_ listing: ConversationSummary) async {
         if stopRequested { states[listing.id] = .skipped; return }
         // A new draft's summary predates its photos; bulk listing only passes drafts that have some.
         guard mode == .generate || (listing.coverPhotoID != nil && listing.settledAt == nil) else {

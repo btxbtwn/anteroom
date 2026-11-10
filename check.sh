@@ -114,7 +114,7 @@ PY"
   fi
 fi
 
-if changed '^anteroom-ios/'; then
+if changed '^(anteroom-ios|contracts)/'; then
   if [[ "$(uname)" == "Darwin" ]]; then
     run "iPhone sandbox UI tests" ./anteroom-ios/test-sandbox.sh
   else
