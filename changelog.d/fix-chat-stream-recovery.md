@@ -1,1 +1,0 @@
-- Keep a completed chat reply from showing a connection error when the connection closes.

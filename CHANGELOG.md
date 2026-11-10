@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.889 — 2026-11-10
+
+- Keep a completed chat reply from showing a connection error when the connection closes.
+
 ## 0.1.888 — 2026-11-10
 
 - When Poshmark refuses a listing because Smart Sell's Lowest Price is too low, Anteroom now says so and offers Edit Lowest Price, instead of a vague "Invalid Input Error".
