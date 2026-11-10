@@ -1,1 +1,0 @@
-- Keep chat from showing a loading indicator during listing actions or opening automatically when empty.

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.877 — 2026-11-10
+
+- Keep chat from showing a loading indicator during listing actions or opening automatically when empty.
+
 ## 0.1.876 — 2026-11-10
 
 - See whether an offer request was accepted, a Depop batch completed, or Mercari confirmed recipient offers, without mistaking likes for delivered offers.
