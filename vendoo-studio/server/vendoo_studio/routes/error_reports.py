@@ -16,7 +16,7 @@ log = logging.getLogger("vendoo_studio.browser")
 
 class BrowserFailure(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["crash", "unhandled-rejection", "render"]
+    kind: Literal["crash", "unhandled-rejection", "render", "query", "mutation"]
     name: str | None = Field(default=None, max_length=200)
     message: str = Field(default="", max_length=4000)
     stack: str | None = Field(default=None, max_length=16000)

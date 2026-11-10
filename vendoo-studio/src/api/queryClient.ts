@@ -1,4 +1,5 @@
-import { QueryClient } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
+import { reportError } from "./errorReports";
 import { ApiRequestError } from "./transport";
 import { LIVE_IDLE_POLL_MS } from "./polling";
 
@@ -36,6 +37,8 @@ export function readRetryDelay(failureCount: number, error: unknown, random = Ma
 
 export function createStudioQueryClient() {
   return new QueryClient({
+    queryCache: new QueryCache({ onError: error => reportError("query", error) }),
+    mutationCache: new MutationCache({ onError: error => reportError("mutation", error) }),
     defaultOptions: {
       // Studio talks to its local server. The webview's Internet connection
       // status must not pause local reads or a confirmed listing action.

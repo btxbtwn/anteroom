@@ -60,6 +60,14 @@ def test_request_context_names_route_request_and_seller():
     assert "POST /api/drafts/{draft_id}" in body and "seller-1" in body
 
 
+def test_distinct_handled_errors_at_one_call_site_are_not_grouped_together():
+    def failure(message):
+        return build_report(logging.LogRecord("vendoo_studio.jobs", logging.ERROR, __file__, 1, message, (), None))
+
+    assert failure("Job 123: network unavailable")["fingerprint"] != failure("Job 456: marketplace refused")["fingerprint"]
+    assert failure("Job 123: network unavailable")["fingerprint"] == failure("Job 456: network unavailable")["fingerprint"]
+
+
 def test_browser_reports_carry_page_and_release():
     record = logging.LogRecord("vendoo_studio.browser", logging.ERROR, __file__, 1, "Browser crash", (), None)
     record.browser = {"kind": "crash", "name": "TypeError", "message": "x is undefined at row 42",
@@ -72,6 +80,31 @@ def test_browser_reports_carry_page_and_release():
     assert "web release 0.1.840" in body
 
 
+def test_background_reports_include_the_seller_context():
+    with patch("vendoo_studio.services.service_context.current", return_value=SimpleNamespace(seller_id="seller-background")):
+        report = build_report(record_with_exception())
+    assert report["request"]["seller_id"] == "seller-background"
+
+
+def test_handled_http_refusal_is_logged_without_private_url_or_body():
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
+    from fastapi.testclient import TestClient
+    from vendoo_studio.hosted import AccessLogMiddleware
+
+    app = FastAPI()
+
+    @app.get("/api/items/{item_id}")
+    def refused(item_id: str):
+        return JSONResponse({"detail": "private listing detail"}, status_code=409)
+
+    app.add_middleware(AccessLogMiddleware)
+    with patch.object(logging.getLogger("vendoo_studio.http"), "warning") as warning:
+        assert TestClient(app).get("/api/items/private-item?token=secret").status_code == 409
+    message, *args = warning.call_args.args
+    assert message % tuple(args) == "GET /api/items/{item_id} answered 409"
+
+
 def test_email_goes_to_operator_over_tls():
     with patch("smtplib.SMTP") as factory:
         send_email("subject", "body")
@@ -80,6 +113,38 @@ def test_email_goes_to_operator_over_tls():
     smtp.starttls.assert_called_once()
     message = smtp.send_message.call_args.args[0]
     assert message["To"] == "ccanizares@myanteroom.com"
+
+
+def test_handled_browser_failure_reaches_email_worker():
+    import threading
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from vendoo_studio.routes.error_reports import router
+
+    delivered = threading.Event()
+    messages = []
+
+    def send(subject, body):
+        messages.append((subject, body))
+        delivered.set()
+
+    h = AlertHandler(send)
+    logger = logging.getLogger("vendoo_studio.browser")
+    logger.addHandler(h)
+    app = FastAPI()
+    app.include_router(router)
+    try:
+        response = TestClient(app).post("/api/error-reports", json={
+            "kind": "mutation", "name": "Error", "message": "Offer refused token=private-value", "path": "/automations",
+        })
+        assert response.status_code == 202
+        assert delivered.wait(3)
+        assert "Offer refused" in messages[0][1]
+        assert "private-value" not in messages[0][1]
+        assert "mutation on /automations" in messages[0][1]
+    finally:
+        logger.removeHandler(h)
+        h.close()
 
 
 def handler(send, clock=lambda: 0.0):
@@ -141,9 +206,9 @@ def test_reporter_ignores_its_own_logs_and_uvicorns_duplicate():
     assert not h.filter(own) and not h.filter(dup) and h.filter(other)
 
 
-def test_warnings_are_not_emailed():
+def test_warnings_are_emailed():
     h = handler(lambda s, b: None)
-    assert h.level == logging.ERROR
+    assert h.level == logging.WARNING
 
 
 @pytest.mark.parametrize("env", [{}, {"ANTEROOM_ERROR_EMAIL": "1", "ANTEROOM_SANDBOX": "1"}])
@@ -170,7 +235,7 @@ def test_enabled_install_reports_errors_and_uncaught_thread_exceptions(monkeypat
     try:
         assert installed is not None
         logging.getLogger("vendoo_studio.jobs").error("boom")
-        logging.getLogger("vendoo_studio.jobs").warning("not emailed")
+        logging.getLogger("vendoo_studio.jobs").warning("handled failure")
         worker = threading.Thread(target=lambda: 1 / 0, name="broken")
         worker.start()
         worker.join()
@@ -178,7 +243,7 @@ def test_enabled_install_reports_errors_and_uncaught_thread_exceptions(monkeypat
         monkeypatch.setattr(installed, "send", lambda s, b: None)
         error_alerts.uninstall_alerts()
     assert (sys.excepthook, threading.excepthook) == hooks
-    assert [r.getMessage() for r in queued] == ["boom", "Uncaught exception in thread broken"]
+    assert [r.getMessage() for r in queued] == ["boom", "handled failure", "Uncaught exception in thread broken"]
 
 
 def test_browser_route_logs_structured_report():

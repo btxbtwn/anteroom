@@ -213,6 +213,7 @@ def pause(db: Session, automation_id: str | None = None, reason: str | None = No
 
 
 def listing(db: Session) -> dict:
+    report_overdue(db)
     labels = set()
     for (options,) in db.query(ListingPromotion.shipping_options).filter(
             ListingPromotion.marketplace == "poshmark", ListingPromotion.action == "offer").order_by(
@@ -436,6 +437,7 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
     except PromotionError as exc:
         db.rollback()
         stop_note = str(exc)
+        log.warning("%s automation %s could not finish its round: %s", row.marketplace, row.id, scrub(str(exc)))
     except Exception:
         # A failed commit (a pool timeout during flush) leaves the session
         # unusable until rolled back. Roll back so the round is still closed
@@ -449,6 +451,16 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
         run.note = " ".join(part for part in (stop_note, f"Skipped: {_skip_note(reasons)}." if reasons else None) if part)[:500] or None
         db.commit()
     return run
+
+
+def report_overdue(db: Session) -> None:
+    """Report missed rounds without running them or changing their approval."""
+    cutoff = _now() - timedelta(minutes=30)
+    for row in db.query(PromotionAutomation).filter(
+        PromotionAutomation.enabled.is_(True), PromotionAutomation.next_run_at < cutoff,
+    ).all():
+        log.error("%s %s automation %s is overdue (seller %s, due %s, last run %s). Check the scheduler and Chrome connection.",
+                  row.marketplace, row.action, row.id, row.user_id, row.next_run_at, row.last_run_at)
 
 
 def _shipping_choice(row: PromotionAutomation, send: ListingPromotion) -> str | None:
@@ -466,6 +478,7 @@ def _pause(db: Session, row: PromotionAutomation, reason: str) -> str:
     note = f"Paused: {reason}"[:300]
     row.enabled, row.paused_reason = False, note
     db.commit()
+    log.warning("%s automation %s paused: %s", row.marketplace, row.id, scrub(reason))
     return note
 
 
@@ -531,11 +544,14 @@ async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
                 started = _now()
                 answer = await promotions.browser_bridge.request(SimpleNamespace(id=f"likes-{row.id}"),
                     "marketplace.like_events", {"marketplace": row.marketplace}, timeout=45)
-            except (promotions.browser_bridge.BrowserBridgeError, PromotionError):
+            except (promotions.browser_bridge.BrowserBridgeError, PromotionError) as exc:
+                log.warning("%s automation %s could not read recent likes: %s", row.marketplace, row.id, scrub(str(exc)))
                 continue
             feeds[row.marketplace] = started, answer
         started, answer = feeds[row.marketplace]
         if answer.get("ok") is not True:
+            log.error("%s automation %s recent-like feed failed: %s", row.marketplace, row.id,
+                      scrub(answer.get("error") or "The marketplace did not answer."))
             if answer.get("error_code") in STOP_CODES | {"schema_drift"}:
                 _pause(db, row, str(answer.get("error") or "The marketplace asked Anteroom to stop."))
             continue

@@ -30,6 +30,7 @@ from vendoo_studio.services.keychain import (
     set_marketplace_account,
 )
 from vendoo_studio.services.relay_client import RelayError, relay_request
+from vendoo_studio.services.marketplace_errors import marketplace_call
 
 log = logging.getLogger("vendoo_studio.marketplace_accounts")
 
@@ -326,6 +327,7 @@ async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
         return account["accessToken"]
 
 
+@marketplace_call("etsy")
 async def etsy_api(method: str, path: str, **kwargs: Any):
     """Call Etsy's API (``path`` under /v3/application/) through the relay.
 

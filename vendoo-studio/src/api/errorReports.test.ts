@@ -15,7 +15,7 @@ it("sends the error's name, message, stack and release", async () => {
   expect(typeof body.release).toBe("string");
 });
 
-it("groups repeats of the same error and caps reports per page", async () => {
+it("groups repeats without silently stopping reports after twenty errors", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(100_000);
   studioFetch.mockResolvedValue({ ok: true });
@@ -27,7 +27,7 @@ it("groups repeats of the same error and caps reports per page", async () => {
   reportError("crash", new Error("same"));
   expect(studioFetch).toHaveBeenCalledTimes(2);
   for (let i = 0; i < 40; i++) reportError("crash", new Error(`distinct ${i}`));
-  expect(studioFetch).toHaveBeenCalledTimes(20);
+  expect(studioFetch).toHaveBeenCalledTimes(42);
 });
 
 it("reports non-Error rejections and swallows a failed report", async () => {

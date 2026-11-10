@@ -18,6 +18,7 @@ from sqlalchemy.engine import CursorResult
 
 import asyncio
 import contextlib
+import logging
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from types import SimpleNamespace
@@ -34,6 +35,8 @@ from vendoo_studio.services import browser_bridge, listing_mode
 from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_result import scrub
+
+log = logging.getLogger("vendoo_studio.listing_promotions")
 
 # What each marketplace's own site lets Anteroom do. See docs/direct-form-parity.md.
 SUPPORTED: dict[str, frozenset[str]] = {
@@ -248,9 +251,13 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
             **({"discount_percent": row.discount_percent} if row.action == "offer" else {}),
         }, timeout=90)
     except browser_bridge.BrowserBridgeError as exc:
+        log.error("%s %s preview failed for listing %s: %s", row.marketplace, row.action, listing_id, scrub(str(exc)), exc_info=True)
         raise PromotionError(502, str(exc), "network") from exc
     if facts.get("ok") is not True:
         row.marketplace_message = scrub(facts.get("marketplace_message"))
+        log.error("%s %s preview rejected for listing %s, automation %s: %s; %s",
+                  row.marketplace, row.action, listing_id, row.automation_id,
+                  scrub(str(facts.get("error") or "The marketplace did not answer.")), row.marketplace_message or "-")
         raise PromotionError(409, str(facts.get("error") or "The marketplace did not answer."), facts.get("error_code"))
     row.price_cents = int(facts["price_cents"])
     row.like_count = int(facts.get("like_count") or 0)
