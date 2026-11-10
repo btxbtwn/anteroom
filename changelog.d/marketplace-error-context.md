@@ -1,0 +1,1 @@
+- Marketplace error emails include safe action timing, retry-safety facts and selected offer or Smart Sell inputs to help diagnose refusals without exposing listing contents.
