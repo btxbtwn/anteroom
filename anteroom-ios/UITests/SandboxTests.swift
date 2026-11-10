@@ -594,7 +594,16 @@ fileprivate extension XCTestCase {
         // in on a cold CI simulator. Screen waits start at workspace readiness.
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 90),
                       "Sandbox sign-in must finish before interacting with the workspace")
-        if let tab { app.tabBars.buttons[tab].tap() }
+        guard let tab else { return }
+        // A tap that lands while the tab bar is still settling can be dropped,
+        // which left the app on Assistant; tap until the tab is selected.
+        let button = app.tabBars.buttons[tab]
+        for _ in 0..<3 where !button.isSelected {
+            button.tap()
+            let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: button)
+            _ = XCTWaiter().wait(for: [selected], timeout: 3)
+        }
+        XCTAssertTrue(button.isSelected, "The \(tab) tab opens")
     }
 
     @MainActor
