@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.896 — 2026-11-10
+
+- iPhone: leaving a new draft keeps unsaved edits before checking whether the blank draft can be removed.
+- iPhone: Review in editor and Done close the listing assistant and reload the saved draft.
+- iPhone: returning from another tab keeps the editor's unsaved changes.
+
 ## 0.1.895 — 2026-11-10
 
 - Updates to myanteroom.com now wait until every check has passed on the exact code being shipped.
