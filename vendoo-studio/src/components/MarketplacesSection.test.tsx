@@ -58,9 +58,17 @@ const enabledButton = (html: string, label: string) => new RegExp(`<button(?![^>
 describe("marketplaces section", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("explains the browser requirement beside Chrome marketplace actions only", () => {
-    expect(render({}, {}, { selected: "mercari" })).toContain("Requires desktop Chrome with the Bridge extension connected");
+  it("omits the persistent Chrome requirement from marketplace actions", () => {
+    expect(render({}, {}, { selected: "mercari" })).not.toContain("Requires desktop Chrome with the Bridge extension connected");
     expect(render({}, {}, { selected: "ebay" })).not.toContain("Requires desktop Chrome with the Bridge extension connected");
+  });
+
+  it("shows a listing failure after an earlier delist", () => {
+    const html = render({ depop: { state: "not_saved", error: "Depop needs a parcel size.", marketplace_message: "parcel_size is required" } },
+      { depop: { ...live, state: "deleted" } }, { selected: "depop" });
+    expect(html).toContain("Not listed");
+    expect(html).toContain("Depop needs a parcel size.");
+    expect(html).toMatch(/<details open=""[^>]*>.*Depop said: parcel_size is required/s);
   });
 
   it("keeps List available when local field checks are incomplete or unavailable", () => {
@@ -283,7 +291,7 @@ describe("marketplaces section", () => {
     const refused = render({ etsy: { state: "not_saved", error: "Etsy needs to know who made this item.", error_code: "missing_fields",
       error_fields: [{ field: "etsy_specifics.who_made", message: "Etsy needs to know who made this item." }],
       marketplace_message: "Invalid value () for enum(i_did, someone_else, collective)" } }, {}, { selected: "etsy", etsyReady: true, onAskChat: vi.fn() });
-    expect(refused).toMatch(/<details[^>]*>.*<summary[^>]*>.*Details.*<\/summary>.*Etsy said: Invalid value/s);
+    expect(refused).toMatch(/<details open=""[^>]*>.*<summary[^>]*>.*Details.*<\/summary>.*Etsy said: Invalid value/s);
     expect(refused.indexOf("<details")).toBeLessThan(refused.indexOf("Etsy said:"));
     expect(refused.match(/Etsy said:/g)).toHaveLength(1);
     expect(enabledButton(refused, "Ask chat")).toBe(true);

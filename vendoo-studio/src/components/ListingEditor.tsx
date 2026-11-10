@@ -631,11 +631,12 @@ export function StructuredEditor({
     // A marketplace's answer can name the listing field its form row comes from.
     const key = matchingEditorField(fields, target.field) ?? rowForField(tab, target.field, fields);
     if (!key) return;
-    const input = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-field]") || [])].find((element) => element.dataset.listingField === key);
-    if (!input) return;
+    const row = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-row]") || [])].find((element) => element.dataset.listingRow === key);
+    if (!row) return;
+    const input = row.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex="0"]');
     reachedTarget.current = target.sequence;
-    input.scrollIntoView({ block: "center" });
-    input.focus();
+    row.scrollIntoView({ block: "center" });
+    (input ?? row).focus({ preventScroll: true });
   }, [target, fields, tab, moreOpen]);
 
   // Derive saved values during render: a cached form is filled on its first frame.
@@ -1063,7 +1064,9 @@ export function StructuredEditor({
                 <fieldset disabled={agentFieldLocked(f.key, agentLocks)} data-listing-row={f.key} className={cn("group/field min-w-0", nativeTab
                   ? f.width === "half" ? "@xl:col-span-6" : f.width === "third" ? "@xl:col-span-4"
                     : f.width === "quarter" ? "@xl:col-span-3" : "col-span-full"
-                  : fullWidth(f) && "col-span-full")}>
+                  : fullWidth(f) && "col-span-full")} tabIndex={-1}
+                  onFocus={event => event.currentTarget.classList.add("ring-2", "ring-ring", "rounded-lg")}
+                  onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.classList.remove("ring-2", "ring-ring", "rounded-lg"); }}>
                   {agentFieldLocked(f.key, agentLocks) && <span role="status" className="text-xs text-muted-foreground">Agent editing…</span>}
                   {labelRow && (f.hashtagMax != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">

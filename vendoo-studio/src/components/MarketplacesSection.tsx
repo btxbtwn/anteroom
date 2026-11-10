@@ -112,8 +112,9 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
   }
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
-  // Delisting clears the draft's error, so an error now is from a later List and wins.
-  if (live?.state === "deleted" && !draft?.error) return { tone: "neutral", label: "Delisted" };
+  if (live?.state === "deleted") return draft?.error
+    ? { tone: "failed", label: "Not listed", detail: draft.error, said }
+    : { tone: "neutral", label: "Delisted" };
   if (live?.state === "failed") {
     return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error,
       said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };
@@ -122,7 +123,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   // moved on. Without that record (listed elsewhere, or marked by hand) it can't tell.
   const behind = draft?.state === "published" && Boolean(draft.revision_id) && draft.revision_id !== _revisionId
     ? `Your latest edits aren't on ${marketplaceName(marketplace)} yet.` : null;
-  if (live?.listing_id && live.state !== "deleted") {
+  if (live?.listing_id) {
     return { tone: "live", label: "Listed", href: live.url ?? undefined, hrefLabel: "View listing", detail: draft?.state === "published" ? draft.error || behind : null, said };
   }
   if (draft && draft.state !== "draft") {
@@ -782,16 +783,13 @@ export function MarketplacesLayout({
             role={selectedStatus.tone === "failed" ? "alert" : undefined}>{detail}</p>}
           {/* Anteroom's own words lead; the marketplace's raw reply is there for whoever wants it. */}
           {said && (
-            <details className="group/said text-muted-foreground">
+            <details open className="group/said text-muted-foreground">
               <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-[900px]:min-h-11 [&::-webkit-details-marker]:hidden">
                 <ChevronRightIcon aria-hidden className="size-3.5 transition-transform group-open/said:rotate-90" />
                 Details
               </summary>
               <p className="mt-1 whitespace-pre-wrap break-words" data-marketplace-message>{said}</p>
             </details>
-          )}
-          {EXTENSION_SESSION_MARKETS.includes(selectedMarketplace as ExtensionSessionMarket) && (
-            <p className="text-xs text-muted-foreground">Requires desktop Chrome with the Bridge extension connected and an Anteroom tab open. You can edit this draft without Chrome.</p>
           )}
           {reconnectNotice(selectedMarketplace)}
           {errorActions(selectedMarketplace)}
