@@ -1,4 +1,4 @@
-import { GARMENTS, type Garment, type Measurements } from "./garmentMeasurements";
+import { GARMENTS, garmentForListing, type Garment, type Measurements } from "./garmentMeasurements";
 
 export interface ItemDetailsData {
   sku: string;
@@ -52,11 +52,45 @@ function isStructuredNotes(value: unknown): value is Record<string, unknown> {
     && Object.keys(value as object).some((key) => key in DEFAULTS || MANAGED_NOTE_KEYS.has(key));
 }
 
-export function parseNotes(notes: string | null, defaultPackageDimensions = DEFAULTS.packageDimensions): ItemDetailsData {
-  if (!notes) return { ...DEFAULTS, packageDimensions: defaultPackageDimensions, measurements: parseMeasurements(null) };
+function knownGarment(value: unknown): Garment | null {
+  if (value === "shorts") return "pants";
+  return GARMENTS.find((g) => g.id === value)?.id ?? null;
+}
+
+/** The garment written in the notes, or null when none was. */
+export function savedGarment(notes: string | null): Garment | null {
+  try {
+    const value: unknown = JSON.parse(notes || "null");
+    return isStructuredNotes(value) ? knownGarment(value.garment) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Typed measurements keep the garment they were typed for. Before any are typed,
+ * a saved garment may be only the default an earlier notes edit wrote, so the
+ * listing's category (or title) picks it: jeans open on Pants, not Top.
+ */
+function chooseGarment(saved: Garment | null, measurements: Measurements, listing?: ListingHint): Garment {
+  const typed = GARMENTS.filter((g) => Object.keys(measurements[g.id]).length).map((g) => g.id);
+  if (typed.length) return saved && typed.includes(saved) ? saved : saved ?? typed[0]!;
+  const guess = listing ? garmentForListing(listing) : DEFAULTS.garment;
+  return guess !== DEFAULTS.garment ? guess : saved ?? DEFAULTS.garment;
+}
+
+/** The listing's category and title, which pick the garment until measurements are typed. */
+export interface ListingHint { category?: string; title?: string }
+
+export function parseNotes(notes: string | null, defaultPackageDimensions = DEFAULTS.packageDimensions, listing?: ListingHint): ItemDetailsData {
+  if (!notes) {
+    const measurements = parseMeasurements(null);
+    return { ...DEFAULTS, packageDimensions: defaultPackageDimensions, measurements, garment: chooseGarment(null, measurements, listing) };
+  }
   try {
     const value: unknown = JSON.parse(notes);
     const parsed = isStructuredNotes(value) ? value as Omit<Partial<ItemDetailsData>, "garment"> & { garment?: string } : { sellerNotes: notes };
+    const measurements = parseMeasurements(parsed.measurements);
     return {
       sku: parsed.sku || "",
       sellerNotes: parsed.sellerNotes || "",
@@ -65,17 +99,21 @@ export function parseNotes(notes: string | null, defaultPackageDimensions = DEFA
       cog: parsed.cog || "",
       packageDimensions: parsed.packageDimensions || defaultPackageDimensions,
       vendooLabels: parsed.vendooLabels ?? DEFAULTS.vendooLabels,
-      garment: parsed.garment === "shorts"
-        ? "pants"
-        : GARMENTS.some((g) => g.id === parsed.garment) ? parsed.garment as Garment : DEFAULTS.garment,
-      measurements: parseMeasurements(parsed.measurements),
+      garment: chooseGarment(knownGarment(parsed.garment), measurements, listing),
+      measurements,
     };
   } catch {
-    return { ...DEFAULTS, sellerNotes: notes, packageDimensions: defaultPackageDimensions, measurements: parseMeasurements(null) };
+    return { ...DEFAULTS, sellerNotes: notes, packageDimensions: defaultPackageDimensions, measurements: parseMeasurements(null),
+      garment: chooseGarment(null, parseMeasurements(null), listing) };
   }
 }
 
-export function changedDetails(before: ItemDetailsData, after: ItemDetailsData): Partial<ItemDetailsData> {
+/**
+ * The fields an edit changed. A garment picked from the category, not yet saved
+ * (`storedGarment` differs), goes with the first edit, so generation reads the
+ * measurements under the garment the seller saw.
+ */
+export function changedDetails(before: ItemDetailsData, after: ItemDetailsData, storedGarment?: Garment | null): Partial<ItemDetailsData> {
   const patch: Partial<ItemDetailsData> = Object.fromEntries(Object.entries(after).filter(([key, value]) =>
     key !== "measurements" && JSON.stringify(before[key as keyof ItemDetailsData]) !== JSON.stringify(value)));
   const measurements: Measurements = { top: {}, pants: {}, skirt: {} };
@@ -85,6 +123,7 @@ export function changedDetails(before: ItemDetailsData, after: ItemDetailsData):
     }
   }
   if (Object.values(measurements).some(values => Object.keys(values).length)) patch.measurements = measurements;
+  if (storedGarment !== undefined && Object.keys(patch).length && after.garment !== storedGarment) patch.garment = after.garment;
   return patch;
 }
 

@@ -135,7 +135,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   if (draft?.state === "draft" && marketplace === "ebay") return { tone: "neutral", label: "Saved on eBay",
     detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to eBay." : "Not listed. Buyers cannot see it until you List." };
   // The listing check says why and how to fix it, under the header.
-  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Review eligibility" };
+  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "May not qualify" };
   return { tone: "idle", label: "Not listed" };
 }
 
@@ -703,11 +703,12 @@ export function MarketplacesLayout({
     const missing = check?.missing.length ?? 0;
     const line = <>
       {status && !quiet && (
-        <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground",
+        // A narrow rail wraps a status instead of cutting it off; the row's tooltip names it too.
+        <span role="status" className={cn("flex items-start gap-1 text-xs text-muted-foreground",
           status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
           status.tone === "sold" && "text-info-foreground")}>
           {TONE_ICON[status.tone]}
-          <span className="truncate">{status.label}</span>
+          <span className="min-w-0 text-pretty">{status.label}</span>
         </span>
       )}
       {status && quiet && !check && <span className="sr-only">{status.label}</span>}
