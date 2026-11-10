@@ -659,7 +659,8 @@ export interface AnalyticsSale {
 export interface InventoryAnalytics {
   range: AnalyticsRange;
   incomplete_sales: { id: string; conversation_id: string | null; title: string; missing: string[] }[];
-
+  /** How many of those sales lack each amount, in form order. */
+  missing_counts: { label: string; count: number }[];
   undated_sales: number;
   periods_truncated: boolean;
   inventory: AnalyticsInventory;

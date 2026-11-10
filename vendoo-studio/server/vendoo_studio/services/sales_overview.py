@@ -79,6 +79,9 @@ def _figures(sales: list[AnalyticsItem], active: int | None) -> dict[str, Any]:
         "profit": stats["profit"],
         "profit_known": stats["profit_known"],
         "fees_known": stats["fees_known"],
+        "median_days": stats["median_days"],
+        # Removal note: replaced by median_days, which Inventory analytics also shows.
+        # Kept until 2027-02-01 for iPhone builds that still read it.
         "average_days": round(sum(days) / len(days), 1) if days else None,
         "days_known": len(days),
         # Sold in the period ÷ (sold in the period + listings still active today).
