@@ -10,6 +10,23 @@ struct MarketplaceAutomationTests {
     }
 
     static func main() throws {
+        // A completed action is not proof that a buyer received an offer.
+        func send(_ fields: String) throws -> PromotionActivity.Send {
+            try JSONDecoder().decode(PromotionActivity.Send.self, from: Data(
+                "{\"id\":\"s\",\"action\":\"offer\",\"listing_id\":\"l\",\"state\":\"done\"\(fields)}".utf8))
+        }
+        let evidenceCases = [
+            ("", "Completed · delivery unverified"),
+            (",\"confirmation\":\"request_accepted\"", "Request accepted · delivery unverified"),
+            (",\"confirmation\":\"job_completed\"", "Offer job completed · buyer count unknown"),
+            (",\"confirmation\":\"recipients_created\",\"recipient_count\":1", "Offer created for 1 buyer"),
+            (",\"confirmation\":\"recipients_created\",\"recipient_count\":2", "Offer created for 2 buyers"),
+            (",\"confirmation\":\"recipients_created\",\"recipient_count\":0", "Completed · delivery unverified"),
+        ]
+        for (fields, expected) in evidenceCases {
+            let result = try send(fields)
+            precondition(result.resultLabel == expected)
+        }
         let name = { (id: String) in ["poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"][id] ?? id }
 
         // eBay offers: the status the hosted API returns.

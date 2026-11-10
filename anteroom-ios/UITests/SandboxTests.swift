@@ -389,6 +389,98 @@ final class EbayFormSandboxTests: XCTestCase {
     }
 }
 
+/// Actual automation views with sandbox-only terminal history. These tests
+/// never toggle a rule, send an offer, or check a live marketplace result.
+@MainActor
+final class AutomationOffersSandboxTests: XCTestCase {
+    func testOfferOverviewAndEvidence() {
+        reviewOffers(accessibilityText: false)
+    }
+
+    func testOfferOverviewAndEvidenceWithAccessibilityText() {
+        reviewOffers(accessibilityText: true)
+    }
+
+    private func reviewOffers(accessibilityText: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        if accessibilityText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName",
+                                    UIContentSizeCategory.accessibilityExtraExtraExtraLarge.rawValue]
+        }
+        launchSandbox(app)
+        let tab = app.tabBars.buttons["Automations"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 30))
+        tab.tap()
+        XCTAssertTrue(app.navigationBars["Automations"].waitForExistence(timeout: 15))
+
+        let menu = app.buttons["More for Likers get 10% off"]
+        reveal(menu, app: app)
+        let size = accessibilityText ? "Accessibility text" : "Default text"
+        keep(app, "Offer automation overview - \(size)")
+        menu.tap()
+        let details = app.buttons["Listings and activity"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        details.tap()
+        XCTAssertTrue(app.navigationBars["Likers get 10% off"].waitForExistence(timeout: 15))
+
+        let accepted = app.staticTexts["Request accepted · delivery unverified"]
+        reveal(accepted, app: app)
+        XCTAssertTrue(app.staticTexts["sandbox-offer-1"].exists, "The sample listing ID remains visible to accessibility")
+        keep(app, "Accepted offer evidence - \(size)")
+
+        let legacy = app.staticTexts["Completed · delivery unverified"]
+        reveal(legacy, app: app)
+        XCTAssertTrue(app.staticTexts["sandbox-offer-2"].exists)
+        keep(app, "Legacy offer evidence - \(size)")
+
+        let totals = app.staticTexts["2 actions completed · 0 skipped · 0 not completed"]
+        reveal(totals, app: app)
+        keep(app, "Offer action totals - \(size)")
+        app.navigationBars["Likers get 10% off"].buttons["Done"].tap()
+        XCTAssertTrue(app.navigationBars["Automations"].waitForExistence(timeout: 10), "Done returns to the overview")
+    }
+
+    private func reveal(_ element: XCUIElement, app: XCUIApplication) {
+        // Hittable can mean only one line is onscreen. Screenshots need the
+        // whole label, especially the multiline totals at accessibility sizes.
+        var viewport = app.frame.insetBy(dx: 8, dy: 8)
+        let navigationBar = app.navigationBars.firstMatch
+        if navigationBar.exists {
+            let top = navigationBar.frame.maxY + 8
+            viewport.size.height -= top - viewport.minY
+            viewport.origin.y = top
+        }
+        let tabBar = app.tabBars.firstMatch
+        if tabBar.exists, tabBar.isHittable {
+            viewport.size.height = min(viewport.maxY, tabBar.frame.minY - 8) - viewport.minY
+        }
+        for _ in 0..<20 {
+            if element.waitForExistence(timeout: 1), element.isHittable,
+               viewport.contains(element.frame) { return }
+            // Small drags avoid skipping a tall label. Reverse only when the
+            // target has moved above the unobscured content area.
+            let scrollDown = element.exists && !element.frame.isEmpty
+                && element.frame.minY < viewport.minY
+            let startY = scrollDown ? 0.45 : 0.75
+            let endY = scrollDown ? 0.70 : 0.50
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+                .press(forDuration: 0.05, thenDragTo:
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY)))
+        }
+        XCTAssertTrue(element.isHittable && viewport.contains(element.frame),
+                      "Expected offer content must be fully visible without horizontal scrolling")
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
 /// iPad only: the inventory list stays beside the open listing, and unsaved
 /// edits come back after the seller opens another listing. CI runs this on an
 /// iPad simulator; on iPhone it is skipped.
