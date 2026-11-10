@@ -28,6 +28,7 @@ import uuid
 from collections import deque
 
 from vendoo_studio.services import bridge_approvals
+from vendoo_studio.services.marketplace_diagnostics import failure_context
 from vendoo_studio.services.marketplace_errors import report_exception, report_result
 from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, ReplyWaits
 
@@ -236,13 +237,16 @@ class BrowserRelay(ReplyWaits):
         return result if isinstance(result, dict) else {"ok": False}
 
     async def read(self, command: str, payload: dict, timeout: float) -> dict:
+        started = time.monotonic()
         marketplace = str(payload.get('marketplace') or 'chrome')
         try:
             result = await self._read(command, payload, timeout)
         except Exception as exc:
-            report_exception(marketplace, command, exc)
+            report_exception(marketplace, command, exc, context=failure_context(
+                command, payload, None, time.monotonic() - started, timeout))
             raise
-        report_result(marketplace, command, result)
+        report_result(marketplace, command, result, context=failure_context(
+            command, payload, result, time.monotonic() - started, timeout))
         return result
 
     async def _read(self, command: str, payload: dict, timeout: float) -> dict:
