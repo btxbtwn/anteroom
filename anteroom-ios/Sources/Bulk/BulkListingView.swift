@@ -308,7 +308,7 @@ struct BulkListingView: View {
                     Section {
                         Text("\(drafts.count) \(drafts.count == 1 ? "draft is" : "drafts are") saved with photos.")
                         ForEach(problems, id: \.self) { problem in
-                            Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
+                            Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive).font(.footnote)
                         }
                     }
                 }

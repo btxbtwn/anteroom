@@ -118,6 +118,10 @@ jobs:
         run: |
           xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Inventory/InventoryFilters.swift Sources/API/MarketplaceReadiness.swift Sources/API/MarketplaceActionModels.swift Tests/MarketplaceActionsTests.swift -o "$RUNNER_TEMP/marketplace-action-tests"
           "$RUNNER_TEMP/marketplace-action-tests"
+      - name: Test assistant Markdown blocks
+        run: |
+          xcrun swiftc Sources/Assistant/MarkdownBlocks.swift Tests/MarkdownBlocksTests.swift -o "$RUNNER_TEMP/markdown-tests"
+          "$RUNNER_TEMP/markdown-tests"
       - name: Test sign-in messages
         run: |
           xcrun swiftc Sources/Session/SignInMessages.swift Tests/SignInMessagesTests.swift -o "$RUNNER_TEMP/sign-in-tests"

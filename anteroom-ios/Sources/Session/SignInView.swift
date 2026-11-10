@@ -68,7 +68,7 @@ struct SignInView: View {
                     }
                     if let message = error ?? session.signInError {
                         Label(message, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red).font(.footnote)
+                            .foregroundStyle(WorkspaceStyle.destructive).font(.footnote)
                     }
                 }
                 HStack {
@@ -186,7 +186,7 @@ struct NewPasswordView: View {
                     .disabled(isSaving || password.count < SignInMessages.minimumPasswordLength)
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red).font(.footnote)
+                            .foregroundStyle(WorkspaceStyle.destructive).font(.footnote)
                     }
                 }
             }

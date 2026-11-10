@@ -87,7 +87,7 @@ struct AutomationsView: View {
                         }
                     }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                     Section {
                         if let automations {
@@ -192,7 +192,12 @@ struct AutomationsView: View {
                     if task.actions.contains(where: { $0.type == "price" }) {
                         Text(AutomationFormat.actions(task.actions)).font(.caption).foregroundStyle(.secondary)
                     }
-                    Text(runs(task)).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                    if let note = AutomationFormat.approvalNote(task.actions) {
+                        Label(note, systemImage: "hand.raised").font(.caption).foregroundStyle(WorkspaceStyle.warning)
+                    }
+                    if let runs = runs(task) {
+                        Text(runs).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -292,7 +297,9 @@ struct AutomationsView: View {
                     Text(view.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                     Text(view.type == view.name ? view.when : "\(view.type) · \(view.when)").font(.caption).foregroundStyle(.secondary)
                     if !view.note.isEmpty { Text(view.note).font(.caption).foregroundStyle(.secondary) }
-                    Text("Last run \(view.lastRun) · Next \(view.nextRun)").font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                    if let runs = AutomationFormat.runsLine(last: view.lastRun, next: view.nextRun) {
+                        Text(runs).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -330,9 +337,9 @@ struct AutomationsView: View {
         }
     }
 
-    private func runs(_ task: Automation) -> String {
+    private func runs(_ task: Automation) -> String? {
         let next = task.status == "active" ? AutomationFormat.runTime(task.nextRunAt, timezone: task.timezone) : "—"
-        return "Last run \(AutomationFormat.runTime(task.lastRunAt, timezone: task.timezone)) · Next \(next)"
+        return AutomationFormat.runsLine(last: AutomationFormat.runTime(task.lastRunAt, timezone: task.timezone), next: next)
     }
 
     /// On resumes a paused automation, off pauses it. Neither runs anything now.
@@ -550,7 +557,7 @@ private struct AutomationEditorView: View {
                     }
                     if let preview { previewSection(preview) }
                     if let error {
-                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                        Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
                     Section {
                         Button(working == "preview" ? "Checking…" : "Preview") { showPreview() }.disabled(working != nil)
