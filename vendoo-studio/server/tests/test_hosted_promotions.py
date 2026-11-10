@@ -133,6 +133,26 @@ def test_timer_only_checks_capable_connected_sellers(monkeypatch):
     hosted_browser_relay._relays.clear()
 
 
+def test_disconnected_seller_is_monitored_without_running_a_round(monkeypatch):
+    import asyncio
+    from contextlib import nullcontext
+    from unittest.mock import AsyncMock, Mock
+    from vendoo_studio.services import hosted_promotion_scheduler as scheduler
+
+    db = object()
+    report = Mock()
+    run = AsyncMock()
+    monkeypatch.setattr(scheduler, 'ready_sellers', lambda _: [])
+    monkeypatch.setattr(scheduler, 'for_seller', lambda owner: owner)
+    monkeypatch.setattr(scheduler, 'use', nullcontext)
+    monkeypatch.setattr(scheduler, 'SessionLocal', lambda: nullcontext(db))
+    monkeypatch.setattr(scheduler.promotion_automations, 'report_overdue', report)
+    monkeypatch.setattr(scheduler, 'check_seller', run)
+    asyncio.run(scheduler.check_ready_sellers({USER_ID}))
+    report.assert_called_once_with(db)
+    run.assert_not_awaited()
+
+
 def test_generic_read_cannot_send_a_promotion():
     import asyncio
     relay = hosted_browser_relay.BrowserRelay()

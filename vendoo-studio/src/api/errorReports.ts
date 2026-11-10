@@ -1,12 +1,10 @@
 import { studioFetch } from "./transport";
 
 /** Uncaught browser errors go to /api/error-reports; hosted emails them to the operator. */
-type FailureKind = "crash" | "unhandled-rejection" | "render";
+type FailureKind = "crash" | "unhandled-rejection" | "render" | "query" | "mutation";
 
-const PER_PAGE_LIMIT = 20;
 const REPEAT_MS = 60_000;
 const recent = new Map<string, number>();
-let sent = 0;
 
 export function describeError(kind: FailureKind, error: unknown) {
   const value = error instanceof Error ? error : null;
@@ -30,9 +28,9 @@ export function reportError(kind: FailureKind, error: unknown) {
   const report = describeError(kind, error);
   const key = `${kind}:${report.message}`;
   const now = Date.now();
-  if (sent >= PER_PAGE_LIMIT || now - (recent.get(key) ?? -Infinity) < REPEAT_MS) return;
+  if (now - (recent.get(key) ?? -Infinity) < REPEAT_MS) return;
+  for (const [previous, at] of recent) if (now - at >= REPEAT_MS) recent.delete(previous);
   recent.set(key, now);
-  sent += 1;
   void studioFetch("/api/error-reports", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(report), signal: AbortSignal.timeout(5000), keepalive: true,

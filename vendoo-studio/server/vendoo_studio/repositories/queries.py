@@ -3,6 +3,7 @@ from typing import cast as type_cast
 from sqlalchemy.engine import CursorResult
 
 from types import SimpleNamespace
+import logging
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select, update
@@ -545,6 +546,7 @@ class JobRepo:
         if is_terminal_job_status(job.status) and status != job.status:
             self.db.refresh(job)
             return job
+        newly_failed = status == "failed" and job.status != "failed"
         job.status = status
         if current_step is not None:
             job.current_step = current_step
@@ -552,6 +554,10 @@ class JobRepo:
             job.last_error = error
         self.db.commit()
         self.db.refresh(job)
+        if newly_failed:
+            logging.getLogger("vendoo_studio.jobs").error(
+                "Job %s failed at %s (seller %s): %s", job.id, job.current_step,
+                job.user_id, job.last_error or "No failure detail was recorded.")
         return job
 
     def _next_sequence(self, job_id: str) -> int:
@@ -1066,6 +1072,10 @@ class FillLogRepo:
         self.db.commit()
         for entry in saved:
             self.db.refresh(entry)
+            if entry.status in {"failed", "invalid", "not_found", "uncertain"}:
+                logging.getLogger("vendoo_studio.marketplaces").error(
+                    "%s field %s %s during %s (job %s): %s", entry.marketplace, entry.field,
+                    entry.status, step, job_id, entry.reason or "No failure detail was recorded.")
         return saved
 
 
