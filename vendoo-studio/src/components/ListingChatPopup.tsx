@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Maximize2Icon, MessageSquareIcon, Minimize2Icon, MinusIcon } from "lucide-react";
 import { isMacPlatform } from "./chat/ModelPickerContent";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "./PanelResizeHandle";
@@ -66,13 +66,6 @@ export function ListingChatPopup({
   }
   const unread = Boolean(!open && current && seen?.convId === convId && current.messageCount > seen.count);
 
-  // An empty chat holds the Generate button, so a fresh listing opens it.
-  const openedEmpty = useRef<string | null>(null);
-  useEffect(() => {
-    if (!current?.empty || openedEmpty.current === convId) return;
-    openedEmpty.current = convId;
-    onOpenChange(true);
-  }, [convId, current?.empty, onOpenChange]);
   const busy = Boolean(current?.busy);
   const label = current?.label ?? "";
 
