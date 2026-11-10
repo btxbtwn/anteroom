@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, errorMessage } from "./client";
 import { ApiRequestError, retryAfterMs } from "./transport";
+import { reportError } from "./errorReports";
+
+vi.mock("./errorReports", () => ({ reportError: vi.fn() }));
 
 describe("errorMessage", () => {
   it("prefers a string detail", () => {
@@ -40,6 +43,7 @@ describe("Listing revision protection", () => {
 
 describe("Listing action deadlines", () => {
   afterEach(() => {
+    vi.clearAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -51,6 +55,7 @@ describe("Listing action deadlines", () => {
     )));
     await expect(api.conversations.reset("listing1", { keepInputs: true })).rejects.toThrow("This listing is busy.");
     expect(vi.getTimerCount()).toBe(0);
+    expect(reportError).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -67,6 +72,9 @@ describe("Listing action deadlines", () => {
     const failure = expect(action()).rejects.toThrow("you do not need to restart Anteroom");
     await vi.advanceTimersByTimeAsync(30000);
     await failure;
+    expect(reportError).toHaveBeenCalledWith("mutation", expect.objectContaining({
+      message: expect.stringContaining("30000ms"),
+    }));
     expect(fetch).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });

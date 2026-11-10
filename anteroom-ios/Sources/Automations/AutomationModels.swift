@@ -356,6 +356,25 @@ enum AutomationFormat {
     }
 
     /// A server time as "Nov 5, 9:00 AM" in the automation's timezone.
+    /// "Last run Nov 2, 9:00 AM · Next Nov 9, 9:00 AM", leaving out a side
+    /// that has nothing to say, and nil when neither has.
+    static func runsLine(last: String, next: String) -> String? {
+        switch (last == "—", next == "—") {
+        case (true, true): nil
+        case (true, false): "Next \(next)"
+        case (false, true): "Last run \(last)"
+        case (false, false): "Last run \(last) · Next \(next)"
+        }
+    }
+
+    /// Said on a row whose actions change live listings, which never happens without the seller.
+    static func approvalNote(_ actions: [AutomationAction]) -> String? {
+        let types = Set(actions.map(\.type))
+        let words = [("relist", "relisting"), ("delist", "delisting")].filter { types.contains($0.0) }.map(\.1)
+        guard !words.isEmpty else { return nil }
+        return "Waits for your approval before \(words.joined(separator: " or "))"
+    }
+
     static func runTime(_ raw: String?, timezone: String) -> String {
         guard let raw else { return "—" }
         guard let date = ServerDate.parse(raw) else { return raw }

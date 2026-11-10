@@ -1,4 +1,5 @@
 import { listingScreenRead } from "./listingScreen";
+import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
 import { ApiRequestError, retryAfterMs, studioFetch, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
@@ -173,7 +174,14 @@ async function requestWithTimeout<T>(
   try {
     return await request<T>(path, { ...options, signal: controller.signal });
   } catch (error) {
-    if (controller.signal.aborted) throw new Error(timeoutMessage);
+    if (controller.signal.aborted) {
+      const failure = new Error(timeoutMessage);
+      // Route shape only: never send listing IDs, request bodies or query values.
+      const action = path.endsWith("/reset") ? "reset"
+        : path.endsWith("/price-drop") ? "price confirmation" : "batch price confirmation";
+      reportError("mutation", new Error(`${action} timed out after ${timeoutMs}ms. The server may still complete the save.`));
+      throw failure;
+    }
     throw error;
   } finally {
     clearTimeout(timer);
@@ -474,7 +482,8 @@ export const api = {
     remove: (id: string) => request<SourceBoxes>(`/boxes/${id}`, { method: "DELETE" }),
   },
   sourcing: {
-    get: () => request<SourcingState>("/sourcing"),
+    // A stalled read ends in an error with Try again, not an endless skeleton.
+    get: () => requestWithTimeout<SourcingState>("/sourcing", {}, "Sourcing took too long to answer."),
     refresh: () => request<SourcingState>("/sourcing/refresh", { method: "POST" }),
     evidence: (theme: string) =>
       request<SourcingEvidence>(`/sourcing/evidence?theme=${encodeURIComponent(theme)}`),
@@ -719,6 +728,9 @@ export const api = {
       request<Conversation>("/conversations", { method: "POST", body: JSON.stringify(body || {}) }),
     update: (id: string, body: ConversationInput) =>
       request<Conversation>(`/conversations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    /** Deletes a new listing only while it is still blank; the server decides. `keepalive` outlives a closing tab. */
+    discardBlank: (id: string, options?: { keepalive?: boolean }) =>
+      request<{ discarded: boolean }>(`/conversations/${id}/discard-blank`, { method: "POST", keepalive: options?.keepalive }),
     settle: (id: string) =>
       request<Conversation>(`/conversations/${id}/settle`, { method: "POST" }),
     unsettle: (id: string) =>
@@ -1072,11 +1084,6 @@ export const api = {
         { method: "DELETE" },
       ),
     ebayInventoryLocation: () => request<{ location: string }>("/settings/ebay-inventory-location"),
-    setEbayInventoryLocation: (location: string) =>
-      request<{ ok: boolean; location: string }>("/settings/ebay-inventory-location", {
-        method: "PUT",
-        body: JSON.stringify({ location }),
-      }),
     hiddenFields: (conversationId?: string) =>
       request<{
         always: { marketplace: string; field: string; label: string }[];

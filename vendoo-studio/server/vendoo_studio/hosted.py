@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import event
 from starlette.datastructures import Headers, MutableHeaders
+from vendoo_studio.services.request_timing import RequestTimingMiddleware
 
 from vendoo_studio.services.seller_sessions import (
     InvalidSession,
@@ -356,6 +357,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.add_middleware(ResponseHeadersMiddleware)
 
     # Outermost, so a refused session or an error still gets its line.
+    app.add_middleware(RequestTimingMiddleware)
     app.add_middleware(AccessLogMiddleware)
 
     from fastapi.exceptions import RequestValidationError

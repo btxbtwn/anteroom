@@ -55,7 +55,7 @@ export function chromeSessionPresentation(
     return { tone: "muted", label: "Connect Chrome first" };
   }
   if (!session || session.state === "unknown") return { tone: "muted", label: "Could not check" };
-  if (session.state === "expired") return { tone: "error", label: "Sign in again" };
+  if (session.state === "expired") return { tone: "error", label: "Sign-in expired" };
   if (session.state === "signed_out") return { tone: "muted", label: "Not signed in" };
   const expiry = expiryPhrase(session.expires_at, now);
   const who = session.label ? `Signed in as ${session.label}` : "Signed in";

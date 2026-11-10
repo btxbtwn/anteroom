@@ -755,7 +755,26 @@ def refresh(*, recrawl: bool = True, research: bool = True) -> dict:
         return _refresh(recrawl=recrawl, research=research)
 
 
+REFRESH_FAILED = "Anteroom couldn’t build your buy list. Try again; if it keeps failing, check your internet connection."
+
+
+def _record_refresh_error() -> None:
+    with _state_lock:
+        state = _stored()
+        state["refresh_error"] = {"message": REFRESH_FAILED, "at": _now().isoformat()}
+        _save(state)
+
+
 def _refresh(*, recrawl: bool, research: bool) -> dict:
+    """Rebuild, and remember a failure so the page can say so instead of waiting for a list that is not coming."""
+    try:
+        return _rebuild(recrawl=recrawl, research=research)
+    except Exception:
+        _record_refresh_error()
+        raise
+
+
+def _rebuild(*, recrawl: bool, research: bool) -> dict:
     s = scout()
     now = _now()
     sales = _own_sales()
@@ -900,6 +919,7 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
         "calibration": calibration,
         "seasonality": context,
     }
+    state["refresh_error"] = None
     _write_state(state, preserve_prefs=True)
     return state["snapshot"]
 

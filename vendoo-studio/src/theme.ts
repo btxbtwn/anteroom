@@ -1,10 +1,10 @@
-/** Studio appearance: dark shell by default, optional light, or follow the OS. */
+/** Studio appearance: follow the device by default, or a fixed light or dark theme. */
 
 export type ThemePreference = "dark" | "light" | "system";
 export type ResolvedTheme = "dark" | "light";
 
 export const THEME_STORAGE_KEY = "vendoo-studio:theme";
-export const DEFAULT_THEME: ThemePreference = "dark";
+export const DEFAULT_THEME: ThemePreference = "system";
 
 const LIGHT_THEME_COLOR = "#ffffff";
 const DARK_THEME_COLOR = "#0a0a0a";

@@ -437,6 +437,24 @@ def delete_conversation(conv_id: str, db: Session = Depends(get_db)):
     return DeleteConversationResult(ok=True, deleted_jobs=deleted_jobs, deleted_photos=deleted_photos)
 
 
+class DiscardBlankResponse(BaseModel):
+    discarded: bool
+
+
+@router.post("/{conv_id}/discard-blank", response_model=DiscardBlankResponse)
+def discard_blank_conversation(conv_id: str, db: Session = Depends(get_db)):
+    """Delete a new listing the seller left without adding anything; keep it otherwise."""
+    from vendoo_studio.services import blank_drafts
+
+    conv = ConversationRepo(db).get(conv_id)
+    if conv is None:
+        raise HTTPException(404, "Conversation not found")
+    if not blank_drafts.is_blank(db, conv):
+        return DiscardBlankResponse(discarded=False)
+    delete_listing(db, conv_id)
+    return DiscardBlankResponse(discarded=True)
+
+
 def _msg_response(msg) -> dict:
     return {
         "id": msg.id,

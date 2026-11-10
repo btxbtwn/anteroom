@@ -12,7 +12,7 @@ import { ApiRequestError } from "../api/transport";
  * closing or reloading the page drops everything still waiting.
  */
 
-type WaitingKind = "list" | "update" | "save_draft";
+type WaitingKind = "list" | "update" | "save_draft" | "delist";
 
 export type WaitingAction = {
   id: string;
@@ -85,8 +85,15 @@ export class MarketplaceWaitlist {
   }
 
   tick(): void {
+    if (this.actions.some((action) => action.starting && action.kind === "delist")) return;
     const taken = new Set<NativeMarketplace>();
     for (const action of this.actions) {
+      if (action.kind === "delist" && !action.error) {
+        if (taken.size || this.actions.some((item) => item.starting) ||
+            (["ebay", "etsy", "poshmark", "mercari", "depop"] as NativeMarketplace[]).some(this.busy)) return;
+        if (!this.deferred.has(action.id)) void this.start(action);
+        return;
+      }
       if (action.error || taken.has(action.marketplace)) continue;
       taken.add(action.marketplace);
       if (!action.starting && !this.deferred.has(action.id) && !this.busy(action.marketplace)) void this.start(action);

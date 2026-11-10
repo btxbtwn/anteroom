@@ -496,11 +496,11 @@ def _ship_from_postal_code() -> str | None:
 
 
 async def _create_ship_from_location(client: EbayClient) -> dict:
-    """Make the eBay inventory location from the ZIP in Settings → Connections → eBay."""
+    """Make the eBay inventory location from the ships-from ZIP in Settings → Listings."""
     postal = _ship_from_postal_code()
     if not postal:
         raise missing(
-            "eBay has no inventory location. Enter a 5-digit ZIP under Settings → Connections → eBay.",
+            "eBay has no inventory location. Enter your ships-from ZIP under Settings → Listings.",
             "settings.ebay.merchant_location_key",
         )
     key = f"zip-{postal}"

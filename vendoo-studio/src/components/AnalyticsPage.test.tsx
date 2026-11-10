@@ -17,7 +17,7 @@ const sales = {
 };
 const data: InventoryAnalytics = {
   range: "30d", undated_sales: 1, periods_truncated: false,
-  incomplete_sales: [],
+  incomplete_sales: [], missing_counts: [],
   inventory: { active: 1, draft: 0, sold: 2, failed: 0, working: 0, asking_value: 60, cost_value: 8, cost_known: 1, stale_count: 1, stale_value: 60, undated_count: 0 },
   sell_through_rate: 66.7,
   sales,
@@ -82,18 +82,22 @@ describe("InventoryAnalyticsView", () => {
     const html = render({ ...data, range: "7d" });
     expect(html).toContain("Last 7 days");
     expect(html).toContain('aria-label="Sales period"');
-    expect(html).toContain("Sell-through rate");
+    expect(html).toContain(">Sell-through<");
     expect(html).toContain("66.7%");
-    expect(html).toContain("Sales in this period ÷ (sales in this period + active listings today)");
+    expect(html).toContain("Sold ÷ (sold + still listed)");
+    for (const label of ["Revenue", "Profit", "Items sold", "Median days to sell"]) expect(html).toContain(`>${label}<`);
+    expect(html).not.toContain("Sell-through rate");
+    expect(html).not.toContain("Median time to sell");
     expect(render({ ...data, sell_through_rate: null })).not.toContain("null%");
   });
   it("renders period comparisons, coverage, and expandable active listings", () => {
     const html = render(data);
     expect(html).toContain("Last 30 days");
-    expect(html).toContain("Up $40 (100%)");
-    expect(html).toContain("previous period, same length");
-    expect(html).toContain("2 of 2 sales with recorded prices");
-    expect(html).toContain("Excluded from this period");
+    expect(html).toContain("Up $40.00 (100%)");
+    expect(html).toContain("Compared with Aug 1 – Aug 30, 2026.");
+    expect(html).toContain("$80.00");
+    expect(html).not.toContain("sales with recorded prices");
+    expect(html).toContain("1 sale has no date and only counts in All time.");
     expect(html).toContain("<details");
     expect(html).toContain("<summary");
     expect(html).toContain("Older jacket");
@@ -102,9 +106,9 @@ describe("InventoryAnalyticsView", () => {
 
   it("withholds comparisons when prices or costs are missing", () => {
     const html = render({ ...data, sales: { ...sales, revenue_known: 1, profit_known: 1, fees_known: 0 } });
-    expect(html).toContain("Comparison unavailable: missing prices");
-    expect(html).toContain("Comparison unavailable: missing costs or fees");
-    expect(html).toContain("1 sale has no recorded price");
+    expect(html.match(/>No comparison</g)).toHaveLength(2);
+    expect(html).toContain("Partial: cost missing on 1 sale, fees missing on 1 sale");
+    expect(html).toContain("Partial: price missing on 1 sale");
     expect(html).not.toContain("Up $40");
     expect(html).not.toContain("undefined");
   });
@@ -119,7 +123,7 @@ describe("InventoryAnalyticsView", () => {
     expect(html).toContain("Listed 90+ days");
     expect(html).toContain("Review your oldest listings");
     expect(html).toContain("110 days listed");
-    expect(html).toContain("$12 profit");
+    expect(html).toContain("$12.00 profit");
     expect(html).toContain("Depop fall sale");
     expect(html).not.toContain("Sale calendar");
     expect(html).not.toContain("Add ad spend");
@@ -138,9 +142,9 @@ describe("InventoryAnalyticsView", () => {
     const html = render(data);
     expect(html).toContain("Sales by price");
     expect(html).toContain("$35–$59");
-    expect(html).toContain("1 sale · 50% of sales");
-    expect(html).toContain("$38 profit");
-    expect(html).toContain("0 sales · 0% of sales");
+    expect(html).toContain("1 sold · 50%");
+    expect(html).toContain("$38.00 profit");
+    expect(html).toContain("0 sold · 0%");
   });
 
   it("keeps unknown prices and profits distinct from recorded zero amounts", () => {
@@ -150,7 +154,7 @@ describe("InventoryAnalyticsView", () => {
     ] });
     expect(html).toContain("Price unknown");
     expect(html).toContain("Profit unavailable");
-    expect(html).toContain("$0 profit");
+    expect(html).toContain("$0.00 profit");
     expect(html).not.toContain("undefined");
   });
 
@@ -158,7 +162,7 @@ describe("InventoryAnalyticsView", () => {
     const html = render({ ...data, range: "all", previous: null });
     expect(html).not.toContain("Compared with");
     expect(html).not.toContain("Up $40");
-    expect(html).toContain("Included in totals, but excluded from the chart");
+    expect(html).toContain("no date and isn&#x27;t charted");
   });
 
 });

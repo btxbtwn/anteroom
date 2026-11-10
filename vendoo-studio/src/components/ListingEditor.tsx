@@ -38,7 +38,7 @@ import { useChatBusy } from "./chat/liveChatStore";
 import { ListingActionsMenu } from "./ListingReviewActions";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
-import { BookmarkCheckIcon, BookmarkPlusIcon, CircleAlertIcon, HistoryIcon } from "lucide-react";
+import { BookmarkCheckIcon, BookmarkPlusIcon, CircleAlertIcon, HistoryIcon, MessageCircleIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
@@ -227,6 +227,9 @@ export function ListingEditor({
 
   const listing = editState.draft ?? data?.listing ?? {};
   const listingTitle = String(listing.title || "Listing");
+  const garmentCategory = String(listing.category_path || "");
+  const garmentTitle = String(listing.title || "");
+  const garmentHint = React.useMemo(() => ({ category: garmentCategory, title: garmentTitle }), [garmentCategory, garmentTitle]);
   // The listing's own answer is fresher than the sidebar row's after an edit.
   const etsyEligible = data?.etsy_eligible ?? conversation?.etsy_eligible ?? true;
 
@@ -288,7 +291,6 @@ export function ListingEditor({
           {(reviewTab !== "forms" || editTab === "general") && (
             <>
               <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
-              <ItemDetails convId={convId} />
             </>
           )}
           {/* A direct marketplace's form shows its photos where its own page has them. */}
@@ -307,6 +309,10 @@ export function ListingEditor({
             saving={unsaved}
             agentLocks={activity?.locked_fields}
             onChange={edits.save}
+            generalSections={{
+              measurements: <ItemDetails convId={convId} part="measurements" garmentHint={garmentHint} />,
+              notes: <ItemDetails convId={convId} part="notes" garmentHint={garmentHint} />,
+            }}
           />
           {/* Past versions are a look-back, so they close the form instead of crowding its header. */}
           <div className="flex border-t pt-2">
@@ -329,6 +335,43 @@ export function ListingEditor({
 /** A field's label without its required marker or page punctuation. */
 function fieldName(label: string): string {
   return label.replace(/\s*\*$/, "").replace(/:\s*$/, "").trim() || "This field";
+}
+
+/**
+ * A field's secondary tools: where its choices come from and Ask chat. They stay
+ * out of sight until the pointer is over the field or focus is in it, so the
+ * form reads as fields first. The button stays in the tab order and shows on
+ * focus; on touch it shows once the seller taps into the field.
+ */
+function FieldTools({ label, source, onAsk }: { label: string; source: string | null; onAsk?: () => void }) {
+  const name = fieldName(label);
+  return (
+    <span className={cn("ms-auto flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity",
+      "pointer-events-none group-hover/field:pointer-events-auto group-hover/field:opacity-100",
+      "group-focus-within/field:pointer-events-auto group-focus-within/field:opacity-100")}>
+      {source && <span className="text-2xs text-muted-foreground">{source}</span>}
+      {onAsk && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="icon-micro"
+                variant="ghost-muted"
+                className="-my-1 shrink-0"
+                aria-label={`Ask chat to fill ${name}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onAsk}
+              />
+            }
+          >
+            <MessageCircleIcon className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup side="top" sideOffset={6}>Ask chat to fill this field</TooltipPopup>
+        </Tooltip>
+      )}
+    </span>
+  );
 }
 
 /**
@@ -399,6 +442,7 @@ export function StructuredEditor({
   saving = false,
   onAskChat,
   agentLocks = [],
+  generalSections,
 }: {
   convId: string;
   listing: ListingData;
@@ -410,6 +454,8 @@ export function StructuredEditor({
   saving?: boolean;
   onAskChat?: (text: string) => void;
   agentLocks?: string[];
+  /** The seller's own General sections: measurements after the item's details, notes last. */
+  generalSections?: { measurements: React.ReactNode; notes: React.ReactNode };
 }) {
   const runtime = useWorkspaceRuntime();
   const formRef = React.useRef<HTMLFieldSetElement>(null);
@@ -770,7 +816,7 @@ export function StructuredEditor({
           : !nativeTab && formsQuery.isFetching
             ? "Refreshing category fields and choices…"
             : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
-              ? "Some choices could not be refreshed. Check the source below each field before listing."
+              ? "Some choices could not be refreshed. Check each field's choices before listing."
               : categoryForm?.known === false
                 ? "The full category form is unavailable. Reference choices are shown where available."
                 : null;
@@ -974,7 +1020,8 @@ export function StructuredEditor({
           ].join("\n"))}>Ask chat</Button>
       </div>}
 
-      {sections.map((section) => {
+      {sections.map((section, sectionIndex) => {
+        const measurementsHere = tab === "general" && generalSections && sectionIndex === measurementsAt(sections);
         // Photos are counted on the photo area. A note is page text, and Smart Sell is a badge on Listing Price.
         const counted = section.fields.filter((f) => f.type !== "photos" && f.type !== "note" && f.type !== "badge");
         const filled = counted.filter((f) => {
@@ -997,6 +1044,14 @@ export function StructuredEditor({
               {visible.map((f, index) => {
                 const badge = section.fields.find((row) => row.type === "badge" && (f.key === "price" || f.key === "poshmark_specifics.poshmarkPrice"));
                 const badgeOn = badge ? formFieldText(local[badge.key] ?? badge.defaultValue) === "true" : false;
+                const source = !nativeTab && f.optionsSource && f.optionsSource !== "saved"
+                  ? f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"
+                  : null;
+                const ask = onAskChat && !f.locked ? () => onAskChat(
+                  `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
+                ) : undefined;
+                const tools = source || ask ? <FieldTools label={f.label} source={source} onAsk={ask} /> : null;
+                const labelRow = f.type !== "cascade" && f.presentation !== "button" && Boolean(f.label);
                 return (
                 <React.Fragment key={f.key}>
                 {pageLayout && f.group && visible[index - 1]?.group !== f.group && (
@@ -1005,17 +1060,18 @@ export function StructuredEditor({
                     {f.groupHelp && <p className="mt-0.5 text-muted-foreground text-xs">{f.groupHelp}</p>}
                   </div>
                 )}
-                <fieldset disabled={agentFieldLocked(f.key, agentLocks)} data-listing-row={f.key} className={cn("min-w-0", nativeTab
+                <fieldset disabled={agentFieldLocked(f.key, agentLocks)} data-listing-row={f.key} className={cn("group/field min-w-0", nativeTab
                   ? f.width === "half" ? "@xl:col-span-6" : f.width === "third" ? "@xl:col-span-4"
                     : f.width === "quarter" ? "@xl:col-span-3" : "col-span-full"
                   : fullWidth(f) && "col-span-full")}>
                   {agentFieldLocked(f.key, agentLocks) && <span role="status" className="text-xs text-muted-foreground">Agent editing…</span>}
-                  {f.type !== "cascade" && f.presentation !== "button" && f.label && (f.hashtagMax != null ? (
+                  {labelRow && (f.hashtagMax != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
                       <span className="flex min-w-0 items-center gap-1.5">
                         <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
                         {fieldDefault(f)}
                       </span>
+                      {tools}
                       <span className="flex gap-3 text-muted-foreground text-xs tabular-nums">
                         <span>Hashtags: {Math.max(0, f.hashtagMax - (formFieldText(local[f.key]).match(/#[^\s#]+/g) || []).length)}</span>
                         {f.maxLength != null && <span>{Math.max(0, f.maxLength - formFieldText(local[f.key]).length)}</span>}
@@ -1027,6 +1083,7 @@ export function StructuredEditor({
                         <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
                         {fieldDefault(f)}
                       </span>
+                      {tools}
                       <span className="text-muted-foreground text-xs tabular-nums">{formFieldText(local[f.key]).length}/{f.maxLength}</span>
                     </div>
                   ) : (
@@ -1035,6 +1092,7 @@ export function StructuredEditor({
                       {fieldDefault(f)}
                       {badge && <button type="button" disabled={disabled || badge.locked} aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
                         onClick={() => commitField(badge.key, !badgeOn)}>{badgeOn ? "Smart Sell ON" : "Smart Sell OFF"}</button>}
+                      {tools}
                     </div>
                   ))}
                   <div className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f)}</div>
@@ -1046,18 +1104,13 @@ export function StructuredEditor({
                       emitChange(updated);
                     }}>Looks right</InlineButton>}
                   </p>}
-                  {onAskChat && !f.locked && <InlineButton type="button" className="mt-1 text-xs" onClick={() => onAskChat(
-                    `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
-                  )}>Ask chat</InlineButton>}
+                  {!labelRow && tools && <div className="mt-1 flex">{tools}</div>}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {uniqueMarketplaceMessages(f.type === "photos" ? [] : fieldWarnings.get(f.key) ?? [], shownMessages).map((message) =>
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
                   {f.required && f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}
-                  {!nativeTab && f.optionsSource && f.optionsSource !== "saved" && <p className="mt-1 text-xs text-muted-foreground">
-                    {f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"}
-                  </p>}
                 </fieldset>
                 </React.Fragment>
                 );
@@ -1069,8 +1122,9 @@ export function StructuredEditor({
         // A part of the page with no heading (Mercari's photos) has none here either.
         if (!section.title) return <section key={section.id} className="min-w-0 border-b py-4 first:pt-1 last:border-b-0">{rows}</section>;
         return (
+          <React.Fragment key={`${tab}-${section.id}`}>
+          {measurementsHere && generalSections.measurements}
           <InspectorSection
-            key={`${tab}-${section.id}`}
             className="gap-3 py-4"
             title={section.title}
             titleId={`listing-section-${tab}-${section.id}`}
@@ -1080,10 +1134,20 @@ export function StructuredEditor({
           >
             {rows}
           </InspectorSection>
+          </React.Fragment>
         );
       })}
+      {tab === "general" && generalSections && measurementsAt(sections) === sections.length && generalSections.measurements}
+      {tab === "general" && generalSections?.notes}
     </fieldset>
   );
+}
+
+/** Measurements follow what the item is and its condition, ahead of shipping and stock. */
+const AFTER_MEASUREMENTS = new Set(["shipping", "inventory", "other"]);
+function measurementsAt(sections: { id: string }[]): number {
+  const at = sections.findIndex((section) => AFTER_MEASUREMENTS.has(section.id));
+  return at < 0 ? sections.length : at;
 }
 
 /** Consecutive fields under the same marketplace heading, in the form's own order. */
