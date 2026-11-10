@@ -286,14 +286,12 @@ def _job_response(job) -> JobResponse:
 @router.get("/{job_id}/photos/{photo_id}")
 def serve_job_photo(job_id: str, photo_id: str, db: Session = Depends(get_db)):
     job_repo = JobRepo(db)
-    job = job_repo.get(job_id)
+    job = job_repo.photo_source(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
 
-    from vendoo_studio.services import approved_photos
-
-    if approved_photos.KEY in (job.listing_snapshot or {}):
-        photo = next((row for row in job.listing_snapshot[approved_photos.KEY] if row["id"] == photo_id), None)
+    if job.has_approved_photos:
+        photo = next((row for row in (job.approved_photos or []) if row["id"] == photo_id), None)
         if photo is None:
             raise HTTPException(404, "Photo not approved for this job")
         filename, mime_type = photo["stored_filename"], photo["mime_type"]

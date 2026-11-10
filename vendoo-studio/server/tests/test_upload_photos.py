@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -27,10 +28,15 @@ JPEG_BYTES = bytes([
 
 class JobPhotoRouteTest(unittest.TestCase):
     def setUp(self):
+        self.decoded_json = []
+        def decode_json(value):
+            self.decoded_json.append(value)
+            return json.loads(value)
         engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
+            json_deserializer=decode_json,
         )
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine)
@@ -82,3 +88,27 @@ class JobPhotoRouteTest(unittest.TestCase):
         with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(self.tmp.name)):
             response = self.client.get(f"/api/jobs/{self.job.id}/photos/does-not-exist")
         self.assertEqual(response.status_code, 404)
+
+    def test_job_photo_reads_only_approved_photo_metadata(self):
+        self.job.listing_snapshot = {
+            "_native_forms": {"large_catalog": ["unused option"] * 10000},
+            "_approved_photos": [{"id": self.photo.id, "stored_filename": "front.jpg", "mime_type": "image/jpeg"}],
+        }
+        self.db.commit()
+        url = f"/api/jobs/{self.job.id}/photos/{self.photo.id}"
+        self.decoded_json.clear()
+        with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(self.tmp.name)):
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.content, JPEG_BYTES)
+        self.assertTrue(self.decoded_json)
+        self.assertFalse(any("unused option" in value for value in self.decoded_json),
+                         "Serving a photo must not decode the job's marketplace catalogs")
+
+    def test_explicit_empty_approved_photos_does_not_serve_current_photos(self):
+        for manifest in ([], None):
+            with self.subTest(manifest=manifest):
+                self.job.listing_snapshot = {"_approved_photos": manifest}
+                self.db.commit()
+                response = self.client.get(f"/api/jobs/{self.job.id}/photos/{self.photo.id}")
+                self.assertEqual(response.status_code, 404)
