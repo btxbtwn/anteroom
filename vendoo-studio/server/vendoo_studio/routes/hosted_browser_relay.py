@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from vendoo_studio.routes import jobs
 from vendoo_studio.services import extension_connection
 from vendoo_studio.services.device_routes import claim, lookup, replay_instance
-from vendoo_studio.services.hosted_browser_relay import relay_for
+from vendoo_studio.services.hosted_browser_relay import WAIT_S, relay_for
 from vendoo_studio.services.service_context import current
 
 router = APIRouter(prefix='/api/browser-relay')
@@ -17,7 +17,6 @@ router = APIRouter(prefix='/api/browser-relay')
 sessions_router = APIRouter()
 sessions_router.add_api_route('/api/marketplaces/sessions', extension_connection.marketplace_sessions, methods=['GET'])
 sessions_router.add_api_route('/api/marketplaces/{marketplace}/connect', extension_connection.connect_marketplace, methods=['POST'])
-WAIT_S = 20.0
 
 
 def _relay():
