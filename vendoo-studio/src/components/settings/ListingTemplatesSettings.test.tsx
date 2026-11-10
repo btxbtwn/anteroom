@@ -13,6 +13,22 @@ describe("saved templates",()=>{
     expect(html).toContain("Saved templates");expect(html).toContain("Coats");expect(html).toContain("Create draft");expect(html).toContain("Rename");expect(html).toContain("Delete");
     expect(useMutation.mock.calls[0][0].retry).toBe(false);
   });
+  it("loads with a skeleton row, shows an empty row, and needs no reload button",()=>{
+    useQuery.mockReturnValue({data:undefined,isPending:true,isFetching:true});
+    const loading=renderToStaticMarkup(<ListingTemplatesSettings onOpenListing={vi.fn()}/>);
+    expect(loading).toContain('aria-label="Loading templates"');
+    expect(loading).not.toContain("Loading templates…");
+    expect(loading).not.toContain("Reload templates");
+    useQuery.mockReturnValue({data:{templates:[]},isPending:false,isFetching:false});
+    const empty=renderToStaticMarkup(<ListingTemplatesSettings onOpenListing={vi.fn()}/>);
+    expect(empty).toContain("No saved templates yet.");
+    expect(empty).not.toContain("Reload templates");
+  });
+  it("offers Try again only when the templates could not load",()=>{
+    useQuery.mockReturnValue({data:undefined,isPending:false,isFetching:false,error:new Error("Offline")});
+    const html=renderToStaticMarkup(<ListingTemplatesSettings onOpenListing={vi.fn()}/>);
+    expect(html).toContain("Offline");expect(html).toContain("Try again");
+  });
   it("freezes the template version and starts a draft with its own SKU and request ID",async()=>{
     const save=vi.spyOn(api.templates,"draft").mockRejectedValue(new Error("No network"));
     renderToStaticMarkup(<TemplateDraftDialog template={template} onClose={vi.fn()} onCreated={vi.fn()}/>);

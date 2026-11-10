@@ -881,6 +881,8 @@ export interface SourcingPrefs {
 
 export interface SourcingState {
   refreshing: boolean;
+  /** Why the last refresh failed, until one succeeds. */
+  refresh_error: string | null;
   ebay_connected: boolean;
   prefs: SourcingPrefs;
   trend: { terms: string[]; updated_at: string | null; source: string | null };

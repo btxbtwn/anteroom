@@ -96,6 +96,15 @@ export function planNeedsUpdate(state: SourcingState): boolean {
   );
 }
 
+/**
+ * Keep reading while a refresh runs or the list trails the saved settings. A failed
+ * refresh stops the reads, so the page shows the error and Try again instead of
+ * waiting for a list that is not coming.
+ */
+export function sourcingNeedsPoll(state: SourcingState): boolean {
+  return state.refreshing || (!state.refresh_error && planNeedsUpdate(state));
+}
+
 export function planMetrics(plan: SourcingBuyList) {
   const lots = plan.carts.flatMap((cart) => cart.lots);
   return {

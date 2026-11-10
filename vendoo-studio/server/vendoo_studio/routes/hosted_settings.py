@@ -37,7 +37,6 @@ for path, handler, methods in (
     ('/listing-defaults', settings.set_listing_default, ['PUT']),
     ('/listing-defaults', settings.clear_listing_default, ['DELETE']),
     ('/ebay-inventory-location', settings.get_ebay_inventory_location, ['GET']),
-    ('/ebay-inventory-location', settings.set_ebay_inventory_location, ['PUT']),
     ('/formulas', settings.get_listing_formulas, ['GET']),
     ('/formulas', settings.put_listing_formulas, ['PUT']),
     ('/sale-detection', settings.get_sale_detection_route, ['GET']),

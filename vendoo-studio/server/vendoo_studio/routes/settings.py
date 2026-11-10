@@ -63,10 +63,6 @@ class ListingFieldDefaultConfig(BaseModel):
     label: str | None = None
 
 
-class EbayInventoryLocationConfig(BaseModel):
-    location: str
-
-
 class PackageDimensionsConfig(BaseModel):
     length: int
     width: int
@@ -660,16 +656,6 @@ def get_ebay_inventory_location():
     from vendoo_studio.services.user_settings import get_ebay_inventory_location as load_location
 
     return {"location": load_location()}
-
-
-@router.put("/ebay-inventory-location")
-def set_ebay_inventory_location(config: EbayInventoryLocationConfig):
-    from vendoo_studio.services.user_settings import set_ebay_inventory_location as save_location
-
-    try:
-        return {"ok": True, "location": save_location(config.location)}
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/hidden-fields")

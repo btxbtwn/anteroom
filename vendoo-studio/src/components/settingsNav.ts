@@ -122,8 +122,8 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: "ships-from-zip",
     title: "Ships from ZIP",
     section: "listings",
-    targetId: "package-dimensions",
-    searchTerms: ["zip", "zip code", "ships from", "shipping", "mercari", "depop"],
+    targetId: "ships-from-zip",
+    searchTerms: ["zip", "zip code", "ships from", "ship from", "shipping", "shipping location", "inventory location", "item location", "ebay", "mercari", "depop"],
   },
   {
     id: "hidden-fields",
@@ -257,13 +257,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "connections",
     targetId: "direct-ebay",
     searchTerms: ["ebay", "sold", "sale", "detect sales", "delist", "connect", "sign in", "notification"],
-  },
-  {
-    id: "ebay-inventory-location",
-    title: "eBay inventory location",
-    section: "connections",
-    targetId: "ebay-inventory-location",
-    searchTerms: ["inventory location", "zip", "zip code", "shipping location", "item location", "ebay", "ship from"],
   },
   {
     id: "direct-etsy",

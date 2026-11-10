@@ -213,14 +213,16 @@ function ShipsFromZipRow() {
     onSuccess: (payload) => {
       queryClient.setQueryData(["settings-ships-from-zip"], { zip: payload.zip });
       queryClient.invalidateQueries({ queryKey: ["settings-listing-defaults"] });
+      queryClient.invalidateQueries({ queryKey: ["settings-ebay-inventory-location"] });
       setDraft(null);
     },
   });
 
   return (
     <SettingsRow
+      id="ships-from-zip"
       title="Ships from ZIP"
-      description="Mercari and Depop ship from here; eBay’s location is under Connections."
+      description="eBay, Mercari and Depop listings ship from here. Anteroom also creates your eBay inventory location from it."
     >
       {isPending ? (
         <LoadingNote>Loading ZIP</LoadingNote>

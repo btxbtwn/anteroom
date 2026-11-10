@@ -50,6 +50,7 @@ import {
 import type { Marketplace } from "../components/MarketplacesPage";
 import { marketplaceName } from "../components/marketplaceNames";
 import { ThemeSync } from "../components/ThemeSync";
+import { inventoryEmptyTitle } from "./inventoryEmpty";
 import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSessionNotice";
 
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
@@ -355,10 +356,10 @@ export function App() {
   const openAnalytics = () => togglePage("analytics");
   const openMarketplaces = () => togglePage("marketplaces");
   const openAssistant = () => goAssistant();
-  const openEbayInventoryLocation = () => {
+  const openShipsFromZip = () => {
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
-    setSettingsSection("connections");
-    setSettingsTargetId("ebay-inventory-location");
+    setSettingsSection("listings");
+    setSettingsTargetId("ships-from-zip");
     setActiveView("settings");
     setMobilePane(runtime.hosted ? "editor" : "workspace");
     closeMobileSidebar();
@@ -668,7 +669,7 @@ export function App() {
         setChatOpen(true);
       },
       cleared: clearListingWorkspace,
-      editInventoryLocation: openEbayInventoryLocation,
+      editInventoryLocation: openShipsFromZip,
       bulkCreated: (listings, generate) => {
         if (generate) void generateBatch(listings);
         const first = listings[0]?.convId;
@@ -898,8 +899,7 @@ export function App() {
                 ) : (
                   <Empty className="flex-1 overflow-y-auto">
                     <EmptyHeader>
-                      <EmptyTitle>Turn product photos into marketplace-ready drafts</EmptyTitle>
-                      <EmptyDescription>Pick up where Anteroom suggests, or start a new listing.</EmptyDescription>
+                      <EmptyTitle>{inventoryEmptyTitle(conversations?.length)}</EmptyTitle>
                     </EmptyHeader>
                     <EmptyContent className="max-w-md">
                       {runtime.features.has("suggestions") && <SuggestionsPanel

@@ -83,7 +83,7 @@ _ETSY_FIELD_DEFAULT_KEYS = {
 DEFAULT_EBAY_INVENTORY_LOCATION = "70125"
 _INVENTORY_LOCATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,'#-]{0,79}$")
 DEFAULT_PACKAGE_DIMENSIONS = {"length": 13, "width": 10, "height": 3}
-DEFAULT_THEME: Literal["dark", "light", "system"] = "dark"
+DEFAULT_THEME: Literal["dark", "light", "system"] = "system"
 
 # Any id in LISTING_PROVIDER_CHOICES; key providers come from ai_key_catalog.
 ListingProviderChoice = str
@@ -132,18 +132,28 @@ def set_package_dimensions(*, length: object, width: object, height: object) -> 
 
 
 def get_ships_from_zip() -> str:
-    """The five-digit ZIP the seller ships from; empty until they set it."""
-    raw = str(read_settings().get(SHIPS_FROM_ZIP_KEY) or "").strip()
-    return raw if re.fullmatch(r"\d{5}", raw) else ""
+    """The five-digit ZIP the seller ships from on every marketplace; empty until they set it.
+
+    Sellers who saved a ZIP only for eBay, before the two settings became one,
+    get that ZIP here too.
+    """
+    settings = read_settings()
+    for raw in (settings.get(SHIPS_FROM_ZIP_KEY), settings.get(EBAY_INVENTORY_LOCATION_KEY)):
+        match = re.fullmatch(r"(\d{5})(?:-\d{4})?", str(raw or "").strip())
+        if match:
+            return match.group(1)
+    return ""
 
 
 def set_ships_from_zip(value: object) -> str:
+    """Save the one ships-from ZIP: Mercari and Depop use it, and so does eBay's inventory location."""
     text = str(value or "").strip()
     if text and not re.fullmatch(r"\d{5}", text):
         raise ValueError("A ZIP code is five digits.")
 
     def mutator(payload: dict) -> None:
         payload[SHIPS_FROM_ZIP_KEY] = text
+        payload[EBAY_INVENTORY_LOCATION_KEY] = text
 
     update_settings(mutator)
     return text
@@ -321,7 +331,11 @@ def normalize_ebay_inventory_location(value: object) -> str:
 
 
 def get_ebay_inventory_location() -> str:
-    """Ship-from ZIP or place. Empty until this install saves one."""
+    """Where eBay listings ship from: the ships-from ZIP, else a place name saved before
+    the eBay setting moved into it. Empty until one is saved."""
+    zip_code = get_ships_from_zip()
+    if zip_code:
+        return zip_code
     raw = read_settings().get(EBAY_INVENTORY_LOCATION_KEY)
     if raw is None or not str(raw).strip():
         return ""
@@ -329,23 +343,6 @@ def get_ebay_inventory_location() -> str:
         return normalize_ebay_inventory_location(raw)
     except ValueError:
         return ""
-
-
-def set_ebay_inventory_location(value: object) -> str:
-    text = " ".join(str(value or "").split())
-    if not text:
-        def clear(payload: dict) -> None:
-            payload[EBAY_INVENTORY_LOCATION_KEY] = ""
-
-        update_settings(clear)
-        return ""
-    location = normalize_ebay_inventory_location(text)
-
-    def mutator(payload: dict) -> None:
-        payload[EBAY_INVENTORY_LOCATION_KEY] = location
-
-    update_settings(mutator)
-    return location
 
 
 def listing_inventory_location(listing: dict | None) -> str:

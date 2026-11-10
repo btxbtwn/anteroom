@@ -212,7 +212,7 @@ def test_account_preferences_do_not_share_settings(cloud, signing_keys):  # noqa
     assert client.put('/api/settings/ui', headers=alice, json={'theme': 'light'}).status_code == 200
     assert client.put('/api/settings/ui', headers=alice, json={'listing_names': 'sku'}).status_code == 200
     assert client.get('/api/settings/ui', headers=alice).json()['theme'] == 'light'
-    assert client.get('/api/settings/ui', headers=bob).json()['theme'] == 'dark'
+    assert client.get('/api/settings/ui', headers=bob).json()['theme'] == 'system'
     assert client.put('/api/settings/ui', headers=alice, json={'vendoo_enabled': True}).status_code == 422
     assert client.put('/api/settings/ui', headers=alice, json={'user_id': BOB}).status_code == 422
 
