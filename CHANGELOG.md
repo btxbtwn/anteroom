@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.892 — 2026-11-10
+
+- Fixed a build error that stopped the latest updates from reaching myanteroom.com.
+
 ## 0.1.891 — 2026-11-10
 
 - iPhone: after generating, the listing assistant says what it filled ("Title, description and 8 item details filled") with a button back to the editor, instead of showing the raw listing JSON.
