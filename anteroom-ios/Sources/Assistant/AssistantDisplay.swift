@@ -226,3 +226,45 @@ private extension AssistantDisplay {
         return result
     }
 }
+
+/// Presentation of an assistant turn, including a direct route back to a generated draft.
+struct AssistantReply: Equatable {
+    let text: String
+    let isListing: Bool
+
+    init(_ raw: String) {
+        let visible = AssistantDisplay.text(raw)
+        if visible == "Listing generated.", let json = AssistantDisplay.extractJson(raw),
+           let listing = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] {
+            text = Self.listingSummary(listing)
+            isListing = true
+        } else {
+            text = visible
+            isListing = false
+        }
+    }
+    /// "Title, description and 9 item details filled."
+    static func listingSummary(_ listing: [String: Any]) -> String {
+        func filled(_ value: Any?) -> Bool {
+            switch value {
+            case nil, is NSNull: false
+            case let text as String: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case let items as [Any]: !items.isEmpty
+            case let object as [String: Any]: !object.isEmpty
+            default: true
+            }
+        }
+        var parts: [String] = []
+        if filled(listing["title"]) { parts.append("Title") }
+        if filled(listing["description"]) { parts.append(parts.isEmpty ? "Description" : "description") }
+        let details = listing.filter { $0.key != "title" && $0.key != "description" && filled($0.value) }.count
+        if details > 0 {
+            let words = "\(details) item \(details == 1 ? "detail" : "details")"
+            parts.append(parts.isEmpty ? words.prefix(1).uppercased() + words.dropFirst() : words)
+        }
+        guard !parts.isEmpty else { return "Listing generated." }
+        let joined = parts.count == 1 ? parts[0] : parts.dropLast().joined(separator: ", ") + " and " + parts.last!
+        return "\(joined) filled."
+    }
+
+}

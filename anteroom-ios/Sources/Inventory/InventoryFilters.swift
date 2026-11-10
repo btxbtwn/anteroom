@@ -114,7 +114,8 @@ struct InventoryFilters: Equatable, Sendable {
 }
 
 enum Marketplaces {
-    static let order = ["ebay", "etsy", "poshmark", "mercari", "depop", "facebook", "shopify",
+    /// The web editor's order (editorTabs.ts), used for every marketplace list on the phone.
+    static let order = ["ebay", "poshmark", "mercari", "depop", "etsy", "facebook", "shopify",
                         "whatnot", "vestiaire"]
     static let names = ["ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark",
                         "mercari": "Mercari", "depop": "Depop", "facebook": "Facebook", "shopify": "Shopify",
@@ -274,6 +275,9 @@ extension ConversationSummary {
 }
 
 enum InventoryQuery {
+    /// A draft made with New listing that the seller left without adding
+    /// anything: no photos, no notes, no saved listing, no chat, and only the
+    /// placeholder name. Leaving it removes it, so backing out leaves no trace.
     /// Coming back to the app reloads an inventory older than this.
     static let returnReloadAge: TimeInterval = 30
 

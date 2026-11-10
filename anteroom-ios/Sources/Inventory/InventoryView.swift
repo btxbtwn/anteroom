@@ -13,6 +13,9 @@ struct InventoryView: View {
     /// The listing in the editor beside the list, in the side-by-side layout.
     @State private var open: ConversationSummary?
     @State private var creatingListing = false
+    /// Drafts made with New listing while this screen was open; leaving one
+    /// untouched removes it.
+    @State private var created: Set<String> = []
     @State private var bulkListing = false
     @State private var renaming: ConversationSummary?
     @State private var newTitle = ""
@@ -61,6 +64,16 @@ struct InventoryView: View {
         }
         .onChange(of: model.listings.map(\.id)) { _, ids in
             if let listing = open, !ids.contains(listing.id) { open = nil }
+        }
+        // Leaving a new draft (Back, or opening another listing beside the
+        // list) removes it when nothing was added. A layout switch keeps it open.
+        .onChange(of: path) { old, new in
+            guard !sideBySide else { return }
+            left(Set(old.map(\.id)).subtracting(new.map(\.id)))
+        }
+        .onChange(of: open) { old, new in
+            guard sideBySide, let old, old.id != new?.id else { return }
+            left([old.id])
         }
     }
 
@@ -364,6 +377,13 @@ struct InventoryView: View {
         Task { await model.reload() }
     }
 
+    private func left(_ ids: Set<String>) {
+        for id in ids.intersection(created) {
+            created.remove(id)
+            Task { await model.discardIfUntouched(id) }
+        }
+    }
+
     /// Like the web: one tap makes an untitled draft and opens it. The
     /// seller adds photos there and generation writes the title.
     private func newListing() {
@@ -371,7 +391,10 @@ struct InventoryView: View {
         creatingListing = true
         Task {
             defer { creatingListing = false }
-            if let listing = await model.createListing() { show(listing) }
+            if let listing = await model.createListing() {
+                created.insert(listing.id)
+                show(listing)
+            }
         }
     }
 }

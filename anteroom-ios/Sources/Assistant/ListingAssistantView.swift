@@ -7,14 +7,21 @@ struct ListingAssistantView: View {
     @State private var action: AssistantAction?
     @State private var runID = UUID()
     @State private var stopping = false
-    @State private var confirmGenerate = false
     @State private var confirmRegenerate = false
     @State private var picked: [PhotosPickerItem] = []
     @State private var following = true
+    @State private var hasCopy: Bool
+    @State private var autoGenerate: Bool
+    private let photoCount: Int
 
     /// `text` starts the composer, e.g. an Ask chat about a marketplace refusal; the seller sends it.
-    init(api: AnteroomAPI, listingID: String, text: String = "") {
+    /// `generate` starts generating as soon as the assistant is ready: the
+    /// editor's Generate listing button has already asked when it had to.
+    init(api: AnteroomAPI, listingID: String, photoCount: Int, hasCopy: Bool, generate: Bool = false, text: String = "") {
         _model = State(initialValue: ListingAssistantModel(api: api, listingID: listingID, text: text))
+        _hasCopy = State(initialValue: hasCopy)
+        _autoGenerate = State(initialValue: generate)
+        self.photoCount = photoCount
     }
 
     var body: some View {
@@ -25,9 +32,8 @@ struct ListingAssistantView: View {
                     LazyVStack(alignment: .leading, spacing: 16) {
                         controls
                         ForEach(model.messages) { message in
-                            let visible = message.role == "assistant"
-                                ? AssistantDisplay.text(message.text)
-                                : message.text
+                            let reply = message.role == "assistant" ? AssistantReply(message.text) : nil
+                            let visible = reply?.text ?? message.text
                             // Match web ChatMessage: hide assistant turns that are only listing JSON.
                             if message.role != "assistant" || !visible.isEmpty || message.attachmentCount > 0 {
                                 VStack(alignment: .leading, spacing: 6) {
@@ -35,6 +41,10 @@ struct ListingAssistantView: View {
                                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                                     if !visible.isEmpty {
                                         Text(visible).textSelection(.enabled)
+                                        if reply?.isListing == true {
+                                            Button("Review in editor") { dismiss() }
+                                                .buttonStyle(.bordered).frame(minHeight: 44)
+                                        }
                                     }
                                     if message.attachmentCount > 0 {
                                         Label(message.attachmentCount == 1 ? "1 image attached" : "\(message.attachmentCount) images attached",
@@ -45,7 +55,7 @@ struct ListingAssistantView: View {
                                 .padding(16)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 10))
-                                .accessibilityElement(children: .combine)
+                                .accessibilityElement(children: .contain)
                             }
                         }
                         Color.clear.frame(height: 1).id(ChatScroll.bottomID)
@@ -64,7 +74,11 @@ struct ListingAssistantView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-            .task { await model.load() }
+            .task {
+                await model.load()
+                if autoGenerate && model.canStart && photoCount > 0 { start(.generate) }
+                autoGenerate = false
+            }
             .sensoryFeedback(.success, trigger: model.runsFinished)
             .sensoryFeedback(.error, trigger: model.runsFailed)
             .sensoryFeedback(.impact(weight: .light), trigger: model.runsStopped)
@@ -72,19 +86,15 @@ struct ListingAssistantView: View {
             .onChange(of: model.runsFailed) { AccessibilityNotification.Announcement("The assistant stopped with an error").post() }
             .reloadingOnReturn(when: !model.ready && model.error != nil) { await model.load() }
             .task(id: runID) {
-                if let action { await model.run(action) }
+                guard let action else { return }
+                await model.run(action)
+                if model.messages.contains(where: { $0.role == "assistant" && AssistantReply($0.text).isListing }) { hasCopy = true }
             }
             .confirmationDialog("Regenerate this listing?", isPresented: $confirmRegenerate, titleVisibility: .visible) {
                 Button("Regenerate", role: .destructive) { start(.regenerate) }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Rewrites the generated listing from your photos and item details. Photos, measurements, flaws, cost, labels and notes stay. The result is saved as a draft.")
-            }
-            .confirmationDialog("Generate a listing from your photos?", isPresented: $confirmGenerate, titleVisibility: .visible) {
-                Button("Generate listing") { start(.generate) }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This can replace generated listing details. Your photos stay in place. The result is saved as a draft.")
             }
         }
     }
@@ -102,17 +112,10 @@ struct ListingAssistantView: View {
             Text("Add an AI provider in Settings → Providers before generating.")
                 .foregroundStyle(.secondary)
         } else {
-            HStack(spacing: 12) {
-                Button("Generate from photos", systemImage: "sparkles") { confirmGenerate = true }
-                    .workspaceProminentButton()
-                Button("Regenerate", systemImage: "arrow.triangle.2.circlepath") { confirmRegenerate = true }
-                    .buttonStyle(.bordered)
-            }
-            .disabled(!model.canStart)
-            .frame(minHeight: 44)
+            generateButton.disabled(!model.canStart)
         }
         if model.ready && model.messages.isEmpty && !model.isWorking {
-            Text("Add product photos to your listing, then generate a draft or ask for help editing it.")
+            Text(Self.emptyText(photoCount: photoCount, hasCopy: hasCopy))
                 .foregroundStyle(.secondary)
         }
     }
@@ -154,8 +157,29 @@ struct ListingAssistantView: View {
         }
         if let error = model.error {
             Label(error, systemImage: "exclamationmark.triangle")
-                .font(.footnote).foregroundStyle(.red)
+                .font(.footnote).foregroundStyle(WorkspaceStyle.destructive)
         }
+    }
+
+    /// Generate listing until there is copy; then Regenerate (clear, then generate), which asks first.
+    @ViewBuilder
+    private var generateButton: some View {
+        if hasCopy {
+            Button("Regenerate", systemImage: "arrow.triangle.2.circlepath") { confirmRegenerate = true }
+                .buttonStyle(.bordered)
+                .frame(minHeight: 44)
+        } else {
+            Button("Generate listing", systemImage: "sparkles") { start(.generate) }
+                .workspaceProminentButton()
+                .frame(minHeight: 44)
+                .disabled(photoCount == 0)
+        }
+    }
+
+    static func emptyText(photoCount: Int, hasCopy: Bool) -> String {
+        if photoCount == 0 { return "Add photos of your item in the editor, then generate a listing from them. You can also ask a question here." }
+        if hasCopy { return "Ask for a change, like a shorter title or a lower price, and Anteroom saves it to the draft." }
+        return "Generate a listing from your \(photoCount == 1 ? "photo" : "\(photoCount) photos"), or ask a question about this item."
     }
 
     @ViewBuilder

@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Native controls for the desktop ItemDetails contract, before generated fields.
-/// SKU, cost and package dimensions are edited once, in the General fields.
-struct SellerInputFields: View {
+/// The seller's own notes, flaws and labels: evidence for generation, kept
+/// with the listing's notes (the desktop ItemDetails contract). They come last
+/// in the General form.
+struct SellerNoteFields: View {
     @Binding var inputs: SellerInputs
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         ListingInspectorSection("Notes & Labels") {
@@ -40,6 +40,15 @@ struct SellerInputFields: View {
                 }
             }
         }
+    }
+}
+
+/// The seller's garment measurements, in inches as typed.
+struct SellerMeasurementFields: View {
+    @Binding var inputs: SellerInputs
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
         ListingInspectorSection("Measurements (in)") {
             if dynamicTypeSize.isAccessibilitySize {
                 garmentPicker.pickerStyle(.menu)

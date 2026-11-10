@@ -95,6 +95,8 @@ struct ListChoice: Equatable, Identifiable {
     let selectable: Bool
     /// The fields still needed, by name, when the label counts some.
     var detail: String? = nil
+    /// The same fields, to open one.
+    var missing: [MissingField] = []
 
     var id: String { marketplace }
 
@@ -102,8 +104,9 @@ struct ListChoice: Equatable, Identifiable {
     /// and missing fields are advice, so the seller may still pick it.
     static func make(_ marketplace: String, canAct: Bool, check: NativePreflight.Check?,
                      draft: NativeDraftState?, live: MarketplaceLiveListing?, soldSomewhere: Bool) -> ListChoice {
-        func choice(_ label: String, _ tone: Tone, _ selectable: Bool = false, detail: String? = nil) -> ListChoice {
-            ListChoice(marketplace: marketplace, label: label, tone: tone, selectable: selectable, detail: detail)
+        func choice(_ label: String, _ tone: Tone, _ selectable: Bool = false, detail: String? = nil,
+                    missing: [MissingField] = []) -> ListChoice {
+            ListChoice(marketplace: marketplace, label: label, tone: tone, selectable: selectable, detail: detail, missing: missing)
         }
         if live?.soldHere == true { return choice("Sold", .sold) }
         let removed = ["deleted", "deleting"].contains(live?.state ?? "")
@@ -118,7 +121,8 @@ struct ListChoice: Equatable, Identifiable {
         if soldSomewhere { return choice("Not listed", .muted) }
         if let check {
             if !check.missing.isEmpty {
-                return choice(needsText(check.missing.count), .needs, true, detail: missingNames(check.missing))
+                return choice(needsText(check.missing.count), .needs, true, detail: missingNames(check.missing),
+                              missing: check.missing)
             }
             if check.ready { return choice("Ready", .ready, true) }
         }
