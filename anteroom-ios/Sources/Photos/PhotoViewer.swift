@@ -164,7 +164,7 @@ struct PhotoAdjustSheet: View {
     @State private var rendering = false
     @State private var saving = false
     @State private var error: String?
-    @State private var dragStart: PhotoEdits.CropBox?
+    @State private var dragStart: CropBox?
 
     init(api: AnteroomAPI, listingID: String, photo: ListingPhoto, onSaved: @escaping (ListingPhoto) -> Void) {
         self.api = api

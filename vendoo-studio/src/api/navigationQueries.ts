@@ -3,12 +3,12 @@ import { loadPrivateImage } from "./privateImages";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { photoThumbUrl } from "../photoThumb";
-import type { Photo } from "./types";
+import type { ListingPhoto } from "./types";
 
 const warmingPhotos = new Map<string, HTMLImageElement>();
 const warmedPhotos = new Set<string>();
 
-function warmPhotoThumbnails(photos: Photo[]) {
+function warmPhotoThumbnails(photos: ListingPhoto[]) {
   if (hasHostedApiSession()) {
     // Signed-in photos download with the session; keep them where the photo tray reads them.
     for (const photo of photos.slice(0, 4)) loadPrivateImage(photoThumbUrl(photo)).catch(() => {});
@@ -49,7 +49,7 @@ export function prefetchListingReads(client: QueryClient, id: string) {
     client.prefetchQuery({ queryKey: ["conversation", id], queryFn: ({ signal }) => api.conversations.get(id, { signal }), retry: false }),
     client.prefetchQuery({ queryKey: ["listing", id], queryFn: ({ signal }) => api.listings.get(id, { signal }), retry: false }),
     client.prefetchQuery({ queryKey: ["photos", id], queryFn: ({ signal }) => api.conversations.photos(id, undefined, { signal }), retry: false })
-      .then(() => warmPhotoThumbnails(client.getQueryData<Photo[]>(["photos", id]) ?? [])),
+      .then(() => warmPhotoThumbnails(client.getQueryData<ListingPhoto[]>(["photos", id]) ?? [])),
     client.prefetchQuery({ queryKey: ["messages", id], queryFn: ({ signal }) => api.conversations.messages(id, { signal }), retry: false }),
   ]);
 }

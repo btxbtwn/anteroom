@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Photo } from "./api/types";
+import type { ListingPhoto } from "./api/types";
 import { formPhotos, isVideoFile, videoRuleText, withPick } from "./marketplaceMedia";
 
-const photo = (id: string, marketplace: string | null = null) => ({ id, marketplace, url: `/api/photos/${id}` }) as Photo;
+const photo = (id: string, marketplace: string | null = null) => ({ id, marketplace, url: `/api/photos/${id}` }) as ListingPhoto;
 const item = [photo("front"), photo("back"), photo("tag")];
 const ebayOnly = [photo("stock", "ebay")];
 

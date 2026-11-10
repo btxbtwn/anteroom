@@ -20,6 +20,8 @@ from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.marketplace_listing import LIVE_STATES
 from vendoo_studio.services.validation import etsy_eligible, validate_listing
 from vendoo_studio.repositories import hosted_drafts
+from vendoo_studio.routes import api_contract as contract
+from vendoo_studio.routes.api_contract import CONFLICT, NOT_FOUND, REFUSED
 from vendoo_studio.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from vendoo_studio.routes.suggestions import SuggestionsResponse
 from vendoo_studio.services import user_settings
@@ -51,6 +53,10 @@ def check_box(db, box_id):
             raise HTTPException(404, 'Box not found')
 
 
+def iso(value):
+    return value.isoformat() if value else None
+
+
 def conversation_response(row, listing=None, direct=None, *, notes=None, include_notes=True, missing_sale_data=None, sold=None):
     """One inventory row. ``notes`` are the parsed notes when the caller deferred loading them.
 
@@ -63,8 +69,8 @@ def conversation_response(row, listing=None, direct=None, *, notes=None, include
     if notes is None:
         notes = parse_notes(row.notes)
     result = {'id': row.id, 'title': row.title, 'status': row.status,
-            'box_id': row.box_id, 'settled_at': row.settled_at, 'unsettled_at': row.unsettled_at,
-            'created_at': row.created_at, 'updated_at': row.updated_at,
+            'box_id': row.box_id, 'settled_at': iso(row.settled_at), 'unsettled_at': iso(row.unsettled_at),
+            'created_at': iso(row.created_at) or '', 'updated_at': iso(row.updated_at) or '',
             'sku': (listing or {}).get('sku'), 'price': (listing or {}).get('price'),
             'quantity': (listing or {}).get('quantity'),
             'direct_marketplaces': [market for market, record in (direct or {}).items() if record['state'] in LIVE_STATES],
@@ -92,7 +98,7 @@ def listing_response(db, identity):
             'errors': validation.errors, 'warnings': validation.warnings, 'etsy_eligible': etsy_eligible(payload)}
 
 
-@router.get('/runtime')
+@router.get('/runtime', response_model=contract.WorkspaceRuntime)
 def runtime(request: Request, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.category_tree import categories_ready
     worker = getattr(request.app.state, 'background_worker', None)
@@ -120,14 +126,7 @@ def status(db=Depends(get_seller_db, scope="function")):
             'database_ok': True, 'packaged': False, 'chrome_available': False, 'setup_guide_dismissed': True}
 
 
-class ConversationInput(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
-    title: str | None = Field(None, max_length=200)
-    notes: str | None = Field(None, max_length=50000)
-    box_id: str | None = Field(None, max_length=100)
-
-
-@router.get('/conversations')
+@router.get('/conversations', response_model=list[contract.ConversationSummary])
 async def list_conversations(request: Request):
     return await request.app.state.seller_reads.read('inventory', inventory_response)
 
@@ -201,8 +200,8 @@ def inventory_response(db):
     return summaries
 
 
-@router.post('/conversations')
-def create_conversation(body: ConversationInput, db=Depends(get_seller_db, scope="function")):
+@router.post('/conversations', response_model=contract.Conversation, responses=NOT_FOUND)
+def create_conversation(body: contract.ConversationInput, db=Depends(get_seller_db, scope="function")):
     check_box(db, body.box_id)
     row = Conversation(title=body.title or 'New Listing', notes=body.notes or '', box_id=body.box_id, status='draft')
     db.add(row)
@@ -211,7 +210,7 @@ def create_conversation(body: ConversationInput, db=Depends(get_seller_db, scope
     return conversation_response(row)
 
 
-@router.get('/conversations/{identity}')
+@router.get('/conversations/{identity}', response_model=contract.Conversation, responses=NOT_FOUND)
 def get_conversation(identity: str, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.item_status import status_for
     from vendoo_studio.services.sales_records import missing_by_conversation
@@ -222,8 +221,8 @@ def get_conversation(identity: str, db=Depends(get_seller_db, scope="function"))
                                  sold=status_for(db, identity, parse_notes(row.notes)))
 
 
-@router.patch('/conversations/{identity}')
-def edit_conversation(identity: str, body: ConversationInput, db=Depends(get_seller_db, scope="function")):
+@router.patch('/conversations/{identity}', response_model=contract.Conversation, responses={**REFUSED, **NOT_FOUND, **CONFLICT})
+def edit_conversation(identity: str, body: contract.ConversationInput, db=Depends(get_seller_db, scope="function")):
     row = conversation(db, identity, lock=True)
     assert_idle(db, identity)
     if "box_id" in body.model_fields_set:
@@ -241,8 +240,12 @@ def listing_screen(identity: str, db=Depends(get_seller_db, scope="function")):
     # Keep the owned row alive in the identity map for the constituent reads.
     row = conversation(db, identity)
     loaded_messages = messages(identity, db)
-    payload = {'conversation': conversation_response(row), 'listing': get_listing(identity, db),
-            'photos': photos(identity, db=db), 'messages': loaded_messages,
+    # The contract parts read exactly as their own routes answer them, so a
+    # client can seed those reads from this one.
+    payload = {'conversation': contract.Conversation.model_validate(conversation_response(row)).model_dump(mode='json'),
+            'listing': contract.ListingDocument.model_validate(get_listing(identity, db)).model_dump(mode='json'),
+            'photos': [contract.ListingPhoto.model_validate(photo).model_dump(mode='json') for photo in photos(identity, db=db)],
+            'messages': loaded_messages,
             'jobs': jobs(identity, db),
             'activity': activity_response(db, identity, len(loaded_messages),
                 loaded_messages[-1]['id'] if loaded_messages else None)}
@@ -251,20 +254,14 @@ def listing_screen(identity: str, db=Depends(get_seller_db, scope="function")):
     return payload
 
 
-@router.get('/conversations/{identity}/listing')
+@router.get('/conversations/{identity}/listing', response_model=contract.ListingDocument, responses=NOT_FOUND)
 def get_listing(identity: str, db=Depends(get_seller_db, scope="function")):
     conversation(db, identity)
     return listing_response(db, identity)
 
 
-class ListingInput(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
-    listing: dict
-    expected_revision_id: str = Field(max_length=100)
-
-
-@router.put('/conversations/{identity}/listing')
-def save_listing(identity: str, body: ListingInput, db=Depends(get_seller_db, scope="function")):
+@router.put('/conversations/{identity}/listing', response_model=contract.ListingSaveResult, responses={**NOT_FOUND, **CONFLICT})
+def save_listing(identity: str, body: contract.ListingSave, db=Depends(get_seller_db, scope="function")):
     import copy
     payload = copy.deepcopy(editable_listing(body.listing))
     conversation(db, identity, lock=True)
@@ -420,7 +417,7 @@ def reset_conversation(identity: str, request: Request, body: ResetInput | None 
 def photo_response(row):
     return {'id': row.id, 'conversation_id': row.conversation_id, 'original_filename': row.original_filename,
             'mime_type': row.mime_type, 'size_bytes': row.size_bytes, 'display_order': row.display_order,
-            'width': row.width, 'height': row.height, 'created_at': row.created_at, 'edits': row.edits,
+            'width': row.width, 'height': row.height, 'created_at': iso(row.created_at) or '', 'edits': row.edits,
             'marketplace': row.marketplace,
             'url': f'/api/conversations/{row.conversation_id}/photos/{row.id}/bytes'
                 + (f'?v={row.checksum[:12]}' if row.checksum else '')}
@@ -436,7 +433,7 @@ def owned_photo(db, identity, photo_id):
     return row
 
 
-@router.get('/conversations/{identity}/photos')
+@router.get('/conversations/{identity}/photos', response_model=list[contract.ListingPhoto], responses=NOT_FOUND)
 def photos(identity: str, marketplace: str | None = None, db=Depends(get_seller_db, scope="function")):
     conversation(db, identity)
     statement = select(Photo).where(Photo.conversation_id == identity)
@@ -565,11 +562,11 @@ class RestoreInput(BaseModel):
 @router.post('/conversations/{identity}/revisions/{revision_id}/restore')
 def restore_revision(identity: str, revision_id: str, body: RestoreInput, db=Depends(get_seller_db, scope="function")):
     earlier = get_revision(identity, revision_id, db)
-    result = save_listing(identity, ListingInput(listing=earlier['listing'], expected_revision_id=body.expected_revision_id), db)
+    result = save_listing(identity, contract.ListingSave(listing=earlier['listing'], expected_revision_id=body.expected_revision_id), db)
     return {'ok': True, 'revision_id': result['revision_id']}
 
 
-@router.delete('/conversations/{identity}')
+@router.delete('/conversations/{identity}', response_model=contract.DeleteConversationResult, responses={**REFUSED, **NOT_FOUND, **CONFLICT})
 def delete_conversation(identity: str, request: Request, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services import hosted_listing_delete
     conversation(db, identity, lock=True)

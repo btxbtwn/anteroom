@@ -20,11 +20,15 @@ import type {
   BackupsStatus,
   ChoiceList,
   Conversation,
+  ConversationInput,
   ConversationSummary,
   DatabaseReport,
   DeleteConversationResult,
   Job,
+  ErrorDetail,
+  HTTPValidationError,
   ListingData,
+  ListingSave,
   ListingNames,
   ChatAttachmentUpload,
   ListingProviderId,
@@ -34,16 +38,16 @@ import type {
   ModelFavorite,
   ProviderUsageLimits,
   PhotoProviderChoice,
-  ListingResponse,
+  ListingDocument,
   ListingRevision,
-  ListingUpdateResult,
+  ListingSaveResult,
   ConversationActivity,
   MarkdownApplyResult,
   MarkdownDropRequest,
   MarkdownPreviewRow,
   Message,
   OkResponse,
-  Photo,
+  ListingPhoto,
   PhotoEdits,
   PhotoUploadResult,
   PriceDropApplyResult,
@@ -54,7 +58,7 @@ import type {
   StudioErrorLogEntry,
   ChatGPTPendingLogin,
   RevisionRestoreResult,
-  ValidationResult,
+  ListingValidation,
   SimilarItems,
   SimilarMerge,
   MarketplaceForm,
@@ -87,11 +91,13 @@ import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPa
 
 const BASE = "/api";
 
-type ErrorBody = { detail?: unknown; message?: unknown } | null | undefined;
+/** The contract's error answers (ErrorDetail, and FastAPI's HTTPValidationError for a 422), or
+ * another route's own detail object. */
+type ErrorBody = ErrorDetail | HTTPValidationError | { detail?: unknown; message?: unknown } | null | undefined;
 type ErrorItem = { msg?: string; message?: string } | string | null | undefined;
 
 export function errorMessage(body: ErrorBody, fallback: string): string {
-  const detail = body?.detail;
+  const detail: unknown = body?.detail;
   if (typeof detail === "string" && detail.trim()) return detail;
   if (Array.isArray(detail)) {
     const messages = detail
@@ -109,7 +115,8 @@ export function errorMessage(body: ErrorBody, fallback: string): string {
       if (messages.length) return messages.join("; ");
     }
   }
-  if (typeof body?.message === "string" && body.message.trim()) return body.message;
+  const message = body && "message" in body ? body.message : undefined;
+  if (typeof message === "string" && message.trim()) return message;
   return fallback;
 }
 
@@ -708,9 +715,9 @@ export const api = {
     get: (id: string, options?: ReadOptions) => read<Conversation>(`/conversations/${id}`, options),
     /** Item Details as Regenerate will start from them; nothing is saved. */
     regenerateDetails: (id: string) => read<{ notes: string | null }>(`/conversations/${id}/regenerate-details`),
-    create: (body?: { title?: string; notes?: string; box_id?: string | null }) =>
+    create: (body?: ConversationInput) =>
       request<Conversation>("/conversations", { method: "POST", body: JSON.stringify(body || {}) }),
-    update: (id: string, body: { title?: string; notes?: string; box_id?: string | null }) =>
+    update: (id: string, body: ConversationInput) =>
       request<Conversation>(`/conversations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     settle: (id: string) =>
       request<Conversation>(`/conversations/${id}/settle`, { method: "POST" }),
@@ -722,23 +729,23 @@ export const api = {
     messages: (id: string, options?: ReadOptions) => read<Message[]>(`/conversations/${id}/messages`, options),
     /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */
     photos: (id: string, marketplace?: string, options?: ReadOptions) =>
-      read<Photo[]>(`/conversations/${id}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`, options),
+      read<ListingPhoto[]>(`/conversations/${id}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`, options),
     deletePhoto: (convId: string, photoId: string) =>
       request<OkResponse>(`/conversations/${convId}/photos/${photoId}`, { method: "DELETE" }),
     /** Rotate the stored image clockwise by `degrees` (90, -90 or 180). */
     rotatePhoto: (convId: string, photoId: string, degrees: 90 | -90 | 180) =>
-      request<Photo>(`/conversations/${convId}/photos/${photoId}/rotate`, {
+      request<ListingPhoto>(`/conversations/${convId}/photos/${photoId}/rotate`, {
         method: "POST",
         body: JSON.stringify({ degrees }),
       }),
     /** Replace a photo's edits; the server renders them from the kept original. */
     editPhoto: (convId: string, photoId: string, edits: PhotoEdits) =>
-      request<Photo>(`/conversations/${convId}/photos/${photoId}/edits`, {
+      request<ListingPhoto>(`/conversations/${convId}/photos/${photoId}/edits`, {
         method: "PUT",
         body: JSON.stringify(edits),
       }),
     resetPhoto: (convId: string, photoId: string) =>
-      request<Photo>(`/conversations/${convId}/photos/${photoId}/edits`, { method: "DELETE" }),
+      request<ListingPhoto>(`/conversations/${convId}/photos/${photoId}/edits`, { method: "DELETE" }),
     /** A smaller JPEG of unsaved edits; `crop: false` keeps the whole frame to draw the crop on. */
     previewPhotoEdits: async (convId: string, photoId: string, edits: PhotoEdits, crop: boolean, signal?: AbortSignal) => {
       const res = await studioFetch(`${BASE}/conversations/${convId}/photos/${photoId}/edits/preview?crop=${crop}`, {
@@ -775,7 +782,7 @@ export const api = {
           if (!response.ok) { errors.push(`${file.name}: could not upload this photo.`); continue; }
           ids.push((await response.json()).id);
         }
-        const photos = await request<Photo[]>(`/conversations/${encodeURIComponent(convId)}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`);
+        const photos = await request<ListingPhoto[]>(`/conversations/${encodeURIComponent(convId)}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`);
         return { ok: errors.length === 0, count: ids.length, photos: photos.filter(photo => ids.includes(photo.id)), errors };
       })();
       const form = new FormData();
@@ -802,17 +809,17 @@ export const api = {
   },
 
   listings: {
-    get: (convId: string, options?: ReadOptions) => read<ListingResponse>(`/conversations/${convId}/listing`, options),
+    get: (convId: string, options?: ReadOptions) => read<ListingDocument>(`/conversations/${convId}/listing`, options),
     /** The marketplace forms for this listing's category (the eBay and Etsy editors read these). */
     fields: (convId: string, options?: ReadOptions) =>
       read<{ ok: boolean; forms: MarketplaceForm[] }>(`/conversations/${convId}/vendoo-api/fields`, options),
     update: (convId: string, listing: ListingData, expectedRevisionId: string) =>
-      request<ListingUpdateResult>(`/conversations/${convId}/listing`, {
+      request<ListingSaveResult>(`/conversations/${convId}/listing`, {
         method: "PUT",
-        body: JSON.stringify({ listing, expected_revision_id: expectedRevisionId }),
+        body: JSON.stringify({ listing, expected_revision_id: expectedRevisionId } satisfies ListingSave),
       }),
     validate: (convId: string) =>
-      request<ValidationResult>(`/conversations/${convId}/listing/validate`, { method: "POST" }),
+      request<ListingValidation>(`/conversations/${convId}/listing/validate`, { method: "POST" }),
     revisions: (convId: string) => request<ListingRevision[]>(`/conversations/${convId}/revisions`),
     revision: (convId: string, revisionId: string) =>
       request<{ id: string; listing: ListingData }>(`/conversations/${convId}/revisions/${revisionId}`),

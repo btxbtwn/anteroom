@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { groupImageFilesByFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
-import type { Photo } from "../api/types";
+import type { ListingPhoto } from "../api/types";
 import { toastManager } from "./ui/toast";
 import { BulkUploadDialog } from "./BulkUploadDialog";
 import { InspectorSection } from "./ListingFormControls";
@@ -53,8 +53,8 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   });
 
   // A rotation or edit keeps the photo's ID and serves a new file under a new URL.
-  const replacePhoto = (changed: Photo) => {
-    queryClient.setQueryData<Photo[]>(["photos", convId], (current) =>
+  const replacePhoto = (changed: ListingPhoto) => {
+    queryClient.setQueryData<ListingPhoto[]>(["photos", convId], (current) =>
       current?.map((photo) => (photo.id === changed.id ? changed : photo)),
     );
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -77,12 +77,12 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     mutationFn: (orderedIds: string[]) => api.conversations.reorderPhotos(convId, orderedIds),
     onMutate: async (orderedIds) => {
       await queryClient.cancelQueries({ queryKey: ["photos", convId] });
-      const previous = queryClient.getQueryData<Photo[]>(["photos", convId]);
+      const previous = queryClient.getQueryData<ListingPhoto[]>(["photos", convId]);
       if (previous) {
         const byId = new Map(previous.map((photo) => [photo.id, photo]));
         queryClient.setQueryData(
           ["photos", convId],
-          orderedIds.map((id) => byId.get(id)).filter((photo): photo is Photo => Boolean(photo)),
+          orderedIds.map((id) => byId.get(id)).filter((photo): photo is ListingPhoto => Boolean(photo)),
         );
       }
       return { previous };

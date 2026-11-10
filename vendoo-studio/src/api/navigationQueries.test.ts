@@ -4,7 +4,7 @@ import { createStudioQueryClient } from "./queryClient";
 import { api } from "./client";
 import { prefetchAssistantThread, prefetchListingReads } from "./navigationQueries";
 import { photoThumbUrl } from "../photoThumb";
-import type { Photo } from "./types";
+import type { ListingPhoto } from "./types";
 
 afterEach(() => vi.restoreAllMocks());
 beforeEach(() => vi.spyOn(api.listings, "get").mockResolvedValue({ listing: { title: "Saved listing" }, current_revision_id: "saved" } as never));
@@ -19,7 +19,7 @@ it("warms bounded versioned thumbnails, deduplicates intent, and retries failed 
     constructor() { images.push(this); }
   });
   const client = createStudioQueryClient();
-  const photos = Array.from({ length: 8 }, (_, i) => ({ id: `warm-${i}`, url: `/api/photos/warm-${i}?v=1` }) as Photo);
+  const photos = Array.from({ length: 8 }, (_, i) => ({ id: `warm-${i}`, url: `/api/photos/warm-${i}?v=1` }) as ListingPhoto);
   vi.spyOn(api.conversations, "get").mockResolvedValue({ id: "warm" } as never);
   vi.spyOn(api.conversations, "messages").mockResolvedValue([]);
   vi.spyOn(api.conversations, "photos").mockResolvedValue(photos);

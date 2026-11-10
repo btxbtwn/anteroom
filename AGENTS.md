@@ -25,6 +25,7 @@ a retry, or as a side effect of any other action.
 - **`skills/`** — Canonical source for listing rules, templates, research loops, and optimizer tooling.
 - **`VENDOO_STUDIO_SPEC.md`** — Product and architecture specification for Anteroom.
 - **`DESIGN.md`** — Visual design rules and review checklist for Anteroom's web UI.
+- **`vendoo-studio/server/vendoo_studio/routes/api_contract.py`** — The listing API contract the web app and the iPhone app share. `contracts/anteroom-api.json`, `vendoo-studio/src/api/contract.gen.ts` and `anteroom-ios/Sources/API/Generated/APIContract.swift` are generated from it; never edit them by hand. See [`contracts/README.md`](contracts/README.md).
 - Do not duplicate listing rules across components.
 
 ## Code Search (Semble)
@@ -234,6 +235,7 @@ mix it with a fix or a feature.
 - Keep frontend API calls under `vendoo-studio/src/api/`; keep backend routes thin and place domain behavior in services and repositories.
 - A direct marketplace tab (eBay, Poshmark, Mercari, Depop) is a 1:1 replica of that marketplace's own listing form: the same fields, labels and order, no more and no fewer, under the same section headings and row layout (each native field carries the page's `section`, and `width: "half"` where the page puts fields side by side). Its rows come only from the native form the server or extension builds; the editor never adds reference, hand-kept or fallback rows to it. A field the marketplace has goes into that native form builder, not the editor.
 - Maintain the JSON listing contract across skills, Anteroom, and the extension. The extension expects the structure documented in `docs/json-contract.md`.
+- A request or response shape both the web app and the iPhone app use belongs in the shared API contract (`routes/api_contract.py`), declared on the hosted and the desktop route alike. After changing it, run `python vendoo-studio/scripts/api-contract.py` and commit the regenerated files with the change.
 
 ## Database schema
 

@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.873 — 2026-11-10
+
+- The iPhone app and the web app now read listings, photos and saves through one shared definition, so they stay in step with each other and with Anteroom's server.
+- Saving a listing in the Mac app now reports whether it is ready to send, as the web app already expected.
+
 ## 0.1.872 — 2026-11-09
 
 - Generating a listing no longer fails when the AI wraps its photo reading in an extra layer or writes a size or measurement as a number.

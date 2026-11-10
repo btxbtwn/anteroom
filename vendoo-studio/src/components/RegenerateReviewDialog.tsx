@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { BULK_READ_CONCURRENCY, mapWithConcurrency } from "../lib/concurrency";
-import type { Photo } from "../api/types";
+import type { ListingPhoto } from "../api/types";
 import { moveItem } from "../photoDrop";
 import { applyReading, readEach } from "../measurementReading";
 import { toastManager } from "./ui/toast";
@@ -355,7 +355,7 @@ function usePhotoRotate(convId: string) {
     mutationFn: ({ photoId, degrees }: { photoId: string; degrees: 90 | -90 }) =>
       api.conversations.rotatePhoto(convId, photoId, degrees),
     onSuccess: (rotated) => {
-      queryClient.setQueryData<Photo[]>(["photos", convId], (current) =>
+      queryClient.setQueryData<ListingPhoto[]>(["photos", convId], (current) =>
         current?.map((photo) => (photo.id === rotated.id ? rotated : photo)),
       );
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -380,12 +380,12 @@ export function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (inde
     mutationFn: (orderedIds: string[]) => api.conversations.reorderPhotos(convId, orderedIds),
     onMutate: async (orderedIds) => {
       await queryClient.cancelQueries({ queryKey: ["photos", convId] });
-      const previous = queryClient.getQueryData<Photo[]>(["photos", convId]);
+      const previous = queryClient.getQueryData<ListingPhoto[]>(["photos", convId]);
       if (previous) {
         const byId = new Map(previous.map((photo) => [photo.id, photo]));
         queryClient.setQueryData(
           ["photos", convId],
-          orderedIds.map((id) => byId.get(id)).filter((photo): photo is Photo => Boolean(photo)),
+          orderedIds.map((id) => byId.get(id)).filter((photo): photo is ListingPhoto => Boolean(photo)),
         );
       }
       return { previous };

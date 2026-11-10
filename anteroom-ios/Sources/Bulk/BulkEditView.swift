@@ -218,18 +218,18 @@ struct BulkEditView: View {
                 }
                 guard text.range(of: #"^\d+(?:\.\d{1,2})?$"#, options: .regularExpression) != nil,
                       let number = Double(text) else {
-                    throw ValidationError("Enter a valid \(field.label.lowercased()).")
+                    throw InputError("Enter a valid \(field.label.lowercased()).")
                 }
                 if number > 1_000_000 || (field != .cost && (number.rounded() != number || number < 1)) {
-                    throw ValidationError("\(field.label) must be a positive whole number up to 1000000.")
+                    throw InputError("\(field.label) must be a positive whole number up to 1000000.")
                 }
                 result.values[field.rawValue] = field == .cost ? .double(number) : .int(Int(number))
             } else {
                 if text.isEmpty && (field == .title || field == .size) {
-                    throw ValidationError("\(field.label) cannot be empty.")
+                    throw InputError("\(field.label) cannot be empty.")
                 }
                 if text.isEmpty && (field == .condition || field == .primaryColor) {
-                    throw ValidationError("Choose a \(field == .condition ? "condition" : "primary color").")
+                    throw InputError("Choose a \(field == .condition ? "condition" : "primary color").")
                 }
                 result.values[field.rawValue] = .string(text)
             }
@@ -240,10 +240,10 @@ struct BulkEditView: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
         if result.values.isEmpty && labelsMode == .keep {
-            throw ValidationError("Choose at least one field or label action.")
+            throw InputError("Choose at least one field or label action.")
         }
         if (labelsMode == .add || labelsMode == .remove) && result.labels.isEmpty {
-            throw ValidationError("Enter labels to add or remove.")
+            throw InputError("Enter labels to add or remove.")
         }
         return result
     }

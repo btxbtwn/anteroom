@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
-import type { Photo } from "../api/types";
+import type { ListingPhoto } from "../api/types";
 import { WorkspaceRuntimeProvider } from "../app/runtime";
 import { PhotoEditor } from "./PhotoEditor";
 import { PhotoLightbox } from "./PhotoThumbs";
@@ -12,7 +12,7 @@ vi.mock("./ui/dialog", () => ({
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
 }));
 
-const photo: Photo = {
+const photo: ListingPhoto = {
   id: "p1", conversation_id: "item", original_filename: "front.jpg", mime_type: "image/jpeg", size_bytes: 10,
   display_order: 0, width: 400, height: 300, created_at: "", url: "/api/photos/p1?v=abc",
   edits: { rotate: 0, straighten: 0, crop: null, exposure: 0.5, brightness: 0, contrast: 0, background: "#ffffff" },
