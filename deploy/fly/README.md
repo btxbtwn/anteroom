@@ -16,16 +16,24 @@ passes on it. A merge that still has notes in `changelog.d/` is skipped; the
 `Release Anteroom` commit the Version workflow pushes next deploys instead.
 In order, it:
 
-1. applies pending Alembic revisions with the migration login
-   (`alembic upgrade head`, `sslmode=verify-full` against the bundled CA);
-2. re-imports the shared category trees when
+1. when the commit is a `Release Anteroom` commit, waits for CI to pass on
+   the merge before it, whose code it ships
+   (`.github/scripts/wait-for-tested-code.py`);
+2. builds the image on Fly's remote builder and pushes it with the label
+   `v<version>-<commit>` (`flyctl deploy --build-only --push`);
+3. applies pending Alembic revisions with the migration login
+   (`alembic upgrade head`, `sslmode=verify-full` against the bundled CA),
+   retrying the first connection for a couple of minutes when the session
+   pooler is full;
+4. re-imports the shared category trees when
    `vendoo-studio/data/category-trees-seed.json.gz` changed since the last
    successful deploy;
-3. runs `flyctl deploy` with the image label `v<version>-<commit>`;
-4. waits for `https://myanteroom.com/api/health` to report the new version.
+5. deploys the image built in step 2 (`flyctl deploy --image`);
+6. waits for `https://myanteroom.com/api/health` to report the new version.
 
-A failed migration stops the run before Fly is touched. Run it by hand from
-the Actions tab (**Deploy hosted → Run workflow**) to redeploy `main`.
+Failed CI on that merge or a failed build stops the run before the database
+changes, and a failed migration stops it before Fly is touched. Run it by hand from the Actions tab
+(**Deploy hosted → Run workflow**) to redeploy `main`.
 
 It uses the `production` GitHub environment, which only `main` may deploy
 from:

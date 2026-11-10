@@ -6,9 +6,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A newer push to a pull request replaces its older run. Every push to main
+# runs to completion in its own group: main does not require PRs to be up to
+# date, so a merge's checks are the only test of the combined code, and the
+# deploy waits for them.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
