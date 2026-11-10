@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.901 — 2026-11-10
+
+- When Depop refuses to list because of shipping, the fix button now opens Package size instead of offering to edit a "National shipping" field that doesn't exist. The message also says why: Depop doesn't offer the package size you chose for this item, or your Depop account has no ship-from address to use.
+
+## 0.1.900 — 2026-11-10
+
+- Show Depop listing errors after a previous delist and expand the marketplace's exact reply.
+- Remove the repeated Chrome extension text from marketplace forms.
+- Scroll to and highlight fields when choosing Edit from a marketplace error.
+
 ## 0.1.899 — 2026-11-10
 
 - Start every selected regeneration without waiting for editor refreshes after clearing the listings.

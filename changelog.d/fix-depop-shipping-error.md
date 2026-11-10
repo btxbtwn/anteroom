@@ -1,1 +1,0 @@
-- When Depop refuses to list because of shipping, the fix button now opens Package size instead of offering to edit a "National shipping" field that doesn't exist. The message also says why: Depop doesn't offer the package size you chose for this item, or your Depop account has no ship-from address to use.
