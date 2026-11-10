@@ -695,9 +695,9 @@ test('Depop\'s own missing fields come back by name, safe to retry, with the dra
   assert.equal(result.safe_to_retry, true);
   assert.equal(result.draft_url, DRAFT);
   assert.deepEqual(JSON.parse(JSON.stringify(result.fields)), [{ field: 'brand', message: 'Depop needs a brand' },
-    { field: 'parcel_size', message: 'Depop needs a parcel size' }]);
+    { field: 'depop_specifics.parcelSize', message: 'Depop needs a package size' }]);
   assert.equal(result.marketplace_message, 'missing_fields: brand, parcel_size');
-  assert.equal(result.error, 'Depop needs a brand, a parcel size.');
+  assert.equal(result.error, 'Depop needs a brand, a package size.');
   assert.ok(requests.every(r => (r.method || 'GET') === 'GET'));
 });
 
@@ -1458,6 +1458,37 @@ test('a draft whose only missing answer is shipping is written again before publ
   assert.equal(puts[0].national_shipping_cost, '4.50');
   // The repair keeps the draft's own pictures.
   assert.deepEqual(puts[0].pictures, [9]);
+});
+
+test('a shipping refusal names the Package size row and why Anteroom could not fill it', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  c.marketplaceSleep = async () => {};
+  const draft = { id: '123456', description: 'Private draft', price_amount: '12', pictures: [{ id: 9 }],
+    missing_fields: ['national_shipping'] };
+  c.fetch = async () => reply(200, draft);
+  const publish = extra => c.depopApiAction('publish', { action: 'publish', confirm: true, draft_url: DRAFT, listing,
+    deadline: Date.now() + 30000, depop_fields: { product_type: 'jeans' }, ...extra });
+  // Depop did not offer the chosen size: the seller is sent to that row, told why.
+  const parcel = await publish({ depop_shipping_problem: { needs: 'a package size it offers for this item (it does not offer Large)' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(parcel.fields)),
+    [{ field: 'depop_specifics.parcelSize', message: 'Depop needs a package size it offers for this item (it does not offer Large)' }]);
+  assert.equal(parcel.marketplace_message, 'missing_fields: national_shipping');
+  // Nothing Anteroom knows of was wrong: still the form's row, never Depop's internal name.
+  const plain = await publish({});
+  assert.deepEqual(JSON.parse(JSON.stringify(plain.fields)), [{ field: 'depop_specifics.parcelSize', message: 'Depop needs shipping' }]);
+  // No ship-from address: fixed on Depop, so no form row is offered.
+  const address = await publish({ depop_shipping_problem: { address: true, message: 'Depop has no ship-from address Anteroom can use.' } });
+  assert.equal(address.error, 'Depop has no ship-from address Anteroom can use.');
+  assert.equal(address.fields, undefined);
+});
+
+test('shipping that cannot be resolved says whether the address or the package size is missing', () => {
+  const c = loadWorker();
+  const problem = (from, parcel, specifics) => JSON.parse(JSON.stringify(call(c, 'depopShippingProblem', from, parcel, { depop_specifics: specifics })));
+  assert.equal(problem(null, { id: 'medium' }, {}).address, true);
+  assert.match(problem({ id: 2 }, null, { parcelSize: 'Large' }).needs, /does not offer Large/);
+  assert.equal(problem({ id: 2 }, null, {}).needs, 'a package size');
 });
 
 test('a draft missing a category is not repaired at publish; it names what the seller must fill', async () => {
