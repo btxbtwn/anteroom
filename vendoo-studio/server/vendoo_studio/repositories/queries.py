@@ -492,6 +492,19 @@ class JobRepo:
     def get(self, job_id: str) -> Job | None:
         return self.db.query(Job).filter(Job.id == job_id).first()
 
+    def photo_source(self, job_id: str):
+        # A listing snapshot can contain megabytes of marketplace catalogs.
+        # Photo downloads need only the pinned manifest, not those catalogs.
+        manifest = json_value(Job.listing_snapshot, "_approved_photos")
+        # JSON null is still an explicitly pinned manifest, never permission
+        # to fall back to the conversation's current photographs.
+        present = (func.json_type(Job.listing_snapshot, '$._approved_photos').isnot(None)
+                   if self.db.get_bind().dialect.name == 'sqlite' else manifest.isnot(None))
+        return self.db.query(
+            Job.conversation_id,
+            manifest.label("approved_photos"), present.label("has_approved_photos"),
+        ).filter(Job.id == job_id).first()
+
     def get_active(self) -> list[Job]:
         return (
             self.db.query(Job)
