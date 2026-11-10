@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from vendoo_studio.services import browser_bridge
+from vendoo_studio.models.listing_promotion import ListingPromotion
+from vendoo_studio.services import browser_bridge, listing_promotions
 from vendoo_studio.services.error_alerts import build_report, render_email
 
 
@@ -95,3 +96,58 @@ def test_nested_result_does_not_inherit_retry_safety(caplog):
 def test_invalid_large_numbers_and_strings_cannot_break_reporting():
     from vendoo_studio.services.marketplace_diagnostics import sanitize_context
     assert sanitize_context({"price_cents": 10 ** 1000, "floor_cents": "1" * 10000}) == {}
+
+
+@pytest.mark.parametrize("retry_safety", [True, False, None, "yes"])
+def test_promotion_preview_rejection_keeps_context_in_its_own_email(monkeypatch, caplog, retry_safety):
+    result = {"ok": False, "error": "Preview rejected", "error_code": "rejected",
+              "marketplace_message": "No offer was sent", "safe_to_retry": retry_safety,
+              "listing": {"token": "private-token"}, "price_cents": 9999}
+    request = AsyncMock(return_value=result)
+    monkeypatch.setattr(browser_bridge, "request", request)
+    row = ListingPromotion(marketplace="depop", action="offer", batch_id="private-batch",
+                           automation_id="private-automation", discount_percent=20, floor_cents=1500)
+    with caplog.at_level(logging.ERROR), pytest.raises(listing_promotions.PromotionError) as raised:
+        asyncio.run(listing_promotions._review_remote(row, "private-listing"))
+    assert (raised.value.status_code, raised.value.code) == (409, "rejected")
+    assert row.marketplace_message == "No offer was sent"
+    report = build_report(caplog.records[-1])
+    assert report["logger"] == "vendoo_studio.listing_promotions"
+    context = report["marketplace_context"]
+    assert context["operation"] == "marketplace.promotion_check"
+    assert context["action"] == "offer"
+    assert context["discount_percent"] == 20
+    assert context["floor_cents"] == 1500
+    assert context["timeout_ms"] == 90000
+    assert context["elapsed_ms"] >= 0
+    if type(retry_safety) is bool:
+        assert context["safe_to_retry"] is retry_safety
+    else:
+        assert "safe_to_retry" not in context
+    assert not any(key in context for key in ("listing", "listing_id", "automation_id", "price_cents", "offer_price_cents"))
+    _, body = render_email(report, 0, None)
+    assert '"discount_percent": 20' in body
+    assert "private-token" not in body
+    request.assert_awaited_once_with(SimpleNamespace(id="promotion-private-batch"), "marketplace.promotion_check", {
+        "marketplace": "depop", "action": "offer", "listing_id": "private-listing", "discount_percent": 20,
+    }, timeout=90)
+
+
+def test_promotion_preview_transport_failure_keeps_context_without_retry(monkeypatch, caplog):
+    request = AsyncMock(side_effect=browser_bridge.BrowserBridgeError("Chrome did not answer in time"))
+    monkeypatch.setattr(browser_bridge, "request", request)
+    row = ListingPromotion(marketplace="poshmark", action="share", batch_id="private-batch")
+    with caplog.at_level(logging.ERROR), pytest.raises(listing_promotions.PromotionError) as raised:
+        asyncio.run(listing_promotions._review_remote(row, "private-listing"))
+    assert (raised.value.status_code, raised.value.code) == (502, "network")
+    report = build_report(caplog.records[-1])
+    assert report["logger"] == "vendoo_studio.listing_promotions"
+    context = report["marketplace_context"]
+    assert context["operation"] == "marketplace.promotion_check"
+    assert context["action"] == "share"
+    assert context["timeout_ms"] == 90000
+    assert context["elapsed_ms"] >= 0
+    assert not any(key in context for key in ("safe_to_retry", "discount_percent", "floor_cents"))
+    request.assert_awaited_once_with(SimpleNamespace(id="promotion-private-batch"), "marketplace.promotion_check", {
+        "marketplace": "poshmark", "action": "share", "listing_id": "private-listing",
+    }, timeout=90)

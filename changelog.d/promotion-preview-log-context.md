@@ -1,0 +1,1 @@
+- Automatic offer preview error emails now include the selected discount, minimum price and timing, so a refusal can be investigated without retrying the offer.
