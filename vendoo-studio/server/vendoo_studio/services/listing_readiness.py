@@ -53,7 +53,8 @@ def missing(gaps: list[dict], rejected: list[dict] | None = None) -> list[dict]:
     candidates += [item for item in rejected or [] if isinstance(item, dict) and item.get("field")]
     for item in candidates:
         field = str(item["field"])
-        name = str(item.get("label") or "").strip() or label(field)
+        # A form's own label can end in a colon ("Ships from:"); the name does not.
+        name = str(item.get("label") or "").strip().rstrip(":").strip() or label(field)
         keys = {same_answer(field), f"label:{name.casefold()}"}
         if keys & seen:
             continue

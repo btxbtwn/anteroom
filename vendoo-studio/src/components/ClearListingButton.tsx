@@ -176,7 +176,7 @@ export function RegenerateListingButton({
         }}
       >
         <RefreshCwIcon />
-        {regenerate.isPending ? "Resetting…" : "Regenerate"}
+        {regenerate.isPending ? "Resetting…" : "Regenerate…"}
       </Button>
 
       <RegeneratePriceDialog

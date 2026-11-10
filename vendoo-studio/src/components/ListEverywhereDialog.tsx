@@ -1,10 +1,10 @@
 import { useState } from "react";
-import type { NativeMarketplace } from "../api/nativeMarketplaces";
+import type { MissingField, NativeMarketplace } from "../api/nativeMarketplaces";
 import { cn } from "../lib/utils";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
 import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
+import { Button, InlineButton } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "./ui/dialog";
 
@@ -14,8 +14,8 @@ export interface ListChoice {
   label: string;
   tone: "ready" | "needs" | "listed" | "sold" | "muted";
   selectable: boolean;
-  /** The fields still needed, by name, when the badge counts some. */
-  detail?: string;
+  /** The fields still needed, when the badge counts some. */
+  missing?: readonly MissingField[];
 }
 
 const BADGE: Record<ListChoice["tone"], "success" | "warning" | "secondary" | "info" | "outline"> = {
@@ -29,13 +29,17 @@ export function readyMarketplaces(choices: readonly ListChoice[]): NativeMarketp
 
 /**
  * List everywhere's picker. Nothing starts selected and nothing is sent until the
- * seller presses List, which names the marketplaces chosen.
+ * seller presses List, which names the marketplaces chosen. Each missing field
+ * is named in full and opens that field on its marketplace's form, as an error
+ * summary links to the field it is about.
  */
-export function ListEverywhereDialog({ title, choices, onConfirm, onClose }: {
+export function ListEverywhereDialog({ title, choices, onConfirm, onClose, onEditField }: {
   title: string;
   choices: readonly ListChoice[];
   onConfirm: (marketplaces: NativeMarketplace[]) => void;
   onClose: () => void;
+  /** Open the editor at a field on a marketplace's form. */
+  onEditField?: (field: string, marketplace: NativeMarketplace) => void;
 }) {
   const [picked, setPicked] = useState<ReadonlySet<NativeMarketplace>>(new Set());
   const selectable = choices.filter((choice) => choice.selectable);
@@ -69,21 +73,33 @@ export function ListEverywhereDialog({ title, choices, onConfirm, onClose }: {
               const name = marketplaceName(choice.marketplace);
               const checked = chosen.includes(choice.marketplace);
               return (
-                <li key={choice.marketplace}>
-                  <label className={cn("flex min-h-16 items-center gap-3 rounded-xl border border-border/60 bg-card/40 p-3 transition-colors",
-                    choice.selectable ? "cursor-pointer hover:bg-accent" : "opacity-64",
-                    checked && "border-foreground/30 bg-accent")}>
+                <li key={choice.marketplace} className={cn("flex flex-col gap-2 rounded-xl border border-border/60 bg-card/40 p-3 transition-colors",
+                  checked && "border-foreground/30 bg-accent")}>
+                  <label className={cn("flex min-h-10 items-center gap-3", choice.selectable ? "cursor-pointer" : "opacity-64")}>
                     <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border/60 bg-background">
                       <MarketplaceLogo id={choice.marketplace} label={name} size={18} />
                     </span>
                     <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
                       <span className="truncate font-medium text-foreground">{name}</span>
                       <Badge variant={BADGE[choice.tone]} size="sm">{choice.label}</Badge>
-                      {choice.detail ? <span className="w-full truncate text-muted-foreground text-xs" title={choice.detail}>{choice.detail}</span> : null}
                     </span>
                     <Checkbox aria-label={`List on ${name}`} checked={checked} disabled={!choice.selectable}
                       onCheckedChange={(value) => toggle(choice.marketplace, value === true)} />
                   </label>
+                  {choice.missing?.length ? (
+                    <ul aria-label={`${name} needs`} className="flex flex-col gap-1 ps-11 text-xs pointer-coarse:gap-0">
+                      {choice.missing.map((item) => (
+                        <li key={item.field} className="min-w-0">
+                          {onEditField ? (
+                            <InlineButton className="break-words font-normal pointer-coarse:min-h-11 pointer-coarse:after:inset-y-0 underline decoration-muted-foreground/50 [--inline-button-text-align:start] [--inline-button-white-space:normal]" title={item.message || undefined}
+                              onClick={() => { onClose(); onEditField(item.field, choice.marketplace); }}>
+                              {item.label}
+                            </InlineButton>
+                          ) : <span className="break-words text-muted-foreground">{item.label}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </li>
               );
             })}
