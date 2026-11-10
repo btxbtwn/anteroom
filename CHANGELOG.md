@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.888 — 2026-11-10
+
+- When Poshmark refuses a listing because Smart Sell's Lowest Price is too low, Anteroom now says so and offers Edit Lowest Price, instead of a vague "Invalid Input Error".
+- A listing that fails after being delisted now shows the failure and its reason, not just "Delisted".
+
 ## 0.1.887 — 2026-11-10
 
 - Show item names in the queue tray when marketplace jobs have no shared title.
