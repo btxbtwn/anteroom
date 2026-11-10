@@ -13,10 +13,15 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-def report_result(marketplace: str, operation: str, result: Any, *, depth: int = 0) -> None:
+def report_result(marketplace: str, operation: str, result: Any, *, depth: int = 0, context: dict | None = None) -> None:
     """Inspect result envelopes only; never traverse listing, order or photo data."""
     if not isinstance(result, dict) or depth > 3:
         return
+    # Safety belongs to this envelope, not an outer batch or a sibling reply.
+    context = dict(context or {})
+    context.pop("safe_to_retry", None)
+    if type(result.get("safe_to_retry")) is bool:
+        context["safe_to_retry"] = result["safe_to_retry"]
     errors = result.get("errors")
     status = result.get("statusCode")
     if (result.get("ok") is False or result.get("error") or errors
@@ -27,18 +32,18 @@ def report_result(marketplace: str, operation: str, result: Any, *, depth: int =
         log.error("%s %s failed (%s): %s; %s", scrub(marketplace), scrub(operation),
                   scrub(result.get("error_code") or status or result.get("state") or "rejected"),
                   scrub(result.get("error") or "; ".join(messages) or "Unconfirmed or failed marketplace result"),
-                  scrub(result.get("marketplace_message")) or "-")
+                  scrub(result.get("marketplace_message")) or "-", extra={"marketplace_context": context or {}})
     for key in ("result", "results", "responses"):
         children = result.get(key)
         if isinstance(children, list):
             for child in children:
-                report_result(marketplace, operation, child, depth=depth + 1)
+                report_result(marketplace, operation, child, depth=depth + 1, context=context)
         elif isinstance(children, dict):
-            report_result(marketplace, operation, children, depth=depth + 1)
+            report_result(marketplace, operation, children, depth=depth + 1, context=context)
 
 
-def report_exception(marketplace: str, operation: str, exc: Exception) -> None:
-    log.error("%s %s failed: %s", scrub(marketplace), scrub(operation), scrub(str(exc)), exc_info=exc)
+def report_exception(marketplace: str, operation: str, exc: Exception, *, context: dict | None = None) -> None:
+    log.error("%s %s failed: %s", scrub(marketplace), scrub(operation), scrub(str(exc)), exc_info=exc, extra={"marketplace_context": context or {}})
 
 
 def marketplace_call(marketplace: str) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
