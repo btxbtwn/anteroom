@@ -1,0 +1,1 @@
+- Asking chat to set a SKU now saves it. Chat still can't make up a SKU on its own.

@@ -34,7 +34,24 @@ def _sync_category_override(db: Session, conv_id: str, listing: dict) -> None:
     db.commit()
 
 
-def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operations: list[dict] | None = None) -> dict:
+def _patched_sku_keys(operations: list[dict]) -> set[str]:
+    """The SKU keys a JSON Patch names directly, like /sku or /depop_specifics/sku."""
+    keys = set()
+    for operation in operations:
+        parts = str(operation.get("path") or "").strip("/").split("/") if isinstance(operation, dict) else []
+        if parts == ["sku"]:
+            keys.add("sku")
+        elif len(parts) == 2 and parts[0].endswith("_specifics") and parts[1] == "sku":
+            keys.add(parts[0])
+    return keys
+
+
+def save_listing_revision(
+    db: Session, conv_id: str, listing: dict, *, operations: list[dict] | None = None,
+    sku_keys: set[str] | frozenset[str] = frozenset(),
+) -> dict:
+    """Save chat output. ``sku_keys`` names the SKUs ("sku", "depop_specifics")
+    the seller's request set field by field; every other SKU stays the seller's."""
     from vendoo_studio.services.validation import normalize_listing_dropdowns
     from vendoo_studio.services.listing_generate import align_size_fields, clear_not_applicable_values
 
@@ -44,6 +61,8 @@ def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operation
     previous = revisions[0].listing_json if revisions else {}
     # Chat may rewrite copy, but SKUs belong to the seller.
     for key in {"sku", *(key for key in stamped.keys() | previous.keys() if key.endswith("_specifics"))}:
+        if key in sku_keys:
+            continue
         if key == "sku":
             if key in previous:
                 stamped[key] = previous[key]
@@ -90,6 +109,7 @@ def _stamp_learned_fields(db: Session, listing: dict) -> dict:
 def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict]) -> bool:
     from vendoo_studio.services.fill_log import (
         FillLogService,
+        field_lookup_key,
         listing_value_for_field,
         summarize_missing_fields,
         remember_chat_clears,
@@ -138,7 +158,11 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict]) 
             if value:
                 accepted[index] = {**field, "value": value}
     updated = remember_chat_clears(updated, accepted)
-    save_listing_revision(db, conv_id, updated)
+    sku_keys = {
+        "sku" if field.get("marketplace", "general") in {"", "general", "unknown"} else f"{field['marketplace']}_specifics"
+        for field in accepted if field_lookup_key(field.get("field") or "") == "sku"
+    }
+    save_listing_revision(db, conv_id, updated, sku_keys=sku_keys)
     FillLogService(db).record_generated_values(conv_id, accepted)
 
     ConversationRepo(db).add_message(
@@ -260,7 +284,7 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
         updated = apply_json_patch(dict(revisions[0].listing_json), parsed_ops)
         if _reject_best_offer(db, conv_id, updated):
             return parsed_ops, False
-        save_listing_revision(db, conv_id, updated, operations=parsed_ops)
+        save_listing_revision(db, conv_id, updated, operations=parsed_ops, sku_keys=_patched_sku_keys(parsed_ops))
         ConversationRepo(db).add_message(
             conv_id,
             "system",
