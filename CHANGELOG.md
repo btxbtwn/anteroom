@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.906 — 2026-11-11
+
+- Blend the mobile status area into the screen and keep the Chat and Listing switch centered.
+
 ## 0.1.905 — 2026-11-10
 
 - Group repeated error emails about different jobs or listings into one, so a few failures no longer use up the hourly email limit.
