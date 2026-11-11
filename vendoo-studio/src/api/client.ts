@@ -588,6 +588,10 @@ export const api = {
       request<SalesCheck>(`/conversations/${convId}/marketplace-listings/check-sales`, { method: "POST" }),
   },
   nativeMarketplaces: {
+    refreshForm: (convId: string, marketplace: string, revisionId: string) =>
+      request<{ revision_id: string }>(`/conversations/${convId}/native-marketplaces/${marketplace}/form/refresh`, {
+        method: "POST", body: JSON.stringify({ revision_id: revisionId }),
+      }),
     form: (convId: string, marketplace: string, revisionId?: string | null) =>
       request<MarketplaceForm>(`/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),

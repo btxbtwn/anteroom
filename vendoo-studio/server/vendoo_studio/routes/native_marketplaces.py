@@ -108,6 +108,16 @@ async def check_result(conv_id: str, marketplace: Marketplace, body: CheckReques
     return await _reply(native.check_result(conv_id, marketplace, body))
 
 
+@router.post("/{marketplace}/form/refresh")
+def refresh_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "etsy"],
+                 body: SaveDraftRequest, db: Session = Depends(get_db, scope="function")):
+    import asyncio
+
+    from vendoo_studio.services import native_editor
+
+    return _sync(asyncio.run, native_editor.refresh_form(conv_id, marketplace, body.revision_id, db))
+
+
 @router.post("/{marketplace}/reset")
 def reset(conv_id: str, marketplace: Marketplace, body: ResetRequest, db: Session = Depends(get_db, scope="function")):
     if body.confirm is not True:
