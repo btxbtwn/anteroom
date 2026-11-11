@@ -1,0 +1,1 @@
+- Blend the mobile status area into the screen and keep the Chat and Listing switch centered.
