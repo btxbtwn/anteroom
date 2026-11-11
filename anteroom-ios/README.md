@@ -278,10 +278,24 @@ and records screenshots in the `iphone-sandbox-results` artifact.
 When the hosted API refuses the seller's token (401), the app renews the
 sign-in once. A read is then sent again; a write is not, because it may have
 already run, so the seller sees "Your sign-in was renewed. Try that again."
-When the sign-in can't be renewed, the app signs out to the sign-in screen. A
-401 that names a marketplace (eBay signed Anteroom out) keeps its own message
-and the sign-in. Signing out also deletes exported CSVs, cached photos and kept
-editor edits from the phone.
+Only a refusal from Supabase signs out: no saved session, or a refresh answered
+400/401/403 with `refresh_token_not_found`, `refresh_token_already_used`,
+`session_not_found`, `session_expired`, `user_not_found`, `user_banned` or
+OAuth's `invalid_grant` (`Sources/Session/SignInRenewal.swift`). The app then
+returns to the sign-in screen. Any other failure to renew (offline, a 5xx, rate
+limiting) keeps the saved sign-in and shows an error to try again. Opening the
+app shows the saved session straight away, even expired or offline; requests
+renew it when they can. A 401 that names a marketplace (eBay signed Anteroom
+out) keeps its own message and the sign-in. Signing out also deletes exported
+CSVs, cached photos and kept editor edits from the phone.
+
+## Marketplace sign-in
+
+Connecting eBay opens eBay's page in a web authentication sheet
+(`ASWebAuthenticationSession` through SwiftUI's `webAuthenticationSession`)
+that shares Safari's cookies. The relay finishes by redirecting to
+`anteroom://marketplace-signin` with a one-time claim; the sheet catches that
+address, closes, and the app trades the claim for the connection.
 
 ## When the server is briefly unavailable
 
