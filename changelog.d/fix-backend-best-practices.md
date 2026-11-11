@@ -1,5 +1,0 @@
-- Very large photos are turned away with a clear message instead of slowing Anteroom down, on the Mac and online.
-- Scout photo checks no longer pause the rest of the app while the photos are read.
-- Online, Scout photos are stored the same way as listing photos: resized and without location data.
-- An eBay message image that is too large to open now says so instead of failing with a server error.
-- Downloading photos from a link no longer freezes the app when the website's address is slow to look up.
