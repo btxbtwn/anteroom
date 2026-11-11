@@ -69,9 +69,29 @@ rates for continuous Machines in the cheapest US regions (`iad` / `ewr`) as of
 | B | Replace the Machine with performance-1x, 2 GB | $33.00 | One full core. HTTP and workers still share the process. |
 | C | Keep the shared web Machine and add a performance-1x, 2 GB worker | about $45.70 | Separates interactive traffic from generation and gives the worker a full core. |
 
-The seller approved option B on 2026-11-03. The existing Machine now has one
-performance CPU and 2 GB RAM. No additional Machine or larger configuration
-has been approved.
+The seller approved option B on 2026-11-03. On 2026-11-11 the seller approved
+adding a worker Machine (about $13 a month more than option B), which reverses
+option C: sellers' pages kept 33% of the CPU in the 2026-11-09 sample
+(inventory and Suggestions rebuilds), so the serving Machine keeps the full
+core and the worker takes the shared one.
+
+| Process group | Role | Machine | Runs |
+| --- | --- | --- | --- |
+| `app` | `web` | performance-1x, 2 GB | Seller requests, Mac and Chrome connections, direct marketplace jobs, Chrome sale checks and promotion rounds (`chrome` lease) |
+| `worker` | `worker` | shared-cpu-1x, 2 GB | Drafts, assistant answers, automations, eBay offers, the job watchdog, Sourcing and sales sync (`schedulers` lease) |
+
+Chrome sale checks and promotion rounds stay on the web Machine because they
+list sellers from the Chrome tabs connected to their own process
+(`hosted_browser_relay.ready_sellers`); on the worker that list would be empty.
+`process_handoff.lead` holds each lease separately and releases them only after
+every set has stopped. A worker whose draft loop has died fails `/api/health`
+(503), so Fly restarts it.
+
+A web process queues drafts and leaves them to the worker group; it never
+claims one. The worker answers forwarded Mac and Chrome calls on the private
+network and has its own health check, so blue-green deploys wait for it. If
+long runs of generation exhaust the shared CPU's burst credit, drafts slow
+down but pages do not; move the worker to performance then.
 
 ## 2. Use database connections deliberately
 
@@ -83,9 +103,17 @@ short-lived clients.
 From this Machine on 2026-11-03, `SELECT 1` through the current transaction
 pooler (port 6543, `sslmode=verify-full`) took 719–880 ms on a new connection
 and about 70 ms when the connection was reused. Session mode on port 5432 took
-about 160–240 ms reused. A direct connection took about 240 ms reused. The
-hosted process therefore keeps the transaction pooler and reuses connections,
-with prepared statements still disabled. Desktop and test processes keep
+about 160–240 ms reused. A direct connection took about 240 ms reused.
+On 2026-11-11 the same reused `SELECT 1` took about 24 ms in every mode
+(transaction pooler 24.5, session pooler 24.4, direct over IPv6 23.4), and a
+transaction of start, seller role, one query and commit about 95 ms. That cost
+is the distance from San Jose to Oregon, not the pooler. The hosted processes
+therefore keep the transaction pooler, which also absorbs the second set of
+client connections while blue-green deploys overlap, and reuse connections,
+with prepared statements still disabled. Each process has its own pool (8 plus
+4 overflow); the pooler multiplexes them onto its server connections.
+Supabase recommends a direct connection for persistent servers; revisit that
+only if the pooler measures slower or a feature needs session state. Desktop and test processes keep
 `NullPool`.
 
 The same sample reported `max_connections` 60 and 40 rows in

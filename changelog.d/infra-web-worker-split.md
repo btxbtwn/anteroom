@@ -1,0 +1,1 @@
+- Keep pages fast while drafts generate: hosted drafts and scheduled work now run on their own server.

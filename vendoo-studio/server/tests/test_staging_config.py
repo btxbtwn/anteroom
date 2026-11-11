@@ -27,3 +27,18 @@ def test_staging_is_separate_and_can_stop_when_idle():
 def test_staging_refuses_production_or_credentialed_configuration(app, url):
     with pytest.raises(ValueError):
         configure(app, url)
+
+
+def test_production_serves_sellers_apart_from_draft_and_scheduled_work():
+    processes = production['processes']
+    # Keep the `app` group name: renaming it would destroy the serving Machine on deploy.
+    assert 'ANTEROOM_PROCESS_ROLE=web' in processes['app']
+    assert 'ANTEROOM_PROCESS_ROLE=worker' in processes['worker']
+    assert production['http_service']['processes'] == ['app']
+    assert production['env']['ANTEROOM_BACKGROUND_WORKER'] == '1'
+    # Blue-green deploys wait for each new Machine's check, including the worker's.
+    checks = [check for check in production['checks'].values() if 'worker' in check['processes']]
+    assert checks and checks[0]['path'] == '/api/health'
+    sizes = {group: vm for vm in production['vm'] for group in vm['processes']}
+    assert set(sizes) == {'app', 'worker'}
+    assert sizes['app']['cpu_kind'] == 'performance'

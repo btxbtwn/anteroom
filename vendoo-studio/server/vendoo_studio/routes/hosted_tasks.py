@@ -21,9 +21,29 @@ from vendoo_studio.services.listing_provider import get_listing_provider
 from vendoo_studio.services.service_context import current
 from vendoo_studio.services.streaming import KEEPALIVE, SSE_HEADERS, sse_event, stream_finished
 
+def drafts_run(app) -> bool:
+    """Whether queued drafts will run: on the worker Machines for a web process, otherwise here."""
+    if app.state.process_role == 'web':
+        return True
+    worker = getattr(app.state, 'background_worker', None)
+    return bool(app.state.background_worker_enabled and worker is not None and not worker.done())
+
+
+def schedules_run(app) -> bool:
+    """Whether the schedulers (watchdog, offers, promotions, sales) run on some Machine.
+
+    A web process never runs them; the worker Machine holding their lease does.
+    Elsewhere they run on whichever Machine holds the lease, so one still waiting
+    for it during a deploy offers what they serve.
+    """
+    if app.state.process_role == 'web':
+        return True
+    handoff = getattr(app.state, 'handoff', None)
+    return bool(app.state.background_worker_enabled and handoff is not None and not handoff.done())
+
+
 def require_worker(request: Request):
-    worker = getattr(request.app.state, 'background_worker', None)
-    if not request.app.state.background_worker_enabled or worker is None or worker.done():
+    if not drafts_run(request.app):
         raise HTTPException(503, 'Draft generation is being configured. Try again shortly.')
 
 
