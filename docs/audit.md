@@ -20,7 +20,9 @@ These override everything below.
 - Never publish, delist, update or delete a live listing. The sandbox refuses
   those routes, and the audit confirms that it does. Never call a real
   marketplace, eBay or Etsy API.
-- Never deploy, release, bump the version, edit `CHANGELOG.md`, or merge a PR.
+- Never deploy, release, bump the version or edit `CHANGELOG.md`. Merge
+  only through the rule in **Fixing bugs**; leave every other PR for the
+  seller.
 - Work in your own worktree off a fresh `origin/main`:
   `git fetch origin && git worktree add -b audit/<YYYY-MM-DD> ../anteroom-audit-<YYYY-MM-DD> origin/main`.
   Other sessions share the main checkout. Remove the worktree at the end unless
@@ -46,9 +48,17 @@ These override everything below.
    **New features**).
 4. **Deep rotation.** Test today's area from **Rotation** (weekday by local
    date).
-5. **Fix.** Open a PR for each bug you can fix (see **Fixing bugs**).
-6. **Report.** File one issue (see **Report**).
-7. **Update this file** when a run teaches something (see **Keeping this file
+5. **Review.** Read the diff of every PR merged since the last run, split by
+   area among subagents when there are many. This finds more bugs than the
+   hand checks. Confirm each suspected bug with a failing test or a sandbox
+   reproduction before reporting it, and give its confidence.
+6. **Fix.** Open a PR for each bug you can fix (see **Fixing bugs**).
+7. **Grow the tests.** Turn one hand check from today into a Playwright,
+   XCUITest or pytest test in CI, and fix one test from **Flaky tests**. Each
+   goes in its own PR.
+8. **Report.** File one issue, and one `audit-finding` issue per unfixed bug
+   (see **Report**).
+9. **Update this file** when a run teaches something (see **Keeping this file
    current**).
 
 If a step cannot run (Xcode missing, Simulator broken, sandbox will not start),
@@ -95,9 +105,14 @@ Every run, in this order:
    any leftover `VENDOO_STUDIO_PORT` / `ANTEROOM_SANDBOX` from that run before
    starting `./sandbox.sh --hosted` (hosted defaults to 4320; an inherited
    `4321` makes it fail to bind).
-6. One hand-driven core journey on each surface: create a draft, add photos,
-   generate, edit a field, save, reopen, and try to publish (it must be
-   refused). Surfaces:
+6. One core journey on each surface: create a draft, add photos, generate,
+   edit a field, save, reopen, and try to publish (it must be refused).
+   `node docs/audit/journey.mjs <local|hosted> <desktop|phone> <out-dir>` runs
+   it on web against the running sandbox. It prints one JSON line (edit kept,
+   publish statuses, Bob's isolation on hosted, page errors) and saves a
+   screenshot per step. Run it from a worktree with `vendoo-studio/node_modules`
+   installed. Fix the script when the UI changes, in the same PR as the
+   change if you can. Drive by hand only what it doesn't cover. Surfaces:
    - local web (`./sandbox.sh`, UI 5174) at desktop and phone sizes. If the
      browser tools cannot connect, drive it with a Playwright script kept
      outside `e2e/` (a running suite would pick it up) and its own config;
@@ -130,8 +145,12 @@ Every run, in this order:
      device tools (`device_list`, `device_open`, `device_screenshot`), never
      raw `simctl` input. If `device_list` reports `simctl` missing even when
      `xcode-select -p` points at Xcode.app, record the hand-driven Simulator
-     journey as **not run** with that error; still run
-     `./anteroom-ios/test-sandbox.sh`.
+     journey as **not run** with that error, and ask the seller to fix the
+     device hub. Run the scripted iPhone journey instead:
+     `ANTEROOM_TEST_ONLY=AnteroomUITests/CoreFlowSandboxTests ANTEROOM_TEST_RESULTS=<out>/iphone.xcresult ./anteroom-ios/test-sandbox.sh`,
+     then export its screenshots with
+     `xcrun xcresulttool export attachments --path <out>/iphone.xcresult --output-path <out>/iphone`
+     and link them in the report.
 
 ## New features
 
@@ -172,6 +191,28 @@ test in CI covers it.
 
 - (none yet)
 
+## Flaky tests
+
+Tests that fail some runs and pass on rerun. Each line says the test, how it
+fails and the likely cause. Fix one per run (see **Each run**), then delete
+its line. Before calling a failure flaky, rerun it alone and check it fails in
+code the PR didn't change.
+
+- `anteroom-ios/UITests/SandboxTests.swift` `launchSandbox`: "Multiple
+  matching elements found" for `app.tabBars.buttons[tab]` (2026-11-11). Use
+  `.firstMatch`.
+- `CoreFlowSandboxTests.testGenerateFromTheEditorShowsASummary` at the
+  `staticTexts.matching(...)` check after the reply: "Timed out while
+  evaluating UI query" on GitHub's macOS runners (2026-11-10, 2026-11-11).
+  Query a narrower element.
+- `PolishScreenshotTests.testPolishedScreensInLightAndDark`: the Inventory
+  list didn't appear within 30 s after a theme change, on CI (2026-11-11).
+- `hosted-e2e/signin.e2e.ts` "in the Mac app, password resets open in the
+  browser": the Account menu isn't open when the test looks for Sign out,
+  about one run in two (2026-11-11). Likely the Assistant composer's
+  `autoFocus` (`AssistantPage.tsx`) takes focus after the click and closes the
+  popover; unproven.
+
 ## Fixing bugs
 
 Follow **How to Work on a Change** in `AGENTS.md` for each bug:
@@ -186,27 +227,51 @@ Follow **How to Work on a Change** in `AGENTS.md` for each bug:
   bug with reproduction steps instead.
 - Before opening a PR, check open PRs and issues for the same bug. Do not
   duplicate one.
-- Never merge.
+- Queue a fix PR to merge itself (`gh pr merge <n> --auto --merge`) only
+  when all of these hold:
+  - it has a test that failed before the fix and passes after, both runs
+    recorded in the PR;
+  - it changes nothing in publishing, delisting or marketplace actions
+    (`routes/native_marketplaces.py`, `routes/marketplace_listings.py`,
+    `vendoo-extension/background/`), in deploys or releases (`.github/`,
+    `deploy/`, `fly.toml`), or in the database schema (`migrations/`, models);
+  - `./check.sh` passed locally.
+
+  Leave every other PR, including `Update daily audit instructions`, for the
+  seller. Never merge by hand, never bypass a check.
 
 ## Report
 
-File one issue per run, labelled `audit`, titled
-`Daily audit <YYYY-MM-DD>`. Close the previous run's issue once its open items
-are carried over. The issue contains:
+File one issue per run, labelled `audit`, titled `Daily audit <YYYY-MM-DD>`,
+and close the previous run's issue. Keep it to about a page: details live in
+the finding issues and PRs.
 
+**Findings.** Each bug that has no merged fix gets its own issue, labelled
+`audit-finding`, titled with the symptom in the seller's words. It holds the
+platform, steps, expected and actual results, root cause or best guess with
+confidence, `file:line`, and a screenshot path. Before filing, search open
+`audit-finding` issues and update the one that matches instead. A fix PR says
+`Fixes #<n>` so merging closes it. The daily issue links findings; it doesn't
+repeat them or carry them over.
+
+The daily issue contains, in this order:
+
+- **Decisions for the seller:** each open question as one line with the
+  options and a recommendation, linked to its finding. Put these first; they
+  are what blocks the most work.
 - **Audited:** the `origin/main` commit SHA, the installed Mac app version, and
   the rotation area.
 - **Summary:** passed, failed, not run, in one or two lines.
-- **Failures:** each with platform, steps, expected and actual results, and a
-  screenshot path or attachment, linked to its fix PR or marked "no fix yet".
+- **New findings** and **fixed today**: links, one line each.
 - **New features tested**, with their PRs and results per platform.
-- **Measurements**, when taken: load, p50/p95, errors.
-- **Recommendations:** UX friction, slow screens, gaps between web and iPhone,
-  missing tests. Keep each one to a sentence with where it is.
+- **Rotation:** what was checked and what it found, linked to findings.
+- **Measurements** on Saturdays only: load, p50/p95, errors.
 - **Not run**, with the reason.
 - **Needs the seller:** things only the seller can do (extension form sweeps
   on a signed-in Chrome, real model quality with
-  `scripts/evaluate-generation.py`, live Supabase and Fly checks).
+  `scripts/evaluate-generation.py`, live Supabase and Fly checks, merging the
+  PRs the merge rule leaves out).
+- **PRs from this run** and their CI state.
 
 ## Keeping this file current
 
