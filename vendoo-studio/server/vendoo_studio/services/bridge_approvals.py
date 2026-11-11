@@ -1,15 +1,16 @@
-"""Server-signed approvals for the marketplace writes the hosted API relays to Chrome.
+"""Server-signed approvals for the marketplace commands the hosted API relays to Chrome.
 
 The seller's Anteroom page carries each command to the Bridge, so the Bridge
 cannot tell a command the hosted API accepted from one a script on the page
-made up. Every relayed write therefore carries a short-lived ES256 token (a
+made up. Every relayed command therefore carries a short-lived ES256 token (a
 compact JWS) that binds the seller, the command, its marketplace, action and
-listing, and a hash of the whole command. The Bridge checks it with the public
-key it ships with, refuses a token it has already used, and runs nothing
-without one. See docs/cloud-extension.md, **Signed approvals**.
+listing, a hash of the whole command and the SHA-256 of each photo the page
+relays beside it. The Bridge checks it with the public key it ships with,
+refuses a token it has already used, and runs nothing without one. See
+docs/cloud-extension.md, **Signed approvals**.
 
 The private key comes only from ``ANTEROOM_BRIDGE_SIGNING_KEY``. Without it,
-commands go out unsigned and a current Bridge refuses every write.
+commands go out unsigned and a current Bridge refuses every one.
 """
 from __future__ import annotations
 
@@ -31,14 +32,22 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 logger = logging.getLogger(__name__)
 
 KEY_ENV = "ANTEROOM_BRIDGE_SIGNING_KEY"
-# The capability a Bridge declares when it checks signed approvals. Only such a
-# Bridge gets them: an older one rejects the extra payload field on some commands.
+# The capability a Bridge declares when it checks the approval on every relayed
+# command, reads and Cancel included, and each relayed photo's SHA-256 against
+# the approval's ``pho`` claim. Only such a Bridge gets approvals on reads: an
+# older one rejects the extra payload field on them.
+SIGNED_COMMANDS_CAPABILITY = "marketplace.signed_commands"
+# Removal note: Bridges 0.2.56 to 0.2.67 declare only this name, check approvals
+# on the writes in SIGNED_COMMANDS, and do not hash photos. SIGNED_COMMANDS_CAPABILITY
+# replaces it; remove this name and SIGNED_COMMANDS after 2027-02-01.
 SIGNED_APPROVALS = "marketplace.signed_approvals"
 # Commands that change something: a marketplace listing, a Vendoo draft, or a
 # message to a buyer. ``marketplace.result`` is here because it may resume an
-# interrupted List. Reads and Cancel are not signed.
+# interrupted List.
 SIGNED_COMMANDS = frozenset({"job.vendoo_api", "marketplace.execute", "marketplace.result",
                              "marketplace.delete", "marketplace.promote"})
+# The commands whose photos the page reads and relays beside them (src/cloud/chromeRelay.ts).
+PHOTO_COMMANDS = frozenset({"job.vendoo_api", "marketplace.execute"})
 # The token is minted when the page takes the command, so this covers loading
 # its photos and handing it to Chrome, not the marketplace call itself.
 APPROVAL_TTL_S = 300
@@ -97,8 +106,25 @@ def command_hash(command: dict) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(body.encode()).digest()).rstrip(b"=").decode()
 
 
-def approval(owner: str, command: dict) -> str | None:
-    """A signed approval for one relayed write by ``owner``, or None when no key is set."""
+def photo_hashes(db, job_id: str) -> list[dict]:
+    """``{id, sha256}`` of each photo approved for ``job_id``: the bytes the page relays for it.
+
+    They come from the job's pinned manifest (``approved_photos``), the copies the
+    relay's photo route serves. A job without one gets none, so the Bridge refuses
+    any photo relayed with its command."""
+    from vendoo_studio.repositories.queries import JobRepo
+
+    source = JobRepo(db).photo_source(job_id)
+    rows = (source.approved_photos if source is not None and source.has_approved_photos else None) or []
+    return [{"id": str(row["id"]), "sha256": str(row["checksum"]).lower()} for row in rows
+            if isinstance(row, dict) and row.get("id") and row.get("checksum")]
+
+
+def approval(owner: str, command: dict, photos: list[dict] | None = None) -> str | None:
+    """A signed approval for one relayed command by ``owner``, or None when no key is set.
+
+    ``photos`` (``{id, sha256}``) are the only photos the Bridge may run it with;
+    None leaves the claim out, for a Bridge that does not check photos."""
     key = signing_key()
     if key is None:
         logger.warning("%s is not set; Chrome will refuse %s.", KEY_ENV, command.get("type"))
@@ -110,16 +136,27 @@ def approval(owner: str, command: dict) -> str | None:
         "cmd": command.get("type"), "mkt": payload.get("marketplace"), "act": payload.get("action"),
         "lid": payload.get("listing_id"), "job": command.get("job_id"), "mid": command.get("message_id"),
         "sha": command_hash(command), "jti": uuid.uuid4().hex, "iat": issued, "exp": issued + APPROVAL_TTL_S,
+        **({"pho": photos} if photos is not None else {}),
     }
     return jwt.encode(claims, key, algorithm="ES256")
 
 
-def signed(owner: str | None, command: dict, capabilities: set[str] | frozenset[str]) -> dict:
-    """``command`` as the page should carry it: with an approval when it is a write and the Bridge checks them."""
-    if (owner is None or command.get("type") not in SIGNED_COMMANDS or SIGNED_APPROVALS not in capabilities
-            or not isinstance(command.get("payload"), dict)):
+def signs_every_command(capabilities: set[str] | frozenset[str]) -> bool:
+    return SIGNED_COMMANDS_CAPABILITY in capabilities
+
+
+def signed(owner: str | None, command: dict, capabilities: set[str] | frozenset[str],
+           photos: list[dict] | None = None) -> dict:
+    """``command`` as the page should carry it, with an approval when the Bridge checks one for it.
+
+    A Bridge that declares ``SIGNED_COMMANDS_CAPABILITY`` gets one on every command,
+    binding ``photos`` (none when not given). An older one that declares
+    ``SIGNED_APPROVALS`` gets one on writes only."""
+    every = signs_every_command(capabilities)
+    if (owner is None or not isinstance(command.get("payload"), dict)
+            or not (every or (command.get("type") in SIGNED_COMMANDS and SIGNED_APPROVALS in capabilities))):
         return command
     # Hash the command exactly as the page will receive it: FastAPI encodes the route's dict this way.
     command = jsonable_encoder(command)
-    token = approval(owner, command)
+    token = approval(owner, command, (photos or []) if every else None)
     return command if token is None else {**command, "payload": {**command["payload"], "approval": token}}

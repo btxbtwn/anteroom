@@ -61,6 +61,13 @@ OFFER_INTERVAL = timedelta(minutes=15)
 # Listing reads per offer check, spaced out; the rest are read in a later check.
 OFFER_READS = 60
 READ_GAP_S = 2.0
+# A listing whose last check found nobody to offer to is not read again until a
+# new like is reported or its marketplace's re-check time passes. Poshmark and
+# Depop report new likes in the feed check_new_likes reads every minute, so
+# their re-check only finds likes that fell out of it (Chrome offline). Mercari
+# has no such feed, so its daily re-check is how its new likes are found.
+LIKE_RECHECK = {"poshmark": timedelta(days=7), "depop": timedelta(days=7), "mercari": timedelta(days=1)}
+WAITING_FOR_LIKES = "no new likes since the last check"
 TICK_S = 60.0
 # How long a due round waits for Chrome to reconnect, e.g. after a restart,
 # before it is recorded as unable to run.
@@ -305,6 +312,28 @@ def _order(db: Session, row: PromotionAutomation, targets: list) -> list:
     return sorted(targets, key=lambda target: target[2] or oldest, reverse=row.share_order == "newest")
 
 
+def _waiting_for_likes(db: Session, row: PromotionAutomation, now: datetime) -> set[str]:
+    """Listings whose latest check by this rule, within LIKE_RECHECK, found too few likers to offer to."""
+    recheck = LIKE_RECHECK.get(row.marketplace)
+    if row.action != "offer" or recheck is None:
+        return set()
+    latest: dict[str, tuple[str, int | None]] = {}
+    for listing_id, state, likes in db.query(ListingPromotion.listing_id, ListingPromotion.state, ListingPromotion.like_count).filter(
+        ListingPromotion.automation_id == row.id, ListingPromotion.marketplace == row.marketplace,
+        ListingPromotion.action == "offer", ListingPromotion.created_at > now - recheck,
+    ).order_by(ListingPromotion.created_at.desc()):
+        latest.setdefault(listing_id, (state, likes))
+    # The like count when each listing was last offered; the same count means no new likers.
+    offered: dict[str, int | None] = dict(db.query(ListingPromotion.listing_id, ListingPromotion.like_count).filter(
+        ListingPromotion.marketplace == row.marketplace, ListingPromotion.action == "offer", ListingPromotion.state == "done",
+        ListingPromotion.listing_id.in_(list(latest)),
+    ).order_by(ListingPromotion.sent_at))
+    minimum = row.min_likes or 1
+    return {listing_id for listing_id, (state, likes) in latest.items()
+            if state == "skipped" and likes is not None
+            and (likes < minimum or (offered.get(listing_id) is not None and likes <= cast(int, offered[listing_id])))}
+
+
 def _skip_reason(exc: PromotionError, send: ListingPromotion) -> str:
     """The skip text, with the marketplace's own words when it gave them."""
     text = scrub(str(exc)) or "The marketplace did not answer."
@@ -344,6 +373,8 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                    if (like_events is None or target[1] in like_events)
                    if not row.min_days_listed or (target[2] and (now - target[2]).days >= row.min_days_listed)]
         remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
+        # Like-feed rounds read their listings; the regular scan skips those still waiting for a like.
+        waiting = _waiting_for_likes(db, row, now) if like_events is None else set()
         reads = 0
         batch = new_id()
         for conv, listing_id, _listed_at in targets:
@@ -356,6 +387,10 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 stop_note = f"Reached the daily cap of {row.daily_cap:,} shares."
                 break
             if row.action == "offer":
+                if listing_id in waiting:
+                    counts["skipped"] += 1
+                    reasons[WAITING_FOR_LIKES] += 1
+                    continue
                 if promotions.blocking(db, row.marketplace, listing_id, "offer", new_like_at=new_like_at):
                     counts["skipped"] += 1
                     reasons["offered in the last 24 hours or unconfirmed"] += 1

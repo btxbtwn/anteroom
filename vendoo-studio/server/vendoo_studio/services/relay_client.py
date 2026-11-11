@@ -21,6 +21,7 @@ import websockets
 
 from vendoo_studio.config import RELAY_URL
 from vendoo_studio.services.keychain import get_relay_device, set_relay_device
+from vendoo_studio.services.shared_http import http_client
 
 log = logging.getLogger("vendoo_studio.relay")
 
@@ -61,8 +62,8 @@ async def ensure_device() -> dict:
     device = await asyncio.to_thread(get_relay_device)
     if device:
         return device
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(f"{RELAY_URL}/devices")
+    async with http_client() as client:
+        resp = await client.post(f"{RELAY_URL}/devices", timeout=20)
     if resp.status_code == 429:
         raise RelayError("Anteroom's relay is busy. Try again in a minute.", 429)
     if resp.status_code != 201:
@@ -82,7 +83,7 @@ async def relay_request(method: str, path: str, *, json_body: Any = None, header
                         timeout: float = 30) -> httpx.Response:
     """One authenticated call to the relay's /studio API."""
     device = await ensure_device()
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with http_client() as client:
         return await client.request(
             method,
             f"{RELAY_URL}{path}",
@@ -91,6 +92,7 @@ async def relay_request(method: str, path: str, *, json_body: Any = None, header
             files=files,
             params=params,
             headers={**_auth_headers(device), **(headers or {})},
+            timeout=timeout,
         )
 
 

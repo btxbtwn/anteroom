@@ -27,6 +27,16 @@ async function deletePoshmark(id, deadline) {
 
 async function deleteMercari(id, deadline) {
   mercariSession = null;
+  const session = await mercariCurrentSession(deadline);
+  const item = await readMercariItem(id, deadline);
+  // cancel / admin_cancel is the item status once it is gone.
+  if (['cancel', 'admin_cancel'].includes(item.status)) return { ok: true, state: 'deleted', already: true };
+  if (String(item.seller?.id ?? '') !== String(session.user.userId)) {
+    throw marketplaceError('This Mercari listing belongs to another account. It was not deleted.');
+  }
+  if (item.status !== 'on_sale') {
+    throw marketplaceError(`This Mercari listing is not on sale${item.status ? ` (${item.status})` : ''}. It was not deleted.`);
+  }
   // Mercari's own Delete button: updateItemStatus to "cancel". Its reply
   // carries the new status; an item already removed reports the same.
   const data = await mercariRequest({ operationName: 'UpdateItemStatusMutation', variables: { input: { id, status: 'cancel' } },

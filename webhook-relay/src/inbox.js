@@ -31,10 +31,32 @@ export class Inbox extends DurableObject {
         received_at INTEGER NOT NULL
       )
     `);
+    // Every event ID accepted in the last RETENTION_MS, acknowledged or not,
+    // so a captured webhook cannot be delivered (or act) a second time.
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS seen (
+        dedupe_key TEXT PRIMARY KEY,
+        received_at INTEGER NOT NULL
+      )
+    `);
+    // Events stored before this table existed.
+    this.sql.exec("INSERT OR IGNORE INTO seen (dedupe_key, received_at) SELECT dedupe_key, received_at FROM events");
+  }
+
+  seen(dedupeKey) {
+    return this.sql.exec("SELECT 1 FROM seen WHERE dedupe_key = ?", dedupeKey).toArray().length > 0;
   }
 
   async add(event) {
     const receivedAt = Date.now();
+    const fresh = this.sql
+      .exec(
+        "INSERT INTO seen (dedupe_key, received_at) VALUES (?, ?) ON CONFLICT(dedupe_key) DO NOTHING RETURNING dedupe_key",
+        event.dedupeKey,
+        receivedAt,
+      )
+      .toArray();
+    if (fresh.length === 0) return { duplicate: true };
     const cursor = this.sql.exec(
       `INSERT INTO events (dedupe_key, source, event_type, ids, occurred_at, received_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -97,8 +119,11 @@ export class Inbox extends DurableObject {
   }
 
   async alarm() {
-    this.sql.exec("DELETE FROM events WHERE received_at < ?", Date.now() - RETENTION_MS);
-    if (this.pending() > 0) await this.ctx.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
+    const cutoff = Date.now() - RETENTION_MS;
+    this.sql.exec("DELETE FROM events WHERE received_at < ?", cutoff);
+    this.sql.exec("DELETE FROM seen WHERE received_at < ?", cutoff);
+    const remembered = this.sql.exec("SELECT COUNT(*) AS n FROM seen").one().n;
+    if (this.pending() > 0 || remembered > 0) await this.ctx.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
   }
 
   // Studio's live connection. On connect it gets everything after `after`,

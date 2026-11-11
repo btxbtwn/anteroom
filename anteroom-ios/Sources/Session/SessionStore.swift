@@ -41,21 +41,27 @@ final class SessionStore {
             state = .missingConfiguration
             return
         }
+        // The saved session opens the app straight away, even expired or offline;
+        // the library renews it in the background and signs out only when the
+        // server refuses it.
         let client: SupabaseClient
 #if DEBUG
         if AppConfig.sandboxURL != nil {
             client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key,
-                                    options: .init(auth: .init(storage: SandboxAuthStorage())))
+                                    options: .init(auth: .init(storage: SandboxAuthStorage(),
+                                                               emitLocalSessionAsInitialSession: true)))
         } else {
-            client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key)
+            client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key,
+                                    options: .init(auth: .init(emitLocalSessionAsInitialSession: true)))
         }
 #else
-        client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key)
+        client = SupabaseClient(supabaseURL: AppConfig.supabaseURL, supabaseKey: key,
+                                options: .init(auth: .init(emitLocalSessionAsInitialSession: true)))
 #endif
         self.client = client
         api = AnteroomAPI(baseURL: AppConfig.apiBaseURL, auth: APIAuthorization(
-            accessToken: { try await client.auth.session.accessToken },
-            refreshedToken: { try await client.auth.refreshSession().accessToken },
+            accessToken: { try await SessionStore.renewing { try await client.auth.session.accessToken } },
+            refreshedToken: { try await SessionStore.renewing { try await client.auth.refreshSession().accessToken } },
             signedOut: { await ended.fire() }))
         ended.handler = { [weak self] in await self?.sessionEnded() }
     }
@@ -83,9 +89,10 @@ final class SessionStore {
         for await (event, session) in client.auth.authStateChanges {
             switch event {
             case .initialSession:
-                // The stored session may have expired; reading it refreshes it.
-                if session != nil, let current = try? await client.auth.session {
-                    state = .signedIn(email: current.user.email)
+                // The saved session, possibly expired: requests renew it when they
+                // can, and a refusal from the server ends it with `.signedOut`.
+                if let session {
+                    state = .signedIn(email: session.user.email)
                 } else {
                     state = .signedOut
                 }
@@ -111,8 +118,8 @@ final class SessionStore {
             return
         }
 #endif
-        if let current = try? await client.auth.session {
-            state = .signedIn(email: current.user.email)
+        if let saved = client.auth.currentSession {
+            state = .signedIn(email: saved.user.email)
         } else {
             state = .signedOut
         }
@@ -246,6 +253,27 @@ final class SessionStore {
         URLCache.shared.removeAllCachedResponses()
         await forgetSeller()
         state = .signedOut
+    }
+
+    /// Runs a token read, reporting a refresh token the server refused as
+    /// `SignInRejected`. Anything else (offline, a 5xx, rate limiting) passes
+    /// through, so the API client shows it as a failure to try again.
+    private nonisolated static func renewing(_ read: @Sendable () async throws -> String) async throws -> String {
+        do {
+            return try await read()
+        } catch let auth as AuthError {
+            switch auth {
+            case .sessionMissing:
+                // Nothing saved, or the server refused the refresh token and
+                // supabase-swift already removed it.
+                throw SignInRejected()
+            case .api(_, let code, let data, let response)
+                where SignInRenewal.rejects(status: response.statusCode, code: code.rawValue, body: data):
+                throw SignInRejected()
+            default:
+                throw auth
+            }
+        }
     }
 
     private static func readable(_ error: Error, for action: SignInAction) -> SignInFailure {

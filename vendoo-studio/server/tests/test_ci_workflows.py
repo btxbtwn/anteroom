@@ -179,3 +179,123 @@ def test_release_commits_resolve_to_the_merge_they_ship(tmp_path: Path, monkeypa
     gate = _load_gate()
     assert gate.code_commit(release) == merge
     assert gate.code_commit(merge) == merge
+
+
+def _load_script(name: str):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), ROOT / ".github" / "scripts" / f"{name}.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_deploy_fetches_main_and_gates_it_before_anything_else() -> None:
+    steps = workflow("deploy-hosted.yml")["jobs"]["deploy"]["steps"]
+    assert steps[0]["with"]["ref"] == "main"
+    assert steps[0]["with"]["persist-credentials"] == "false"
+    assert "deploy-gate.py" in steps[1]["run"]
+    assert all(step.get("if") == "steps.gate.outputs.skip != 'true'" for step in steps[2:])
+
+
+T, M, R, N = "t" * 40, "m" * 40, "r" * 40, "n" * 40
+
+
+@pytest.mark.parametrize(
+    ("commits", "notes", "ci", "chosen"),
+    [
+        ([T], set(), {}, T),  # the trigger is still main's tip
+        ([T], {T}, {}, None),  # pending notes: the release commit deploys
+        ([R, M, T], {M}, {R: ("completed", "success")}, R),  # the newest tested commit wins
+        # main moved on but its CI is still running: ship the newest tested one
+        # anyway rather than wait (merges can outpace CI), never anything older.
+        ([R, M, T], {M}, {R: ("queued", "")}, T),
+        ([N, R, M, T], {M}, {N: ("in_progress", ""), R: ("completed", "success")}, R),
+        ([R, M, T], {M, T}, {R: ("completed", "failure")}, None),
+        ([R, T], set(), {R: ("missing", "")}, T),
+    ],
+)
+def test_deploy_gate_ships_the_newest_tested_commit_from_the_trigger_up(commits, notes, ci, chosen) -> None:
+    gate = _load_script("deploy-gate")
+    assert gate.choose(commits, T, notes.__contains__, ci.__getitem__)[0] == chosen
+
+
+def test_deploy_gate_checks_out_its_choice_and_writes_outputs(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / "vendoo-studio").mkdir(parents=True)
+    (repo / "changelog.d").mkdir()
+    (repo / "changelog.d" / "README.md").write_text("notes\n")
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", *args],
+            cwd=repo, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    def commit(version: str, message: str, note: bool = False) -> str:
+        (repo / "vendoo-studio" / "VERSION").write_text(version + "\n")
+        (repo / "changelog.d" / "fix.md").unlink(missing_ok=True)
+        if note:
+            (repo / "changelog.d" / "fix.md").write_text("- Fix.\n")
+        git("add", "-A")
+        git("commit", "-qm", message)
+        return git("rev-parse", "HEAD")
+
+    git("init", "-q")
+    trigger = commit("1.0.0", "Release Anteroom 1.0.0")
+    commit("1.0.0", "Merge pull request #2", note=True)
+    release = commit("1.0.1", "Release Anteroom 1.0.1")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ci_status = tmp_path / "ci-status"
+    (bin_dir / "gh").write_text(
+        f"#!{sys.executable}\nimport json, pathlib\n"
+        f"status, conclusion = pathlib.Path({str(ci_status)!r}).read_text().split()\n"
+        "print(json.dumps({'workflow_runs': [{'status': status, 'conclusion': conclusion}]}))\n"
+    )
+    (bin_dir / "gh").chmod(0o755)
+
+    def run(status: str) -> tuple[str, str]:
+        git("checkout", "-q", "--detach", release)
+        ci_status.write_text(status)
+        output = tmp_path / "output"
+        output.write_text("")
+        subprocess.run(
+            [sys.executable, str(ROOT / ".github" / "scripts" / "deploy-gate.py"), "--repo", "o/r", "--trigger", trigger],
+            cwd=repo, check=True, capture_output=True,
+            env={**os.environ, "GITHUB_OUTPUT": str(output), "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+        )
+        return output.read_text(), git("rev-parse", "HEAD")
+
+    assert run("completed success") == ("skip=false\nversion=1.0.1\n", release)
+    # The release commit's CI is still queued: ship the trigger, never wait.
+    assert run("queued none") == ("skip=false\nversion=1.0.0\n", trigger)
+
+
+def _machine(group: str | None, tag: str, state: str = "started", **config) -> dict:
+    metadata = {"fly_process_group": group} if group else {}
+    return {"id": f"{group}-{tag}", "state": state, "image_ref": {"tag": tag}, "config": {"metadata": metadata, **config}}
+
+
+@pytest.mark.parametrize(
+    ("machines", "passes"),
+    [
+        ([_machine("app", "v1-new")], True),
+        ([_machine("app", "v1-new"), _machine("worker", "v1-new")], True),
+        ([_machine("app", "v1-new"), _machine("worker", "v0-old")], False),
+        ([_machine("app", "v1-new"), _machine("worker", "v1-new", state="stopped")], False),
+        ([_machine("app", "v1-new"), _machine("app", "v0-old", auto_destroy=True)], True),
+        ([_machine("fly_app_console", "v0-old"), _machine(None, "v1-new")], True),
+        ([], False),
+    ],
+)
+def test_every_machine_in_every_process_group_must_run_the_new_image(machines: list, passes: bool) -> None:
+    check = _load_script("check-fly-machines")
+    assert (check.problems(machines, "v1-new")[1] == []) is passes
+
+
+def test_machine_image_falls_back_to_the_configured_image() -> None:
+    check = _load_script("check-fly-machines")
+    assert check.image_tag({"config": {"image": "registry.fly.io/app:v1-new@sha256:abc"}}) == "v1-new"

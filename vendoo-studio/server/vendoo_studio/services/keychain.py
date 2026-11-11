@@ -409,7 +409,10 @@ def _update_json(account: str, mutate) -> None:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
+        before = json.dumps(payload, sort_keys=True)
         mutate(payload)
+        if json.dumps(payload, sort_keys=True) == before:
+            return raw
         return json.dumps(payload) if payload else None
     from vendoo_studio.services.service_context import current
     context = current()
@@ -417,7 +420,10 @@ def _update_json(account: str, mutate) -> None:
         context.secrets.update(account, change)
         return
     with _lock:
-        value = change(_get(account))
+        raw = _get(account)
+        value = change(raw)
+        if value == raw:
+            return
         if value is None:
             _delete(account)
         else:
@@ -430,6 +436,11 @@ def get_marketplace_accounts() -> dict:
 
 def set_marketplace_account(marketplace: str, account: dict):
     _update_json(MARKETPLACE_ACCOUNTS_ACCOUNT, lambda accounts: accounts.update({marketplace: account}))
+
+
+def update_marketplace_accounts(mutate) -> None:
+    """Read, change and save the accounts map as one atomic step (``mutate`` edits it in place)."""
+    _update_json(MARKETPLACE_ACCOUNTS_ACCOUNT, mutate)
 
 
 def delete_marketplace_account(marketplace: str):

@@ -133,10 +133,14 @@ extension Conversation {
 struct ConversationInput: Codable, Hashable, Sendable {
     var title: String?
     var notes: String?
+    /// Item Details' changed keys, merged into the notes as they are now, so keys
+    /// the server wrote since the notes were read survive. Measurements merge per field.
+    var noteChanges: [String: JSONValue]?
     var boxID: String?
 
     enum CodingKeys: String, CodingKey {
         case title, notes
+        case noteChanges = "note_changes"
         case boxID = "box_id"
     }
 }

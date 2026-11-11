@@ -1,6 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { ListingData, ListingDocument } from "./types";
+import { refreshInventory } from "./inventoryRefresh";
+import { ApiRequestError } from "./transport";
+import type { ConversationSummary, ListingData, ListingDocument } from "./types";
 import { listingCategorySignature } from "../components/nativeFormStability";
 import { notifyUnsavedWork, registerUnsavedWork } from "../lib/unsavedWork";
 
@@ -98,7 +100,21 @@ class ListingEdits {
       }
       while (this.state.draft) {
         const submitted = this.state.draft;
-        const result = await api.listings.update(this.id, submitted, this.revisionId);
+        const result = await api.listings.update(this.id, submitted, this.revisionId).catch(async error => {
+          if (!(error instanceof ApiRequestError) || error.status !== 409 || error.reason !== "draft_busy") throw error;
+          // Keep typing locally until the worker releases this draft, then
+          // merge against its result without overwriting concurrent changes.
+          while ((await api.conversations.activity(this.id)).busy) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+          const latest = await api.listings.get(this.id);
+          const merged = rebase(latest.listing, this.base, this.state.draft, true) as ListingData;
+          this.revisionId = latest.current_revision_id ?? "";
+          this.base = latest.listing;
+          this.update({ ...this.state, draft: merged });
+          return null;
+        });
+        if (!result) continue;
         this.revisionId = result.revision_id;
         this.base = result.listing;
         const pending = this.state.draft === submitted ? null : rebase(result.listing, submitted, this.state.draft) as ListingData;
@@ -113,7 +129,13 @@ class ListingEdits {
         }
         if (!pending) {
           void this.client.invalidateQueries({ queryKey: ["conversation", this.id] });
-          void this.client.invalidateQueries({ queryKey: ["conversations"] });
+          // The row shows the saved price at once; the shared schedule picks up the rest.
+          const price = result.listing.price;
+          if (typeof price === "number") {
+            this.client.setQueryData<ConversationSummary[]>(["conversations"], rows =>
+              rows?.map(row => row.id === this.id ? { ...row, price } : row));
+          }
+          refreshInventory(this.client);
         }
         this.update({ draft: pending, saving: Boolean(pending), error: null });
       }

@@ -223,8 +223,13 @@ def edit_conversation(identity: str, body: contract.ConversationInput, db=Depend
     assert_idle(db, identity)
     if "box_id" in body.model_fields_set:
         check_box(db, body.box_id)
-    for key, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    note_changes = changes.pop('note_changes', None)
+    for key, value in changes.items():
         setattr(row, key, value)
+    if note_changes:
+        from vendoo_studio.services.vendoo_import import merge_note_changes
+        row.notes = merge_note_changes(row.notes, note_changes)
     db.commit()
     db.refresh(row)
     return conversation_response(row)
@@ -323,10 +328,11 @@ def activity_response(db, identity, count, last):
     tasks = db.scalars(select(BackgroundTask).where(
         BackgroundTask.conversation_id == identity, BackgroundTask.status.in_(('queued', 'running')))).all()
     labels = [f'{row.kind}: {row.status}' for row in tasks]
-    from vendoo_studio.services.native_marketplaces import step_label
+    from vendoo_studio.services.native_marketplaces import is_direct_action, step_label
 
     items = [step_label(str(row.current_step or '')) or row.current_step or row.status for row in jobs]
-    return {'busy': bool(jobs or tasks), 'items': items + labels,
+    writing = bool(tasks) or any(not is_direct_action(str(row.current_step or '')) for row in jobs)
+    return {'busy': bool(jobs or tasks), 'writing': writing, 'items': items + labels,
             'message_count': count, 'last_message_id': last, 'agents': []}
 
 

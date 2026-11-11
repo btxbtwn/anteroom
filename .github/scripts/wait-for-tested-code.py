@@ -57,7 +57,7 @@ def main() -> int:
     head = git("rev-parse", args.head)
     sha = code_commit(head)
     if sha == head:
-        print(f"{sha[:8]} is the code commit and its CI started this deploy.")
+        print(f"{sha[:8]} is the code commit; the deploy gate checked its CI.")
         return 0
 
     print(f"{head[:8]} is a release commit; checking CI on the code it ships, {sha[:8]}.")

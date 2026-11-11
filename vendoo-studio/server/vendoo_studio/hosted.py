@@ -31,7 +31,7 @@ from vendoo_studio.services.seller_sessions import (
     SessionVerifier,
 )
 from vendoo_studio.version import app_version
-from vendoo_studio.services.background_loop import BackgroundLoop
+from vendoo_studio.services.background_loop import BackgroundLoop, give_threads
 
 
 def from_public_edge(scope) -> bool:
@@ -127,6 +127,8 @@ class ResponseHeadersMiddleware:
                 headers.setdefault("Cache-Control", "no-store")
                 headers["Referrer-Policy"] = "no-referrer"
                 headers["X-Content-Type-Options"] = "nosniff"
+                # Browsers honor this only over HTTPS, so local HTTP sandboxes are unaffected.
+                headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
                 # pywebview builds its native API methods with Function(). WebKit
                 # applies this policy to that bootstrap as well as to page scripts.
                 headers["Content-Security-Policy"] = (
@@ -227,6 +229,7 @@ class AccountResponse(BaseModel):
 def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, session_verifier: SessionVerifier | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        give_threads(asyncio.get_running_loop())
         from vendoo_studio.services.error_alerts import install_alerts, uninstall_alerts
         install_alerts()
         # ORM relationship names must resolve before a route constructs its

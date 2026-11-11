@@ -58,17 +58,44 @@ test('Poshmark never deletes a sold or foreign listing, and a gone one is alread
   assert.ok(!requests.some(r => r.startsWith('DELETE')));
 });
 
-test('Mercari delete sends its own Delete status and checks the reply', async () => {
+const MERCARI_ID = 'm70565754838';
+// The signed-in seller is userId 1 (the initialize stub above).
+const mercariItem = (item = {}) => ({ data: { item: { itemId: MERCARI_ID, status: 'on_sale', seller: { id: 1 }, ...item } } });
+function mercari(item, statusReply = { status: 'cancel' }) {
+  const operations = [];
   const bodies = [];
-  const { c } = worker({ 'POST www.mercari.com/v1/api': (n, options) => { bodies.push(JSON.parse(options.body)); return [200, { data: { updateItemStatus: { status: 'cancel' } } }]; } });
-  assert.equal((await c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: 'm70565754838', confirm: true })).state, 'deleted');
-  assert.deepEqual(bodies[0].variables, { input: { id: 'm70565754838', status: 'cancel' } });
-  const ok = worker({ 'POST www.mercari.com/v1/api': [200, { data: { updateItemStatus: { status: 'OK' } } }] });
-  assert.equal((await ok.c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: 'm70565754838', confirm: true })).state, 'deleted');
-  const other = worker({ 'POST www.mercari.com/v1/api': [200, { data: { updateItemStatus: { status: 'trading' } } }] });
-  const refused = await other.c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: 'm70565754838', confirm: true });
+  const { c } = worker({ 'POST www.mercari.com/v1/api': (n, options) => {
+    const body = JSON.parse(options.body);
+    operations.push(body.operationName);
+    bodies.push(body);
+    return [200, body.operationName === 'sellFetchItemsDetails' ? item : { data: { updateItemStatus: statusReply } }];
+  } });
+  return { c, operations, bodies, run: () => c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: MERCARI_ID, confirm: true }) };
+}
+
+test('Mercari delete reads the item, then sends its own Delete status and checks the reply', async () => {
+  const s = mercari(mercariItem());
+  assert.equal((await s.run()).state, 'deleted');
+  assert.deepEqual(s.operations, ['sellFetchItemsDetails', 'UpdateItemStatusMutation']);
+  assert.deepEqual(s.bodies[1].variables, { input: { id: MERCARI_ID, status: 'cancel' } });
+  assert.equal((await mercari(mercariItem(), { status: 'OK' }).run()).state, 'deleted');
+  const refused = await mercari(mercariItem(), { status: 'trading' }).run();
   assert.equal(refused.ok, false);
   assert.equal(refused.marketplace_message, 'status trading');
+});
+
+test('Mercari never deletes a sold or foreign listing, and a cancelled one is already deleted', async () => {
+  for (const item of [mercariItem({ seller: { id: 2 } }), mercariItem({ status: 'trading' }), mercariItem({ status: 'sold_out' })]) {
+    const s = mercari(item);
+    const result = await s.run();
+    assert.equal(result.ok, false, JSON.stringify(item));
+    assert.ok(!s.operations.includes('UpdateItemStatusMutation'), JSON.stringify(item));
+  }
+  for (const status of ['cancel', 'admin_cancel']) {
+    const s = mercari(mercariItem({ status }));
+    assert.equal((await s.run()).already, true, status);
+    assert.deepEqual(s.operations, ['sellFetchItemsDetails']);
+  }
 });
 
 test('a refused delete carries the marketplace\'s own words and is safe to repeat', async () => {

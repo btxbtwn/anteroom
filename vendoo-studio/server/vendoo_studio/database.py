@@ -166,6 +166,7 @@ async def _undo_once_claimed(step, undo) -> None:
 
 def load_models() -> None:
     """Import every model so ``Base.metadata`` describes the whole schema."""
+    from vendoo_studio.models.error_email import OperatorEmailState  # noqa: F401
     from vendoo_studio.models.background_task import BackgroundTask, BackgroundTaskEvent  # noqa: F401
     from vendoo_studio.models.user_secret import UserSecretReference  # noqa: F401
     from vendoo_studio.models.user_preference import UserPreference  # noqa: F401

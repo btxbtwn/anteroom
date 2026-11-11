@@ -5,13 +5,28 @@ seller id, and ``services/error_alerts.py`` emails it to the operator. On the
 Mac the report only lands in Settings → Logs.
 """
 import logging
+import os
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter(prefix="/api/error-reports", tags=["diagnostics"])
 log = logging.getLogger("vendoo_studio.browser")
+
+
+@router.get('/delivery')
+def delivery_status(request: Request):
+    """Only the configured operator sees shared mail accounting, never reports."""
+    operator = os.environ.get('ANTEROOM_OPERATOR_USER_ID')
+    seller = getattr(request.state, 'seller', None)
+    if not operator or seller is None or seller.user_id != operator:
+        return {'visible': False}
+    from vendoo_studio.services.error_alerts import _handler
+
+    if _handler is None:
+        return {'visible': True, 'state': 'disabled'}
+    return {'visible': True, **_handler.delivery.status(), 'dropped': _handler.dropped}
 
 
 class BrowserFailure(BaseModel):

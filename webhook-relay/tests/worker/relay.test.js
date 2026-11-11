@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init = {}) => {
     const request = new Request(input, init);
     const body = ["GET", "HEAD"].includes(request.method) ? "" : await request.clone().text();
-    calls.push({ method: request.method, url: request.url, headers: request.headers, body });
+    calls.push({ method: request.method, url: request.url, headers: request.headers, body, signal: init.signal });
     const match = routes.findLast((r) => r.method === request.method && r.pattern.test(request.url));
     if (!match) return new Response(`unmocked ${request.method} ${request.url}`, { status: 599 });
     const out = await match.respond({ request, body, url: new URL(request.url) });
@@ -98,14 +98,18 @@ async function ebaySigner() {
   return ebayKey;
 }
 
-async function postEbayNotification(payload) {
+// eBay key IDs are UUIDs, as in eBay's own SDK fixtures.
+const EBAY_KID = "9936261a-7d7b-4621-a0f1-96ccb428af49";
+const ebayHeader = (kid, signature) => btoa(JSON.stringify({ alg: "ecdsa", kid, signature, digest: "SHA1" }));
+const now = (offsetMs = 0) => new Date(Date.now() + offsetMs).toISOString();
+
+async function postEbayNotification(payload, kid = EBAY_KID) {
   const { pair } = await ebaySigner();
   const body = JSON.stringify(payload);
   const raw = new Uint8Array(
     await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-1" }, pair.privateKey, new TextEncoder().encode(body)),
   );
-  const header = btoa(JSON.stringify({ alg: "ecdsa", kid: "kid-1", signature: bytesToBase64(rawToDer(raw)), digest: "SHA1" }));
-  return relay("/ebay", { method: "POST", body, headers: { "x-ebay-signature": header } });
+  return relay("/ebay", { method: "POST", body, headers: { "x-ebay-signature": ebayHeader(kid, bytesToBase64(rawToDer(raw))) } });
 }
 
 async function mockEbayBasics() {
@@ -119,7 +123,7 @@ async function mockEbayBasics() {
     if (params.get("refresh_token") === "dead") return new Response('{"error":"invalid_grant"}', { status: 400 });
     return { access_token: "ebay-user-token-2", expires_in: 7200 };
   });
-  route("GET", /notification\/v1\/public_key\/kid-1/, () => ({ algorithm: "ECDSA", digest: "SHA1", key: pem }));
+  route("GET", new RegExp(`notification/v1/public_key/${EBAY_KID}$`), () => ({ algorithm: "ECDSA", digest: "SHA1", key: pem }));
 }
 
 const returnTo = (marketplace) => `http://127.0.0.1:4318/api/marketplace-accounts/${marketplace}/finish`;
@@ -452,8 +456,8 @@ describe("eBay", () => {
       metadata: { topic: "ORDER_CONFIRMATION", schemaVersion: "1.0", deprecated: false },
       notification: {
         notificationId: "n-order-1",
-        eventDate: "2026-10-24T01:00:00.000Z",
-        publishDate: "2026-10-24T01:00:01.000Z",
+        eventDate: now(-1000),
+        publishDate: now(),
         publishAttemptCount: 1,
         data: {
           user: { userId: "seller-a", username: "name-seller-a" },
@@ -484,7 +488,7 @@ describe("eBay", () => {
     await connectEbay(a.token, "seller-d");
     const deletion = (id, userId) => ({
       metadata: { topic: "MARKETPLACE_ACCOUNT_DELETION" },
-      notification: { notificationId: id, data: { username: "x", userId, eiasToken: "x" } },
+      notification: { notificationId: id, eventDate: now(), publishDate: now(), data: { username: "x", userId, eiasToken: "x" } },
     });
     expect((await postEbayNotification(deletion("n-del-0", "stranger"))).status).toBe(204);
     expect(await events(a.token)).toEqual([]);
@@ -497,8 +501,7 @@ describe("eBay", () => {
 
   it("rejects notifications that fail the signature check", async () => {
     await mockEbayBasics();
-    const header = btoa(JSON.stringify({ alg: "ecdsa", kid: "kid-1", signature: btoa("junk"), digest: "SHA1" }));
-    const response = await relay("/ebay", { method: "POST", body: "{}", headers: { "x-ebay-signature": header } });
+    const response = await relay("/ebay", { method: "POST", body: "{}", headers: { "x-ebay-signature": ebayHeader(EBAY_KID, btoa("junk")) } });
     expect(response.status).toBe(412);
   });
 
@@ -521,5 +524,141 @@ describe("eBay", () => {
     await mockEbayBasics();
     const response = await relay("/studio/oauth/ebay/refresh", authed(a.token, { method: "POST", body: JSON.stringify({ refreshToken: "dead" }) }));
     expect(response.status).toBe(401);
+  });
+});
+
+describe("eBay public keys", () => {
+  const keyFetches = () => calls.filter((call) => call.url.includes("/public_key/"));
+  const order = (id) => ({
+    metadata: { topic: "ORDER_CONFIRMATION" },
+    notification: { notificationId: id, eventDate: now(), publishDate: now(), data: { user: { userId: "nobody" } } },
+  });
+
+  it.each(["kid-1", "../destination", "9936261a-7d7b-4621-a0f1-96ccb428af4", `${EBAY_KID}x`])(
+    "refuses a key ID that is not a UUID without asking eBay: %s",
+    async (kid) => {
+      await mockEbayBasics();
+      expect((await postEbayNotification(order("n-kid"), kid)).status).toBe(412);
+      expect(keyFetches()).toHaveLength(0);
+    },
+  );
+
+  it("remembers a key eBay does not know instead of asking again", async () => {
+    await mockEbayBasics();
+    const unknown = "00000000-0000-4000-8000-000000000001";
+    route("GET", new RegExp(`public_key/${unknown}$`), () => new Response("{}", { status: 404 }));
+    expect((await postEbayNotification(order("n-u1"), unknown)).status).toBe(500);
+    expect((await postEbayNotification(order("n-u2"), unknown)).status).toBe(500);
+    expect(keyFetches()).toHaveLength(1);
+  });
+
+  it("stops fetching keys when the key limiter says so", async () => {
+    await mockEbayBasics();
+    vi.spyOn(env.EBAY_KEY_LIMITER, "limit").mockResolvedValue({ success: false });
+    const response = await postEbayNotification(order("n-limited"), "00000000-0000-4000-8000-000000000002");
+    expect(response.status).toBe(429);
+    expect(keyFetches()).toHaveLength(0);
+  });
+});
+
+describe("replays", () => {
+  it("refuses eBay notifications published more than a day ago", async () => {
+    const a = await register();
+    await connectEbay(a.token, "seller-old");
+    const stale = {
+      metadata: { topic: "MARKETPLACE_ACCOUNT_DELETION" },
+      notification: { notificationId: "n-old", eventDate: now(-25 * 3600e3), publishDate: now(-25 * 3600e3), data: { userId: "seller-old" } },
+    };
+    expect((await postEbayNotification(stale)).status).toBe(412);
+    const undated = { ...stale, notification: { notificationId: "n-undated", data: { userId: "seller-old" } } };
+    expect((await postEbayNotification(undated)).status).toBe(400);
+    expect((await (await relay("/studio/accounts", authed(a.token))).json()).accounts).toHaveLength(1);
+    expect(await events(a.token)).toEqual([]);
+  });
+
+  it("does not accept an acknowledged eBay notification again", async () => {
+    const a = await register();
+    await connectEbay(a.token, "seller-replay");
+    const deletion = {
+      metadata: { topic: "MARKETPLACE_ACCOUNT_DELETION" },
+      notification: { notificationId: "n-replay", eventDate: now(), publishDate: now(), data: { userId: "seller-replay" } },
+    };
+    expect((await postEbayNotification(deletion)).status).toBe(204);
+    const [event] = await events(a.token);
+    await relay("/studio/ack", authed(a.token, { method: "POST", body: JSON.stringify({ through: event.seq }) }));
+    await connectEbay(a.token, "seller-replay");
+    expect((await postEbayNotification(deletion)).status).toBe(204);
+    expect(await events(a.token)).toEqual([]);
+    expect((await (await relay("/studio/accounts", authed(a.token))).json()).accounts).toHaveLength(1);
+  });
+
+  it("does not accept an acknowledged Etsy webhook again", async () => {
+    const a = await register();
+    await connectEtsy(a.token, { userId: "790", shopId: "60" });
+    const paid = { event_type: "order.paid", shop_id: 60, resource_url: "https://api.etsy.com/v3/application/shops/60/receipts/960" };
+    expect((await postEtsyWebhook("msg_replay", paid)).status).toBe(200);
+    const [event] = await events(a.token);
+    await relay("/studio/ack", authed(a.token, { method: "POST", body: JSON.stringify({ through: event.seq }) }));
+    expect((await postEtsyWebhook("msg_replay", paid)).status).toBe(200);
+    expect(await events(a.token)).toEqual([]);
+  });
+});
+
+describe("request bodies", () => {
+  // A chunked body with no Content-Length: count how much the relay reads.
+  function endless() {
+    const stats = { read: 0 };
+    const chunk = new Uint8Array(16 * 1024).fill(0x20);
+    const body = new ReadableStream({
+      pull(controller) {
+        stats.read += chunk.length;
+        if (stats.read > 32 * 1024 * 1024) controller.close();
+        else controller.enqueue(chunk);
+      },
+    });
+    return { body, stats };
+  }
+
+  it("stops reading a webhook body once it passes the limit", async () => {
+    const { body, stats } = endless();
+    const response = await relay("/etsy", { method: "POST", body, duplex: "half" });
+    expect(response.status).toBe(413);
+    expect(stats.read).toBeLessThan(1024 * 1024);
+  });
+
+  it("stops reading a research body once it passes the limit", async () => {
+    const device = await register();
+    await connectEbay(device.token, "seller-big");
+    const { body, stats } = endless();
+    const response = await relay("/studio/ebay/research", authed(device.token, { method: "POST", body, duplex: "half" }));
+    expect(response.status).toBe(413);
+    expect(stats.read).toBeLessThan(12 * 1024 * 1024);
+  });
+});
+
+describe("deadlines", () => {
+  it("gives every call to eBay and Etsy a deadline", async () => {
+    const device = await register();
+    await connectEbay(device.token, "seller-deadline");
+    await connectEtsy(device.token, { userId: "791", shopId: "61" });
+    route("GET", /api\.etsy\.com\/v3\/application\/shops\/61$/, () => ({ shop_id: 61 }));
+    await relay("/studio/etsy/v3/application/shops/61", authed(device.token, { headers: { "x-etsy-authorization": "Bearer 791.access" } }));
+    expect(calls.length).toBeGreaterThan(5);
+    for (const call of calls) expect(call.signal, call.url).toBeInstanceOf(AbortSignal);
+  });
+
+  it("answers 504 when eBay research or the Etsy API times out", async () => {
+    const device = await register();
+    await connectEbay(device.token, "seller-slow");
+    await connectEtsy(device.token, { userId: "792", shopId: "62" });
+    const timeout = () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    };
+    route("GET", /buy\/browse\/v1\/item_summary\/search/, timeout);
+    route("GET", /api\.etsy\.com\/v3\/application\/shops\/62$/, timeout);
+    const research = await relay("/studio/ebay/research", authed(device.token, { method: "POST", body: JSON.stringify({ operation: "search", params: { q: "x" } }) }));
+    expect(research.status).toBe(504);
+    const etsy = await relay("/studio/etsy/v3/application/shops/62", authed(device.token, { headers: { "x-etsy-authorization": "Bearer 792.access" } }));
+    expect(etsy.status).toBe(504);
   });
 });

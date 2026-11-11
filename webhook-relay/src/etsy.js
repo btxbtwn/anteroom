@@ -2,7 +2,11 @@
 // sign-in code exchange, refresh, shop lookup, and forwarding Anteroom's
 // API calls with the app's x-api-key attached.
 
+import { fetchWithDeadline, isTimeout, timeoutResponse } from "./deadline.js";
+
 const ETSY_API = "https://api.etsy.com";
+// Forwarded calls include listing image uploads, so they get longer.
+const FORWARD_TIMEOUT_MS = 60_000;
 
 // Listings (drafts, publish, delist), sales, and shop details. No shipping
 // addresses or email.
@@ -33,7 +37,7 @@ export function etsyAuthorizeUrl(env, { state, challenge, redirectUri }) {
 }
 
 async function tokenRequest(env, params) {
-  const response = await fetch(`${ETSY_API}/v3/public/oauth/token`, {
+  const response = await fetchWithDeadline("Etsy token request", `${ETSY_API}/v3/public/oauth/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", "x-api-key": apiKey(env) },
     body: new URLSearchParams({ client_id: env.ETSY_KEYSTRING, ...params }).toString(),
@@ -69,7 +73,7 @@ export function etsyUserIdFromToken(accessToken) {
 export async function etsyShop(env, accessToken) {
   const userId = etsyUserIdFromToken(accessToken);
   if (!userId) throw new Error("Etsy token has no user ID");
-  const response = await fetch(`${ETSY_API}/v3/application/users/${userId}/shops`, {
+  const response = await fetchWithDeadline("Etsy shop lookup", `${ETSY_API}/v3/application/users/${userId}/shops`, {
     headers: { authorization: `Bearer ${accessToken}`, "x-api-key": apiKey(env) },
   });
   if (!response.ok) throw new Error(`Etsy shop lookup failed: ${response.status}`);
@@ -93,11 +97,18 @@ export async function etsyForward(env, request, path, etsyToken) {
     if (value) headers.set(name, value);
   }
   const hasBody = !["GET", "HEAD"].includes(request.method);
-  const upstream = await fetch(target, {
-    method: request.method,
-    headers,
-    body: hasBody ? request.body : undefined,
-  });
+  let upstream;
+  try {
+    upstream = await fetchWithDeadline("Etsy API call", target, {
+      method: request.method,
+      headers,
+      body: hasBody ? request.body : undefined,
+    }, FORWARD_TIMEOUT_MS);
+  } catch (error) {
+    if (!isTimeout(error)) throw error;
+    console.error("[ETSY]", error.message);
+    return timeoutResponse("Etsy");
+  }
   const responseHeaders = new Headers();
   for (const name of FORWARDED_RESPONSE_HEADERS) {
     const value = upstream.headers.get(name);

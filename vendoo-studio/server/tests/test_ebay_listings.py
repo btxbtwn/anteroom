@@ -687,6 +687,19 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
                                                  conversation_id="abc")
         self.assertEqual((result["safe_to_retry"], result["error_code"]), (False, "uncertain"))
 
+    async def test_a_publish_that_timed_out_or_conflicted_in_ebay_is_uncertain(self):
+        import httpx
+        from vendoo_studio.services.ebay_client import _failure_for
+
+        for status in (408, 409):
+            client = Client()
+            client.publish_failure = _failure_for(httpx.Response(status, json={"errors": []}))
+            self.binding.clear()
+            with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+                result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                     conversation_id="abc")
+            self.assertEqual((result["safe_to_retry"], result["error_code"]), (False, "uncertain"), status)
+
     async def test_general_fields_fill_empty_aspects_and_missing_ones_are_named(self):
         catalog = [
             {"localizedAspectName": "Color", "aspectConstraint": {"aspectRequired": True, "aspectMode": "FREE_TEXT"}},

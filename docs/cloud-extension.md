@@ -102,29 +102,44 @@ unchanged; no cloud credential is added. See [form previews](cloud-marketplace-f
 
 Any script that runs on the Anteroom page can post a command to the content
 script, so the page's `confirm: true` does not show that the seller confirmed
-anything. Since Bridge 0.2.56, every write the hosted API relays carries
+anything. Since Bridge 0.2.68, every command the hosted API relays carries
 `payload.approval`: an ES256 compact JWS signed by the API
 (`services/bridge_approvals.py`) when the page takes the command. Its claims
 bind the seller's account (`sub`), the command (`cmd`), marketplace (`mkt`),
 action (`act`), listing (`lid`), job and message ids, a SHA-256 of the whole
-command in sorted-key JSON (`sha`), a single-use id (`jti`) and a five-minute
-expiry.
+command in sorted-key JSON (`sha`), the photos the page may relay with it
+(`pho`), a single-use id (`jti`) and a five-minute expiry.
+
+The page reads a List's or Vendoo draft's photos itself and hands their bytes to
+the Bridge beside the command, outside the hashed command. So `pho` lists
+`{id, sha256}` for each photo approved for the job: the hex SHA-256 recorded
+when the photo was copied for that job (`approved_photos`), which is what the
+relay's photo route serves. Other commands get an empty list.
 
 The worker (`background/cloud-approvals.js`) checks the signature with the
 public key it ships with, then the expiry (one minute of clock leeway), each
 bound field against the command and the page's approved account, and the hash.
-It remembers each used `jti` in `chrome.storage.local` until it expires and
+It hashes each relayed photo and refuses the command (`approval: "photos"`) if
+any is missing from `pho` or has other bytes; that refusal does not use the
+approval up, so the page can still send the approved bytes. It remembers each used `jti` in `chrome.storage.local` until it expires and
 refuses a second use. It strips the approval before running the command. A
 refusal returns `error_code: "rejected"` with the reason, and nothing reaches
 the marketplace.
 
-Signed: `marketplace.execute`, `marketplace.result` (it may resume an interrupted
-List), `marketplace.delete`, `marketplace.promote` and `job.vendoo_api`. Reads,
-promotion checks and results, and `job.cancel` are not. A Bridge declares
-`marketplace.signed_approvals`, and the API signs only for one that does: an
-older Bridge would refuse the extra field on promotions. A Bridge whose
-`BRIDGE_APPROVAL_PUBLIC_KEY` is empty refuses every relayed write. The key and
+Signed: every relayed command, reads (sales history, imports, sign-in status,
+likes, promotion checks and results) and `job.cancel` included, so a script on
+the page can neither read the seller's marketplace data through the Bridge nor
+stop a running List. A Bridge declares `marketplace.signed_commands`, and the
+API signs every command, with `pho`, only for one that does: an older Bridge
+would refuse the extra field on reads. A Bridge whose
+`BRIDGE_APPROVAL_PUBLIC_KEY` is empty refuses every relayed command. The key and
 rollout order are in [the operating guide](hosted-production.md#6-bridge-approval-key).
+
+Transition: Bridges 0.2.56 to 0.2.67 declare `marketplace.signed_approvals` instead.
+For them the API still signs only the writes (`marketplace.execute`,
+`marketplace.result`, `marketplace.delete`, `marketplace.promote`,
+`job.vendoo_api`), without `pho`. Remove that path (`SIGNED_APPROVALS` and
+`SIGNED_COMMANDS` in `bridge_approvals.py`) after 2027-02-01.
 
 The Mac app's loopback socket does not use these approvals. Its pairing token
 comes from `/api/extension/pairing-token` on `127.0.0.1`, which only a program

@@ -22,6 +22,24 @@ test("reload marketplace fields preserves answers and refreshes validation", asy
     const form = page.getByRole("group", { name: "Mercari listing fields" });
     const reload = form.getByRole("button", { name: "Reload fields", exact: true });
     await expect(reload).toBeEnabled();
+    // Hosted saves reject writes while chat owns the draft. The retained edit
+    // must recover automatically and release Reload fields afterwards.
+    let refused = false;
+    await page.route(`**/api/conversations/${id}/listing`, async route => {
+      if (route.request().method() === "PUT" && !refused) {
+        refused = true;
+        await route.fulfill({ status: 409, contentType: "application/json",
+          headers: { "X-Anteroom-Reason": "draft_busy" },
+          body: JSON.stringify({ detail: "Wait for the draft task to finish, or stop it before editing." }) });
+      } else await route.continue();
+    });
+    const titleInput = form.getByRole("textbox", { name: "Title", exact: true });
+    await titleInput.fill("Seller's updated Mercari title");
+    await titleInput.blur();
+    await expect.poll(() => refused).toBe(true);
+    await expect.poll(async () => (await (await request.get(`/api/conversations/${id}/listing`)).json()).listing.mercari_specifics.title)
+      .toBe("Seller's updated Mercari title");
+    await expect(reload).toBeEnabled();
     const refreshed = page.waitForResponse(response => response.url().endsWith(`/native-marketplaces/mercari/form/refresh`));
     await reload.click();
     expect((await refreshed).ok()).toBe(true);
@@ -30,10 +48,10 @@ test("reload marketplace fields preserves answers and refreshes validation", asy
       const body = await (await request.get(`/api/conversations/${id}/listing`)).json();
       return [body.listing.title, body.listing.mercari_specifics.title,
         body.listing._native_forms.mercari.inputs["direct_category_ids.mercari"]];
-    }).toEqual([title, "Seller's Mercari title", "2008"]);
+    }).toEqual([title, "Seller's updated Mercari title", "2008"]);
     const after = await (await request.get(`/api/conversations/${id}/native-marketplaces/preflight`)).json();
     expect(after.marketplaces.mercari.gaps.some((gap: { message: string }) => gap.message.includes("Reload its fields"))).toBe(false);
-    await expect(form.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Seller's Mercari title");
+    await expect(form.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Seller's updated Mercari title");
     await expect(form.getByText("The form's category or dependent choices changed.", { exact: false })).toHaveCount(0);
     await page.screenshot({ path: info.outputPath("reloaded-fields.png") });
     for (const market of ["eBay", "Poshmark", "Depop", "Etsy"]) {

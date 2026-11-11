@@ -222,6 +222,8 @@ export function ListingEditor({
     refetchInterval: (query) => (sessionActive ? activityPollMs(Boolean(query.state.data?.busy)) : false),
   });
   const generating = chatBusy || Boolean(activity?.busy);
+  // A List running on one marketplace locks only that marketplace's row, not the others.
+  const writing = chatBusy || Boolean(activity?.writing);
   // While chat is busy an Ask chat joins its queue and runs next.
   const askChat = runtime.features.has("generation") ? onAskChat : undefined;
 
@@ -267,7 +269,7 @@ export function ListingEditor({
           </AlertDescription>
         </Alert> :
       <Layout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
-        disabled={generating || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
+        disabled={writing || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
           if (vendoo) return;
           if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
@@ -275,7 +277,7 @@ export function ListingEditor({
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
         railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}
         railMenu={<ListingActionsMenu convId={convId} onCleared={onCleared} />}
-        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">Saving…</span> : undefined}
+        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? "Edits kept. Waiting for chat to finish before saving…" : "Saving…"}</span> : undefined}
         onSelect={(id) => {
           setFieldTarget(null);
           setEditTab(id);

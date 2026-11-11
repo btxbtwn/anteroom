@@ -82,6 +82,11 @@ def step_label(current_step: str) -> str | None:
     return f"{NAMES.get(marketplace, marketplace)}: {STEP_LABEL.get(step, 'Working')}…"
 
 
+def is_direct_action(current_step: str) -> bool:
+    """A direct marketplace job. It holds only its own marketplace, never the listing."""
+    return any(current_step.startswith(f"native_{name}_") for name in NAMES)
+
+
 class EtsyPackage(BaseModel):
     item_weight: float = Field(allow_inf_nan=False)
     item_length: float = Field(allow_inf_nan=False)

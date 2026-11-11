@@ -124,7 +124,7 @@ class TailscaleServeTests(unittest.TestCase):
     def test_dns_name_from_status_json(self):
         payload = {"Self": {"DNSName": "criss-mac-mini-1.tail6c7361.ts.net."}}
         with patch.object(ts, "_run_json", return_value=payload):
-            self.assertEqual(ts.dns_name(), "criss-mac-mini-1.tail6c7361.ts.net")
+            self.assertEqual(ts.identity(), ("criss-mac-mini-1.tail6c7361.ts.net", None))
 
 
 if __name__ == "__main__":

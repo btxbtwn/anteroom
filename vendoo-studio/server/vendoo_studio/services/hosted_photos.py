@@ -5,30 +5,25 @@ import io
 import os
 import threading
 import uuid
-import warnings
 from collections import OrderedDict
 
 import httpx
 from fastapi import HTTPException
-from PIL import Image, ImageOps, UnidentifiedImageError
-from pillow_heif import register_heif_opener
+from PIL import Image
 
 from vendoo_studio.config import MAX_PHOTO_COUNT, MAX_PHOTO_SIZE_MB
+from vendoo_studio.services import image_decode
 
 BUCKET = 'anteroom-photos'
 MAX_BYTES = MAX_PHOTO_SIZE_MB * 1024 * 1024
 MAX_PHOTOS = MAX_PHOTO_COUNT
-# Camera photos reach about 48 megapixels (6000×8000); larger is refused.
-MAX_PIXELS = 50_000_000
 MAX_SIDE = 2400
 # Thumbnail sizes the apps ask for (covers and photo strips). These are kept in
 # Storage beside the photo, so a restart or deploy never has to remake them.
 # 384 is the iPhone's photo tiles (about 136 pt at 3x).
 KEPT_THUMB_SIZES = (96, 192, 384)
-register_heif_opener()
-_decode_slot = threading.Semaphore(1)
 # Thumbnails decode a JPEG at a fraction of its size, so they need little memory
-# and never wait behind a full-size upload in ``_decode_slot``.
+# and never wait behind a full-size upload in ``image_decode``.
 _thumb_slot = threading.Semaphore(2)
 # One client for every Storage call, so each reuses an open TLS connection
 # instead of paying a new handshake to Supabase. httpx clients are thread-safe.
@@ -36,32 +31,10 @@ _storage = httpx.Client(limits=httpx.Limits(max_connections=20, max_keepalive_co
 
 
 def normalize(data: bytes) -> tuple[bytes, int, int]:
-    # Bound decoder memory on the shared API while uploads arrive concurrently.
-    with _decode_slot:
-        return _normalize(data)
-
-
-def _normalize(data: bytes) -> tuple[bytes, int, int]:
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter('error', Image.DecompressionBombWarning)
-            with Image.open(io.BytesIO(data)) as image:
-                if image.format not in {'JPEG', 'PNG', 'WEBP', 'HEIF', 'HEIC'} or image.width * image.height > MAX_PIXELS:
-                    raise ValueError
-                # A JPEG decodes at a fraction of its size when that still
-                # covers the stored size, which keeps big photos cheap.
-                image.draft('RGB', (MAX_SIDE, MAX_SIDE))
-                image = ImageOps.exif_transpose(image)
-                image.thumbnail((MAX_SIDE, MAX_SIDE))
-                # Flatten transparent images onto white and strip EXIF/location data.
-                rgba = image.convert('RGBA')
-                result = Image.new('RGB', rgba.size, 'white')
-                result.paste(rgba, mask=rgba.getchannel('A'))
-                output = io.BytesIO()
-                result.save(output, format='JPEG', quality=90)
-                return output.getvalue(), result.width, result.height
-    except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError, Image.DecompressionBombWarning):
-        raise HTTPException(422, f'Choose a JPEG, PNG, WebP or HEIC photo under {MAX_PIXELS // 1_000_000} megapixels') from None
+        return image_decode.normalized_jpeg(data, max_side=MAX_SIDE)
+    except ValueError:
+        raise HTTPException(422, f'Choose a JPEG, PNG, WebP or HEIC photo under {image_decode.MAX_PIXELS // 1_000_000} megapixels') from None
 
 
 def new_key(user_id: str, draft_id: str) -> str:

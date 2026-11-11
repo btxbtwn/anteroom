@@ -69,6 +69,34 @@ function historyPending(ids, settled) {
   return ids.filter(id => !settled.has(id));
 }
 
+// Order lists come newest first, so most passes stop at the first page whose
+// orders were all settled before. A full walk, at least every six hours and
+// after a pass that left orders unread, still reaches older open orders.
+const HISTORY_FULL_WALK_MS = 6 * 60 * 60 * 1000;
+const HISTORY_FULL_WALKS_KEY = 'orderHistoryFullWalks';
+
+async function historyFullWalks() {
+  try { return (await chrome.storage.local.get(HISTORY_FULL_WALKS_KEY))[HISTORY_FULL_WALKS_KEY] || {}; } catch { return {}; }
+}
+
+async function historyFullWalkDue(marketplace) {
+  const at = Number((await historyFullWalks())[marketplace]);
+  return !(Date.now() - at < HISTORY_FULL_WALK_MS);
+}
+
+async function recordHistoryWalk(marketplace, full, more) {
+  if (!full && !more) return;
+  const walks = await historyFullWalks();
+  // A pass that left orders unread is followed by a full walk.
+  if (more) delete walks[marketplace];
+  else walks[marketplace] = Date.now();
+  try { await chrome.storage.local.set({ [HISTORY_FULL_WALKS_KEY]: walks }); } catch { /* The next pass walks everything. */ }
+}
+
+function historySettledPage(ids, settled) {
+  return ids.length > 0 && ids.every(id => settled.has(id));
+}
+
 // ── Depop ────────────────────────────────────────────────────────────────
 
 const DEPOP_FINAL = new Set(['delivered', 'delivered_pending_feedback', 'refunded', 'cancelled']);
@@ -102,7 +130,7 @@ function depopHistoryOrder(receipt) {
   });
 }
 
-async function depopOrderHistory(settled) {
+async function depopOrderHistory(settled, incremental = false) {
   await ensureMarketplaceRequestContext();
   const auth = await depopBearer();
   const read = path => historyJson('depop', `https://webapi.depop.com/presentation/api/v1/receipts/${path}`,
@@ -127,6 +155,7 @@ async function depopOrderHistory(settled) {
       else unreadable += 1;
     }
     after = body.page_info?.last || null;
+    if (!more && incremental && historySettledPage(ids, settled)) break;
     if (page === HISTORY_MAX_PAGES - 1 && body.page_info?.has_more) more = true;
     if (more || !body.page_info?.has_more || !after) break;
   }
@@ -164,7 +193,7 @@ function poshmarkHistoryOrder(order, displayStatus) {
   });
 }
 
-async function poshmarkOrderHistory(settled) {
+async function poshmarkOrderHistory(settled, incremental = false) {
   const { user_id: seller } = await poshmarkAccount();
   const orders = [];
   const seen = new Set();
@@ -197,6 +226,7 @@ async function poshmarkOrderHistory(settled) {
       else unreadable += 1;
     }
     maxId = body.meta?.next_max_id || null;
+    if (!more && incremental && historySettledPage(ids, settled)) break;
     if (page === HISTORY_MAX_PAGES - 1 && maxId) more = true;
     if (more || !maxId) break;
   }
@@ -266,7 +296,7 @@ function mercariHistoryOrder(item, contents) {
   });
 }
 
-async function mercariOrderHistory(settled) {
+async function mercariOrderHistory(settled, incremental = false) {
   const deadline = Date.now() + 15 * 60 * 1000;
   const session = await mercariCurrentSession(deadline, true);
   const seller = Number(session?.user?.userId);
@@ -299,6 +329,7 @@ async function mercariOrderHistory(settled) {
         if (order) orders.push(order);
         else unreadable += 1;
       }
+      if (!more && incremental && historySettledPage(sold.map(item => String(item.activeOrder.orderId)), settled)) break;
       if (page === HISTORY_MAX_PAGES && data.userItems.pagination?.hasNext) more = true;
       if (!data.userItems.pagination?.hasNext) break;
     }
@@ -314,7 +345,9 @@ async function readMarketplaceOrderHistory(marketplace, settledIds) {
   if (!read) return { ok: false, error: 'Could not read sales.' };
   const settled = new Set((Array.isArray(settledIds) ? settledIds : []).filter(id => typeof id === 'string' && id.length <= 64));
   try {
-    const { orders, more = false, unreadable = 0 } = await read(settled);
+    const full = await historyFullWalkDue(marketplace);
+    const { orders, more = false, unreadable = 0 } = await read(settled, !full);
+    await recordHistoryWalk(marketplace, full, more);
     return { ok: true, orders, more, unreadable };
   } catch (error) {
     const code = ['signed_out', 'challenge', 'rate_limited', 'network', 'schema_drift', 'rejected'].includes(error?.code)

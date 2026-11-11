@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "./client";
+import { ApiRequestError } from "./transport";
 import { createStudioQueryClient } from "./queryClient";
 import { listingEditQueueCount, listingEdits } from "./listingEdits";
 import { hasUnsavedWork } from "../lib/unsavedWork";
@@ -19,6 +20,48 @@ function result(revision: string, listing: ListingData): ListingSaveResult {
   return { ok: true, revision_id: revision, listing, etsy_eligible: false,
     validation: { valid: true, can_send: true, errors: [], warnings: [], info: [] } };
 }
+
+it("waits for a draft task and saves retained edits against its latest revision", async () => {
+  const { client, edits } = setup();
+  const update = vi.spyOn(api.listings, "update")
+    .mockRejectedValueOnce(new ApiRequestError("Draft busy", 409, false, null, "draft_busy"))
+    .mockImplementationOnce(async (_id, listing) => result("r2", listing));
+  vi.spyOn(api.conversations, "activity").mockResolvedValue({ busy: false, writing: false, items: [], message_count: 0, last_message_id: null });
+  vi.spyOn(api.listings, "get").mockResolvedValue({
+    ...client.getQueryData<ListingDocument>(["listing", "item"])!,
+    current_revision_id: "r1", listing: { title: "Original", price: 25 },
+  });
+  try {
+    edits.save({ title: "My edit", price: 10 });
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    expect(update).toHaveBeenLastCalledWith("item", { title: "My edit", price: 25 }, "r1");
+    expect(edits.getSnapshot()).toEqual({ draft: null, saving: false, error: null });
+  } finally { client.clear(); }
+});
+
+it("keeps newer typing while waiting and retains conflicting edits", async () => {
+  const { client, edits } = setup();
+  let finish!: (value: Awaited<ReturnType<typeof api.conversations.activity>>) => void;
+  const activity = new Promise<Awaited<ReturnType<typeof api.conversations.activity>>>(resolve => { finish = resolve; });
+  const update = vi.spyOn(api.listings, "update")
+    .mockRejectedValue(new ApiRequestError("Draft busy", 409, false, null, "draft_busy"));
+  const read = vi.spyOn(api.conversations, "activity").mockReturnValue(activity);
+  vi.spyOn(api.listings, "get").mockResolvedValue({
+    ...client.getQueryData<ListingDocument>(["listing", "item"])!,
+    current_revision_id: "r1", listing: { title: "Chat title", price: 10 },
+  });
+  try {
+    edits.save({ title: "My edit", price: 10 });
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+    expect(edits.getSnapshot().saving).toBe(true);
+    expect(edits.getSnapshot().error).toBeNull();
+    edits.save({ title: "My latest edit", price: 10 });
+    finish({ busy: false, writing: false, items: [], message_count: 0, last_message_id: null });
+    await vi.waitFor(() => expect(edits.getSnapshot().error).toContain("also changed"));
+    expect(update).toHaveBeenCalledOnce();
+    expect(edits.getSnapshot().draft?.title).toBe("My latest edit");
+  } finally { edits.discard(); client.clear(); }
+});
 
 it("recovers from an HTTP 409 through the listing API without overwriting a newer price", async () => {
   const { client, edits } = setup();
@@ -202,6 +245,19 @@ it("counts a queued or in-flight save as unsaved work and drops the queue once i
   await vi.waitFor(() => expect(edits.getSnapshot().saving).toBe(false));
   expect(edits.pending).toBe(false);
   await vi.waitFor(() => expect(listingEditQueueCount(client)).toBe(0));
+});
+
+it("shows a saved price in the inventory row without reading the whole inventory again", async () => {
+  const { client, edits } = setup();
+  client.setQueryData(["conversations"], [{ id: "item", title: "Original", price: 10 }, { id: "other", title: "Other", price: 5 }]);
+  const list = vi.spyOn(api.conversations, "list");
+  vi.spyOn(api.listings, "update").mockImplementation(async (_id, listing) => result("r1", listing));
+  try {
+    edits.save({ title: "Original", price: 32 });
+    await vi.waitFor(() => expect(edits.getSnapshot().saving).toBe(false));
+    expect(client.getQueryData(["conversations"])).toEqual([{ id: "item", title: "Original", price: 32 }, { id: "other", title: "Other", price: 5 }]);
+    expect(list).not.toHaveBeenCalled();
+  } finally { client.clear(); }
 });
 
 it("keeps a queue that is re-subscribed in the same task, as a remount does", async () => {
