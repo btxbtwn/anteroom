@@ -1129,16 +1129,18 @@ def _skip_reason(db, conv, listing, item, filters, wanted, needs_live, now, auto
 
 def _sold_marketplaces(db: Session, conv_id: str) -> set[str]:
     """Marketplaces where this item is sold out. Those listings are never delisted or relisted."""
-    try:
-        from vendoo_studio.models.marketplace_sale import MarketplaceSale
-        from vendoo_studio.services.sale_inventory import stock_after_sale
-    except Exception:
-        return set()
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+    from vendoo_studio.services.sale_inventory import stock_after_sale
+
     sold = set()
     for sale in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id == conv_id).all():
         try:
             stock = stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)
         except Exception:
+            # Unknown stock after a sale is treated as sold, so no proposal
+            # delists or relists a listing that may have just sold.
+            log.exception("could not read stock after a %s sale of %s; treating it as sold", sale.marketplace, conv_id)
+            sold.add(sale.marketplace)
             continue
         if stock.get("status") == "sold_out":
             sold.add(sale.marketplace)

@@ -1,0 +1,4 @@
+- Automations never offer to delist or relist an item on a marketplace where it may have just sold, even when its stock can't be read.
+- A marketplace recording that fails for an unexpected reason now shows what went wrong instead of stopping silently.
+- Online, category search no longer stays stuck when building its index hangs.
+- Fixing a garbled listing now follows your own title and description formulas from Settings.
