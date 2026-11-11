@@ -11,10 +11,18 @@ ship: eBay's Cert ID and Etsy's shared secret.
   device that signed them in, and their events go only to that device's inbox.
 - **Checks every webhook is genuine.** eBay: ECDSA signature in
   `X-EBAY-SIGNATURE`, verified against the key from eBay's Notification API.
+  Key IDs must be UUIDs; key lookups that miss the cache are rate-limited per
+  IP (`EBAY_KEY_LIMITER`), and failed lookups are remembered briefly.
+  Notifications published more than 24 hours ago are refused.
   Etsy: Standard Webhooks HMAC with a 300 s replay window.
 - **Keeps IDs only** (order, line item, listing, shop, receipt, seller user ID).
   Anteroom fetches the details itself, so buyer names, addresses and prices
-  never sit in the cloud. Unacknowledged events wait 30 days.
+  never sit in the cloud. Unacknowledged events wait 30 days. Each device's
+  inbox remembers the event IDs it accepted for 30 days, acknowledged or not,
+  so a replayed webhook is neither delivered nor acted on twice.
+- **Bounds every outside call.** Calls to eBay and Etsy time out (10 s; eBay
+  image research 30 s; forwarded Etsy calls 60 s) and answer 504. Webhook
+  bodies stop being read past 64 KB.
 - **Brokers sign-in.** eBay and Etsy only redirect to HTTPS, and eBay's code
   exchange needs the Cert ID, so the relay hosts the callback and exchanges the
   code. It then sends the approving browser back to the Anteroom that started
