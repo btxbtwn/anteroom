@@ -1399,10 +1399,12 @@ async function depopApiAction(action, payload) {
       // A job that ended without posting is an answer too: nothing is live and the draft is still there.
       const failed = !complete && ['FAILED', 'ERROR', 'CANCELLED'].some(key => count(key) > 0);
       // Depop's own words, so a job it refused is never a silent one.
-      const said = [status?.error, status?.message, status?.detail, ...(Array.isArray(status?.errors) ? status.errors : [])]
-        .map(item => (item && typeof item === 'object' ? item.message || item.detail || item.error || '' : item))
-        .filter(text => typeof text === 'string' && text.trim());
-      const reason = marketplaceScrub(said.join(' '));
+      let reason = depopValidationReason(status);
+      if (failed && !reason && id) {
+        try {
+          reason = depopValidationReason(await request('GET', path));
+        } catch { /* Keep the confirmed publish refusal when the draft cannot be read. */ }
+      }
       // Depop's counts are the only record of what its publish queue did. Keep them in the worker console.
       if (!complete) marketplaceLog('depop', 'publish-status', { counts: JSON.stringify(counts), ...(reason ? { said: reason } : {}) });
       // The status counts say the draft posted. The public link is a separate field, or the seller's selling list.
@@ -1421,6 +1423,26 @@ async function depopApiAction(action, payload) {
   } catch (error) {
     return marketplaceFailure(error, !wrote);
   }
+}
+
+// Read only error containers: draft descriptions, addresses and other seller
+// data must never become error text just because the response is nested.
+function depopValidationReason(document) {
+  const messages = [];
+  const collect = (value, depth = 0) => {
+    if (depth > 8 || value == null) return;
+    if (typeof value === 'string') {
+      if (value.trim()) messages.push(value.trim());
+    } else if (Array.isArray(value)) {
+      value.forEach(item => collect(item, depth + 1));
+    } else if (typeof value === 'object') {
+      const named = ['message', 'detail', 'error', 'errors'].filter(key => Object.hasOwn(value, key));
+      (named.length ? named.map(key => value[key]) : Object.values(value))
+        .forEach(item => collect(item, depth + 1));
+    }
+  };
+  for (const key of ['error', 'message', 'detail', 'errors']) collect(document?.[key]);
+  return marketplaceScrub([...new Set(messages)].join(' '));
 }
 
 // Depop's own words when it refuses a SKU that another listing already carries.
