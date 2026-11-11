@@ -1,0 +1,1 @@
+- Sales checks on Depop, Poshmark and Mercari now stop at orders Anteroom already has, and re-read your whole order history every six hours, so they send far fewer requests.
