@@ -134,6 +134,10 @@ jobs:
         run: |
           xcrun swiftc Sources/Session/SignInMessages.swift Tests/SignInMessagesTests.swift -o "$RUNNER_TEMP/sign-in-tests"
           "$RUNNER_TEMP/sign-in-tests"
+      - name: Test which failed sign-in renewals sign out
+        run: |
+          xcrun swiftc Sources/Session/SignInRenewal.swift Tests/SignInRenewalTests.swift -o "$RUNNER_TEMP/sign-in-renewal-tests"
+          "$RUNNER_TEMP/sign-in-renewal-tests"
       - name: Test eBay and Etsy sign-in return links
         run: |
           xcrun swiftc Sources/Session/MarketplaceSignInReturn.swift Tests/MarketplaceSignInReturnTests.swift -o "$RUNNER_TEMP/marketplace-sign-in-tests"
