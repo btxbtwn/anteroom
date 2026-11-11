@@ -1,0 +1,1 @@
+- Offers to likers on Depop and Poshmark no longer re-check listings nobody can get an offer on every 15 minutes. Anteroom waits for a new like (it watches the likes feed every minute) and re-checks those listings once a week in case a like was missed, which cuts thousands of daily Depop requests.
