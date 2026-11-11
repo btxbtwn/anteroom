@@ -197,3 +197,47 @@ def test_a_connection_taken_on_the_request_loop_is_logged(monkeypatch, caplog):
     warnings = [record for record in caplog.records if 'request event loop' in record.getMessage()]
     assert len(warnings) == 1
     assert 'test_hosted_tasks.py' not in warnings[0].getMessage()
+
+
+def test_a_task_no_worker_claims_ends_its_stream_and_frees_the_draft(migration_engine, monkeypatch):  # noqa: F811
+    from datetime import UTC, datetime, timedelta
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.routes import hosted_tasks
+    from vendoo_studio.services.hosted_context import for_seller
+    from vendoo_studio.services.service_context import use
+
+    if migration_engine.dialect.name != 'postgresql':
+        pytest.skip('Hosted work requires Postgres')
+    schema_migrations.ensure_schema(migration_engine)
+    monkeypatch.setattr('vendoo_studio.database.engine', migration_engine)
+    with Session(migration_engine) as session:
+        session.add_all([Conversation(id=name, title='Coat', user_id=USER_ID) for name in ('stale', 'fresh')])
+        session.commit()
+        stale = BackgroundTask(user_id=USER_ID, conversation_id='stale', kind='generate',
+                               created_at=datetime.now(UTC) - timedelta(minutes=6))
+        fresh = BackgroundTask(user_id=USER_ID, conversation_id='fresh', kind='generate')
+        session.add_all([stale, fresh])
+        session.commit()
+        stale_id, fresh_id = stale.id, fresh.id
+
+    async def follow(task_id, seconds):
+        with use(for_seller(USER_ID)):
+            frames = []
+            async def read():
+                async for frame in hosted_tasks.task_stream(task_id).body_iterator:
+                    frames.append(frame)
+            try:
+                await asyncio.wait_for(read(), seconds)
+            except TimeoutError:
+                pass
+            return ''.join(frames)
+
+    ended = asyncio.run(follow(stale_id, 10))
+    assert 'event: error\ndata: The draft worker is unavailable; try again shortly.' in ended
+    assert ended.endswith('data: [DONE]\n\n')
+    waiting = asyncio.run(follow(fresh_id, 1))
+    assert 'event: error' not in waiting and '[DONE]' not in waiting
+    with Session(migration_engine) as session:
+        statuses = {task.id: task.status for task in session.scalars(select(BackgroundTask))}
+    # Failed, not left queued: a worker that comes back never runs work the seller was told stopped.
+    assert statuses == {stale_id: 'failed', fresh_id: 'queued'}
