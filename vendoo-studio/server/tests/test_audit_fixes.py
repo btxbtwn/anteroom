@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import stat
@@ -24,7 +25,7 @@ from vendoo_studio.models.job import Job
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.services.validation import validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
-from vendoo_studio.services.safe_fetch import UnsafeURLError, validate_fetch_url
+from vendoo_studio.services.safe_fetch import UnsafeURLError, resolve_fetch_target
 from vendoo_studio.services.vendoo_import import merge_notes
 
 
@@ -90,11 +91,11 @@ class SafeFetchTest(unittest.TestCase):
             "http://[::ffff:127.0.0.1]/secret.jpg",
         ):
             with self.assertRaises(UnsafeURLError):
-                validate_fetch_url(url)
+                asyncio.run(resolve_fetch_target(url))
 
     def test_import_download_requires_https(self):
         with self.assertRaises(UnsafeURLError):
-            validate_fetch_url("http://example.com/photo.jpg", allow_http=False)
+            asyncio.run(resolve_fetch_target("http://example.com/photo.jpg", allow_http=False))
 
 
 class WebSocketOriginTest(unittest.TestCase):
