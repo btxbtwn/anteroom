@@ -101,7 +101,7 @@ test("recorded amounts appear in sales records and missing data marks sold inven
   await expect(record.getByText("Missing fees", { exact: true })).toBeVisible();
   await record.getByRole("button", { name: "Record amounts" }).click();
   await expect(page.getByLabel("Sale price", { exact: true })).toHaveValue("40");
-  await expect(page.getByText("Cost of goods: $5.00, from the item's form.", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Cost of goods", { exact: true })).toHaveValue("5");
   await page.getByLabel("Fees", { exact: true }).fill("8");
   await page.getByRole("button", { name: "Save amounts", exact: true }).click();
   await expect(record.getByText("Profit: $23.00", { exact: true })).toBeVisible();
@@ -121,7 +121,7 @@ test("historical sales can be corrected entirely in Anteroom", async ({ page, re
   const created = await createConversation({ title, notes: "" });
   expect(created.ok()).toBe(true);
   await recordSale(request, (await created.json()).id, {
-    marketplace: "poshmark", item_revenue: "40", item_cost: "5", fees: "8", shipping_cost: "4", sold_on: null,
+    marketplace: "poshmark", item_revenue: "40", item_cost: null, fees: "8", shipping_cost: "4", sold_on: null,
   });
   await page.goto("/");
   if (phone) {
@@ -141,12 +141,12 @@ test("historical sales can be corrected entirely in Anteroom", async ({ page, re
   await page.getByRole("option", { name: "Missing sale data", exact: true }).click();
   await page.screenshot({ path: info.outputPath("sales-records-missing.png"), fullPage: true });
   const row = page.getByRole("listitem").filter({ has: page.getByText(title, { exact: true }) });
-  await expect(row.getByText("Profit: $23.00", { exact: true })).toBeVisible();
-  await expect(row.getByText("Missing sale date", { exact: true })).toBeVisible();
+  await expect(row.getByText("Missing cost of goods, sale date", { exact: true })).toBeVisible();
   await row.getByRole("button", { name: "Record amounts", exact: true }).click();
   await expect(page.getByLabel("Fees", { exact: true })).toHaveValue("8");
   await expect(page.getByLabel("Sale price", { exact: true })).toHaveValue("40");
   await page.getByLabel("Fees", { exact: true }).fill("9");
+  await page.getByLabel("Cost of goods", { exact: true }).fill("5");
   await page.getByLabel("Date", { exact: true }).fill(new Date().toISOString().slice(0, 10));
   await page.screenshot({ path: info.outputPath("imported-vendoo-details.png") });
   await page.getByRole("button", { name: "Save amounts", exact: true }).click();
