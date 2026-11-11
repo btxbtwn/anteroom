@@ -427,11 +427,43 @@ logger, request, browser, release, Machine/region/process, the message, the
 exception, the stack trace, and the same report as JSON. Credentials are masked
 by `services/redaction.py` and SQL parameter values are removed.
 
-**Noise control:** reports group by fingerprint (exception type plus code path,
-or call site and message shape). The first is sent immediately; repeats in the next 15 minutes are
-counted and reported with the next email for that group, or at shutdown. At most
-60 emails per hour per process; anything over is counted in the next email and
-remains in `fly logs`. Failed sends retry after 5 s, 30 s and 2 min.
+**Noise control:** reports group by severity and fingerprint (exception type
+plus code path, or call site and message shape). Errors are eligible immediately;
+repeats wait 15 minutes. Warnings are grouped into at most one digest per hour.
+Each message contains at most 20 groups; remaining groups stay pending. The
+outbox keeps the latest scrubbed report and occurrence count for each group.
+
+**Budget:** set `ANTEROOM_ERROR_EMAIL_DAILY_LIMIT` to an operator-selected
+allowance below the Workspace account's verified relay quota, leaving headroom
+for other senders. Its default is zero: retain reports without sending until
+an allowance is configured. Google does not provide our customer-specific
+allowance in the rejection; confirm it with Workspace support rather than
+assuming the published maximum applies to this account.
+Every SMTP attempt, including failed or uncertain attempts, reserves one slot
+in the rolling 24-hour budget before network activity. A quarter of the budget
+(at least one slot) is reserved for errors. A shared 60/hour ceiling also
+applies. Accounting, pending groups and backoff live in `error_email_state`,
+survive restarts, and are locked transactionally across Machines. SMTP never
+holds a database connection. Only the API role can access this operator table;
+seller and Supabase client roles have no access.
+
+**Relay refusals:** a daily-quota rejection pauses all senders for 24 hours,
+retaining pending reports. Other permanent SMTP refusals wait an hour; transient
+failures wait five minutes. These are local retry times, not a promise that
+Google's quota has reset. No shutdown flush bypasses the budget. If the process
+dies during SMTP, its reservation remains charged; a 120-second lease prevents
+another sender from immediately repeating it. An uncertain delivery can be
+repeated after lease expiry, still charged against the budget.
+
+**Operator status:** set `ANTEROOM_OPERATOR_USER_ID` to the operator's verified
+Supabase user UUID. Only that signed-in seller sees Settings → General → Error
+emails, showing budget use, pending occurrence count, the safe delivery failure,
+last relay acceptance and next eligible attempt. `/api/error-reports/delivery`
+returns no global mail details to other sellers. No report bodies are returned.
+The request path still hands scrubbed reports to a bounded in-memory queue;
+abrupt termination before persistence or a full queue can omit an email report.
+Original application logs remain the diagnostic source; the status includes
+the process's queue-drop count.
 
 **Delivery:** Google Workspace SMTP relay (`smtp-relay.gmail.com:587`, TLS
 required), which accepts mail only from the app's static egress addresses

@@ -1242,6 +1242,17 @@ export const api = {
         funnel: boolean;
       }>("/settings/tailscale/disable", { method: "POST" }),
     errorLogs: () => request<{ entries: StudioErrorLogEntry[] }>("/settings/error-logs"),
+    errorEmailDelivery: () => request<{
+      visible: boolean;
+      state?: "disabled" | "needs_budget" | "ready" | "quota_paused" | "delivery_failed" | "budget_exhausted";
+      daily_limit?: number;
+      used?: number;
+      pending?: number;
+      resume_at?: number | null;
+      last_error?: string | null;
+      last_success_at?: number | null;
+      dropped?: number;
+    }>("/error-reports/delivery"),
     clearErrorLogs: () => request<{ ok: boolean }>("/settings/error-logs", { method: "DELETE" }),
   },
 
