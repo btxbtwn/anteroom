@@ -1,7 +1,7 @@
 name: Deploy hosted
 
-# Ships main to production once CI has passed on it and on the merge it
-# releases: builds and pushes the image first, so a build failure stops before the database changes; then
+# Ships main's tip to production once CI has passed on it and on the merge it
+# releases (never the older commit whose CI happened to start the run): builds and pushes the image first, so a build failure stops before the database changes; then
 # applies pending Alembic revisions to Supabase with the migration login,
 # refreshes the shared category trees when their seed changed, deploys that
 # image to Fly.io and confirms the live version. See deploy/fly/README.md and
@@ -41,23 +41,24 @@ jobs:
     environment: production
     timeout-minutes: 45
     steps:
+      # main's tip, not the triggering commit: CI runs finish out of order and
+      # a queued deploy can replace another, so shipping the trigger could put
+      # older code over newer code and a database already migrated past it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: main
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Wait for the release commit
+      - name: Ship main's tip, or wait for the release commit
         id: gate
-        run: |
-          # A merge with pending notes is followed by a "Release Anteroom" commit
-          # from the Version workflow; deploy that one instead of both.
-          if find changelog.d -type f ! -name README.md | grep -q .; then
-            echo "Pending changelog notes; the release commit will deploy."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "version=$(cat vendoo-studio/VERSION)" >> "$GITHUB_OUTPUT"
-          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER: ${{ github.event.workflow_run.head_sha || github.sha }}
+        # Skips when changelog.d/ has pending notes (the Version workflow's
+        # "Release Anteroom" commit deploys instead) or when main moved past
+        # the trigger and CI on the new tip has not passed (that CI deploys it).
+        run: python3 .github/scripts/deploy-gate.py --repo "$GITHUB_REPOSITORY" --trigger "$TRIGGER"
 
       - name: Wait for CI on the code being shipped
         if: steps.gate.outputs.skip != 'true'
@@ -108,14 +109,13 @@ jobs:
           flyctl deploy . --config deploy/fly/fly.toml --remote-only --build-only --push \
             --image-label "$label" \
             --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="$VITE_SUPABASE_PUBLISHABLE_KEY"
+          echo "label=${label}" >> "$GITHUB_OUTPUT"
           echo "ref=registry.fly.io/${FLY_APP}:${label}" >> "$GITHUB_OUTPUT"
 
       - name: Install the hosted server
         if: steps.gate.outputs.skip != 'true'
         working-directory: vendoo-studio
-        run: |
-          python -m pip install -U pip
-          ./scripts/install-locked.sh python hosted
+        run: ./scripts/install-locked.sh python hosted
 
       - name: Apply pending migrations
         if: steps.gate.outputs.skip != 'true'
@@ -142,20 +142,12 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         working-directory: vendoo-studio
         env:
-          GH_TOKEN: ${{ github.token }}
           ANTEROOM_MIGRATION_DATABASE_URL: ${{ secrets.ANTEROOM_MIGRATION_DATABASE_URL }}
           PGSSLMODE: verify-full
           PGSSLROOTCERT: ${{ github.workspace }}/deploy/fly/supabase-prod-ca-2021.crt
-        run: |
-          seed=vendoo-studio/data/category-trees-seed.json.gz
-          previous="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-hosted.yml \
-            --status success --limit 1 --json headSha --jq '.[0].headSha // empty')"
-          if [ -n "$previous" ] && git cat-file -e "$previous^{commit}" 2>/dev/null \
-            && git diff --quiet "$previous" HEAD -- "../$seed"; then
-            echo "Category tree seed unchanged since $previous."
-            exit 0
-          fi
-          ./scripts/category-trees.sh import --database-url-env ANTEROOM_MIGRATION_DATABASE_URL
+        # Compares the trees in the database with the seed row for row, so a
+        # refresh never depends on which earlier deploy imported what.
+        run: ./scripts/category-trees.sh import --if-changed --database-url-env ANTEROOM_MIGRATION_DATABASE_URL
 
       - name: Deploy to Fly.io
         if: steps.gate.outputs.skip != 'true'
@@ -181,4 +173,21 @@ jobs:
             sleep 10
           done
           echo "::error::Production did not report version $VERSION as ready."
+          exit 1
+
+      # The public URL reaches only the web Machines; this also covers process
+      # groups without a public service, such as a background worker.
+      - name: Confirm every Machine runs the new image
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          LABEL: ${{ steps.image.outputs.label }}
+        run: |
+          for attempt in $(seq 1 12); do
+            flyctl machines list --app "$FLY_APP" --json > "$RUNNER_TEMP/machines.json"
+            python3 .github/scripts/check-fly-machines.py --label "$LABEL" "$RUNNER_TEMP/machines.json" && exit 0
+            echo "Not every Machine is started on $LABEL yet (attempt $attempt)."
+            sleep 10
+          done
+          echo "::error::Not every Machine is running $LABEL."
           exit 1

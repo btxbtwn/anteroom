@@ -11,6 +11,7 @@ from vendoo_studio.services.category_tree_seed import (
     default_seed_path,
     export_seed,
     import_seed,
+    seed_matches,
 )
 
 
@@ -68,17 +69,25 @@ def main(argv: list[str] | None = None) -> int:
         default=default_seed_path(),
         help=f"Seed path (default: {default_seed_path()})",
     )
+    import_parser.add_argument(
+        "--if-changed",
+        action="store_true",
+        help="Leave the database alone when it already holds exactly this seed's rows",
+    )
 
     args = parser.parse_args(argv)
     try:
         if args.command == "export":
             db = args.db or default_db_path()
             result = export_seed(db, args.out)
-        elif args.database_url_env:
-            result = import_seed(_postgres(args.database_url_env), args.seed)
-            result["db"] = args.database_url_env
         else:
-            result = import_seed(args.db, args.seed)
+            target = _postgres(args.database_url_env) if args.database_url_env else args.db
+            if args.if_changed and seed_matches(target, args.seed):
+                result = {"seed": str(args.seed), "unchanged": True}
+            else:
+                result = import_seed(target, args.seed)
+            if args.database_url_env:
+                result["db"] = args.database_url_env
     except Exception as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
