@@ -11,12 +11,14 @@ triggering commit up to the tip, that
 
 * has no pending changelog.d/ notes (the Version workflow's "Release Anteroom"
   commit after it ships that code with its version), and
-* passed CI (the triggering commit did, or this run would not have started).
+* passed CI. The trigger is checked too: a manual run starts from main's tip,
+  whose CI nothing has confirmed.
 
 Every later run considers at least the commits this one did, so production
 never moves backwards. A newer commit whose CI is still running gets its own
 run when that CI finishes. Writes ``skip`` and ``version`` to $GITHUB_OUTPUT.
-Waiting for CI on the merge a release commit ships is wait-for-tested-code.py's job.
+Checking CI on every merge since the commit production runs is
+wait-for-tested-code.py's job.
 """
 
 from __future__ import annotations
@@ -42,7 +44,10 @@ def has_pending_notes(sha: str) -> bool:
 
 
 def ci_state(repo: str, sha: str) -> tuple[str, str]:
-    """(status, conclusion) of the latest CI run for a push of sha, or ("missing", "")."""
+    """(status, conclusion) of the latest CI run for a push of sha, or ("missing", "").
+
+    A re-run updates the same run, so this is its latest attempt's result.
+    """
     out = subprocess.run(
         ["gh", "api", f"repos/{repo}/actions/workflows/ci.yml/runs?head_sha={sha}&event=push&per_page=1"],
         check=True,
@@ -69,7 +74,6 @@ def candidates(trigger: str, limit: int = 200) -> list[str]:
 
 def choose(
     commits: Iterable[str],
-    trigger: str,
     notes: Callable[[str], bool],
     state: Callable[[str], tuple[str, str]],
 ) -> tuple[str | None, list[str]]:
@@ -79,8 +83,6 @@ def choose(
         if notes(sha):
             passed.append(f"{sha[:8]} has pending changelog notes; its release commit ships it.")
             continue
-        if sha == trigger:
-            return sha, passed
         status, conclusion = state(sha)
         if status == "completed" and conclusion == "success":
             return sha, passed
@@ -96,7 +98,7 @@ def main() -> int:
     args = parser.parse_args()
 
     trigger = git("rev-parse", args.trigger)
-    target, passed = choose(candidates(trigger), trigger, has_pending_notes, lambda sha: ci_state(args.repo, sha))
+    target, passed = choose(candidates(trigger), has_pending_notes, lambda sha: ci_state(args.repo, sha))
     for line in passed:
         print(line)
     lines = [f"skip={'false' if target else 'true'}"]

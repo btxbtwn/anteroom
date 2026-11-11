@@ -181,6 +181,98 @@ def test_release_commits_resolve_to_the_merge_they_ship(tmp_path: Path, monkeypa
     assert gate.code_commit(merge) == merge
 
 
+@pytest.fixture
+def main_since_production(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """main's first-parent line: production's release, two merges, and their release."""
+
+    def commit(message: str) -> str:
+        subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", message], cwd=tmp_path, check=True)
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True).stdout.strip()
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    shas = {"old": commit("Merge pull request #0 from x/y")}
+    shas["production"] = commit("Release Anteroom 0.1.1")
+    shas["m1"] = commit("Merge pull request #1 from x/app-change")
+    shas["m2"] = commit("Merge pull request #2 from x/docs-only")
+    shas["release"] = commit("Release Anteroom 0.1.2")
+    monkeypatch.chdir(tmp_path)
+    return shas
+
+
+def test_every_merge_since_production_is_checked(main_since_production: dict[str, str]) -> None:
+    shas = main_since_production
+    gate = _load_gate()
+    assert gate.commits_to_check(shas["release"], shas["production"])[0] == [shas["m1"], shas["m2"]]
+    # A manual run of a merge checks that merge too.
+    assert gate.commits_to_check(shas["m2"], shas["production"])[0] == [shas["m1"], shas["m2"]]
+    # Production's commit unknown, or not below the one being shipped: the nearest merge only.
+    assert gate.commits_to_check(shas["release"], None)[0] == [shas["m2"]]
+    assert gate.commits_to_check(shas["release"], "f" * 40)[0] == [shas["m2"]]
+    assert gate.commits_to_check(shas["production"], shas["release"])[0] == [shas["old"]]
+
+
+@pytest.mark.parametrize(
+    ("head", "production", "ci", "passes"),
+    [
+        # M1 failed and docs-only M2 passed: M2's release still ships M1's code.
+        ("release", "production", {"m1": "failure", "m2": "success"}, False),
+        # A re-run of M1's CI passed: its latest attempt is what counts.
+        ("release", "production", {"m1": "success", "m2": "success"}, True),
+        # A manual run of a merge whose own CI failed.
+        ("m2", "production", {"m1": "success", "m2": "failure"}, False),
+        ("m2", "production", {"m1": "cancelled", "m2": "success"}, False),
+        # No record of production's commit: only the nearest merge, as before.
+        ("release", None, {"m1": "failure", "m2": "success"}, True),
+    ],
+)
+def test_deploy_needs_ci_on_every_merge_since_production(
+    main_since_production: dict[str, str], monkeypatch: pytest.MonkeyPatch, capsys, head, production, ci, passes
+) -> None:
+    shas = main_since_production
+    gate = _load_gate()
+    by_sha = {shas[name]: ("completed", conclusion) for name, conclusion in ci.items()}
+    monkeypatch.setattr(sys, "argv", ["gate", "--repo", "o/r", "--head", shas[head], "--timeout", "0"])
+    monkeypatch.setattr(gate, "production_commit", lambda repo: shas[production] if production else None)
+    monkeypatch.setattr(gate, "ci_state", lambda repo, sha: by_sha[sha])
+    assert gate.main() == (0 if passes else 1)
+    if production is None:
+        assert "nearest merge" in capsys.readouterr().out
+
+
+def test_production_commit_is_the_last_recorded_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
+    gate = _load_gate()
+    deployed = "d" * 40
+    responses = {
+        "repos/o/r/actions/workflows/deploy-hosted.yml/runs?status=success&per_page=50": {
+            "workflow_runs": [{"id": 3, "head_sha": "h" * 40}, {"id": 2, "head_sha": "g" * 40}]
+        },
+        # Run 3 skipped at the gate: nothing deployed, so no record.
+        "repos/o/r/actions/runs/3/jobs": {"jobs": [{"id": 30}]},
+        "repos/o/r/check-runs/30/annotations": [{"title": None, "message": "Nothing to deploy"}],
+        "repos/o/r/actions/runs/2/jobs": {"jobs": [{"id": 20}]},
+        "repos/o/r/check-runs/20/annotations": [{"title": "Deployed commit", "message": deployed}],
+    }
+    monkeypatch.setattr(gate, "gh_api", responses.__getitem__)
+    assert gate.production_commit("o/r") == deployed
+    responses["repos/o/r/check-runs/20/annotations"] = []
+    assert gate.production_commit("o/r") is None
+
+
+def test_deploy_records_the_commit_it_shipped() -> None:
+    steps = workflow("deploy-hosted.yml")["jobs"]["deploy"]["steps"]
+    assert steps[-1]["name"] == "Record the deployed commit"
+    assert "::notice title=Deployed commit::" in steps[-1]["run"]
+
+
+def test_only_runs_that_deploy_join_the_deploy_queue() -> None:
+    deploy = workflow("deploy-hosted.yml")
+    # A CI completion whose deploy job is skipped must not replace a queued deploy.
+    assert "concurrency" not in deploy
+    assert deploy["jobs"]["deploy"]["concurrency"] == {"group": "deploy-hosted", "cancel-in-progress": "false"}
+
+
 def _load_script(name: str):
     import importlib.util
 
@@ -200,25 +292,29 @@ def test_deploy_fetches_main_and_gates_it_before_anything_else() -> None:
 
 
 T, M, R, N = "t" * 40, "m" * 40, "r" * 40, "n" * 40
+OK = ("completed", "success")
 
 
 @pytest.mark.parametrize(
     ("commits", "notes", "ci", "chosen"),
     [
-        ([T], set(), {}, T),  # the trigger is still main's tip
+        ([T], set(), {T: OK}, T),  # the trigger is still main's tip
         ([T], {T}, {}, None),  # pending notes: the release commit deploys
-        ([R, M, T], {M}, {R: ("completed", "success")}, R),  # the newest tested commit wins
+        ([R, M, T], {M}, {R: OK}, R),  # the newest tested commit wins
         # main moved on but its CI is still running: ship the newest tested one
         # anyway rather than wait (merges can outpace CI), never anything older.
-        ([R, M, T], {M}, {R: ("queued", "")}, T),
-        ([N, R, M, T], {M}, {N: ("in_progress", ""), R: ("completed", "success")}, R),
+        ([R, M, T], {M}, {R: ("queued", ""), T: OK}, T),
+        ([N, R, M, T], {M}, {N: ("in_progress", ""), R: OK}, R),
         ([R, M, T], {M, T}, {R: ("completed", "failure")}, None),
-        ([R, T], set(), {R: ("missing", "")}, T),
+        ([R, T], set(), {R: ("missing", ""), T: OK}, T),
+        # A manual run starts from main's tip, whose CI nothing has checked yet.
+        ([T], set(), {T: ("completed", "failure")}, None),
+        ([T], set(), {T: ("in_progress", "")}, None),
     ],
 )
 def test_deploy_gate_ships_the_newest_tested_commit_from_the_trigger_up(commits, notes, ci, chosen) -> None:
     gate = _load_script("deploy-gate")
-    assert gate.choose(commits, T, notes.__contains__, ci.__getitem__)[0] == chosen
+    assert gate.choose(commits, notes.__contains__, ci.__getitem__)[0] == chosen
 
 
 def test_deploy_gate_checks_out_its_choice_and_writes_outputs(tmp_path: Path) -> None:
@@ -250,16 +346,18 @@ def test_deploy_gate_checks_out_its_choice_and_writes_outputs(tmp_path: Path) ->
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     ci_status = tmp_path / "ci-status"
+    # Answers each commit's CI query from {sha: "status conclusion"}.
     (bin_dir / "gh").write_text(
-        f"#!{sys.executable}\nimport json, pathlib\n"
-        f"status, conclusion = pathlib.Path({str(ci_status)!r}).read_text().split()\n"
+        f"#!{sys.executable}\nimport json, pathlib, re, sys\n"
+        "sha = re.search('head_sha=([0-9a-f]+)', sys.argv[2]).group(1)\n"
+        f"status, conclusion = json.loads(pathlib.Path({str(ci_status)!r}).read_text())[sha].split()\n"
         "print(json.dumps({'workflow_runs': [{'status': status, 'conclusion': conclusion}]}))\n"
     )
     (bin_dir / "gh").chmod(0o755)
 
-    def run(status: str) -> tuple[str, str]:
+    def run(release_ci: str, trigger_ci: str = "completed success") -> tuple[str, str]:
         git("checkout", "-q", "--detach", release)
-        ci_status.write_text(status)
+        ci_status.write_text(json.dumps({release: release_ci, trigger: trigger_ci}))
         output = tmp_path / "output"
         output.write_text("")
         subprocess.run(
@@ -272,6 +370,8 @@ def test_deploy_gate_checks_out_its_choice_and_writes_outputs(tmp_path: Path) ->
     assert run("completed success") == ("skip=false\nversion=1.0.1\n", release)
     # The release commit's CI is still queued: ship the trigger, never wait.
     assert run("queued none") == ("skip=false\nversion=1.0.0\n", trigger)
+    # A manual run is not proof that CI passed: nothing tested ships nothing.
+    assert run("queued none", "completed failure") == ("skip=true\n", release)
 
 
 def _machine(group: str | None, tag: str, state: str = "started", **config) -> dict:

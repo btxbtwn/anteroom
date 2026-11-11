@@ -1,7 +1,9 @@
 name: Deploy hosted
 
-# Ships the newest commit on main that passed CI, and the merge it releases
-# (never older than the commit whose CI started the run): builds and pushes the image first, so a build failure stops before the database changes; then
+# Ships the newest commit on main that passed CI (never older than the commit
+# whose CI started the run), once CI passed on every merge since the commit
+# production runs: builds and pushes the image first, so a build failure stops
+# before the database changes; then
 # applies pending Alembic revisions to Supabase with the migration login,
 # refreshes the shared category trees when their seed changed, deploys that
 # image to Fly.io and confirms the live version. See deploy/fly/README.md and
@@ -12,11 +14,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-
-# One deploy at a time and never cancelled mid-migration or mid-rollout.
-concurrency:
-  group: deploy-hosted
-  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -36,6 +33,12 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push')
+    # One deploy at a time and never cancelled mid-migration or mid-rollout.
+    # On the job, not the workflow: a run whose job is skipped above (failed or
+    # pull request CI) must not join the group and replace a queued deploy.
+    concurrency:
+      group: deploy-hosted
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # Secrets live in this environment, which only main may use.
     environment: production
@@ -65,8 +68,9 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        # A release commit's CI skips the component checks; the merge before it
-        # holds the code, and its CI may still be running.
+        # Every merge since the commit production runs (the last "Deployed
+        # commit" notice) must have passed CI: CI on main checks only what each
+        # merge changed. A release commit's merge may still be running.
         run: python3 .github/scripts/wait-for-tested-code.py --repo "$GITHUB_REPOSITORY"
 
       - name: Check deploy secrets
@@ -192,3 +196,9 @@ jobs:
           done
           echo "::error::Not every Machine is running $LABEL."
           exit 1
+
+      # The next deploy reads this notice to find the commit production runs
+      # (.github/scripts/wait-for-tested-code.py).
+      - name: Record the deployed commit
+        if: steps.gate.outputs.skip != 'true'
+        run: echo "::notice title=Deployed commit::$(git rev-parse HEAD)"

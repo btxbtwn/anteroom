@@ -1,0 +1,1 @@
+- The website only updates once every change since the last update has passed its tests, and a queued update is no longer dropped.
