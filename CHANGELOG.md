@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.919 — 2026-11-11
+
+- Sales checks on Depop, Poshmark and Mercari now stop at orders Anteroom already has, and re-read your whole order history every six hours, so they send far fewer requests.
+
 ## 0.1.918 — 2026-11-11
 
 - Group warning emails into hourly digests, keep pending error reports across restarts, and pause delivery when Google rejects mail for exceeding its quota.
