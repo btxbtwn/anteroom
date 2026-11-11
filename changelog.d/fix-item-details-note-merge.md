@@ -1,0 +1,2 @@
+- Item details you type no longer undo a category or delist record Anteroom saved to the same listing a moment earlier.
+- Reloading for an update, or leaving the page, now saves item details you just typed instead of dropping them.

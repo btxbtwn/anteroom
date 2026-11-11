@@ -135,11 +135,24 @@ export function applyDetailsPatch(before: ItemDetailsData, patch: Partial<ItemDe
   return { ...before, ...patch, measurements: mergeMeasurements(before.measurements, patch?.measurements) };
 }
 
-export function mergeDetailNotes(notes: string | null, patch: Partial<ItemDetailsData>, dimensions: string): string {
-  let managed: Record<string, unknown> = {};
+/**
+ * The notes keys an Item Details save sends: what the seller changed, and each
+ * detail the notes do not hold yet as the editor shows it. The server merges
+ * them into the notes as they are then, so keys it wrote since `notes` was
+ * read (a category override, a delist record) are kept.
+ */
+export function detailNoteChanges(notes: string | null, patch: Partial<ItemDetailsData>, dimensions: string): Record<string, unknown> {
+  let stored: Record<string, unknown> = {};
   try {
     const raw: unknown = JSON.parse(notes || "null");
-    if (isStructuredNotes(raw)) managed = raw;
-  } catch { /* Seller text is retained by parseNotes. */ }
-  return JSON.stringify({ ...managed, ...applyDetailsPatch(parseNotes(notes, dimensions), patch), condition: "", poshmarkOriginalPrice: "0" });
+    if (isStructuredNotes(raw)) stored = raw;
+  } catch { /* Seller text becomes sellerNotes below. */ }
+  const shown = parseNotes(notes, dimensions);
+  const { measurements: typed, ...fields } = patch;
+  const missing = Object.fromEntries(Object.entries(shown).filter(([key]) => key !== "measurements" && !(key in stored)));
+  const storedMeasurements = (stored.measurements && typeof stored.measurements === "object" ? stored.measurements : {}) as Record<string, unknown>;
+  // A garment the notes keep under an older shape (shorts) is written whole, so the merge does not hide it.
+  const measurements = typed && Object.fromEntries(GARMENTS.filter(({ id }) => Object.keys(typed[id]).length).map(({ id }) =>
+    [id, storedMeasurements[id] && typeof storedMeasurements[id] === "object" ? typed[id] : { ...shown.measurements[id], ...typed[id] }]));
+  return { ...missing, ...fields, ...(measurements && Object.keys(measurements).length ? { measurements } : {}), condition: "", poshmarkOriginalPrice: "0" };
 }

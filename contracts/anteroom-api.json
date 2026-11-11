@@ -332,6 +332,19 @@
             ],
             "title": "Box Id"
           },
+          "note_changes": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Item Details' changed keys, merged into the notes as they are now, so keys\nthe server wrote since the notes were read survive. Measurements merge per field.",
+            "title": "Note Changes"
+          },
           "notes": {
             "anyOf": [
               {
