@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import secrets
 import time
 import webbrowser
 from dataclasses import dataclass, field
@@ -28,6 +29,7 @@ from vendoo_studio.services.keychain import (
     get_marketplace_accounts,
     get_relay_device,
     set_marketplace_account,
+    update_marketplace_accounts,
 )
 from vendoo_studio.services.relay_client import RelayError, relay_request
 from vendoo_studio.services.marketplace_errors import marketplace_call
@@ -246,20 +248,61 @@ class SignInRequired(RuntimeError):
     pass
 
 
-_refresh_locks: dict[tuple[asyncio.AbstractEventLoop, str], asyncio.Lock] = {}
+# One refresh per account at a time, across event loops, processes and
+# Machines. Etsy rotates its refresh token, so a second refresh sent with the
+# old one would sign the seller out. The claim is saved with the account, in
+# one short atomic update (a locked Vault transaction on the web, the Keychain
+# lock on the Mac); the relay call itself runs with no transaction open. It
+# outlives relay_request's 30 s deadline, so it cannot lapse mid-refresh.
+REFRESH_CLAIM_S = 60
+CLAIM_POLL_S = 0.5
 
 
-def _refresh_lock(marketplace: str) -> asyncio.Lock:
-    """One refresh per marketplace at a time. Etsy rotates its refresh token, so
-    a second refresh sent with the old one would sign the seller out."""
-    loop = asyncio.get_running_loop()
-    key = (loop, f"{_seller()}:{marketplace}")
-    lock = _refresh_locks.get(key)
-    if lock is None:
-        for stale in [stale for stale in _refresh_locks if stale[0] is not loop]:
-            del _refresh_locks[stale]
-        lock = _refresh_locks[key] = asyncio.Lock()
-    return lock
+def _claim_refresh(marketplace: str, claim: str, rejected: str | None) -> tuple[dict | None, bool]:
+    """The saved account, and whether this caller now holds its refresh.
+
+    No claim is taken when the token is still fresh, cannot be refreshed, or
+    another caller's claim has not run out.
+    """
+    outcome: dict = {"claimed": False}
+
+    def take(accounts):
+        account = outcome["account"] = accounts.get(marketplace)
+        if (not account or not account.get("accessToken") or not account.get("refreshToken")
+                or _fresh(account, rejected)
+                or (account.get("refreshClaim") or {}).get("until", 0) > time.time()):
+            return
+        account = {**account, "refreshClaim": {"id": claim, "until": time.time() + REFRESH_CLAIM_S}}
+        accounts[marketplace] = outcome["account"] = account
+        outcome["claimed"] = True
+
+    update_marketplace_accounts(take)
+    return outcome["account"], outcome["claimed"]
+
+
+def _store_refresh(marketplace: str, claim: str, used: dict, refreshed: dict) -> bool:
+    """Save refreshed tokens unless the connection changed since the claim."""
+    outcome = {"stored": False}
+
+    def store(accounts):
+        current = accounts.get(marketplace)
+        if not current or any(current.get(key) != used.get(key) for key in ("accountId", "connectedAt", "refreshToken")):
+            return
+        held = current.get("refreshClaim")
+        accounts[marketplace] = {**refreshed, "refreshClaim": held} if held and held.get("id") != claim else refreshed
+        outcome["stored"] = True
+
+    update_marketplace_accounts(store)
+    return outcome["stored"]
+
+
+def _release_refresh(marketplace: str, claim: str) -> None:
+    def release(accounts):
+        current = accounts.get(marketplace)
+        if current and (current.get("refreshClaim") or {}).get("id") == claim:
+            accounts[marketplace] = {key: value for key, value in current.items() if key != "refreshClaim"}
+
+    update_marketplace_accounts(release)
 
 
 def relay_refused(resp) -> bool:
@@ -291,15 +334,25 @@ async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
         raise SignInRequired(f"{NAMES[marketplace]} isn't connected.")
     if _fresh(account, rejected):
         return account["accessToken"]
-    async with _refresh_lock(marketplace):
-        # Whoever held the lock may have refreshed already; use what it stored.
-        account = (await _accounts()).get(marketplace)
+    claim = secrets.token_hex(16)
+    # A claim always runs out, so waiting for another caller's refresh is bounded too.
+    deadline = time.monotonic() + REFRESH_CLAIM_S + 15
+    while True:
+        # Whoever held the claim may have refreshed already; use what it stored.
+        account, claimed = await asyncio.to_thread(_claim_refresh, marketplace, claim, rejected)
         if not account or not account.get("accessToken"):
             raise SignInRequired(f"{NAMES[marketplace]} isn't connected.")
         if _fresh(account, rejected):
             return account["accessToken"]
         if not account.get("refreshToken"):
             raise SignInRequired(f"Sign in to {NAMES[marketplace]} again.")
+        if claimed:
+            break
+        if time.monotonic() > deadline:
+            raise RelayError(f"Refreshing the {NAMES[marketplace]} sign-in is taking too long. Try again in a minute.", 503)
+        await asyncio.sleep(CLAIM_POLL_S)
+    stored = False
+    try:
         resp = await relay_request(
             "POST", f"/studio/oauth/{marketplace}/refresh", json_body={"refreshToken": account["refreshToken"]},
         )
@@ -309,22 +362,26 @@ async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
             raise SignInRequired(f"Sign in to {NAMES[marketplace]} again.")
         if resp.status_code != 200:
             raise RelayError(f"Could not refresh the {NAMES[marketplace]} sign-in ({resp.status_code}).", resp.status_code)
-        current = (await _accounts()).get(marketplace)
-        if not current or any(current.get(key) != account.get(key) for key in ("accountId", "connectedAt", "refreshToken")):
-            # Disconnect or a new sign-in during the request revokes this refresh.
-            # Never recreate the connection using a response for its old grant.
-            raise SignInRequired(f"The {NAMES[marketplace]} connection changed. Sign in again.")
         tokens = resp.json().get("tokens") or {}
-        now = time.time()
-        account = {
-            **account,
+        refreshed = {
+            **{key: value for key, value in account.items() if key != "refreshClaim"},
             "accessToken": tokens.get("accessToken"),
             # eBay keeps its refresh token; Etsy issues a new one each time.
             "refreshToken": tokens.get("refreshToken") or account["refreshToken"],
-            "expiresAt": now + tokens["expiresIn"] if tokens.get("expiresIn") else None,
+            "expiresAt": time.time() + tokens["expiresIn"] if tokens.get("expiresIn") else None,
         }
-        await asyncio.to_thread(set_marketplace_account, marketplace, account)
-        return account["accessToken"]
+        stored = await asyncio.to_thread(_store_refresh, marketplace, claim, account, refreshed)
+        if not stored:
+            # Disconnect or a new sign-in during the request revokes this refresh.
+            # Never recreate the connection using a response for its old grant.
+            raise SignInRequired(f"The {NAMES[marketplace]} connection changed. Sign in again.")
+        return refreshed["accessToken"]
+    finally:
+        if not stored:
+            try:
+                await asyncio.to_thread(_release_refresh, marketplace, claim)
+            except Exception:  # noqa: BLE001 - the claim runs out on its own
+                log.warning("could not release the %s refresh claim", marketplace)
 
 
 @marketplace_call("etsy")

@@ -103,6 +103,19 @@ every transaction. The isolation check runs once per pooled connection. Keep
 the unprivileged runtime login, certificate verification, and the separate
 migration login. Do not bypass row security.
 
+The same statement sets `statement_timeout = 15s` and
+`idle_in_transaction_session_timeout = 30s` for the seller transaction
+(`services/hosted_database.py`), so a runaway query, a long lock wait or a
+transaction left open across a wait cannot keep a pooled connection
+indefinitely. The longest seller read measured is the inventory list, about
+2 s; the longest legitimate pause inside a transaction is one Storage call,
+capped at 20 s. Migrations use their own login and are unaffected. When a
+seller sees `canceling statement due to statement timeout` or a connection
+closed for idle-in-transaction, fix the code holding the transaction rather
+than raising these. The seller policies read the signed-in seller through a
+scalar subquery, so Postgres evaluates it once per statement (an InitPlan)
+instead of parsing the claims JSON for every row a scan visits.
+
 Inventory, suggestions and sales totals read the stored generated
 `listing_revisions.inventory_fields` projection. The complete marketplace
 forms remain in `listing_json`; routine inventory reads must not extract their

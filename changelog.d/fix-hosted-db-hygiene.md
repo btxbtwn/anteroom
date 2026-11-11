@@ -1,0 +1,3 @@
+- Keep the web app responsive while the assistant answers, photos upload or are deleted, and pages load.
+- Keep Etsy and eBay signed in when two parts of Anteroom refresh the sign-in at the same moment.
+- Tell you the draft worker is unavailable instead of waiting forever when a draft task never starts.

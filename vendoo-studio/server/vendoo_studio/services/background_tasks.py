@@ -17,6 +17,10 @@ ACTIVE = ('queued', 'running')
 # Each store is a short transaction on a shared pooled connection, so writing
 # more often than readers poll only takes connections from the seller's pages.
 EVENT_INTERVAL = .5
+# A worker claims a queued task within seconds. One still queued after this
+# long has no worker to run it, and would otherwise keep its draft busy.
+UNCLAIMED_LIMIT_S = 300
+WORKER_UNAVAILABLE = 'The draft worker is unavailable; try again shortly.'
 
 
 class TaskLeaseExpired(RuntimeError):
@@ -117,6 +121,24 @@ def finish(task_id, token, *, error=None):
         db.commit()
         if finished is None:
             raise _lost(db, task_id)
+
+
+def expire_unclaimed(db, task_id):
+    """Fail a task no worker claimed within UNCLAIMED_LIMIT_S and free its draft.
+
+    Returns False when a worker claimed it meanwhile; the update and the
+    worker's claim cannot both succeed.
+    """
+    expired = db.execute(update(BackgroundTask).where(
+        BackgroundTask.id == task_id, BackgroundTask.status == 'queued',
+        BackgroundTask.created_at < func.now() - text(f"interval '{UNCLAIMED_LIMIT_S} seconds'"),
+    ).values(status='failed', error=WORKER_UNAVAILABLE, updated_at=func.now())
+        .returning(BackgroundTask.conversation_id)).first()
+    if expired is not None and expired.conversation_id is not None:
+        db.execute(update(Conversation).where(Conversation.id == expired.conversation_id, Conversation.status == 'in_progress')
+                   .values(status='draft'))
+    db.commit()
+    return expired is not None
 
 
 def cancel(db, task_id):

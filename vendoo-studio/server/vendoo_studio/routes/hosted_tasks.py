@@ -1,5 +1,7 @@
 """Authenticated draft work, streamed from durable, seller-owned events."""
 import asyncio
+from datetime import UTC, datetime, timedelta
+
 import anyio
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -46,6 +48,10 @@ def task_stream(task_id):
             task = db.get(BackgroundTask, task_id)
             if task is None:
                 raise HTTPException(404, 'Task not found')
+            if (task.status == 'queued'
+                    and datetime.now(UTC) - task.created_at > timedelta(seconds=queue.UNCLAIMED_LIMIT_S)
+                    and queue.expire_unclaimed(db, task_id)):
+                return [], 'failed', queue.WORKER_UNAVAILABLE
             rows = db.execute(select(BackgroundTaskEvent.sequence, BackgroundTaskEvent.data)
                               .where(BackgroundTaskEvent.task_id == task_id,
                                      BackgroundTaskEvent.sequence > sequence)

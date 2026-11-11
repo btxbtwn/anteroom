@@ -17,6 +17,7 @@ class TokenRefreshTest(unittest.IsolatedAsyncioTestCase):
                                "expiresAt": time.time() - 10}}
         self.enterContext(patch.object(accounts, "get_marketplace_accounts", side_effect=lambda: {k: dict(v) for k, v in self.store.items()}))
         self.enterContext(patch.object(accounts, "set_marketplace_account", side_effect=lambda m, a: self.store.__setitem__(m, dict(a))))
+        self.enterContext(patch.object(accounts, "update_marketplace_accounts", side_effect=lambda mutate: mutate(self.store)))
         self.refreshes = []
 
     async def relay(self, method, path, json_body=None, **kwargs):
@@ -74,3 +75,39 @@ class TokenRefreshTest(unittest.IsolatedAsyncioTestCase):
             self.store["etsy"]["expiresAt"] = time.time() - 10
             with self.assertRaises(RelayError):
                 await accounts.access_token("etsy")
+
+
+def test_refreshes_on_separate_event_loops_send_the_rotating_token_once(monkeypatch):
+    """Request and scheduler loops (and other Machines) each refresh; Etsy accepts a refresh token once."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from vendoo_studio.services import keychain
+
+    keychain.set_marketplace_account("etsy", {"accountId": "1", "connectedAt": 1, "accessToken": "old",
+                                              "refreshToken": "r1", "expiresAt": time.time() - 10})
+    sent, valid, lock = [], {"refreshToken": "r1"}, threading.Lock()
+    both_waiting = threading.Barrier(2, timeout=5)
+
+    async def relay(method, path, json_body=None, **kwargs):
+        with lock:
+            sent.append(json_body["refreshToken"])
+        await asyncio.sleep(0.2)
+        with lock:
+            if json_body["refreshToken"] != valid["refreshToken"]:
+                return httpx.Response(401, json={"error": "invalid_grant"})
+            valid["refreshToken"] = f"r{len(sent) + 1}"
+            return httpx.Response(200, json={"tokens": {"accessToken": f"a{len(sent)}",
+                                                        "refreshToken": valid["refreshToken"], "expiresIn": 3600}})
+
+    def on_its_own_loop(_):
+        both_waiting.wait()
+        return asyncio.run(accounts.access_token("etsy"))
+
+    monkeypatch.setattr(accounts, "relay_request", relay)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        tokens = list(pool.map(on_its_own_loop, range(2)))
+    assert sent == ["r1"]
+    assert tokens == ["a1", "a1"]
+    saved = keychain.get_marketplace_accounts()["etsy"]
+    assert saved["refreshToken"] == "r2" and "refreshClaim" not in saved
