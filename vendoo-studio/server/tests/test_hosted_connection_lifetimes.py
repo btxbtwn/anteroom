@@ -365,6 +365,51 @@ def test_photo_reads_return_the_database_connection_before_storage(cloud, active
     assert client.get(paths[route], headers=alice).status_code == 200
 
 
+def test_photo_upload_and_delete_write_storage_without_a_database_connection(cloud, active_connections, signing_keys, monkeypatch):  # noqa: F811
+    """Storage can take 20 seconds; the draft's row lock and pooled connection must not wait for it."""
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    draft = client.post('/api/drafts', headers=alice, json={'title': 'Coat'}).json()['id']
+    objects, calls = {}, []
+
+    def storage(method, key, _token=None, data=None):
+        calls.append((method, bool(active_connections)))
+        if method == 'POST':
+            objects[key] = data
+        elif method == 'DELETE':
+            objects.pop(key, None)
+        return b''
+
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    uploaded = client.post(f'/api/drafts/{draft}/photos', headers=alice, content=image_bytes())
+    assert uploaded.status_code == 201, uploaded.text
+    assert len(objects) == 1
+    assert client.delete(f"/api/drafts/{draft}/photos/{uploaded.json()['id']}", headers=alice).status_code == 204
+    assert objects == {}
+    assert calls == [('POST', False), ('DELETE', False)], 'Storage calls must not hold a database connection'
+
+
+def test_a_refused_photo_upload_removes_its_stored_object(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    draft = client.post('/api/drafts', headers=alice, json={'title': 'Coat'}).json()['id']
+    objects = {}
+
+    def storage(method, key, _token=None, data=None):
+        if method == 'POST':
+            objects[key] = data
+        elif method == 'DELETE':
+            objects.pop(key, None)
+        return b''
+
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    monkeypatch.setattr(hosted_photos, 'MAX_PHOTOS', 1)
+    assert client.post(f'/api/drafts/{draft}/photos', headers=alice, content=image_bytes()).status_code == 201
+    refused = client.post(f'/api/drafts/{draft}/photos', headers=alice, content=image_bytes())
+    assert refused.status_code == 422
+    assert len(objects) == 1, 'A refused upload must not leave its object in Storage'
+
+
 @pytest.fixture
 def active_connections(cloud):  # noqa: F811
     _client, engine = cloud
