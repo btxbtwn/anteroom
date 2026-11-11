@@ -1,1 +1,0 @@
-- Enter cost of goods when completing sale details so the missing sale data warning can clear.
