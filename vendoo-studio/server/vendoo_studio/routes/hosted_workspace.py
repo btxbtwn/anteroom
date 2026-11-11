@@ -327,10 +327,11 @@ def activity_response(db, identity, count, last):
     tasks = db.scalars(select(BackgroundTask).where(
         BackgroundTask.conversation_id == identity, BackgroundTask.status.in_(('queued', 'running')))).all()
     labels = [f'{row.kind}: {row.status}' for row in tasks]
-    from vendoo_studio.services.native_marketplaces import step_label
+    from vendoo_studio.services.native_marketplaces import is_direct_action, step_label
 
     items = [step_label(str(row.current_step or '')) or row.current_step or row.status for row in jobs]
-    return {'busy': bool(jobs or tasks), 'items': items + labels,
+    writing = bool(tasks) or any(not is_direct_action(str(row.current_step or '')) for row in jobs)
+    return {'busy': bool(jobs or tasks), 'writing': writing, 'items': items + labels,
             'message_count': count, 'last_message_id': last, 'agents': []}
 
 
