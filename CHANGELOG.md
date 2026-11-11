@@ -6,6 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.918 — 2026-11-11
+
+- Group warning emails into hourly digests, keep pending error reports across restarts, and pause delivery when Google rejects mail for exceeding its quota.
+- Show the operator when email delivery is paused and how much of the configured daily email budget has been used.
+
+## 0.1.917 — 2026-11-11
+
+- The app no longer stalls for everyone when you list one item on several marketplaces at once.
+
 ## 0.1.916 — 2026-11-11
 
 - Keep edits made while chat is working and save them when it finishes, so field reloads are no longer blocked by a failed save.

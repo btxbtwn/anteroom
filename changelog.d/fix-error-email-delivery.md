@@ -1,2 +1,0 @@
-- Group warning emails into hourly digests, keep pending error reports across restarts, and pause delivery when Google rejects mail for exceeding its quota.
-- Show the operator when email delivery is paused and how much of the configured daily email budget has been used.
