@@ -161,6 +161,11 @@ def update_conversation(conv_id: str, body: ConversationUpdate, db: Session = De
     conv = repo.get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
+    if body.note_changes:
+        # Lock and reload before changing anything: note changes merge into the
+        # notes as they are now, and a reload after the title or notes were set
+        # would throw those away.
+        db.refresh(conv, with_for_update=True)
     changed = False
     renamed = False
     if body.title is not None:
@@ -183,7 +188,6 @@ def update_conversation(conv_id: str, body: ConversationUpdate, db: Session = De
     if body.note_changes:
         from vendoo_studio.services.vendoo_import import merge_note_changes
 
-        db.refresh(conv, with_for_update=True)
         conv.notes = merge_note_changes(conv.notes, body.note_changes)
         changed = True
     if renamed:
