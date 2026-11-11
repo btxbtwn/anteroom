@@ -6,7 +6,7 @@ import editorFields from "../../../skills/list-this/references/listing-editor-fi
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { EbayVariationAspect, EbayVariations, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
+import type { EbayVariationAspect, EbayVariations, ListingData, ListingDocument, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { listingEdits } from "../api/listingEdits";
 import { registerUnsavedWork } from "../lib/unsavedWork";
@@ -744,6 +744,26 @@ export function StructuredEditor({
   };
   const commitDraftsRef = React.useRef(commitDrafts);
   const hasDrafts = Object.keys(drafts).length > 0;
+  const reloadFields = useMutation({
+    mutationFn: ({ market, revision }: { market: string; revision: string }) =>
+      api.nativeMarketplaces.refreshForm(convId, market, revision),
+    onSuccess: async (result, { market }) => {
+      await queryClient.invalidateQueries({ queryKey: ["listing", convId] });
+      // Use the returned revision even before React renders it. This also
+      // refreshes notes when rebuilding did not change the saved definition.
+      const current = queryClient.getQueryData<ListingDocument>(["listing", convId]);
+      if (current?.current_revision_id === result.revision_id) {
+        await queryClient.fetchQuery({
+          ...nativeFormOptions(convId, market, current.listing, result.revision_id), staleTime: 0,
+        });
+      }
+      await Promise.all(["native-preflight", "revisions"].map(key =>
+        queryClient.invalidateQueries({ queryKey: [key, convId] })));
+    },
+    onError: (err: Error) => {
+      toastManager.add({ type: "error", title: "Could not reload fields", description: err.message });
+    },
+  });
   React.useLayoutEffect(() => {
     commitDraftsRef.current = commitDrafts;
   });
@@ -1014,6 +1034,12 @@ export function StructuredEditor({
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
     <fieldset ref={formRef} key={tab} disabled={disabled} aria-busy={disabled || undefined}
       aria-label={`${marketplaceName(tab)} listing fields`} className="@container flex min-w-0 flex-col border-0 p-0">
+      {nativeTab && <div className="flex justify-end py-2">
+        <Button size="xs" variant="ghost" disabled={disabled || saving || hasDrafts || !revisionId || reloadFields.isPending}
+          onClick={() => { if (revisionId) reloadFields.mutate({ market: tab, revision: revisionId }); }}>
+          {reloadFields.isPending ? "Reloading fields…" : "Reload fields"}
+        </Button>
+      </div>}
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {formNotes.length > 0 && onAskChat && <div className="pb-2">
