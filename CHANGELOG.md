@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.939 — 2026-11-11
+
+- Renaming a listing in the same save as an Item Details change keeps the new name.
+
 ## 0.1.938 — 2026-11-11
 
 - Reading eBay or Etsy stock after a sale no longer fails partway on the hosted app.
