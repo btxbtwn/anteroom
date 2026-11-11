@@ -442,11 +442,45 @@ class PersistListingTest(unittest.TestCase):
                         original["sku"] = seller_sku
                         original["depop_specifics"]["sku"] = seller_sku
                     listing_persistence.save_revision(self.db, conv.id, original, source="user_form")
-                    _, saved = chat_listing.apply_listing_payload(self.db, conv.id, reply)
+                    _, saved = chat_listing.apply_listing_payload(self.db, conv.id, reply,
+                        user_message="Set the SKU to BIN4-001 and the Depop SKU to DEPOP-002")
                     self.assertTrue(saved)
                     listing = ListingRepo(self.db).get_revisions(conv.id)[0].listing_json
                     self.assertEqual(listing.get("sku"), "BIN4-001")
                     self.assertEqual(listing["depop_specifics"].get("sku"), "DEPOP-002")
+
+    def test_chat_keeps_skus_the_seller_did_not_ask_for(self):
+        from vendoo_studio.services.fill_log import is_missing_fields_request
+
+        ask_chat_fill = ('Fill these listing fields for "Tee". Reply with JSON in this exact shape:\n'
+                         '{"missing_fields":[{"marketplace":"general","field":"SKU","value":"..."}]}\n'
+                         "Fields:\n- Marketplace: general\n  Field: SKU")
+        self.assertTrue(is_missing_fields_request(ask_chat_fill))
+        replies = [
+            ("Make the title shorter", 'Done.\n```json\n[{"op":"replace","path":"/title","value":"Tee"},'
+             '{"op":"replace","path":"/sku","value":"INVENTED"},'
+             '{"op":"add","path":"/depop_specifics/sku","value":"INVENTED"}]\n```'),
+            ("Fill in the missing fields", json.dumps({"missing_fields": [
+                {"marketplace": "general", "field": "SKU", "value": "INVENTED"},
+                {"marketplace": "depop", "field": "SKU", "value": "INVENTED"}]})),
+            (ask_chat_fill, json.dumps({"missing_fields": [
+                {"marketplace": "general", "field": "SKU", "value": "INVENTED"},
+                {"marketplace": "depop", "field": "SKU", "value": "INVENTED"}]})),
+        ]
+        for user_message, reply in replies:
+            for seller_sku in (None, "OLD-001"):
+                with self.subTest(user_message=user_message[:30], seller_sku=seller_sku):
+                    conv = ConversationRepo(self.db).create(title="SKU")
+                    original = {**LISTING_JSON, "depop_specifics": {"material": ["Cotton"]}}
+                    if seller_sku:
+                        original["sku"] = seller_sku
+                        original["depop_specifics"]["sku"] = seller_sku
+                    listing_persistence.save_revision(self.db, conv.id, original, source="user_form")
+                    _, saved = chat_listing.apply_listing_payload(self.db, conv.id, reply, user_message=user_message)
+                    self.assertTrue(saved)
+                    listing = ListingRepo(self.db).get_revisions(conv.id)[0].listing_json
+                    self.assertEqual(listing.get("sku"), seller_sku)
+                    self.assertEqual(listing["depop_specifics"].get("sku"), seller_sku)
 
     def test_chat_patch_cannot_invent_a_sku_inside_another_change(self):
         listing_persistence.save_revision(self.db, self.conv.id,

@@ -34,6 +34,17 @@ def _sync_category_override(db: Session, conv_id: str, listing: dict) -> None:
     db.commit()
 
 
+def _seller_asked_for_sku(user_message: str) -> bool:
+    """The seller typed a request about the SKU. Ask chat's generated fill
+    prompt does not count: it asks the model to make values up."""
+    import re
+
+    from vendoo_studio.services.fill_log import is_missing_fields_request
+
+    return bool(re.search(r"\bskus?\b", user_message or "", re.IGNORECASE)) and not is_missing_fields_request(
+        user_message)
+
+
 def _patched_sku_keys(operations: list[dict]) -> set[str]:
     """The SKU keys a JSON Patch names directly, like /sku or /depop_specifics/sku."""
     keys = set()
@@ -106,7 +117,7 @@ def _stamp_learned_fields(db: Session, listing: dict) -> dict:
     return listing
 
 
-def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict]) -> bool:
+def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], *, user_message: str = "") -> bool:
     from vendoo_studio.services.fill_log import (
         FillLogService,
         field_lookup_key,
@@ -161,7 +172,7 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict]) 
     sku_keys = {
         "sku" if field.get("marketplace", "general") in {"", "general", "unknown"} else f"{field['marketplace']}_specifics"
         for field in accepted if field_lookup_key(field.get("field") or "") == "sku"
-    }
+    } if _seller_asked_for_sku(user_message) else set()
     save_listing_revision(db, conv_id, updated, sku_keys=sku_keys)
     FillLogService(db).record_generated_values(conv_id, accepted)
 
@@ -242,7 +253,9 @@ def _reject_best_offer(db: Session, conv_id: str, listing: dict) -> bool:
     return True
 
 
-def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[list[dict] | None, bool]:
+def apply_listing_payload(
+    db: Session, conv_id: str, full_text: str, *, user_message: str = "",
+) -> tuple[list[dict] | None, bool]:
     from fastapi import HTTPException
 
     from vendoo_studio.services.fill_log import extract_missing_fields
@@ -273,7 +286,7 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
 
     missing_fields = extract_missing_fields(full_text)
     if missing_fields:
-        return None, _save_missing_fields(db, conv_id, missing_fields)
+        return None, _save_missing_fields(db, conv_id, missing_fields, user_message=user_message)
 
     parsed_ops = extract_json_patch(full_text)
     if parsed_ops:
@@ -284,7 +297,8 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
         updated = apply_json_patch(dict(revisions[0].listing_json), parsed_ops)
         if _reject_best_offer(db, conv_id, updated):
             return parsed_ops, False
-        save_listing_revision(db, conv_id, updated, operations=parsed_ops, sku_keys=_patched_sku_keys(parsed_ops))
+        sku_keys = _patched_sku_keys(parsed_ops) if _seller_asked_for_sku(user_message) else set()
+        save_listing_revision(db, conv_id, updated, operations=parsed_ops, sku_keys=sku_keys)
         ConversationRepo(db).add_message(
             conv_id,
             "system",
@@ -324,14 +338,14 @@ async def apply_listing_payload_with_repair(
         repair_missing_fields,
     )
 
-    operations, saved = apply_listing_payload(db, conv_id, full_text)
+    operations, saved = apply_listing_payload(db, conv_id, full_text, user_message=user_message)
     if saved:
         return operations, True
 
     ask_fields = is_missing_fields_request(user_message)
     if ask_fields or looks_like_missing_fields_attempt(full_text):
         repaired_fields = await repair_missing_fields(provider, full_text, user_message)
-        if repaired_fields and _save_missing_fields(db, conv_id, repaired_fields):
+        if repaired_fields and _save_missing_fields(db, conv_id, repaired_fields, user_message=user_message):
             return None, True
         if ask_fields:
             ConversationRepo(db).add_message(
