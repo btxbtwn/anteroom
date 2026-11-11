@@ -1,5 +1,0 @@
-- When ChatGPT or Claude on your Mac can't finish a request, Anteroom now says why (usage limit, signed out, stopped responding, rejected) instead of always asking you to wake your Mac.
-- Web searches through ChatGPT or Claude on your Mac get the same ten minutes as other searches instead of stopping after five.
-- Claude, Gemini, xAI, Mistral and OpenRouter keys now retry a busy or briefly failing request a couple of times before giving up, and no longer resend a rejected request.
-- Claude keys reuse cached prompts, so repeated listing steps cost less and start faster, and Claude's web search uses its newer, more focused search on current models.
-- OpenRouter only sends listing requests to hosts that follow Anteroom's listing format.
