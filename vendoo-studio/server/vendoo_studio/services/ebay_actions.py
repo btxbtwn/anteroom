@@ -157,7 +157,7 @@ def image_bytes(data: dict, *, maximum: int = 8000000) -> bytes:
                 raise ValueError
             image.verify()
         return raw
-    except (ValueError, binascii.Error, OSError) as exc:
+    except (ValueError, binascii.Error, OSError, Image.DecompressionBombError) as exc:
         raise EbayFailure(f"Choose a valid JPEG or PNG image of at most {maximum // 1000} KB.", 422) from exc
 
 

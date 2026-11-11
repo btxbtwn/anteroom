@@ -38,7 +38,7 @@ def cover_cache_path(url: str) -> Path:
 
 async def remote_cover_thumb(url: str) -> Path:
     """The cached thumbnail for ``url``. Raises ``UnsafeURLError`` when it is not a public https image."""
-    raw, _addresses = resolve_fetch_target(url, allow_http=False)
+    raw, _addresses = await resolve_fetch_target(url, allow_http=False)
     dest = cover_cache_path(raw)
     if dest.is_file() and dest.stat().st_size > 0:
         return dest
