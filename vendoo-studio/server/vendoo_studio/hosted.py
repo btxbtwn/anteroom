@@ -127,6 +127,8 @@ class ResponseHeadersMiddleware:
                 headers.setdefault("Cache-Control", "no-store")
                 headers["Referrer-Policy"] = "no-referrer"
                 headers["X-Content-Type-Options"] = "nosniff"
+                # Browsers honor this only over HTTPS, so local HTTP sandboxes are unaffected.
+                headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
                 # pywebview builds its native API methods with Function(). WebKit
                 # applies this policy to that bootstrap as well as to page scripts.
                 headers["Content-Security-Policy"] = (
