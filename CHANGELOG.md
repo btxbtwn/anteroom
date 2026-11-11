@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.934 — 2026-11-11
+
+- Keep pages fast while drafts generate: hosted drafts and scheduled work now run on their own server.
+
 ## 0.1.933 — 2026-11-11
 
 - Anteroom Bridge checks that a Mercari listing is yours and still on sale before it delists it, and keeps its saved sign-in and approvals away from web pages.
