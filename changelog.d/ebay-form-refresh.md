@@ -1,0 +1,1 @@
+- Reloading marketplace fields on the website now saves the rebuilt form and clears outdated category warnings.

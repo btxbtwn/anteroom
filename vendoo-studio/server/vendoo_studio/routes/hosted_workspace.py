@@ -599,6 +599,23 @@ def discard_blank_conversation(identity: str, request: Request, db=Depends(get_s
     return {'discarded': True}
 
 
+class FormRefreshInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    revision_id: str = Field(min_length=1, max_length=100)
+
+
+@router.post('/conversations/{identity}/native-marketplaces/{marketplace}/form/refresh')
+def refresh_native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
+                                body: FormRefreshInput, db=Depends(get_seller_db, scope="function")):
+    from vendoo_studio.services.native_editor import refresh_form
+    from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
+
+    try:
+        return asyncio.run(refresh_form(identity, marketplace, body.revision_id, db))
+    except NativeMarketplaceError as error:
+        raise HTTPException(error.status_code, str(error)) from None
+
+
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
 def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
                         revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
