@@ -16,6 +16,7 @@ from vendoo_studio.services import local_requests, tailscale_serve
 @pytest.fixture(autouse=True)
 def trusted_private_origin(monkeypatch):
     monkeypatch.setattr(local_requests, "_private_origin", None)
+    monkeypatch.setattr(local_requests, "_private_owner", None)
 
 
 @pytest.mark.parametrize("headers", [
@@ -45,23 +46,93 @@ def test_untrusted_host_cannot_read_pairing_token(host):
     {},
     {"Origin": "http://127.0.0.1:4318", "Sec-Fetch-Site": "same-origin"},
     {"Origin": "http://127.0.0.1:5173", "Sec-Fetch-Site": "same-site"},
-    {"Origin": "chrome-extension://" + "a" * 32},
+    {"Origin": "chrome-extension://empinkdlhndpfoigoipbiiofaeepcheo"},
 ])
 def test_local_app_cli_and_extension_can_read_health(headers):
     assert TestClient(app).get("/api/health", headers=headers).status_code == 200
 
 
-def test_only_the_configured_private_proxy_host_is_trusted():
-    private = "https://mac.tailnet.ts.net:9444"
+PRIVATE = "https://mac.tailnet.ts.net:9444"
+
+
+def _serve_on(owner: str | None = "seller@example.com"):
     with patch.object(tailscale_serve, "_which_tailscale", return_value="tailscale"), \
-         patch.object(tailscale_serve, "dns_name", return_value="mac.tailnet.ts.net"), \
+         patch.object(tailscale_serve, "identity", return_value=("mac.tailnet.ts.net", owner)), \
          patch.object(tailscale_serve, "_serve_status", return_value={}), \
          patch.object(tailscale_serve, "_classify_route", return_value="configured"):
         tailscale_serve.status()
-    assert TestClient(app, base_url=private).get("/api/health", headers={"Origin": private}).status_code == 200
-    assert TestClient(app, base_url="https://another.tailnet.ts.net:9444").get("/api/health").status_code == 403
+
+
+def test_only_the_configured_private_proxy_host_is_trusted():
+    _serve_on()
+    owner = {"Origin": PRIVATE, "Tailscale-User-Login": "seller@example.com"}
+    assert TestClient(app, base_url=PRIVATE).get("/api/health", headers=owner).status_code == 200
+    assert TestClient(app, base_url="https://another.tailnet.ts.net:9444").get("/api/health", headers=owner).status_code == 403
     local_requests.set_private_origin(None)
-    assert TestClient(app, base_url=private).get("/api/health").status_code == 403
+    assert TestClient(app, base_url=PRIVATE).get("/api/health", headers=owner).status_code == 403
+
+
+@pytest.mark.parametrize("headers", [
+    {},  # a tagged device: Serve sends no identity
+    {"Tailscale-User-Login": "someone-else@example.com"},
+    {"Tailscale-User-Login": ""},
+])
+def test_private_proxy_admits_only_the_macs_own_tailnet_user(headers):
+    _serve_on()
+    reply = TestClient(app, base_url=PRIVATE).get("/api/health", headers={"Origin": PRIVATE, **headers})
+    assert reply.status_code == 403
+
+
+def test_another_tailnet_user_cannot_reach_loopback_by_naming_it():
+    _serve_on()
+    reply = TestClient(app).get("/api/health", headers={"Tailscale-User-Login": "someone-else@example.com"})
+    assert reply.status_code == 403
+
+
+def test_a_tagged_mac_admits_nobody_over_the_private_proxy():
+    _serve_on(owner=None)
+    reply = TestClient(app, base_url=PRIVATE).get("/api/health", headers={"Origin": PRIVATE, "Tailscale-User-Login": "seller@example.com"})
+    assert reply.status_code == 403
+
+
+def test_owner_login_comes_from_this_macs_tailscale_user():
+    status = {"Self": {"DNSName": "mac.tailnet.ts.net.", "UserID": 7},
+              "User": {"7": {"LoginName": "seller@example.com"}, "8": {"LoginName": "other@example.com"}}}
+    with patch.object(tailscale_serve, "_run_json", return_value=status):
+        assert tailscale_serve.identity() == ("mac.tailnet.ts.net", "seller@example.com")
+    tagged = {"Self": {"DNSName": "mac.tailnet.ts.net.", "UserID": 9, "Tags": ["tag:server"]},
+              "User": {"9": {"LoginName": "tagged-devices"}}}
+    with patch.object(tailscale_serve, "_run_json", return_value=tagged):
+        assert tailscale_serve.identity() == ("mac.tailnet.ts.net", None)
+
+
+def test_only_anteroom_bridge_extensions_are_trusted(monkeypatch):
+    monkeypatch.delenv("ANTEROOM_BRIDGE_EXTENSION_IDS", raising=False)
+    local_requests.trusted_extension_ids.cache_clear()
+    bridge = "chrome-extension://" + local_requests.STORE_BRIDGE_ID
+    other = "chrome-extension://" + "a" * 32
+    assert TestClient(app).get("/api/health", headers={"Origin": bridge}).status_code == 200
+    assert TestClient(app).get("/api/health", headers={"Origin": other}).status_code == 403
+    assert TestClient(app).get("/api/extension/pairing-token", headers={"Origin": other}).status_code == 403
+
+
+def test_the_bridge_this_mac_loads_unpacked_is_trusted(monkeypatch):
+    from vendoo_studio.services.chrome_bridge import installed_extension_dir
+
+    local_requests.trusted_extension_ids.cache_clear()
+    unpacked = local_requests.unpacked_extension_id(str(installed_extension_dir().resolve()))
+    try:
+        assert TestClient(app).get("/api/health", headers={"Origin": "chrome-extension://" + unpacked}).status_code == 200
+        monkeypatch.setenv("ANTEROOM_BRIDGE_EXTENSION_IDS", " " + "b" * 32 + ",")
+        local_requests.trusted_extension_ids.cache_clear()
+        assert TestClient(app).get("/api/health", headers={"Origin": "chrome-extension://" + "b" * 32}).status_code == 200
+    finally:
+        local_requests.trusted_extension_ids.cache_clear()
+
+
+def test_unpacked_extension_id_matches_chrome():
+    # Chromium's id_util_unittest: GenerateId("test").
+    assert local_requests.unpacked_extension_id("test") == "jpignaibiiemhngfjkcpokkamffknabf"
 
 
 def test_foreign_websocket_is_rejected_before_accepting():

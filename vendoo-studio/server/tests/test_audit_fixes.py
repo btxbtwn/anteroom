@@ -103,7 +103,8 @@ class WebSocketOriginTest(unittest.TestCase):
 
         self.assertTrue(_ws_origin_allowed("http://127.0.0.1:4318"))
         self.assertTrue(_ws_origin_allowed("http://127.0.0.1:5173"))
-        self.assertTrue(_ws_origin_allowed("chrome-extension://abcdefghijklmnopabcdefghijklmnop"))
+        self.assertTrue(_ws_origin_allowed("chrome-extension://empinkdlhndpfoigoipbiiofaeepcheo"))
+        self.assertFalse(_ws_origin_allowed("chrome-extension://abcdefghijklmnopabcdefghijklmnop"))
         self.assertFalse(_ws_origin_allowed("http://127.0.0.1.evil.example:4318"))
         self.assertFalse(_ws_origin_allowed("http://localhost.evil.example:4318"))
         self.assertFalse(_ws_origin_allowed("https://web.vendoo.co"))
