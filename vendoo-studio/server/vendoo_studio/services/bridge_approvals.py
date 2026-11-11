@@ -37,7 +37,7 @@ KEY_ENV = "ANTEROOM_BRIDGE_SIGNING_KEY"
 # the approval's ``pho`` claim. Only such a Bridge gets approvals on reads: an
 # older one rejects the extra payload field on them.
 SIGNED_COMMANDS_CAPABILITY = "marketplace.signed_commands"
-# Removal note: Bridges 0.2.56 to 0.2.64 declare only this name, check approvals
+# Removal note: Bridges 0.2.56 to 0.2.67 declare only this name, check approvals
 # on the writes in SIGNED_COMMANDS, and do not hash photos. SIGNED_COMMANDS_CAPABILITY
 # replaces it; remove this name and SIGNED_COMMANDS after 2027-02-01.
 SIGNED_APPROVALS = "marketplace.signed_approvals"

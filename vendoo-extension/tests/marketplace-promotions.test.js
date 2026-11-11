@@ -460,10 +460,12 @@ test('Depop says plainly when it has nobody to offer to, and keeps a missing rec
     if (answer[0] === 400) {
       assert.match(run.results[0].error, /nobody to send an offer to.*no one has liked it, or every liker already has an offer/);
       assert.equal(run.results[0].error_code, 'rejected');
+      assert.equal(run.results[0].like_count, 0);
       // Depop's own wording asks about variants, which is not the cause.
       assert.doesNotMatch(JSON.stringify(run.results[0]), /variants|1003/);
     } else {
       assert.match(run.results[0].error, /HTTP 200.*offer_recipient_id/);
+      assert.equal(run.results[0].like_count, undefined);
       assert.equal(run.results[0].error_code, 'schema_drift');
     }
     const send = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: answer }));

@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 /// eBay offers (EbayOffersSettings.tsx): pick listings or cover them all, set a
@@ -8,7 +9,8 @@ struct EbayOffersView: View {
     let onChange: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @Environment(SessionStore.self) private var session
     @State private var status: EbayOffersStatus?
     @State private var form = EbayOffersForm()
     @State private var search = ""
@@ -284,8 +286,7 @@ struct EbayOffersView: View {
     private func connect() {
         perform("connect") {
             let url = try await api.connectEbay()
-            openURL(url)
-            notice = "Finish signing in on the eBay page that opened, then preview your offers again."
+            await MarketplaceWebSignIn.run(url, using: webAuthenticationSession, session: session)
         }
     }
 

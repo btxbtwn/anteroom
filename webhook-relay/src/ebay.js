@@ -2,6 +2,11 @@
 // app tokens, signing keys, sign-in code exchange, refresh, and the
 // per-seller ORDER_CONFIRMATION subscription.
 
+import { fetchWithDeadline, isTimeout, timeoutResponse } from "./deadline.js";
+
+// Image search uploads up to ~11 MB, so it gets longer than the other calls.
+const RESEARCH_TIMEOUT_MS = 30_000;
+
 const HOSTS = {
   production: { api: "https://api.ebay.com", apiz: "https://apiz.ebay.com", auth: "https://auth.ebay.com" },
   sandbox: {
@@ -41,6 +46,12 @@ export const EBAY_FEATURE_SCOPES = {
 };
 
 const KEY_TTL_MS = 60 * 60 * 1000;
+// A key eBay does not know stays unknown for a while; other failures are retried sooner.
+const UNKNOWN_KEY_TTL_MS = 10 * 60 * 1000;
+const FAILED_KEY_TTL_MS = 30 * 1000;
+const MAX_CACHED_KEYS = 500;
+// eBay's key IDs are UUIDs (see eBay's event-notification SDK fixtures).
+const KEY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const publicKeys = new Map();
 let appToken = null;
 
@@ -57,7 +68,7 @@ function basicAuth(env) {
 }
 
 async function tokenRequest(env, params) {
-  const response = await fetch(`${hosts(env).api}/identity/v1/oauth2/token`, {
+  const response = await fetchWithDeadline("eBay token request", `${hosts(env).api}/identity/v1/oauth2/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", authorization: basicAuth(env) },
     body: new URLSearchParams(params).toString(),
@@ -100,27 +111,66 @@ export async function ebayResearch(env, input) {
     url.searchParams.set(key, String(value));
   }
   if (input.operation === "image" && (typeof input.image !== "string" || input.image.length > 11000000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.image))) return new Response(null, { status: 400 });
-  const response = await fetch(url, {
-    method, redirect: "manual",
-    headers: { authorization: `Bearer ${await ebayAppToken(env)}`, "content-type": "application/json", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
-    ...(method === "POST" ? { body: JSON.stringify({ image: input.image }) } : {}),
-  });
-  // Do not forward provider headers, credentials, or private error echoes.
-  const body = response.ok ? await response.text() : JSON.stringify({ error: "eBay research unavailable" });
+  let response;
+  let body;
+  try {
+    response = await fetchWithDeadline("eBay research", url, {
+      method, redirect: "manual",
+      headers: { authorization: `Bearer ${await ebayAppToken(env)}`, "content-type": "application/json", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
+      ...(method === "POST" ? { body: JSON.stringify({ image: input.image }) } : {}),
+    }, RESEARCH_TIMEOUT_MS);
+    // Do not forward provider headers, credentials, or private error echoes.
+    body = response.ok ? await response.text() : JSON.stringify({ error: "eBay research unavailable" });
+  } catch (error) {
+    if (!isTimeout(error)) throw error;
+    console.error("[EBAY]", error.message);
+    return timeoutResponse("eBay");
+  }
   return new Response(body, { status: response.status >= 300 && response.status < 400 ? 502 : response.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 }
 
-export async function ebayPublicKey(env, kid) {
+export function isEbayKeyId(kid) {
+  return typeof kid === "string" && KEY_ID.test(kid);
+}
+
+function rememberKey(kid, entry) {
+  publicKeys.delete(kid);
+  if (publicKeys.size >= MAX_CACHED_KEYS) publicKeys.delete(publicKeys.keys().next().value);
+  publicKeys.set(kid, entry);
+}
+
+// /ebay is public, so a cache miss is rate-limited per caller (`limitKey`)
+// and a failed lookup is remembered, not retried on every request.
+export async function ebayPublicKey(env, kid, limitKey = "unknown") {
+  if (!isEbayKeyId(kid)) throw Object.assign(new Error("eBay key ID is not a UUID"), { status: 412 });
   const cached = publicKeys.get(kid);
-  if (cached && cached.expiresAt > Date.now()) return cached.pem;
-  const token = await ebayAppToken(env);
-  const response = await fetch(`${hosts(env).api}/commerce/notification/v1/public_key/${encodeURIComponent(kid)}`, {
-    headers: { authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) throw new Error(`eBay public key request failed: ${response.status}`);
-  const body = await response.json();
-  publicKeys.set(kid, { pem: body.key, expiresAt: Date.now() + KEY_TTL_MS });
-  return body.key;
+  if (cached && cached.expiresAt > Date.now()) {
+    if (cached.pem) return cached.pem;
+    throw new Error(cached.error);
+  }
+  if (env.EBAY_KEY_LIMITER) {
+    const { success } = await env.EBAY_KEY_LIMITER.limit({ key: limitKey });
+    if (!success) throw Object.assign(new Error("too many eBay key lookups"), { status: 429 });
+  }
+  try {
+    const token = await ebayAppToken(env);
+    const response = await fetchWithDeadline(
+      "eBay public key request",
+      `${hosts(env).api}/commerce/notification/v1/public_key/${kid}`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    if (!response.ok) {
+      throw Object.assign(new Error(`eBay public key request failed: ${response.status}`), { keyStatus: response.status });
+    }
+    const body = await response.json();
+    if (typeof body?.key !== "string") throw new Error("eBay public key response had no key");
+    rememberKey(kid, { pem: body.key, expiresAt: Date.now() + KEY_TTL_MS });
+    return body.key;
+  } catch (error) {
+    const unknown = error.keyStatus >= 400 && error.keyStatus < 500;
+    rememberKey(kid, { error: error.message, expiresAt: Date.now() + (unknown ? UNKNOWN_KEY_TTL_MS : FAILED_KEY_TTL_MS) });
+    throw new Error(error.message);
+  }
 }
 
 export function ebayAuthorizeUrl(env, state, features = []) {
@@ -149,7 +199,7 @@ export function ebayRefresh(env, refreshToken) {
 }
 
 export async function ebayUser(env, accessToken) {
-  const response = await fetch(`${hosts(env).apiz}/commerce/identity/v1/user/`, {
+  const response = await fetchWithDeadline("eBay user lookup", `${hosts(env).apiz}/commerce/identity/v1/user/`, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
   if (!response.ok) throw new Error(`eBay user lookup failed: ${response.status}`);
@@ -159,7 +209,7 @@ export async function ebayUser(env, accessToken) {
 }
 
 async function notificationApi(env, token, path, init = {}) {
-  const response = await fetch(`${hosts(env).api}/commerce/notification/v1${path}`, {
+  const response = await fetchWithDeadline(`eBay ${init.method ?? "GET"} ${path}`, `${hosts(env).api}/commerce/notification/v1${path}`, {
     ...init,
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(init.headers ?? {}) },
   });

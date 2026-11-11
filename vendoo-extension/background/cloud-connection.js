@@ -12,7 +12,7 @@
   // What a relaying Bridge runs: marketplace actions, and each named read under its own name,
   // and how it checks them: a signed approval on every relayed command, binding the photos
   // relayed with it (background/cloud-approvals.js). It no longer declares the writes-only
-  // `marketplace.signed_approvals` of Bridges 0.2.56 to 0.2.64, which the server drops later.
+  // `marketplace.signed_approvals` of Bridges 0.2.56 to 0.2.67, which the server drops later.
   const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands'];
 
   function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null, runCommand = null,

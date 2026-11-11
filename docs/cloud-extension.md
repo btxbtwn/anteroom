@@ -102,7 +102,7 @@ unchanged; no cloud credential is added. See [form previews](cloud-marketplace-f
 
 Any script that runs on the Anteroom page can post a command to the content
 script, so the page's `confirm: true` does not show that the seller confirmed
-anything. Since Bridge 0.2.65, every command the hosted API relays carries
+anything. Since Bridge 0.2.68, every command the hosted API relays carries
 `payload.approval`: an ES256 compact JWS signed by the API
 (`services/bridge_approvals.py`) when the page takes the command. Its claims
 bind the seller's account (`sub`), the command (`cmd`), marketplace (`mkt`),
@@ -135,7 +135,7 @@ would refuse the extra field on reads. A Bridge whose
 `BRIDGE_APPROVAL_PUBLIC_KEY` is empty refuses every relayed command. The key and
 rollout order are in [the operating guide](hosted-production.md#6-bridge-approval-key).
 
-Transition: Bridges 0.2.56 to 0.2.64 declare `marketplace.signed_approvals` instead.
+Transition: Bridges 0.2.56 to 0.2.67 declare `marketplace.signed_approvals` instead.
 For them the API still signs only the writes (`marketplace.execute`,
 `marketplace.result`, `marketplace.delete`, `marketplace.promote`,
 `job.vendoo_api`), without `pho`. Remove that path (`SIGNED_APPROVALS` and

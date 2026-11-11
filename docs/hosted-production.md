@@ -363,8 +363,8 @@ was not pointed at production.
 The hosted API signs every command it relays to the seller's Chrome (List,
 Update, Save draft, result checks, Delist, Cancel, shares and offers, Vendoo
 drafts, and the reads of sales, likes, imports and sign-in status), and binds
-the photos relayed with a List or Vendoo draft. Anteroom Bridge 0.2.65 and later
-run none of them without that signature (0.2.56 to 0.2.64, writes only), so a
+the photos relayed with a List or Vendoo draft. Anteroom Bridge 0.2.68 and later
+run none of them without that signature (0.2.56 to 0.2.67, writes only), so a
 script on the Anteroom page cannot list, change or delete a listing, swap its
 photos, or read the seller's marketplace data on its own. See [the Bridge protocol](cloud-extension.md#signed-approvals).
 

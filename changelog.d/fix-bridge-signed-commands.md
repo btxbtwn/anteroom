@@ -1,1 +1,1 @@
-- Anteroom Bridge 0.2.65 runs only the photos Anteroom approved for a listing, and needs Anteroom's signed approval for every action from the web, including reading your sales, likes and imports and cancelling a listing.
+- Anteroom Bridge 0.2.68 runs only the photos Anteroom approved for a listing, and needs Anteroom's signed approval for every action from the web, including reading your sales, likes and imports and cancelling a listing.
