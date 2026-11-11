@@ -202,3 +202,21 @@ def test_chrome_read_looks_up_the_device_route_off_the_event_loop(monkeypatch):
 
     loop_thread = asyncio.run(run())
     assert threads and loop_thread not in threads
+
+
+def test_health_fails_when_the_draft_loop_has_stopped(monkeypatch):
+    from concurrent.futures import Future
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'worker')
+    app = create_app()
+    finished = Future()
+    finished.set_result(None)
+    client = TestClient(app)
+    app.state.background_worker = finished
+    response = client.get('/api/health')
+    assert response.status_code == 503 and response.json()['status'] == 'worker_stopped'
+    app.state.background_worker = Future()
+    assert client.get('/api/health').status_code == 200

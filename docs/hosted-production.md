@@ -77,8 +77,15 @@ core and the worker takes the shared one.
 
 | Process group | Role | Machine | Runs |
 | --- | --- | --- | --- |
-| `app` | `web` | performance-1x, 2 GB | Seller requests, Mac and Chrome connections, direct marketplace jobs |
-| `worker` | `worker` | shared-cpu-1x, 2 GB | Drafts, assistant answers, the schedulers (scheduler lease) |
+| `app` | `web` | performance-1x, 2 GB | Seller requests, Mac and Chrome connections, direct marketplace jobs, Chrome sale checks and promotion rounds (`chrome` lease) |
+| `worker` | `worker` | shared-cpu-1x, 2 GB | Drafts, assistant answers, automations, eBay offers, the job watchdog, Sourcing and sales sync (`schedulers` lease) |
+
+Chrome sale checks and promotion rounds stay on the web Machine because they
+list sellers from the Chrome tabs connected to their own process
+(`hosted_browser_relay.ready_sellers`); on the worker that list would be empty.
+`process_handoff.lead` holds each lease separately and releases them only after
+every set has stopped. A worker whose draft loop has died fails `/api/health`
+(503), so Fly restarts it.
 
 A web process queues drafts and leaves them to the worker group; it never
 claims one. The worker answers forwarded Mac and Chrome calls on the private
