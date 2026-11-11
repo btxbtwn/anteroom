@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.940 — 2026-11-11
+
+- Asking chat to set a SKU now saves it. Chat still can't make up a SKU on its own.
+
 ## 0.1.939 — 2026-11-11
 
 - Renaming a listing in the same save as an Item Details change keeps the new name.
