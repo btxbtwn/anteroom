@@ -1,5 +1,6 @@
 """Process-to-process Mac and Chrome calls. Browsers do not call these routes."""
 from uuid import UUID
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,6 +28,7 @@ def _owner(user_id: str) -> str:
 class MacCall(BaseModel):
     model_config = ConfigDict(extra='forbid')
     user_id: str
+    provider: Literal['chatgpt', 'claude']
     operation: str
     args: list = Field(default_factory=list)
     kwargs: dict = Field(default_factory=dict)
@@ -38,7 +40,7 @@ async def invoke_mac(body: MacCall, authorization: str | None = Header(default=N
     if body.operation not in OPERATIONS:
         raise HTTPException(404, 'Not found')
     try:
-        result = await mac_for(_owner(body.user_id)).invoke(body.operation, body.args, body.kwargs)
+        result = await mac_for(_owner(body.user_id)).invoke(body.operation, body.args, body.kwargs, body.provider)
     except MacUnavailable:
         return {'ok': False}
     return {'ok': True, 'result': result}

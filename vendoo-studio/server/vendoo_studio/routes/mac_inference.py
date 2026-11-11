@@ -1,8 +1,9 @@
-"""The signed-in Mac polls outbound; ChatGPT credentials never leave that Mac."""
+"""The signed-in Mac polls outbound; subscription credentials stay on that Mac."""
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
 from sqlalchemy.exc import SQLAlchemyError
 
 from vendoo_studio.services.device_routes import claim, lookup, replay_instance
@@ -33,11 +34,16 @@ def _pinned(device: str, *, claim_route: bool):
     return Response(status_code=409, headers={'fly-replay': f'instance={instance}'})
 
 
+class SubscriptionModels(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    vision_model: str = Field(min_length=1, max_length=100)
+    listing_model: str = Field(min_length=1, max_length=100)
+
+
 class Poll(BaseModel):
     model_config = ConfigDict(extra='forbid')
     worker: str = Field(pattern=r'^[0-9a-f]{32}$')
-    vision_model: str = Field(min_length=1, max_length=100)
-    listing_model: str = Field(min_length=1, max_length=100)
+    providers: dict[Literal['chatgpt', 'claude'], SubscriptionModels] = Field(max_length=2)
     available: bool = True
     active_call: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
 
@@ -51,7 +57,12 @@ async def next_call(body: Poll):
     connection = relay()
     while True:
         try:
-            command = connection.poll(body.worker, {'vision_model': body.vision_model, 'listing_model': body.listing_model}, body.available, timeout=0)
+            with connection.condition:
+                # Cancellation heartbeats must not restore an older account
+                # snapshot after the main poll reports a subscription sign-out.
+                models = (connection.models if body.active_call is not None else
+                          {name: entry.model_dump() for name, entry in body.providers.items()})
+                command = connection.poll(body.worker, models, body.available, timeout=0)
         except MacUnavailable:
             raise HTTPException(409, 'Another Mac is already connected to this account') from None
         if command is not None:
@@ -87,4 +98,4 @@ async def status():
     if pinned := await asyncio.to_thread(_pinned, 'mac', claim_route=False):
         return pinned
     connection = relay()
-    return {'connected': connection.connected, **connection.models}
+    return {'connected': connection.connected, 'providers': connection.models if connection._local() else {}}

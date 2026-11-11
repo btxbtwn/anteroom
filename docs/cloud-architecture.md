@@ -11,6 +11,26 @@ scoping; account linking/import and other file-backed services remain separate w
 
 ## Shared workspace port
 
+### Desktop subscription worker
+
+ChatGPT and Claude subscriptions are connected under Account → This Mac’s
+Listings → Settings → Providers in the Mac app. Return to Account → My
+Account and sign into the same Anteroom account to connect its outbound
+inference worker. Web and iPhone Settings → Providers
+show each subscription separately and let the seller select it for listings
+or photos. Models and reasoning are configured on the Mac.
+
+The Mac must remain awake, online, and running Anteroom. Credentials remain
+in the local ChatGPT connection and Claude Code's own login; neither web nor
+iPhone receives them. The hosted API routes each inference call to the
+seller's connected Mac and the named subscription. Calls can overlap and
+are cancelled when their originating task stops. A disconnected Mac or
+signed-out subscription fails visibly; an interrupted inference is not
+replayed. Automatic generation still stops at a saved draft.
+
+Subscription access through this worker does not provide cloud execution
+while the Mac is off. API-key providers continue to run on the hosted API.
+
 The hosted entry point mounts `src/app/App.tsx` behind Supabase sign-in. It
 installs the authenticated transport used by the existing API client; private
 images use that transport too. Each account gets a new query client, and an

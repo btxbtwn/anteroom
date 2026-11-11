@@ -13,11 +13,12 @@ import uuid
 from collections import deque
 
 OPERATIONS = frozenset({'analyze_photos', 'chat', 'vision_chat', 'structured_chat', 'quick_chat', 'web_search'})
+SUBSCRIPTIONS = frozenset({'chatgpt', 'claude'})
 
 
 class MacUnavailable(RuntimeError):
     def __init__(self):
-        super().__init__('Open Anteroom on your Mac, sign into this account, and connect ChatGPT there before retrying.')
+        super().__init__('Open Anteroom on your Mac, sign into this account, and connect the selected subscription there. Keep the Mac awake and online, then retry.')
 
 
 class MacInference:
@@ -40,6 +41,9 @@ class MacInference:
             return True
         from vendoo_studio.services.device_routes import remote_fresh
         return remote_fresh(self.owner, 'mac')
+
+    def ready(self, provider):
+        return self._local() and provider in self.models
 
     def poll(self, worker, models, available=True, timeout=20):
         with self.condition:
@@ -82,7 +86,9 @@ class MacInference:
                 return False
             return True
 
-    async def invoke(self, operation, args, kwargs):
+    async def invoke(self, operation, args, kwargs, provider):
+        if provider not in SUBSCRIPTIONS or operation not in OPERATIONS:
+            raise ValueError('Unsupported subscription operation')
         from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
         try:
             target = await forward_target(self.owner, 'mac')
@@ -91,7 +97,7 @@ class MacInference:
         if target is not None:
             try:
                 payload = await post(target, '/internal/mac-inference/invoke', {
-                    'user_id': self.owner, 'operation': operation, 'args': args, 'kwargs': kwargs,
+                    'user_id': self.owner, 'provider': provider, 'operation': operation, 'args': args, 'kwargs': kwargs,
                 }, timeout=310)
             except RoutingUnavailable:
                 raise MacUnavailable from None
@@ -102,10 +108,10 @@ class MacInference:
         future = concurrent.futures.Future()
         with self.condition:
             # No other process holds this Mac, so only a local one can take it.
-            if not self._local():
+            if not self.ready(provider):
                 raise MacUnavailable()
             self.pending[identity] = future
-            self.outbox.append({'id': identity, 'operation': operation, 'args': args, 'kwargs': kwargs})
+            self.outbox.append({'id': identity, 'provider': provider, 'operation': operation, 'args': args, 'kwargs': kwargs})
             self.condition.notify_all()
         try:
             return await asyncio.wait_for(asyncio.wrap_future(future), 300)
@@ -130,25 +136,24 @@ def relay_for(owner):
         return relay
 
 
-class MacChatGPTProvider:
-    name = 'chatgpt'
-    base_url = 'https://api.openai.com/v1'
-
-    def __init__(self, relay):
+class MacSubscriptionProvider:
+    def __init__(self, relay, provider):
         self.relay = relay
-        self.vision_model = relay.models.get('vision_model', '')
-        self.listing_model = relay.models.get('listing_model', '')
+        self.name = provider
+        self.base_url = 'https://api.openai.com/v1' if provider == 'chatgpt' else 'https://api.anthropic.com'
+        models = relay.models.get(provider, {})
+        self.vision_model = models.get('vision_model', '')
+        self.listing_model = models.get('listing_model', '')
 
     async def test_connection(self):
-        # May read the device route from Postgres: keep it off the event loop.
-        if not await asyncio.to_thread(lambda: self.relay.connected):
-            raise MacUnavailable()
+        # Exercise the selected subscription, rather than only its heartbeat.
+        await self.relay.invoke('chat', [[{'role': 'user', 'content': 'Reply OK.'}]], {'stream': False}, self.name)
         return True
 
     async def analyze_photos(self, photo_paths, **kwargs):
         from vendoo_studio.providers.xiaomi_mimo import encode_images
         images = await encode_images(photo_paths, kwargs.pop('max_side', 1600))
-        return await self.relay.invoke('analyze_photos', [images], kwargs)
+        return await self.relay.invoke('analyze_photos', [images], kwargs, self.name)
 
     async def chat(self, messages, stream=True):
         async for chunk in self._stream('chat', [messages], {'stream': stream}):
@@ -163,12 +168,15 @@ class MacChatGPTProvider:
             yield chunk
 
     async def quick_chat(self, messages):
-        async for chunk in self._stream('quick_chat', [messages], {}):
+        # Claude's local provider implements quick requests through chat,
+        # matching listing_generate's handling of this optional capability.
+        operation, kwargs = ('chat', {'stream': False}) if self.name == 'claude' else ('quick_chat', {})
+        async for chunk in self._stream(operation, [messages], kwargs):
             yield chunk
 
     async def _stream(self, operation, args, kwargs):
         from vendoo_studio.providers.xiaomi_mimo import StreamChunk
-        result = await self.relay.invoke(operation, args, kwargs)
+        result = await self.relay.invoke(operation, args, kwargs, self.name)
         if not isinstance(result, list):
             raise MacUnavailable()
         for item in result:
@@ -177,4 +185,4 @@ class MacChatGPTProvider:
             yield StreamChunk(item['text'], item['kind'])
 
     async def web_search(self, messages):
-        return await self.relay.invoke('web_search', [messages], {})
+        return await self.relay.invoke('web_search', [messages], {}, self.name)
