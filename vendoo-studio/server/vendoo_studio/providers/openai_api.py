@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import httpx
 
-from vendoo_studio.providers.chatgpt_codex import DEFAULT_REASONING_EFFORT, ChatGPTCodexProvider, _http_client
+from vendoo_studio.providers.chatgpt_codex import DEFAULT_REASONING_EFFORT, ChatGPTCodexProvider
 from vendoo_studio.services.ai_key_catalog import key_provider
+from vendoo_studio.services.shared_http import http_client
 
 SPEC = key_provider("openai")
 
@@ -53,7 +54,7 @@ class OpenAIAPIProvider(ChatGPTCodexProvider):
         return payload
 
     async def list_models(self) -> list[str]:
-        async with _http_client() as client:
+        async with http_client() as client:
             resp = await client.get(
                 f"{self.base_url}/models",
                 headers={"Authorization": f"Bearer {self.api_key}"},
