@@ -382,7 +382,8 @@ async function depopOfferState(requests, slug, deadline) {
     reply = await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview');
   } catch (error) {
     if (error?.status === 400 && error.response_data?.code === 1003) {
-      throw marketplaceError(DEPOP_NO_RECIPIENTS, { status: 400 });
+      // Zero likers to offer to: Anteroom then waits for a new like before checking again.
+      throw Object.assign(marketplaceError(DEPOP_NO_RECIPIENTS, { status: 400 }), { like_count: 0 });
     }
     throw error;
   }
@@ -461,7 +462,7 @@ async function checkMarketplacePromotion(payload) {
     return marketplaceFailure(marketplaceError('Name a marketplace listing and an action to check.'), true);
   }
   try { return await entry.check(payload, Date.now() + PROMOTION_DEADLINE_MS); }
-  catch (error) { return marketplaceFailure(error, true); }
+  catch (error) { return marketplaceFailure(error, true, Number.isInteger(error?.like_count) ? { like_count: error.like_count } : {}); }
 }
 
 async function runMarketplacePromotion(payload) {
