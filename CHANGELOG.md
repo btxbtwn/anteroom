@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.922 — 2026-11-11
+
+- Remote access over Tailscale now only lets in your own Tailscale account, not other people or tagged devices on your tailnet.
+- Only the Anteroom Bridge extension can talk to Anteroom; other Chrome extensions are refused.
+- The app only offers updates that are newer than the version you have.
+
 ## 0.1.921 — 2026-11-11
 
 - Keep the web app from switching back to older code when updates finish out of order, and refresh category lists whenever they differ from the ones that ship.

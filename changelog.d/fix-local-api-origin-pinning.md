@@ -1,3 +1,0 @@
-- Remote access over Tailscale now only lets in your own Tailscale account, not other people or tagged devices on your tailnet.
-- Only the Anteroom Bridge extension can talk to Anteroom; other Chrome extensions are refused.
-- The app only offers updates that are newer than the version you have.
