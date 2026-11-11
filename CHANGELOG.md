@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.929 — 2026-11-11
+
+- Automations never offer to delist or relist an item on a marketplace where it may have just sold, even when its stock can't be read.
+- A marketplace recording that fails for an unexpected reason now shows what went wrong instead of stopping silently.
+- Online, category search no longer stays stuck when building its index hangs.
+- Fixing a garbled listing now follows your own title and description formulas from Settings.
+
 ## 0.1.928 — 2026-11-11
 
 - Anteroom Bridge 0.2.68 runs only the photos Anteroom approved for a listing, and needs Anteroom's signed approval for every action from the web, including reading your sales, likes and imports and cancelling a listing.
