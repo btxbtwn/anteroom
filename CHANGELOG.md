@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.936 — 2026-11-11
+
+- On the website, listings that are no longer drafts no longer offer Add Photos, which could not work there; they say photos can be added while a listing is a draft, as the iPhone app does.
+
+## 0.1.935 — 2026-11-11
+
+- A photo added after deleting others now goes at the end instead of jumping ahead and becoming the cover.
+
 ## 0.1.934 — 2026-11-11
 
 - Keep pages fast while drafts generate: hosted drafts and scheduled work now run on their own server.

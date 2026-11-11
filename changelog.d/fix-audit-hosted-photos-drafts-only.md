@@ -1,1 +1,0 @@
-- On the website, listings that are no longer drafts no longer offer Add Photos, which could not work there; they say photos can be added while a listing is a draft, as the iPhone app does.

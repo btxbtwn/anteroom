@@ -1,1 +1,0 @@
-- A photo added after deleting others now goes at the end instead of jumping ahead and becoming the cover.
