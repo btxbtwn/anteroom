@@ -16,7 +16,7 @@ its removal before proving the cloud replacement.
 
 1. From a pushed feature-branch checkout containing these changes, run `xcodegen` in `anteroom-ios`
    and open `Anteroom.xcodeproj`. Select the **AnteroomCloud** scheme and use
-   Product → Xcode Cloud → Create Workflow. Grant Apple's GitHub integration
+   Integrate → Create Workflow. Grant Apple's GitHub integration
    access to this repository. Keep the repository's current visibility.
 2. Connect the project path `anteroom-ios/Anteroom.xcodeproj` and the
    **AnteroomCloud** scheme. The project remains generated and untracked;
@@ -48,6 +48,31 @@ runs all standalone model checks, checks the privacy manifest and seller
 confirmation calls, regenerates the project and writes ignored cloud build
 settings. Archives fail if their public Supabase key is absent or malformed.
 Unit tests use URLProtocol stubs, without a live seller account.
+
+## Activation status — 2026-11-10
+
+Apple's GitHub connection is active. [Build 4](https://appstoreconnect.apple.com/teams/cacb4d81-675e-4fbe-99e2-fed2f3e1edb9/xcode-cloud/products/505F107A-8E64-4DF5-A50D-AA8539FB0D49/builds/03b38858-31ed-4897-ad30-87d03d31f1f9/summary)
+passed on migration commit `e18b746`: 63/63 unit tests, five minutes of compute,
+using Xcode 26.6 and macOS Tahoe 26.5.1. Ten compiler warnings remain in the test
+code; there were no test failures. The generated, untracked project works in
+the live cloud build.
+
+**iOS Verify** currently watches only `xcode-cloud-ios`, with one iPhone 17
+destination and no distribution. Switch it to the relevant main/PR changes
+described above after the migration is merged. The enrollment-created
+**Default** workflow is deactivated to prevent duplicate main builds.
+
+**iOS Release** is saved but deactivated until the migration reaches main.
+It allows manual starts on exactly `main`, requires an `AnteroomCloud` Test
+action on one iPhone 17, archives for internal TestFlight testing, and targets
+the existing **Me** group. Its publishable Supabase key is configured and
+redacted. No archive or upload has been run: signing, upload processing and
+the uploaded version/build number still require verification on the first
+release after the local release gate passes.
+
+Create new actions in Xcode if the web editor has not yet discovered the
+generated schemes. After the first successful build, the web editor also
+offers `AnteroomCloud`.
 
 ## Before each TestFlight release
 
