@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.914 — 2026-11-11
+
+- Depop offers to likers now say "Depop has nobody to send an offer to on this listing" for listings without likers, or whose likers already have an offer, instead of Depop's confusing "Does the product have variants" refusal.
+
 ## 0.1.913 — 2026-11-11
 
 - Reloading marketplace fields on the website now saves the rebuilt form and clears outdated category warnings.
