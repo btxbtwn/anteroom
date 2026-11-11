@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.937 — 2026-11-11
+
+- Chat on the Mac no longer drops a reply while it is still looking at your photos.
+
 ## 0.1.936 — 2026-11-11
 
 - On the website, listings that are no longer drafts no longer offer Add Photos, which could not work there; they say photos can be added while a listing is a draft, as the iPhone app does.
