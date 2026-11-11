@@ -14,7 +14,7 @@ Automation stops at saved drafts. Listing, updating and delisting run only when 
 
 ## Mac app
 
-Anteroom binds only to `127.0.0.1`. Optional Tailscale Serve may proxy the seller's private tailnet to that port; Funnel is never used.
+Anteroom binds only to `127.0.0.1`. Optional Tailscale Serve may proxy the seller's private tailnet to that port; Funnel is never used. Requests through Serve are accepted only from the Tailscale login that owns the Mac. Only Anteroom Bridge's extension IDs (the store item and the unpacked folders Anteroom knows, plus `ANTEROOM_BRIDGE_EXTENSION_IDS`) count as a trusted extension origin.
 
 The extension pairs with the local app through a token served at `GET /api/extension/pairing-token`. That endpoint has no authentication. Browser pages on other origins cannot read it because of CORS, but any process running as the same user on the Mac can. The token only lets a client act as the extension over the loopback websocket on port 4318. It never grants access to API keys.
 
