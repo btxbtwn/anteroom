@@ -6,6 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.924 — 2026-11-11
+
+- Item details you type no longer undo a category or delist record Anteroom saved to the same listing a moment earlier.
+- Reloading for an update, or leaving the page, now saves item details you just typed instead of dropping them.
+
+## 0.1.923 — 2026-11-11
+
+- Offers to likers on Mercari no longer re-check listings nobody can get an offer on every 15 minutes. Anteroom re-checks them once a day, since Mercari has no likes feed to watch, which cuts thousands of daily Mercari requests.
+
 ## 0.1.922 — 2026-11-11
 
 - Remote access over Tailscale now only lets in your own Tailscale account, not other people or tagged devices on your tailnet.
