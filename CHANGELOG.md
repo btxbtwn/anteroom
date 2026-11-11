@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.912 — 2026-11-11
+
+- Use Anteroom Connector for Mac to connect your ChatGPT and Claude subscriptions to the web app and iPhone without installing the full desktop app. Pause new requests or quit from its menu-bar icon.
+
 ## 0.1.911 — 2026-11-11
 
 - Listing generation leaves SKU blank unless you supply one, and chat keeps your existing SKU.
