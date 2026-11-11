@@ -60,9 +60,13 @@ def save_photo(db, draft_id, key, data, width, height, marketplace=None):
     limit = photos.MAX_PHOTOS if marketplace is None else PHOTO_LIMITS[marketplace]
     if count >= limit:
         raise HTTPException(422, f'Add at most {limit} photos on this form')
+    # One past the highest position, not the count: after a delete the count
+    # can land on or ahead of a photo the seller already has.
+    highest = db.scalar(select(func.max(Photo.display_order)).where(Photo.conversation_id == draft_id, own))
     photo = Photo(conversation_id=draft_id, original_filename='photo.jpg', stored_filename=key,
                   mime_type='image/jpeg', size_bytes=len(data), checksum=hashlib.sha256(data).hexdigest(),
-                  width=width, height=height, display_order=count, marketplace=marketplace)
+                  width=width, height=height, display_order=0 if highest is None else highest + 1,
+                  marketplace=marketplace)
     db.add(photo)
     db.commit()
     return PhotoResponse.model_validate(photo)
