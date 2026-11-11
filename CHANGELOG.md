@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.927 — 2026-11-11
+
+- Install the exact, verified package versions everywhere, including first-time setup.
+
 ## 0.1.926 — 2026-11-11
 
 - Very large photos are turned away with a clear message instead of slowing Anteroom down, on the Mac and online.
