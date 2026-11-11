@@ -24,6 +24,7 @@
 
 
 :root {
+  --mobile-canvas: #000;
   --app-scrollbar-width: 6px;
   --appearance-contrast-base: 100%;
   --appearance-contrast-boost: 0%;
