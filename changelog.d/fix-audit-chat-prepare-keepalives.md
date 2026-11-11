@@ -1,0 +1,1 @@
+- Chat on the Mac no longer drops a reply while it is still looking at your photos.
