@@ -45,7 +45,7 @@ def _seller_asked_for_sku(user_message: str) -> bool:
         user_message)
 
 
-def _sku_key(path: str, separator: str) -> str | None:
+def _sku_key(path: object, separator: str) -> str | None:
     """The SKU key a path names directly: "sku" or "depop_specifics", else None."""
     parts = str(path or "").strip(separator).split(separator)
     if parts == ["sku"]:
