@@ -36,6 +36,19 @@ final class NewDraftTests: XCTestCase {
         XCTAssertFalse(StubProtocol.requests.contains { $0.httpMethod == "DELETE" })
     }
 
+    func testDraftWithPhotosStillUploadingSendsNoDiscardRequest() async {
+        let id = "uploading-\(UUID().uuidString)"
+        PhotoUploadTracker.shared.begin(id, count: 2)
+        StubProtocol.answer(.init(status: 200, body: #"{"discarded":true}"#))
+        let model = InventoryModel(api: StubSignIn().api())
+        await model.discardIfUntouched(id)
+        XCTAssertTrue(StubProtocol.requests.isEmpty, "Photos on their way make the draft not blank")
+        PhotoUploadTracker.shared.end(id)
+        XCTAssertTrue(PhotoUploadTracker.shared.isUploading(id), "One photo is still on its way")
+        PhotoUploadTracker.shared.end(id)
+        XCTAssertFalse(PhotoUploadTracker.shared.isUploading(id))
+    }
+
     func testServerKeepsDraftChangedByAnotherClient() async {
         StubProtocol.answer(.init(status: 200, body: #"{"discarded":false}"#))
         let model = InventoryModel(api: StubSignIn().api())

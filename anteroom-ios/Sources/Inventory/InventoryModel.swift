@@ -176,9 +176,10 @@ final class InventoryModel {
     }
 
     /// Removes a draft made with New listing when the seller leaves it without
-    /// adding a photo, a note, a detail or a message. Anything unclear keeps it.
+    /// adding a photo, a note, a detail or a message. Anything unclear keeps it,
+    /// and so do photos still uploading.
     func discardIfUntouched(_ id: String) async {
-        guard EditorDraftStore.load(id) == nil else { return }
+        guard EditorDraftStore.load(id) == nil, !PhotoUploadTracker.shared.isUploading(id) else { return }
         do {
             guard try await api.discardBlankListing(id) else { return }
             changeListings { rows in rows.removeAll { $0.id == id } }

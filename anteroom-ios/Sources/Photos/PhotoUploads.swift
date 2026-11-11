@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// What became of one batch of photos: how many were tried, which prepared
 /// JPEGs didn't upload (kept so Retry sends the same bytes) and how many
@@ -56,5 +57,30 @@ struct PhotoUploadReport: Equatable, Sendable {
             }
         }
         return report
+    }
+}
+
+/// Which listings still have photos uploading, shared across screens like the
+/// web's `photoUploads.ts`. The strip's own count goes away with the view, so
+/// Back on a new draft and Generate listing read this instead: a draft with
+/// photos on the way is not blank, and generating now would write the copy from
+/// only the photos that have landed.
+@MainActor
+@Observable
+final class PhotoUploadTracker {
+    static let shared = PhotoUploadTracker()
+
+    private var pending: [String: Int] = [:]
+
+    func isUploading(_ listingID: String) -> Bool { (pending[listingID] ?? 0) > 0 }
+
+    func begin(_ listingID: String, count: Int = 1) {
+        guard count > 0 else { return }
+        pending[listingID, default: 0] += count
+    }
+
+    func end(_ listingID: String) {
+        let remaining = (pending[listingID] ?? 1) - 1
+        pending[listingID] = remaining > 0 ? remaining : nil
     }
 }
