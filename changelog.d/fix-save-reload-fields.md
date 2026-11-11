@@ -1,1 +1,0 @@
-- Keep edits made while chat is working and save them when it finishes, so field reloads are no longer blocked by a failed save.

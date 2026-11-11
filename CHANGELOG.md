@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.916 — 2026-11-11
+
+- Keep edits made while chat is working and save them when it finishes, so field reloads are no longer blocked by a failed save.
+
 ## 0.1.915 — 2026-11-11
 
 - List on another marketplace while one is still listing, instead of waiting for it to finish.
