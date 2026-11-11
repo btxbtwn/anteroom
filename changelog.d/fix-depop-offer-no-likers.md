@@ -1,0 +1,1 @@
+- Depop offers to likers now say "Depop has nobody to send an offer to on this listing" for listings without likers, or whose likers already have an offer, instead of Depop's confusing "Does the product have variants" refusal.
