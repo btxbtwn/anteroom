@@ -75,6 +75,9 @@ log = logging.getLogger("vendoo_studio.chat")
 
 router = APIRouter(tags=["chat"])
 
+# Seconds between keepalives while photo analysis and sold comps prepare the prompt.
+PREPARE_KEEPALIVE_SECONDS = 3.0
+
 
 class ChatMessage(BaseModel):
     text: str
@@ -181,7 +184,17 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
             option_catalog = OptionCatalog({})
             build_db = SessionLocal()
             try:
-                messages = await build_chat_messages(conv_id, build_db, body.text, option_catalog)
+                # Keep the stream talking while it runs: the browser treats
+                # 20 s of silence as a dropped connection.
+                build = asyncio.create_task(build_chat_messages(conv_id, build_db, body.text, option_catalog))
+                try:
+                    async for _ in wait_task_keepalives(build, timeout=PREPARE_KEEPALIVE_SECONDS):
+                        yield KEEPALIVE
+                finally:
+                    if not build.done():
+                        build.cancel()
+                        await asyncio.gather(build, return_exceptions=True)
+                messages = build.result()
             finally:
                 build_db.close()
             messages = await asyncio.to_thread(attach_to_last_user_turn, messages, attachments)

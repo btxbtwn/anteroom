@@ -114,6 +114,30 @@ class SendMessageStreamTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertLess(response.text.index("event: status"), response.text.index("data: Done."))
 
+    def test_the_stream_sends_keepalives_while_preparing_the_prompt(self):
+        """Photo analysis can outlast the browser's 20 s silence limit (STREAM_IDLE_MS)."""
+        import asyncio
+        from unittest.mock import patch
+
+        from vendoo_studio.services.streaming import KEEPALIVE
+
+        class Provider:
+            name = "chatgpt"
+            model = "test"
+
+            async def chat(self, messages, stream=True):
+                yield "Done."
+
+        async def build(conv_id, db, text, option_catalog=None):
+            await asyncio.sleep(0.5)
+            return [{"role": "user", "content": text}]
+
+        with patch("vendoo_studio.routes.chat.PREPARE_KEEPALIVE_SECONDS", 0.1):
+            response = self.send(build, Provider())
+        self.assertEqual(response.status_code, 200)
+        before_reply = response.text[:response.text.index("data: Done.")]
+        self.assertGreaterEqual(before_reply.count(KEEPALIVE), 3)
+
     def test_a_failed_photo_analysis_ends_the_stream_with_an_error(self):
         from vendoo_studio.services.listing_generate import PhotoAnalysisError
 
