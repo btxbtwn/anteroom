@@ -21,7 +21,10 @@ fi
 REQUIREMENTS="$(mktemp)"
 trap 'rm -f "$REQUIREMENTS"' EXIT
 # --frozen fails instead of re-resolving when pyproject.toml and uv.lock disagree.
-uv export --project "$ROOT" --frozen --no-emit-project --extra "$EXTRA" \
+# The build group is the locked build backend (setuptools) for the app itself.
+uv export --project "$ROOT" --frozen --no-emit-project --extra "$EXTRA" --group build \
   --format requirements-txt --hashes --quiet --output-file "$REQUIREMENTS"
 "$PYTHON" -m pip install --require-hashes --no-deps -r "$REQUIREMENTS"
-"$PYTHON" -m pip install --no-deps -e "$ROOT"
+# No build isolation: build with the locked setuptools just installed instead
+# of fetching an unpinned one.
+"$PYTHON" -m pip install --no-deps --no-build-isolation -e "$ROOT"
