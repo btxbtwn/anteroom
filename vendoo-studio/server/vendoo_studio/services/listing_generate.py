@@ -1430,6 +1430,10 @@ def persist_generated_listing(
             listing["sku"] = seller_sku
         else:
             listing.pop("sku", None)
+        # Marketplace copies from the model must not override the seller's SKU.
+        for key, value in listing.items():
+            if key.endswith("_specifics") and isinstance(value, dict):
+                value.pop("sku", None)
         package = str(seller.get("packageDimensions") or "").strip()
         if package:
             listing["package_dimensions_in"] = package
