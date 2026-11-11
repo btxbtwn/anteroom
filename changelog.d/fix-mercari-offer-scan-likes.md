@@ -1,0 +1,1 @@
+- Offers to likers on Mercari no longer re-check listings nobody can get an offer on every 15 minutes. Anteroom re-checks them once a day, since Mercari has no likes feed to watch, which cuts thousands of daily Mercari requests.

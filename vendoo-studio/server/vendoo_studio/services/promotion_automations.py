@@ -61,12 +61,12 @@ OFFER_INTERVAL = timedelta(minutes=15)
 # Listing reads per offer check, spaced out; the rest are read in a later check.
 OFFER_READS = 60
 READ_GAP_S = 2.0
-# Marketplaces whose recent-like feed check_new_likes reads every minute. On
-# these, a listing whose last check found nobody to offer to is not read again
-# until the feed reports a new like, or LIKE_RECHECK passes for likes the feed
-# missed (Chrome offline long enough for them to fall out of it).
-LIKE_FEEDS = frozenset({"poshmark", "depop"})
-LIKE_RECHECK = timedelta(days=7)
+# A listing whose last check found nobody to offer to is not read again until a
+# new like is reported or its marketplace's re-check time passes. Poshmark and
+# Depop report new likes in the feed check_new_likes reads every minute, so
+# their re-check only finds likes that fell out of it (Chrome offline). Mercari
+# has no such feed, so its daily re-check is how its new likes are found.
+LIKE_RECHECK = {"poshmark": timedelta(days=7), "depop": timedelta(days=7), "mercari": timedelta(days=1)}
 WAITING_FOR_LIKES = "no new likes since the last check"
 TICK_S = 60.0
 # How long a due round waits for Chrome to reconnect, e.g. after a restart,
@@ -314,12 +314,13 @@ def _order(db: Session, row: PromotionAutomation, targets: list) -> list:
 
 def _waiting_for_likes(db: Session, row: PromotionAutomation, now: datetime) -> set[str]:
     """Listings whose latest check by this rule, within LIKE_RECHECK, found too few likers to offer to."""
-    if row.action != "offer" or row.marketplace not in LIKE_FEEDS:
+    recheck = LIKE_RECHECK.get(row.marketplace)
+    if row.action != "offer" or recheck is None:
         return set()
     latest: dict[str, tuple[str, int | None]] = {}
     for listing_id, state, likes in db.query(ListingPromotion.listing_id, ListingPromotion.state, ListingPromotion.like_count).filter(
         ListingPromotion.automation_id == row.id, ListingPromotion.marketplace == row.marketplace,
-        ListingPromotion.action == "offer", ListingPromotion.created_at > now - LIKE_RECHECK,
+        ListingPromotion.action == "offer", ListingPromotion.created_at > now - recheck,
     ).order_by(ListingPromotion.created_at.desc()):
         latest.setdefault(listing_id, (state, likes))
     # The like count when each listing was last offered; the same count means no new likers.

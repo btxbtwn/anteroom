@@ -552,12 +552,40 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual([sent["listing_id"] for sent in self.promoted()], [none])
         # A like the feed missed is still found by the weekly re-check.
         self.db.query(ListingPromotion).filter_by(listing_id=few).update(
-            {"created_at": _now() - promotion_automations.LIKE_RECHECK - timedelta(minutes=1)})
+            {"created_at": _now() - promotion_automations.LIKE_RECHECK["poshmark"] - timedelta(minutes=1)})
         self.db.commit()
         self.bridge.reset_mock()
         self.due(saved["id"])
         self.tick()
         self.assertEqual(self.checked(), [few])
+
+    def test_mercari_waits_a_day_before_re_checking_listings_nobody_liked(self):
+        items = self.mercari_items(3)
+        (_c0, none), (_c1, few), (_c2, liked) = items
+        self.likes.update({none: 0, few: 1})
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",
+                             "conversation_ids": [conv.id for conv, _item in items]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(sorted(self.checked()), sorted([none, few, liked]))
+        self.assertEqual([sent["listing_id"] for sent in self.promoted()], [liked])
+        # Within the day, the 15-minute scans ask Mercari nothing about them.
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [])
+        # A day later Mercari has no like feed to report new likes, so they are read again.
+        self.likes[none] = 3
+        self.db.query(ListingPromotion).filter(ListingPromotion.listing_id.in_([none, few])).update(
+            {"created_at": _now() - promotion_automations.LIKE_RECHECK["mercari"] - timedelta(minutes=1)},
+            synchronize_session=False)
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(sorted(self.checked()), sorted([none, few]))
+        self.assertEqual([sent["listing_id"] for sent in self.promoted()], [none])
 
     def test_nobody_to_offer_to_refusal_waits_for_a_new_like(self):
         conv, post = self.items[0]
