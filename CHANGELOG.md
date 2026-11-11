@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.933 — 2026-11-11
+
+- Anteroom Bridge checks that a Mercari listing is yours and still on sale before it delists it, and keeps its saved sign-in and approvals away from web pages.
+- Anteroom Bridge now needs Chrome 120 or later, asks for two fewer site permissions, and describes what it does more plainly in Chrome.
+
 ## 0.1.932 — 2026-11-11
 
 - Keep the web app responsive while the assistant answers, photos upload or are deleted, and pages load.

@@ -1,2 +1,0 @@
-- Anteroom Bridge checks that a Mercari listing is yours and still on sale before it delists it, and keeps its saved sign-in and approvals away from web pages.
-- Anteroom Bridge now needs Chrome 120 or later, asks for two fewer site permissions, and describes what it does more plainly in Chrome.
