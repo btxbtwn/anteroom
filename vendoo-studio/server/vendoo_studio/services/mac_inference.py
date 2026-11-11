@@ -11,14 +11,58 @@ import threading
 import time
 import uuid
 from collections import deque
+from typing import Literal
+
+from vendoo_studio.services.provider_deadlines import CALL_DEADLINE_SEC, operation_stalled, provider_label
 
 OPERATIONS = frozenset({'analyze_photos', 'chat', 'vision_chat', 'structured_chat', 'quick_chat', 'web_search'})
 SUBSCRIPTIONS = frozenset({'chatgpt', 'claude'})
+# The Mac's own provider deadlines (provider_deadlines on the Mac) end a call
+# within CALL_DEADLINE_SEC and say why; this wait only has to outlast them.
+INVOKE_DEADLINE_SEC = CALL_DEADLINE_SEC + 30
+
+# Why a call failed on the Mac. The Mac sends only one of these words, never
+# the provider's own error text, so nothing private crosses to the server.
+_FAILURES = {
+    'rate_limited': '{label} on your Mac hit its usage limit. Wait a few minutes, then retry, or choose another provider.',
+    'stalled': '{label} on your Mac stopped responding. Retry, or choose another provider.',
+    'signed_out': '{label} on your Mac is signed out. Sign in again in Anteroom on your Mac, then retry.',
+    'rejected': '{label} on your Mac rejected the request. Retry, or choose another provider.',
+    'unavailable': 'Your Mac could not reach {label}. Check that the Mac is online, then retry.',
+    'paused': 'AI requests are paused in Anteroom on your Mac. Resume them there, then retry.',
+    'failed': '{label} on your Mac could not complete the request. Retry, or choose another provider.',
+}
+ErrorKind = Literal['rate_limited', 'stalled', 'signed_out', 'rejected', 'unavailable', 'paused', 'failed']
+# Why a forwarded call failed before the Mac answered.
+NOT_TAKEN, NO_REPLY = 'not_taken', 'no_reply'
 
 
 class MacUnavailable(RuntimeError):
     def __init__(self):
         super().__init__('Open Anteroom on your Mac, sign into this account, and connect the selected subscription there. Keep the Mac awake and online, then retry.')
+
+
+class MacCallFailed(RuntimeError):
+    """The Mac took the call and its subscription failed, for a known reason."""
+
+    def __init__(self, kind, provider=''):
+        self.kind = kind
+        super().__init__(_FAILURES[kind].format(label=provider_label(provider)))
+
+
+def _failure(kind, provider=''):
+    """The exception for a failed reply from the Mac."""
+    if kind in _FAILURES:
+        return MacCallFailed(kind, provider)
+    # Removal note: Macs before this release reply with only ``failed: True``
+    # and no ``error``. Until every Mac has updated, that still reads as the Mac
+    # being unavailable. Remove this fallback, and make ``error`` required on
+    # /api/mac-ai/reply, after 2027-02-01.
+    return MacUnavailable()
+
+
+def _mac_label(provider):
+    return f'{provider_label(provider)} on your Mac'
 
 
 class MacInference:
@@ -70,7 +114,7 @@ class MacInference:
                     return command
             return None
 
-    def reply(self, worker, identity, result, failed):
+    def reply(self, worker, identity, result, failed, error=None):
         with self.condition:
             if worker != self.worker:
                 return False
@@ -79,7 +123,7 @@ class MacInference:
                 return False
             try:
                 if failed:
-                    future.set_exception(MacUnavailable())
+                    future.set_exception(_failure(error))
                 else:
                     future.set_result(result)
             except concurrent.futures.InvalidStateError:
@@ -98,11 +142,14 @@ class MacInference:
             try:
                 payload = await post(target, '/internal/mac-inference/invoke', {
                     'user_id': self.owner, 'provider': provider, 'operation': operation, 'args': args, 'kwargs': kwargs,
-                }, timeout=310)
+                }, timeout=INVOKE_DEADLINE_SEC + 10)
             except RoutingUnavailable:
                 raise MacUnavailable from None
             if not payload.get('ok'):
-                raise MacUnavailable
+                kind = payload.get('error')
+                if kind == NO_REPLY:
+                    raise operation_stalled(_mac_label(provider), operation, INVOKE_DEADLINE_SEC)
+                raise _failure(kind, provider)
             return payload.get('result')
         identity = uuid.uuid4().hex
         future = concurrent.futures.Future()
@@ -114,9 +161,16 @@ class MacInference:
             self.outbox.append({'id': identity, 'provider': provider, 'operation': operation, 'args': args, 'kwargs': kwargs})
             self.condition.notify_all()
         try:
-            return await asyncio.wait_for(asyncio.wrap_future(future), 300)
+            return await asyncio.wait_for(asyncio.wrap_future(future), INVOKE_DEADLINE_SEC)
+        except MacCallFailed as failure:
+            raise MacCallFailed(failure.kind, provider) from None
         except TimeoutError:
-            raise MacUnavailable() from None
+            with self.condition:
+                taken = all(command['id'] != identity for command in self.outbox)
+            if not taken:
+                # The Mac never picked the call up.
+                raise MacUnavailable() from None
+            raise operation_stalled(_mac_label(provider), operation, INVOKE_DEADLINE_SEC) from None
         finally:
             with self.condition:
                 self.pending.pop(identity, None)

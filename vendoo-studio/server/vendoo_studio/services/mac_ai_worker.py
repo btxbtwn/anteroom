@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import inspect
+import re
 import tempfile
 import threading
 import uuid
@@ -14,6 +15,9 @@ import httpx
 
 from vendoo_studio.config import HOSTED_URL
 from vendoo_studio.services.mac_inference import OPERATIONS
+from vendoo_studio.services.provider_deadlines import ProviderStalled, with_deadlines
+
+_STATUS = re.compile(r'\bHTTP (\d{3})\b')
 
 
 async def subscription_providers():
@@ -24,13 +28,35 @@ async def subscription_providers():
 
     providers = {}
     if await asyncio.to_thread(chatgpt_signed_in):
-        providers['chatgpt'] = ChatGPTCodexProvider()
+        providers['chatgpt'] = with_deadlines(ChatGPTCodexProvider())
     if await asyncio.to_thread(claude_signed_in):
-        providers['claude'] = ClaudeProvider()
+        providers['claude'] = with_deadlines(ClaudeProvider())
     return providers
 
 
+def error_kind(exc):
+    """Why a call failed, as one word the server can show; never the provider's text."""
+    if isinstance(exc, (ProviderStalled, TimeoutError, httpx.TimeoutException)):
+        return 'stalled'
+    text = str(exc)
+    status = getattr(exc, 'status', None)
+    if status is None and (match := _STATUS.search(text)):
+        status = int(match.group(1))
+    lowered = text.lower()
+    if status == 429 or 'rate limit' in lowered or 'usage limit' in lowered:
+        return 'rate_limited'
+    if status in (401, 403) or 'signed out' in lowered or 'not signed in' in lowered:
+        return 'signed_out'
+    if isinstance(exc, httpx.TransportError) or (status is not None and status >= 500):
+        return 'unavailable'
+    if isinstance(exc, ValueError) or (status is not None and 400 <= status < 500):
+        return 'rejected'
+    return 'failed'
+
+
 async def execute(command, provider):
+    if provider is None:
+        raise RuntimeError('Not signed in to this subscription on this Mac')
     operation = command.get('operation')
     if operation not in OPERATIONS:
         raise ValueError('Unsupported inference operation')
@@ -173,6 +199,7 @@ class MacAIWorker:
                             if now_paused:
                                 await client.post('/api/mac-ai/reply', headers=headers, json={
                                     'worker': worker, 'identity': command['id'], 'result': None, 'failed': True,
+                                    'error': 'paused',
                                 })
                                 continue
 
@@ -206,8 +233,8 @@ class MacAIWorker:
                                         return
                                     result = work.result()
                                     body = {'result': result, 'failed': False}
-                                except Exception:
-                                    body = {'result': None, 'failed': True}
+                                except Exception as exc:
+                                    body = {'result': None, 'failed': True, 'error': error_kind(exc)}
                                 finally:
                                     for task in (work, pulse):
                                         task.cancel()
