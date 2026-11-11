@@ -14,11 +14,16 @@ on:
     paths:
       - "anteroom-ios/**"
       - ".github/workflows/ios.yml"
+      # The Version workflow's "Release Anteroom" commit, which uploads the
+      # iPhone changes it releases with their new version (see gate).
+      - "vendoo-studio/VERSION"
   workflow_dispatch:
 
 concurrency:
   group: ios-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a TestFlight upload on main; GitHub keeps only the newest
+  # push waiting behind it. Pull requests still cancel stale runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -28,14 +33,49 @@ env:
   XCODE_APP: /Applications/Xcode_26.6.app
 
 jobs:
+  gate:
+    # A push that brings changelog.d/ notes still has the old version: the
+    # Version workflow's "Release Anteroom" commit (pushed with a deploy key,
+    # so it starts workflows) follows, and that run builds and uploads with
+    # the new version, if iPhone code changed since the previous release.
+    name: Decide whether to build
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: gate
+        run: |
+          run=true
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            if find changelog.d -maxdepth 1 -type f ! -name README.md 2>/dev/null | grep -q .; then
+              echo "Pending changelog notes; the release commit builds this."
+              run=false
+            elif git log -1 --format=%s HEAD | grep -q '^Release Anteroom '; then
+              previous="$(git log --first-parent --format='%H %s' HEAD^ | awk '$2 == "Release" && $3 == "Anteroom" { print $1; exit }')"
+              if [ -n "$previous" ] && git diff --quiet "$previous" HEAD -- anteroom-ios .github/workflows/ios.yml; then
+                echo "No iPhone changes since the previous release ${previous:0:8}."
+                run=false
+              fi
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build for Simulator
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: macos-26
     defaults:
       run:
         working-directory: anteroom-ios
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Select Xcode
         run: |
           sudo xcode-select -s "$XCODE_APP"
@@ -168,9 +208,13 @@ jobs:
 
   sandbox-tests:
     name: iPhone unit and sandbox tests
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
@@ -182,11 +226,14 @@ jobs:
         run: ./anteroom-ios/tools/install-xcodegen.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.12.13"
       - name: Prepare disposable hosted API and simulator project
         run: |
           cd vendoo-studio
           python -m venv .venv
-          .venv/bin/pip install -e ".[dev]"
+          ./scripts/install-locked.sh .venv/bin/python dev
       - name: Initialize Xcode simulator components
         run: sudo xcodebuild -runFirstLaunch
       - name: Connect to CoreSimulator before runtime discovery
@@ -287,6 +334,8 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Write the App Store Connect key
         env:
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}

@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vendoo_studio.services.device_routes import token_matches
 from vendoo_studio.services.hosted_browser_relay import ChromeReadError, relay_for as chrome_for
-from vendoo_studio.services.mac_inference import OPERATIONS, MacUnavailable, relay_for as mac_for
+from vendoo_studio.services.mac_inference import NO_REPLY, NOT_TAKEN, OPERATIONS, MacCallFailed, MacUnavailable, relay_for as mac_for
+from vendoo_studio.services.provider_deadlines import ProviderStalled
 
 router = APIRouter(prefix='/internal')
 
@@ -41,8 +42,12 @@ async def invoke_mac(body: MacCall, authorization: str | None = Header(default=N
         raise HTTPException(404, 'Not found')
     try:
         result = await mac_for(_owner(body.user_id)).invoke(body.operation, body.args, body.kwargs, body.provider)
+    except MacCallFailed as failure:
+        return {'ok': False, 'error': failure.kind}
+    except ProviderStalled:
+        return {'ok': False, 'error': NO_REPLY}
     except MacUnavailable:
-        return {'ok': False}
+        return {'ok': False, 'error': NOT_TAKEN}
     return {'ok': True, 'result': result}
 
 

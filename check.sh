@@ -112,7 +112,7 @@ if component audit; then
     run "Anteroom Python lock and audit" bash -c "
       cd vendoo-studio && uv lock --check
       locked=\$(mktemp)
-      uv export --frozen --no-emit-project --all-extras --format requirements-txt --hashes --quiet --output-file \"\$locked\"
+      uv export --frozen --no-emit-project --all-extras --all-groups --format requirements-txt --hashes --quiet --output-file \"\$locked\"
       '$PY' -m pip_audit --disable-pip --require-hashes -r \"\$locked\"
     "
   else

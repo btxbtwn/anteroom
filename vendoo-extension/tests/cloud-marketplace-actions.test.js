@@ -49,19 +49,40 @@ async function setup() {
     await bridge.handle({ type: 'cloud.connection', action: 'approve', requestId: REQUEST },
       { id: 'bridge', url: api.runtime.getURL('cloud-connect.html') + '#' + REQUEST });
   };
-  return { api, page, connect, runs, sign: (command, account = ALICE) => signer.sign(command, account) };
+  return { api, page, connect, runs, sign: (command, account = ALICE, options = {}) => signer.sign(command, account, options) };
 }
 
 test('an approved page relays the seller command with its photos and gets the Bridge reply', async () => {
   const s = await setup();
   await s.connect();
-  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_approvals']);
-  const result = await s.page('marketplace_command', ALICE, { command: await s.sign(execute()), photos: [photo] });
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands']);
+  const result = await s.page('marketplace_command', ALICE, { command: await s.sign(execute(), ALICE, { photos: [photo] }), photos: [photo] });
   assert.deepEqual(result, { ok: true, reply: { ok: true, state: 'published' } });
   assert.equal(s.runs.length, 1);
   assert.equal(s.runs[0].command.payload.action, 'list');
   assert.equal(Object.hasOwn(s.runs[0].command.payload, 'approval'), false, 'the approval stays in the Bridge');
   assert.deepEqual(s.runs[0].photos, [photo]);
+});
+
+test('a List with the most photos the contract allows carries its signed photo hashes', async () => {
+  const s = await setup();
+  await s.connect();
+  const photos = Array.from({ length: 30 }, (_, index) => ({ ...photo, id: crypto.randomUUID(), base64: Buffer.from(`photo ${index}`).toString('base64') }));
+  const command = await s.sign(execute({ photos: photos.map(({ id, mime_type }) => ({ id, mime_type })) }), ALICE, { photos });
+  assert.equal((await s.page('marketplace_command', ALICE, { command, photos })).reply.ok, true);
+  assert.equal(s.runs.length, 1);
+});
+
+test('a page that swaps the photos of a signed List never reaches the marketplace', async () => {
+  const s = await setup();
+  await s.connect();
+  const signed = await s.sign(execute(), ALICE, { photos: [photo] });
+  const swapped = { ...photo, base64: 'BBBB' };
+  const result = await s.page('marketplace_command', ALICE, { command: signed, photos: [swapped] });
+  assert.equal(result.reply.approval, 'photos');
+  assert.equal(s.runs.length, 0);
+  assert.equal((await s.page('marketplace_command', ALICE, { command: signed, photos: [photo] })).reply.ok, true);
+  assert.equal(s.runs.length, 1);
 });
 
 test('a write the page made up, edited or replayed never runs', async () => {
@@ -85,10 +106,29 @@ test('a write the page made up, edited or replayed never runs', async () => {
   assert.deepEqual(await s.page('marketplace_command', ALICE, { command: signed, photos: [] }), { ok: true, reply: { ok: true, state: 'published' } });
   assert.equal((await refused(signed)).approval, 'replayed');
   assert.equal(s.runs.length, 2);
-  // Reads need no approval.
-  const sessions = { type: 'marketplace.sessions', job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE } };
-  await s.page('marketplace_command', ALICE, { command: sessions, photos: [] });
-  assert.equal(s.runs.length, 3);
+  // Reads and Cancel need one too: a page script could otherwise read the seller's orders or stop a List.
+  const read = (type, payload = {}) => ({ type, job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE, ...payload } });
+  const cancel = { type: 'job.cancel', job_id: 'job-1', message_id: MESSAGE, payload: { job_id: 'job-1', request_id: MESSAGE } };
+  for (const command of [read('marketplace.sessions'), read('marketplace.sales_history', { marketplace: 'depop', settled: [] }),
+    read('marketplace.import.page', { marketplace: 'depop' }), cancel]) {
+    assert.equal((await refused(command)).approval, 'unsigned', command.type);
+    assert.deepEqual(await s.page('marketplace_command', ALICE, { command: await s.sign(command), photos: [] }),
+      { ok: true, reply: { ok: true, state: 'published' } }, command.type);
+  }
+  assert.equal(s.runs.length, 6);
+});
+
+test('the contract accepts an approval on every relayed command', async () => {
+  const s = await setup();
+  const promotion = { job_id: 'job-1', request_id: MESSAGE };
+  for (const command of [
+    { type: 'marketplace.sessions', job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE } },
+    { type: 'marketplace.sales_history', job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE, marketplace: 'depop', settled: [] } },
+    { type: 'marketplace.import.listing', job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE, marketplace: 'depop', listing_id: 'some-listing' } },
+    { type: 'marketplace.like_events', job_id: 'job-1', message_id: MESSAGE, payload: { ...promotion, marketplace: 'depop' } },
+    { type: 'marketplace.promotion_result', job_id: 'job-1', message_id: MESSAGE, payload: { ...promotion, action_id: 'action-1' } },
+    { type: 'marketplace.promotion_check', job_id: 'job-1', message_id: MESSAGE, payload: { ...promotion, marketplace: 'poshmark', action: 'share', listing_id: 'b'.repeat(24) } },
+  ]) assert.ok(CloudMarketplaceProtocol.command(await s.sign(command)), command.type);
 });
 
 test('a Bridge that relays writes cannot be built without the approval check', () => {
@@ -146,5 +186,5 @@ test('reads take only their own inputs and no job', async () => {
   ]) assert.equal(CloudMarketplaceProtocol.command(command), null, JSON.stringify(command));
   const s = await setup();
   await s.connect();
-  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_approvals']);
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands']);
 });

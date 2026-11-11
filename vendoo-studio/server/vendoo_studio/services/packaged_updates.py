@@ -419,6 +419,28 @@ def _resolve_zip_digest(remote: dict, client: httpx.Client | None = None) -> str
     return _asset_digest(_asset_map(release).get(ZIP_NAME))
 
 
+def _version_key(version: object) -> tuple[int, ...] | None:
+    try:
+        return tuple(int(part) for part in str(version or "").strip().split("."))
+    except ValueError:
+        return None
+
+
+def _moves_forward(local: dict, remote: dict) -> bool:
+    """True when the published build is newer than this one.
+
+    Every release carries a new version except a rebuild of the same version
+    (a push that only touched the extension or skills, or a manual run), which
+    ships under the same number with a new commit. A lower or unreadable
+    version is never offered: the published stamp must not roll the app back.
+    """
+    remote_sha, local_sha = remote.get("sha"), local.get("sha")
+    if not remote_sha or remote_sha == local_sha:
+        return False
+    remote_key, local_key = _version_key(remote.get("version")), _version_key(local.get("version"))
+    return remote_key is not None and local_key is not None and remote_key >= local_key
+
+
 def check_for_packaged_update() -> dict:
     local = local_build_info()
     try:
@@ -432,7 +454,7 @@ def check_for_packaged_update() -> dict:
         }
     remote_sha = remote.get("sha")
     local_sha = local.get("sha")
-    available = bool(remote_sha) and remote_sha != local_sha
+    available = _moves_forward(local, remote)
     commits = list(remote.get("commits") or [])
     summary = str((commits[0] if commits else remote.get("title")) or "").strip()
     return {

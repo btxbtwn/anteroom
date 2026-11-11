@@ -227,8 +227,13 @@ def edit_conversation(identity: str, body: contract.ConversationInput, db=Depend
     assert_idle(db, identity)
     if "box_id" in body.model_fields_set:
         check_box(db, body.box_id)
-    for key, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    note_changes = changes.pop('note_changes', None)
+    for key, value in changes.items():
         setattr(row, key, value)
+    if note_changes:
+        from vendoo_studio.services.vendoo_import import merge_note_changes
+        row.notes = merge_note_changes(row.notes, note_changes)
     db.commit()
     db.refresh(row)
     return conversation_response(row)

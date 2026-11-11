@@ -125,7 +125,8 @@ async def lifespan(app: FastAPI):
             start_chrome_sales()
     except Exception:
         pass
-    from vendoo_studio.providers import chatgpt_codex, claude_sessions
+    from vendoo_studio.providers import claude_sessions
+    from vendoo_studio.services import shared_http
 
     from vendoo_studio.services import ebay_offers as offer_service
     if not offline:
@@ -142,13 +143,13 @@ async def lifespan(app: FastAPI):
         promotion_automation_service.start()
 
     claude_sessions.keep_warm_on_this_loop()
-    chatgpt_codex.keep_connection_on_this_loop()
+    shared_http.keep_connection_on_this_loop()
     yield
     await offer_service.stop()
     await promotion_automation_service.stop()
     try:
         await claude_sessions.close_warm_processes()
-        await chatgpt_codex.close_connection()
+        await shared_http.close_connection()
     except Exception:
         pass
     try:

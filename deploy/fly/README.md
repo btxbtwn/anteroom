@@ -12,9 +12,17 @@ and desktop timers do not run in this container.
 ## Automatic deploys
 
 `.github/workflows/deploy-hosted.yml` deploys every push to `main` once CI
-passes on it. A merge that still has notes in `changelog.d/` is skipped; the
-`Release Anteroom` commit the Version workflow pushes next deploys instead.
-In order, it:
+passes on it. It always checks out `main`'s tip, never the older commit whose
+CI started it, so CI runs that finish out of order or a re-run can never put
+older code over newer code (`.github/scripts/deploy-gate.py`). It skips,
+successfully and with a notice, when:
+
+- `changelog.d/` still has notes: the `Release Anteroom` commit the Version
+  workflow pushes next deploys instead;
+- `main` moved past the triggering commit and CI on the new tip has not
+  passed: that CI's own run deploys it.
+
+Otherwise, in order, it:
 
 1. when the commit is a `Release Anteroom` commit, waits for CI to pass on
    the merge before it, whose code it ships
@@ -25,11 +33,15 @@ In order, it:
    (`alembic upgrade head`, `sslmode=verify-full` against the bundled CA),
    retrying the first connection for a couple of minutes when the session
    pooler is full;
-4. re-imports the shared category trees when
-   `vendoo-studio/data/category-trees-seed.json.gz` changed since the last
-   successful deploy;
+4. re-imports the shared category trees unless the database already holds
+   exactly the rows of `vendoo-studio/data/category-trees-seed.json.gz`
+   (`category-trees.sh import --if-changed` compares them row for row);
 5. deploys the image built in step 2 (`flyctl deploy --image`);
-6. waits for `https://myanteroom.com/api/health` to report the new version.
+6. waits for `https://myanteroom.com/api/health` to report the new version
+   and `/api/ready` to confirm the schema;
+7. checks that every Machine in every process group (`flyctl machines list`)
+   is started on the new image label, since the public URL reaches only the
+   web Machines (`.github/scripts/check-fly-machines.py`).
 
 Failed CI on that merge or a failed build stops the run before the database
 changes, and a failed migration stops it before Fly is touched. Run it by hand from the Actions tab
@@ -47,6 +59,37 @@ from:
 The migration URI stays in GitHub; Fly never receives it. Revisions that need
 a drained database (see `docs/hosted-production.md`, section 4) still apply
 automatically, so check for active work before merging one.
+
+## Rollback and expand/contract
+
+Migrations run before the new image starts, and the image before it keeps
+serving until the new one is healthy, so every revision must work with the
+code one release behind it. Change the schema in two releases:
+
+1. **Expand.** Add the new table, column or index (nullable or with a
+   default) and ship the code that writes and reads it. Keep the old one in
+   place.
+2. **Contract.** Drop or rename the old column, table or constraint only in a
+   later release, after the release that stopped using it is live. A
+   destructive change always waits one release behind the code that stops
+   using it.
+
+To roll back the code, redeploy the previous image by its label. Labels are
+`v<version>-<first 8 characters of the commit>`, as the **Build the image**
+step prints (`flyctl releases --image --config deploy/fly/fly.toml` lists
+recent ones):
+
+```sh
+fly deploy . --config deploy/fly/fly.toml --ha=false \
+  --image registry.fly.io/peaceful-meadowstone-6944:v<previous version>-<commit>
+```
+
+Alembic revisions are not rolled back. The older image serves the expanded
+schema because of the rule above, but `/api/ready` answers
+`schema_mismatch` until a fixed release (a new commit on `main`) deploys, so
+fix forward rather than downgrading the database. Pause automatic deploys
+(disable the **Deploy hosted** workflow) while production runs a rolled-back
+image, or the next push to `main` replaces it.
 
 ## Manual deploy
 

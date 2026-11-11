@@ -97,6 +97,29 @@ def merge_notes(existing: str | None, updates: dict[str, Any]) -> str:
     return json.dumps(data)
 
 
+def merge_note_changes(existing: str | None, changes: dict[str, Any]) -> str:
+    """The notes as they are now, with only the keys the seller changed set.
+
+    Item Details sends just what the seller typed, so a key the server wrote
+    since the editor read the notes (a category override, a delist record)
+    survives. Measurements merge per garment and field. Notes that are seller
+    text rather than JSON become ``sellerNotes``, as the editor shows them.
+    """
+    try:
+        raw = json.loads(existing) if existing else None
+    except ValueError:
+        raw = None
+    data = parse_notes(existing) if isinstance(raw, dict) else ({"sellerNotes": existing} if existing and existing.strip() else {})
+    for key, value in changes.items():
+        current = data.get(key)
+        if key == "measurements" and isinstance(value, dict) and isinstance(current, dict):
+            value = {**current, **{garment: {**current[garment], **fields}
+                                   if isinstance(fields, dict) and isinstance(current.get(garment), dict) else fields
+                                   for garment, fields in value.items()}}
+        data[key] = value
+    return json.dumps(data)
+
+
 # Vendoo keys Vestiaire's API integration separately; Studio treats it as one marketplace.
 VENDOO_MARKETPLACE_ALIASES = {"vestiaireApi": "vestiaire"}
 

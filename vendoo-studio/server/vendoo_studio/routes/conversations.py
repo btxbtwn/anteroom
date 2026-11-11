@@ -129,6 +129,8 @@ class ConversationUpdate(BaseModel):
 
     title: str | None = None
     notes: str | None = None
+    # Item Details' changed keys, merged into the notes as they are now.
+    note_changes: dict | None = None
     # Null takes the listing out of its box; leaving it out changes nothing.
     box_id: str | None = None
 
@@ -177,6 +179,12 @@ def update_conversation(conv_id: str, body: ConversationUpdate, db: Session = De
             conv.notes = merge_notes(conv.notes, incoming)
         else:
             conv.notes = body.notes
+        changed = True
+    if body.note_changes:
+        from vendoo_studio.services.vendoo_import import merge_note_changes
+
+        db.refresh(conv, with_for_update=True)
+        conv.notes = merge_note_changes(conv.notes, body.note_changes)
         changed = True
     if renamed:
         from vendoo_studio.services.vendoo_import import merge_notes

@@ -6,6 +6,56 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.929 — 2026-11-11
+
+- Automations never offer to delist or relist an item on a marketplace where it may have just sold, even when its stock can't be read.
+- A marketplace recording that fails for an unexpected reason now shows what went wrong instead of stopping silently.
+- Online, category search no longer stays stuck when building its index hangs.
+- Fixing a garbled listing now follows your own title and description formulas from Settings.
+
+## 0.1.928 — 2026-11-11
+
+- Anteroom Bridge 0.2.68 runs only the photos Anteroom approved for a listing, and needs Anteroom's signed approval for every action from the web, including reading your sales, likes and imports and cancelling a listing.
+
+## 0.1.927 — 2026-11-11
+
+- Install the exact, verified package versions everywhere, including first-time setup.
+
+## 0.1.926 — 2026-11-11
+
+- Very large photos are turned away with a clear message instead of slowing Anteroom down, on the Mac and online.
+- Scout photo checks no longer pause the rest of the app while the photos are read.
+- Online, Scout photos are stored the same way as listing photos: resized and without location data.
+- An eBay message image that is too large to open now says so instead of failing with a server error.
+- Downloading photos from a link no longer freezes the app when the website's address is slow to look up.
+
+## 0.1.925 — 2026-11-11
+
+- When ChatGPT or Claude on your Mac can't finish a request, Anteroom now says why (usage limit, signed out, stopped responding, rejected) instead of always asking you to wake your Mac.
+- Web searches through ChatGPT or Claude on your Mac get the same ten minutes as other searches instead of stopping after five.
+- Claude, Gemini, xAI, Mistral and OpenRouter keys now retry a busy or briefly failing request a couple of times before giving up, and no longer resend a rejected request.
+- Claude keys reuse cached prompts, so repeated listing steps cost less and start faster, and Claude's web search uses its newer, more focused search on current models.
+- OpenRouter only sends listing requests to hosts that follow Anteroom's listing format.
+
+## 0.1.924 — 2026-11-11
+
+- Item details you type no longer undo a category or delist record Anteroom saved to the same listing a moment earlier.
+- Reloading for an update, or leaving the page, now saves item details you just typed instead of dropping them.
+
+## 0.1.923 — 2026-11-11
+
+- Offers to likers on Mercari no longer re-check listings nobody can get an offer on every 15 minutes. Anteroom re-checks them once a day, since Mercari has no likes feed to watch, which cuts thousands of daily Mercari requests.
+
+## 0.1.922 — 2026-11-11
+
+- Remote access over Tailscale now only lets in your own Tailscale account, not other people or tagged devices on your tailnet.
+- Only the Anteroom Bridge extension can talk to Anteroom; other Chrome extensions are refused.
+- The app only offers updates that are newer than the version you have.
+
+## 0.1.921 — 2026-11-11
+
+- Keep the web app from switching back to older code when updates finish out of order, and refresh category lists whenever they differ from the ones that ship.
+
 ## 0.1.920 — 2026-11-11
 
 - Offers to likers on Depop and Poshmark no longer re-check listings nobody can get an offer on every 15 minutes. Anteroom waits for a new like (it watches the likes feed every minute) and re-checks those listings once a week in case a like was missed, which cuts thousands of daily Depop requests.

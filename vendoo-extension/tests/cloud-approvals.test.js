@@ -84,26 +84,46 @@ test('an unsigned write, a forged signature or a malformed token is refused', as
   assert.equal((await s.verify(long, ALICE)).approval, 'invalid');
 });
 
-test('without a configured key every write is refused, and reads still run', async () => {
+test('without a configured key every command is refused, reads included', async () => {
   const s = await setup({ publicKey: '' });
   const signed = await s.signer.sign(update(), ALICE, { seconds: NOW });
   const refusal = await s.verify(signed, ALICE);
   assert.equal(refusal.approval, 'no_key');
   assert.match(refusal.error, /no approval key/);
-  const read = { type: 'marketplace.sessions', job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE } };
-  assert.equal(await s.verify(read, ALICE), null);
+  const read = await s.signer.sign({ type: 'marketplace.sessions', job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE } }, ALICE, { seconds: NOW });
+  assert.equal((await s.verify(read, ALICE)).approval, 'no_key');
   assert.equal(typeof BRIDGE_APPROVAL_PUBLIC_KEY, 'string');
 });
 
-test('every write the hosted API relays needs an approval; reads and cancel do not', async () => {
+test('every command the hosted API relays needs an approval, reads and cancel included', async () => {
   const s = await setup();
-  for (const type of ['job.vendoo_api', 'marketplace.execute', 'marketplace.result', 'marketplace.delete', 'marketplace.promote']) {
-    assert.equal((await s.verify({ type, job_id: 'job-1', message_id: MESSAGE, payload: { request_id: MESSAGE } }, ALICE)).approval, 'unsigned', type);
+  const types = ['job.vendoo_api', 'marketplace.execute', 'marketplace.result', 'marketplace.delete', 'marketplace.promote',
+    'job.cancel', 'marketplace.promotion_check', 'marketplace.promotion_result', 'marketplace.like_events',
+    'marketplace.sessions', 'marketplace.connect', 'marketplace.import.page', 'marketplace.import.listing', 'marketplace.sales_history'];
+  for (const type of types) {
+    const command = { type, job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE } };
+    assert.equal((await s.verify(command, ALICE)).approval, 'unsigned', type);
+    assert.equal(await s.verify(await s.signer.sign(command, ALICE, { seconds: NOW }), ALICE), null, type);
   }
-  for (const type of ['job.cancel', 'marketplace.promotion_check', 'marketplace.promotion_result', 'marketplace.like_events',
-    'marketplace.sessions', 'marketplace.connect', 'marketplace.import.page', 'marketplace.import.listing', 'marketplace.sales_history']) {
-    assert.equal(await s.verify({ type, job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE } }, ALICE), null, type);
-  }
+});
+
+test('only the photos the approval names, with exactly their bytes, go with a command', async () => {
+  const s = await setup();
+  const front = { id: 'p1', mime_type: 'image/jpeg', base64: Buffer.from('approved front').toString('base64') };
+  const back = { id: 'p2', mime_type: 'image/jpeg', base64: Buffer.from('approved back').toString('base64') };
+  const signed = await s.signer.sign(update(), ALICE, { seconds: NOW, photos: [front, back] });
+  // A page script swaps the bytes of an approved photo, or adds one the approval does not name.
+  assert.equal((await s.verify(signed, ALICE, [front, { ...back, base64: Buffer.from('swapped').toString('base64') }])).approval, 'photos');
+  assert.equal((await s.verify(signed, ALICE, [front, { ...front, id: 'p3' }])).approval, 'photos');
+  const refusal = await s.verify(signed, ALICE, [{ ...front, base64: back.base64 }]);
+  assert.match(refusal.error, /photos/);
+  assert.equal(refusal.ok, false);
+  // A refusal over photos does not use the approval up: the same command with the approved bytes runs.
+  assert.equal(await s.verify(signed, ALICE, [front, back]), null);
+  // Without a photo claim, no photo may come with the command.
+  const unnamed = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { pho: undefined } });
+  assert.equal((await s.verify(unnamed, ALICE, [front])).approval, 'photos');
+  assert.equal(await s.verify(await s.signer.sign(update(), ALICE, { seconds: NOW }), ALICE, []), null);
 });
 
 test('used approvals are forgotten once they expire', async () => {

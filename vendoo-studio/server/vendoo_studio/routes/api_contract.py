@@ -170,6 +170,9 @@ class ConversationInput(ContractModel):
 
     title: str | None = Field(None, max_length=200)
     notes: str | None = Field(None, max_length=50000)
+    note_changes: dict | None = None
+    """Item Details' changed keys, merged into the notes as they are now, so keys
+    the server wrote since the notes were read survive. Measurements merge per field."""
     box_id: str | None = Field(None, max_length=100)
 
 

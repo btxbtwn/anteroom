@@ -65,13 +65,23 @@ def _run_json(args: list[str]) -> Any:
         raise TailscaleServeError("Tailscale returned invalid JSON.") from exc
 
 
-def dns_name() -> str | None:
+def identity() -> tuple[str | None, str | None]:
+    """This Mac's MagicDNS name, and the Tailscale login of the person who owns it.
+
+    Only that login may use Anteroom over Serve. A tagged Mac belongs to no
+    person, so it has no owner login and Serve admits nobody.
+    """
     status = _run_json(["status", "--json"])
     self_node = status.get("Self") if isinstance(status, dict) else None
     if not isinstance(self_node, dict):
-        return None
-    name = str(self_node.get("DNSName") or "").rstrip(".")
-    return name or None
+        return None, None
+    name = str(self_node.get("DNSName") or "").rstrip(".") or None
+    users = status.get("User") if isinstance(status, dict) else None
+    user = users.get(str(self_node.get("UserID"))) if isinstance(users, dict) else None
+    login = str(user.get("LoginName") or "") if isinstance(user, dict) else ""
+    if self_node.get("Tags") or not login:
+        return name, None
+    return name, login
 
 
 def _serve_status() -> dict:
@@ -113,12 +123,12 @@ def status() -> dict[str, Any]:
     """Inspect Tailscale and whether Studio's private Serve route is active."""
     from vendoo_studio.services.local_requests import set_private_origin
 
-    payload = _status()
-    set_private_origin(payload["url"] if payload["enabled"] else None)
+    payload, owner = _status()
+    set_private_origin(payload["url"] if payload["enabled"] else None, owner)
     return payload
 
 
-def _status() -> dict[str, Any]:
+def _status() -> tuple[dict[str, Any], str | None]:
     payload: dict[str, Any] = {
         "available": False,
         "installed": bool(_which_tailscale()),
@@ -133,14 +143,15 @@ def _status() -> dict[str, Any]:
     }
     if not payload["installed"]:
         payload["error"] = "Tailscale is not installed (or not on PATH)."
-        return payload
+        return payload, None
 
+    owner = None
     try:
-        host = dns_name()
+        host, owner = identity()
         if not host:
             payload["state"] = "logged_out"
             payload["error"] = "Tailscale is installed but this machine has no MagicDNS name. Sign in to Tailscale."
-            return payload
+            return payload, None
         payload["dns_name"] = host
         payload["url"] = _public_url(host)
         payload["available"] = True
@@ -159,10 +170,15 @@ def _status() -> dict[str, Any]:
                 f"HTTPS port {HTTPS_PORT} is already used by another Tailscale Serve route. "
                 f"Run `tailscale serve status` or set VENDOO_STUDIO_TAILSCALE_HTTPS_PORT to a free port."
             )
+        elif state == "configured" and not owner:
+            payload["error"] = (
+                "This Mac is a tagged Tailscale device, so it has no owner to let in. "
+                "Anteroom only answers its owner's Tailscale account; sign this Mac in as yourself."
+            )
     except TailscaleServeError as exc:
         payload["error"] = str(exc)
         payload["state"] = "error"
-    return payload
+    return payload, owner
 
 
 def enable() -> dict[str, Any]:

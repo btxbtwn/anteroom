@@ -30,7 +30,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ANTEROOM_WEB_DIR=/app/web
 WORKDIR /app
 COPY deploy/fly/supabase-prod-ca-2021.crt /app/supabase-prod-ca-2021.crt
-COPY vendoo-studio/pyproject.toml vendoo-studio/VERSION /app/vendoo-studio/
+COPY vendoo-studio/VERSION /app/vendoo-studio/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY vendoo-studio/server/vendoo_studio/ /app/vendoo-studio/server/vendoo_studio/
 COPY skills/list-this/SKILL.md /app/skills/list-this/SKILL.md
@@ -39,8 +39,9 @@ COPY skills/list-this/references/ /app/skills/list-this/references/
 COPY skills/measure-this/ /app/skills/measure-this/
 COPY skills/box-scout/ /app/skills/box-scout/
 COPY --from=requirements /requirements.txt /tmp/requirements.txt
+# The app itself is not pip-installed: PYTHONPATH serves it from its source
+# folder, and installing it would build it with an unpinned setuptools.
 RUN pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements.txt \
-    && pip install --no-cache-dir --no-deps /app/vendoo-studio \
     && rm /tmp/requirements.txt \
     && chmod -R a+rX /app/skills /app/vendoo-studio /app/CHANGELOG.md \
     && useradd --create-home --uid 10001 anteroom
