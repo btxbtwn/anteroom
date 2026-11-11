@@ -342,8 +342,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     )
     app.state.web_dir = web_dir
     app.state.process_role = os.environ.get('ANTEROOM_PROCESS_ROLE', 'all')
-    # A web process serves sellers and device connections. Heavy scheduled work
-    # runs on a worker process once that split is deployed. One process keeps both.
+    # On Fly, `web` Machines serve sellers and device connections, and `worker`
+    # Machines run drafts and the schedulers (deploy/fly/fly.toml). The Mac, the
+    # sandbox and staging run both in one process (`all`).
     app.state.background_worker_enabled = (
         os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1' and app.state.process_role != 'web'
     )

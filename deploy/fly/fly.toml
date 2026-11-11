@@ -20,6 +20,14 @@ kill_timeout = 300
   [build.args]
     VITE_SUPABASE_URL = 'https://ytoqdgtzvutdltfkpxbu.supabase.co'
 
+[processes]
+  # `app` serves sellers, the Mac and Chrome on a full CPU, so page loads never
+  # wait behind generation. `worker` runs drafts, assistant answers and the
+  # schedulers; it takes no public traffic. Keep the `app` name: renaming the
+  # group would destroy the serving Machine on deploy. See docs/hosted-production.md.
+  app = 'env ANTEROOM_PROCESS_ROLE=web python -m vendoo_studio.hosted_server'
+  worker = 'env ANTEROOM_PROCESS_ROLE=worker python -m vendoo_studio.hosted_server'
+
 [env]
   ANTEROOM_BACKGROUND_WORKER = '1'
   # Email every distinct error to the operator (services/error_alerts.py).
@@ -27,6 +35,7 @@ kill_timeout = 300
   SUPABASE_URL = 'https://ytoqdgtzvutdltfkpxbu.supabase.co'
 
 [http_service]
+  processes = ['app']
   internal_port = 8080
   force_https = true
   auto_stop_machines = 'off'
@@ -46,8 +55,33 @@ kill_timeout = 300
     method = 'GET'
     path = '/api/health'
 
+# The worker has no public service, so blue-green deploys wait on this check
+# before stopping its old Machine. It also answers forwarded Mac and Chrome
+# calls on the private network.
+[checks.worker_alive]
+  processes = ['worker']
+  type = 'http'
+  port = 8080
+  method = 'get'
+  path = '/api/health'
+  interval = '30s'
+  timeout = '5s'
+  grace_period = '15s'
+
 [[vm]]
+  processes = ['app']
   memory = '2gb'
   cpu_kind = 'performance'
+  cpus = 1
+  memory_mb = 2048
+
+# Generation mostly waits on the model, and a shared CPU banks burst credit
+# while idle. Its sustained baseline is a fraction of a core, so a long run of
+# generation slows drafts, never page loads. Move it to performance if drafts
+# queue behind CPU.
+[[vm]]
+  processes = ['worker']
+  memory = '2gb'
+  cpu_kind = 'shared'
   cpus = 1
   memory_mb = 2048

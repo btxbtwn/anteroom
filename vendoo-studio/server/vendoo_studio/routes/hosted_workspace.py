@@ -101,12 +101,8 @@ def listing_response(db, identity):
 @router.get('/runtime', response_model=contract.WorkspaceRuntime)
 def runtime(request: Request, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.category_tree import categories_ready
-    worker = getattr(request.app.state, 'background_worker', None)
-    generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
-    # The schedulers run on whichever Machine holds their lease, so a Machine
-    # waiting for it during a deploy still offers what they serve.
-    handoff = getattr(request.app.state, 'handoff', None)
-    scheduled = bool(request.app.state.background_worker_enabled and handoff is not None and not handoff.done())
+    from vendoo_studio.routes.hosted_tasks import drafts_run, schedules_run
+    generation, scheduled = drafts_run(request.app), schedules_run(request.app)
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant', 'account_deletion']
             + (['marketplace_sessions'] if scheduled else [])
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
