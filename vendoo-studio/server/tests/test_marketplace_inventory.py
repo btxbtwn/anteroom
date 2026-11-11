@@ -194,3 +194,18 @@ def test_a_sale_reads_stock_before_deciding_to_delist_elsewhere(monkeypatch):
     monkeypatch.setattr(marketplace_accounts, "_notify_sales", lambda *a: None)
     asyncio.run(marketplace_accounts.announce_sales(["sale"], session_factory=lambda: None))
     assert order == ["read", "delist"]
+
+
+def test_stock_read_after_a_sale_holds_no_transaction_during_the_remote_read(etsy_imported):
+    """Hosted Postgres ends a connection idle in a transaction after 30 s; the read can take longer."""
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+
+    conv_id = import_item(etsy_imported, "etsy")
+    sale = MarketplaceSale(marketplace="etsy", listing_id="555", order_id="order", line_id="line", quantity=1, conversation_id=conv_id)
+    etsy_imported.db.add(sale)
+    etsy_imported.db.commit()
+    sale_id = sale.id
+    during_read = []
+    etsy_imported.remote.after_read = lambda: during_read.append(etsy_imported.db.in_transaction())
+    asyncio.run(marketplace_inventory.read_after_sales([sale_id], session_factory=lambda: etsy_imported.db))
+    assert during_read and not any(during_read)

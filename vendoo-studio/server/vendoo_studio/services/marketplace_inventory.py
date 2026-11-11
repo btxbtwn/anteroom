@@ -165,6 +165,10 @@ async def read_after_sales(sale_ids: list[str], *, session_factory) -> None:
         for conv_id, marketplace, listing_id in sorted(targets):
             if stock_after_sale(db, conv_id, marketplace, listing_id)["status"] != "unknown":
                 continue
+            # End the read-only transaction first: the remote read can outlast
+            # hosted Postgres's idle-in-transaction limit, and holds no pooled
+            # connection while it waits. observe saves through this session after.
+            db.rollback()
             try:
                 await observe(db, conv_id, marketplace, listing_id)
             except Exception as exc:  # noqa: BLE001 - the sale is recorded either way
