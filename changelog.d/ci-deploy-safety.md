@@ -1,1 +1,0 @@
-- Keep the web app from switching back to older code when updates finish out of order, and refresh category lists whenever they differ from the ones that ship.

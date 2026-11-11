@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.921 — 2026-11-11
+
+- Keep the web app from switching back to older code when updates finish out of order, and refresh category lists whenever they differ from the ones that ship.
+
 ## 0.1.920 — 2026-11-11
 
 - Offers to likers on Depop and Poshmark no longer re-check listings nobody can get an offer on every 15 minutes. Anteroom waits for a new like (it watches the likes feed every minute) and re-checks those listings once a week in case a like was missed, which cuts thousands of daily Depop requests.
