@@ -31,7 +31,7 @@ from vendoo_studio.services.seller_sessions import (
     SessionVerifier,
 )
 from vendoo_studio.version import app_version
-from vendoo_studio.services.background_loop import BackgroundLoop
+from vendoo_studio.services.background_loop import BackgroundLoop, give_threads
 
 
 def from_public_edge(scope) -> bool:
@@ -227,6 +227,7 @@ class AccountResponse(BaseModel):
 def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, session_verifier: SessionVerifier | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        give_threads(asyncio.get_running_loop())
         from vendoo_studio.services.error_alerts import install_alerts, uninstall_alerts
         install_alerts()
         # ORM relationship names must resolve before a route constructs its

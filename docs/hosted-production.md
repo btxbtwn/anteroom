@@ -211,6 +211,26 @@ preflight copies them or changes them. Remaining: each read still decodes the
 full revision JSON, the snapshot rebuilds and catalog index still compete for
 the same CPU, and the pool has not been re-measured after deploy.
 
+Production 0.1.910 stalled again on 2026-11-11 at 03:22 UTC, right after the
+seller pressed List everywhere on one item: page reads took 30–110 s and
+`GET .../marketplace-listings` hit the pool timeout, while the Machine's CPU
+stayed under 40%. The requests were waiting for a thread, not the CPU.
+`asyncio.to_thread`, which `database.in_worker_session` and every other
+async hand-off use, runs on the event loop's default pool, and asyncio sizes
+that pool from the CPU count: five threads on one vCPU (`py-spy dump` showed
+`asyncio_0`–`asyncio_4`). Each direct marketplace start holds one of them while
+`approved_photos.capture` downloads and re-uploads every photo to Storage, so
+four or five starts at once left every other database step queued. Plain `def`
+routes were unaffected only because FastAPI gives them 40 threads of their own.
+The request loop and every `BackgroundLoop` now get a 40-thread pool
+(`background_loop.give_threads`); `tests/test_loop_threads.py` holds 12
+blocking calls at once on a one-CPU count. Not yet measured after deploy:
+whether List everywhere with several marketplaces stays clear of the pool
+timeout. Storage refusals still reach the seller as "Could not upload or load
+the photo" without Supabase's status in any log, and the operator error emails
+failed with `SMTPDataError` during this incident, so the pool-timeout holder
+snapshot was not delivered.
+
 Machines reach each other's `/internal/` routes at
 `http://[FLY_PRIVATE_IP]:8080` on the private network
 (`device_routes.local_base_url`), which does not pass through Fly's proxy. The
