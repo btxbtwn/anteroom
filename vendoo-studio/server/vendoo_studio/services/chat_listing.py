@@ -41,6 +41,22 @@ def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operation
     updated = align_listing_gender(listing, operations)
     stamped = _stamp_learned_fields(db, updated)
     revisions = ListingRepo(db).get_revisions(conv_id)
+    previous = revisions[0].listing_json if revisions else {}
+    # Chat may rewrite copy, but SKUs belong to the seller.
+    for key in {"sku", *(key for key in stamped.keys() | previous.keys() if key.endswith("_specifics"))}:
+        if key == "sku":
+            if key in previous:
+                stamped[key] = previous[key]
+            else:
+                stamped.pop(key, None)
+        else:
+            seller_block = previous.get(key) or {}
+            if isinstance(seller_block, dict) and "sku" in seller_block:
+                if not isinstance(stamped.get(key), dict):
+                    stamped[key] = {}
+                stamped[key]["sku"] = seller_block["sku"]
+            elif isinstance(stamped.get(key), dict):
+                stamped[key].pop("sku", None)
     previous_size = None
     if revisions and isinstance(revisions[0].listing_json, dict):
         previous_size = revisions[0].listing_json.get("size")

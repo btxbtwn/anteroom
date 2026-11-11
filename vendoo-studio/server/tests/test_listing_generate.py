@@ -390,6 +390,36 @@ class PersistListingTest(unittest.TestCase):
         )
         self.assertNotIn("sku", parsed)
 
+    def test_model_depop_sku_is_dropped_without_a_seller_sku(self):
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON,
+                "depop_specifics": {"sku": "undefined", "material": ["Cotton"]}},
+        )
+        self.assertNotIn("sku", parsed["depop_specifics"])
+        self.assertEqual(parsed["depop_specifics"]["material"], ["Cotton"])
+
+    def test_seller_sku_wins_over_model_depop_sku(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"sku": "BIN4-001"}))
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON,
+                "depop_specifics": {"sku": "INVENTED"}},
+        )
+        self.assertEqual(parsed["sku"], "BIN4-001")
+        self.assertNotIn("sku", parsed["depop_specifics"])
+
+    def test_chat_cannot_invent_or_replace_seller_skus(self):
+        for seller_sku in (None, "BIN4-001"):
+            with self.subTest(seller_sku=seller_sku):
+                original = {**LISTING_JSON, "depop_specifics": {}}
+                if seller_sku:
+                    original["sku"] = seller_sku
+                    original["depop_specifics"]["sku"] = "DEPOP-001"
+                listing_persistence.save_revision(self.db, self.conv.id, original, source="user_form")
+                updated = chat_listing.save_listing_revision(self.db, self.conv.id,
+                    {**LISTING_JSON, "sku": "INVENTED", "depop_specifics": {"sku": "undefined"}})
+                self.assertEqual(updated.get("sku"), seller_sku)
+                self.assertEqual(updated["depop_specifics"].get("sku"), "DEPOP-001" if seller_sku else None)
+
     def test_regenerate_writes_carried_measurements_and_flaws_into_description(self):
         """The model writing "See photos" / "none noted" cannot drop the seller's facts."""
         ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({
