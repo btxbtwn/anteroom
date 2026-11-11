@@ -603,6 +603,13 @@ def build_catalog_index(snapshot: CatalogSnapshot) -> dict[str, Any]:
         return _build_unlocked(snapshot)
 
 
+# A child that hangs is killed and the build fails, so ``rebuilding`` clears
+# and the next search starts a fresh build. 31,300 category leaves (about the
+# size of every marketplace tree together) built in 87 s on a loaded 6-core
+# Linux machine; a niced child on a shared Fly vCPU gets ten times that.
+HOSTED_BUILD_TIMEOUT_SEC = 900
+
+
 def _build_hosted(snapshot: CatalogSnapshot, owner: str) -> dict[str, Any]:
     """Tokenize in a lower-priority process, then publish the completed index.
 
@@ -619,7 +626,7 @@ def _build_hosted(snapshot: CatalogSnapshot, owner: str) -> dict[str, Any]:
         subprocess.run(
             [sys.executable, '-m', 'vendoo_studio.services.catalog_index_worker', owner, directory],
             input=json.dumps(asdict(snapshot)), text=True, check=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=HOSTED_BUILD_TIMEOUT_SEC,
         )
         result = json.loads((output / 'result.json').read_text())
         index = SembleIndex.load_from_disk(output / 'index') if result.pop('indexed') else None

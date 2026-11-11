@@ -28,42 +28,17 @@ DEFAULT_DESCRIPTION_MARKERS = ("measurements:",)
 # A flawless item leaves its Flaws line out, so the marker is never required.
 OPTIONAL_DESCRIPTION_MARKERS = frozenset({"flaws:"})
 
-_FALLBACK_FORMULAS = f"""## Formula Reference (NON-NEGOTIABLE)
-
-### TITLE Formula
-```
-{DEFAULT_TITLE_FORMULA}
-```
-- EXACT order
-- Max 80 characters
-- Example: `Levi's 33 Y2K 511 Slim Shorts Black Denim`
-
-### DESCRIPTION Formula (Line breaks MANDATORY)
-```
-{DEFAULT_DESCRIPTION_FORMULA}
-```
-- Include the Flaws line only when the item has flaws; leave it out entirely when there are none.
-- Max 1,000 characters, so the description fits Mercari, Poshmark, and Depop.
-
-### PRICING Formula
-```
-Listing Price = Market comp × 1.35 (round to nearest dollar)
-Ceiling       = median asking price of 3+ similar live listings; price at or
-                below it unless the item is clearly better (NWT, condition, size)
-```
-"""
-
 
 @lru_cache(maxsize=1)
 def _base_formula_rules(*, max_chars: int = 8000) -> str:
     """Return the non-negotiable Formula Reference section from list-this SKILL.md."""
     skill_md = skills_dir() / "list-this" / "SKILL.md"
     if not skill_md.is_file():
-        return _FALLBACK_FORMULAS[:max_chars]
+        raise FileNotFoundError(f"The list-this skill is missing: {skill_md} does not exist")
     text = skill_md.read_text(encoding="utf-8")
     start = _FORMULA_HEADING.search(text)
     if not start:
-        return _FALLBACK_FORMULAS[:max_chars]
+        raise ValueError(f"{skill_md} has no Formula Reference section")
     rest = text[start.start() :]
     end = len(rest)
     for match in _SECTION_HEADING.finditer(rest):
@@ -72,7 +47,7 @@ def _base_formula_rules(*, max_chars: int = 8000) -> str:
             break
     section = rest[:end].strip()
     if "TITLE Formula" not in section or "DESCRIPTION Formula" not in section:
-        return _FALLBACK_FORMULAS[:max_chars]
+        raise ValueError(f"{skill_md} Formula Reference lacks the TITLE or DESCRIPTION formula")
     return section[:max_chars]
 
 
