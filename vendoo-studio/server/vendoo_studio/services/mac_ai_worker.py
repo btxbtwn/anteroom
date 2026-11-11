@@ -16,6 +16,20 @@ from vendoo_studio.config import HOSTED_URL
 from vendoo_studio.services.mac_inference import OPERATIONS
 
 
+async def subscription_providers():
+    from vendoo_studio.services.chatgpt_oauth import chatgpt_signed_in
+    from vendoo_studio.services.claude_auth import claude_signed_in
+    from vendoo_studio.providers.chatgpt_codex import ChatGPTCodexProvider
+    from vendoo_studio.providers.claude_agent import ClaudeProvider
+
+    providers = {}
+    if await asyncio.to_thread(chatgpt_signed_in):
+        providers['chatgpt'] = ChatGPTCodexProvider()
+    if await asyncio.to_thread(claude_signed_in):
+        providers['claude'] = ClaudeProvider()
+    return providers
+
+
 async def execute(command, provider):
     operation = command.get('operation')
     if operation not in OPERATIONS:
@@ -63,12 +77,10 @@ class MacAIWorker:
             self._token = token
             self._owner = owner
             if token and (self._thread is None or not self._thread.is_alive()):
-                self._thread = threading.Thread(target=lambda: asyncio.run(self._run()), daemon=True, name='mac-chatgpt-worker')
+                self._thread = threading.Thread(target=lambda: asyncio.run(self._run()), daemon=True, name='mac-subscription-worker')
                 self._thread.start()
 
     async def _run(self):
-        from vendoo_studio.services.chatgpt_oauth import chatgpt_signed_in
-        from vendoo_studio.providers.chatgpt_codex import ChatGPTCodexProvider
         worker = uuid.uuid4().hex
         active = {}
 
@@ -90,10 +102,9 @@ class MacAIWorker:
                     if not token:
                         await asyncio.sleep(1)
                         continue
-                    if not await asyncio.to_thread(chatgpt_signed_in):
-                        await asyncio.sleep(5)
-                        continue
-                    provider = ChatGPTCodexProvider()
+                    providers = await subscription_providers()
+                    models = {name: {'vision_model': provider.vision_model, 'listing_model': provider.listing_model}
+                              for name, provider in providers.items()}
                     headers = {'Authorization': 'Bearer ' + token}
                     for identity, (_account, task) in list(active.items()):
                         if task.done():
@@ -101,7 +112,7 @@ class MacAIWorker:
                             task.result()
                     try:
                         response = await client.post('/api/mac-ai/next', headers=headers, json={
-                            'worker': worker, 'vision_model': provider.vision_model, 'listing_model': provider.listing_model,
+                            'worker': worker, 'providers': models,
                             'available': True,
                         })
                         with self._lock:
@@ -111,7 +122,7 @@ class MacAIWorker:
                         if response.status_code == 200:
                             command = response.json()
 
-                            async def answer(command, provider, owner):
+                            async def answer(command, provider, owner, models):
                                 async def watch():
                                     # Each call checks its own cancellation. A long
                                     # poll or another slow call cannot delay Stop.
@@ -124,8 +135,7 @@ class MacAIWorker:
                                         try:
                                             heartbeat = await client.post('/api/mac-ai/next',
                                                 headers={'Authorization': 'Bearer ' + token}, json={
-                                                    'worker': worker, 'vision_model': provider.vision_model,
-                                                    'listing_model': provider.listing_model, 'available': False,
+                                                    'worker': worker, 'providers': models, 'available': False,
                                                     'active_call': command['id'],
                                                 })
                                         except httpx.HTTPError:
@@ -158,7 +168,7 @@ class MacAIWorker:
                                     })
                                 except httpx.HTTPError:
                                     pass
-                            active[command['id']] = (owner, asyncio.create_task(answer(command, provider, owner)))
+                            active[command['id']] = (owner, asyncio.create_task(answer(command, providers.get(command.get('provider')), owner, models)))
                         elif response.status_code != 204:
                             await asyncio.sleep(5)
                     except httpx.HTTPError:

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.908 — 2026-11-11
+
+- Load eBay fields automatically when saved category choices are out of date.
+
 ## 0.1.907 — 2026-11-11
 
 - Enter cost of goods when completing sale details so the missing sale data warning can clear.
