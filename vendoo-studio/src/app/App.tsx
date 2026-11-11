@@ -22,6 +22,7 @@ import {
 } from "../components/settingsNav";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { PhotoDropOverlay } from "../components/PhotoDropOverlay";
+import { canAddPhotos, DRAFT_ONLY_PHOTOS } from "../components/photoAdding";
 import { BulkUploadDialog } from "../components/BulkUploadDialog";
 import { useBulkRegenerate } from "../components/useBulkRegenerate";
 import { bulkRegenerateToast } from "../bulkRegenerate";
@@ -1013,6 +1014,10 @@ export function App() {
           const groups = groupImageFilesByFolder(files);
           if (groups.length > 1) {
             setPendingBulkGroups(groups);
+            return;
+          }
+          if (selectedConvId && !canAddPhotos(runtime.hosted, selectedListing?.status)) {
+            toastManager.add({ type: "info", title: "Photos not added", description: DRAFT_ONLY_PHOTOS });
             return;
           }
           dropPhotos.mutate({ files });

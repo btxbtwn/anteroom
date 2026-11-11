@@ -22,6 +22,7 @@ import { PhotoEditor } from "./PhotoEditor";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
 import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
+import { DRAFT_ONLY_PHOTOS, useCanAddPhotos } from "./photoAdding";
 import { photoThumbUrl } from "../photoThumb";
 import { Button } from "./ui/button";
 
@@ -54,6 +55,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     queryKey: ["listing-videos", convId], queryFn: () => api.listingVideos.list(convId), enabled: Boolean(videoRules),
   });
   const sessionActive = useListingSessionActive();
+  const canAdd = useCanAddPhotos(convId);
   const { picked, unticked, custom } = formPhotos(listing, item, own, marketplace);
   const ids = picked.map((photo) => photo.id);
   const limit = rules?.photo_limits?.[marketplace];
@@ -175,7 +177,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   };
 
   const onStripDragOver = (event: React.DragEvent) => {
-    if (!dragHasFiles(event.dataTransfer) || locked) return;
+    if (!dragHasFiles(event.dataTransfer) || locked || !canAdd) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     if (!dropping) setDropping(true);
@@ -185,7 +187,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     if (!dragHasFiles(event.dataTransfer)) return;
     // Handled here, so the window's drop does not add them to the item's photos.
     event.preventDefault();
-    if (locked) return;
+    // A hosted listing past draft says why beside its photos instead.
+    if (locked || !canAdd) return;
     void addFiles(Array.from(event.dataTransfer.files || []));
   };
 
@@ -235,7 +238,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
 
   if (!sessionActive) return null;
 
-  const addTile = (
+  const addTile = canAdd && (
     <button type="button" disabled={locked} onClick={() => input.current?.click()}
       className="flex size-16 shrink-0 items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:border-ring/60 disabled:opacity-50"
       aria-label={videoRules ? `Add photos or a video to ${name}` : `Add photos to ${name}`}
@@ -243,7 +246,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       <PlusIcon className="size-4" />
     </button>
   );
-  const fileInput = <input ref={input} type="file" multiple hidden aria-label={`Add photos${videoRules ? " or a video" : ""} to ${name}`}
+  const draftOnly = !canAdd && <p className="text-xs text-muted-foreground">{DRAFT_ONLY_PHOTOS}</p>;
+  const fileInput = canAdd && <input ref={input} type="file" multiple hidden aria-label={`Add photos${videoRules ? " or a video" : ""} to ${name}`}
     accept={page?.accept ?? (videoRules ? "image/*,video/*" : "image/*")}
     onChange={(event) => { if (event.target.files) void addFiles(Array.from(event.target.files)); }} />;
   const reset = custom && <Button variant="ghost" size="xs" disabled={locked} title="Send the item's photos in item order"
@@ -301,13 +305,14 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       <div data-marketplace-media={marketplace} onDragOver={onStripDragOver} onDragLeave={() => setDropping(false)} onDrop={onStripDrop}
         className={cn("min-w-0 space-y-2 rounded-lg", dropping && "ring-2 ring-ring")}>
         {page.hint && <p className="text-xs whitespace-pre-line text-muted-foreground">{page.hint}</p>}
+        {draftOnly}
         {notes}
         <PhotoStrip>
           {video && <VideoTile video={video} label={`${name} video`} problem={videoProblem(video, videoRules)}
             onRemove={locked ? undefined : () => onChange(withVideo(listing, ""))} />}
           {sortedThumbs}
           {emptySlots.length
-            ? emptySlots.map((caption, index) => <SlotCaption key={caption} caption={caption}>{index === 0 ? addTile : <EmptySlot />}</SlotCaption>)
+            ? emptySlots.map((caption, index) => <SlotCaption key={caption} caption={caption}>{index === 0 && addTile ? addTile : <EmptySlot />}</SlotCaption>)
             : addTile}
         </PhotoStrip>
         {videoId && library && !video && <p role="alert" className="text-xs text-destructive-foreground">The selected video is missing. Add another video or remove it.</p>}
@@ -330,10 +335,10 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       meta={`${Math.min(picked.length, limit ?? picked.length)}${limit ? ` of ${limit}` : ""} sent to ${name}${custom ? " · this form's own" : " · the item's photos"}`}
       actions={<>
         {reset}
-        <Button variant="outline" size="xs" disabled={locked} onClick={() => input.current?.click()}>
+        {canAdd && <Button variant="outline" size="xs" disabled={locked} onClick={() => input.current?.click()}>
           <ImagePlusIcon />
           {busy ? "Adding…" : videoRules ? "Add photos or video" : "Add photos"}
-        </Button>
+        </Button>}
         {fileInput}
       </>}
     >
@@ -359,6 +364,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
           {videoRules ? videoRuleText(videoRules) : ""}
           {custom ? " Photos added to the item later show here, left off, until you add them." : ""}
         </p>
+        {draftOnly}
         {notes}
         {error && <p role="alert" className="text-xs text-destructive-foreground">{error}</p>}
       </div>

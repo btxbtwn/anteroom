@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 
 const api = `http://127.0.0.1:${process.env.VENDOO_STUDIO_PORT || "4341"}`;
@@ -225,6 +226,35 @@ test("typing before the initial details arrive preserves the pending edit and un
     await page.goto(`/?listing=${draft.id}`);
     await expect(page.locator(`#item-notes-${draft.id}`)).toHaveValue("Saved after moving to another draft");
   } finally { release(); }
+});
+
+test("a sold listing offers no photo upload, which hosted accepts on drafts only", async ({ page, request }, info) => {
+  test.skip(info.project.name === "phone", "The same photo tray serves both layouts");
+  const alice = await (await request.post(`${api}/local/auth/v1/token?grant_type=password`, {
+    data: { email: "alice@sandbox.test", password: "sandbox" },
+  })).json();
+  const headers = { Authorization: `Bearer ${alice.access_token}` };
+  const draft = await (await request.post(`${api}/api/drafts`, { headers, data: { title: `Sold photos ${Date.now()}` } })).json();
+  expect((await request.post(`${api}/api/drafts/${draft.id}/photos`, { headers, data: pixel })).status()).toBe(201);
+  expect((await request.post(`${api}/api/conversations/${draft.id}/marketplace-listings/sold`, { headers, data: {
+    marketplace: "ebay", currency: "USD", item_revenue: "20", fees: "2", shipping_credit: null, shipping_cost: null,
+    item_cost: null, sold_on: new Date().toISOString().slice(0, 10), request_id: randomUUID().replaceAll("-", ""),
+  } })).ok()).toBe(true);
+  // Reading the inventory reconciles the stored status the upload route checks.
+  await expect.poll(async () => {
+    await request.get(`${api}/api/conversations`, { headers });
+    return (await (await request.get(`${api}/api/conversations/${draft.id}`, { headers })).json()).status;
+  }, { timeout: 15_000 }).toBe("sold");
+  await page.goto("/?sign-in");
+  await page.getByLabel("Email address").fill("alice@sandbox.test");
+  await page.getByLabel("Password").fill("sandbox");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible();
+  await page.goto(`/?listing=${draft.id}`);
+  const tray = page.locator("[data-photo-tray]");
+  await expect(tray.getByText("New photos can be added while this listing is a draft.", { exact: true })).toBeVisible();
+  await expect(tray.getByRole("button", { name: "Add Photos" })).toHaveCount(0);
+  await expect(tray.getByRole("button", { name: "Add Folder" })).toHaveCount(0);
 });
 
 test("a listing the server briefly cannot answer keeps loading and fills in its saved details once it is back, without an error or a Retry tap", async ({ page, request }, info) => {
