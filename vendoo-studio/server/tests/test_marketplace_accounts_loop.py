@@ -25,15 +25,15 @@ def test_access_token_reads_and_refreshes_the_saved_account_in_a_worker_thread(m
         threads.append(threading.get_ident())
         return {name: dict(account) for name, account in saved.items()}
 
-    def write(marketplace, account):
+    def update(mutate):
         threads.append(threading.get_ident())
-        saved[marketplace] = account
+        mutate(saved)
 
     async def relay(method, path, **kwargs):
         return httpx.Response(200, json={"tokens": {"accessToken": "new", "expiresIn": 3600}})
 
     monkeypatch.setattr(marketplace_accounts, "get_marketplace_accounts", read)
-    monkeypatch.setattr(marketplace_accounts, "set_marketplace_account", write)
+    monkeypatch.setattr(marketplace_accounts, "update_marketplace_accounts", update)
     monkeypatch.setattr(marketplace_accounts, "relay_request", relay)
 
     async def run():

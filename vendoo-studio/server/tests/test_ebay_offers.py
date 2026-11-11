@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -401,8 +401,7 @@ def test_changes_during_final_token_refresh_prevent_the_send(offers, monkeypatch
 def test_token_refresh_does_not_restore_a_disconnected_account(offers, monkeypatch):
     offers.account["ebay"].update({"refreshToken": "test-refresh", "expiresAt": 1})
     monkeypatch.setattr(marketplace_accounts, "get_marketplace_accounts", lambda: offers.account)
-    saved = Mock()
-    monkeypatch.setattr(marketplace_accounts, "set_marketplace_account", saved)
+    monkeypatch.setattr(marketplace_accounts, "update_marketplace_accounts", lambda mutate: mutate(offers.account))
 
     async def refresh(*_args, **_kwargs):
         offers.account.clear()
@@ -411,7 +410,6 @@ def test_token_refresh_does_not_restore_a_disconnected_account(offers, monkeypat
     monkeypatch.setattr(marketplace_accounts, "relay_request", refresh)
     with pytest.raises(marketplace_accounts.SignInRequired, match="connection changed"):
         asyncio.run(marketplace_accounts.access_token("ebay"))
-    saved.assert_not_called()
     assert not offers.account
 
 
