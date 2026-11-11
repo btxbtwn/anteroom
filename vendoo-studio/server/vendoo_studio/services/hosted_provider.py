@@ -60,8 +60,8 @@ def provider_for(choice):
     from vendoo_studio.services.keychain import get_ai_key, get_api_key
     from vendoo_studio.services.listing_provider import key_provider_instance
 
-    if choice == 'chatgpt':
-        from vendoo_studio.services.mac_inference import MacChatGPTProvider, relay_for
+    if choice in ('chatgpt', 'claude'):
+        from vendoo_studio.services.mac_inference import MacSubscriptionProvider, relay_for
         from vendoo_studio.services.service_context import current
         from vendoo_studio.services.user_settings import LISTING_PROVIDER_KEY, read_settings
         context = current()
@@ -71,9 +71,10 @@ def provider_for(choice):
         # An explicitly selected Mac must fail clearly when offline, rather
         # than silently charging a different provider.
         selected = read_settings().get(LISTING_PROVIDER_KEY)
-        explicitly_selected = isinstance(selected, dict) and selected.get('primary') == 'chatgpt'
-        if relay.connected or explicitly_selected:
-            return MacChatGPTProvider(relay)
+        explicitly_selected = isinstance(selected, dict) and selected.get('primary') == choice
+        from vendoo_studio.services.device_routes import remote_fresh
+        if relay.ready(choice) or remote_fresh(context.seller_id, 'mac') or explicitly_selected:
+            return MacSubscriptionProvider(relay, choice)
         return None
 
     if choice in KEY_PROVIDERS:

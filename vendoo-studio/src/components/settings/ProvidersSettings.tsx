@@ -618,7 +618,7 @@ function KeyProviderEditor({
 
 export function ProvidersSettings() {
   const { hosted } = useWorkspaceRuntime();
-  const providerIds = hosted ? PROVIDER_IDS.filter((id) => isKeyProviderId(id) || id === "mimo" || id === "chatgpt") : PROVIDER_IDS;
+  const providerIds = hosted ? PROVIDER_IDS.filter((id) => isKeyProviderId(id) || id === "mimo" || id === "chatgpt" || id === "claude") : PROVIDER_IDS;
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<ListingProviderId | null>(null);
   const [claudeTerminalOpen, setClaudeTerminalOpen] = useState(false);
@@ -643,7 +643,7 @@ export function ProvidersSettings() {
   const { data: claudeModels } = useQuery({
     queryKey: ["claude-models"],
     queryFn: api.settings.claudeModels,
-    enabled: claudeSignedIn,
+    enabled: claudeSignedIn && !hosted,
     // Listing the account's models starts Claude Code, so don't redo it on every focus.
     staleTime: 5 * 60_000,
   });
@@ -1235,7 +1235,7 @@ export function ProvidersSettings() {
                     <RoleBadges id={selected} primary={primary} fallback={fallback} photoProvider={photoProvider} />
                   </span>
                 </div>
-                {hosted && selected === "chatgpt" ? <SettingsNote>{chatgptSignedIn ? "ChatGPT on your Mac is connected. Select ChatGPT as your primary listing AI above. Models and reasoning are selected in your Mac's settings." : "Open Anteroom on your Mac, connect ChatGPT in its settings, then sign into this account in the Mac app. Keep the Mac awake and Anteroom open while generating."}</SettingsNote> : hosted && !providerIds.includes(selected) ? <SettingsNote>This sign-in requires a connected Mac worker. Choose an API-key provider below and select it as your primary listing AI to run in the web app.</SettingsNote> : editors[selected]}
+                {hosted && (selected === "chatgpt" || selected === "claude") ? <SettingsNote>{(selected === "chatgpt" ? chatgptSignedIn : claudeSignedIn) ? `${providerLabel(selected)} on your Mac is connected. Select it as your primary listing AI above. Models and reasoning are selected in your Mac's settings. Keep the Mac awake and Anteroom open while generating from the web or iPhone.` : `Open Anteroom on your Mac, sign into your ${providerLabel(selected)} subscription under Account → This Mac’s Listings → Settings → Providers, then return to Account → My Account and sign into this Anteroom account. Keep the Mac awake, online, and Anteroom open. Subscription credentials stay on your Mac.`}</SettingsNote> : hosted && !providerIds.includes(selected) ? <SettingsNote>This sign-in requires a connected Mac worker. Choose an API-key provider below and select it as your primary listing AI to run in the web app.</SettingsNote> : editors[selected]}
               </div>
             </ScrollArea>
           </div>

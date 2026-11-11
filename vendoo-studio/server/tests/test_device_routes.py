@@ -20,6 +20,7 @@ from vendoo_studio.services.hosted_browser_relay import BrowserRelay, ChromeRead
 from vendoo_studio.services.mac_inference import MacInference, MacUnavailable, relay_for
 
 OWNER = 'c7a5ee16-9850-49ba-b5bd-83b8be54df46'
+MODELS = {'chatgpt': {'vision_model': 'v', 'listing_model': 'l'}}
 
 
 async def _forward_to_peer(owner, device):
@@ -75,55 +76,60 @@ def test_a_fresh_device_route_cannot_be_stolen_or_read_by_the_seller(storage, mo
         ), {'owner': owner}).all()
 
 
-def test_forwarded_inference_does_not_queue_on_the_wrong_process(monkeypatch):
+@pytest.mark.parametrize('subscription', ['chatgpt', 'claude'])
+def test_forwarded_inference_does_not_queue_on_the_wrong_process(monkeypatch, subscription):
     relay = MacInference(OWNER)
-    relay.poll('a' * 32, {'vision_model': 'v', 'listing_model': 'l'}, timeout=0)
+    relay.poll('a' * 32, MODELS, timeout=0)
     calls = []
 
     async def fail(url, path, body, timeout):
+        assert body['provider'] == subscription
         calls.append(path)
         raise RoutingUnavailable
 
     monkeypatch.setattr(device_routes, 'forward_target', _forward_to_peer)
     monkeypatch.setattr(device_routes, 'post', fail)
     with pytest.raises(MacUnavailable):
-        asyncio.run(relay.invoke('quick_chat', [1], {}))
+        asyncio.run(relay.invoke('quick_chat', [1], {}, subscription))
     assert calls == ['/internal/mac-inference/invoke']
-    assert relay.poll('a' * 32, {'vision_model': 'v', 'listing_model': 'l'}, timeout=0) is None
+    assert relay.poll('a' * 32, MODELS, timeout=0) is None
     assert not relay.pending
 
 
-def test_internal_invoke_reaches_only_that_sellers_mac(monkeypatch):
+@pytest.mark.parametrize('subscription', ['chatgpt', 'claude'])
+def test_internal_invoke_reaches_only_that_sellers_mac(monkeypatch, subscription):
     monkeypatch.setenv('ANTEROOM_PROCESS_TOKEN', 'process-token')
     owner = str(uuid.uuid4())
     other = str(uuid.uuid4())
     relay = relay_for(owner)
-    relay_for(other).poll('b' * 32, {'vision_model': 'v', 'listing_model': 'l'}, timeout=0)
-    relay.poll('a' * 32, {'vision_model': 'v', 'listing_model': 'l'}, timeout=0)
+    models = {subscription: {'vision_model': 'v', 'listing_model': 'l'}}
+    relay_for(other).poll('b' * 32, models, timeout=0)
+    relay.poll('a' * 32, models, timeout=0)
     app = create_app()
 
     async def run():
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url='http://internal') as client:
             refused = await client.post('/internal/mac-inference/invoke', json={
-                'user_id': owner, 'operation': 'quick_chat', 'args': [1], 'kwargs': {},
+                'user_id': owner, 'provider': subscription, 'operation': 'quick_chat', 'args': [1], 'kwargs': {},
             })
             assert refused.status_code == 404
 
             async def call():
                 return await client.post('/internal/mac-inference/invoke', headers={'Authorization': 'Bearer process-token'}, json={
-                    'user_id': owner, 'operation': 'quick_chat', 'args': [1], 'kwargs': {},
+                    'user_id': owner, 'provider': subscription, 'operation': 'quick_chat', 'args': [1], 'kwargs': {},
                 })
 
             task = asyncio.create_task(call())
             command = None
             for _ in range(50):
-                command = relay.poll('a' * 32, {'vision_model': 'v', 'listing_model': 'l'}, timeout=0)
+                command = relay.poll('a' * 32, models, timeout=0)
                 if command is not None:
                     break
                 await asyncio.sleep(0.01)
             assert command is not None
-            assert relay_for(other).poll('b' * 32, {'vision_model': 'v', 'listing_model': 'l'}, timeout=0) is None
+            assert command['provider'] == subscription
+            assert relay_for(other).poll('b' * 32, models, timeout=0) is None
             assert relay.reply('a' * 32, command['id'], 7, False)
             response = await task
             assert response.status_code == 200

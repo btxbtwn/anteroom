@@ -23,16 +23,22 @@ struct KeyProvider: Decodable, Identifiable, Sendable {
 }
 
 struct ProviderOrder: Decodable, Sendable {
+    struct Subscription: Decodable, Sendable {
+        let signedIn: Bool
+        enum CodingKeys: String, CodingKey { case signedIn = "signed_in" }
+    }
     let primary: String
     let fallback: String
     let photoProvider: String
     /// Xiaomi MiMo's key, masked; MiMo keeps its key apart from the API-key providers.
     let mimoMaskedKey: String?
+    let chatgpt: Subscription?
+    let claude: Subscription?
 
     var mimoConfigured: Bool { !(mimoMaskedKey ?? "").isEmpty }
 
     enum CodingKeys: String, CodingKey {
-        case primary, fallback
+        case primary, fallback, chatgpt, claude
         case photoProvider = "photo_provider"
         case mimoMaskedKey = "masked_key"
     }
