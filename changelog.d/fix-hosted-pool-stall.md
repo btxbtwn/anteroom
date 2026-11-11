@@ -1,0 +1,1 @@
+- The app no longer stalls for everyone when you list one item on several marketplaces at once.
