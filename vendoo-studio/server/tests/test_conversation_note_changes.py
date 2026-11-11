@@ -69,6 +69,30 @@ def test_desktop_detail_save_keeps_keys_the_server_wrote_meanwhile(desktop):
     assert json.loads(saved.json()["notes"]) == {"sku": "A1", "categoryOverride": "Tops", "knownFlaws": "Pilling"}
 
 
+def test_desktop_rename_with_note_changes_keeps_the_new_title(desktop):
+    client, make = desktop
+    with make() as db:
+        identity = ConversationRepo(db).create(title="Tee", notes=json.dumps({"sku": "A1"})).id
+    saved = client.patch(f"/api/conversations/{identity}",
+                         json={"title": "Renamed", "note_changes": {"knownFlaws": "Pilling"}})
+    assert saved.status_code == 200, saved.text
+    with make() as db:
+        row = db.get(Conversation, identity)
+        assert row is not None
+        assert row.title == "Renamed"
+        assert json.loads(row.notes) == {"sku": "A1", "knownFlaws": "Pilling", "titlePinned": True}
+
+
+def test_desktop_notes_with_note_changes_keeps_both(desktop):
+    client, make = desktop
+    with make() as db:
+        identity = ConversationRepo(db).create(title="Tee", notes=json.dumps({"sku": "A1"})).id
+    saved = client.patch(f"/api/conversations/{identity}",
+                         json={"notes": json.dumps({"sellerNotes": "Smoke free"}), "note_changes": {"knownFlaws": "Pilling"}})
+    assert saved.status_code == 200, saved.text
+    assert json.loads(saved.json()["notes"]) == {"sku": "A1", "sellerNotes": "Smoke free", "knownFlaws": "Pilling"}
+
+
 def test_hosted_detail_save_keeps_keys_the_server_wrote_meanwhile(cloud, signing_keys):  # noqa: F811
     client, engine = cloud
     alice = headers(signing_keys)

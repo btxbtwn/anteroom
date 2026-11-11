@@ -1,0 +1,1 @@
+- Renaming a listing in the same save as an Item Details change keeps the new name.
