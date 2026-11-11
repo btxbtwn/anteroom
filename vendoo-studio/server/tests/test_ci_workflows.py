@@ -191,7 +191,7 @@ def _load_script(name: str):
     return module
 
 
-def test_deploy_checks_out_mains_tip_and_gates_it_before_anything_else() -> None:
+def test_deploy_fetches_main_and_gates_it_before_anything_else() -> None:
     steps = workflow("deploy-hosted.yml")["jobs"]["deploy"]["steps"]
     assert steps[0]["with"]["ref"] == "main"
     assert steps[0]["with"]["persist-credentials"] == "false"
@@ -199,52 +199,79 @@ def test_deploy_checks_out_mains_tip_and_gates_it_before_anything_else() -> None
     assert all(step.get("if") == "steps.gate.outputs.skip != 'true'" for step in steps[2:])
 
 
-A, B = "a" * 40, "b" * 40
+T, M, R, N = "t" * 40, "m" * 40, "r" * 40, "n" * 40
 
 
 @pytest.mark.parametrize(
-    ("head", "notes", "state", "skip"),
+    ("commits", "notes", "ci", "chosen"),
     [
-        (A, False, None, False),  # the trigger is still main's tip
-        (A, True, None, True),  # pending notes: the release commit deploys
-        (B, False, ("completed", "success"), False),  # main moved on and its CI passed
-        (B, False, ("in_progress", ""), True),  # main moved on; its own CI deploys it
-        (B, False, ("missing", ""), True),
-        (B, False, ("completed", "failure"), True),  # never ship the older trigger over it
+        ([T], set(), {}, T),  # the trigger is still main's tip
+        ([T], {T}, {}, None),  # pending notes: the release commit deploys
+        ([R, M, T], {M}, {R: ("completed", "success")}, R),  # the newest tested commit wins
+        # main moved on but its CI is still running: ship the newest tested one
+        # anyway rather than wait (merges can outpace CI), never anything older.
+        ([R, M, T], {M}, {R: ("queued", "")}, T),
+        ([N, R, M, T], {M}, {N: ("in_progress", ""), R: ("completed", "success")}, R),
+        ([R, M, T], {M, T}, {R: ("completed", "failure")}, None),
+        ([R, T], set(), {R: ("missing", "")}, T),
     ],
 )
-def test_deploy_gate_ships_only_mains_tested_tip(head: str, notes: bool, state, skip: bool) -> None:
+def test_deploy_gate_ships_the_newest_tested_commit_from_the_trigger_up(commits, notes, ci, chosen) -> None:
     gate = _load_script("deploy-gate")
-
-    def ci(sha: str):
-        assert state is not None and sha == head
-        return state
-
-    assert gate.decide(head, A, notes, ci)[0] is skip
+    assert gate.choose(commits, T, notes.__contains__, ci.__getitem__)[0] == chosen
 
 
-def test_deploy_gate_reads_notes_and_writes_outputs(tmp_path: Path) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    (tmp_path / "vendoo-studio").mkdir()
-    (tmp_path / "vendoo-studio" / "VERSION").write_text("1.2.3\n")
-    (tmp_path / "changelog.d").mkdir()
-    (tmp_path / "changelog.d" / "README.md").write_text("notes\n")
-    for args in (["add", "."], ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
-                                "commit", "-qm", "x"]):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+def test_deploy_gate_checks_out_its_choice_and_writes_outputs(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / "vendoo-studio").mkdir(parents=True)
+    (repo / "changelog.d").mkdir()
+    (repo / "changelog.d" / "README.md").write_text("notes\n")
 
-    def run() -> str:
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", *args],
+            cwd=repo, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    def commit(version: str, message: str, note: bool = False) -> str:
+        (repo / "vendoo-studio" / "VERSION").write_text(version + "\n")
+        (repo / "changelog.d" / "fix.md").unlink(missing_ok=True)
+        if note:
+            (repo / "changelog.d" / "fix.md").write_text("- Fix.\n")
+        git("add", "-A")
+        git("commit", "-qm", message)
+        return git("rev-parse", "HEAD")
+
+    git("init", "-q")
+    trigger = commit("1.0.0", "Release Anteroom 1.0.0")
+    commit("1.0.0", "Merge pull request #2", note=True)
+    release = commit("1.0.1", "Release Anteroom 1.0.1")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ci_status = tmp_path / "ci-status"
+    (bin_dir / "gh").write_text(
+        f"#!{sys.executable}\nimport json, pathlib\n"
+        f"status, conclusion = pathlib.Path({str(ci_status)!r}).read_text().split()\n"
+        "print(json.dumps({'workflow_runs': [{'status': status, 'conclusion': conclusion}]}))\n"
+    )
+    (bin_dir / "gh").chmod(0o755)
+
+    def run(status: str) -> tuple[str, str]:
+        git("checkout", "-q", "--detach", release)
+        ci_status.write_text(status)
         output = tmp_path / "output"
         output.write_text("")
         subprocess.run(
-            [sys.executable, str(ROOT / ".github" / "scripts" / "deploy-gate.py"), "--repo", "o/r", "--trigger", "HEAD"],
-            cwd=tmp_path, check=True, capture_output=True, env={**os.environ, "GITHUB_OUTPUT": str(output)},
+            [sys.executable, str(ROOT / ".github" / "scripts" / "deploy-gate.py"), "--repo", "o/r", "--trigger", trigger],
+            cwd=repo, check=True, capture_output=True,
+            env={**os.environ, "GITHUB_OUTPUT": str(output), "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
         )
-        return output.read_text()
+        return output.read_text(), git("rev-parse", "HEAD")
 
-    assert run() == "skip=false\nversion=1.2.3\n"
-    (tmp_path / "changelog.d" / "fix.md").write_text("- Fix.\n")
-    assert run() == "skip=true\n"
+    assert run("completed success") == ("skip=false\nversion=1.0.1\n", release)
+    # The release commit's CI is still queued: ship the trigger, never wait.
+    assert run("queued none") == ("skip=false\nversion=1.0.0\n", trigger)
 
 
 def _machine(group: str | None, tag: str, state: str = "started", **config) -> dict:

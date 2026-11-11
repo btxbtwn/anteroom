@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Decide whether Deploy hosted ships the main it checked out.
+"""Choose the commit Deploy hosted ships, and check it out.
 
-The deploy checks out main's tip, never the commit whose CI started it: CI runs
-can finish out of order, and a queued deploy can replace another, so shipping
-the triggering commit could put older code over newer code (and older code on
-a database already migrated past it). It then skips, successfully, when:
+CI runs on main finish out of order, and a queued deploy can replace another,
+so shipping the commit whose CI started this run could put older code over
+newer code (and on a database already migrated past it). Waiting for main's
+tip instead starves deploys while merges keep landing faster than CI.
 
-* changelog.d/ has pending notes: the Version workflow's "Release Anteroom"
-  commit follows and deploys instead;
-* the tip is not the commit whose CI started this run and CI on the tip has
-  not passed yet: the tip's own CI starts the deploy that ships it.
+So the deploy ships the newest commit on main's first-parent line, from the
+triggering commit up to the tip, that
 
-Writes ``skip`` and ``version`` to $GITHUB_OUTPUT. Waiting for CI on the merge
-a release commit ships is wait-for-tested-code.py's job.
+* has no pending changelog.d/ notes (the Version workflow's "Release Anteroom"
+  commit after it ships that code with its version), and
+* passed CI (the triggering commit did, or this run would not have started).
+
+Every later run considers at least the commits this one did, so production
+never moves backwards. A newer commit whose CI is still running gets its own
+run when that CI finishes. Writes ``skip`` and ``version`` to $GITHUB_OUTPUT.
+Waiting for CI on the merge a release commit ships is wait-for-tested-code.py's job.
 """
 
 from __future__ import annotations
@@ -22,16 +26,19 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable, Iterable
 from pathlib import Path
+
+NOTES_DIR = "changelog.d"
 
 
 def git(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def pending_notes(root: Path) -> bool:
-    notes = root / "changelog.d"
-    return notes.is_dir() and any(path.is_file() and path.name != "README.md" for path in notes.iterdir())
+def has_pending_notes(sha: str) -> bool:
+    names = git("ls-tree", "--name-only", sha, f"{NOTES_DIR}/").splitlines()
+    return any(Path(name).name != "README.md" for name in names)
 
 
 def ci_state(repo: str, sha: str) -> tuple[str, str]:
@@ -48,21 +55,38 @@ def ci_state(repo: str, sha: str) -> tuple[str, str]:
     return runs[0]["status"], runs[0]["conclusion"] or ""
 
 
-def decide(head: str, trigger: str, notes: bool, state) -> tuple[bool, str]:
-    """(skip, message). ``state`` is called for CI on head only when needed."""
-    if notes:
-        return True, "Pending changelog notes; the release commit will deploy."
-    if head == trigger:
-        return False, f"Deploying {head[:8]}, main's tip, whose CI started this run."
-    status, conclusion = state(head)
-    if status == "completed" and conclusion == "success":
-        return False, f"main moved to {head[:8]} after {trigger[:8]}; CI passed on it, so deploying {head[:8]}."
-    if status == "completed":
-        return True, (
-            f"main's tip {head[:8]} finished CI as '{conclusion}'; not deploying {trigger[:8]} over it. "
-            "Fix main to deploy again."
-        )
-    return True, f"main moved to {head[:8]} after {trigger[:8]}; its CI ({status}) starts the deploy that ships it."
+def candidates(trigger: str, limit: int = 200) -> list[str]:
+    """main's first-parent commits from the tip back to the trigger, newest first."""
+    found: list[str] = []
+    for sha in git("rev-list", "--first-parent", f"--max-count={limit}", "HEAD").splitlines():
+        found.append(sha)
+        if sha == trigger:
+            return found
+    # The trigger is not on main's first-parent line (a re-run of an old
+    # commit, or a manual run): consider only the tip.
+    return found[:1]
+
+
+def choose(
+    commits: Iterable[str],
+    trigger: str,
+    notes: Callable[[str], bool],
+    state: Callable[[str], tuple[str, str]],
+) -> tuple[str | None, list[str]]:
+    """(the commit to ship or None, why each newer commit was passed over)."""
+    passed: list[str] = []
+    for sha in commits:
+        if notes(sha):
+            passed.append(f"{sha[:8]} has pending changelog notes; its release commit ships it.")
+            continue
+        if sha == trigger:
+            return sha, passed
+        status, conclusion = state(sha)
+        if status == "completed" and conclusion == "success":
+            return sha, passed
+        shown = conclusion if status == "completed" else status
+        passed.append(f"{sha[:8]}: CI {shown}; its own CI run deploys it once it passes.")
+    return None, passed
 
 
 def main() -> int:
@@ -71,14 +95,19 @@ def main() -> int:
     parser.add_argument("--trigger", required=True, help="The commit whose CI (or dispatch) started this run.")
     args = parser.parse_args()
 
-    head = git("rev-parse", "HEAD")
-    root = Path(git("rev-parse", "--show-toplevel"))
-    skip, message = decide(head, git("rev-parse", args.trigger), pending_notes(root),
-                           lambda sha: ci_state(args.repo, sha))
-    print(f"::notice::{message}" if skip else message)
-    lines = [f"skip={'true' if skip else 'false'}"]
-    if not skip:
+    trigger = git("rev-parse", args.trigger)
+    target, passed = choose(candidates(trigger), trigger, has_pending_notes, lambda sha: ci_state(args.repo, sha))
+    for line in passed:
+        print(line)
+    lines = [f"skip={'false' if target else 'true'}"]
+    if target:
+        if target != git("rev-parse", "HEAD"):
+            git("checkout", "--quiet", "--detach", target)
+        root = Path(git("rev-parse", "--show-toplevel"))
         lines.append(f"version={(root / 'vendoo-studio' / 'VERSION').read_text().strip()}")
+        print(f"Deploying {target[:8]}, the newest tested commit on main from {trigger[:8]} on.")
+    else:
+        print(f"::notice::Nothing to deploy from {trigger[:8]} on; a newer commit's own run ships it.")
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with open(output, "a", encoding="utf-8") as handle:
