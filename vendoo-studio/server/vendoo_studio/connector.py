@@ -57,7 +57,7 @@ def install_menu(window, api, quit_app):
 
 def run_connector():
     import webview
-    from PyObjCTools import AppHelper
+    AppHelper = importlib.import_module('PyObjCTools.AppHelper')
     from vendoo_studio.config import HOSTED_URL, user_data_root
     from vendoo_studio.services.connector import ConnectorAPI
 
