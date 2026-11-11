@@ -460,6 +460,9 @@ class PersistListingTest(unittest.TestCase):
             ("Make the title shorter", 'Done.\n```json\n[{"op":"replace","path":"/title","value":"Tee"},'
              '{"op":"replace","path":"/sku","value":"INVENTED"},'
              '{"op":"add","path":"/depop_specifics/sku","value":"INVENTED"}]\n```'),
+            ("make the title shorter", json.dumps({"fields": [
+                {"path": "title", "value": "Tee"}, {"path": "sku", "value": "INVENTED"},
+                {"path": "depop_specifics.sku", "value": "INVENTED"}]})),
             ("Fill in the missing fields", json.dumps({"missing_fields": [
                 {"marketplace": "general", "field": "SKU", "value": "INVENTED"},
                 {"marketplace": "depop", "field": "SKU", "value": "INVENTED"}]})),
@@ -481,6 +484,20 @@ class PersistListingTest(unittest.TestCase):
                     listing = ListingRepo(self.db).get_revisions(conv.id)[0].listing_json
                     self.assertEqual(listing.get("sku"), seller_sku)
                     self.assertEqual(listing["depop_specifics"].get("sku"), seller_sku)
+                    if user_message[0].islower():  # the fields reply still saves its other field
+                        self.assertEqual(listing["title"], "Tee")
+
+    def test_chat_fields_reply_with_only_an_unrequested_sku_saves_nothing(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {**LISTING_JSON, "sku": "OLD-001"}, source="user_form")
+        _, saved = chat_listing.apply_listing_payload(self.db, self.conv.id,
+            json.dumps({"fields": [{"path": "sku", "value": "INVENTED"}]}), user_message="make the title shorter")
+        self.assertTrue(saved)
+        revisions = ListingRepo(self.db).get_revisions(self.conv.id)
+        self.assertEqual(len(revisions), 1)
+        self.assertEqual(revisions[0].listing_json["sku"], "OLD-001")
+        messages = [m.text for m in ConversationRepo(self.db).get_messages(self.conv.id)]
+        self.assertIn("No proposed field changes were accepted.", messages)
+        self.assertNotIn("Saved those field changes to the listing.", messages)
 
     def test_chat_patch_cannot_invent_a_sku_inside_another_change(self):
         listing_persistence.save_revision(self.db, self.conv.id,

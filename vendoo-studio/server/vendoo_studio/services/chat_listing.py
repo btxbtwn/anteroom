@@ -45,16 +45,20 @@ def _seller_asked_for_sku(user_message: str) -> bool:
         user_message)
 
 
+def _sku_key(path: str, separator: str) -> str | None:
+    """The SKU key a path names directly: "sku" or "depop_specifics", else None."""
+    parts = str(path or "").strip(separator).split(separator)
+    if parts == ["sku"]:
+        return "sku"
+    if len(parts) == 2 and parts[0].endswith("_specifics") and parts[1] == "sku":
+        return parts[0]
+    return None
+
+
 def _patched_sku_keys(operations: list[dict]) -> set[str]:
     """The SKU keys a JSON Patch names directly, like /sku or /depop_specifics/sku."""
-    keys = set()
-    for operation in operations:
-        parts = str(operation.get("path") or "").strip("/").split("/") if isinstance(operation, dict) else []
-        if parts == ["sku"]:
-            keys.add("sku")
-        elif len(parts) == 2 and parts[0].endswith("_specifics") and parts[1] == "sku":
-            keys.add(parts[0])
-    return keys
+    keys = {_sku_key(operation.get("path"), "/") for operation in operations if isinstance(operation, dict)}
+    return {key for key in keys if key}
 
 
 def save_listing_revision(
@@ -262,6 +266,14 @@ def apply_listing_payload(
     from vendoo_studio.services.seller_overrides import apply_field_updates
 
     commands = _field_commands(full_text)
+    if commands and not _seller_asked_for_sku(user_message):
+        # SKUs belong to the seller: chat sets one only when asked to.
+        commands = [command for command in commands if not _sku_key(command["path"], ".")]
+        if not commands:
+            ConversationRepo(db).add_message(
+                conv_id, "system", "No proposed field changes were accepted.", provider="system", model="",
+            )
+            return None, True
     if commands:
         revisions = ListingRepo(db).get_revisions(conv_id)
         if not revisions or not isinstance(revisions[0].listing_json, dict):
