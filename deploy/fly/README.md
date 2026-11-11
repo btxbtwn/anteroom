@@ -12,17 +12,16 @@ and desktop timers do not run in this container.
 ## Automatic deploys
 
 `.github/workflows/deploy-hosted.yml` deploys every push to `main` once CI
-passes on it. It always checks out `main`'s tip, never the older commit whose
-CI started it, so CI runs that finish out of order or a re-run can never put
-older code over newer code (`.github/scripts/deploy-gate.py`). It skips,
-successfully and with a notice, when:
+passes on it. It ships the newest commit on `main`'s first-parent line, from
+the commit whose CI started it up to the tip, that passed CI and has no notes
+left in `changelog.d/` (the `Release Anteroom` commit the Version workflow
+pushes next ships that code with its version). A later run never picks an
+older commit, so CI runs that finish out of order or a re-run can never put
+older code over newer code, and a busy stream of merges still deploys the
+newest tested one (`.github/scripts/deploy-gate.py`). When no such commit
+exists it skips, successfully and with a notice.
 
-- `changelog.d/` still has notes: the `Release Anteroom` commit the Version
-  workflow pushes next deploys instead;
-- `main` moved past the triggering commit and CI on the new tip has not
-  passed: that CI's own run deploys it.
-
-Otherwise, in order, it:
+Then, in order, it:
 
 1. when the commit is a `Release Anteroom` commit, waits for CI to pass on
    the merge before it, whose code it ships

@@ -1,7 +1,7 @@
 name: Deploy hosted
 
-# Ships main's tip to production once CI has passed on it and on the merge it
-# releases (never the older commit whose CI happened to start the run): builds and pushes the image first, so a build failure stops before the database changes; then
+# Ships the newest commit on main that passed CI, and the merge it releases
+# (never older than the commit whose CI started the run): builds and pushes the image first, so a build failure stops before the database changes; then
 # applies pending Alembic revisions to Supabase with the migration login,
 # refreshes the shared category trees when their seed changed, deploys that
 # image to Fly.io and confirms the live version. See deploy/fly/README.md and
@@ -41,23 +41,24 @@ jobs:
     environment: production
     timeout-minutes: 45
     steps:
-      # main's tip, not the triggering commit: CI runs finish out of order and
-      # a queued deploy can replace another, so shipping the trigger could put
-      # older code over newer code and a database already migrated past it.
+      # All of main: the gate picks the newest tested commit from the trigger
+      # up. CI runs finish out of order and a queued deploy can replace
+      # another, so shipping the trigger itself could put older code over
+      # newer code and a database already migrated past it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Ship main's tip, or wait for the release commit
+      - name: Choose the newest tested commit on main
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
           TRIGGER: ${{ github.event.workflow_run.head_sha || github.sha }}
-        # Skips when changelog.d/ has pending notes (the Version workflow's
-        # "Release Anteroom" commit deploys instead) or when main moved past
-        # the trigger and CI on the new tip has not passed (that CI deploys it).
+        # Checks out the newest first-parent commit from the trigger to main's
+        # tip that passed CI and has no pending changelog.d/ notes (their
+        # "Release Anteroom" commit ships that code). Skips when there is none.
         run: python3 .github/scripts/deploy-gate.py --repo "$GITHUB_REPOSITORY" --trigger "$TRIGGER"
 
       - name: Wait for CI on the code being shipped
