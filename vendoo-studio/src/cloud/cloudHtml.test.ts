@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
-
-const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+import page from "../../cloud.html?raw";
+import themeBoot from "../../public/assets/theme-boot.js?raw";
 
 // The hosted API serves this page with `script-src 'self'`, which blocks inline scripts.
 it("loads every script on the hosted page from a file", () => {
-  const scripts = [...read("../../cloud.html").matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
+  const scripts = [...page.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
   expect(scripts.length).toBeGreaterThan(0);
   for (const [, attributes, body] of scripts) {
     expect(attributes).toMatch(/\ssrc="\/[^"]+"/);
@@ -14,10 +13,9 @@ it("loads every script on the hosted page from a file", () => {
 });
 
 it("sets the theme before the stylesheet, so the first paint matches it", () => {
-  const page = read("../../cloud.html");
   // Served from /assets, which the hosted API answers without a session.
   const script = page.indexOf('<script src="/assets/theme-boot.js"></script>');
   expect(script).toBeGreaterThan(-1);
   expect(script).toBeLessThan(page.indexOf('rel="stylesheet"'));
-  expect(read("../../public/assets/theme-boot.js")).toContain('localStorage.getItem("vendoo-studio:theme")');
+  expect(themeBoot).toContain('localStorage.getItem("vendoo-studio:theme")');
 });
