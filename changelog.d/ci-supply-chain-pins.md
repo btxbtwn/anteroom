@@ -1,0 +1,1 @@
+- Install the exact, verified package versions everywhere, including first-time setup.

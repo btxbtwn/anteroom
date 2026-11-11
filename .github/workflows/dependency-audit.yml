@@ -34,8 +34,8 @@ jobs:
           ./scripts/install-locked.sh .venv/bin/python dev
       - name: Lock matches pyproject.toml
         run: uv lock --check
-      - name: Audit locked Python dependencies (dev, hosted image and Mac app)
+      - name: Audit locked Python dependencies (dev, hosted image, Mac app and build backend)
         run: |
-          uv export --frozen --no-emit-project --all-extras --format requirements-txt --hashes \
+          uv export --frozen --no-emit-project --all-extras --all-groups --format requirements-txt --hashes \
             --quiet --output-file "$RUNNER_TEMP/locked.txt"
           .venv/bin/python -m pip_audit --disable-pip --require-hashes -r "$RUNNER_TEMP/locked.txt"
