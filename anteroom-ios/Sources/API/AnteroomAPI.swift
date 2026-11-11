@@ -9,13 +9,16 @@ struct APIError: LocalizedError, Sendable {
 
     static let signInEnded = "Your sign-in has ended. Sign in again."
     static let signInRenewed = "Your sign-in was renewed. Try that again."
+    static let signInNotRenewed = "Anteroom couldn't renew your sign-in. Check your connection and try again."
 }
 
 /// How the API client gets the seller's token, and what it does when the server refuses it.
 struct APIAuthorization: Sendable {
     /// The current access token; the sign-in library refreshes it when it expires.
+    /// Throws `SignInRejected` when the server refused the saved sign-in.
     var accessToken: @Sendable () async throws -> String
-    /// A newly issued access token. Throws when the sign-in can no longer be renewed.
+    /// A newly issued access token. Throws `SignInRejected` when the server
+    /// refused the saved sign-in; any other error leaves it to try again.
     var refreshedToken: @Sendable () async throws -> String
     /// The sign-in has ended: go back to the sign-in screen.
     var signedOut: @Sendable () async -> Void
@@ -26,7 +29,8 @@ struct APIAuthorization: Sendable {
 ///
 /// When the server refuses the token (401) the client renews the sign-in once.
 /// A read (GET) is then sent again; anything else is not, because it may have
-/// already run. When the sign-in cannot be renewed the seller is signed out.
+/// already run. When the sign-in server refuses to renew it the seller is
+/// signed out; a renewal that only failed (offline, a server error) is not.
 ///
 /// A read the server can't answer yet (it is restarting, or the connection
 /// dropped) is tried again for a while before its error shows; see `ReadRetry`.
@@ -897,7 +901,7 @@ final class AnteroomAPI: Sendable {
                 if data.count >= 65536 { break }
                 data.append(byte)
             }
-            if http.statusCode == 401 { throw await renewAfterRefusal(data).error }
+            if http.statusCode == 401 { throw try await renewAfterRefusal(data).error }
             throw APIError(status: http.statusCode, message: Self.message(from: data, status: http.statusCode))
         }
         var finished = false
@@ -989,7 +993,7 @@ final class AnteroomAPI: Sendable {
                 if data.count >= 65536 { break }
                 data.append(byte)
             }
-            if http.statusCode == 401 { throw await renewAfterRefusal(data).error }
+            if http.statusCode == 401 { throw try await renewAfterRefusal(data).error }
             throw APIError(status: http.statusCode, message: Self.message(from: data, status: http.statusCode))
         }
         var failure: String?
@@ -1103,12 +1107,14 @@ final class AnteroomAPI: Sendable {
         let token: String
         do {
             token = try await auth.accessToken()
-        } catch let offline as URLError {
-            throw offline
-        } catch {
-            // The saved sign-in is gone or can no longer be renewed.
+        } catch is SignInRejected {
+            // The saved sign-in is gone or the server refused to renew it.
             await auth.signedOut()
             throw APIError(status: 401, message: APIError.signInEnded)
+        } catch let stopped where stopped is URLError || stopped.isCancellation {
+            throw stopped
+        } catch {
+            throw APIError(status: 0, message: APIError.signInNotRenewed)
         }
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = method
@@ -1140,7 +1146,7 @@ final class AnteroomAPI: Sendable {
     private func send(_ request: URLRequest) async throws -> Data {
         let (data, status) = try await perform(request)
         if status == 401 {
-            let refusal = await renewAfterRefusal(data)
+            let refusal = try await renewAfterRefusal(data)
             // Only a read is safe to send again; anything else may already have run.
             guard let token = refusal.token, request.httpMethod == "GET" else { throw refusal.error }
             var retry = request
@@ -1174,21 +1180,24 @@ final class AnteroomAPI: Sendable {
     }
 
     /// The server refused a request with 401. A refusal of the seller's session
-    /// renews the sign-in (or signs out when it can't be renewed); any other 401,
+    /// renews the sign-in (or signs out when the server refuses to renew it); any other 401,
     /// such as a marketplace that signed Anteroom out, keeps the server's message.
     /// Returns the error to report, and the renewed token when there is one.
-    private func renewAfterRefusal(_ data: Data) async -> (error: APIError, token: String?) {
+    private func renewAfterRefusal(_ data: Data) async throws -> (error: APIError, token: String?) {
         guard Self.isSessionRefusal(data) else {
             return (APIError(status: 401, message: Self.message(from: data, status: 401)), nil)
         }
         do {
             let token = try await auth.refreshedToken()
             return (APIError(status: 401, message: APIError.signInRenewed), token)
-        } catch is URLError {
-            return (APIError(status: 0, message: "Anteroom couldn't renew your sign-in. Check your connection and try again."), nil)
-        } catch {
+        } catch is SignInRejected {
             await auth.signedOut()
             return (APIError(status: 401, message: APIError.signInEnded), nil)
+        } catch let stopped where stopped.isCancellation {
+            throw stopped
+        } catch {
+            // Offline, or the sign-in server failed: the saved sign-in still works later.
+            return (APIError(status: 0, message: APIError.signInNotRenewed), nil)
         }
     }
 

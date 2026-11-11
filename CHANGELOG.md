@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.920 — 2026-11-11
+
+- Offers to likers on Depop and Poshmark no longer re-check listings nobody can get an offer on every 15 minutes. Anteroom waits for a new like (it watches the likes feed every minute) and re-checks those listings once a week in case a like was missed, which cuts thousands of daily Depop requests.
+
 ## 0.1.919 — 2026-11-11
 
 - Sales checks on Depop, Poshmark and Mercari now stop at orders Anteroom already has, and re-read your whole order history every six hours, so they send far fewer requests.
