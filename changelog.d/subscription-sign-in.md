@@ -1,1 +1,0 @@
-- Use your Mac’s signed-in ChatGPT or Claude subscription to generate listings from the web app or iPhone. Keep your Mac awake, online, and Anteroom open; subscription credentials stay on your Mac.

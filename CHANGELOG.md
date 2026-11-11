@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.909 — 2026-11-11
+
+- Use your Mac’s signed-in ChatGPT or Claude subscription to generate listings from the web app or iPhone. Keep your Mac awake, online, and Anteroom open; subscription credentials stay on your Mac.
+
 ## 0.1.908 — 2026-11-11
 
 - Load eBay fields automatically when saved category choices are out of date.
