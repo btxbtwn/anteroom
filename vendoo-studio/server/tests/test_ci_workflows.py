@@ -179,3 +179,96 @@ def test_release_commits_resolve_to_the_merge_they_ship(tmp_path: Path, monkeypa
     gate = _load_gate()
     assert gate.code_commit(release) == merge
     assert gate.code_commit(merge) == merge
+
+
+def _load_script(name: str):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), ROOT / ".github" / "scripts" / f"{name}.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_deploy_checks_out_mains_tip_and_gates_it_before_anything_else() -> None:
+    steps = workflow("deploy-hosted.yml")["jobs"]["deploy"]["steps"]
+    assert steps[0]["with"]["ref"] == "main"
+    assert steps[0]["with"]["persist-credentials"] == "false"
+    assert "deploy-gate.py" in steps[1]["run"]
+    assert all(step.get("if") == "steps.gate.outputs.skip != 'true'" for step in steps[2:])
+
+
+A, B = "a" * 40, "b" * 40
+
+
+@pytest.mark.parametrize(
+    ("head", "notes", "state", "skip"),
+    [
+        (A, False, None, False),  # the trigger is still main's tip
+        (A, True, None, True),  # pending notes: the release commit deploys
+        (B, False, ("completed", "success"), False),  # main moved on and its CI passed
+        (B, False, ("in_progress", ""), True),  # main moved on; its own CI deploys it
+        (B, False, ("missing", ""), True),
+        (B, False, ("completed", "failure"), True),  # never ship the older trigger over it
+    ],
+)
+def test_deploy_gate_ships_only_mains_tested_tip(head: str, notes: bool, state, skip: bool) -> None:
+    gate = _load_script("deploy-gate")
+
+    def ci(sha: str):
+        assert state is not None and sha == head
+        return state
+
+    assert gate.decide(head, A, notes, ci)[0] is skip
+
+
+def test_deploy_gate_reads_notes_and_writes_outputs(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "vendoo-studio").mkdir()
+    (tmp_path / "vendoo-studio" / "VERSION").write_text("1.2.3\n")
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / "changelog.d" / "README.md").write_text("notes\n")
+    for args in (["add", "."], ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+                                "commit", "-qm", "x"]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+
+    def run() -> str:
+        output = tmp_path / "output"
+        output.write_text("")
+        subprocess.run(
+            [sys.executable, str(ROOT / ".github" / "scripts" / "deploy-gate.py"), "--repo", "o/r", "--trigger", "HEAD"],
+            cwd=tmp_path, check=True, capture_output=True, env={**os.environ, "GITHUB_OUTPUT": str(output)},
+        )
+        return output.read_text()
+
+    assert run() == "skip=false\nversion=1.2.3\n"
+    (tmp_path / "changelog.d" / "fix.md").write_text("- Fix.\n")
+    assert run() == "skip=true\n"
+
+
+def _machine(group: str | None, tag: str, state: str = "started", **config) -> dict:
+    metadata = {"fly_process_group": group} if group else {}
+    return {"id": f"{group}-{tag}", "state": state, "image_ref": {"tag": tag}, "config": {"metadata": metadata, **config}}
+
+
+@pytest.mark.parametrize(
+    ("machines", "passes"),
+    [
+        ([_machine("app", "v1-new")], True),
+        ([_machine("app", "v1-new"), _machine("worker", "v1-new")], True),
+        ([_machine("app", "v1-new"), _machine("worker", "v0-old")], False),
+        ([_machine("app", "v1-new"), _machine("worker", "v1-new", state="stopped")], False),
+        ([_machine("app", "v1-new"), _machine("app", "v0-old", auto_destroy=True)], True),
+        ([_machine("fly_app_console", "v0-old"), _machine(None, "v1-new")], True),
+        ([], False),
+    ],
+)
+def test_every_machine_in_every_process_group_must_run_the_new_image(machines: list, passes: bool) -> None:
+    check = _load_script("check-fly-machines")
+    assert (check.problems(machines, "v1-new")[1] == []) is passes
+
+
+def test_machine_image_falls_back_to_the_configured_image() -> None:
+    check = _load_script("check-fly-machines")
+    assert check.image_tag({"config": {"image": "registry.fly.io/app:v1-new@sha256:abc"}}) == "v1-new"

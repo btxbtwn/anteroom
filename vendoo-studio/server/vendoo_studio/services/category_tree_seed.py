@@ -175,28 +175,28 @@ def export_seed(source: Engine | Path, seed_path: Path) -> dict:
     return {"seed": str(seed_path), "node_counts": counts, "nodes": len(nodes)}
 
 
-def import_seed(target: Engine | Path | None, seed_path: Path | None = None) -> dict:
-    """Replace category_trees / category_tree_nodes and mark all six marketplaces complete."""
-    seed_path = seed_path or default_seed_path()
+def _seed_rows(seed_path: Path) -> tuple[list[dict], list[dict]]:
+    """The category_trees and category_tree_nodes rows an import of this seed writes."""
     if not seed_path.is_file():
         raise FileNotFoundError(f"Seed not found: {seed_path}")
     payload = _read_seed(seed_path)
-    trees = payload["category_trees"]
-    nodes = payload["category_tree_nodes"]
-    by_marketplace = {tree["marketplace"]: tree for tree in trees}
+    by_marketplace = {tree["marketplace"]: tree for tree in payload["category_trees"]}
     missing = [mp for mp in MARKETPLACES if mp not in by_marketplace]
     if missing:
         raise RuntimeError("Seed missing marketplaces: " + ", ".join(missing))
-
-    if isinstance(target, Path):
-        target.parent.mkdir(parents=True, exist_ok=True)
-    engine = _engine(target)
-    trees_table, nodes_table = _tables()
-    # The app's database already has these from its migrations; a bare file
-    # the CLI points at may not.
-    trees_table.metadata.create_all(engine, tables=[trees_table, nodes_table])
     now = _utcnow()
-    rows = [
+    trees = [
+        {
+            "marketplace": marketplace,
+            "roots_loaded": bool(by_marketplace[marketplace].get("roots_loaded", True)),
+            "status": "complete",
+            "error": None,
+            "source": by_marketplace[marketplace].get("source"),
+            "updated_at": _moment(by_marketplace[marketplace].get("updated_at") or now),
+        }
+        for marketplace in MARKETPLACES
+    ]
+    nodes = [
         {
             "marketplace": node["marketplace"],
             "category_id": node["category_id"],
@@ -207,23 +207,60 @@ def import_seed(target: Engine | Path | None, seed_path: Path | None = None) -> 
             "has_children": bool(node["has_children"]),
             "children_loaded": bool(node.get("children_loaded", True)),
         }
-        for node in nodes
+        for node in payload["category_tree_nodes"]
         if node["marketplace"] in MARKETPLACES
     ]
+    return trees, nodes
+
+
+def _canonical(rows, columns: tuple[str, ...]) -> list[tuple]:
+    booleans = {"roots_loaded", "is_leaf", "has_children", "children_loaded"}
+    return sorted(
+        tuple(bool(row[name]) if name in booleans else row[name] for name in columns)
+        for row in rows
+    )
+
+
+def seed_matches(target: Engine | Path | None, seed_path: Path | None = None) -> bool:
+    """True when the database holds exactly the rows an import of this seed would write.
+
+    The hosted deploy compares the database itself with the seed, so whether a
+    refresh is needed never depends on which earlier deploy imported what.
+    """
+    seed_trees, seed_nodes = _seed_rows(seed_path or default_seed_path())
+    if isinstance(target, Path) and not target.is_file():
+        return False
+    engine = _engine(target)
+    if not _has_tables(engine, "category_trees", "category_tree_nodes"):
+        return False
+    trees_table, nodes_table = _tables()
+    tree_columns = tuple(trees_table.c.keys())
+    node_columns = tuple(nodes_table.c.keys())
+    with engine.connect() as connection:
+        trees = connection.execute(select(*trees_table.c)).mappings().all()
+        nodes = connection.execute(select(*nodes_table.c)).mappings().all()
+    return (
+        _canonical(trees, tree_columns) == _canonical(seed_trees, tree_columns)
+        and _canonical(nodes, node_columns) == _canonical(seed_nodes, node_columns)
+    )
+
+
+def import_seed(target: Engine | Path | None, seed_path: Path | None = None) -> dict:
+    """Replace category_trees / category_tree_nodes and mark all six marketplaces complete."""
+    seed_path = seed_path or default_seed_path()
+    trees, rows = _seed_rows(seed_path)
+
+    if isinstance(target, Path):
+        target.parent.mkdir(parents=True, exist_ok=True)
+    engine = _engine(target)
+    trees_table, nodes_table = _tables()
+    # The app's database already has these from its migrations; a bare file
+    # the CLI points at may not.
+    trees_table.metadata.create_all(engine, tables=[trees_table, nodes_table])
     with engine.begin() as connection:
         connection.execute(delete(nodes_table))
         connection.execute(delete(trees_table))
-        connection.execute(insert(trees_table), [
-            {
-                "marketplace": marketplace,
-                "roots_loaded": bool(by_marketplace[marketplace].get("roots_loaded", True)),
-                "status": "complete",
-                "error": None,
-                "source": by_marketplace[marketplace].get("source"),
-                "updated_at": _moment(by_marketplace[marketplace].get("updated_at") or now),
-            }
-            for marketplace in MARKETPLACES
-        ])
+        connection.execute(insert(trees_table), trees)
         for start in range(0, len(rows), INSERT_BATCH):
             connection.execute(insert(nodes_table), rows[start:start + INSERT_BATCH])
         counts = dict(connection.execute(
