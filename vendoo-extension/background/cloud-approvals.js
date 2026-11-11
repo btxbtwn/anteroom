@@ -1,25 +1,23 @@
-/* The hosted API's signed approval on each relayed write, checked before the Bridge runs it.
+/* The hosted API's signed approval on each relayed command, checked before the Bridge runs it.
    Any script on the Anteroom page can hand the Bridge a command, so the page's own
    `confirm: true` is not the seller's confirmation. The hosted API signs the command
    it accepted (services/bridge_approvals.py); this checks that signature, its expiry,
    the account, command, marketplace, action and listing it names, a hash of the whole
-   command, and that the approval has not been used before. */
+   command, the SHA-256 of each photo relayed beside it, and that the approval has not
+   been used before. */
 (function () {
   // The hosted API's ES256 public key: the base64 body of the PEM that
   // `openssl ec -in bridge-signing.pem -pubout` prints, without its BEGIN/END lines.
   // Set it before releasing the Bridge (docs/hosted-production.md, **Bridge approval key**).
-  // While it is empty, the Bridge refuses every write the web relays.
+  // While it is empty, the Bridge refuses every command the web relays.
   const BRIDGE_APPROVAL_PUBLIC_KEY = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETSODemzvbkZtbvrN9kXt4ERklx7tQbbrqLkgX6QwByD/MFVX1TWzNeYgtsP5Gx0G4eLKXbCrCT1emOHbRIYq+A==';
-  // Commands that change something: listings, Vendoo drafts, buyer offers. A result check
-  // may resume an interrupted List. Must match SIGNED_COMMANDS on the server.
-  const SIGNED_COMMANDS = new Set(['job.vendoo_api', 'marketplace.execute', 'marketplace.result',
-    'marketplace.delete', 'marketplace.promote']);
   const USED_KEY = 'anteroom_used_approvals';
   // Allowed clock difference between this computer and the server.
   const LEEWAY_S = 60;
   // The longest life an approval may claim; the server issues five minutes.
   const MAX_LIFE_S = 600;
-  const TOKEN = /^[A-Za-z0-9_-]{10,200}\.[A-Za-z0-9_-]{10,2000}\.[A-Za-z0-9_-]{80,90}$/;
+  // The claims carry an id and SHA-256 for each of up to 30 photos.
+  const TOKEN = /^[A-Za-z0-9_-]{10,200}\.[A-Za-z0-9_-]{10,10000}\.[A-Za-z0-9_-]{80,90}$/;
   const REFUSALS = {
     no_key: 'This copy of Anteroom Bridge has no approval key, so it does not run marketplace actions from the web. Install the released Anteroom Bridge.',
     unsigned: 'Anteroom did not sign this action, so Chrome did not run it. Reload Anteroom and try again.',
@@ -27,11 +25,18 @@
     invalid: 'Chrome did not run this action because its approval is not valid. Reload Anteroom and try again.',
     mismatch: 'Chrome did not run this action because it is not the one Anteroom approved. Reload Anteroom and try again.',
     replayed: 'Chrome already ran this approval once. Start the action again in Anteroom.',
+    photos: 'Chrome did not run this action because its photos are not the ones Anteroom approved. Reload Anteroom and try again.',
   };
 
   function bytes(text) {
     const base64 = text.replace(/-/g, '+').replace(/_/g, '/');
     return Uint8Array.from(atob(base64 + '='.repeat((4 - base64.length % 4) % 4)), char => char.charCodeAt(0));
+  }
+  function base64Bytes(text) {
+    const binary = atob(text);
+    const data = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) data[index] = binary.charCodeAt(index);
+    return data;
   }
   function base64url(data) {
     return btoa(String.fromCharCode(...data)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -54,6 +59,22 @@
       const body = canonical({ type: command.type, job_id: command.job_id, message_id: command.message_id, payload });
       return base64url(new Uint8Array(await subtle.digest('SHA-256', new TextEncoder().encode(body))));
     }
+    // Each relayed photo must be one the approval names, with exactly the bytes it hashed.
+    async function photosMatch(claims, photos) {
+      if (!photos.length) return true;
+      if (!Array.isArray(claims.pho)) return false;
+      const approved = new Map();
+      for (const entry of claims.pho) {
+        if (!entry || typeof entry.id !== 'string' || typeof entry.sha256 !== 'string') return false;
+        approved.set(entry.id, entry.sha256.toLowerCase());
+      }
+      for (const photo of photos) {
+        if (!approved.has(photo.id)) return false;
+        const digest = new Uint8Array(await subtle.digest('SHA-256', base64Bytes(photo.base64)));
+        if ([...digest].map(byte => byte.toString(16).padStart(2, '0')).join('') !== approved.get(photo.id)) return false;
+      }
+      return true;
+    }
     // Remember each approval until it expires, so a copy of it cannot run again.
     function use(id, expires) {
       const result = tail.then(async () => {
@@ -68,7 +89,7 @@
       tail = result.catch(() => {});
       return result;
     }
-    async function check(command, accountId) {
+    async function check(command, accountId, photos) {
       if (!publicKey) return 'no_key';
       const token = command.payload.approval;
       if (typeof token !== 'string') return 'unsigned';
@@ -96,20 +117,22 @@
           || claims.mkt !== (p.marketplace ?? null) || claims.act !== (p.action ?? null) || claims.lid !== (p.listing_id ?? null)
           || claims.job !== (command.job_id ?? null) || claims.mid !== command.message_id
           || claims.sha !== await commandHash(command)) return 'mismatch';
+      // Checked before the approval is used, so the page can still send the approved bytes.
+      if (!await photosMatch(claims, photos)) return 'photos';
       return await use(claims.jti, claims.exp) ? null : 'replayed';
     }
     return {
-      // Null when the command may run; otherwise the Bridge's refusal, which reaches the hosted API.
-      async verify(command, accountId) {
-        if (!SIGNED_COMMANDS.has(command?.type)) return null;
-        const code = await check(command, accountId);
+      // Null when the command may run with `photos`; otherwise the Bridge's refusal, which
+      // reaches the hosted API. Every relayed command needs one, reads and Cancel included.
+      async verify(command, accountId, photos = []) {
+        const code = await check(command, accountId, photos);
         if (!code) return null;
         console.warn(`[BRIDGE] Refused ${command.type}: approval ${code}`);
         return { ok: false, safe_to_retry: true, error: REFUSALS[code], error_code: 'rejected', approval: code };
       },
     };
   }
-  const exported = { createApprovalVerifier, canonical, SIGNED_COMMANDS, BRIDGE_APPROVAL_PUBLIC_KEY };
+  const exported = { createApprovalVerifier, canonical, BRIDGE_APPROVAL_PUBLIC_KEY };
   if (typeof module !== 'undefined') module.exports = exported;
   else globalThis.CloudApprovals = exported;
 })();
