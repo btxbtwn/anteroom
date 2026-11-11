@@ -26,7 +26,7 @@ it("waits for a draft task and saves retained edits against its latest revision"
   const update = vi.spyOn(api.listings, "update")
     .mockRejectedValueOnce(new ApiRequestError("Draft busy", 409, false, null, "draft_busy"))
     .mockImplementationOnce(async (_id, listing) => result("r2", listing));
-  vi.spyOn(api.conversations, "activity").mockResolvedValue({ busy: false, items: [], message_count: 0, last_message_id: null });
+  vi.spyOn(api.conversations, "activity").mockResolvedValue({ busy: false, writing: false, items: [], message_count: 0, last_message_id: null });
   vi.spyOn(api.listings, "get").mockResolvedValue({
     ...client.getQueryData<ListingDocument>(["listing", "item"])!,
     current_revision_id: "r1", listing: { title: "Original", price: 25 },
@@ -56,7 +56,7 @@ it("keeps newer typing while waiting and retains conflicting edits", async () =>
     expect(edits.getSnapshot().saving).toBe(true);
     expect(edits.getSnapshot().error).toBeNull();
     edits.save({ title: "My latest edit", price: 10 });
-    finish({ busy: false, items: [], message_count: 0, last_message_id: null });
+    finish({ busy: false, writing: false, items: [], message_count: 0, last_message_id: null });
     await vi.waitFor(() => expect(edits.getSnapshot().error).toContain("also changed"));
     expect(update).toHaveBeenCalledOnce();
     expect(edits.getSnapshot().draft?.title).toBe("My latest edit");
