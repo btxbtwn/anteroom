@@ -1,7 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
+import { refreshInventory } from "./inventoryRefresh";
 import { ApiRequestError } from "./transport";
-import type { ListingData, ListingDocument } from "./types";
+import type { ConversationSummary, ListingData, ListingDocument } from "./types";
 import { listingCategorySignature } from "../components/nativeFormStability";
 import { notifyUnsavedWork, registerUnsavedWork } from "../lib/unsavedWork";
 
@@ -128,7 +129,13 @@ class ListingEdits {
         }
         if (!pending) {
           void this.client.invalidateQueries({ queryKey: ["conversation", this.id] });
-          void this.client.invalidateQueries({ queryKey: ["conversations"] });
+          // The row shows the saved price at once; the shared schedule picks up the rest.
+          const price = result.listing.price;
+          if (typeof price === "number") {
+            this.client.setQueryData<ConversationSummary[]>(["conversations"], rows =>
+              rows?.map(row => row.id === this.id ? { ...row, price } : row));
+          }
+          refreshInventory(this.client);
         }
         this.update({ draft: pending, saving: Boolean(pending), error: null });
       }

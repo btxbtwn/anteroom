@@ -4,6 +4,7 @@ import type { KeyProviderId, ListingProviderId, ModelFavorite, ProviderStatus } 
 import { KEY_PROVIDER_IDS, KEY_PROVIDER_LABELS, isKeyProviderId, isListingProviderId } from "../keyProviders";
 import type { ModelEsque } from "./providerIconUtils";
 import { useWorkspaceRuntime } from "../../app/runtime";
+import { IDLE_POLL_MS, pollMs } from "../../api/polling";
 
 /**
  * The data behind the composer's model picker: every provider, its models,
@@ -160,7 +161,7 @@ export function useModelFavorites() {
 export function useComposerModel() {
   const { hosted } = useWorkspaceRuntime();
   const queryClient = useQueryClient();
-  const status = useQuery({ queryKey: ["settings-provider"], queryFn: api.settings.provider, staleTime: 30_000, refetchInterval: hosted ? 10_000 : false });
+  const status = useQuery({ queryKey: ["settings-provider"], queryFn: api.settings.provider, staleTime: 30_000, refetchInterval: hosted ? () => pollMs(IDLE_POLL_MS) : false });
   const chatgptReady = Boolean(status.data?.chatgpt?.signed_in);
   const claudeReady = Boolean(status.data?.claude?.signed_in);
   const cursorReady = Boolean(status.data?.masked_cursor_key);

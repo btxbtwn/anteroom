@@ -1,0 +1,4 @@
+- The web app stays smooth while drafts generate: it saves its offline copy of your inventory at most once a second instead of after every update.
+- A chat, assistant answer or listing generation whose connection silently dies now reconnects after 20 seconds instead of waiting forever.
+- Saving a field, starting a chat and finishing a send no longer reload your whole inventory each time. A saved price shows in the list right away.
+- The web app opens in your chosen light or dark theme again; the browser had been blocking the script that sets it.
