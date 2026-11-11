@@ -1,1 +1,0 @@
-- Listing generation leaves SKU blank unless you supply one, and chat keeps your existing SKU.

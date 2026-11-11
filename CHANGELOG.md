@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.911 — 2026-11-11
+
+- Listing generation leaves SKU blank unless you supply one, and chat keeps your existing SKU.
+
 ## 0.1.910 — 2026-11-11
 
 - Reload fields on any marketplace tab to refresh its saved category choices without changing your answers.
