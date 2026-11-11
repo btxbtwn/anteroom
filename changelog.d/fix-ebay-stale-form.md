@@ -1,0 +1,1 @@
+- Load eBay fields automatically when saved category choices are out of date.

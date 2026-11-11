@@ -47,9 +47,8 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
         saved_form = native_contract.editor_form(listing_json, marketplace, values=snapshot)
         if saved_form is not None:
             return saved_form
-        contract = (listing_json.get(native_contract.KEY) or {}).get(marketplace)
-        if isinstance(contract, dict) and not contract.get("unavailable") and "page_labels" in contract:
-            raise NativeMarketplaceError(409, "The category or dependent choices changed. Reload this form's choices before continuing.")
+        # Stale saved choices must be rebuilt from the current catalog below.
+        # Rejecting here leaves the editor empty with no way to reload them.
     if marketplace == "ebay":
         return await ebay_form(snapshot)
     raise NativeMarketplaceError(404, "This marketplace has no native editor form.")
