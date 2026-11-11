@@ -32,6 +32,9 @@ from vendoo_studio.routes.vendoo_drafts import router as vendoo_drafts_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from vendoo_studio.services.background_loop import give_threads
+
+    give_threads(asyncio.get_running_loop())
     from vendoo_studio import sandbox
 
     # Sandbox mode keeps everything on this machine: no timers that crawl

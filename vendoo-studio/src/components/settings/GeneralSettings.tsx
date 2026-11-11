@@ -12,6 +12,7 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection, SettingsSelect } from "./SettingsLayout";
 import { useWorkspaceRuntime } from "../../app/runtime";
+import { ErrorEmailStatus } from "./ErrorEmailStatus";
 
 function AppearanceSection() {
   const queryClient = useQueryClient();
@@ -161,6 +162,7 @@ export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () =>
   return (
     <>
       <AppearanceSection />
+      <ErrorEmailStatus />
       {!hosted ? <SettingsSection id="setup-guide" title="Setup guide">
         <SettingsRow
           title="First-run tutorial"
