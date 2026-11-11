@@ -6,13 +6,13 @@ and message), where (stack and call site), when, on which release and Machine,
 for which request (method, route template, request id) and seller id. Browser
 crashes arrive through ``routes/error_reports.py`` and are reported the same way.
 
-Reports group by fingerprint (exception type and code location, or call site
-and message shape when there is no exception). The first of a group is emailed straight away;
-repeats within ``REPEAT_WINDOW`` are counted and summarised in the next email
-for that group. A global hourly cap keeps a crash loop from flooding the inbox.
+Reports group by severity and fingerprint. A durable shared outbox batches
+warnings hourly, groups repeated errors for 15 minutes, and reserves every
+SMTP attempt against a configured rolling 24-hour budget before sending.
 
 Messages and stacks pass through ``redaction.redact``; SQL parameters are
-dropped. Delivery runs on its own thread with retries, never on a request.
+dropped. Delivery runs on its own thread, never on a request. Relay quota
+rejections pause all senders for 24 hours and retain reports for later delivery.
 Only the hosted app with ``ANTEROOM_ERROR_EMAIL=1`` sends; the Mac app and
 sandboxes never do.
 """
@@ -39,9 +39,6 @@ from vendoo_studio.version import app_version
 
 OPERATOR = "ccanizares@myanteroom.com"
 SMTP_HOST, SMTP_PORT = "smtp-relay.gmail.com", 587
-REPEAT_WINDOW = 15 * 60
-HOURLY_CAP = 60
-RETRY_DELAYS = (5, 30, 120)
 MAX_MESSAGE = 2000
 MAX_STACK = 12000
 # Loggers whose errors are reported. Each is attached directly so a logger
@@ -170,7 +167,7 @@ def render_email(report: dict[str, Any], repeats: int, first_seen: str | None) -
         f"Fingerprint  {report['fingerprint']}",
     ]
     if repeats:
-        lines.append(f"Occurrences  {repeats + 1} since {first_seen} (repeats are grouped for {REPEAT_WINDOW // 60} min)")
+        lines.append(f"Occurrences  {repeats + 1} since {first_seen}")
     lines += [f"Where        {report['location']}", f"Logger       {report['logger']}"]
     if report["request"]:
         r = report["request"]
@@ -218,14 +215,17 @@ def send_email(subject: str, body: str) -> None:
 class AlertHandler(logging.Handler):
     """Hands records to one mail thread; emit never blocks or raises."""
 
-    def __init__(self, send=send_email, *, sleep=time.sleep, clock=time.monotonic):
+    def __init__(self, send=send_email, *, store=None, daily_limit=None, clock=time.time):
         super().__init__(logging.WARNING)
-        self.send, self.sleep, self.clock = send, sleep, clock
+        from vendoo_studio.repositories.error_email import EmailStore
+        from vendoo_studio.services.error_email_delivery import EmailDelivery
+        from vendoo_studio.database import engine
+
+        self.delivery = EmailDelivery(store or EmailStore(engine), send, clock=clock,
+                                      daily_limit=int(os.environ.get('ANTEROOM_ERROR_EMAIL_DAILY_LIMIT', '0'))
+                                      if daily_limit is None else daily_limit)
         self.pending: queue.Queue = queue.Queue(maxsize=500)
         self.dropped = 0
-        self.groups: dict[str, dict[str, Any]] = {}
-        self.sent_at: list[float] = []
-        self.capped = 0
         self.stopping = threading.Event()
         self.worker = threading.Thread(target=self._run, name="error-email", daemon=True)
         self.worker.start()
@@ -246,65 +246,36 @@ class AlertHandler(logging.Handler):
             self.dropped += 1
 
     def _run(self) -> None:
+        report = None
         while not (self.stopping.is_set() and self.pending.empty()):
             try:
-                report = self.pending.get(timeout=0.5)
-            except queue.Empty:
-                continue
-            self.process(report)
-
-    def process(self, report: dict[str, Any]) -> None:
-        now = self.clock()
-        group = self.groups.get(report["fingerprint"])
-        if group and now - group["sent"] < REPEAT_WINDOW:
-            group["repeats"] += 1
-            group["latest"] = report
-            return
-        repeats = group["repeats"] if group else 0
-        first_seen = group["first_seen"] if group else None
-        self.groups[report["fingerprint"]] = {"sent": now, "repeats": 0, "first_seen": report["occurred_at"], "latest": None}
-        self.sent_at = [t for t in self.sent_at if now - t < 3600]
-        if len(self.sent_at) >= HOURLY_CAP:
-            self.capped += 1
-            return
-        self.sent_at.append(now)
-        subject, body = render_email(report, repeats, first_seen)
-        if self.capped or self.dropped:
-            body = (f"Note: {self.capped} report(s) were not emailed because of the {HOURLY_CAP}/hour cap and "
-                    f"{self.dropped} were dropped by a full queue since the last email. "
-                    "Check `fly logs` for them.\n\n") + body
-            self.capped = self.dropped = 0
-        self.deliver(subject, body)
-
-    def deliver(self, subject: str, body: str) -> bool:
-        for attempt, delay in enumerate((0, *RETRY_DELAYS)):
-            if delay:
-                if self.stopping.is_set():
-                    break
-                self.sleep(delay)
-            try:
-                self.send(subject, body)
-                return True
+                if report is None:
+                    try:
+                        report = self.pending.get(timeout=30)
+                    except queue.Empty:
+                        pass
+                if report is not None:
+                    self.delivery.add(report)
+                    report = None
+                if not self.stopping.is_set():
+                    self.delivery.tick()
             except Exception as exc:
-                # stderr, not logging: a mail outage must not report itself.
-                print(f"error-email: attempt {attempt + 1} failed ({type(exc).__name__})", file=sys.stderr)
-        print(f"error-email: gave up on '{subject}'", file=sys.stderr)
-        return False
-
-    def flush_repeats(self) -> None:
-        """At shutdown, email groups whose repeats have not been reported yet."""
-        for group in self.groups.values():
-            if group["repeats"] and group["latest"]:
-                self.deliver(*render_email(group["latest"], group["repeats"], group["first_seen"]))
-                group["repeats"] = 0
+                # Retain the current report and retry storage without reporting
+                # the reporter or killing its thread during a database outage.
+                print(f'error-email: storage unavailable ({type(exc).__name__})', file=sys.stderr)
+                if self.stopping.is_set():
+                    return
+                self.stopping.wait(30)
 
     def close(self) -> None:
         self.stopping.set()
-        self.worker.join(timeout=15)
         try:
-            self.flush_repeats()
-        finally:
-            super().close()
+            self.pending.put_nowait(None)
+        except queue.Full:
+            pass
+        self.worker.join(timeout=15)
+        # Never bypass the durable budget by flushing mail at shutdown.
+        super().close()
 
 
 _handler: AlertHandler | None = None

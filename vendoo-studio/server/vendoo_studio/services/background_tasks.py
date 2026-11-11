@@ -40,7 +40,8 @@ def require_idle(db, conversation_id):
         raise HTTPException(404, 'Listing not found')
     if db.scalar(select(BackgroundTask.id).where(
             BackgroundTask.conversation_id == conversation_id, BackgroundTask.status.in_(ACTIVE)).limit(1)):
-        raise HTTPException(409, 'Wait for the draft task to finish, or stop it before editing.')
+        raise HTTPException(409, 'Wait for the draft task to finish, or stop it before editing.',
+                            headers={'X-Anteroom-Reason': 'draft_busy'})
 
 
 def draft_payload(db, conversation_id, text='', attachments=()):

@@ -6,6 +6,31 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.919 — 2026-11-11
+
+- Sales checks on Depop, Poshmark and Mercari now stop at orders Anteroom already has, and re-read your whole order history every six hours, so they send far fewer requests.
+
+## 0.1.918 — 2026-11-11
+
+- Group warning emails into hourly digests, keep pending error reports across restarts, and pause delivery when Google rejects mail for exceeding its quota.
+- Show the operator when email delivery is paused and how much of the configured daily email budget has been used.
+
+## 0.1.917 — 2026-11-11
+
+- The app no longer stalls for everyone when you list one item on several marketplaces at once.
+
+## 0.1.916 — 2026-11-11
+
+- Keep edits made while chat is working and save them when it finishes, so field reloads are no longer blocked by a failed save.
+
+## 0.1.915 — 2026-11-11
+
+- List on another marketplace while one is still listing, instead of waiting for it to finish.
+
+## 0.1.914 — 2026-11-11
+
+- Depop offers to likers now say "Depop has nobody to send an offer to on this listing" for listings without likers, or whose likers already have an offer, instead of Depop's confusing "Does the product have variants" refusal.
+
 ## 0.1.913 — 2026-11-11
 
 - Reloading marketplace fields on the website now saves the rebuilt form and clears outdated category warnings.
