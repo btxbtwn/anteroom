@@ -66,7 +66,11 @@ Every run, in this order:
    This also runs `npm run e2e` (local web, desktop and phone),
    `npm run e2e:hosted` (hosted web, two sellers) and, on macOS,
    `./anteroom-ios/test-sandbox.sh`, so steps 2 to 4 need no separate run
-   when it covered them. On macOS, **Anteroom types** fails on PyObjC symbols
+   when it covered them. The whole run takes about 40 minutes on the
+   seller's Mac. `hosted-e2e/signin.e2e.ts` "in the Mac app, password resets
+   open in the browser" fails about one run in three at its Account menu step
+   (the menu is not open); rerun it alone before reporting it.
+   On macOS, **Anteroom types** fails on PyObjC symbols
    in `desktop.py`, `macos_keychain.py` and `photo_edits.py` that CI's Linux
    job never sees; report any other type error. Do not run `basedpyright` on
    single files: it rewrites `.basedpyright/baseline.json`.
@@ -107,10 +111,21 @@ Every run, in this order:
      The sandbox's fake model can't answer the marketplace field fill, so
      "The agent returned an unreadable marketplace field response" in the
      chat is expected there. Find the New listing button with an exact name:
-     a blank "New Listing" draft's row menu also matches it;
-   - hosted web (`./sandbox.sh --hosted`, UI 5175, sign in as
+     a blank "New Listing" draft's row menu also matches it. After a reload
+     the editor's fields are empty until the listing loads, so poll the Title
+     box for the edited value before calling the edit lost, and confirm with
+     `GET /api/conversations/<id>/listing`. On a phone the first
+     `input[type=file]` on the page is the chat composer's (6 images at
+     most), not the photo tray's;
+   - hosted web (`./sandbox.sh --hosted`, UI 5175, API 4320, sign in as
      `alice@sandbox.test` / `sandbox`). On a phone a new draft opens on its
-     Listing tab; switch to Chat before staging photos in the composer;
+     Listing tab; switch to Chat before staging photos in the composer.
+     Hosted API calls need a bearer token: a `fetch` from the page has none
+     and gets 401. Get one with `POST /local/auth/v1/token?grant_type=password`
+     and the same email and password, then call the publish routes at
+     `/api/conversations/<id>/native-marketplaces/<m>/list|update` and
+     `/marketplace-listings/delist` (403 expected). Sign in as
+     `bob@sandbox.test` the same way to check he gets 404 on Alice's draft;
    - iPhone in the Simulator against the hosted sandbox, driven with the T3
      device tools (`device_list`, `device_open`, `device_screenshot`), never
      raw `simctl` input. If `device_list` reports `simctl` missing even when
