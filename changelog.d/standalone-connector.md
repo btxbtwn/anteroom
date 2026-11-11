@@ -1,0 +1,1 @@
+- Use Anteroom Connector for Mac to connect your ChatGPT and Claude subscriptions to the web app and iPhone without installing the full desktop app. Pause new requests or quit from its menu-bar icon.

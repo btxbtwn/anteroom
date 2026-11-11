@@ -24,6 +24,7 @@ import { SIGN_IN_PATH, showsLanding } from "./landingRoute";
 import { linkOpenedElsewhere } from "./authMessages";
 import { followSellerChanges } from "./liveUpdates";
 import { StartupScreen } from "./StartupScreen";
+import { ConnectorPage } from "./ConnectorPage";
 import { DEVICE_BUSTER, DEVICE_MAX_AGE_MS, devicePersister, forgetDeviceWorkspace, keepReadsForDevice, keepsOnDevice, saveRuntime, savedRuntime } from "./deviceCache";
 import "./workspace.css";
 
@@ -31,6 +32,7 @@ const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 if (!url || !key) throw new Error("The cloud build requires Supabase public configuration.");
 const supabase = createClient(url, key, { auth: { flowType: "pkce" } });
+const connectorMode = new URLSearchParams(window.location.search).has("connector");
 // A reset link signs in while the client starts, before React subscribes, so
 // listen now: the seller must choose a new password before the workspace opens.
 let recovering = false;
@@ -74,7 +76,7 @@ function CloudApp() {
         // returns to the sign-in form, not the landing page.
         // The last seller's thumbnails and workspace kept on this device go with them.
         void Promise.allSettled([cloudExtension({ id: previous, email: "" }).disconnect(), forgetDeviceImages(), forgetDeviceWorkspace()]).finally(() => {
-          window.location.replace(new URL(SIGN_IN_PATH, window.location.origin).href);
+          window.location.replace(new URL(connectorMode ? "/?connector&sign-in" : SIGN_IN_PATH, window.location.origin).href);
         });
         return;
       }
@@ -93,6 +95,10 @@ function CloudApp() {
   }, []);
   if (!ready) return <StartupScreen/>;
   if (session && newPassword) return <div className="cloud-auth"><SetPassword client={supabase} onDone={() => setNewPassword(false)}/></div>;
+  if (session && connectorMode) return <ConnectorPage email={session.user.email || "Your Anteroom account"} onSignOut={async () => {
+    const { error } = await supabase.auth.signOut({ scope: "local" });
+    if (error) throw error;
+  }}/>;
   if (session) return <HostedWorkspace key={session.user.id} session={session}/>;
   if (!error && showsLanding(window.location.search, mac)) return <Landing/>;
   return <div className="cloud-auth"><SignIn client={supabase} notice={error} sandbox={sandbox}/></div>;

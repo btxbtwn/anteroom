@@ -10,6 +10,26 @@ import { Spinner } from "./ui/spinner";
 
 type TerminalState = "running" | "succeeded" | "failed";
 
+interface TerminalHandlers {
+  message: (data: Uint8Array | string) => void;
+  close: () => void;
+}
+export type OpenClaudeTerminal = (cols: number, rows: number, handlers: TerminalHandlers) => {
+  send: (message: { type: string; data?: string; cols?: number; rows?: number }) => void;
+  close: () => void;
+};
+
+const openWebSocketTerminal: OpenClaudeTerminal = (cols, rows, handlers) => {
+  const socket = new WebSocket(api.settings.claudeLoginTerminalUrl(cols, rows));
+  socket.binaryType = "arraybuffer";
+  socket.onmessage = event => handlers.message(event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : event.data as string);
+  socket.onclose = handlers.close;
+  return {
+    send: message => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message)); },
+    close: () => socket.close(),
+  };
+};
+
 /**
  * Resolve a theme token to the rgb() string xterm can parse. T3's tokens are
  * oklch and color-mix, so let the browser compute them through a canvas.
@@ -42,7 +62,7 @@ function openLink(_event: MouseEvent, url: string) {
  * prompts and can paste its code. It runs that one command, not a shell. A
  * successful sign-in closes it; a failed one stays open so the error can be read.
  */
-export function ClaudeLoginTerminal({ onClose }: { onClose: (signedIn: boolean) => void }) {
+export function ClaudeLoginTerminal({ onClose, openTerminal = openWebSocketTerminal }: { onClose: (signedIn: boolean) => void; openTerminal?: OpenClaudeTerminal }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const [state, setState] = useState<TerminalState>("running");
@@ -73,14 +93,12 @@ export function ClaudeLoginTerminal({ onClose }: { onClose: (signedIn: boolean) 
     terminal.open(host);
     fit.fit();
 
-    const socket = new WebSocket(api.settings.claudeLoginTerminalUrl(terminal.cols, terminal.rows));
-    socket.binaryType = "arraybuffer";
-    socket.onmessage = (event) => {
-      if (event.data instanceof ArrayBuffer) {
-        terminal.write(new Uint8Array(event.data));
+    const receive = (data: Uint8Array | string) => {
+      if (data instanceof Uint8Array) {
+        terminal.write(data);
         return;
       }
-      const frame = JSON.parse(event.data as string) as { type: string; code?: number; message?: string };
+      const frame = JSON.parse(data) as { type: string; code?: number; message?: string };
       if (frame.type === "exit" && frame.code === 0) {
         setState("succeeded");
         onCloseRef.current(true);
@@ -91,12 +109,15 @@ export function ClaudeLoginTerminal({ onClose }: { onClose: (signedIn: boolean) 
         setMessage(frame.message ?? "Could not start Claude sign-in.");
       }
     };
-    socket.onclose = () => setState((current) => (current === "running" ? "failed" : current));
+    const socket = openTerminal(terminal.cols, terminal.rows, {
+      message: receive,
+      close: () => setState(current => current === "running" ? "failed" : current),
+    });
     const input = terminal.onData((data) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "input", data }));
+      socket.send({ type: "input", data });
     });
     const resize = terminal.onResize(({ cols, rows }) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "resize", cols, rows }));
+      socket.send({ type: "resize", cols, rows });
     });
     const observer = new ResizeObserver(() => fit.fit());
     observer.observe(host);
@@ -109,7 +130,7 @@ export function ClaudeLoginTerminal({ onClose }: { onClose: (signedIn: boolean) 
       socket.close();
       terminal.dispose();
     };
-  }, []);
+  }, [openTerminal]);
 
   return (
     <div className="grid gap-2">
