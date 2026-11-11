@@ -20,6 +20,22 @@ from vendoo_studio.services.vendoo_import import merge_notes
 
 
 class NativeEditorTest(unittest.TestCase):
+    def test_stale_ebay_form_rebuilds_current_choices(self):
+        from vendoo_studio.services import native_contract
+
+        snapshot = copy.deepcopy(self.listing)
+        snapshot[native_contract.KEY] = {"ebay": {"page_labels": True, "fields": []}}
+        revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
+        fresh = {"marketplace": "ebay", "fields": [], "page_labels": True}
+        with patch.object(native_contract, "editor_form", return_value=None), \
+             patch.object(native_editor, "ebay_form", new=AsyncMock(return_value=fresh)) as rebuild:
+            answer = self.client.get(f"{self.url}/ebay/form?revision_id={revision.id}")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(answer.json(), fresh)
+        rebuild.assert_awaited_once()
+        self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+
     def test_chat_reads_real_native_catalogs_and_saves_an_optional_field_without_a_job(self):
         import asyncio
         import json
