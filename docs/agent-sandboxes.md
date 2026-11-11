@@ -62,8 +62,9 @@ normal backend developer dependencies installed. It starts its own disposable
 hosted API and runs XCUITest, creating a draft through the native UI and
 checking it survives an app relaunch. It uses the iPhone 17 Simulator by
 default; `ANTEROOM_TEST_DESTINATION` selects another Xcode test destination.
-`.github/workflows/ios.yml` runs the same command on pull requests. No signing
-or TestFlight credentials are available to that test job.
+Run these UI checks locally before an iPhone release; Xcode Cloud runs the
+unit tests separately. See [Xcode Cloud setup](xcode-cloud.md). The local
+sandbox checks require no signing or TestFlight credentials.
 
 ## Hosted staging preparation
 

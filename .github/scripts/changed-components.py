@@ -30,13 +30,12 @@ CI_FILES = (".github/workflows/ci.yml", ".github/workflows/dependency-audit.yml"
 # Changes that no test job reads. Release notes and the changelog are checked
 # by the Changelog job, which always runs.
 # Read by backend tests although no Studio code uses them (test_xcodegen_installer.py).
-IOS_READ_BY_BACKEND = ("anteroom-ios/tools/", ".github/workflows/ios.yml")
+IOS_READ_BY_BACKEND = ("anteroom-ios/tools/", "anteroom-ios/ci_scripts/")
 NOT_STUDIO = (
     "webhook-relay/",
     "anteroom-ios/",
     "docs/",
     "changelog.d/",
-    ".github/workflows/ios.yml",
 )
 # Studio's contract check regenerates these from the backend, so it must run
 # when they change (contracts/ is not in NOT_STUDIO, so it already counts).

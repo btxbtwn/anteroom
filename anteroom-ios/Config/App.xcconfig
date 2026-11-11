@@ -7,3 +7,4 @@ CURRENT_PROJECT_VERSION = 1
 
 #include? "Version.xcconfig"
 #include? "Local.xcconfig"
+#include? "Cloud.xcconfig"

@@ -82,6 +82,13 @@ targets:
         SWIFT_VERSION: "6.0"
         GENERATE_INFOPLIST_FILE: YES
 schemes:
+  AnteroomCloud:
+    build:
+      targets:
+        Anteroom: all
+        AnteroomTests: [test]
+    test:
+      targets: [AnteroomTests]
   Anteroom:
     build:
       targets:
