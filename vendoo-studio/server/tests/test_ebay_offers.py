@@ -71,9 +71,11 @@ class EbayStandIn(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
-    def reply(self, status, body, content_type="application/json"):
+    def reply(self, status, body, content_type="application/json", headers=None):
         raw = json.dumps(body).encode() if isinstance(body, dict) else body.encode()
         self.send_response(status)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
@@ -86,7 +88,9 @@ class EbayStandIn(BaseHTTPRequestHandler):
         assert self.headers["X-EBAY-C-MARKETPLACE-ID"] == "EBAY_US"
         assert self.headers["Authorization"] == "Bearer test-token"
         state.offsets.append(int(parse_qs(path.query)["offset"][0]))
-        if state.read_status != 200:
+        if state.limited:
+            self.reply(429, {"errors": []}, headers={"Retry-After": state.limited.pop(0)})
+        elif state.read_status != 200:
             self.reply(state.read_status, {"errors": []})
         elif state.paginated and state.offsets[-1] == 0:
             self.reply(200, {"eligibleItems": [{"listingId": "111111111111"}], "next": "ignored-untrusted-url"})
@@ -118,7 +122,7 @@ class EbayStandIn(BaseHTTPRequestHandler):
 @pytest.fixture
 def ebay_server():
     state = SimpleNamespace(price="50.00", currency="USD", eligible=True, listing_status="Active", variations=False,
-                            read_status=200, send_status=200, paginated=False, offsets=[], reads=0, sends=[], eligible_ids=[ITEM_ID],
+                            read_status=200, limited=[], send_status=200, paginated=False, offsets=[], reads=0, sends=[], eligible_ids=[ITEM_ID],
                             send_body={"offers": [{"offerId": "offer-1"}, {"offerId": "offer-2"}]})
     server = ThreadingHTTPServer(("127.0.0.1", 0), EbayStandIn)
     server.state = state
@@ -339,6 +343,39 @@ def test_missing_permission_requests_reconnect_and_preserves_no_preview(offers):
     assert response.status_code == 403
     assert "Reconnect eBay" in response.json()["detail"]
     assert offers.db.query(EbayOfferAttempt).count() == 0
+
+
+def test_a_rate_limited_eligibility_read_waits_out_retry_after(offers, monkeypatch):
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(ebay_api.asyncio, "sleep", sleep)
+    offers.remote.limited = ["3"]
+    assert preview(offers)["eligible"]
+    assert waits == [3]
+    assert offers.remote.offsets == [0, 0]
+
+
+def test_a_long_rate_limit_is_shown_not_waited_out(offers, monkeypatch):
+    monkeypatch.setattr(ebay_api.asyncio, "sleep", AsyncMock())
+    offers.remote.limited = ["3600"]
+    response = offers.client.post("/api/ebay-offers/preview", json={
+        "selections": [{"conversation_id": "coat", "minimum_price": "30"}], "discount_percent": 10,
+    })
+    assert response.status_code == 502
+    assert "limiting requests" in response.json()["detail"]
+    assert offers.remote.offsets == [0]
+
+
+def test_an_ebay_outage_says_so(offers):
+    offers.remote.read_status = 503
+    response = offers.client.post("/api/ebay-offers/preview", json={
+        "selections": [{"conversation_id": "coat", "minimum_price": "30"}], "discount_percent": 10,
+    })
+    assert response.status_code == 502
+    assert "eBay is having trouble" in response.json()["detail"]
 
 
 def test_eligibility_reads_every_page_without_following_external_next_urls(offers):

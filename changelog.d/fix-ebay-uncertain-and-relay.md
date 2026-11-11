@@ -1,0 +1,4 @@
+- If eBay times out or reports a conflict while creating or publishing a listing, Anteroom now asks you to check eBay instead of treating it as safe to list again, so a listing is never doubled.
+- eBay offers wait out a short eBay rate limit instead of failing, and say plainly when eBay is limiting requests or having trouble.
+- An eBay account-closure notice no longer briefly holds up the web app while it forgets that account.
+- eBay and relay calls reuse open connections, so they start faster.
