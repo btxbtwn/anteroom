@@ -7,7 +7,7 @@ export function ErrorEmailStatus() {
   const { data, error } = useQuery({
     queryKey: ["error-email-delivery"],
     queryFn: api.settings.errorEmailDelivery,
-    refetchInterval: () => (document.hidden ? false : pollMs(30000)),
+    refetchInterval: () => (typeof document === "undefined" || document.hidden ? false : pollMs(30000)),
   });
   if (!data?.visible) return null;
   const labels = {
