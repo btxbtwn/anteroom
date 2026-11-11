@@ -1,1 +1,0 @@
-- Reading eBay or Etsy stock after a sale no longer fails partway on the hosted app.

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.938 — 2026-11-11
+
+- Reading eBay or Etsy stock after a sale no longer fails partway on the hosted app.
+
 ## 0.1.937 — 2026-11-11
 
 - Chat on the Mac no longer drops a reply while it is still looking at your photos.
