@@ -15,7 +15,6 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from vendoo_studio.models.user_preference import UserPreference
-from vendoo_studio.models.user_secret import UserSecretReference
 from vendoo_studio.services.hosted_database import SellerDatabaseSession, note_changes
 from vendoo_studio.services.service_context import ServiceContext
 
@@ -34,9 +33,14 @@ class HostedSettingsStore:
     def read(self):
         if self._snapshot is None:
             with self.sessions() as db:
-                value = db.scalar(select(UserPreference.value).where(UserPreference.key == 'settings'))
-                self._snapshot = value if isinstance(value, dict) else {}
+                self.load(db)
         return copy.deepcopy(self._snapshot)
+
+    def load(self, db):
+        """Take the snapshot through a session the caller already holds, unless it is taken."""
+        if self._snapshot is None:
+            value = db.scalar(select(UserPreference.value).where(UserPreference.key == 'settings'))
+            self._snapshot = value if isinstance(value, dict) else {}
 
     def write(self, payload):
         def replace(current):
@@ -67,8 +71,11 @@ class VaultSecretStore:
 
     @staticmethod
     def _read(db, account):
-        exists = db.scalar(select(UserSecretReference.id).where(UserSecretReference.account == account))
-        return db.scalar(text('SELECT anteroom_private.secret_read(:slot)'), {'slot': account}) if exists else None
+        # One round trip. Vault is reached only for a slot that has a secret,
+        # so a database without Vault still works while none is saved.
+        return db.scalar(text(
+            'SELECT CASE WHEN EXISTS (SELECT 1 FROM user_secret_references WHERE account = :slot)'
+            ' THEN anteroom_private.secret_read(:slot) END'), {'slot': account})
 
     def get(self, account):
         if account not in self._cache:

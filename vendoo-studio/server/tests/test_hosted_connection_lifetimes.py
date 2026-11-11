@@ -158,6 +158,9 @@ def test_settings_snapshot_failure_returns_a_private_retriable_response(cloud, s
         def read(self):
             raise SQLAlchemyError('private-diagnostic')
 
+        def load(self, _db):
+            self.read()
+
     context = ServiceContext(USER_ID, MagicMock(), UnavailableSettings(), MagicMock(), MagicMock())
     monkeypatch.setattr('vendoo_studio.services.hosted_context.for_seller', lambda *_args: context)
     response = client.get(f'/api/conversations/{identity}/listing', headers=alice)
@@ -363,6 +366,30 @@ def test_photo_reads_return_the_database_connection_before_storage(cloud, active
              'bytes': f'/api/conversations/{draft}/photos/{photo}/bytes',
              'photo': f'/api/photos/{photo}', 'thumb': f'/api/photos/{photo}/thumb'}
     assert client.get(paths[route], headers=alice).status_code == 200
+
+
+def test_a_seller_request_reads_its_settings_through_its_own_connection(cloud, signing_keys):  # noqa: F811
+    """A second session for the settings snapshot costs another checkout and four round trips per request."""
+    client, engine = cloud
+    alice = headers(signing_keys)
+    draft = client.post('/api/drafts', headers=alice, json={'title': 'Coat'}).json()['id']
+    checkouts, statements = [], []
+
+    def checkout(*_args):
+        checkouts.append(True)
+
+    def record(_connection, _cursor, statement, *_args):
+        statements.append(statement)
+
+    event.listen(engine, 'checkout', checkout)
+    event.listen(engine, 'before_cursor_execute', record)
+    try:
+        assert client.get(f'/api/drafts/{draft}/photos', headers=alice).status_code == 200
+    finally:
+        event.remove(engine, 'checkout', checkout)
+        event.remove(engine, 'before_cursor_execute', record)
+    assert len(checkouts) == 1
+    assert sum('user_preferences' in statement for statement in statements) == 1
 
 
 def test_photo_upload_and_delete_write_storage_without_a_database_connection(cloud, active_connections, signing_keys, monkeypatch):  # noqa: F811
