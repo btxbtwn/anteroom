@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.932 — 2026-11-11
+
+- Keep the web app responsive while the assistant answers, photos upload or are deleted, and pages load.
+- Keep Etsy and eBay signed in when two parts of Anteroom refresh the sign-in at the same moment.
+- Tell you the draft worker is unavailable instead of waiting forever when a draft task never starts.
+
 ## 0.1.931 — 2026-11-11
 
 - If eBay times out or reports a conflict while creating or publishing a listing, Anteroom now asks you to check eBay instead of treating it as safe to list again, so a listing is never doubled.
