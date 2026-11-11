@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.928 — 2026-11-11
+
+- Anteroom Bridge 0.2.68 runs only the photos Anteroom approved for a listing, and needs Anteroom's signed approval for every action from the web, including reading your sales, likes and imports and cancelling a listing.
+
 ## 0.1.927 — 2026-11-11
 
 - Install the exact, verified package versions everywhere, including first-time setup.
