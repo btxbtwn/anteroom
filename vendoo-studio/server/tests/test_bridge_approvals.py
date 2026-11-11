@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from test_hosted_browser_relay import direct_mode  # noqa: F401
 from test_seller_sessions import USER_ID
 from vendoo_studio.services import bridge_approvals, browser_bridge, hosted_browser_relay
-from vendoo_studio.services.bridge_approvals import SIGNED_APPROVALS
+from vendoo_studio.services.bridge_approvals import SIGNED_APPROVALS, SIGNED_COMMANDS_CAPABILITY
 from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, current_extension
 from vendoo_studio.services.hosted_context import for_seller
 from vendoo_studio.services.service_context import use
@@ -94,7 +94,50 @@ def test_canonical_json_matches_what_the_bridge_rebuilds():
         assert bridge_approvals.canonical(number) == text, number
 
 
-def _bridge_verifies(spki: str, command: dict, account: str) -> object:
+def test_a_bridge_that_checks_every_command_gets_an_approval_on_reads_and_cancel_too(key):
+    capabilities = {MARKETPLACE_ACTIONS, SIGNED_APPROVALS, SIGNED_COMMANDS_CAPABILITY}
+    for kind in ('job.cancel', 'marketplace.sessions', 'marketplace.connect', 'marketplace.sales_history',
+                 'marketplace.import.page', 'marketplace.import.listing', 'marketplace.like_events',
+                 'marketplace.promotion_check', 'marketplace.promotion_result'):
+        read = {'type': kind, 'job_id': None, 'message_id': 'a' * 32, 'payload': {'request_id': 'a' * 32}}
+        claims = _claims(bridge_approvals.signed(USER_ID, read, capabilities)['payload']['approval'], key.public)
+        assert claims['cmd'] == kind and claims['pho'] == [], kind
+    photos = [{'id': 'p1', 'sha256': 'ab' * 32}]
+    claims = _claims(bridge_approvals.signed(USER_ID, UPDATE, capabilities, photos)['payload']['approval'], key.public)
+    assert claims['pho'] == photos
+    # A Bridge from before does not check photos, so its approvals say nothing about them.
+    assert 'pho' not in _claims(bridge_approvals.signed(USER_ID, UPDATE, {SIGNED_APPROVALS}, photos)['payload']['approval'], key.public)
+
+
+def test_photo_hashes_come_from_the_jobs_approved_copies():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from vendoo_studio.database import Base
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.job import Job
+    from vendoo_studio.models.listing import Listing, ListingRevision  # noqa: F401
+
+    engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as db:
+        conversation = Conversation(title='Jeans')
+        db.add(conversation)
+        db.commit()
+        approved = Job(conversation_id=conversation.id, approved_revision_id='r', status='dispatched', listing_snapshot={
+            '_approved_photos': [{'id': 'p1', 'stored_filename': 'a.jpg', 'mime_type': 'image/jpeg', 'checksum': 'AB' * 32},
+                                 {'id': 'p2', 'stored_filename': 'b.jpg', 'mime_type': 'image/jpeg'}]})
+        unpinned = Job(conversation_id=conversation.id, approved_revision_id='r', status='dispatched', listing_snapshot={})
+        db.add_all([approved, unpinned])
+        db.commit()
+        # A row without a checksum is left out, so the Bridge refuses that photo rather than trusting it.
+        assert bridge_approvals.photo_hashes(db, approved.id) == [{'id': 'p1', 'sha256': 'ab' * 32}]
+        assert bridge_approvals.photo_hashes(db, unpinned.id) == []
+        assert bridge_approvals.photo_hashes(db, 'missing') == []
+
+
+def _bridge_verifies(spki: str, command: dict, account: str, photos: list | None = None) -> object:
     """What the extension's own approval check answers for ``command``: null when it runs."""
     script = f"""
       const {{ createApprovalVerifier }} = require({json.dumps(str(EXTENSION / 'background' / 'cloud-approvals.js'))});
@@ -102,7 +145,8 @@ def _bridge_verifies(spki: str, command: dict, account: str) -> object:
       const api = {{ storage: {{ local: {{ get: async () => data, set: async value => {{ data = {{ ...data, ...value }}; }} }} }} }};
       const verifier = createApprovalVerifier(api, {{ publicKey: {json.dumps(spki)} }});
       const command = JSON.parse({json.dumps(json.dumps(command))});
-      verifier.verify(command, {json.dumps(account)}).then(result => console.log(JSON.stringify(result?.approval ?? null)));
+      const photos = JSON.parse({json.dumps(json.dumps(photos or []))});
+      verifier.verify(command, {json.dumps(account)}, photos).then(result => console.log(JSON.stringify(result?.approval ?? null)));
     """
     return json.loads(subprocess.run(['node', '-e', script], check=True, capture_output=True, text=True).stdout)
 
@@ -142,6 +186,39 @@ def test_the_relay_signs_a_write_as_the_page_takes_it(direct_mode, key):  # noqa
     assert _bridge_verifies(key.spki, execute, USER_ID) is None
 
 
+def test_the_relay_binds_a_lists_photos_and_the_bridge_refuses_swapped_bytes(direct_mode, key, monkeypatch):  # noqa: F811
+    import hashlib
+
+    hosted_browser_relay._relays.clear()
+    capabilities = {MARKETPLACE_ACTIONS, SIGNED_APPROVALS, SIGNED_COMMANDS_CAPABILITY}
+    front = b'\xff\xd8approved front photo'
+    asked = []
+
+    async def hashes(job_id):
+        asked.append(job_id)
+        return [{'id': 'p1', 'sha256': hashlib.sha256(front).hexdigest()}]
+    monkeypatch.setattr(hosted_browser_relay, 'approved_photo_hashes', hashes)
+
+    async def scenario():
+        with use(for_seller(USER_ID)):
+            relay = current_extension()
+            await relay.next_message(capabilities, 0.01)
+            request = asyncio.create_task(browser_bridge.request(SimpleNamespace(id='job-1'), 'marketplace.execute', {
+                'marketplace': 'poshmark', 'action': 'list', 'confirm': True,
+                'photos': [{'id': 'p1', 'mime_type': 'image/jpeg'}]}, timeout=5))
+            execute = await relay.next_message(capabilities, 1)
+            relay.resolve_wait(execute['message_id'], {'ok': True})
+            await request
+        return execute
+
+    execute = asyncio.run(scenario())
+    assert asked == ['job-1']
+    photo = lambda data: {'id': 'p1', 'mime_type': 'image/jpeg', 'base64': base64.b64encode(data).decode()}  # noqa: E731
+    assert _bridge_verifies(key.spki, execute, USER_ID, [photo(front)]) is None
+    assert _bridge_verifies(key.spki, execute, USER_ID, [photo(b'\xff\xd8another photo')]) == 'photos'
+    assert _bridge_verifies(key.spki, execute, USER_ID, [{**photo(front), 'id': 'p2'}]) == 'photos'
+
+
 def test_values_json_cannot_hold_are_signed_as_the_page_receives_them(key):
     from datetime import UTC, datetime
     from decimal import Decimal
@@ -153,3 +230,14 @@ def test_values_json_cannot_hold_are_signed_as_the_page_receives_them(key):
     # The route returns this dict; FastAPI encodes it the same way before the page reads it.
     received = json.loads(json.dumps(jsonable_encoder(signed)))
     assert _bridge_verifies(key.spki, received, USER_ID) is None
+
+
+def test_the_relay_takes_every_capability_a_current_bridge_declares():
+    import re
+
+    from vendoo_studio.routes.hosted_browser_relay import Heartbeat
+
+    source = (EXTENSION / 'background' / 'cloud-connection.js').read_text()
+    declared = re.findall(r"'([a-z_.]+)'", re.search(r'const RELAY_CAPABILITIES = \[([^\]]*)\]', source).group(1))
+    assert SIGNED_COMMANDS_CAPABILITY in declared
+    assert Heartbeat(capabilities=declared).capabilities == declared
