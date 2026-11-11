@@ -247,6 +247,19 @@ it("counts a queued or in-flight save as unsaved work and drops the queue once i
   await vi.waitFor(() => expect(listingEditQueueCount(client)).toBe(0));
 });
 
+it("shows a saved price in the inventory row without reading the whole inventory again", async () => {
+  const { client, edits } = setup();
+  client.setQueryData(["conversations"], [{ id: "item", title: "Original", price: 10 }, { id: "other", title: "Other", price: 5 }]);
+  const list = vi.spyOn(api.conversations, "list");
+  vi.spyOn(api.listings, "update").mockImplementation(async (_id, listing) => result("r1", listing));
+  try {
+    edits.save({ title: "Original", price: 32 });
+    await vi.waitFor(() => expect(edits.getSnapshot().saving).toBe(false));
+    expect(client.getQueryData(["conversations"])).toEqual([{ id: "item", title: "Original", price: 32 }, { id: "other", title: "Other", price: 5 }]);
+    expect(list).not.toHaveBeenCalled();
+  } finally { client.clear(); }
+});
+
 it("keeps a queue that is re-subscribed in the same task, as a remount does", async () => {
   const { client, edits } = setup();
   edits.subscribe(() => {})();

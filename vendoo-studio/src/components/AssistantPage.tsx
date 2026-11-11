@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage, type AssistantThread } from "../api/assistant";
 import type { ChatAttachment, ChatAttachmentUpload } from "../api/types";
+import { invalidateTopics } from "../cloud/liveUpdates";
 import { addToast } from "../ui/toast";
 import { useMobileLayout } from "../lib/useMobileLayout";
 import { AssistantAutomationCard } from "./AssistantAutomationCard";
@@ -393,7 +394,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const changesSettled = (message: AssistantMessage, applied: boolean) => {
     queryClient.setQueryData<AssistantMessage[]>(messagesKey(threadId ?? ""), (saved) =>
       saved?.map((turn) => (turn.id === message.id ? message : turn)));
-    if (applied) void queryClient.invalidateQueries();
+    if (applied) void invalidateTopics(queryClient, ["listings"]);
   };
 
   const automationSettled = (message: AssistantMessage) => {
