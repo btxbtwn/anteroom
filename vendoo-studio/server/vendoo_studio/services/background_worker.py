@@ -61,6 +61,7 @@ async def _execute(task_id, token):
         db.rollback()
     if handler is not None:
         return await handler(task_id, token, task)
+    assert conversation_id is not None  # a draft task without one was refused above
     if kind == 'generate':
         response = await generate_listing(conversation_id)
     elif kind == 'chat':
