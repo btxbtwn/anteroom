@@ -1,0 +1,1 @@
+- Drafts no longer fail with a database timeout while looking up your past items of the same brand.
