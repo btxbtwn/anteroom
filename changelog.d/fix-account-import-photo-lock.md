@@ -1,0 +1,1 @@
+- Moving a Mac into an online account no longer keeps a photo locked while it uploads, so the account stays responsive during a move.
