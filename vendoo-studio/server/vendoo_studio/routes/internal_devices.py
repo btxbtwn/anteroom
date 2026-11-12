@@ -41,14 +41,14 @@ async def invoke_mac(body: MacCall, authorization: str | None = Header(default=N
     if body.operation not in OPERATIONS:
         raise HTTPException(404, 'Not found')
     try:
-        result = await mac_for(_owner(body.user_id)).invoke(body.operation, body.args, body.kwargs, body.provider)
+        result, model = await mac_for(_owner(body.user_id)).call(body.operation, body.args, body.kwargs, body.provider)
     except MacCallFailed as failure:
         return {'ok': False, 'error': failure.kind}
     except ProviderStalled:
         return {'ok': False, 'error': NO_REPLY}
     except MacUnavailable:
         return {'ok': False, 'error': NOT_TAKEN}
-    return {'ok': True, 'result': result}
+    return {'ok': True, 'result': result, 'model': model}
 
 
 class ChromeSend(BaseModel):

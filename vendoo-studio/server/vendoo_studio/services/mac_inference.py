@@ -17,6 +17,7 @@ from vendoo_studio.services.provider_deadlines import CALL_DEADLINE_SEC, operati
 
 OPERATIONS = frozenset({'analyze_photos', 'chat', 'vision_chat', 'structured_chat', 'quick_chat', 'web_search'})
 SUBSCRIPTIONS = frozenset({'chatgpt', 'claude'})
+VISION_OPERATIONS = frozenset({'analyze_photos', 'vision_chat'})
 # The Mac's own provider deadlines (provider_deadlines on the Mac) end a call
 # within CALL_DEADLINE_SEC and say why; this wait only has to outlast them.
 INVOKE_DEADLINE_SEC = CALL_DEADLINE_SEC + 30
@@ -130,9 +131,25 @@ class MacInference:
                 return False
             return True
 
+    def model_for(self, provider, operation):
+        """The model the connected Mac uses for this operation, when this process holds it."""
+        models = self.models.get(provider) or {}
+        return models.get('vision_model' if operation in VISION_OPERATIONS else 'listing_model') or ''
+
     async def invoke(self, operation, args, kwargs, provider):
+        """Run one call on the Mac and record it in the current generation's model calls."""
         if provider not in SUBSCRIPTIONS or operation not in OPERATIONS:
             raise ValueError('Unsupported subscription operation')
+        from vendoo_studio.services import model_usage
+
+        with model_usage.observe(provider, self.model_for(provider, operation)) as call:
+            result, model = await self.call(operation, args, kwargs, provider)
+            if model:
+                call.record['model'] = model
+            return result
+
+    async def call(self, operation, args, kwargs, provider):
+        """The Mac's result and the model that produced it, forwarding to the process holding the Mac."""
         from vendoo_studio.services.device_routes import RoutingUnavailable, forward_target, post
         try:
             target = await forward_target(self.owner, 'mac')
@@ -150,7 +167,7 @@ class MacInference:
                 if kind == NO_REPLY:
                     raise operation_stalled(_mac_label(provider), operation, INVOKE_DEADLINE_SEC)
                 raise _failure(kind, provider)
-            return payload.get('result')
+            return payload.get('result'), payload.get('model') or ''
         identity = uuid.uuid4().hex
         future = concurrent.futures.Future()
         with self.condition:
@@ -161,7 +178,8 @@ class MacInference:
             self.outbox.append({'id': identity, 'provider': provider, 'operation': operation, 'args': args, 'kwargs': kwargs})
             self.condition.notify_all()
         try:
-            return await asyncio.wait_for(asyncio.wrap_future(future), INVOKE_DEADLINE_SEC)
+            result = await asyncio.wait_for(asyncio.wrap_future(future), INVOKE_DEADLINE_SEC)
+            return result, self.model_for(provider, operation)
         except MacCallFailed as failure:
             raise MacCallFailed(failure.kind, provider) from None
         except TimeoutError:

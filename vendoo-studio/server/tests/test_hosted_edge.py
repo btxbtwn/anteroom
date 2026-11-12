@@ -35,11 +35,11 @@ def test_internal_routes_still_answer_on_the_private_network(monkeypatch):
     monkeypatch.setenv('ANTEROOM_PROCESS_TOKEN', 'process-token')
     owner = str(uuid.uuid4())
     # No Mac is polling, so the call reaches the route and reports it unavailable.
-    monkeypatch.setattr('vendoo_studio.services.mac_inference.MacInference.invoke',
-                        lambda *args, **kwargs: asyncio.sleep(0, {'answer': 7}))
+    monkeypatch.setattr('vendoo_studio.services.mac_inference.MacInference.call',
+                        lambda *args, **kwargs: asyncio.sleep(0, ({'answer': 7}, 'mac-listing')))
     allowed = _post_invoke(create_app(), owner, {})
     assert allowed.status_code == 200
-    assert allowed.json() == {'ok': True, 'result': {'answer': 7}}
+    assert allowed.json() == {'ok': True, 'result': {'answer': 7}, 'model': 'mac-listing'}
 
 
 class Lines(logging.Handler):
