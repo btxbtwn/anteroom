@@ -374,11 +374,6 @@ async function handleStudioMessage(msg) {
       break;
     }
 
-    case 'marketplace.record': {
-      await handleMarketplaceRecord(msg);
-      break;
-    }
-
     case 'marketplace.delete': {
       await handleMarketplaceDelete(msg);
       break;

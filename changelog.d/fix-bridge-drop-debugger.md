@@ -1,0 +1,1 @@
+- Anteroom Bridge no longer asks Chrome for debugger access. The developer-only tool that recorded a marketplace's own requests is gone with it.

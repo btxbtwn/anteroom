@@ -31,6 +31,16 @@ test('host permissions have callers', () => {
   }
 });
 
+test('the Bridge does not ask for the debugger permission or use chrome.debugger', () => {
+  // Chrome Web Store asks for the narrowest permissions, and debugger cannot be optional.
+  // Its only caller, the developer request recorder, was removed.
+  assert.ok(!manifest.permissions.includes('debugger'));
+  const files = ['background.js', ...fs.readdirSync(path.join(ROOT, 'background')).map(file => path.join('background', file))];
+  for (const file of files) {
+    assert.doesNotMatch(fs.readFileSync(path.join(ROOT, file), 'utf8'), /chrome\.debugger/, file);
+  }
+});
+
 test('the description says what the Bridge does, within Chrome\'s limit', () => {
   assert.ok(manifest.description.length <= 132, `${manifest.description.length} characters`);
   assert.match(manifest.description, /publish/i);
