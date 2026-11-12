@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.943 — 2026-11-12
+
+- Anteroom Bridge no longer asks Chrome for debugger access. The developer-only tool that recorded a marketplace's own requests is gone with it.
+
 ## 0.1.942 — 2026-11-12
 
 - iPhone builds and unit tests use Xcode Cloud, with TestFlight releases started manually after local iPhone and iPad checks.
