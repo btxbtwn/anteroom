@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anteroom Bridge",
-  "version": "0.2.70",
+  "version": "0.2.71",
   "minimum_chrome_version": "120",
   "description": "Lets Anteroom publish, update and delist your marketplace listings, save drafts, share, send offers, and read sales and likes.",
   "permissions": [

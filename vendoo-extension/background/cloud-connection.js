@@ -224,7 +224,7 @@
       }),
     };
   }
-  if (typeof module !== 'undefined') module.exports = { createCloudConnection, ORIGIN };
+  if (typeof module !== 'undefined') module.exports = { createCloudConnection, ORIGIN, RELAY_CAPABILITIES };
   else {
     const bridge = createCloudConnection(chrome, { readForm: readCloudPoshmarkForm, runCommand: runCloudMarketplaceCommand,
       verifyApproval: CloudApprovals.createApprovalVerifier(chrome).verify });
