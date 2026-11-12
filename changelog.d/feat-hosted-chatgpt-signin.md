@@ -1,2 +1,0 @@
-- Sign into ChatGPT from My Account → Settings → Providers in the desktop app, without switching to This Mac's Listings.
-- Subscription messages on the web and iPhone now say "computer" instead of "Mac".

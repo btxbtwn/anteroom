@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.948 — 2026-11-12
+
+- Sign into ChatGPT from My Account → Settings → Providers in the desktop app, without switching to This Mac's Listings.
+- Subscription messages on the web and iPhone now say "computer" instead of "Mac".
+
 ## 0.1.947 — 2026-11-12
 
 - On the web, a draft or assistant answer you are watching no longer checks the cloud database twice a second while nothing is happening, which leaves more room for your pages to load while drafts generate.
