@@ -447,8 +447,8 @@ test('Depop reads the price from the offer preview when its product document has
   assert.ok(!priceless.requests.some(r => r.key === DEPOP_SEND));
 });
 
-test('Depop distinguishes a refused preview from a missing recipient without inferring eligibility', async () => {
-  // Observed answers (2026-10-30): HTTP 400 code 1003, or HTTP 200 with no recipient. Neither establishes why eligibility failed.
+test('Depop says plainly when it has nobody to offer to, and keeps a missing recipient as drift', async () => {
+  // Observed answers: HTTP 400 code 1003 on listings without likers (or whose likers already have an offer), or HTTP 200 with no recipient.
   const noLikes = { id: 'USER_ERROR', message: 'You are unable to submit an offer on this product. Does the product have variants and are you sending them?', code: 1003 };
   const noRecipient = { product_id: 999, product_description: 'Vintage tee', price_currency: 'USD', variant_set: 1, variant_id: 2,
     shipping_cost: '1.99', sellers_lowest_offer_value: '4.46', offer_expiration_hours: 24 };
@@ -457,12 +457,15 @@ test('Depop distinguishes a refused preview from a missing recipient without inf
     await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
       listing_id: SLUG, discount_percent: 15 } });
     assert.equal(run.results[0].ok, false);
-    assert.doesNotMatch(run.results[0].error, /Nobody who liked|no eligible/i);
     if (answer[0] === 400) {
-      assert.match(run.results[0].error, /HTTP 400, code 1003/);
-      assert.equal(run.results[0].marketplace_message, noLikes.message);
+      assert.match(run.results[0].error, /nobody to send an offer to.*no one has liked it, or every liker already has an offer/);
+      assert.equal(run.results[0].error_code, 'rejected');
+      assert.equal(run.results[0].like_count, 0);
+      // Depop's own wording asks about variants, which is not the cause.
+      assert.doesNotMatch(JSON.stringify(run.results[0]), /variants|1003/);
     } else {
       assert.match(run.results[0].error, /HTTP 200.*offer_recipient_id/);
+      assert.equal(run.results[0].like_count, undefined);
       assert.equal(run.results[0].error_code, 'schema_drift');
     }
     const send = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: answer }));
@@ -693,12 +696,12 @@ test('Depop has no share action', async () => {
 
 test('Depop preview diagnostics expose only sanitized message fields, never the recipient or raw response', async () => {
   const run = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: [400, {
-    code: 1003, message: 'Refused for buyer@example.com token=short-secret Bearer private-secret',
+    code: 1004, message: 'Refused for buyer@example.com token=short-secret Bearer private-secret',
     offer_recipient_id: 987654321, offer_recipient_username: 'private-buyer', session: 'private-session',
   }] }));
   await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
     listing_id: SLUG, discount_percent: 15 } });
-  assert.match(run.results[0].error, /HTTP 400, code 1003/);
+  assert.match(run.results[0].error, /HTTP 400/);
   assert.match(run.results[0].marketplace_message, /Refused for \[email\]/);
   assert.doesNotMatch(JSON.stringify(run.results[0]), /buyer@example|short-secret|private-secret|987654321|private-buyer|private-session/);
   assert.ok(run.requests.every(r => r.key.startsWith('GET')));

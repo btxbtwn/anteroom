@@ -29,12 +29,13 @@ CI_FILES = (".github/workflows/ci.yml", ".github/workflows/dependency-audit.yml"
 
 # Changes that no test job reads. Release notes and the changelog are checked
 # by the Changelog job, which always runs.
+# Read by backend tests although no Studio code uses them (test_xcodegen_installer.py).
+IOS_READ_BY_BACKEND = ("anteroom-ios/tools/", "anteroom-ios/ci_scripts/")
 NOT_STUDIO = (
     "webhook-relay/",
     "anteroom-ios/",
     "docs/",
     "changelog.d/",
-    ".github/workflows/ios.yml",
 )
 # Studio's contract check regenerates these from the backend, so it must run
 # when they change (contracts/ is not in NOT_STUDIO, so it already counts).
@@ -90,7 +91,7 @@ def components(files: list[str]) -> dict[str, bool]:
             selected.update(COMPONENTS)
         elif path.startswith("webhook-relay/"):
             selected.add("relay")
-        elif path.startswith(STUDIO_GENERATED) or path.startswith("contracts/"):
+        elif path.startswith(STUDIO_GENERATED) or path.startswith("contracts/") or path.startswith(IOS_READ_BY_BACKEND):
             selected.update(("backend", "health"))
         elif path.startswith(NOT_STUDIO) or ("/" not in path and path.endswith(".md")):
             continue
@@ -113,8 +114,15 @@ def components(files: list[str]) -> dict[str, bool]:
             selected.update(("frontend", "backend", "browser", "health"))
         elif path.startswith("vendoo-extension/"):
             selected.update(("extension", "backend", "browser", "health"))
+            if path == "vendoo-extension/manifest.json":
+                # The web app shows the extension's version from it.
+                selected.add("frontend")
         elif path.startswith("skills/"):
             selected.update(("backend", "browser", "health"))
+            if path.startswith("skills/list-this/references/"):
+                # The editor imports the field list, and the extension's
+                # value matrix reads the marketplace option lists.
+                selected.update(("frontend", "extension"))
         else:
             # Unknown inputs run every Studio suite rather than silently
             # dropping coverage. Audits depend on the locked Python packages.

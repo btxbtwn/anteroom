@@ -8,7 +8,7 @@ import concurrent.futures
 import uuid
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -54,6 +54,34 @@ def vault_storage(storage):
                 UPDATE vault.secrets SET secret=public.pgp_sym_encrypt(value, 'fixture-cipher-key'), name=new_name WHERE id=identity $$;
         """))
     return storage
+
+
+def test_seller_transactions_bound_queries_and_open_transactions(storage):
+    """A runaway query or a transaction left open across a wait cannot keep a pooled connection for good."""
+    engine, sessions = storage
+    with sessions(ALICE)() as db:
+        assert db.scalar(text('SHOW statement_timeout')) == '15s'
+        assert db.scalar(text('SHOW idle_in_transaction_session_timeout')) == '30s'
+    with engine.connect() as db:
+        assert db.scalar(text('SHOW statement_timeout')) == '0', 'The limits end with the seller transaction'
+
+
+def test_reading_a_saved_credential_is_one_query(vault_storage):
+    engine, sessions = vault_storage
+    VaultSecretStore(sessions(ALICE), ALICE).set('ai-api-keys', 'fixture-alice-credential')
+    statements = []
+
+    def record(_connection, _cursor, statement, *_args):
+        if 'set_config' not in statement and 'pg_roles' not in statement and 'pg_policy' not in statement:
+            statements.append(statement)
+
+    event.listen(engine, 'before_cursor_execute', record)
+    try:
+        assert VaultSecretStore(sessions(ALICE), ALICE).get('ai-api-keys') == 'fixture-alice-credential'
+        assert VaultSecretStore(sessions(ALICE), ALICE).get('missing') is None
+    finally:
+        event.remove(engine, 'before_cursor_execute', record)
+    assert len(statements) == 2, statements
 
 
 def test_vault_credentials_are_owned_encrypted_and_never_directly_readable(vault_storage):

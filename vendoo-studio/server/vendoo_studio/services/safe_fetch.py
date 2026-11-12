@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from collections.abc import Callable
@@ -23,6 +24,8 @@ METADATA_NETWORKS = (
 MAX_REDIRECTS = 3
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 DOWNLOAD_TIMEOUT_SEC = 15.0
+# A lookup that takes longer than this is treated as a host that does not resolve.
+DNS_TIMEOUT_SEC = 5.0
 
 
 class UnsafeURLError(ValueError):
@@ -37,7 +40,7 @@ def is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return not ip.is_global
 
 
-def resolve_public_host(host: str) -> list[str]:
+async def resolve_public_host(host: str) -> list[str]:
     cleaned = (host or "").strip().lower().rstrip(".")
     if not cleaned:
         raise UnsafeURLError("URL is missing a hostname")
@@ -52,7 +55,11 @@ def resolve_public_host(host: str) -> list[str]:
             raise UnsafeURLError(f"Address {cleaned} is not a public host")
         return [cleaned]
     try:
-        results = socket.getaddrinfo(cleaned, None, type=socket.SOCK_STREAM)
+        results = await asyncio.wait_for(
+            asyncio.get_running_loop().getaddrinfo(cleaned, None, type=socket.SOCK_STREAM), DNS_TIMEOUT_SEC,
+        )
+    except TimeoutError as exc:
+        raise UnsafeURLError(f"{cleaned} did not resolve in time") from exc
     except socket.gaierror as exc:
         raise UnsafeURLError(f"Could not resolve {cleaned}") from exc
     addresses: list[str] = []
@@ -71,7 +78,7 @@ def resolve_public_host(host: str) -> list[str]:
     return addresses
 
 
-def resolve_fetch_target(url: str, *, allow_http: bool = True) -> tuple[str, list[str]]:
+async def resolve_fetch_target(url: str, *, allow_http: bool = True) -> tuple[str, list[str]]:
     raw = (url or "").strip()
     if not raw:
         raise UnsafeURLError("URL is required")
@@ -88,12 +95,7 @@ def resolve_fetch_target(url: str, *, allow_http: bool = True) -> tuple[str, lis
         raise UnsafeURLError("URL is missing a hostname")
     if parsed.port in {22, 25, 3306, 5432, 6379, 11211, 27017}:
         raise UnsafeURLError("URL port is not allowed")
-    return raw, resolve_public_host(host)
-
-
-def validate_fetch_url(url: str, *, allow_http: bool = True) -> str:
-    raw, _ = resolve_fetch_target(url, allow_http=allow_http)
-    return raw
+    return raw, await resolve_public_host(host)
 
 
 def is_image_type(content_type: str) -> bool:
@@ -122,7 +124,7 @@ async def fetch_public(
     """
     current = str(url or "").strip()
     for _ in range(MAX_REDIRECTS + 1):
-        current, addresses = resolve_fetch_target(current, allow_http=allow_http)
+        current, addresses = await resolve_fetch_target(current, allow_http=allow_http)
         parsed = urlparse(current)
         host = str(parsed.hostname or "")
         host_header = f"[{host}]" if ":" in host else host

@@ -128,8 +128,6 @@ class _Workspace(unittest.IsolatedAsyncioTestCase):
         patches = [
             *_deadlines(),
             patch("vendoo_studio.database.SessionLocal", self.Session),
-            patch.object(chat_routes, "SessionLocal", self.Session),
-            patch.object(listing_generation, "SessionLocal", self.Session),
             patch.object(listing_generation, "load_skill_rules", return_value="rules"),
             patch.object(listing_generation, "comps_search_available", return_value=False),
         ]
@@ -229,7 +227,7 @@ class StalledChatTest(_Workspace):
             db.close()
 
     async def test_a_chat_send_ends_with_the_stalled_step_named(self):
-        async def build(conv_id, db, text, option_catalog=None):
+        async def build(conv_id, text, option_catalog=None):
             return [{"role": "user", "content": text}]
 
         with patch.object(chat_routes, "build_chat_messages", new=build):

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Anteroom Bridge",
-  "version": "0.2.62",
-  "minimum_chrome_version": "116",
-  "description": "Connect Anteroom to automate marketplace listing drafts",
+  "version": "0.2.71",
+  "minimum_chrome_version": "120",
+  "description": "Lets Anteroom publish, update and delist your marketplace listings, save drafts, share, send offers, and read sales and likes.",
   "permissions": [
     "alarms",
     "storage",
@@ -11,13 +11,11 @@
     "declarativeNetRequestWithHostAccess",
     "scripting",
     "tabs",
-    "debugger",
     "system.display"
   ],
   "host_permissions": [
     "https://web.vendoo.co/*",
     "https://app.vendoo.co/*",
-    "https://api.web.vendoo.co/*",
     "https://us.vendoo.co/*",
     "https://us-central1-vendoo-prod-7948f.cloudfunctions.net/*",
     "https://securetoken.googleapis.com/*",
@@ -29,7 +27,6 @@
     "https://www.mercari.com/*",
     "https://www.depop.com/*",
     "https://webapi.depop.com/*",
-    "https://api.depop.com/*",
     "https://*.s3.amazonaws.com/*",
     "https://*.s3-accelerate.amazonaws.com/*",
     "https://www.etsy.com/*",

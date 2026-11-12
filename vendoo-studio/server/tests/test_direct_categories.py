@@ -4,7 +4,6 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import Base
@@ -20,12 +19,14 @@ from vendoo_studio.services.direct_categories import (
     search_text,
 )
 from vendoo_studio.services.ebay_listings import ebay_category_id
+from worker_sessions import memory_engine, worker_sessions
 
 
 class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite://")
+        self.engine = memory_engine()
         Base.metadata.create_all(self.engine)
+        self.enterContext(worker_sessions(self.engine))
         self.db = Session(self.engine)
 
     def tearDown(self):
@@ -42,7 +43,7 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
         listing = {"category_path": path}
         with patch("vendoo_studio.services.direct_categories._ebay_leaf", AsyncMock(side_effect=AssertionError("network suggestion used"))) as search, \
                 patch("vendoo_studio.services.direct_categories._etsy_leaf", AsyncMock(return_value=None)):
-            await attach_direct_categories(self.db, listing)
+            await attach_direct_categories(listing)
         search.assert_not_awaited()
         self.assertEqual(listing["direct_category_ids"]["ebay"], "11483")
         self.assertEqual(listing["direct_category_ids"]["ebay_path"], path)
@@ -178,7 +179,7 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
              patch("vendoo_studio.services.direct_categories._etsy_leaf", new=AsyncMock(return_value={"id": "482", "path": "Clothing > Men > T-shirts"})), \
              patch("vendoo_studio.services.marketplace_schemas.etsy_taxonomy", etsy_taxonomy), \
              patch("vendoo_studio.services.chrome_catalog.live_preview", new=AsyncMock(return_value={})):
-            await attach_direct_categories(self.db, listing, "cotton tee")
+            await attach_direct_categories(listing, "cotton tee")
         self.assertEqual(listing["marketplace_category_ids"], {"ebay": "111", "etsy": "222"})
         self.assertEqual(listing["direct_category_ids"]["ebay"], "15687")
         self.assertEqual(listing["direct_category_ids"]["etsy"], "482")
@@ -193,7 +194,7 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
              patch("vendoo_studio.services.direct_categories._etsy_leaf", new=AsyncMock(return_value=None)), \
              patch("vendoo_studio.services.chrome_catalog.live_preview", new=AsyncMock(
                  side_effect=AssertionError("Chrome catalog used"))) as chrome_read:
-            await attach_direct_categories(self.db, listing, "")
+            await attach_direct_categories(listing, "")
         self.assertEqual(listing["marketplace_category_ids"], {"ebay": "111", "poshmark": "stale", "depop": "old_leaf"})
         chrome_read.assert_not_awaited()
         self.assertNotIn("poshmark", listing.get("direct_category_ids", {}))

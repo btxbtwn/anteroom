@@ -13,7 +13,7 @@ import statistics
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import json_value, json_text
@@ -103,25 +103,34 @@ def seller_history_context(
     start = clock - timedelta(days=SALES_WINDOW_DAYS)
 
     # No photos, messages, internal notes, item URLs or whole listing JSON enter
-    # this context. Filter brand in the database before examining category/condition.
+    # this context. Pick candidates by brand from the small stored inventory
+    # fields: listing_json can hold megabytes of saved marketplace forms, and
+    # reading a field from it decompresses all of them for every listing.
+    brand_key = brand.lower()
+    small = ListingRevision.inventory_fields
+    listed = (
+        db.query(Listing.conversation_id)
+        .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
+        .filter(func.lower(func.trim(json_text(small, "brand"))) == brand_key)
+    )
+    sold = db.query(SaleSnapshot.conversation_id).filter(
+        func.lower(func.trim(json_text(SaleSnapshot.listing, "brand"))) == brand_key,
+    )
+    candidates = listed.union(sold).subquery()
     facets = ("title", "category_path", "department", "condition", "size", "price", "quantity")
+    # Only matching candidates read the fields inventory_fields does not store.
     rows = (
         db.query(
             Conversation.id, Conversation.status, Conversation.notes,
-            *(json_value(ListingRevision.listing_json, key) for key in facets),
+            json_value(small, "title"), json_value(small, "category_path"),
+            json_value(ListingRevision.listing_json, "department"),
+            json_value(ListingRevision.listing_json, "condition"),
+            json_value(ListingRevision.listing_json, "size"),
+            json_value(small, "price"), json_value(small, "quantity"),
         )
         .join(Listing, Listing.conversation_id == Conversation.id)
         .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
-        .filter(
-            Conversation.id != conv_id,
-            or_(
-                func.lower(func.trim(json_text(ListingRevision.listing_json, "brand"))) == brand.lower(),
-                db.query(SaleSnapshot.id).filter(
-                    SaleSnapshot.conversation_id == Conversation.id,
-                    func.lower(func.trim(json_text(SaleSnapshot.listing, "brand"))) == brand.lower(),
-                ).exists(),
-            ),
-        )
+        .filter(Conversation.id != conv_id, Conversation.id.in_(select(candidates.c[0])))
         .order_by(Conversation.updated_at.desc(), Conversation.id)
         .all()
     )

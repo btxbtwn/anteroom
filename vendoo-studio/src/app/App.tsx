@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { discardBlankDraft, discardBlankDraftOnExit } from "./blankDraft";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { refreshInventory } from "../api/inventoryRefresh";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, inventoryPollMs, pollMs } from "../api/polling";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
 import { isChatToggleShortcut } from "../components/ListingChatPopup";
@@ -21,6 +22,7 @@ import {
 } from "../components/settingsNav";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { PhotoDropOverlay } from "../components/PhotoDropOverlay";
+import { canAddPhotos, DRAFT_ONLY_PHOTOS } from "../components/photoAdding";
 import { BulkUploadDialog } from "../components/BulkUploadDialog";
 import { useBulkRegenerate } from "../components/useBulkRegenerate";
 import { bulkRegenerateToast } from "../bulkRegenerate";
@@ -216,9 +218,10 @@ export function App() {
     if (!previous) return;
     for (const job of queue.data.jobs) {
       if (!ACTIVE_JOB_STATUSES.has(previous.get(job.id) || "") || ACTIVE_JOB_STATUSES.has(job.status)) continue;
-      for (const key of ["jobs", "conversations", "conversation", "listing", "listing-fields", "fill-log"]) {
+      for (const key of ["jobs", "conversation", "listing", "listing-fields", "fill-log"]) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
+      refreshInventory(queryClient);
       if (job.status === "completed" || job.status === "failed") {
         toastManager.add({
           type: job.status === "failed" ? "error" : "success",
@@ -1011,6 +1014,10 @@ export function App() {
           const groups = groupImageFilesByFolder(files);
           if (groups.length > 1) {
             setPendingBulkGroups(groups);
+            return;
+          }
+          if (selectedConvId && !canAddPhotos(runtime.hosted, selectedListing?.status)) {
+            toastManager.add({ type: "info", title: "Photos not added", description: DRAFT_ONLY_PHOTOS });
             return;
           }
           dropPhotos.mutate({ files });

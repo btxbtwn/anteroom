@@ -36,12 +36,11 @@ Every permission in `manifest.json` has a caller. Remove a permission when its l
 | Permission | Why |
 |---|---|
 | `alarms` | Wakes the worker to reconnect to Anteroom. |
-| `storage` | Keeps the Anteroom pairing token and the journal of marketplace actions, so a lost reply is read back instead of repeated. |
+| `storage` | Keeps the Anteroom pairing token and the journal of marketplace actions, so a lost reply is read back instead of repeated. The worker limits it to itself and the extension's own page (`TRUSTED_CONTEXTS`), so content scripts cannot read it. |
 | `cookies` | Checks whether the seller is signed in to a marketplace. Cookie values stay in Chrome. |
 | `declarativeNetRequestWithHostAccess` | Sets the headers marketplace requests need. |
 | `scripting` | Runs marketplace requests inside the seller's signed-in marketplace tab. |
 | `tabs` | Finds and opens marketplace tabs. |
-| `debugger` | Records a marketplace's own requests when the seller records a listing flow. |
 | `system.display` | Places a new Chrome window inside a real display work area. |
 
 Host permissions cover eBay, Poshmark, Mercari, Depop, Etsy, Facebook, the Amazon S3 buckets their presigned photo uploads go to (`*.s3.amazonaws.com`, `*.s3-accelerate.amazonaws.com`), and Anteroom on `127.0.0.1:4318`. Direct marketplace requests go through `background/marketplace-fetch.js`, which bounds each request by the operation's deadline, retries only reads and photo uploads, and logs one `[POSHMARK]`/`[MERCARI]`/`[DEPOP]` line per step (status, error code, latency; never cookies, tokens or listing text). eBay and Etsy listings go through their APIs from Anteroom, not through the extension. The Chrome sign-in check for Depop, Poshmark, Mercari reports only whether the session is present. Cookie values and tokens stay in Chrome.
@@ -61,3 +60,4 @@ For live pages:
 2. Save a draft from Anteroom and check its result. Never list while testing.
 3. Open the service worker's DevTools from `chrome://extensions/` and filter by the marketplace prefix (`[POSHMARK]`, `[MERCARI]`, ...).
 4. When a marketplace may have changed its sell page, run its form sweep in `tools/form-sweep/` (see the root `AGENTS.md`, **Verification**).
+5. To learn the shape of a marketplace's own requests, use the Network panel of Chrome's DevTools on its page while you act by hand, and keep only operation names, paths and field names. The Bridge does not ask for the `debugger` permission, so it cannot record them itself.

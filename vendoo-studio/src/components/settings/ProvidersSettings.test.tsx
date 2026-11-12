@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceRuntimeProvider } from "../../app/runtime";
 import { SettingsPage } from "../SettingsPage";
 import { ProvidersSettings } from "./ProvidersSettings";
@@ -26,11 +26,28 @@ it("uses the private account vault for hosted keys and omits local sign-in contr
 
 it("preserves a desktop provider preference without offering a local sign-in on the server", () => {
   const html = render(true, "chatgpt");
-  expect(html).toContain("Open Anteroom on your Mac");
-  expect(html).toContain("Keep the Mac awake");
+  expect(html).toContain("Open Anteroom on your computer");
+  expect(html).toContain("Keep the computer awake");
   expect(html).not.toContain("Retry sign-in");
 });
 
 it("keeps desktop provider setup and Keychain guidance", () => {
   expect(render(false)).toContain("macOS Keychain");
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+it("lets the Mac app's account window sign this Mac into ChatGPT", () => {
+  const ok = () => Promise.resolve({ ok: true });
+  vi.stubGlobal("window", {
+    pywebview: { api: { chatgpt_sign_in: ok, chatgpt_sign_in_status: ok, chatgpt_sign_in_cancel: ok } },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  });
+  const html = render(true, "chatgpt");
+  expect(html).toContain("Sign in with ChatGPT");
+  expect(html).toContain("the sign-in stays on this computer");
+  expect(html).not.toContain("Open Anteroom on your computer");
 });

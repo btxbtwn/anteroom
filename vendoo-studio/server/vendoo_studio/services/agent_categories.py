@@ -421,7 +421,7 @@ def _catalogs(db) -> dict[str, list[dict]]:
 
 
 async def apply_native_categories(
-    db, listing: dict, previous: dict | None, requested: dict | None, *, catalogs: dict | None = None,
+    listing: dict, previous: dict | None, requested: dict | None, *, catalogs: dict | None = None,
 ) -> list[str]:
     """Write each marketplace form's category onto `listing`. Nothing is saved here."""
     previous = previous or {}
@@ -432,7 +432,10 @@ async def apply_native_categories(
         general = ""
     if not markets and not general:
         return []
-    catalogs = catalogs if catalogs is not None else _catalogs(db)
+    if catalogs is None:
+        from vendoo_studio.database import in_worker_session
+
+        catalogs = await in_worker_session(_catalogs)
     written = apply_agent_categories(listing, catalogs, requested=requested, markets=markets, explicit=explicit)
     if await _fill_ebay_suggestion(listing, requested, markets=markets, explicit=explicit):
         if _FIELD["ebay"] not in written:
@@ -469,7 +472,7 @@ def map_general_category(db, previous: dict | None, listing: dict) -> None:
     requested = {"category_path": path, "paths": {}, "ids": {}}
     try:
         # Read the database here: the coroutine may run on another thread.
-        _run(apply_native_categories(None, listing, previous, requested, catalogs=_catalogs(db)))
+        _run(apply_native_categories(listing, previous, requested, catalogs=_catalogs(db)))
     except Exception:
         log.exception("Could not map the general category onto the marketplace forms")
 
@@ -497,7 +500,6 @@ def match_general_category(db, previous: dict | None, listing: dict) -> None:
 
 
 async def apply_saved_agent_category(
-    db,
     conv_id: str,
     *,
     operations: list[dict] | None = None,
@@ -505,41 +507,58 @@ async def apply_saved_agent_category(
 ) -> None:
     """After a chat save that chooses a category, store each marketplace's own category."""
     try:
-        await _apply_saved_agent_category(db, conv_id, operations=operations, source_text=source_text)
+        await _apply_saved_agent_category(conv_id, operations=operations, source_text=source_text)
     except Exception:
         log.exception("Could not save the assistant's category")
 
 
-async def _apply_saved_agent_category(db, conv_id: str, *, operations, source_text: str) -> None:
-    from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-    from vendoo_studio.services.chat_listing import save_listing_revision
+def _saved_category_inputs(db, conv_id: str) -> tuple[dict, dict] | None:
+    from vendoo_studio.repositories.queries import ListingRepo
 
     revisions = ListingRepo(db).get_revisions(conv_id)
     if not revisions or not isinstance(revisions[0].listing_json, dict):
-        return
-    current = revisions[0].listing_json
+        return None
     parent = {}
     if revisions[0].parent_revision_id:
         previous = ListingRepo(db).get_revision(revisions[0].parent_revision_id)
         if previous is not None and isinstance(previous.listing_json, dict):
             parent = previous.listing_json
-    requested = requested_choices(operations, source_text)
-    listing = copy.deepcopy(current)
-    written = await apply_native_categories(db, listing, parent, requested)
-    if not written:
-        if _rejected_explicit(listing, requested):
-            ConversationRepo(db).add_message(
-                conv_id, "system",
-                "Choose the last category in that branch so the form can show its fields.",
-                provider="system", model="",
-            )
-        return
+    return revisions[0].listing_json, parent
+
+
+def _category_note(db, conv_id: str, message: str) -> None:
+    from vendoo_studio.repositories.queries import ConversationRepo
+
+    ConversationRepo(db).add_message(conv_id, "system", message, provider="system", model="")
+
+
+def _save_category_choice(db, conv_id: str, listing: dict, written: list[str]) -> None:
+    from vendoo_studio.services.chat_listing import save_listing_revision
+
     save_listing_revision(db, conv_id, listing)
     changed = {_changed_market(field) for field in written}
     saved = [market for market in changed if _stored_category(listing, market)]
     missing = [market for market in changed if not _stored_category(listing, market)]
     message = _saved_message(saved, missing) or "Choose the last category in that branch so the form can show its fields."
-    ConversationRepo(db).add_message(conv_id, "system", message, provider="system", model="")
+    _category_note(db, conv_id, message)
+
+
+async def _apply_saved_agent_category(conv_id: str, *, operations, source_text: str) -> None:
+    from vendoo_studio.database import in_worker_session
+
+    inputs = await in_worker_session(_saved_category_inputs, conv_id)
+    if inputs is None:
+        return
+    current, parent = inputs
+    requested = requested_choices(operations, source_text)
+    listing = copy.deepcopy(current)
+    written = await apply_native_categories(listing, parent, requested)
+    if not written:
+        if _rejected_explicit(listing, requested):
+            await in_worker_session(
+                _category_note, conv_id, "Choose the last category in that branch so the form can show its fields.")
+        return
+    await in_worker_session(_save_category_choice, conv_id, listing, written)
 
 
 def _rejected_explicit(listing: dict, requested: dict) -> bool:

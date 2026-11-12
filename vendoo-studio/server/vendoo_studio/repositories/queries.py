@@ -311,7 +311,12 @@ class ConversationRepo:
         return self.db.query(Message).filter(Message.conversation_id == conv_id).order_by(Message.created_at).all()
 
     def insert_photo(self, conv_id: str, original_filename: str, stored_filename: str, mime_type: str, size_bytes: int, checksum: str | None = None, width: int | None = None, height: int | None = None, marketplace: str | None = None) -> Photo:
-        max_order = self.db.query(Photo).filter(Photo.conversation_id == conv_id).count()
+        # One past the highest position, not the count: after a delete the count
+        # can land on or ahead of a photo the seller already has.
+        own = Photo.marketplace.is_(None) if marketplace is None else Photo.marketplace == marketplace
+        highest = (self.db.query(func.max(Photo.display_order))
+                   .filter(Photo.conversation_id == conv_id, own).scalar())
+        max_order = 0 if highest is None else highest + 1
         photo = Photo(
             conversation_id=conv_id,
             original_filename=original_filename,

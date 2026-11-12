@@ -5,6 +5,7 @@ import {
   EBAY_FEATURE_SCOPES,
   ebayConfigured,
   ebayExchangeCode,
+  isEbayKeyId,
   ebayPublicKey,
   ebayRefresh,
   ebayUser,
@@ -37,6 +38,8 @@ import {
 export { Directory, Inbox };
 
 const MAX_BODY_BYTES = 64 * 1024;
+// eBay image search: an ~11 MB base64 image plus its JSON wrapper.
+const MAX_RESEARCH_BODY_BYTES = 11_100_000;
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -57,11 +60,42 @@ function ebayEndpoint(env, url) {
   return env.EBAY_ENDPOINT_URL || `${url.origin}/ebay`;
 }
 
-async function readBody(request) {
+// Reads at most `limit` bytes, counting as it goes, so a chunked body with no
+// Content-Length is cut off at the limit instead of buffered whole.
+async function readBody(request, limit = MAX_BODY_BYTES) {
   const declared = Number(request.headers.get("content-length") ?? 0);
-  if (declared > MAX_BODY_BYTES) return null;
-  const text = await request.text();
-  return new TextEncoder().encode(text).length > MAX_BODY_BYTES ? null : text;
+  if (declared > limit) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+// eBay stamps each delivery attempt with publishDate. A signed notification
+// older than this is a replay, not a retry.
+const EBAY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function ebayNotificationAge(payload) {
+  const stamp = payload?.notification?.publishDate ?? payload?.notification?.eventDate;
+  const time = typeof stamp === "string" ? Date.parse(stamp) : Number.NaN;
+  return Number.isFinite(time) ? Date.now() - time : null;
 }
 
 // Field names only, for logging an event Anteroom could not route.
@@ -101,14 +135,15 @@ async function handleEbayChallenge(env, url) {
 async function handleEbayNotification(request, env) {
   if (!ebayConfigured(env)) return json({ error: "eBay is not configured" }, 503);
   const header = parseEbaySignatureHeader(request.headers.get("x-ebay-signature"));
-  if (!header) return json({ error: "bad signature header" }, 412);
+  if (!header || !isEbayKeyId(header.kid)) return json({ error: "bad signature header" }, 412);
   const rawBody = await readBody(request);
   if (rawBody === null) return json({ error: "body too large" }, 413);
   let publicKeyPem;
   try {
-    publicKeyPem = await ebayPublicKey(env, header.kid);
+    publicKeyPem = await ebayPublicKey(env, header.kid, request.headers.get("cf-connecting-ip") ?? "unknown");
   } catch (error) {
     console.error("[EBAY]", error.message);
+    if (error.status === 429) return json({ error: "too many requests" }, 429);
     return json({ error: "could not fetch eBay public key" }, 500);
   }
   if (!(await verifyEbaySignature({ rawBody, signature: header.signature, publicKeyPem }))) {
@@ -117,16 +152,22 @@ async function handleEbayNotification(request, env) {
   const payload = JSON.parse(rawBody);
   const event = extractEbayEvent(payload);
   if (!event) return json({ error: "unrecognised notification" }, 400);
+  const age = ebayNotificationAge(payload);
+  if (age === null) return json({ error: "notification has no date" }, 400);
+  if (age > EBAY_MAX_AGE_MS) return json({ error: "notification is too old" }, 412);
   const userId = event.ids.userId?.[0];
   const dir = directory(env);
   const deviceId = userId ? await dir.deviceForAccount("ebay", userId) : null;
+  // A notification this device already has (even acknowledged) is a retry or a replay: do nothing twice.
+  const box = deviceId ? inbox(env, deviceId) : null;
+  if (box && (await box.seen(event.dedupeKey))) return new Response(null, { status: 204 });
   if (event.eventType === "MARKETPLACE_ACCOUNT_DELETION" && userId) await dir.unlink("ebay", userId);
-  if (!deviceId) {
+  if (!box) {
     // Not one of our sellers (or eBay's portal test). Acknowledge so eBay stops retrying.
     console.log("[EBAY]", event.eventType, "for an unlinked account", userId ?? `(no user ID; fields: ${JSON.stringify(shape(payload?.notification?.data))})`);
     return new Response(null, { status: 204 });
   }
-  await inbox(env, deviceId).add(event);
+  await box.add(event);
   return new Response(null, { status: 204 });
 }
 
@@ -362,9 +403,8 @@ async function handleStudio(request, env, url, deviceId) {
     if (!ebayConfigured(env)) return json({ error: "eBay is not configured" }, 503);
     const accounts = await directory(env).accountsForDevice(deviceId);
     if (!accounts.some((account) => account.marketplace === "ebay")) return json({ error: "connect eBay first" }, 403);
-    if (Number(request.headers.get("content-length") ?? 0) > 11100000) return json({ error: "image too large" }, 413);
-    const body = await request.text();
-    if (body.length > 11100000) return json({ error: "image too large" }, 413);
+    const body = await readBody(request, MAX_RESEARCH_BODY_BYTES);
+    if (body === null) return json({ error: "image too large" }, 413);
     let input;
     try { input = JSON.parse(body); } catch { return json({ error: "invalid research request" }, 400); }
     return ebayResearch(env, input);

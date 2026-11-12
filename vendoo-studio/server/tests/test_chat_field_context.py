@@ -3,7 +3,6 @@ import json
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from vendoo_studio.services import listing_persistence
@@ -12,13 +11,14 @@ from vendoo_studio.models.catalog import CategorySchema
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.chat_field_context import chat_field_context
 from vendoo_studio.services.chat_prompts import build_chat_messages
+from worker_sessions import memory_engine, worker_sessions
 
 
 @pytest.fixture
 def context_db():
-    engine = create_engine("sqlite:///:memory:")
+    engine = memory_engine()
     Base.metadata.create_all(engine)
-    with sessionmaker(bind=engine)() as db:
+    with worker_sessions(engine), sessionmaker(bind=engine)() as db:
         conv = ConversationRepo(db).create(notes=json.dumps({"vendooItemId": "draft-1"}))
         revision = listing_persistence.save_revision(db, conv.id, {
             "title": "Shirt", "category_path": "Clothing > Tops",
@@ -79,7 +79,7 @@ def test_old_draft_observations_are_not_reused(context_db):
 def test_every_chat_turn_gets_field_context_even_without_skill_rules(context_db):
     db, conv_id, _ = context_db
     with patch("vendoo_studio.services.chat_prompts.load_skill_rules", return_value=""):
-        messages = asyncio.run(build_chat_messages(conv_id, db, "Can you finish the fields?"))
+        messages = asyncio.run(build_chat_messages(conv_id, "Can you finish the fields?"))
     assert "Listing field gaps" in messages[0]["content"]
     assert "Material" in messages[0]["content"]
     assert "Never publish" in messages[0]["content"]

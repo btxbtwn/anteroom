@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMacApp, markMacApp } from "./macApp";
+import { isMacApp, macChatGPTBridge, markMacApp } from "./macApp";
 
 function fakeWindow(mac: boolean) {
   const classes = new Set<string>();
@@ -24,5 +24,15 @@ describe("Mac app window", () => {
     expect(page.classes.has("desktop-app")).toBe(false);
     page.listeners.get("pywebviewready")?.();
     expect(page.classes.has("desktop-app")).toBe(true);
+  });
+});
+
+describe("Mac ChatGPT sign-in bridge", () => {
+  it("is offered only by a Mac app that has every sign-in call", () => {
+    const call = () => Promise.resolve({ ok: true });
+    const full = { chatgpt_sign_in: call, chatgpt_sign_in_status: call, chatgpt_sign_in_cancel: call };
+    expect(macChatGPTBridge({ pywebview: { api: full } } as unknown as Window)).toBe(full);
+    expect(macChatGPTBridge({ pywebview: { api: { connect_chatgpt_worker: call } } } as unknown as Window)).toBeNull();
+    expect(macChatGPTBridge({} as unknown as Window)).toBeNull();
   });
 });

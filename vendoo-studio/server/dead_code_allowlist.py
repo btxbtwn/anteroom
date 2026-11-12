@@ -14,6 +14,12 @@ BaseHTTPRequestHandler.do_GET
 BaseHTTPRequestHandler.log_message
 # logging calls this when a handler fails.
 Handler.handleError
+
+# AppKit dispatches Anteroom Connector's NSMenu action selectors and delegate by name.
+connectorOpen_
+connectorPause_
+connectorQuit_
+menuWillOpen_
 # keyring backends: keyring calls this.
 delete_password
 

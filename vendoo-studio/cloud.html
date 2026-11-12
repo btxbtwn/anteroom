@@ -6,18 +6,8 @@
     <meta name="color-scheme" content="dark" />
     <title>Anteroom</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <script>
-      // Match the workspace theme before the first paint, even on a slow connection.
-      (function () {
-        try {
-          var pref = localStorage.getItem("vendoo-studio:theme");
-          var light = pref === "light" || (pref === "system" && matchMedia("(prefers-color-scheme: light)").matches);
-          document.documentElement.classList.toggle("dark", !light);
-          document.documentElement.style.colorScheme = light ? "light" : "dark";
-          document.querySelector('meta[name="color-scheme"]').setAttribute("content", light ? "light" : "dark");
-        } catch (e) {}
-      })();
-    </script>
+    <!-- Sets the theme before the first paint. A file, not inline: the hosted policy blocks inline scripts. -->
+    <script src="/assets/theme-boot.js"></script>
     <link rel="stylesheet" href="/src/styles/app.css" />
     <link rel="stylesheet" href="/src/styles/startup.css" />
   </head>

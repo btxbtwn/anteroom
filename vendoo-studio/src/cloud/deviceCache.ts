@@ -84,17 +84,41 @@ export function keepReadsForDevice(client: QueryClient): void {
   for (const first of KEPT_ON_DEVICE) client.setQueryDefaults([first], { gcTime: DEVICE_MAX_AGE_MS });
 }
 
+/**
+ * React Query offers the whole client for saving on every cache change, and
+ * writing it copies every kept read (the full inventory) on the main thread.
+ * The latest state is written at most this often, and at once when the page
+ * is hidden or closed.
+ */
+export const DEVICE_SAVE_EVERY_MS = 1000;
+
 export function devicePersister(seller: string): Persister {
+  let latest: PersistedClient | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const write = async () => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    const client = latest;
+    latest = null;
+    if (!client) return;
+    const target = await sellerStore(seller);
+    if (target && !forgotten) await set(QUERIES, client, target).catch(() => {});
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", () => { void write(); });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") void write(); });
+  }
   return {
-    persistClient: async (client: PersistedClient) => {
-      const target = await sellerStore(seller);
-      if (target && !forgotten) await set(QUERIES, client, target).catch(() => {});
+    persistClient: (client: PersistedClient) => {
+      latest = client;
+      timer ??= setTimeout(() => { void write(); }, DEVICE_SAVE_EVERY_MS);
     },
     restoreClient: () => withDeadline((async () => {
       const target = await sellerStore(seller);
       return target ? await get<PersistedClient>(QUERIES, target) : undefined;
     })(), undefined),
     removeClient: async () => {
+      latest = null;
       const target = await sellerStore(seller);
       if (target) await del(QUERIES, target).catch(() => {});
     },

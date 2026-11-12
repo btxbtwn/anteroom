@@ -52,6 +52,67 @@ def async_session_handlers() -> set[str]:
             if isinstance(node, ast.AsyncFunctionDef) and _depends_on(node, sessions)}
 
 
+SESSION_FACTORIES = {"SessionLocal", "Session", "session_factory"}
+
+
+def _own_nodes(function: ast.AsyncFunctionDef):
+    """The function's own statements, leaving out nested functions and lambdas (worker-thread steps)."""
+    nested = ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef
+    stack: list[ast.AST] = [node for node in function.body if not isinstance(node, nested)]
+    while stack:
+        node = stack.pop()
+        yield node
+        stack.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, nested))
+
+
+def _is_session(annotation: ast.expr | None) -> bool:
+    return annotation is not None and ast.unparse(annotation).replace("'", "").replace('"', "") in {
+        "Session", "Session | None", "Optional[Session]", "orm.Session"}
+
+
+def _is_factory(annotation: ast.expr | None) -> bool:
+    text = "" if annotation is None else ast.unparse(annotation)
+    return text.startswith("Callable[") and text.endswith("Session]")
+
+
+def _called(node: ast.expr) -> str:
+    return ast.unparse(node.func).rsplit(".", 1)[-1] if isinstance(node, ast.Call) else ""
+
+
+def loop_session_functions(folders=("services", "routes")) -> set[str]:
+    """Every ``async def`` that opens a blocking session or uses one on the event loop.
+
+    A session's queries and commits block the loop: on the Mac's SQLite a
+    commit can wait 30 s for the write lock, freezing every request, stream
+    and Chrome socket meanwhile. Async code runs each database step through
+    ``database.in_worker_session`` instead, as a nested function or a plain
+    ``def`` helper, which this leaves out.
+    """
+    found = set()
+    for folder in folders:
+        for path in sorted((PACKAGE / folder).rglob("*.py")):
+            for function in ast.walk(ast.parse(path.read_text())):
+                if not isinstance(function, ast.AsyncFunctionDef):
+                    continue
+                arguments = [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs]
+                sessions = {arg.arg for arg in arguments if arg.arg == "db" or _is_session(arg.annotation)}
+                factories = SESSION_FACTORIES | {arg.arg for arg in arguments if _is_factory(arg.annotation)}
+                nodes = list(_own_nodes(function))
+                opens = False
+                for node in nodes:
+                    if _called(node) in factories:
+                        opens = True
+                    if isinstance(node, ast.withitem) and node.optional_vars is not None and _called(node.context_expr) in factories:
+                        sessions.add(ast.unparse(node.optional_vars))
+                    if isinstance(node, ast.Assign) and _called(node.value) in factories:
+                        sessions.update(ast.unparse(target) for target in node.targets)
+                uses = any(isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in sessions
+                           for node in nodes)
+                if opens or uses:
+                    found.add(_name(function, path))
+    return found
+
+
 class EndpointCheckouts:
     """Records each async route handler that checks out a pooled connection on the event loop."""
 

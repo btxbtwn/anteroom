@@ -111,6 +111,14 @@ def test_without_a_known_base_everything_runs(repository: tuple[Path, str]) -> N
         # Backend tests read the extension and skills.
         ("vendoo-extension/background.js\n", flags("backend", "browser", "health", "extension")),
         ("skills/list-this/SKILL.md\n", flags("backend", "browser", "health")),
+        # The editor imports the field list; the extension's value matrix reads the option lists.
+        ("skills/list-this/references/listing-editor-fields.json\n",
+         flags("frontend", "backend", "browser", "health", "extension")),
+        # The web app shows the extension's version from its manifest.
+        ("vendoo-extension/manifest.json\n", flags("frontend", "backend", "browser", "health", "extension")),
+        # test_xcodegen_installer.py reads the installer and the iPhone workflow.
+        ("anteroom-ios/tools/install-xcodegen.sh\n", flags("backend", "health")),
+        ("anteroom-ios/ci_scripts/ci_post_clone.sh\n", flags("backend", "health")),
         (".github/workflows/ci.yml\n", flags(*GROUPS)),
         (".github/workflows/dependency-audit.yml\n", flags(*GROUPS)),
         ("check.sh\n", flags(*GROUPS)),

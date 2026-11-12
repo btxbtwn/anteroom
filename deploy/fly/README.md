@@ -12,26 +12,43 @@ and desktop timers do not run in this container.
 ## Automatic deploys
 
 `.github/workflows/deploy-hosted.yml` deploys every push to `main` once CI
-passes on it. A merge that still has notes in `changelog.d/` is skipped; the
-`Release Anteroom` commit the Version workflow pushes next deploys instead.
-In order, it:
+passes on it. It ships the newest commit on `main`'s first-parent line, from
+the commit whose CI started it up to the tip, that passed CI and has no notes
+left in `changelog.d/` (the `Release Anteroom` commit the Version workflow
+pushes next ships that code with its version). A later run never picks an
+older commit, so CI runs that finish out of order or a re-run can never put
+older code over newer code, and a busy stream of merges still deploys the
+newest tested one (`.github/scripts/deploy-gate.py`). A manual run checks
+CI on the tip the same way. When no such commit exists it skips, successfully
+and with a notice. Only runs that will deploy queue for the one-at-a-time
+deploy slot, so a failed CI on `main` never displaces a waiting deploy.
 
-1. when the commit is a `Release Anteroom` commit, waits for CI to pass on
-   the merge before it, whose code it ships
-   (`.github/scripts/wait-for-tested-code.py`);
+Then, in order, it:
+
+1. waits for CI to pass on every merge on `main` since the commit production
+   runs, since CI on `main` checks only what each merge changed
+   (`.github/scripts/wait-for-tested-code.py`). Production's commit is the
+   last successful run's `Deployed commit` notice; without one it checks the
+   nearest merge only. A failed merge stops every deploy until its CI passes
+   on a re-run or the failure is fixed;
 2. builds the image on Fly's remote builder and pushes it with the label
    `v<version>-<commit>` (`flyctl deploy --build-only --push`);
 3. applies pending Alembic revisions with the migration login
    (`alembic upgrade head`, `sslmode=verify-full` against the bundled CA),
    retrying the first connection for a couple of minutes when the session
    pooler is full;
-4. re-imports the shared category trees when
-   `vendoo-studio/data/category-trees-seed.json.gz` changed since the last
-   successful deploy;
+4. re-imports the shared category trees unless the database already holds
+   exactly the rows of `vendoo-studio/data/category-trees-seed.json.gz`
+   (`category-trees.sh import --if-changed` compares them row for row);
 5. deploys the image built in step 2 (`flyctl deploy --image`);
-6. waits for `https://myanteroom.com/api/health` to report the new version.
+6. waits for `https://myanteroom.com/api/health` to report the new version
+   and `/api/ready` to confirm the schema;
+7. checks that every Machine in every process group (`flyctl machines list`)
+   is started on the new image label, since the public URL reaches only the
+   web Machines (`.github/scripts/check-fly-machines.py`);
+8. records the commit it shipped as a `Deployed commit` notice.
 
-Failed CI on that merge or a failed build stops the run before the database
+Failed CI on any of those merges or a failed build stops the run before the database
 changes, and a failed migration stops it before Fly is touched. Run it by hand from the Actions tab
 (**Deploy hosted → Run workflow**) to redeploy `main`.
 
@@ -48,6 +65,37 @@ The migration URI stays in GitHub; Fly never receives it. Revisions that need
 a drained database (see `docs/hosted-production.md`, section 4) still apply
 automatically, so check for active work before merging one.
 
+## Rollback and expand/contract
+
+Migrations run before the new image starts, and the image before it keeps
+serving until the new one is healthy, so every revision must work with the
+code one release behind it. Change the schema in two releases:
+
+1. **Expand.** Add the new table, column or index (nullable or with a
+   default) and ship the code that writes and reads it. Keep the old one in
+   place.
+2. **Contract.** Drop or rename the old column, table or constraint only in a
+   later release, after the release that stopped using it is live. A
+   destructive change always waits one release behind the code that stops
+   using it.
+
+To roll back the code, redeploy the previous image by its label. Labels are
+`v<version>-<first 8 characters of the commit>`, as the **Build the image**
+step prints (`flyctl releases --image --config deploy/fly/fly.toml` lists
+recent ones):
+
+```sh
+fly deploy . --config deploy/fly/fly.toml --ha=false \
+  --image registry.fly.io/peaceful-meadowstone-6944:v<previous version>-<commit>
+```
+
+Alembic revisions are not rolled back. The older image serves the expanded
+schema because of the rule above, but `/api/ready` answers
+`schema_mismatch` until a fixed release (a new commit on `main`) deploys, so
+fix forward rather than downgrading the database. Pause automatic deploys
+(disable the **Deploy hosted** workflow) while production runs a rolled-back
+image, or the next push to `main` replaces it.
+
 ## Manual deploy
 
 From the repository root, after signing in to Fly:
@@ -63,10 +111,12 @@ The Dockerfile path is relative to the configuration directory; the build
 context is the repository root. The allowlist in `.dockerignore` excludes
 local data, photos, databases, credentials, tests and the extension.
 
-The configuration uses one performance CPU, 2 GB memory, HTTPS, a health check, and
-a paid plan with one Machine kept running (`auto_stop_machines = 'off'`,
-`min_machines_running = 1`), so the draft worker and the scheduled automations,
-offer checks and Sourcing refreshes keep running. Supabase's project URL is
+The configuration runs two process groups from one image. `app` (role `web`,
+one performance CPU, 2 GB) serves HTTPS with a health check and is kept running
+(`auto_stop_machines = 'off'`, `min_machines_running = 1`). `worker` (role
+`worker`, one shared CPU, 2 GB) has no public service and runs the draft worker,
+the scheduled automations, offer checks and Sourcing refreshes. Machines without
+a service are never auto-stopped. Supabase's project URL is
 public configuration. No database password, service-role key, provider key or
 seller data is needed for this first deployment. Later hosted data routes
 require the remaining cloud work in `docs/cloud-architecture.md`.

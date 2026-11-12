@@ -24,6 +24,25 @@ router.add_api_route('/provider/mimo/test', settings.test_mimo, methods=['POST']
 keys_router = ai_keys.key_router
 
 
+@router.get('/{provider}/models')
+def subscription_models(provider: str):
+    from vendoo_studio.routes.mac_inference import _pinned, relay
+    if provider not in ('chatgpt', 'claude'):
+        raise HTTPException(404, 'Not found')
+    if pinned := _pinned('mac', claim_route=False):
+        return pinned
+    connection = relay()
+    models = connection.models.get(provider, {}) if connection.ready(provider) else {}
+    vision, listing = models.get('vision_model', ''), models.get('listing_model', '')
+    slugs = [listing] if listing else []
+    return {
+        'models': [{'value': slug, 'label': slug, 'efforts': []} for slug in slugs] if provider == 'claude' else slugs,
+        'vision_model': vision, 'listing_model': listing,
+        'reasoning_efforts': [], 'efforts': [],
+        'error': None if models else 'Connect this subscription in Anteroom on your computer and keep it awake and online.',
+    }
+
+
 # These handlers use only the execution's owned settings store. They do not
 # start browser sessions, write marketplace listings, or use machine settings.
 for path, handler, methods in (

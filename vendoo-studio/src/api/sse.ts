@@ -1,3 +1,35 @@
+/**
+ * The longest a stream may stay silent. The server sends a keepalive every 3 s
+ * while it works (10 s on the sold-comps search), so this much silence means the
+ * connection is gone even though the browser has not said so.
+ */
+export const STREAM_IDLE_MS = 20_000;
+
+/** A stream went silent past its deadline; callers treat it as a dropped connection. */
+export class StreamIdleError extends Error {
+  constructor() {
+    super("Lost the connection to Anteroom: nothing arrived for 20 seconds.");
+    this.name = "StreamIdleError";
+  }
+}
+
+/** The next chunk, or StreamIdleError (with the stream cancelled) when none arrives in time. */
+export async function readWithin<T>(reader: ReadableStreamDefaultReader<T>, ms = STREAM_IDLE_MS): Promise<ReadableStreamReadResult<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const idle = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      // Reject first: cancelling settles the pending read as finished.
+      reject(new StreamIdleError());
+      void reader.cancel().catch(() => undefined);
+    }, ms);
+  });
+  try {
+    return await Promise.race([reader.read(), idle]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Read a `text/event-stream` response, calling `onEvent` once per complete event. */
 export async function readSse(
   res: Response,
@@ -11,7 +43,7 @@ export async function readSse(
   const decoder = new TextDecoder();
   let buffer = "";
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readWithin(reader);
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const blocks = buffer.split("\n\n");

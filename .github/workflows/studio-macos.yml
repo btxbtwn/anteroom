@@ -12,6 +12,9 @@ on:
   pull_request:
     paths:
       - "vendoo-studio/scripts/package-macos-app.sh"
+      - "vendoo-studio/scripts/package-connector.sh"
+      - "vendoo-studio/server/vendoo_studio/connector.py"
+      - "vendoo-studio/server/vendoo_studio/services/connector.py"
       - "vendoo-studio/server/vendoo_studio/sandbox.py"
       - "vendoo-studio/scripts/smoke-packaged-sandbox.py"
       - "vendoo-studio/desktop/**"
@@ -131,6 +134,9 @@ jobs:
           python -m venv .venv
           "$PYTHON" -m pip install -U pip
           ./scripts/package-macos-app.sh
+      - name: Package standalone subscription connector
+        working-directory: vendoo-studio
+        run: ./scripts/package-connector.sh
       - name: Exercise the packaged app on sandbox data
         working-directory: vendoo-studio
         run: .venv/bin/python scripts/smoke-packaged-sandbox.py release/Anteroom.app
@@ -230,6 +236,7 @@ jobs:
           path: |
             vendoo-studio/release/Anteroom-macos.zip
             vendoo-studio/release/List-This-Studio-macos.zip
+            vendoo-studio/release/Anteroom-Connector-macos.zip
             vendoo-studio/release/build_info.json
           if-no-files-found: error
           retention-days: 1

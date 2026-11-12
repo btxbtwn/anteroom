@@ -34,13 +34,63 @@ def _sync_category_override(db: Session, conv_id: str, listing: dict) -> None:
     db.commit()
 
 
-def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operations: list[dict] | None = None) -> dict:
+def _seller_asked_for_sku(user_message: str) -> bool:
+    """The seller typed a request about the SKU. Ask chat's generated fill
+    prompt does not count: it asks the model to make values up."""
+    import re
+
+    from vendoo_studio.services.fill_log import is_missing_fields_request
+
+    return bool(re.search(r"\bskus?\b", user_message or "", re.IGNORECASE)) and not is_missing_fields_request(
+        user_message)
+
+
+def _sku_key(path: object, separator: str) -> str | None:
+    """The SKU key a path names directly: "sku" or "depop_specifics", else None."""
+    parts = str(path or "").strip(separator).split(separator)
+    if parts == ["sku"]:
+        return "sku"
+    if len(parts) == 2 and parts[0].endswith("_specifics") and parts[1] == "sku":
+        return parts[0]
+    return None
+
+
+def _patched_sku_keys(operations: list[dict]) -> set[str]:
+    """The SKU keys a JSON Patch names directly, like /sku or /depop_specifics/sku."""
+    keys = {_sku_key(operation.get("path"), "/") for operation in operations if isinstance(operation, dict)}
+    return {key for key in keys if key}
+
+
+def save_listing_revision(
+    db: Session, conv_id: str, listing: dict, *, operations: list[dict] | None = None,
+    sku_keys: set[str] | frozenset[str] = frozenset(),
+) -> dict:
+    """Save chat output. ``sku_keys`` names the SKUs ("sku", "depop_specifics")
+    the seller's request set field by field; every other SKU stays the seller's."""
     from vendoo_studio.services.validation import normalize_listing_dropdowns
     from vendoo_studio.services.listing_generate import align_size_fields, clear_not_applicable_values
 
     updated = align_listing_gender(listing, operations)
     stamped = _stamp_learned_fields(db, updated)
     revisions = ListingRepo(db).get_revisions(conv_id)
+    previous = revisions[0].listing_json if revisions else {}
+    # Chat may rewrite copy, but SKUs belong to the seller.
+    for key in {"sku", *(key for key in stamped.keys() | previous.keys() if key.endswith("_specifics"))}:
+        if key in sku_keys:
+            continue
+        if key == "sku":
+            if key in previous:
+                stamped[key] = previous[key]
+            else:
+                stamped.pop(key, None)
+        else:
+            seller_block = previous.get(key) or {}
+            if isinstance(seller_block, dict) and "sku" in seller_block:
+                if not isinstance(stamped.get(key), dict):
+                    stamped[key] = {}
+                stamped[key]["sku"] = seller_block["sku"]
+            elif isinstance(stamped.get(key), dict):
+                stamped[key].pop("sku", None)
     previous_size = None
     if revisions and isinstance(revisions[0].listing_json, dict):
         previous_size = revisions[0].listing_json.get("size")
@@ -71,9 +121,10 @@ def _stamp_learned_fields(db: Session, listing: dict) -> dict:
     return listing
 
 
-def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict]) -> bool:
+def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], *, user_message: str = "") -> bool:
     from vendoo_studio.services.fill_log import (
         FillLogService,
+        field_lookup_key,
         listing_value_for_field,
         summarize_missing_fields,
         remember_chat_clears,
@@ -122,7 +173,11 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict]) 
             if value:
                 accepted[index] = {**field, "value": value}
     updated = remember_chat_clears(updated, accepted)
-    save_listing_revision(db, conv_id, updated)
+    sku_keys = {
+        "sku" if field.get("marketplace", "general") in {"", "general", "unknown"} else f"{field['marketplace']}_specifics"
+        for field in accepted if field_lookup_key(field.get("field") or "") == "sku"
+    } if _seller_asked_for_sku(user_message) else set()
+    save_listing_revision(db, conv_id, updated, sku_keys=sku_keys)
     FillLogService(db).record_generated_values(conv_id, accepted)
 
     ConversationRepo(db).add_message(
@@ -202,13 +257,23 @@ def _reject_best_offer(db: Session, conv_id: str, listing: dict) -> bool:
     return True
 
 
-def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[list[dict] | None, bool]:
+def apply_listing_payload(
+    db: Session, conv_id: str, full_text: str, *, user_message: str = "",
+) -> tuple[list[dict] | None, bool]:
     from fastapi import HTTPException
 
     from vendoo_studio.services.fill_log import extract_missing_fields
     from vendoo_studio.services.seller_overrides import apply_field_updates
 
     commands = _field_commands(full_text)
+    if commands and not _seller_asked_for_sku(user_message):
+        # SKUs belong to the seller: chat sets one only when asked to.
+        commands = [command for command in commands if not _sku_key(command["path"], ".")]
+        if not commands:
+            ConversationRepo(db).add_message(
+                conv_id, "system", "No proposed field changes were accepted.", provider="system", model="",
+            )
+            return None, True
     if commands:
         revisions = ListingRepo(db).get_revisions(conv_id)
         if not revisions or not isinstance(revisions[0].listing_json, dict):
@@ -233,7 +298,7 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
 
     missing_fields = extract_missing_fields(full_text)
     if missing_fields:
-        return None, _save_missing_fields(db, conv_id, missing_fields)
+        return None, _save_missing_fields(db, conv_id, missing_fields, user_message=user_message)
 
     parsed_ops = extract_json_patch(full_text)
     if parsed_ops:
@@ -244,7 +309,8 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
         updated = apply_json_patch(dict(revisions[0].listing_json), parsed_ops)
         if _reject_best_offer(db, conv_id, updated):
             return parsed_ops, False
-        save_listing_revision(db, conv_id, updated, operations=parsed_ops)
+        sku_keys = _patched_sku_keys(parsed_ops) if _seller_asked_for_sku(user_message) else set()
+        save_listing_revision(db, conv_id, updated, operations=parsed_ops, sku_keys=sku_keys)
         ConversationRepo(db).add_message(
             conv_id,
             "system",
@@ -270,37 +336,42 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
     return None, False
 
 
+def _system_note(db: Session, conv_id: str, text: str) -> None:
+    ConversationRepo(db).add_message(conv_id, "system", text, provider="system", model="")
+
+
+def _save_repaired_listing(db: Session, conv_id: str, repaired: dict) -> None:
+    save_listing_revision(db, conv_id, repaired)
+    _system_note(db, conv_id, "Repaired malformed listing JSON and saved it for review.")
+
+
 async def apply_listing_payload_with_repair(
-    db: Session,
     conv_id: str,
     full_text: str,
     provider,
     *,
     user_message: str = "",
 ) -> tuple[list[dict] | None, bool]:
+    from vendoo_studio.database import in_worker_session
     from vendoo_studio.services.fill_log import (
         is_missing_fields_request,
         looks_like_missing_fields_attempt,
         repair_missing_fields,
     )
 
-    operations, saved = apply_listing_payload(db, conv_id, full_text)
+    operations, saved = await in_worker_session(
+        lambda db: apply_listing_payload(db, conv_id, full_text, user_message=user_message))
     if saved:
         return operations, True
 
     ask_fields = is_missing_fields_request(user_message)
     if ask_fields or looks_like_missing_fields_attempt(full_text):
         repaired_fields = await repair_missing_fields(provider, full_text, user_message)
-        if repaired_fields and _save_missing_fields(db, conv_id, repaired_fields):
+        if repaired_fields and await in_worker_session(
+                lambda db: _save_missing_fields(db, conv_id, repaired_fields, user_message=user_message)):
             return None, True
         if ask_fields:
-            ConversationRepo(db).add_message(
-                conv_id,
-                "system",
-                "Could not save field values into the listing JSON. Retry Ask chat.",
-                provider="system",
-                model="",
-            )
+            await in_worker_session(_system_note, conv_id, "Could not save field values into the listing JSON. Retry Ask chat.")
         return None, False
 
     if extract_listing_json(full_text):
@@ -313,59 +384,18 @@ async def apply_listing_payload_with_repair(
     repaired = await repair_listing_json(provider, full_text)
     if not repaired:
         return None, False
-    save_listing_revision(db, conv_id, repaired)
-    ConversationRepo(db).add_message(
-        conv_id,
-        "system",
-        "Repaired malformed listing JSON and saved it for review.",
-        provider="system",
-        model="",
-    )
+    await in_worker_session(_save_repaired_listing, conv_id, repaired)
     return None, True
 
 
-async def persist_chat_result(
-    db: Session,
-    conv_id: str,
-    full_text: str,
-    provider,
-    *,
-    provider_name: str,
-    provider_model: str,
-    stream_error: str,
-    user_message: str,
-) -> tuple[list[dict] | None, bool]:
-    stream_repo = ConversationRepo(db)
-    usable = full_text.strip() and not full_text.lstrip().lower().startswith("error:")
-    saved = False
-    operations: list[dict] | None = None
-    if usable and not stream_error:
-        stream_repo.add_message(conv_id, "assistant", full_text, provider=provider_name, model=provider_model)
-        operations, saved = await apply_listing_payload_with_repair(
-            db, conv_id, full_text, provider, user_message=user_message
-        )
-        from vendoo_studio.services import activity
-
-        scope = activity.edit_fields.get()
-        if saved and (scope is None or any("categor" in path.casefold() for path in scope)):
-            from vendoo_studio.services.agent_categories import apply_saved_agent_category
-
-            await apply_saved_agent_category(db, conv_id, operations=operations, source_text=full_text)
-    elif stream_error or not full_text.strip():
-        stream_repo.add_message(
-            conv_id,
-            "system",
-            stream_error or "The listing assistant returned an empty response. Retry this prompt.",
-            provider="system",
-            model="",
-        )
-
+def _settle_chat_status(db: Session, conv_id: str) -> None:
     from vendoo_studio.repositories.queries import (
         LISTING_STATUSES,
         JobRepo,
     )
     from vendoo_studio.services.vendoo_import import parse_notes
 
+    stream_repo = ConversationRepo(db)
     active = any(job.conversation_id == conv_id for job in JobRepo(db).get_active())
     if active:
         stream_repo.update_status(conv_id, "listing")
@@ -377,4 +407,38 @@ async def persist_chat_result(
         if imported_status not in LISTING_STATUSES:
             imported_status = "draft"
         stream_repo.update_status(conv_id, imported_status)
+
+
+async def persist_chat_result(
+    conv_id: str,
+    full_text: str,
+    provider,
+    *,
+    provider_name: str,
+    provider_model: str,
+    stream_error: str,
+    user_message: str,
+) -> tuple[list[dict] | None, bool]:
+    from vendoo_studio.database import in_worker_session
+
+    usable = full_text.strip() and not full_text.lstrip().lower().startswith("error:")
+    saved = False
+    operations: list[dict] | None = None
+    if usable and not stream_error:
+        await in_worker_session(lambda db: ConversationRepo(db).add_message(
+            conv_id, "assistant", full_text, provider=provider_name, model=provider_model))
+        operations, saved = await apply_listing_payload_with_repair(
+            conv_id, full_text, provider, user_message=user_message
+        )
+        from vendoo_studio.services import activity
+
+        scope = activity.edit_fields.get()
+        if saved and (scope is None or any("categor" in path.casefold() for path in scope)):
+            from vendoo_studio.services.agent_categories import apply_saved_agent_category
+
+            await apply_saved_agent_category(conv_id, operations=operations, source_text=full_text)
+    elif stream_error or not full_text.strip():
+        await in_worker_session(
+            _system_note, conv_id, stream_error or "The listing assistant returned an empty response. Retry this prompt.")
+    await in_worker_session(_settle_chat_status, conv_id)
     return operations, saved

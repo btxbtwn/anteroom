@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import SessionLocal, in_worker_session
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import activity
 from vendoo_studio.services.photo_store import photo_store
@@ -75,6 +75,9 @@ log = logging.getLogger("vendoo_studio.chat")
 
 router = APIRouter(tags=["chat"])
 
+# Seconds between keepalives while photo analysis and sold comps prepare the prompt.
+PREPARE_KEEPALIVE_SECONDS = 3.0
+
 
 class ChatMessage(BaseModel):
     text: str
@@ -82,13 +85,11 @@ class ChatMessage(BaseModel):
 
 
 async def _persist_chat_result(conv_id: str, full_text: str, provider, *, field_paths=None, **kwargs):
-    db = SessionLocal()
     token = activity.edit_fields.set(field_paths)
     try:
-        return await persist_chat_result(db, conv_id, full_text, provider, **kwargs)
+        return await persist_chat_result(conv_id, full_text, provider, **kwargs)
     finally:
         activity.edit_fields.reset(token)
-        db.close()
 
 
 STOPPED_NOTE = "*Stopped*"
@@ -100,29 +101,29 @@ def stopped_prose(text: str) -> str:
     return (text[: payload.start()] if payload else text).strip()
 
 
-def _save_stopped_answer(conv_id: str, full_text: str, provider_name: str, provider_model: str) -> None:
+def _save_stopped_answer(db: Session, conv_id: str, full_text: str, provider_name: str, provider_model: str) -> None:
     """Keep what a stopped reply had said. Its listing edits are never applied."""
     prose = stopped_prose(full_text)
     if not prose:
         return
-    db = SessionLocal()
     try:
         ConversationRepo(db).add_message(
             conv_id, "assistant", f"{prose}\n\n{STOPPED_NOTE}", provider=provider_name, model=provider_model)
     except Exception:
         log.exception("failed to keep the stopped answer for %s", conv_id)
-    finally:
-        db.close()
 
 
-def _reset_status(conv_id: str, reason: str) -> None:
-    db = SessionLocal()
+def _reset_status(db: Session, conv_id: str, reason: str) -> None:
     try:
         ConversationRepo(db).update_status(conv_id, "draft")
     except Exception:
         log.exception("failed to reset status after %s for %s", reason, conv_id)
-    finally:
-        db.close()
+
+
+async def _closing_step(work, /, *args) -> None:
+    """A database step a closing stream still needs. A stop or a dropped
+    connection cancels the stream, not the step: it finishes on its thread."""
+    await asyncio.shield(asyncio.ensure_future(in_worker_session(work, *args)))
 
 
 @router.post("/api/conversations/{conv_id}/messages")
@@ -179,11 +180,17 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
             from vendoo_studio.services.option_lookup import OptionCatalog, chat_with_options
 
             option_catalog = OptionCatalog({})
-            build_db = SessionLocal()
+            # Keep the stream talking while it runs: the browser treats
+            # 20 s of silence as a dropped connection.
+            build = asyncio.create_task(build_chat_messages(conv_id, body.text, option_catalog))
             try:
-                messages = await build_chat_messages(conv_id, build_db, body.text, option_catalog)
+                async for _ in wait_task_keepalives(build, timeout=PREPARE_KEEPALIVE_SECONDS):
+                    yield KEEPALIVE
             finally:
-                build_db.close()
+                if not build.done():
+                    build.cancel()
+                    await asyncio.gather(build, return_exceptions=True)
+            messages = build.result()
             messages = await asyncio.to_thread(attach_to_last_user_turn, messages, attachments)
             def lock_targets(paths):
                 work.fields = tuple(sorted(set(work.fields) | set(paths)))
@@ -235,7 +242,7 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
                 _operations, saved = persist_task.result()
             except Exception:
                 log.exception("failed to persist chat result for %s", conv_id)
-                _reset_status(conv_id, "chat persist error")
+                await in_worker_session(_reset_status, conv_id, "chat persist error")
                 saved = False
             if saved:
                 yield sse_event("listing_updated", "1")
@@ -246,13 +253,15 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
             log.exception("chat stream failed for %s: %s", conv_id, message)
             stream_error = message
             yield sse_data(f"Error: {message}")
-            _reset_status(conv_id, "chat stream error")
+            await in_worker_session(_reset_status, conv_id, "chat stream error")
             yield "data: [DONE]\n\n"
         finally:
-            # Stop, or a closed connection, ends the reply where it was.
-            if not settled and full_text.strip():
-                _save_stopped_answer(conv_id, full_text, provider_name, provider_model)
-            activity.end(work)
+            try:
+                # Stop, or a closed connection, ends the reply where it was.
+                if not settled and full_text.strip():
+                    await _closing_step(_save_stopped_answer, conv_id, full_text, provider_name, provider_model)
+            finally:
+                activity.end(work)
 
     return StreamingResponse(stream_response(), media_type="text/event-stream", headers=SSE_HEADERS)
 

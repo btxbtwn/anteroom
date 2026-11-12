@@ -158,6 +158,9 @@ def test_settings_snapshot_failure_returns_a_private_retriable_response(cloud, s
         def read(self):
             raise SQLAlchemyError('private-diagnostic')
 
+        def load(self, _db):
+            self.read()
+
     context = ServiceContext(USER_ID, MagicMock(), UnavailableSettings(), MagicMock(), MagicMock())
     monkeypatch.setattr('vendoo_studio.services.hosted_context.for_seller', lambda *_args: context)
     response = client.get(f'/api/conversations/{identity}/listing', headers=alice)
@@ -198,10 +201,11 @@ def test_category_model_does_not_hold_the_catalog_connection(single_connection, 
                 assert other.get(CategoryTree, 'general').status == 'complete'
             return {'categories': {'general': '1'}}
 
-        monkeypatch.setattr(category_selection, '_collect_choices', choices)
-        monkeypatch.setattr(category_selection, '_ask_model', model)
-        result = asyncio.run(category_selection.select_categories(db, object(), 'Tee', '', []))
-        assert result == {'general': 'Men > Tees'}
+    monkeypatch.setattr(category_selection, '_collect_choices', choices)
+    monkeypatch.setattr(category_selection, '_ask_model', model)
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
+    result = asyncio.run(category_selection.select_categories(object(), 'Tee', '', []))
+    assert result == {'general': 'Men > Tees'}
 
 
 def test_live_category_lookup_does_not_hold_the_tree_connection(single_connection, monkeypatch):
@@ -219,8 +223,8 @@ def test_live_category_lookup_does_not_hold_the_tree_connection(single_connectio
     monkeypatch.setattr(native_category_match, 'native_rows', lambda: {})
     monkeypatch.setattr(direct_categories, '_ebay_leaf', lookup)
     monkeypatch.setattr(direct_categories, '_etsy_leaf', lookup)
-    with single_connection() as db:
-        asyncio.run(direct_categories.attach_direct_categories(db, {'title': 'Black cotton tee'}))
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
+    asyncio.run(direct_categories.attach_direct_categories({'title': 'Black cotton tee'}))
     assert len(completed) == 2
 
 
@@ -365,6 +369,75 @@ def test_photo_reads_return_the_database_connection_before_storage(cloud, active
     assert client.get(paths[route], headers=alice).status_code == 200
 
 
+def test_a_seller_request_reads_its_settings_through_its_own_connection(cloud, signing_keys):  # noqa: F811
+    """A second session for the settings snapshot costs another checkout and four round trips per request."""
+    client, engine = cloud
+    alice = headers(signing_keys)
+    draft = client.post('/api/drafts', headers=alice, json={'title': 'Coat'}).json()['id']
+    checkouts, statements = [], []
+
+    def checkout(*_args):
+        checkouts.append(True)
+
+    def record(_connection, _cursor, statement, *_args):
+        statements.append(statement)
+
+    event.listen(engine, 'checkout', checkout)
+    event.listen(engine, 'before_cursor_execute', record)
+    try:
+        assert client.get(f'/api/drafts/{draft}/photos', headers=alice).status_code == 200
+    finally:
+        event.remove(engine, 'checkout', checkout)
+        event.remove(engine, 'before_cursor_execute', record)
+    assert len(checkouts) == 1
+    assert sum('user_preferences' in statement for statement in statements) == 1
+
+
+def test_photo_upload_and_delete_write_storage_without_a_database_connection(cloud, active_connections, signing_keys, monkeypatch):  # noqa: F811
+    """Storage can take 20 seconds; the draft's row lock and pooled connection must not wait for it."""
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    draft = client.post('/api/drafts', headers=alice, json={'title': 'Coat'}).json()['id']
+    objects, calls = {}, []
+
+    def storage(method, key, _token=None, data=None):
+        calls.append((method, bool(active_connections)))
+        if method == 'POST':
+            objects[key] = data
+        elif method == 'DELETE':
+            objects.pop(key, None)
+        return b''
+
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    uploaded = client.post(f'/api/drafts/{draft}/photos', headers=alice, content=image_bytes())
+    assert uploaded.status_code == 201, uploaded.text
+    assert len(objects) == 1
+    assert client.delete(f"/api/drafts/{draft}/photos/{uploaded.json()['id']}", headers=alice).status_code == 204
+    assert objects == {}
+    assert calls == [('POST', False), ('DELETE', False)], 'Storage calls must not hold a database connection'
+
+
+def test_a_refused_photo_upload_removes_its_stored_object(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    draft = client.post('/api/drafts', headers=alice, json={'title': 'Coat'}).json()['id']
+    objects = {}
+
+    def storage(method, key, _token=None, data=None):
+        if method == 'POST':
+            objects[key] = data
+        elif method == 'DELETE':
+            objects.pop(key, None)
+        return b''
+
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    monkeypatch.setattr(hosted_photos, 'MAX_PHOTOS', 1)
+    assert client.post(f'/api/drafts/{draft}/photos', headers=alice, content=image_bytes()).status_code == 201
+    refused = client.post(f'/api/drafts/{draft}/photos', headers=alice, content=image_bytes())
+    assert refused.status_code == 422
+    assert len(objects) == 1, 'A refused upload must not leave its object in Storage'
+
+
 @pytest.fixture
 def active_connections(cloud):  # noqa: F811
     _client, engine = cloud
@@ -479,7 +552,8 @@ def test_native_editor_form_releases_the_connection_before_marketplace_waits(sin
     with single_connection() as db:
         db.add(Conversation(id='form-tee', title='Cotton tee'))
         db.commit()
-        form = asyncio.run(native_editor.editor_form('form-tee', 'ebay', None, db, refresh=True))
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
+    form = asyncio.run(native_editor.editor_form('form-tee', 'ebay', None, refresh=True))
     assert form['marketplace'] == 'ebay'
     assert released == ['Cotton tee']
 
@@ -621,10 +695,10 @@ def test_generated_listing_repair_releases_the_connection_before_model_waits(sin
     with single_connection() as db:
         db.add(Conversation(id='repair-tee', title='Cotton tee'))
         db.commit()
-        # The generate run reads photos right before this call, leaving a transaction open.
         fingerprint = listing_generate.photo_fingerprint(ConversationRepo(db).get_photos('repair-tee'))
-        listing = asyncio.run(listing_generate.persist_generated_listing_with_repair(
-            db, 'repair-tee', '{"title": "Cotton tee",,', object(), final_announce=False,
-            expected_revision_id='', expected_photo_fingerprint=fingerprint))
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
+    listing = asyncio.run(listing_generate.persist_generated_listing_with_repair(
+        'repair-tee', '{"title": "Cotton tee",,', object(), final_announce=False,
+        expected_revision_id='', expected_photo_fingerprint=fingerprint))
     assert waits == ['repair', 'fill']
     assert listing['price'] == 25

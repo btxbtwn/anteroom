@@ -7,7 +7,7 @@ import copy
 import logging
 import time
 
-from vendoo_studio.database import SessionLocal
+from vendoo_studio.database import in_worker_session
 from vendoo_studio.repositories.queries import ConversationRepo, RevisionConflict
 from vendoo_studio.services import activity, generation_timing, live_trace, model_slots, model_usage
 from vendoo_studio.services.background_tasks import TaskLeaseExpired
@@ -80,6 +80,22 @@ async def _identify_item(vision_provider, paths: list[str], notes: str) -> dict[
         return fields
 
 
+def _post(db, conv_id: str, role: str, text: str, **kwargs) -> str:
+    return str(ConversationRepo(db).add_message(conv_id, role, text, **kwargs).id)
+
+
+def _set_draft(db, conv_id: str) -> None:
+    ConversationRepo(db).update_status(conv_id, "draft")
+
+
+def _current_revision_id(db, conv_id: str) -> str | None:
+    return ConversationRepo(db).current_revision_id(conv_id)
+
+
+def _photos_fingerprint(db, conv_id: str) -> str:
+    return photo_fingerprint(ConversationRepo(db).get_photos(conv_id))
+
+
 async def run_listing_generation(
     run: GenerationRun,
     *,
@@ -95,7 +111,12 @@ async def run_listing_generation(
     photo_count: int,
     analysis_fingerprint: str,
 ) -> None:
-    """Analyze photos, pick categories, stream the listing, and save it."""
+    """Analyze photos, pick categories, stream the listing, and save it.
+
+    Every database step runs in a short session of its own on a worker thread
+    (``in_worker_session``): nothing here queries on the event loop, and no
+    connection is held while a model, comps search or marketplace answers.
+    """
     calls = model_usage.bind()
     agents_run = activity.begin_agents(conv_id)
 
@@ -109,8 +130,6 @@ async def run_listing_generation(
     live_trace.bind(trace)
     model_slots.bind()
     run.publish(sse_event("status", "Analyzing photos…"))
-    stream_db = SessionLocal()
-    stream_repo = ConversationRepo(stream_db)
     full_text = ""
     prompt_analysis: str | None = None
     expected_revision_id: str | None = None
@@ -135,15 +154,23 @@ async def run_listing_generation(
     timing_saved = False
     timing_id: str | None = None
 
-    def save_timings(outcome: str) -> str | None:
+    async def save_timings(outcome: str) -> str | None:
         """Record the run once: a failure after it was saved as done is not a second run."""
         nonlocal timing_saved
         if timing_saved:
             return None
         timing_saved = True
-        return generation_timing.record_run(
+        return await asyncio.to_thread(
+            generation_timing.record_run,
             conv_id, timings, total_sec=time.monotonic() - run_started, outcome=outcome, calls=calls,
         )
+
+    async def add_stages(outcome: str) -> None:
+        if timing_id is not None:
+            await asyncio.to_thread(
+                generation_timing.add_stages,
+                timing_id, timings, total_sec=time.monotonic() - run_started, outcome=outcome, calls=calls,
+            )
 
     async def timed(stage: str, coro):
         """A side-by-side stage's own duration."""
@@ -166,8 +193,8 @@ async def run_listing_generation(
     try:
         skill_rules = await asyncio.to_thread(load_skill_rules, item_details)
         evidence: dict = {}
-        existing = latest_photo_analysis(stream_repo.get_messages(conv_id), fingerprint=analysis_fingerprint)
-        stream_db.close()
+        history = await in_worker_session(lambda db: ConversationRepo(db).get_messages(conv_id))
+        existing = latest_photo_analysis(history, fingerprint=analysis_fingerprint)
         listing_rules = skill_rules
         if existing:
             analysis_text = existing
@@ -212,11 +239,11 @@ async def run_listing_generation(
                 raise photo_analysis_failure(exc) from exc
             prompt_analysis = analysis_with_photo_count(photo_count, analysis_text)
             still_current()
-            analysis_message = stream_repo.add_message(
-                conv_id, "system", analysis_text, provider=vision_name, model=vision_model,
+            analysis_message_id = await in_worker_session(lambda db: _post(
+                db, conv_id, "system", analysis_text, provider=vision_name, model=vision_model,
                 photo_fingerprint=analysis_fingerprint,
-            )
-            run.publish(sse_event("posted", str(analysis_message.id)))
+            ))
+            run.publish(sse_event("posted", analysis_message_id))
 
         if existing:
             prompt_analysis = analysis_with_photo_count(photo_count, analysis_text)
@@ -240,30 +267,21 @@ async def run_listing_generation(
             run.publish(sse_event("status", "Choosing marketplace categories…"))
 
         async def choose_categories():
-            # Its own session: comps and this run's stream write beside it.
-            # Release before any provider wait — a held checkout starves the
-            # hosted pool while categories talk to the Mac.
-            db = SessionLocal()
-            try:
-                async with live_trace.agent("categories", "Categories") as agent:
-                    def on_status(message: str) -> None:
-                        run.publish(sse_event("status", message))
-                        agent.update(message)
+            async with live_trace.agent("categories", "Categories") as agent:
+                def on_status(message: str) -> None:
+                    run.publish(sse_event("status", message))
+                    agent.update(message)
 
-                    db.rollback()
-                    seed = await prepare_generation_schema(
-                        db,
-                        conv_id,
-                        provider,
-                        prompt_analysis + "\nSeller answers:\n" + seller_answers,
-                        notes,
-                        on_status=on_status,
-                    )
-                    if isinstance(seed, dict) and seed.get("category_path"):
-                        agent.result(str(seed["category_path"]).split(">")[-1].strip())
-                    return seed
-            finally:
-                db.close()
+                seed = await prepare_generation_schema(
+                    conv_id,
+                    provider,
+                    prompt_analysis + "\nSeller answers:\n" + seller_answers,
+                    notes,
+                    on_status=on_status,
+                )
+                if isinstance(seed, dict) and seed.get("category_path"):
+                    agent.result(str(seed["category_path"]).split(">")[-1].strip())
+                return seed
 
         schema_task = asyncio.create_task(timed("categories", choose_categories()))
         child_tasks.append(schema_task)
@@ -284,31 +302,31 @@ async def run_listing_generation(
         schema_task.result()
         from vendoo_studio.services.native_field_fill import prepare_generation_forms
 
-        stream_db.rollback()
         native_forms = await timed("native_forms", prepare_generation_forms(
-            stream_db, conv_id, provider, evidence=f"{prompt_analysis}\n{item_details}"))
+            conv_id, provider, evidence=f"{prompt_analysis}\n{item_details}"))
         if comps_task is not None:
             comps_text = comps_task.result() or ""
         if comps_text:
             still_current()
-            comps_message = stream_repo.add_message(
-                conv_id, "system", comps_text, provider="web-search", model="web-search",
-            )
-            run.publish(sse_event("posted", str(comps_message.id)))
+            comps_message_id = await in_worker_session(lambda db: _post(
+                db, conv_id, "system", comps_text, provider="web-search", model="web-search",
+            ))
+            run.publish(sse_event("posted", comps_message_id))
 
-        messages = listing_generation_messages(
-            listing_rules,
-            item_details,
-            prompt_analysis,
-            stream_db,
-            conv_id,
-            comps_text,
-            photo_count=photo_count,
-            native_forms=native_forms,
-        )
-        expected_revision_id = ConversationRepo(stream_db).current_revision_id(conv_id) or ""
-        # Do not keep a pooled connection while ChatGPT on the Mac writes the listing.
-        stream_db.rollback()
+        def prompt(db):
+            messages = listing_generation_messages(
+                listing_rules,
+                item_details,
+                prompt_analysis,
+                db,
+                conv_id,
+                comps_text,
+                photo_count=photo_count,
+                native_forms=native_forms,
+            )
+            return messages, _current_revision_id(db, conv_id) or ""
+
+        messages, expected_revision_id = await in_worker_session(prompt)
         run.publish(sse_event("status", "thinking"))
 
         from vendoo_studio.services.option_lookup import OptionCatalog, chat_with_options
@@ -330,14 +348,13 @@ async def run_listing_generation(
             run.publish(sse_event("status", "Repairing listing JSON…"))
         needed_repair = not extract_listing_json(full_text)
         still_current()
-        stream_db.expire_all()
-        if photo_fingerprint(stream_repo.get_photos(conv_id)) != analysis_fingerprint:
+        if await in_worker_session(_photos_fingerprint, conv_id) != analysis_fingerprint:
             raise RuntimeError("Photos changed during generation. Generate again to read the current photos.")
         run.publish(sse_event("status", "Filling required fields…"))
         listing = await await_with_pulses(
             run,
             persist_generated_listing_with_repair(
-                stream_db, conv_id, full_text, provider, final_announce=False,
+                conv_id, full_text, provider, final_announce=False,
                 expected_revision_id=expected_revision_id,
                 expected_photo_fingerprint=analysis_fingerprint,
             ),
@@ -350,8 +367,9 @@ async def run_listing_generation(
             time.monotonic() - run_started,
             " ".join(f"{stage}={seconds}s" for stage, seconds in timings.items()),
         )
-        timing_id = save_timings("preparing")
-        stream_repo.update_status(conv_id, "draft")
+        timing_id = await save_timings("preparing")
+        await in_worker_session(_set_draft, conv_id)
+        finish_revision_id = await in_worker_session(_current_revision_id, conv_id) if listing else None
         run.publish("data: [DONE]\n\n")
         if listing:
             evidence_text = "\n\n".join(
@@ -367,7 +385,7 @@ async def run_listing_generation(
                 timing_id=timing_id,
                 run_started=run_started,
                 agents_run=agents_run,
-                expected_revision_id=ConversationRepo(stream_db).current_revision_id(conv_id),
+                expected_revision_id=finish_revision_id,
                 expected_photo_fingerprint=analysis_fingerprint,
             )))
     except asyncio.CancelledError:
@@ -375,9 +393,8 @@ async def run_listing_generation(
         for task in child_tasks:
             if not task.done():
                 task.cancel()
-        save_timings("cancelled")
-        if timing_id is not None:
-            generation_timing.add_stages(timing_id, timings, total_sec=time.monotonic() - run_started, outcome="cancelled", calls=calls)
+        await save_timings("cancelled")
+        await add_stages("cancelled")
         # Clear/Regenerate discarded this run; saving now would write the old
         # listing into the wiped conversation.
         if (
@@ -388,28 +405,25 @@ async def run_listing_generation(
         ):
             try:
                 await persist_generated_listing_with_repair(
-                    stream_db, conv_id, full_text, provider,
+                    conv_id, full_text, provider,
                     expected_revision_id=expected_revision_id,
                     expected_photo_fingerprint=analysis_fingerprint,
                 )
             except TaskLeaseExpired:
-                stream_db.rollback()
                 log.warning("cancelled listing %s no longer owns its task lease; skipping cleanup", conv_id)
                 raise asyncio.CancelledError() from None
             except Exception:
                 log.exception("failed to persist cancelled listing for %s", conv_id)
         try:
-            stream_repo.update_status(conv_id, "draft")
+            await in_worker_session(_set_draft, conv_id)
         except TaskLeaseExpired:
-            stream_db.rollback()
             log.warning("skipped cancelled listing status reset for %s after its task lease ended", conv_id)
         except Exception:
             log.exception("failed to reset status after cancelled listing for %s", conv_id)
         raise
     except Exception as e:
-        save_timings("failed")
-        if timing_id is not None:
-            generation_timing.add_stages(timing_id, timings, total_sec=time.monotonic() - run_started, outcome="failed", calls=calls)
+        await save_timings("failed")
+        await add_stages("failed")
         message = str(e).strip() or type(e).__name__
         if isinstance(e, TimeoutError) and not str(e).strip():
             stage = (run.last_status or "").strip()
@@ -424,16 +438,32 @@ async def run_listing_generation(
         log.error("listing generation failed for %s: %s", conv_id, message)
         try:
             run.publish(sse_data(f"Error: {message}"))
-            stream_repo.add_message(conv_id, "system", message, provider="system", model="")
+            await in_worker_session(lambda db: _post(db, conv_id, "system", message, provider="system", model=""))
             run.publish("data: [DONE]\n\n")
-            stream_repo.update_status(conv_id, "draft")
+            await in_worker_session(_set_draft, conv_id)
         except Exception:
             log.exception("failed to report listing generation error for %s", conv_id)
     finally:
         for task in child_tasks:
             if not task.done():
                 task.cancel()
-        stream_db.close()
+
+
+def _finish_inputs(db, conv_id: str, expected_revision_id: str | None) -> str | None:
+    """The photos' fingerprint, or None when the listing changed since generation saved it."""
+    if expected_revision_id is not None and _current_revision_id(db, conv_id) != expected_revision_id:
+        return None
+    return _photos_fingerprint(db, conv_id)
+
+
+def _finish_summary(db, conv_id: str, listing: dict, repaired: bool) -> None:
+    ConversationRepo(db).add_message(
+        conv_id,
+        "system",
+        listing_save_summary(db, conv_id, listing, repaired=repaired),
+        provider="system",
+        model="",
+    )
 
 
 async def _finish_generation_background(
@@ -464,8 +494,6 @@ async def _finish_generation_background(
     finish_started = time.monotonic()
     outcome = "superseded"
     stages: dict[str, float] = {}
-    db = SessionLocal()
-    repo = ConversationRepo(db)
 
     async def timed(stage: str, coro):
         started = time.monotonic()
@@ -475,28 +503,28 @@ async def _finish_generation_background(
             stages[stage] = round(time.monotonic() - started, 2)
 
     try:
-        if expected_revision_id is not None and ConversationRepo(db).current_revision_id(conv_id) != expected_revision_id:
+        fingerprint = await in_worker_session(_finish_inputs, conv_id, expected_revision_id)
+        if fingerprint is None:
             return
         current = dict(listing) if isinstance(listing, dict) else {}
         if expected_photo_fingerprint is None:
-            expected_photo_fingerprint = photo_fingerprint(repo.get_photos(conv_id))
+            expected_photo_fingerprint = fingerprint
 
-        def check_photos() -> None:
-            db.expire_all()
-            if photo_fingerprint(repo.get_photos(conv_id)) != expected_photo_fingerprint:
+        async def check_photos() -> None:
+            if await in_worker_session(_photos_fingerprint, conv_id) != expected_photo_fingerprint:
                 raise RevisionConflict("Photos changed while preparing marketplace fields")
 
-        check_photos()
+        await check_photos()
 
         async def fill_native():
             from vendoo_studio.services.native_field_fill import fill_native_fields
 
             async with live_trace.agent("native-fields", "Marketplace category fields") as agent, model_slots.slot():
-                filled = await fill_native_fields(db, conv_id, provider, evidence=evidence)
+                filled = await fill_native_fields(conv_id, provider, evidence=evidence)
                 agent.result("Filled category fields" if filled else "No category fields to fill")
                 return filled
 
-        check_photos()
+        await check_photos()
         native = await timed("native_fields", fill_native())
         if native is not None:
             current = native
@@ -505,30 +533,26 @@ async def _finish_generation_background(
         outcome = "incomplete" if _validation_blockers(copy.deepcopy(current)) else "done"
         # Posted only now: said before the fill, it reported fields as empty
         # and "Send when ready" while chat was still filling them.
-        repo.add_message(
-            conv_id,
-            "system",
-            listing_save_summary(db, conv_id, copy.deepcopy(current), repaired=repaired),
-            provider="system",
-            model="",
-        )
+        await in_worker_session(_finish_summary, conv_id, copy.deepcopy(current), repaired)
     except RevisionConflict:
         log.info("discarding stale generation finish for %s", conv_id)
     except Exception:
         outcome = "failed"
         log.exception("post-generate finish failed for %s", conv_id)
         try:
-            repo.add_message(
+            await in_worker_session(lambda db: _post(
+                db,
                 conv_id,
                 "system",
                 "Listing saved, but finishing discovered fields failed. Retry generate.",
                 provider="system",
                 model="",
-            )
+            ))
         except Exception:
             log.exception("failed to report post-generate finish error for %s", conv_id)
     finally:
         stages["finish"] = round(time.monotonic() - finish_started, 2)
         if run_started is not None:
-            generation_timing.add_stages(timing_id, stages, total_sec=time.monotonic() - run_started, outcome=outcome, calls=model_usage.current())
-        db.close()
+            await asyncio.to_thread(
+                generation_timing.add_stages,
+                timing_id, stages, total_sec=time.monotonic() - run_started, outcome=outcome, calls=model_usage.current())

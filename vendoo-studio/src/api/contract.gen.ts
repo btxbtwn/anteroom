@@ -68,6 +68,11 @@ export interface Conversation {
 export interface ConversationInput {
   title?: string | null;
   notes?: string | null;
+  /**
+   * Item Details' changed keys, merged into the notes as they are now, so keys
+   * the server wrote since the notes were read survive. Measurements merge per field.
+   */
+  note_changes?: Record<string, unknown> | null;
   box_id?: string | null;
 }
 

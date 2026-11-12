@@ -3,7 +3,6 @@
 Every query uses the verified seller session. No desktop services are imported
 or started, and no request accepts an owner, file path or operational identity.
 """
-import asyncio
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -101,12 +100,8 @@ def listing_response(db, identity):
 @router.get('/runtime', response_model=contract.WorkspaceRuntime)
 def runtime(request: Request, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.category_tree import categories_ready
-    worker = getattr(request.app.state, 'background_worker', None)
-    generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
-    # The schedulers run on whichever Machine holds their lease, so a Machine
-    # waiting for it during a deploy still offers what they serve.
-    handoff = getattr(request.app.state, 'handoff', None)
-    scheduled = bool(request.app.state.background_worker_enabled and handoff is not None and not handoff.done())
+    from vendoo_studio.routes.hosted_tasks import drafts_run, schedules_run
+    generation, scheduled = drafts_run(request.app), schedules_run(request.app)
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant', 'account_deletion']
             + (['marketplace_sessions'] if scheduled else [])
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
@@ -227,8 +222,13 @@ def edit_conversation(identity: str, body: contract.ConversationInput, db=Depend
     assert_idle(db, identity)
     if "box_id" in body.model_fields_set:
         check_box(db, body.box_id)
-    for key, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    note_changes = changes.pop('note_changes', None)
+    for key, value in changes.items():
         setattr(row, key, value)
+    if note_changes:
+        from vendoo_studio.services.vendoo_import import merge_note_changes
+        row.notes = merge_note_changes(row.notes, note_changes)
     db.commit()
     db.refresh(row)
     return conversation_response(row)
@@ -327,10 +327,11 @@ def activity_response(db, identity, count, last):
     tasks = db.scalars(select(BackgroundTask).where(
         BackgroundTask.conversation_id == identity, BackgroundTask.status.in_(('queued', 'running')))).all()
     labels = [f'{row.kind}: {row.status}' for row in tasks]
-    from vendoo_studio.services.native_marketplaces import step_label
+    from vendoo_studio.services.native_marketplaces import is_direct_action, step_label
 
     items = [step_label(str(row.current_step or '')) or row.current_step or row.status for row in jobs]
-    return {'busy': bool(jobs or tasks), 'items': items + labels,
+    writing = bool(tasks) or any(not is_direct_action(str(row.current_step or '')) for row in jobs)
+    return {'busy': bool(jobs or tasks), 'writing': writing, 'items': items + labels,
             'message_count': count, 'last_message_id': last, 'agents': []}
 
 
@@ -599,11 +600,28 @@ def discard_blank_conversation(identity: str, request: Request, db=Depends(get_s
     return {'discarded': True}
 
 
+class FormRefreshInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    revision_id: str = Field(min_length=1, max_length=100)
+
+
+@router.post('/conversations/{identity}/native-marketplaces/{marketplace}/form/refresh')
+def refresh_native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
+                                body: FormRefreshInput, db=Depends(get_seller_db, scope="function")):
+    from vendoo_studio.services.native_editor import refresh_form
+    from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
+
+    try:
+        return refresh_form(db, identity, marketplace, body.revision_id)
+    except NativeMarketplaceError as error:
+        raise HTTPException(error.status_code, str(error)) from None
+
+
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
 def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
                         revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     from vendoo_studio.services.choice_lists import share
-    from vendoo_studio.services.native_editor import editor_form
+    from vendoo_studio.services.native_editor import read_form
     from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
     # These canonical builders read verified catalogs and the owned snapshot.
@@ -615,6 +633,6 @@ def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop',
         current = db.get(Listing, identity)
         if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
             raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
-        return share(asyncio.run(editor_form(identity, marketplace, revision_id, db)))
+        return share(read_form(db, identity, marketplace, revision_id))
     except NativeMarketplaceError as error:
         raise HTTPException(error.status_code, str(error)) from None

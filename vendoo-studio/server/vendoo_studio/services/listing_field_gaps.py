@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.models.catalog import CategorySchema
 from vendoo_studio.services.category_fields import listing_category_ids, load_fields
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
+from vendoo_studio.repositories.queries import ConversationRepo, RevisionConflict
 from vendoo_studio.services.fill_log import (
     MAX_PATCH_FIELDS,
     FillLogService,
@@ -280,8 +280,45 @@ async def _request_missing_field_values(
     return None
 
 
+def _gap_start(db: Session, conv_id: str) -> tuple[str, str | None]:
+    from vendoo_studio.services.listing_generate import photo_fingerprint
+
+    repo = ConversationRepo(db)
+    return photo_fingerprint(repo.get_photos(conv_id)), repo.current_revision_id(conv_id)
+
+
+def _round_gaps(db: Session, current: dict) -> list[dict]:
+    RegistryService(db).merge_learned_fields(current)
+    return collect_empty_discovered_fields(db, current)
+
+
+def _save_gap_round(db: Session, conv_id: str, updated: dict, patches: list[dict], fingerprint: str,
+                    expected_revision_id: str) -> str:
+    from vendoo_studio.services.listing_generate import photo_fingerprint
+
+    repo = ConversationRepo(db)
+    if photo_fingerprint(repo.get_photos(conv_id)) != fingerprint:
+        raise RevisionConflict("Photos changed while filling fields")
+    try:
+        revision = listing_persistence.save_revision(db,
+            conv_id, updated, source="gap_fill",
+            parent_revision_id=expected_revision_id, expected_revision_id=expected_revision_id,
+        )
+    except RevisionConflict:
+        log.info("discarding stale gap fill for %s", conv_id)
+        raise
+    FillLogService(db).record_generated_values(conv_id, patches)
+    repo.add_message(
+        conv_id,
+        "system",
+        summarize_missing_fields(patches),
+        provider="system",
+        model="",
+    )
+    return revision.id
+
+
 async def fill_listing_field_gaps(
-    db: Session,
     conv_id: str,
     listing: dict,
     provider,
@@ -289,24 +326,19 @@ async def fill_listing_field_gaps(
     evidence: str,
 ) -> dict:
     """Fill discovered empty fields with follow-up LLM rounds before Apply/Send."""
+    from vendoo_studio.database import in_worker_session
+
     if not isinstance(listing, dict) or provider is None:
         return listing
 
-    repo = ConversationRepo(db)
-    listing_repo = ListingRepo(db)
-    fill_log = FillLogService(db)
     current = dict(listing)
-    from vendoo_studio.services.listing_generate import photo_fingerprint
-
-    fingerprint = photo_fingerprint(repo.get_photos(conv_id))
-    expected_revision_id = repo.current_revision_id(conv_id)
+    fingerprint, expected_revision_id = await in_worker_session(_gap_start, conv_id)
     if expected_revision_id is None:
         return current
     total_filled = 0
 
     for round_index in range(MAX_GAP_ROUNDS):
-        RegistryService(db).merge_learned_fields(current)
-        gaps = collect_empty_discovered_fields(db, current)
+        gaps = await in_worker_session(_round_gaps, current)
         if not gaps:
             break
 
@@ -327,32 +359,14 @@ async def fill_listing_field_gaps(
             break
 
         updated = write_values_into_listing(current, patches[:MAX_PATCH_FIELDS])
-        db.expire_all()
-        if photo_fingerprint(repo.get_photos(conv_id)) != fingerprint:
-            raise RevisionConflict("Photos changed while filling fields")
-        try:
-            revision = listing_persistence.save_revision(listing_repo.db,
-                conv_id, updated, source="gap_fill",
-                parent_revision_id=expected_revision_id, expected_revision_id=expected_revision_id,
-            )
-        except RevisionConflict:
-            log.info("discarding stale gap fill for %s", conv_id)
-            raise
-        expected_revision_id = revision.id
-        fill_log.record_generated_values(conv_id, patches[:MAX_PATCH_FIELDS])
-        repo.add_message(
-            conv_id,
-            "system",
-            summarize_missing_fields(patches[:MAX_PATCH_FIELDS]),
-            provider="system",
-            model="",
-        )
+        expected_revision_id = await in_worker_session(
+            _save_gap_round, conv_id, updated, patches[:MAX_PATCH_FIELDS], fingerprint, expected_revision_id)
         current = updated
         total_filled += len(patches[:MAX_PATCH_FIELDS])
 
     if total_filled:
         log.info("filled %s discovered listing field(s) across gap rounds for %s", total_filled, conv_id)
-    if repo.current_revision_id(conv_id) != expected_revision_id:
+    if await in_worker_session(lambda db: ConversationRepo(db).current_revision_id(conv_id)) != expected_revision_id:
         raise RevisionConflict("This listing changed while filling fields")
     return current
 

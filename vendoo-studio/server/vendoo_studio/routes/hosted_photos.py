@@ -1,5 +1,7 @@
 """Bounded photo uploads and authenticated reads; no filesystem-backed routes."""
+import asyncio
 import hashlib
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from typing import Literal
 from pydantic import BaseModel, ConfigDict
@@ -10,6 +12,7 @@ from vendoo_studio.services import hosted_photos as photos
 from vendoo_studio.services.hosted_database import get_seller_db, in_seller_session
 
 router = APIRouter(prefix='/api/drafts/{draft_id}/photos')
+log = logging.getLogger(__name__)
 
 
 class PhotoResponse(BaseModel):
@@ -49,8 +52,7 @@ def list_photos(draft_id: str, db=Depends(get_seller_db)):
                       .order_by(Photo.display_order, Photo.id)).all()
 
 
-def upload(db, draft_id, token, data, marketplace=None):
-    data, width, height = photos.normalize(data)
+def save_photo(db, draft_id, key, data, width, height, marketplace=None):
     require_draft(db, draft_id, lock=True)
     from vendoo_studio.services.marketplace_media import PHOTO_LIMITS
     own = Photo.marketplace.is_(None) if marketplace is None else Photo.marketplace == marketplace
@@ -58,25 +60,15 @@ def upload(db, draft_id, token, data, marketplace=None):
     limit = photos.MAX_PHOTOS if marketplace is None else PHOTO_LIMITS[marketplace]
     if count >= limit:
         raise HTTPException(422, f'Add at most {limit} photos on this form')
-    key = photos.new_key(db.user_id, draft_id)
+    # One past the highest position, not the count: after a delete the count
+    # can land on or ahead of a photo the seller already has.
+    highest = db.scalar(select(func.max(Photo.display_order)).where(Photo.conversation_id == draft_id, own))
     photo = Photo(conversation_id=draft_id, original_filename='photo.jpg', stored_filename=key,
                   mime_type='image/jpeg', size_bytes=len(data), checksum=hashlib.sha256(data).hexdigest(),
-                  width=width, height=height, display_order=count, marketplace=marketplace)
+                  width=width, height=height, display_order=0 if highest is None else highest + 1,
+                  marketplace=marketplace)
     db.add(photo)
-    db.flush()
-    photos.storage_call('POST', key, token, data)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        # A failed metadata commit must not leave a visible photo in the draft.
-        # Best-effort cleanup; the original failure remains sanitized by the DB dependency.
-        try:
-            photos.storage_call('DELETE', key, token)
-        except HTTPException:
-            pass
-        raise
-    db.refresh(photo)
+    db.commit()
     return PhotoResponse.model_validate(photo)
 
 
@@ -84,16 +76,27 @@ def upload(db, draft_id, token, data, marketplace=None):
 async def upload_photo(draft_id: str, request: Request, marketplace: Literal['poshmark', 'mercari', 'depop', 'ebay', 'etsy'] | None = None):
     # Check ownership before reading bytes. Read a raw body, avoiding an unbounded
     # multipart spool before the handler has an opportunity to enforce the limit.
-    # The body and decoder can take time; no session is open while waiting.
-    # Upload checks and locks the conversation again before saving.
+    # The body, decoder and Storage can take time; no session is open while
+    # waiting. The draft is checked and locked again only to save the row.
     await in_seller_session(request, require_draft, draft_id)
     data = bytearray()
     async for chunk in request.stream():
         if len(data) + len(chunk) > photos.MAX_BYTES:
             raise HTTPException(413, f'Choose a photo of {photos.MAX_BYTES // (1024 * 1024)} MB or smaller')
         data.extend(chunk)
+    image, width, height = await asyncio.to_thread(photos.normalize, bytes(data))
     token = request.headers['authorization'].partition(' ')[2]
-    return await in_seller_session(request, upload, draft_id, token, bytes(data), marketplace)
+    key = photos.new_key(request.state.seller.user_id, draft_id)
+    await asyncio.to_thread(photos.storage_call, 'POST', key, token, image)
+    try:
+        return await in_seller_session(request, save_photo, draft_id, key, image, width, height, marketplace)
+    except Exception:
+        # A refused or failed save must not leave an unreachable object behind.
+        try:
+            await asyncio.to_thread(photos.storage_call, 'DELETE', key, token)
+        except HTTPException:
+            pass
+        raise
 
 
 @router.get('/{photo_id}')
@@ -109,9 +112,15 @@ def read_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_se
 def delete_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_seller_db)):
     require_draft(db, draft_id, lock=True)
     photo = get_photo(db, draft_id, photo_id)
-    photos.storage_call('DELETE', photo.stored_filename, request.headers['authorization'].partition(' ')[2])
+    key = photo.stored_filename
     from vendoo_studio.services.hosted_listing_contract import remove_photo_selections
     remove_photo_selections(db, draft_id, photo_id)
     db.delete(photo)
+    # Commit before Storage, so the draft's row lock is not held while it answers.
     db.commit()
+    try:
+        photos.storage_call('DELETE', key, request.headers['authorization'].partition(' ')[2])
+    except HTTPException:
+        # The photo is gone from the draft; only an unreachable private object remains.
+        log.warning('A deleted photo stayed in Storage')
     return Response(status_code=204)

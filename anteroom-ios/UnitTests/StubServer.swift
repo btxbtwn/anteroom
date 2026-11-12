@@ -80,6 +80,8 @@ final class StubSignIn: @unchecked Sendable {
     private var signOuts = 0
     /// Thrown by refresh; nil renews the sign-in.
     var refreshFailure: Error?
+    /// Thrown when the current token is read; nil returns it.
+    var accessFailure: Error?
 
     var refreshCount: Int { lock.lock(); defer { lock.unlock() }; return refreshes }
     var signOutCount: Int { lock.lock(); defer { lock.unlock() }; return signOuts }
@@ -88,6 +90,7 @@ final class StubSignIn: @unchecked Sendable {
         APIAuthorization(
             accessToken: { [self] in
                 lock.lock(); defer { lock.unlock() }
+                if let accessFailure { throw accessFailure }
                 return token
             },
             refreshedToken: { [self] in
@@ -144,7 +147,8 @@ final class TestClock: @unchecked Sendable {
     }
 }
 
-struct SignInGone: Error {}
+/// A sign-in server that failed without refusing the sign-in, such as a 503.
+struct SignInServerFailed: Error {}
 
 extension URLRequest {
     var json: [String: Any]? {

@@ -1,3 +1,9 @@
 # Public Poshmark category ID for Electronics > Networking > Wireless Access Points.
 # This is a category path from the public catalog, not an API key.
 skills/list-this/references/poshmark-native-form.json:generic-api-key:1529
+
+# Synthetic sb_publishable_test123 fixture in the original cloud-hook tests.
+# The current fixture uses an obvious dummy value; only these historical
+# findings are ignored so PR history scans can pass without rewriting commits.
+e18b746ff89d1a6582e5d3ba9c5aeb2cf9380a5a:anteroom-ios/tools/test_cloud_setup.py:generic-api-key:62
+e18b746ff89d1a6582e5d3ba9c5aeb2cf9380a5a:anteroom-ios/tools/test_cloud_setup.py:generic-api-key:65

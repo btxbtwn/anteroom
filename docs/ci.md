@@ -16,6 +16,8 @@ the old and new paths. An unavailable base runs every check group.
 | Frontend runtime | Frontend tests and both builds, backend, code health, both browser suites |
 | Frontend tests only | Frontend tests and both builds, backend, code health |
 | Extension or listing skills | Backend, code health, browser suites; extension checks for extension changes |
+| Skill references (`skills/list-this/references/`) or the extension manifest | Also frontend and extension checks: the editor imports the field list and the manifest's version, and the extension's value matrix reads the option lists |
+| iPhone tool installer or `ios.yml` | Backend, code health (a backend test reads them) |
 | Python dependencies or their installer | Backend, code health, browser suites, dependency audit |
 | npm dependencies | Frontend, backend, code health, browser suites, extension checks |
 | Relay | Relay checks |
@@ -38,6 +40,6 @@ be up to date with `main`. Update a PR for actual conflicts, failed checks or
 a needed dependency, not solely because another PR merged. A passing PR can
 still interact badly with another change; the checks on `main` verify the
 merged result. Pushes to `main` never cancel each other's CI, and the hosted
-deploy of a `Release Anteroom` commit waits for CI to pass on the merge before
-it (`.github/scripts/wait-for-tested-code.py`), so a broken combination stops
-before production. The automatic branch-update workflow is disabled.
+deploy waits for CI to pass on every merge since the commit production runs
+(`.github/scripts/wait-for-tested-code.py`), so a broken combination stops
+before production even when a later merge's narrower checks pass. The automatic branch-update workflow is disabled.

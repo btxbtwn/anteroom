@@ -7,7 +7,7 @@ export const THEME_STORAGE_KEY = "vendoo-studio:theme";
 export const DEFAULT_THEME: ThemePreference = "system";
 
 const LIGHT_THEME_COLOR = "#ffffff";
-const DARK_THEME_COLOR = "#0a0a0a";
+const DARK_THEME_COLOR = "#000000";
 
 export function normalizeTheme(value: unknown): ThemePreference {
   if (value === "light" || value === "dark" || value === "system") return value;

@@ -19,6 +19,11 @@ from vendoo_studio.services.error_alerts import note_cause
 from vendoo_studio.services.seller_sessions import SellerIdentity
 
 
+# Per seller transaction; see _scope_transaction.
+STATEMENT_TIMEOUT = "15s"
+IDLE_IN_TRANSACTION_TIMEOUT = "30s"
+
+
 class SellerDatabaseSession(Session):
     def __init__(self, *, user_id: str, bind, **kwargs):
         self._seller_id = str(UUID(user_id))
@@ -51,13 +56,14 @@ def seller_session(request: Request) -> Iterator[SellerDatabaseSession]:
     from vendoo_studio.services.service_context import current
 
     try:
-        # Preferences are an execution snapshot. Load it before any inventory
-        # query: concurrent validators must not each hold one pooled connection
-        # while waiting for a second connection to read settings.
-        context = current()
-        if context is not None:
-            context.settings.read()
         with SellerDatabaseSession(user_id=identity.user_id, bind=engine) as db:
+            # Preferences are an execution snapshot. Load it as this session's
+            # first query: concurrent validators must not each hold one pooled
+            # connection while waiting for a second one to read settings, and
+            # a session of its own would cost four more round trips per request.
+            context = current()
+            if context is not None:
+                context.settings.load(db)
             yield db
     except SQLAlchemyError as exc:
         note_cause(exc)
@@ -92,9 +98,17 @@ def _scope_transaction(session, transaction, connection):
     # recurse). Both settings disappear on commit/rollback before pool reuse.
     # One statement, as PostgREST scopes a request: Postgres is a network hop
     # away, and each extra statement here is paid by every transaction.
+    # The timeouts bound a runaway query, a lock wait, or a transaction left
+    # open across a wait, any of which otherwise keeps a pooled connection
+    # until the process stops. Seller statements take well under a second (an
+    # inventory list, the largest read, about 2 s in production); the longest
+    # legitimate pause inside a transaction is one Storage call, capped at 20 s.
     connection.execute(
-        text("SELECT set_config('role', 'anteroom_seller', true), set_config('request.jwt.claims', :claims, true)"),
-        {"claims": json.dumps({"sub": session.user_id})},
+        text("SELECT set_config('role', 'anteroom_seller', true), set_config('request.jwt.claims', :claims, true),"
+             " set_config('statement_timeout', :statement_timeout, true),"
+             " set_config('idle_in_transaction_session_timeout', :idle_timeout, true)"),
+        {"claims": json.dumps({"sub": session.user_id}), "statement_timeout": STATEMENT_TIMEOUT,
+         "idle_timeout": IDLE_IN_TRANSACTION_TIMEOUT},
     )
     # The role and the row security it relies on are checked once per pooled
     # connection: a new connection is checked before its first seller query.
