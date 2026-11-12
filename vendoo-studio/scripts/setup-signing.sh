@@ -19,8 +19,10 @@
 # Then:  ./scripts/setup-signing.sh ~/Desktop/DeveloperID.p12
 #
 # The script checks the file, uploads it and its password as the GitHub
-# Actions secrets MACOS_SIGNING_CERT_P12_BASE64 and MACOS_SIGNING_CERT_PASSWORD,
-# and leaves nothing behind. Delete the .p12 afterwards; Keychain still has it.
+# Actions secrets MACOS_SIGNING_CERT_P12_BASE64 and MACOS_SIGNING_CERT_PASSWORD
+# in the `release` environment (only main may use it, so no other branch's
+# workflow can read the key), removes any repository-wide copies, and leaves
+# nothing behind. Delete the .p12 afterwards; Keychain still has it.
 set -euo pipefail
 
 REPO="${REPO:-btxbtwn/anteroom}"
@@ -70,7 +72,11 @@ if [[ "$IDENTITIES" != "Developer ID Application:"* ]]; then
   [[ "$ANSWER" == [yY] ]] || exit 1
 fi
 
-base64 -i "$P12" | gh secret set MACOS_SIGNING_CERT_P12_BASE64 --repo "$REPO"
-printf '%s' "$P12_PASSWORD" | gh secret set MACOS_SIGNING_CERT_PASSWORD --repo "$REPO"
+base64 -i "$P12" | gh secret set MACOS_SIGNING_CERT_P12_BASE64 --repo "$REPO" --env release
+printf '%s' "$P12_PASSWORD" | gh secret set MACOS_SIGNING_CERT_PASSWORD --repo "$REPO" --env release
+# Older setups stored them repository-wide, where any branch could read them.
+for name in MACOS_SIGNING_CERT_P12_BASE64 MACOS_SIGNING_CERT_PASSWORD; do
+  gh secret delete "$name" --repo "$REPO" >/dev/null 2>&1 || true
+done
 echo "Uploaded. The next release from main is signed with this certificate."
 echo "After installing that update, click Always Allow once; later updates won't ask."
