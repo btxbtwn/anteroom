@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.955 — 2026-11-12
+
+- Send each new Anteroom Bridge version to the Chrome Web Store for review automatically, so Chrome can update it without a Mac app release.
+
 ## 0.1.954 — 2026-11-12
 
 - Keep normal empty Chrome relay polls out of slow-response error emails, while still reporting failures and excessive waits.

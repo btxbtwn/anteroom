@@ -1,1 +1,0 @@
-- Send each new Anteroom Bridge version to the Chrome Web Store for review automatically, so Chrome can update it without a Mac app release.
