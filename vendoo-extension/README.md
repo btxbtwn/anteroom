@@ -61,3 +61,13 @@ For live pages:
 3. Open the service worker's DevTools from `chrome://extensions/` and filter by the marketplace prefix (`[POSHMARK]`, `[MERCARI]`, ...).
 4. When a marketplace may have changed its sell page, run its form sweep in `tools/form-sweep/` (see the root `AGENTS.md`, **Verification**).
 5. To learn the shape of a marketplace's own requests, use the Network panel of Chrome's DevTools on its page while you act by hand, and keep only operation names, paths and field names. The Bridge does not ask for the `debugger` permission, so it cannot record them itself.
+
+## Chrome Web Store
+
+Anteroom Bridge is store item `empinkdlhndpfoigoipbiiofaeepcheo`. When a merge to `main` raises the version in `manifest.json` (CI requires that for every Bridge code change), the **Chrome Web Store** workflow (`.github/workflows/chrome-web-store.yml`) packages the files Chrome loads, the same ones the Mac app copies, and submits them for review through the Chrome Web Store API (v2). It submits only a version newer than every one the store has published or is reviewing, so rerunning it never resubmits a build, and it cancels an older submission still in review first. Google reviews each version before sellers get it, under the visibility set in the developer dashboard. The zip is kept as a run artifact for 30 days. To build it locally: `python3 .github/scripts/chrome-web-store.py package --out bridge.zip`.
+
+One-time setup:
+1. In a Google Cloud project, enable the **Chrome Web Store API**, create a service account, and download a JSON key for it.
+2. In the [developer dashboard](https://chrome.google.com/webstore/devconsole), open **Account**, add the service account's email, and copy the **Publisher ID**.
+3. Add both to the `production` environment's secrets in GitHub: `CHROME_WEB_STORE_SERVICE_ACCOUNT` (the whole JSON key) and `CHROME_WEB_STORE_PUBLISHER_ID`.
+4. Run the workflow once from the Actions tab (**Run workflow**) to submit the current version.

@@ -1,0 +1,50 @@
+name: Chrome Web Store
+
+# Submits Anteroom Bridge to the Chrome Web Store when a merge to main raises
+# its manifest version. CI requires that raise for every Bridge code change
+# (vendoo-extension/tools/version-bump/check.js), and main only takes PRs that
+# passed CI. The script submits only a version newer than every one the store
+# has, so a rerun or a manual run never resubmits the same build. The store
+# reviews each version before sellers get it, under the item's own visibility.
+# See vendoo-extension/README.md, **Chrome Web Store**.
+on:
+  push:
+    branches: [main]
+    paths: [vendoo-extension/manifest.json]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    name: Package and submit
+    # One submission at a time, never cancelled midway.
+    concurrency:
+      group: chrome-web-store
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    # Secrets live in this environment, which only main may use.
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Package the Bridge
+        id: package
+        run: echo "version=$(python3 .github/scripts/chrome-web-store.py package --out "$RUNNER_TEMP/anteroom-bridge.zip")" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: anteroom-bridge-${{ steps.package.outputs.version }}
+          path: ${{ runner.temp }}/anteroom-bridge.zip
+          retention-days: 30
+
+      - name: Submit to the Chrome Web Store
+        env:
+          CHROME_WEB_STORE_SERVICE_ACCOUNT: ${{ secrets.CHROME_WEB_STORE_SERVICE_ACCOUNT }}
+          CHROME_WEB_STORE_PUBLISHER_ID: ${{ secrets.CHROME_WEB_STORE_PUBLISHER_ID }}
+        run: python3 .github/scripts/chrome-web-store.py release --package "$RUNNER_TEMP/anteroom-bridge.zip"
