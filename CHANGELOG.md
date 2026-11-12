@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.945 — 2026-11-12
+
+- Moving a Mac into an online account no longer keeps a photo locked while it uploads, so the account stays responsive during a move.
+
 ## 0.1.944 — 2026-11-12
 
 - The online account keeps checking sign-ins quickly while other work is busy, so the Mac and Chrome stay connected.
