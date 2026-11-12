@@ -1,0 +1,1 @@
+- Anteroom stays responsive while it checks how many are left on eBay or Etsy after a sale.

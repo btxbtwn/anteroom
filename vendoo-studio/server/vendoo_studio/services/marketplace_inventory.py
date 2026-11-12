@@ -1,12 +1,11 @@
 """Reads of linked eBay and Etsy listings, taken after a sale. Never write to a marketplace."""
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 import logging
 import math
-
-from sqlalchemy.orm import Session
 
 from vendoo_studio.models.listing import ListingRevision
 from vendoo_studio.repositories.queries import ListingRepo
@@ -108,43 +107,65 @@ async def _etsy(listing_id: str) -> dict:
     return result
 
 
-async def observe(db: Session, conv_id: str, marketplace: str, listing_id: str) -> dict:
-    """Compare verified public values with the latest local revision, keeping both intact."""
+def _record(session_factory, conv_id: str, marketplace: str, listing_id: str, started: str, result: dict) -> list[dict]:
+    """Compare a verified remote read with the latest local revision and save the observation (a worker-thread step)."""
+    from vendoo_studio.services.ebay_variations import total_quantity
     from vendoo_studio.services.marketplace_delist import listings
 
+    with session_factory() as db:
+        # The seller may have replaced the link while the remote read was in flight.
+        db.expire_all()
+        current = listings(db, conv_id).get(marketplace) or {}
+        if current.get("listing_id") != listing_id or current.get("state") != "live":
+            raise InventoryCheckError("This item's marketplace link or status changed during the read.")
+        listing = ListingRepo(db).get_current(conv_id)
+        revision = db.get(ListingRevision, listing.current_revision_id) if listing and listing.current_revision_id else None
+        snapshot = revision.listing_json if revision else {}
+        differences = []
+        varied = total_quantity(snapshot) if marketplace == "ebay" else None
+        for field in ("price", "quantity"):
+            remote, local = result[field], _number(snapshot.get(field))
+            if field == "quantity" and varied is not None:
+                local = float(varied)
+            if field == "price" and result.get("variations"):
+                continue
+            if remote is not None and remote != local:
+                differences.append({"field": field, "local": local, "remote": remote})
+        observation = {"listing_id": listing_id, "checked_at": started, "state": result["state"],
+                       "quantity": result["quantity"], "price": result["price"]}
+        if result.get("variations"):
+            # Per-SKU stock, so a sale of one size is not read as the whole item selling out.
+            observation["variations"] = [{"sku": row["sku"], "quantity": row["quantity"]} for row in result["variations"]]
+        values: dict = {"inventory_observation": observation}
+        if result["price"] is not None and not result.get("variations"):
+            # A verified read of the live listing: the price the marketplace has now.
+            values["listed_price"] = result["price"]
+        MarketplaceListingRepo(db).save(conv_id, marketplace, values)
+        return differences
+
+
+async def observe(conv_id: str, marketplace: str, listing_id: str, *, session_factory) -> dict:
+    """Compare verified public values with the latest local revision, keeping both intact.
+
+    The remote read holds no database session; the comparison and save run on a worker thread.
+    """
     started = datetime.now(UTC).isoformat()
     result = await {"ebay": _ebay, "etsy": _etsy}[marketplace](listing_id)
-    # The seller may have replaced the link while the remote read was in flight.
-    db.expire_all()
-    current = listings(db, conv_id).get(marketplace) or {}
-    if current.get("listing_id") != listing_id or current.get("state") != "live":
-        raise InventoryCheckError("This item's marketplace link or status changed during the read.")
-    listing = ListingRepo(db).get_current(conv_id)
-    revision = db.get(ListingRevision, listing.current_revision_id) if listing and listing.current_revision_id else None
-    snapshot = revision.listing_json if revision else {}
-    from vendoo_studio.services.ebay_variations import total_quantity
-
-    differences = []
-    varied = total_quantity(snapshot) if marketplace == "ebay" else None
-    for field in ("price", "quantity"):
-        remote, local = result[field], _number(snapshot.get(field))
-        if field == "quantity" and varied is not None:
-            local = float(varied)
-        if field == "price" and result.get("variations"):
-            continue
-        if remote is not None and remote != local:
-            differences.append({"field": field, "local": local, "remote": remote})
-    observation = {"listing_id": listing_id, "checked_at": started, "state": result["state"],
-                   "quantity": result["quantity"], "price": result["price"]}
-    if result.get("variations"):
-        # Per-SKU stock, so a sale of one size is not read as the whole item selling out.
-        observation["variations"] = [{"sku": row["sku"], "quantity": row["quantity"]} for row in result["variations"]]
-    values: dict = {"inventory_observation": observation}
-    if result["price"] is not None and not result.get("variations"):
-        # A verified read of the live listing: the price the marketplace has now.
-        values["listed_price"] = result["price"]
-    MarketplaceListingRepo(db).save(conv_id, marketplace, values)
+    differences = await asyncio.to_thread(_record, session_factory, conv_id, marketplace, listing_id, started, result)
     return {"listing_id": listing_id, **result, "differences": differences}
+
+
+def _unknown_stock(session_factory, sale_ids: list[str]) -> list[tuple[str, str, str]]:
+    """The paid eBay and Etsy sales whose remaining stock Anteroom cannot tell (a worker-thread step)."""
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
+    from vendoo_studio.services.sale_inventory import stock_after_sale
+
+    with session_factory() as db:
+        sales = db.query(MarketplaceSale).filter(MarketplaceSale.id.in_(sale_ids)).all()
+        targets = {(sale.conversation_id, sale.marketplace, sale.listing_id) for sale in sales
+                   if sale.marketplace in {"ebay", "etsy"} and sale.conversation_id and sale.listing_id
+                   and sale.order_status in PAID_STATUSES}
+        return [target for target in sorted(targets) if stock_after_sale(db, *target)["status"] == "unknown"]
 
 
 async def read_after_sales(sale_ids: list[str], *, session_factory) -> None:
@@ -154,23 +175,12 @@ async def read_after_sales(sale_ids: list[str], *, session_factory) -> None:
     unit needs the marketplace's own stock, read after the sale, before anything
     is delisted elsewhere. A failed read leaves the stock unknown.
     """
-    from vendoo_studio.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
-    from vendoo_studio.services.sale_inventory import stock_after_sale
-
-    with session_factory() as db:
-        sales = db.query(MarketplaceSale).filter(MarketplaceSale.id.in_(sale_ids)).all()
-        targets = {(sale.conversation_id, sale.marketplace, sale.listing_id) for sale in sales
-                   if sale.marketplace in {"ebay", "etsy"} and sale.conversation_id and sale.listing_id
-                   and sale.order_status in PAID_STATUSES}
-        for conv_id, marketplace, listing_id in sorted(targets):
-            if stock_after_sale(db, conv_id, marketplace, listing_id)["status"] != "unknown":
-                continue
-            # End the read-only transaction first: the remote read can outlast
-            # hosted Postgres's idle-in-transaction limit, and holds no pooled
-            # connection while it waits. observe saves through this session after.
-            db.rollback()
-            try:
-                await observe(db, conv_id, marketplace, listing_id)
-            except Exception as exc:  # noqa: BLE001 - the sale is recorded either way
-                # The exception text can carry marketplace responses; log its type only.
-                log.info("Could not read %s stock for %s: %s", marketplace, conv_id, type(exc).__name__)
+    # Each database step runs on a worker thread with a session of its own, so
+    # no query waits on the event loop and no connection or transaction is held
+    # while the marketplace answers.
+    for conv_id, marketplace, listing_id in await asyncio.to_thread(_unknown_stock, session_factory, sale_ids):
+        try:
+            await observe(conv_id, marketplace, listing_id, session_factory=session_factory)
+        except Exception as exc:  # noqa: BLE001 - the sale is recorded either way
+            # The exception text can carry marketplace responses; log its type only.
+            log.info("Could not read %s stock for %s: %s", marketplace, conv_id, type(exc).__name__)

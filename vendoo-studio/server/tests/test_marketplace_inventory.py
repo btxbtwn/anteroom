@@ -34,7 +34,8 @@ def read_listings(fixture, conv_id):
         if marketplace not in {"ebay", "etsy"} or not entry.get("listing_id"):
             continue
         try:
-            inventory = asyncio.run(marketplace_inventory.observe(fixture.db, conv_id, marketplace, entry["listing_id"]))
+            inventory = asyncio.run(marketplace_inventory.observe(
+                conv_id, marketplace, entry["listing_id"], session_factory=lambda: fixture.db))
         except Exception as exc:  # noqa: BLE001 - the test reads the failure
             outcome[marketplace] = {"ok": False, "error": str(exc)}
         else:
@@ -209,3 +210,35 @@ def test_stock_read_after_a_sale_holds_no_transaction_during_the_remote_read(ets
     etsy_imported.remote.after_read = lambda: during_read.append(etsy_imported.db.in_transaction())
     asyncio.run(marketplace_inventory.read_after_sales([sale_id], session_factory=lambda: etsy_imported.db))
     assert during_read and not any(during_read)
+
+
+def test_stock_read_after_a_sale_keeps_database_steps_off_the_event_loop(etsy_imported):
+    """On the Mac this runs on the server loop after a sale; a query there waiting on SQLite's write lock froze every request."""
+    import threading
+
+    from sqlalchemy import event
+
+    conv_id = import_item(etsy_imported, "etsy")
+    sale = MarketplaceSale(marketplace="etsy", listing_id="555", order_id="order", line_id="line", quantity=1,
+                           conversation_id=conv_id)
+    etsy_imported.db.add(sale)
+    etsy_imported.db.commit()
+    sale_id = sale.id
+    engine = etsy_imported.db.get_bind()
+    on_loop = []
+
+    async def run():
+        loop_thread = threading.get_ident()
+
+        def note(*_args, **_kwargs):
+            on_loop.append(threading.get_ident() == loop_thread)
+
+        event.listen(engine, "before_cursor_execute", note)
+        try:
+            await marketplace_inventory.read_after_sales([sale_id], session_factory=lambda: etsy_imported.db)
+        finally:
+            event.remove(engine, "before_cursor_execute", note)
+
+    asyncio.run(run())
+    assert on_loop, "expected database statements"
+    assert not any(on_loop), f"{sum(on_loop)} of {len(on_loop)} statements ran on the event loop thread"
