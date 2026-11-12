@@ -236,6 +236,46 @@ after deploy: whether page reads stay under the pool timeout with two sellers
 generating. The stream reader's own poll (about five round trips every 0.5 s
 per open stream) is the next cost of the same kind.
 
+Open streams now read only when Postgres says there is something new
+(`services/task_signals.py`). Triggers on `background_task_events` (insert) and
+`background_tasks` (status change) call `pg_notify('anteroom_task_events',
+<task id>)`, which Postgres delivers when the writing transaction commits,
+through the transaction pooler as well. The notice carries only the task id.
+Each web process (role `web` or `all`) keeps one connection that runs `LISTEN`
+on a thread and wakes the streams in that process that follow the task. The
+stream then reads through its own seller session as before, so row security
+still decides what it sees, and the durable journal still serves a resume. The
+transaction pooler cannot `LISTEN`, so the listener uses the session pooler on
+the same host: `ANTEROOM_DATABASE_URL` with port 6543 changed to 5432 (any
+other URL is used as it is), with the same login. `LISTEN` touches no table, so
+the restricted `anteroom_api` login can run it; it costs one session-mode
+connection per web process (two while a blue-green deploy overlaps). The
+listener connects with a 10 s deadline and TCP keepalives, checks an idle
+connection every 30 s, and reconnects with backoff from 1 to 30 s. A stream
+that hears nothing reads again after 10 s anyway, so a lost notice only delays
+an update. While the listener is down, streams read every 0.5 s as before, and
+every stream reads once when it reconnects. `/api/health` reports
+`progress_listener` (`listening`, `reconnects`), and a lost connection logs a
+warning with the error's type only.
+
+The writer also lost a round trip: one insert numbers its events after the
+task's last one, instead of reading the highest number first.
+
+Measured on local Postgres 16 in a test (`test_task_signals.py` scenario, 20 s
+windows, one open stream, counting `BEGIN`, statements and `COMMIT`/`ROLLBACK`
+on the engine; the once-per-connection isolation check excluded):
+
+| Open stream | Before | After |
+| --- | --- | --- |
+| Idle (task queued or between writes) | 8.5 round trips/s | 0.5 round trips/s (the 10 s fallback) |
+| Draft writing every 0.5 s, writer plus one stream | about 22 round trips/s (writer 12, from its six statements a write; stream 10 measured) | 20 round trips/s (writer 10, stream reads once per write) |
+
+At about 24 ms a round trip from the Machine, an idle stream went from about
+0.2 s of pooled-connection time per second to about 0.01 s. Not yet measured
+after deploy: whether Supabase's session pooler accepts the listener (until it
+does, `/api/health` shows `listening: false` and streams poll as before), and
+pool use with several sellers following drafts.
+
 The same incident had a CPU cost as well. Samples a few minutes after the
 error found all 12 connections `idle in transaction` for 1 to 7 s between
 ordinary reads while the process waited for the CPU, and a 30-second py-spy

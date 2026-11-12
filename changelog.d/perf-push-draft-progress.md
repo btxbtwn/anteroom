@@ -1,0 +1,2 @@
+- On the web, a draft or assistant answer you are watching no longer checks the cloud database twice a second while nothing is happening, which leaves more room for your pages to load while drafts generate.
+- Saving draft progress takes one fewer trip to the database.
