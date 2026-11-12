@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.954 — 2026-11-12
+
+- Keep normal empty Chrome relay polls out of slow-response error emails, while still reporting failures and excessive waits.
+
 ## 0.1.953 — 2026-11-12
 
 - Anteroom and Anteroom Connector are now notarized by Apple, so a fresh download opens without Control-clicking.
