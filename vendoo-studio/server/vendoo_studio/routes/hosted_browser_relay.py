@@ -41,7 +41,7 @@ def _pinned(*, claim_route: bool):
 
 
 @router.get('/next')
-async def next_command(capabilities: str = Query('', max_length=200)):
+async def next_command(capabilities: str = Query('', max_length=400)):
     """The next command for this seller's Chrome. Waits up to 20 seconds; 204 when there is none."""
     if pinned := await asyncio.to_thread(_pinned, claim_route=True):
         return pinned
@@ -54,7 +54,7 @@ class Heartbeat(BaseModel):
     capabilities: list[Literal['marketplace.actions',
                                'marketplace.sessions', 'marketplace.sales_history',
                                'marketplace.promotions', 'marketplace.import', 'vendoo.drafts',
-                               'marketplace.signed_approvals']] = Field(max_length=8)
+                               'marketplace.signed_approvals', 'marketplace.signed_commands']] = Field(max_length=12)
 
 
 @router.post('/heartbeat')

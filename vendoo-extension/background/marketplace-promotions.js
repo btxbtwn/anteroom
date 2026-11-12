@@ -336,8 +336,13 @@ function requireDepopOfferCurrency(product, preview = {}) {
   if (!currencies.length) throw depopOfferDrift('listing currency');
 }
 
-// Neither code 1003 nor an omitted recipient proves that a listing has no
-// eligible likers. Preserve the observed refusal, not an inferred cause.
+// Depop answers the send-all preview with HTTP 400 code 1003 ("Does the
+// product have variants and are you sending them?") when it has nobody to
+// send an offer to. On the seller's account (2026-11-11), 558 of the 564
+// listings that got it had never been liked, and the other 6 had already had
+// an offer sent to their likers; listings with several sizes are refused
+// before the preview. Say that instead of Depop's misleading wording.
+const DEPOP_NO_RECIPIENTS = 'Depop has nobody to send an offer to on this listing: no one has liked it, or every liker already has an offer.';
 
 function depopOfferPreview(body, product) {
   if (String(body?.product_id) === String(product.id) && body?.offer_recipient_id == null) {
@@ -377,8 +382,8 @@ async function depopOfferState(requests, slug, deadline) {
     reply = await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview');
   } catch (error) {
     if (error?.status === 400 && error.response_data?.code === 1003) {
-      throw marketplaceError('Depop refused this listing’s send-all preview (HTTP 400, code 1003). No offer was sent.',
-        { status: 400, marketplace_message: error.marketplace_message });
+      // Zero likers to offer to: Anteroom then waits for a new like before checking again.
+      throw Object.assign(marketplaceError(DEPOP_NO_RECIPIENTS, { status: 400 }), { like_count: 0 });
     }
     throw error;
   }
@@ -457,7 +462,7 @@ async function checkMarketplacePromotion(payload) {
     return marketplaceFailure(marketplaceError('Name a marketplace listing and an action to check.'), true);
   }
   try { return await entry.check(payload, Date.now() + PROMOTION_DEADLINE_MS); }
-  catch (error) { return marketplaceFailure(error, true); }
+  catch (error) { return marketplaceFailure(error, true, Number.isInteger(error?.like_count) ? { like_count: error.like_count } : {}); }
 }
 
 async function runMarketplacePromotion(payload) {

@@ -357,6 +357,42 @@ test('a Depop publish job that ended without posting names its reason and leaves
   assert.equal(result.draft_url, DRAFT);
 });
 
+test('Depop publish failures recover nested SKU validation without writing', async () => {
+  for (const onDraft of [false, true]) {
+    const { c, payload } = page();
+    const validation = { errors: { sku: ['SKU is invalid: SKU must be unique'] } };
+    c.fetch = async (url, options = {}) => {
+      assert.ok(!options.method || options.method === 'GET');
+      if (new URL(url).pathname.endsWith('/status/')) return reply(200, {
+        count_by_status: { FAILED: 1, COMPLETE: 0, PENDING: 0 },
+        ...(!onDraft ? validation : {}),
+      });
+      return reply(200, { description: 'Private draft', ...validation });
+    };
+    const result = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1' });
+    assert.equal(result.failed, true);
+    assert.equal(result.reason, 'SKU is invalid: SKU must be unique');
+  }
+});
+
+test('a count-only Depop failure stays a refusal if reading its draft fails', async () => {
+  const { c, payload } = page();
+  c.fetch = async (url, options = {}) => {
+    assert.ok(!options.method || options.method === 'GET');
+    return new URL(url).pathname.endsWith('/status/')
+      ? reply(200, { count_by_status: { FAILED: 1 } }) : reply(404, { detail: 'Not found' });
+  };
+  const result = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1' });
+  assert.equal(result.failed, true);
+  assert.equal(result.reason, undefined);
+});
+
+test('Depop validation extraction excludes unrelated draft data', () => {
+  const { c } = page();
+  assert.equal(c.depopValidationReason({ description: 'private', address: 'private',
+    errors: { sku: ['SKU must be unique'] } }), 'SKU must be unique');
+});
+
 test('a completed Depop publish without a slug uses the one matching selling listing', async () => {
   const { c, requests, payload } = page();
   c.fetch = async (url) => {

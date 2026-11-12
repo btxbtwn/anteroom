@@ -17,6 +17,7 @@ function loadWorker({ apiOrigin } = {}) {
   const alarms = [];
   const alarmListeners = [];
   const messageListeners = [];
+  const storageAccess = [];
   const context = {
     ...(apiOrigin ? { STUDIO_API_ORIGIN: apiOrigin } : {}),
     console: { log() {}, error() {}, warn() {} },
@@ -46,13 +47,13 @@ function loadWorker({ apiOrigin } = {}) {
           get: async () => ({}),
           set: async () => {},
           remove: async () => {},
+          setAccessLevel: async (options) => { storageAccess.push(options); },
         },
       },
       tabs: stubApi(),
       windows: { getAll: async () => [{ id: 1, focused: true }] },
       declarativeNetRequest: { updateSessionRules: async () => {} },
       scripting: stubApi(),
-      debugger: stubApi(),
       system: { display: stubApi() },
     },
     // Timers never fire: tests only call pure helpers, and the worker's
@@ -92,6 +93,7 @@ function loadWorker({ apiOrigin } = {}) {
   context.__messageListeners = messageListeners;
   context.__alarms = alarms;
   context.__alarmListeners = alarmListeners;
+  context.__storageAccess = storageAccess;
   vm.createContext(context);
   context.importScripts('background.js');
   // Retry pauses return at once; tests that count them replace this.

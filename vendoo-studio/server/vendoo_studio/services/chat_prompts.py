@@ -74,12 +74,23 @@ def current_listing_prompt(db: Session, conv_id: str, *, include_native_forms: b
     )
 
 
-async def build_chat_messages(conv_id: str, db: Session, user_message: str, option_catalog=None) -> list[dict]:
+def _chat_inputs(db: Session, conv_id: str):
     repo = ConversationRepo(db)
-    history = repo.get_messages(conv_id)
-    photos = repo.get_photos(conv_id)
     conv = repo.get(conv_id)
-    notes = (conv.notes if conv else "") or ""
+    return repo.get_messages(conv_id), repo.get_photos(conv_id), (conv.notes if conv else "") or ""
+
+
+def _listing_context(db: Session, conv_id: str) -> tuple[str, str, str]:
+    from vendoo_studio.services.chat_field_context import chat_field_context
+
+    return (current_listing_prompt(db, conv_id, include_native_forms=False) + learned_fields_prompt(db, conv_id),
+            chat_field_context(db, conv_id), item_decisions_prompt(db, conv_id))
+
+
+async def build_chat_messages(conv_id: str, user_message: str, option_catalog=None) -> list[dict]:
+    from vendoo_studio.database import in_worker_session
+
+    history, photos, notes = await in_worker_session(_chat_inputs, conv_id)
 
     # Quotes the seller cited are links in the stored message; the rule search
     # and the request heuristics read them as the text the seller sees.
@@ -102,9 +113,6 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
         provider = get_photo_provider()
         if provider:
             paths = [str(path) for path in photo_store().local_paths([p.stored_filename for p in photos])]
-            # End the read transaction so the session does not hold a pool
-            # connection while the model reads photos and researches comps.
-            db.commit()
             try:
                 result = await analyze_photos_with_tag_retry(provider, paths, notes="", listing_rules=skill_rules[:8000])
             except Exception as exc:
@@ -115,16 +123,17 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
                 "Photo analysis of the uploaded product images:",
                 1,
             )
-            repo.add_message(conv_id, "system", analysis_note, photo_fingerprint=fingerprint)
+            await in_worker_session(lambda db: ConversationRepo(db).add_message(
+                conv_id, "system", analysis_note, photo_fingerprint=fingerprint))
             photo_analysis_text = analysis_with_photo_count(len(photos), analysis_note)
             skill_rules = await asyncio.to_thread(
                 load_skill_rules,
                 f"{user_message_text}\n{photo_analysis_text}\n{seller_item_details(notes)}",
             )
-            db.commit()
             comps_text = await research_sold_comps(photo_analysis_text, evidence)
             if comps_text:
-                repo.add_message(conv_id, "system", comps_text, provider="web-search", model="web-search")
+                await in_worker_session(lambda db: ConversationRepo(db).add_message(
+                    conv_id, "system", comps_text, provider="web-search", model="web-search"))
         else:
             photo_analysis_text = analysis_with_photo_count(len(photos), existing_analysis)
 
@@ -183,6 +192,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
             "On Poshmark, None is the last step when you want a category that still has narrower choices.\n\n"
         )
 
+    listing_text, field_context, decisions_text = await in_worker_session(_listing_context, conv_id)
     system_prompt = {
         "role": "system",
         "content": (
@@ -204,18 +214,16 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str, opti
             + (f"\n{photo_analysis_text}\n\n" if photo_analysis_text else "") +
             comps_block +
             (f"\n--- Listing Rules ---\n\n{skill_rules}" if skill_rules else "")
-        ) + current_listing_prompt(db, conv_id, include_native_forms=False) + learned_fields_prompt(db, conv_id),
+        ) + listing_text,
     }
 
-    from vendoo_studio.services.chat_field_context import chat_field_context
-
-    system_prompt["content"] += chat_field_context(db, conv_id)
+    system_prompt["content"] += field_context
     from vendoo_studio.services.chat_forms import forms_prompt
 
-    system_prompt["content"] += await forms_prompt(db, conv_id, option_catalog)
+    system_prompt["content"] += await forms_prompt(conv_id, option_catalog)
     from vendoo_studio.services.item_context import seller_messages
 
-    system_prompt["content"] += item_decisions_prompt(db, conv_id)
+    system_prompt["content"] += decisions_text
     selected = {message.id for message in seller_messages(history, user_message_text)}
     # Assistant replies and save confirmations provide recent conversational
     # continuity; they cannot crowd old seller evidence out of its own budget.

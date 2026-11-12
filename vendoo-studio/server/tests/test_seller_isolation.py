@@ -196,6 +196,26 @@ def test_every_seller_table_has_restrictive_row_security(seller_engine):
     assert tables <= restrictive
 
 
+def test_seller_policies_read_the_signed_in_seller_once_per_statement(seller_engine):
+    """Unwrapped, the claim is read and parsed as JSON for every row a scan visits."""
+    with seller_engine.connect() as connection:
+        policies = connection.execute(text(
+            "SELECT tablename, policyname, qual, with_check FROM pg_policies "
+            "WHERE policyname IN ('seller_owner', 'seller_subscriber')")).all()
+    assert policies
+    per_row = [(row.tablename, row.policyname) for row in policies
+               if any(expression is not None and "current_setting" in expression
+                      and "(SELECT" not in expression.upper().replace("( SELECT", "(SELECT")
+                      for expression in (row.qual, row.with_check))]
+    assert per_row == []
+    with seller_engine.begin() as connection:
+        connection.execute(text("SELECT set_config('role', 'anteroom_seller', true), "
+                                "set_config('request.jwt.claims', :claims, true)"), {"claims": f'{{"sub": "{ALICE}"}}'})
+        plan = "\n".join(connection.execute(text("EXPLAIN SELECT id FROM conversations")).scalars())
+        assert "InitPlan" in plan, plan
+        assert connection.execute(text("SELECT id FROM conversations")).scalars().all() == ["alice"]
+
+
 def test_missing_claims_deny_all_rows(seller_engine):
     with seller_engine.begin() as connection:
         connection.execute(text("SET LOCAL ROLE anteroom_seller"))

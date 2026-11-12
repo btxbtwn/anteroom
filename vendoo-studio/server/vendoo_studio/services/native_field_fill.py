@@ -237,14 +237,14 @@ def _keep_depop_age(listing: dict, row: dict | None) -> None:
     write_value(listing, DEPOP_AGE, [stored] if row.get("multi") else stored)
 
 
-async def load_forms(db: Session, conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str, dict]:
+async def load_forms(conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str, dict]:
     """Each named direct marketplace's current form. One that cannot be read is skipped."""
     from vendoo_studio.services.native_editor import editor_form
 
     forms = {}
     for market in (market for market in MARKETS if market in set(markets)):
         try:
-            form = await editor_form(conv_id, market, None, db, refresh=True)
+            form = await editor_form(conv_id, market, None, refresh=True)
         except Exception as exc:  # noqa: BLE001 - one marketplace's form never stops the others
             log.info("No %s form to fill for %s: %s", market, conv_id, exc)
             continue
@@ -253,27 +253,41 @@ async def load_forms(db: Session, conv_id: str, markets: Iterable[str] = MARKETS
     return forms
 
 
-async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: str,
-                             markets: Iterable[str] = MARKETS) -> dict | None:
-    """Choose required categories first, then read their forms again to fill item fields."""
-    markets = set(markets)
+def _current_revision(db: Session, conv_id: str):
     repo = ListingRepo(db)
     saved = repo.get_current(conv_id)
-    revision = repo.get_revision(saved.current_revision_id) if saved else None
-    strict = bool(revision and native_contract.KEY in revision.listing_json)
-    if strict and revision is not None:
-        markets &= set(revision.listing_json[native_contract.KEY])
-    categories = await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets, categories=True)
+    return repo.get_revision(saved.current_revision_id) if saved else None
+
+
+def _revision_data(db: Session, conv_id: str) -> tuple[str, dict] | None:
+    revision = _current_revision(db, conv_id)
+    return (revision.id, revision.listing_json) if revision is not None else None
+
+
+def _current_listing(db: Session, conv_id: str) -> dict | None:
+    revision = _current_revision(db, conv_id)
+    return revision.listing_json if revision is not None else None
+
+
+async def fill_native_fields(conv_id: str, provider, *, evidence: str,
+                             markets: Iterable[str] = MARKETS) -> dict | None:
+    """Choose required categories first, then read their forms again to fill item fields."""
+    from vendoo_studio.database import in_worker_session
+
+    markets = set(markets)
+    listing = await in_worker_session(_current_listing, conv_id)
+    strict = bool(listing is not None and native_contract.KEY in listing)
+    if strict and listing is not None:
+        markets &= set(listing[native_contract.KEY])
+    categories = await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets, categories=True)
     if strict:
-        await record_forms(db, conv_id, markets)
+        await record_forms(conv_id, markets)
     fields = None
     required_only = False
     for _round in range(3 if strict else 1):
-        saved = repo.get_current(conv_id)
-        previous = repo.get_revision(saved.current_revision_id) if saved else None
-        before = previous.listing_json if previous is not None else {}
-        fields = await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets,
-                                          categories=False, required_only=required_only)
+        before = await in_worker_session(_current_listing, conv_id) or {}
+        fields = await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets,
+                                           categories=False, required_only=required_only)
         dependencies_changed = fields is not None and any(
             native_contract.inputs(before, market, contract.get("fields") or [])
             != native_contract.inputs(fields, market, contract.get("fields") or [])
@@ -292,37 +306,40 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
         if required_only and not dependencies_changed:
             break
         required_only = not dependencies_changed
-        await record_forms(db, conv_id, markets)
+        await record_forms(conv_id, markets)
     if strict:
-        await record_forms(db, conv_id, markets)
-        saved = repo.get_current(conv_id)
-        latest = repo.get_revision(saved.current_revision_id) if saved else None
-        return latest.listing_json if latest is not None else None
+        await record_forms(conv_id, markets)
+        return await in_worker_session(_current_listing, conv_id)
     return fields if fields is not None else categories
 
 
-async def prepare_generation_forms(db: Session, conv_id: str, provider, *, evidence: str) -> dict:
+async def prepare_generation_forms(conv_id: str, provider, *, evidence: str) -> dict:
     """Select categories and capture the exact native forms before listing prose is generated."""
     from vendoo_studio.services.marketplaces import get_selected_marketplaces
 
     markets = set(MARKETS) & set(get_selected_marketplaces())
-    await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets, categories=True)
-    return await record_forms(db, conv_id, markets, reset_evidence=True)
+    await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets, categories=True)
+    return await record_forms(conv_id, markets, reset_evidence=True)
 
 
-async def record_forms(db: Session, conv_id: str, markets, *, reset_evidence: bool = False) -> dict:
+async def record_forms(conv_id: str, markets, *, reset_evidence: bool = False) -> dict:
     """Save current form definitions and their effective values onto the same revision snapshot."""
-    repo = ListingRepo(db)
-    current = repo.get_current(conv_id)
-    revision = repo.get_revision(current.current_revision_id) if current else None
-    if not revision:
+    from vendoo_studio.database import in_worker_session
+
+    current = await in_worker_session(_revision_data, conv_id)
+    if current is None:
         return {}
-    forms = await load_forms(db, conv_id, markets)
-    db.expire_all()
-    latest = repo.get_current(conv_id)
-    if not latest or latest.current_revision_id != revision.id:
+    revision_id, saved = current
+    forms = await load_forms(conv_id, markets)
+    return await in_worker_session(_record_forms, conv_id, revision_id, saved, forms, markets, reset_evidence)
+
+
+def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, forms: dict[str, dict], markets,
+                  reset_evidence: bool) -> dict:
+    latest = ListingRepo(db).get_current(conv_id)
+    if not latest or latest.current_revision_id != revision_id:
         return {}
-    listing = copy.deepcopy(revision.listing_json)
+    listing = copy.deepcopy(saved)
     if reset_evidence:
         listing[native_contract.EVIDENCE_KEY] = {}
     for market, form in forms.items():
@@ -338,25 +355,37 @@ async def record_forms(db: Session, conv_id: str, markets, *, reset_evidence: bo
     listing[native_contract.KEY] = {**(listing.get(native_contract.KEY) or {}),
                                     **native_contract.capture(listing, forms, markets)}
     native_contract.constrain_generated(listing, listing, freeze_categories=False)
-    if listing != revision.listing_json:
-        listing_persistence.save_revision(repo.db, conv_id, listing, source="native_schema", parent_revision_id=revision.id, expected_revision_id=revision.id)
+    if listing != saved:
+        listing_persistence.save_revision(db, conv_id, listing, source="native_schema", parent_revision_id=revision_id, expected_revision_id=revision_id)
     return listing[native_contract.KEY]
 
 
-async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: str,
+def _fill_inputs(db: Session, conv_id: str):
+    """The photos' fingerprint and the current revision, or None when there is nothing to fill."""
+    from vendoo_studio.services.listing_generate import photo_fingerprint
+
+    revision = _current_revision(db, conv_id)
+    if revision is None or not isinstance(revision.listing_json, dict):
+        return None
+    return photo_fingerprint(ConversationRepo(db).get_photos(conv_id)), revision.id, revision.listing_json
+
+
+def _note(db: Session, conv_id: str, text: str) -> None:
+    ConversationRepo(db).add_message(conv_id, "system", text, provider="system", model="")
+
+
+async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
                               markets: Iterable[str], categories: bool, required_only: bool = False) -> dict | None:
     """Save picks; a valid strict check returns its snapshot even when unchanged."""
-    from vendoo_studio.services.listing_generate import collect_provider_text, photo_fingerprint
+    from vendoo_studio.database import in_worker_session
+    from vendoo_studio.services.listing_generate import collect_provider_text
 
     if provider is None:
         return None
-    fingerprint = photo_fingerprint(ConversationRepo(db).get_photos(conv_id))
-    listing_repo = ListingRepo(db)
-    saved = listing_repo.get_current(conv_id)
-    revision = listing_repo.get_revision(saved.current_revision_id) if saved else None
-    if revision is None or not isinstance(revision.listing_json, dict):
+    inputs = await in_worker_session(_fill_inputs, conv_id)
+    if inputs is None:
         return None
-    listing = revision.listing_json
+    fingerprint, revision_id, listing = inputs
     strict = native_contract.KEY in listing and not categories
     # Finishing just captured these definitions. Reuse them while their
     # controlling inputs match; parent/category edits still need fresh forms.
@@ -365,7 +394,7 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
              if strict and market in requested and (form := native_contract.editor_form(listing, market)) is not None}
     missing = requested - forms.keys()
     if missing:
-        forms.update(await load_forms(db, conv_id, missing))
+        forms.update(await load_forms(conv_id, missing))
     rows_by_market = {market: rows for market, form in forms.items()
                       if (rows := category_rows(form, listing) if categories else fillable_rows(form, market, listing, evidence=evidence))}
     if required_only:
@@ -379,7 +408,8 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
         "secondaryColor", "material", "condition") if not _empty(listing.get(key))}
     from vendoo_studio.services.catalog_index import relevant_skill_rules
 
-    rules = relevant_skill_rules(db, " ".join([*rows, str(summary.get("category_path") or "")]), max_chars=40000)
+    query = " ".join([*rows, str(summary.get("category_path") or "")])
+    rules = await in_worker_session(lambda db: relevant_skill_rules(db, query, max_chars=40000))
     messages = [
         {"role": "system", "content": f"--- Canonical listing rules ---\n{rules}\n\n"
             "The native fields and choices below override generic marketplace templates. " + FILL_RULES + (
@@ -406,8 +436,6 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
         from vendoo_studio.services.option_lookup import OptionCatalog
 
         catalog = OptionCatalog({market: {"fields": rows} for market, rows in rows_by_market.items()})
-        # Hosted pool is small; never keep a checkout while waiting on the Mac.
-        db.rollback()
         for attempt in range(2):
             text = await collect_provider_text(provider, messages, option_catalog=catalog)
             reply = _json_object(text)
@@ -422,11 +450,10 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
                 )}]
     except Exception:
         log.exception("marketplace field fill request failed for %s", conv_id)
-        ConversationRepo(db).add_message(
-            conv_id, "system",
+        await in_worker_session(
+            _note, conv_id,
             "Could not fill marketplace category fields. Your saved listing is unchanged. "
             "Ask chat to fill the remaining fields, or review them in each marketplace tab.",
-            provider="system", model="",
         )
         return None
     finally:
@@ -435,19 +462,26 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
         # A failed/truncated response is not an evidence check that rejected
         # every existing answer. Leave the revision untouched.
         log.warning("unreadable marketplace field response for %s (%s characters)", conv_id, len(text))
-        ConversationRepo(db).add_message(
-            conv_id, "system", "The agent returned an unreadable marketplace field response. "
-            "Your saved listing is unchanged. Ask chat to fill the remaining fields.", provider="system", model="",
+        await in_worker_session(
+            _note, conv_id, "The agent returned an unreadable marketplace field response. "
+            "Your saved listing is unchanged. Ask chat to fill the remaining fields.",
         )
         return None
     accepted = validated_values(reply, rows, evidence=evidence if strict else None)
     if not accepted and not strict:
         return None
-    db.expire_all()
-    latest = listing_repo.get_current(conv_id)
+    return await in_worker_session(_save_fill, conv_id, revision_id, fingerprint, listing, forms, rows, reply,
+                                   accepted, strict, categories)
+
+
+def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, listing: dict, forms: dict[str, dict],
+               rows: dict[str, dict], reply: dict, accepted: dict, strict: bool, categories: bool) -> dict | None:
+    from vendoo_studio.services.listing_generate import photo_fingerprint
+
+    latest = ListingRepo(db).get_current(conv_id)
     if photo_fingerprint(ConversationRepo(db).get_photos(conv_id)) != fingerprint:
         return None
-    if not latest or latest.current_revision_id != revision.id:
+    if not latest or latest.current_revision_id != revision_id:
         # The seller edited, cleared or regenerated while the forms were read.
         return None
     updated = copy.deepcopy(listing)
@@ -476,8 +510,8 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
     _keep_depop_age(updated, rows.get(DEPOP_AGE))
     if updated == listing:
         return updated if strict else None
-    listing_persistence.save_revision(listing_repo.db, conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision.id, expected_revision_id=revision.id)
-    ConversationRepo(db).add_message(conv_id, "system", filled_message(accepted, rows), provider="system", model="")
+    listing_persistence.save_revision(db, conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision_id, expected_revision_id=revision_id)
+    _note(db, conv_id, filled_message(accepted, rows))
     return updated
 
 
@@ -587,26 +621,30 @@ def _finished(conv_id: str) -> None:
         _queue(conv_id, set())
 
 
-async def _fill_after_category(conv_id: str, markets: set[str]) -> None:
-    from vendoo_studio.database import SessionLocal
+def _category_fill_evidence(db: Session, conv_id: str) -> str | None:
     from vendoo_studio.services.listing_generate import current_photo_analysis, seller_item_details
+
+    repo = ConversationRepo(db)
+    conv = repo.get(conv_id)
+    if conv is None:
+        return None
+    return "\n\n".join(part for part in (
+        current_photo_analysis(repo, conv_id) or "", seller_item_details(conv.notes),
+        "Seller messages:\n" + "\n".join(message.text for message in repo.get_messages(conv_id)
+                                            if message.role == "user" and message.text)) if part)
+
+
+async def _fill_after_category(conv_id: str, markets: set[str]) -> None:
+    from vendoo_studio.database import in_worker_session
     from vendoo_studio.services.listing_provider import get_listing_provider
 
     provider = get_listing_provider()
     if provider is None:
         return
-    db = SessionLocal()
     try:
-        repo = ConversationRepo(db)
-        conv = repo.get(conv_id)
-        if conv is None:
+        evidence = await in_worker_session(_category_fill_evidence, conv_id)
+        if evidence is None:
             return
-        evidence = "\n\n".join(part for part in (
-            current_photo_analysis(repo, conv_id) or "", seller_item_details(conv.notes),
-            "Seller messages:\n" + "\n".join(message.text for message in repo.get_messages(conv_id)
-                                                if message.role == "user" and message.text)) if part)
-        await fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets)
+        await fill_native_fields(conv_id, provider, evidence=evidence, markets=markets)
     except Exception:
         log.exception("category field fill failed for %s", conv_id)
-    finally:
-        db.close()

@@ -14,6 +14,7 @@ import httpx
 from vendoo_studio.services.keychain import get_marketplace_accounts
 from vendoo_studio.services.marketplace_accounts import SignInRequired, access_token
 from vendoo_studio.services.relay_client import relay_request
+from vendoo_studio.services.shared_http import http_client
 from vendoo_studio.services.marketplace_errors import marketplace_call
 
 API = "https://api.ebay.com"
@@ -87,6 +88,12 @@ def _failure_for(response) -> EbayFailure:
     if status == 429:
         return EbayFailure("eBay is limiting requests right now. Try again in a little while.", 429, code="rate_limited",
                            marketplace_message=message, retry_after_s=retry_after_seconds(response.headers.get("retry-after")))
+    if status in (408, 409):
+        # eBay timed out or hit a conflict while handling the call, and may
+        # already have run it: uncertain, never a definite refusal. Etsy writes
+        # read these two the same way.
+        return EbayFailure("eBay did not confirm the request. Check eBay before trying again.", status,
+                           marketplace_message=message)
     # Plain words for the seller; eBay's own reason, codes included, goes beside them.
     if status >= 500:
         return EbayFailure(EBAY_DOWN, status, marketplace_message=message)
@@ -186,12 +193,13 @@ class EbayClient:
             if binary is not None:
                 # The Media API's video upload takes the file itself as the body.
                 headers["Content-Type"] = "application/octet-stream"
-            async with httpx.AsyncClient(timeout=300 if binary is not None else 30, follow_redirects=False) as client:
+            async with http_client() as client:
                 files = {upload["field"]: ("image.jpg" if upload["mime"] == "image/jpeg" else "image.png",
                                           base64.b64decode(upload["data"], validate=True), upload["mime"])} if upload else None
                 return await client.request(method, host + path, headers=headers, params=params,
                                             json=body if xml is None and not files and binary is None else None,
-                                            content=xml if binary is None else binary, files=files)
+                                            content=xml if binary is None else binary, files=files,
+                                            timeout=300 if binary is not None else 30, follow_redirects=False)
 
         if not app:
             response = await send(token)

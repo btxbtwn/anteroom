@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { STREAM_IDLE_MS, StreamIdleError } from "../../api/sse";
 import { consumeResponseSse } from "./chatStream";
 
 describe("consumeResponseSse", () => {
@@ -39,5 +40,21 @@ describe("consumeResponseSse", () => {
     expect(sawDone).toBe(true);
     expect(parts.content).toBe("Error: Photo analysis failed.");
     expect(parts.content).not.toContain("Sold comps");
+  });
+  it("treats a connection that goes silent as dropped, so generation reattaches", async () => {
+    vi.useFakeTimers();
+    try {
+      let cancelled = false;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode("event: status\ndata: Reading photos\n\n")); },
+        cancel() { cancelled = true; },
+      });
+      const failed = expect(consumeResponseSse(new Response(body), () => {})).rejects.toBeInstanceOf(StreamIdleError);
+      await vi.advanceTimersByTimeAsync(STREAM_IDLE_MS);
+      await failed;
+      expect(cancelled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

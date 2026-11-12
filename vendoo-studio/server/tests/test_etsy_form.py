@@ -83,7 +83,7 @@ def test_etsy_tab_is_etsys_page_with_this_categorys_attributes(studio):
     # The 3,050 categories are a shared list the client downloads once.
     assert len(answer.content) < 100_000
     form = _filled(studio.client, answer.json())
-    assert form == asyncio.run(native_editor.editor_form(studio.conv.id, "etsy", studio.revision.id, studio.db))
+    assert form == native_editor.read_form(studio.db, studio.conv.id, "etsy", studio.revision.id)
     assert form["native"] and form["page_labels"] and form["category_id"] == TEE and form["notes"] == []
     assert list(dict.fromkeys(row["section"] for row in form["fields"])) == SECTIONS
     rows = {row["path"]: row for row in form["fields"]}
@@ -136,7 +136,7 @@ def test_etsy_tab_opens_without_etsy_and_says_what_is_missing(studio):
 
 def test_a_new_draft_opens_an_empty_etsy_form(studio):
     conv = ConversationRepo(studio.db).create(title="Empty")
-    form = asyncio.run(native_editor.editor_form(conv.id, "etsy", None, studio.db))
+    form = native_editor.read_form(studio.db, conv.id, "etsy", None)
     assert form["category_id"] == "" and form["known"] is True
     assert not any(row["path"].startswith("etsy_specifics.category_specifics.") for row in form["fields"])
     studio.properties.assert_not_awaited()
@@ -145,7 +145,7 @@ def test_a_new_draft_opens_an_empty_etsy_form(studio):
 def test_an_unknown_etsy_category_is_named_not_replaced(studio):
     listing = {**studio.listing, "direct_category_ids": {"etsy": "999999999"}}
     revision = listing_persistence.save_revision(studio.db, studio.conv.id, listing, "test")
-    form = asyncio.run(native_editor.editor_form(studio.conv.id, "etsy", revision.id, studio.db))
+    form = native_editor.read_form(studio.db, studio.conv.id, "etsy", revision.id)
     assert form["known"] is False and form["category_id"] == ""
     assert "Choose the most specific category again" in form["notes"][-1]
 
@@ -168,7 +168,7 @@ def test_an_etsy_tab_edit_stays_on_etsy_and_the_picked_category_is_kept(studio):
     # A category fill never replaces the seller's pick.
     with patch("vendoo_studio.services.direct_categories._etsy_leaf", AsyncMock(return_value={"id": TEE, "path": "x"})):
         assert asyncio.run(_fill_etsy(json.loads(json.dumps(stored)), "Men > Shirts")) is False
-    form = asyncio.run(native_editor.editor_form(studio.conv.id, "etsy", current.id, studio.db))
+    form = native_editor.read_form(studio.db, studio.conv.id, "etsy", current.id)
     rows = {row["path"]: row["value"] for row in form["fields"]}
     assert rows["direct_category_ids.etsy"] == "482"
     assert rows["etsy_specifics.title"] == "Etsy only title"

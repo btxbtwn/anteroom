@@ -44,18 +44,12 @@ def test_connect_response_cannot_carry_a_token():
     assert "page_read_status" not in response.json()
 
 
-def test_only_one_recording_runs_at_a_time(tmp_path):
-    import asyncio
-
-    async def slow(*_args, **_kwargs):
-        await asyncio.sleep(0.5)
-        return {"ok": True, "requests": []}
-
-    with patch("vendoo_studio.services.browser_bridge.request", new=AsyncMock(side_effect=slow)), \
-            patch("vendoo_studio.services.marketplace_recording.RECORDINGS_DIR", tmp_path), TestClient(app) as client:
-        assert client.post("/api/marketplaces/mercari/record?goal=offers").status_code == 202
-        assert client.get("/api/marketplaces/mercari/record?goal=offers").json()["recording"] is True
-        assert client.post("/api/marketplaces/depop/record?goal=offers").status_code == 409
+def test_marketplace_request_recording_is_not_offered():
+    # The recorder needed Chrome's debugger permission, which the Bridge no longer asks for.
+    with patch("vendoo_studio.services.browser_bridge.request", new=AsyncMock()) as request, TestClient(app) as client:
+        assert client.post("/api/marketplaces/mercari/record?goal=offers").status_code == 404
+        assert client.get("/api/marketplaces/mercari/record?goal=offers").status_code == 404
+    request.assert_not_awaited()
 
 
 def test_unknown_marketplace_connect_is_rejected():

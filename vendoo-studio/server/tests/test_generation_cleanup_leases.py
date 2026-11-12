@@ -33,10 +33,11 @@ def test_timing_save_classifies_rejected_lease(operation, error, caplog):
 @pytest.mark.parametrize("error", [TaskLeaseExpired, TaskStopped, RuntimeError])
 def test_cancelled_generation_keeps_cancellation_when_status_write_is_rejected(error, caplog):
     db = MagicMock()
+    db.__enter__.return_value = db
     repo = MagicMock()
     repo.update_status.side_effect = error()
     with (
-        patch.object(listing_generation, "SessionLocal", return_value=db),
+        patch("vendoo_studio.database.SessionLocal", return_value=db),
         patch.object(listing_generation, "ConversationRepo", return_value=repo),
         patch.object(listing_generation, "load_skill_rules", side_effect=asyncio.CancelledError()),
         patch.object(listing_generation, "comps_search_available", return_value=False),
@@ -49,6 +50,7 @@ def test_cancelled_generation_keeps_cancellation_when_status_write_is_rejected(e
             seller_answers="", paths=[], photo_count=0, analysis_fingerprint="",
         ))
     repo.update_status.assert_called_once_with("draft", "draft")
-    db.close.assert_called_once()
+    # The status write ran in its own short session, which closed.
+    db.__exit__.assert_called_once()
     errors = [record for record in caplog.records if record.levelno >= logging.ERROR]
     assert bool(errors) is (error is RuntimeError)

@@ -11,6 +11,7 @@ import { PhotoEditor } from "./PhotoEditor";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
 import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
+import { DRAFT_ONLY_PHOTOS, useCanAddPhotos } from "./photoAdding";
 import { photoThumbUrl } from "../photoThumb";
 import { Button } from "./ui/button";
 import { FolderPlusIcon, ImagePlusIcon } from "lucide-react";
@@ -118,6 +119,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   // A hidden listing tab stays mounted. Its photo tiles must not: each one
   // would keep a full-size decoded bitmap.
   const sessionActive = useListingSessionActive();
+  const canAdd = useCanAddPhotos(convId);
 
   const canReorder = (photos?.length || 0) > 1;
   // A phone cannot drop files.
@@ -201,10 +203,10 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
       title="Photos"
       meta={(() => {
         const count = photos?.length || 0;
-        if (count === 0) return touchScreen ? undefined : "Drop photos anywhere";
+        if (count === 0) return touchScreen || !canAdd ? undefined : "Drop photos anywhere";
         return `${count} ${count === 1 ? "photo" : "photos"}`;
       })()}
-      actions={
+      actions={canAdd ? (
         <>
           <Button variant="outline" size="xs" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
             <ImagePlusIcon />
@@ -232,8 +234,9 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
             onChange={(e) => { if (e.target.files) void doUpload(e.target.files); }}
           />
         </>
-      }
+      ) : undefined}
     >
+      {!canAdd && <p className="text-xs text-muted-foreground">{DRAFT_ONLY_PHOTOS}</p>}
       {uploadError && <div className="text-destructive-foreground text-xs">{uploadError}</div>}
       {photos && photos.length > 0 && (
         <PhotoStrip className="gap-2">

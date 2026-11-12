@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 /// The Automations destination (AutomationsPage.tsx): every automation in one
@@ -30,7 +31,8 @@ struct AutomationsView: View {
     @State private var confirmingRun: Automation?
     @State private var busy: String?
     @State private var error: String?
-    @Environment(\.openURL) private var openURL
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @Environment(SessionStore.self) private var session
 
     var body: some View {
         screen
@@ -346,7 +348,7 @@ struct AutomationsView: View {
     private func connectEbay() {
         change("ebay_offers") {
             let url = try await api.connectEbay()
-            openURL(url)
+            await MarketplaceWebSignIn.run(url, using: webAuthenticationSession, session: session)
         }
     }
 

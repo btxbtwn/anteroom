@@ -28,6 +28,8 @@ export interface BulkUploadItem extends PhotoFolderGroup {
   /** Photos turned in the bulk upload window; applied once each one is saved. */
   rotations?: Map<File, PhotoRotation>;
   sku?: string;
+  /** Tag text is seller evidence for generation, saved in the existing seller notes. */
+  sizeTag?: string;
   garment?: Garment;
   measurements?: Record<string, string>;
 }
@@ -50,9 +52,11 @@ export function bulkListingNotes(defaults: BulkUploadDefaults, item: Omit<BulkUp
   const cog = defaults.cog.trim();
   const vendooLabels = joinLabels(splitLabels(defaults.labels));
   const sku = item.sku?.trim();
+  const sizeTag = item.sizeTag?.trim();
   const notes = {
     ...(cog || vendooLabels ? { cog, vendooLabels } : {}),
     ...(sku ? { sku } : {}),
+    ...(sizeTag ? { sellerNotes: `Size tag: ${sizeTag}` } : {}),
   };
   const shared = Object.keys(notes).length ? JSON.stringify(notes) : undefined;
   const { garment, measurements = {} } = item;

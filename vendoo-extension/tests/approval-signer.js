@@ -18,12 +18,15 @@ async function approvalSigner() {
     const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, privateKey, new TextEncoder().encode(`${head}.${body}`));
     return `${head}.${body}.${encode(new Uint8Array(signature))}`;
   }
-  // `command` with the approval the server would add for `accountId` at `seconds`, after `changes` to its claims.
-  async function sign(command, accountId, { seconds = Math.floor(Date.now() / 1000), changes = {}, privateKey } = {}) {
+  // `command` with the approval the server would add for `accountId` at `seconds`, binding the
+  // SHA-256 of each relayed `photos` entry, after `changes` to its claims.
+  async function sign(command, accountId, { seconds = Math.floor(Date.now() / 1000), changes = {}, privateKey, photos = [] } = {}) {
     const p = command.payload;
+    const pho = photos.map(photo => ({ id: photo.id,
+      sha256: require('node:crypto').createHash('sha256').update(Buffer.from(photo.base64, 'base64')).digest('hex') }));
     const claims = { iss: 'anteroom', aud: 'anteroom-bridge', sub: accountId, cmd: command.type, mkt: p.marketplace ?? null,
       act: p.action ?? null, lid: p.listing_id ?? null, job: command.job_id ?? null, mid: command.message_id,
-      sha: await commandHash(command), jti: crypto.randomUUID().replace(/-/g, ''), iat: seconds, exp: seconds + 300, ...changes };
+      sha: await commandHash(command), jti: crypto.randomUUID().replace(/-/g, ''), iat: seconds, exp: seconds + 300, pho, ...changes };
     return { ...command, payload: { ...p, approval: await token(claims, privateKey) } };
   }
   return { publicKey, sign };

@@ -9,21 +9,43 @@ from __future__ import annotations
 from vendoo_studio.services import model_usage
 
 import json
+import re
 
 import httpx
 
+from vendoo_studio.providers import http_retry
 from vendoo_studio.providers.chat_completions import parse_evidence
 from vendoo_studio.providers.claude_agent import _image_block
 from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
 from vendoo_studio.providers.xiaomi_mimo import VISION_MAX_SIDE, StreamChunk, encode_images
 from vendoo_studio.services import live_trace
 from vendoo_studio.services.ai_key_catalog import key_provider
+from vendoo_studio.services.shared_http import http_client
 
 SPEC = key_provider("anthropic")
 API_VERSION = "2023-06-01"
 MAX_TOKENS = 16_000
 MAX_SEARCH_RESUMES = 3
-WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
+# Web search with dynamic filtering (it trims pages before they reach the
+# model) needs Opus or Sonnet 4.6 or later, or a Fable or Mythos model; older
+# models and every Haiku keep the basic tool.
+# https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool
+WEB_SEARCH_TYPE = "web_search_20260209"
+BASIC_WEB_SEARCH_TYPE = "web_search_20250305"
+_MODEL_VERSION = re.compile(r"^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d{1,2}))?(?:$|-)")
+
+
+def web_search_tool(model: str) -> dict:
+    """The newest web search tool ``model`` takes."""
+    match = _MODEL_VERSION.match(model)
+    family, major, minor = (match.group(1), int(match.group(2)), int(match.group(3) or 0)) if match else ("", 0, 0)
+    current = family in {"fable", "mythos"} or (family in {"opus", "sonnet"} and (major, minor) >= (4, 6))
+    return {"type": WEB_SEARCH_TYPE if current else BASIC_WEB_SEARCH_TYPE, "name": "web_search", "max_uses": 5}
+
+
+# An error status or a lost connection was already retried; sending the same
+# request again without streaming would only repeat it.
+NO_FALLBACK = (http_retry.ProviderHTTPError, httpx.TransportError)
 
 
 def to_messages(messages: list[dict]) -> tuple[str, list[dict]]:
@@ -110,7 +132,7 @@ class AnthropicAPIProvider:
             "content-type": "application/json",
         }
 
-    def _http_error(self, resp: httpx.Response) -> str:
+    def _http_error(self, resp: httpx.Response) -> http_retry.ProviderHTTPError:
         try:
             payload = resp.json()
         except Exception:
@@ -118,20 +140,27 @@ class AnthropicAPIProvider:
         error = payload.get("error") if isinstance(payload, dict) else None
         detail = error.get("message") if isinstance(error, dict) else None
         text = " ".join(str(detail or resp.text or "").split())[:240]
-        return f"Anthropic HTTP {resp.status_code}: {text}" if text else f"Anthropic HTTP {resp.status_code}"
+        message = f"Anthropic HTTP {resp.status_code}: {text}" if text else f"Anthropic HTTP {resp.status_code}"
+        return http_retry.ProviderHTTPError(message, resp.status_code)
 
     def _body(self, messages: list[dict], model: str, **extra) -> dict:
         system, turns = to_messages(messages)
-        body: dict = {"model": model, "max_tokens": MAX_TOKENS, "messages": turns, **extra}
+        # Automatic caching: Anthropic caches up to the last cacheable block, so
+        # the long system prompt and earlier turns are read from cache on the
+        # next call with the same prefix (field fills, repairs, chat).
+        # https://docs.claude.com/en/docs/build-with-claude/prompt-caching
+        body: dict = {"model": model, "max_tokens": MAX_TOKENS, "messages": turns,
+                      "cache_control": {"type": "ephemeral"}, **extra}
         if system:
             body["system"] = system
         return body
 
     async def list_models(self) -> list[str]:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(f"{self.base_url}/models", headers=self._headers(), params={"limit": 1000})
+        async with http_client() as client:
+            resp = await http_retry.send(lambda: client.get(
+                f"{self.base_url}/models", headers=self._headers(), params={"limit": 1000}, timeout=20))
         if resp.status_code >= 400:
-            raise RuntimeError(self._http_error(resp))
+            raise self._http_error(resp)
         data = resp.json().get("data") or []
         return [str(item["id"]) for item in data if isinstance(item, dict) and isinstance(item.get("id"), str)]
 
@@ -141,10 +170,11 @@ class AnthropicAPIProvider:
 
     async def _post(self, body: dict, timeout: float = 300) -> dict:
         with model_usage.observe(self.name, str(body.get("model") or "")) as call:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(f"{self.base_url}/messages", headers=self._headers(), json=body)
+            async with http_client() as client:
+                resp = await http_retry.send(lambda: client.post(
+                    f"{self.base_url}/messages", headers=self._headers(), json=body, timeout=timeout))
             if resp.status_code >= 400:
-                raise RuntimeError(self._http_error(resp))
+                raise self._http_error(resp)
             payload = resp.json()
             call.usage(payload.get("usage"), anthropic=True)
             return payload
@@ -157,16 +187,18 @@ class AnthropicAPIProvider:
 
     async def _stream(self, messages: list[dict], model: str):
         with model_usage.observe(self.name, model) as call:
-            async with httpx.AsyncClient(timeout=300) as client:
-                async with client.stream(
+            async with http_client() as client:
+                async with http_retry.stream(
+                    client,
                     "POST",
                     f"{self.base_url}/messages",
                     headers=self._headers(),
                     json=self._body(messages, model, stream=True),
+                    timeout=300,
                 ) as resp:
                     if resp.status_code >= 400:
                         await resp.aread()
-                        raise RuntimeError(self._http_error(resp))
+                        raise self._http_error(resp)
                     async for line in resp.aiter_lines():
                         if not line.startswith("data:"):
                             continue
@@ -227,9 +259,13 @@ class AnthropicAPIProvider:
             async for chunk in self._stream(messages, self.listing_model):
                 yielded = True
                 yield chunk
+        except NO_FALLBACK:
+            raise
         except Exception:
             if yielded:
                 raise
+            # The stream broke before answering, without an error status: one
+            # plain request may still work.
             yield await self._complete(messages, self.listing_model)
             return
         if not yielded:
@@ -242,7 +278,7 @@ class AnthropicAPIProvider:
         yield await self._complete(messages, self.listing_model)
 
     async def web_search(self, messages: list[dict]) -> dict:
-        body = self._body(messages, self.listing_model, tools=[WEB_SEARCH_TOOL])
+        body = self._body(messages, self.listing_model, tools=[web_search_tool(self.listing_model)])
         payload = await self._post(body, timeout=180)
         blocks = list(payload.get("content") or [])
         # A long search can pause mid-turn; sending the partial reply back resumes it.

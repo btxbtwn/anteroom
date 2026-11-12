@@ -26,7 +26,7 @@ Pushes to `main` that touch Anteroom, the extension, or listing skills also buil
 
 The packaged app does not git-pull. **Check for updates** compares the stamped build SHA against the GitHub release and, if newer, downloads the zip, replaces the `.app`, and relaunches. All Anteroom data stays in `~/Library/Application Support/Anteroom` (listings, photos, drafts, hidden fields, settings, fill logs, logs). API keys remain in macOS Keychain. Settings → Data shows the folder path.
 
-Release builds are signed with the certificate in the GitHub secrets `MACOS_SIGNING_CERT_P12_BASE64` and `MACOS_SIGNING_CERT_PASSWORD`; packaging fails rather than fall back to ad-hoc signing when they are missing, and the updater refuses any download that is ad-hoc signed or fails `codesign --verify --deep --strict`. Keychain recognises later builds by their Apple Team ID, which only an Apple-issued certificate carries. Signed with a self-signed certificate, each update gets a new `cdhash` in the Keychain item's partition list, so macOS asks for the Mac password once per update (the release job warns about it). Signed with a **Developer ID Application** certificate, it asks once more and then never again. To switch, follow the steps at the top of `scripts/setup-signing.sh` and run it with the exported `.p12`. Credentials are updated in place and are never rewritten at startup.
+Release builds are signed with the certificate in the GitHub secrets `MACOS_SIGNING_CERT_P12_BASE64` and `MACOS_SIGNING_CERT_PASSWORD`, kept in the `release` environment so only `main` can read them; packaging fails rather than fall back to ad-hoc signing when they are missing, and the updater refuses any download that is ad-hoc signed or fails `codesign --verify --deep --strict`. Keychain recognises later builds by their Apple Team ID, which only an Apple-issued certificate carries. Signed with a self-signed certificate, each update gets a new `cdhash` in the Keychain item's partition list, so macOS asks for the Mac password once per update (the release job warns about it). Signed with a **Developer ID Application** certificate, it asks once more and then never again. To switch, follow the steps at the top of `scripts/setup-signing.sh` and run it with the exported `.p12`. Credentials are updated in place and are never rewritten at startup.
 
 The recipient:
 
@@ -321,7 +321,8 @@ vendoo-studio/           Local web app (FastAPI + React)
 ## Security
 
 - Binds only to `127.0.0.1` (localhost).
-- Optional **Settings → Connections → Remote access** uses private Tailscale Serve to proxy HTTPS to that loopback port. Funnel stays off; only devices on your Tailnet can open the link. Same Anteroom process and data as on the Mac — not a second install.
+- Optional **Settings → Connections → Remote access** uses private Tailscale Serve to proxy HTTPS to that loopback port. Funnel stays off. Only the Tailscale account this Mac is signed in with can use the link (Serve names it in `Tailscale-User-Login`); other people on the tailnet and tagged devices are refused, and a tagged Mac admits no one. Same Anteroom process and data as on the Mac — not a second install.
+- Of Chrome extensions, only Anteroom Bridge may call the app: the Chrome Web Store copy, and an unpacked copy loaded from Anteroom's extension folder or this repository's `vendoo-extension/`. A developer loading it from anywhere else adds its ID to `ANTEROOM_BRIDGE_EXTENSION_IDS` (comma-separated).
 - API keys and ChatGPT tokens live in macOS Keychain, never in SQLite, browser storage, or logs.
 - Never sent to the React frontend or Chrome extension.
 - Photos are served only through the Anteroom origin (`GET /api/photos/{id}`).

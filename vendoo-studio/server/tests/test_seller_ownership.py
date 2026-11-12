@@ -19,6 +19,9 @@ from vendoo_studio.services import backups, schema_migrations
 PREVIOUS_REVISION = "3ec056c582ed"
 CURRENT_REVISION = schema_migrations.head_revision()
 SHARED_TABLES = {"category_trees", "category_tree_nodes"}
+# Global operator accounting is not public taxonomy. Its migration denies
+# seller access; test_error_email_budget exercises those Postgres permissions.
+OPERATOR_TABLES = {"error_email_state"}
 
 
 @pytest.fixture
@@ -91,7 +94,7 @@ def read_rows(engine, names):
         }
 
 
-def test_every_model_has_explicit_ownership_or_is_public_taxonomy():
+def test_every_model_has_explicit_seller_operator_or_public_taxonomy_ownership():
     load_models()
     shared = set()
     for mapper in Base.registry.mappers:
@@ -101,7 +104,7 @@ def test_every_model_has_explicit_ownership_or_is_public_taxonomy():
             continue
         assert not table.c.user_id.nullable
         assert table.c.user_id.index
-    assert shared == SHARED_TABLES
+    assert shared == SHARED_TABLES | OPERATOR_TABLES
 
 
 def test_previous_release_upgrade_preserves_records_and_constraints(migration_engine):
@@ -130,7 +133,7 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
         indexes = {index["name"] for index in inspector.get_indexes(table.name)}
         assert old_indexes.get(table.name, set()) <= indexes
         assert all(key in inspector.get_foreign_keys(table.name) for key in foreign_keys.get(table.name, []))
-        if table.name in SHARED_TABLES:
+        if table.name in SHARED_TABLES | OPERATOR_TABLES:
             assert "user_id" not in columns
         else:
             assert not columns["user_id"]["nullable"]

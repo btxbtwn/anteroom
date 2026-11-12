@@ -129,6 +129,8 @@ class ConversationUpdate(BaseModel):
 
     title: str | None = None
     notes: str | None = None
+    # Item Details' changed keys, merged into the notes as they are now.
+    note_changes: dict | None = None
     # Null takes the listing out of its box; leaving it out changes nothing.
     box_id: str | None = None
 
@@ -159,6 +161,11 @@ def update_conversation(conv_id: str, body: ConversationUpdate, db: Session = De
     conv = repo.get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
+    if body.note_changes:
+        # Lock and reload before changing anything: note changes merge into the
+        # notes as they are now, and a reload after the title or notes were set
+        # would throw those away.
+        db.refresh(conv, with_for_update=True)
     changed = False
     renamed = False
     if body.title is not None:
@@ -177,6 +184,11 @@ def update_conversation(conv_id: str, body: ConversationUpdate, db: Session = De
             conv.notes = merge_notes(conv.notes, incoming)
         else:
             conv.notes = body.notes
+        changed = True
+    if body.note_changes:
+        from vendoo_studio.services.vendoo_import import merge_note_changes
+
+        conv.notes = merge_note_changes(conv.notes, body.note_changes)
         changed = True
     if renamed:
         from vendoo_studio.services.vendoo_import import merge_notes
@@ -205,6 +217,10 @@ def get_messages(conv_id: str, db: Session = Depends(get_db)):
 
 class ActivityResponse(BaseModel):
     busy: bool
+    # Something is changing the listing itself (generation, field fills, a Vendoo
+    # job). A direct marketplace action holds only its marketplace, so it is busy
+    # but not writing: List stays open on the other marketplaces.
+    writing: bool
     items: list[str]
     message_count: int
     last_message_id: str | None
@@ -228,6 +244,7 @@ def get_activity(conv_id: str, db: Session = Depends(get_db)):
     from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
     from vendoo_studio.models.conversation import Message
     from vendoo_studio.services import activity
+    from vendoo_studio.services.native_marketplaces import is_direct_action
     from vendoo_studio.services.streaming import active_generation
 
     items: list[str] = []
@@ -237,12 +254,14 @@ def get_activity(conv_id: str, db: Session = Depends(get_db)):
     items.extend(activity.running(conv_id))
     # Polled about once a second per open listing: read only ids and statuses,
     # and load a job (and its listing snapshot) only when it is still running.
+    writing = bool(items)
     jobs = db.query(Job.id, Job.status).filter(Job.conversation_id == conv_id).all()
     for job_id, status in jobs:
         if status in ACTIVE_JOB_STATUSES:
             job = db.get(Job, job_id)
             if job is not None:
                 items.append(_job_activity_label(job))
+                writing = writing or not is_direct_action(str(job.current_step or ""))
     items = list(dict.fromkeys(items))
 
     message_count = (
@@ -257,6 +276,7 @@ def get_activity(conv_id: str, db: Session = Depends(get_db)):
     )
     return ActivityResponse(
         busy=bool(items),
+        writing=writing,
         items=items,
         message_count=message_count,
         last_message_id=last_id,

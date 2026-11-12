@@ -146,16 +146,6 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/relay_sales.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 28,
-                    "endColumn": 34,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/sold_listings.py": [
             {
                 "code": "reportArgumentType",

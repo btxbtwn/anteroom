@@ -69,9 +69,29 @@ rates for continuous Machines in the cheapest US regions (`iad` / `ewr`) as of
 | B | Replace the Machine with performance-1x, 2 GB | $33.00 | One full core. HTTP and workers still share the process. |
 | C | Keep the shared web Machine and add a performance-1x, 2 GB worker | about $45.70 | Separates interactive traffic from generation and gives the worker a full core. |
 
-The seller approved option B on 2026-11-03. The existing Machine now has one
-performance CPU and 2 GB RAM. No additional Machine or larger configuration
-has been approved.
+The seller approved option B on 2026-11-03. On 2026-11-11 the seller approved
+adding a worker Machine (about $13 a month more than option B), which reverses
+option C: sellers' pages kept 33% of the CPU in the 2026-11-09 sample
+(inventory and Suggestions rebuilds), so the serving Machine keeps the full
+core and the worker takes the shared one.
+
+| Process group | Role | Machine | Runs |
+| --- | --- | --- | --- |
+| `app` | `web` | performance-1x, 2 GB | Seller requests, Mac and Chrome connections, direct marketplace jobs, Chrome sale checks and promotion rounds (`chrome` lease) |
+| `worker` | `worker` | shared-cpu-1x, 2 GB | Drafts, assistant answers, automations, eBay offers, the job watchdog, Sourcing and sales sync (`schedulers` lease) |
+
+Chrome sale checks and promotion rounds stay on the web Machine because they
+list sellers from the Chrome tabs connected to their own process
+(`hosted_browser_relay.ready_sellers`); on the worker that list would be empty.
+`process_handoff.lead` holds each lease separately and releases them only after
+every set has stopped. A worker whose draft loop has died fails `/api/health`
+(503), so Fly restarts it.
+
+A web process queues drafts and leaves them to the worker group; it never
+claims one. The worker answers forwarded Mac and Chrome calls on the private
+network and has its own health check, so blue-green deploys wait for it. If
+long runs of generation exhaust the shared CPU's burst credit, drafts slow
+down but pages do not; move the worker to performance then.
 
 ## 2. Use database connections deliberately
 
@@ -83,9 +103,17 @@ short-lived clients.
 From this Machine on 2026-11-03, `SELECT 1` through the current transaction
 pooler (port 6543, `sslmode=verify-full`) took 719–880 ms on a new connection
 and about 70 ms when the connection was reused. Session mode on port 5432 took
-about 160–240 ms reused. A direct connection took about 240 ms reused. The
-hosted process therefore keeps the transaction pooler and reuses connections,
-with prepared statements still disabled. Desktop and test processes keep
+about 160–240 ms reused. A direct connection took about 240 ms reused.
+On 2026-11-11 the same reused `SELECT 1` took about 24 ms in every mode
+(transaction pooler 24.5, session pooler 24.4, direct over IPv6 23.4), and a
+transaction of start, seller role, one query and commit about 95 ms. That cost
+is the distance from San Jose to Oregon, not the pooler. The hosted processes
+therefore keep the transaction pooler, which also absorbs the second set of
+client connections while blue-green deploys overlap, and reuse connections,
+with prepared statements still disabled. Each process has its own pool (8 plus
+4 overflow); the pooler multiplexes them onto its server connections.
+Supabase recommends a direct connection for persistent servers; revisit that
+only if the pooler measures slower or a feature needs session state. Desktop and test processes keep
 `NullPool`.
 
 The same sample reported `max_connections` 60 and 40 rows in
@@ -102,6 +130,19 @@ Transaction-local `set_config` for the seller role still runs at the start of
 every transaction. The isolation check runs once per pooled connection. Keep
 the unprivileged runtime login, certificate verification, and the separate
 migration login. Do not bypass row security.
+
+The same statement sets `statement_timeout = 15s` and
+`idle_in_transaction_session_timeout = 30s` for the seller transaction
+(`services/hosted_database.py`), so a runaway query, a long lock wait or a
+transaction left open across a wait cannot keep a pooled connection
+indefinitely. The longest seller read measured is the inventory list, about
+2 s; the longest legitimate pause inside a transaction is one Storage call,
+capped at 20 s. Migrations use their own login and are unaffected. When a
+seller sees `canceling statement due to statement timeout` or a connection
+closed for idle-in-transaction, fix the code holding the transaction rather
+than raising these. The seller policies read the signed-in seller through a
+scalar subquery, so Postgres evaluates it once per statement (an InitPlan)
+instead of parsing the claims JSON for every row a scan visits.
 
 Inventory, suggestions and sales totals read the stored generated
 `listing_revisions.inventory_fields` projection. The complete marketplace
@@ -195,6 +236,46 @@ after deploy: whether page reads stay under the pool timeout with two sellers
 generating. The stream reader's own poll (about five round trips every 0.5 s
 per open stream) is the next cost of the same kind.
 
+Open streams now read only when Postgres says there is something new
+(`services/task_signals.py`). Triggers on `background_task_events` (insert) and
+`background_tasks` (status change) call `pg_notify('anteroom_task_events',
+<task id>)`, which Postgres delivers when the writing transaction commits,
+through the transaction pooler as well. The notice carries only the task id.
+Each web process (role `web` or `all`) keeps one connection that runs `LISTEN`
+on a thread and wakes the streams in that process that follow the task. The
+stream then reads through its own seller session as before, so row security
+still decides what it sees, and the durable journal still serves a resume. The
+transaction pooler cannot `LISTEN`, so the listener uses the session pooler on
+the same host: `ANTEROOM_DATABASE_URL` with port 6543 changed to 5432 (any
+other URL is used as it is), with the same login. `LISTEN` touches no table, so
+the restricted `anteroom_api` login can run it; it costs one session-mode
+connection per web process (two while a blue-green deploy overlaps). The
+listener connects with a 10 s deadline and TCP keepalives, checks an idle
+connection every 30 s, and reconnects with backoff from 1 to 30 s. A stream
+that hears nothing reads again after 10 s anyway, so a lost notice only delays
+an update. While the listener is down, streams read every 0.5 s as before, and
+every stream reads once when it reconnects. `/api/health` reports
+`progress_listener` (`listening`, `reconnects`), and a lost connection logs a
+warning with the error's type only.
+
+The writer also lost a round trip: one insert numbers its events after the
+task's last one, instead of reading the highest number first.
+
+Measured on local Postgres 16 in a test (`test_task_signals.py` scenario, 20 s
+windows, one open stream, counting `BEGIN`, statements and `COMMIT`/`ROLLBACK`
+on the engine; the once-per-connection isolation check excluded):
+
+| Open stream | Before | After |
+| --- | --- | --- |
+| Idle (task queued or between writes) | 8.5 round trips/s | 0.5 round trips/s (the 10 s fallback) |
+| Draft writing every 0.5 s, writer plus one stream | about 22 round trips/s (writer 12, from its six statements a write; stream 10 measured) | 20 round trips/s (writer 10, stream reads once per write) |
+
+At about 24 ms a round trip from the Machine, an idle stream went from about
+0.2 s of pooled-connection time per second to about 0.01 s. Not yet measured
+after deploy: whether Supabase's session pooler accepts the listener (until it
+does, `/api/health` shows `listening: false` and streams poll as before), and
+pool use with several sellers following drafts.
+
 The same incident had a CPU cost as well. Samples a few minutes after the
 error found all 12 connections `idle in transaction` for 1 to 7 s between
 ordinary reads while the process waited for the CPU, and a 30-second py-spy
@@ -210,6 +291,39 @@ copy. Snapshots now share the saved forms read-only
 preflight copies them or changes them. Remaining: each read still decodes the
 full revision JSON, the snapshot rebuilds and catalog index still compete for
 the same CPU, and the pool has not been re-measured after deploy.
+
+Production 0.1.910 stalled again on 2026-11-11 at 03:22 UTC, right after the
+seller pressed List everywhere on one item: page reads took 30–110 s and
+`GET .../marketplace-listings` hit the pool timeout, while the Machine's CPU
+stayed under 40%. The requests were waiting for a thread, not the CPU.
+`asyncio.to_thread`, which `database.in_worker_session` and every other
+async hand-off use, runs on the event loop's default pool, and asyncio sizes
+that pool from the CPU count: five threads on one vCPU (`py-spy dump` showed
+`asyncio_0`–`asyncio_4`). Each direct marketplace start holds one of them while
+`approved_photos.capture` downloads and re-uploads every photo to Storage, so
+four or five starts at once left every other database step queued. Plain `def`
+routes were unaffected only because FastAPI gives them 40 threads of their own.
+The request loop and every `BackgroundLoop` now get a 40-thread pool
+(`background_loop.give_threads`); `tests/test_loop_threads.py` holds 12
+blocking calls at once on a one-CPU count. Not yet measured after deploy:
+whether List everywhere with several marketplaces stays clear of the pool
+timeout. Storage refusals still reach the seller as "Could not upload or load
+the photo" without Supabase's status in any log, and the operator error emails
+failed with `SMTPDataError` during this incident, so the pool-timeout holder
+snapshot was not delivered.
+
+Session verification ran on that same pool, so every async request's sign-in
+check queued behind database steps waiting up to the pool timeout and behind
+photo copies, the Mac's and Chrome's heartbeats included. It now has four
+threads of its own (`hosted.AUTH_THREADS`); `tests/test_auth_threads.py`
+signs a seller in while every loop thread is blocked. The loop pool stays at
+40 rather than the 12 pooled connections plus a few: its threads also wait on
+Storage, Chrome replies and providers, which hold no connection, and a smaller
+pool brought back the 0.1.910 stall. FastAPI's 40-thread limiter for plain
+`def` routes is left as is for the same reason, and because `/api/health` and
+`/api/ready` are plain routes that must answer while page reads wait for a
+connection. Not yet measured after deploy: sign-in latency while the pool is
+exhausted.
 
 Machines reach each other's `/internal/` routes at
 `http://[FLY_PRIVATE_IP]:8080` on the private network
@@ -340,11 +454,13 @@ was not pointed at production.
 
 ## 6. Bridge approval key
 
-The hosted API signs every marketplace write it relays to the seller's Chrome
-(List, Update, Save draft, result checks, Delist, shares and offers, Vendoo
-drafts). Anteroom Bridge 0.2.56 and later run none of them without that
-signature, so a script on the Anteroom page cannot list, change or delete a
-listing on its own. See [the Bridge protocol](cloud-extension.md#signed-approvals).
+The hosted API signs every command it relays to the seller's Chrome (List,
+Update, Save draft, result checks, Delist, Cancel, shares and offers, Vendoo
+drafts, and the reads of sales, likes, imports and sign-in status), and binds
+the photos relayed with a List or Vendoo draft. Anteroom Bridge 0.2.68 and later
+run none of them without that signature (0.2.56 to 0.2.67, writes only), so a
+script on the Anteroom page cannot list, change or delete a listing, swap its
+photos, or read the seller's marketplace data on its own. See [the Bridge protocol](cloud-extension.md#signed-approvals).
 
 The private key is the Fly secret **`ANTEROOM_BRIDGE_SIGNING_KEY`**: an ECDSA
 P-256 key in PKCS#8 PEM. Generate it once, on a trusted computer, and never
@@ -365,16 +481,17 @@ manager, not on disk. Every API Machine needs the same secret.
 Roll out in this order, because installed Bridges update days after a release:
 
 1. Set the secret (staged, as above).
-2. Deploy the API. It signs writes only for a Bridge that declares
+2. Deploy the API. It signs every command only for a Bridge that declares
+   `marketplace.signed_commands`, and writes only for one that declares
    `marketplace.signed_approvals`, so Bridges already installed keep working
    unchanged.
 3. Release the Bridge with the matching public key. From then on, that Bridge
-   refuses any relayed write without a valid approval.
+   refuses any relayed command without a valid approval.
 
 Rotating the key is the same three steps. Approvals last five minutes, so a
 Bridge released with the new key refuses writes signed with the old one: deploy
 the API with the new secret first, then release the Bridge promptly. Without the
-secret the API logs a warning for each write and sends it unsigned, which a
+secret the API logs a warning for each command and sends it unsigned, which a
 current Bridge refuses.
 
 ## Audit
@@ -427,11 +544,43 @@ logger, request, browser, release, Machine/region/process, the message, the
 exception, the stack trace, and the same report as JSON. Credentials are masked
 by `services/redaction.py` and SQL parameter values are removed.
 
-**Noise control:** reports group by fingerprint (exception type plus code path,
-or call site and message shape). The first is sent immediately; repeats in the next 15 minutes are
-counted and reported with the next email for that group, or at shutdown. At most
-60 emails per hour per process; anything over is counted in the next email and
-remains in `fly logs`. Failed sends retry after 5 s, 30 s and 2 min.
+**Noise control:** reports group by severity and fingerprint (exception type
+plus code path, or call site and message shape). Errors are eligible immediately;
+repeats wait 15 minutes. Warnings are grouped into at most one digest per hour.
+Each message contains at most 20 groups; remaining groups stay pending. The
+outbox keeps the latest scrubbed report and occurrence count for each group.
+
+**Budget:** set `ANTEROOM_ERROR_EMAIL_DAILY_LIMIT` to an operator-selected
+allowance below the Workspace account's verified relay quota, leaving headroom
+for other senders. Its default is zero: retain reports without sending until
+an allowance is configured. Google does not provide our customer-specific
+allowance in the rejection; confirm it with Workspace support rather than
+assuming the published maximum applies to this account.
+Every SMTP attempt, including failed or uncertain attempts, reserves one slot
+in the rolling 24-hour budget before network activity. A quarter of the budget
+(at least one slot) is reserved for errors. A shared 60/hour ceiling also
+applies. Accounting, pending groups and backoff live in `error_email_state`,
+survive restarts, and are locked transactionally across Machines. SMTP never
+holds a database connection. Only the API role can access this operator table;
+seller and Supabase client roles have no access.
+
+**Relay refusals:** a daily-quota rejection pauses all senders for 24 hours,
+retaining pending reports. Other permanent SMTP refusals wait an hour; transient
+failures wait five minutes. These are local retry times, not a promise that
+Google's quota has reset. No shutdown flush bypasses the budget. If the process
+dies during SMTP, its reservation remains charged; a 120-second lease prevents
+another sender from immediately repeating it. An uncertain delivery can be
+repeated after lease expiry, still charged against the budget.
+
+**Operator status:** set `ANTEROOM_OPERATOR_USER_ID` to the operator's verified
+Supabase user UUID. Only that signed-in seller sees Settings → General → Error
+emails, showing budget use, pending occurrence count, the safe delivery failure,
+last relay acceptance and next eligible attempt. `/api/error-reports/delivery`
+returns no global mail details to other sellers. No report bodies are returned.
+The request path still hands scrubbed reports to a bounded in-memory queue;
+abrupt termination before persistence or a full queue can omit an email report.
+Original application logs remain the diagnostic source; the status includes
+the process's queue-drop count.
 
 **Delivery:** Google Workspace SMTP relay (`smtp-relay.gmail.com:587`, TLS
 required), which accepts mail only from the app's static egress addresses

@@ -25,25 +25,21 @@ def register(kind, handler):
     _handlers[kind] = handler
 
 
-async def _execute(task_id, token):
-    """Run one claimed task. Returns True when the handler already completed it."""
-    from vendoo_studio.database import SessionLocal
-    from vendoo_studio.routes.chat import ChatMessage, generate_listing, run_message
+def _claimed_task(db, task_id, token):
+    """The claimed task's listing, kind, payload and handler, checked against its lease and draft."""
     from vendoo_studio.services.listing_generate import photo_fingerprint
 
-    context = current()
-    if context is None:
-        raise RuntimeError("Hosted draft work requires a seller context")
-    await asyncio.to_thread(context.settings.read)
-    with SessionLocal() as db:
-        task = db.get(BackgroundTask, task_id)
-        queue.check_write_lease(db, task_id, token)
-        if task is None:
-            raise queue.TaskLeaseExpired()
-        if (handler := _handlers.get(task.kind)) is not None:
-            db.rollback()
-            return await handler(task_id, token, task)
-        conversation_id, kind, payload = task.conversation_id, task.kind, task.payload
+    task = db.get(BackgroundTask, task_id)
+    queue.check_write_lease(db, task_id, token)
+    if task is None:
+        raise queue.TaskLeaseExpired()
+    conversation_id, kind, payload = task.conversation_id, task.kind, task.payload
+    if (handler := _handlers.get(kind)) is not None:
+        # The handler runs after this session closes, with the row detached:
+        # reading an attribute a rollback expired would check a connection
+        # out again and hold it for the whole model answer.
+        db.expunge(task)
+    else:
         if conversation_id is None:
             raise ValueError('A draft task needs its listing')
         repo = ConversationRepo(db)
@@ -53,9 +49,25 @@ async def _execute(task_id, token):
                 or photo_fingerprint(repo.get_photos(conversation_id)) != payload['photos']
                 or (conversation.notes or '') != payload['notes']):
             raise RuntimeError('The draft changed before this task started. Review it and retry.')
-        # Release the lease lock before waiting for a provider. Every save
-        # obtains it again through SellerDatabaseSession.before_flush.
-        db.rollback()
+    # Release the lease lock before waiting for a provider. Every save
+    # obtains it again through SellerDatabaseSession.before_flush.
+    db.rollback()
+    return conversation_id, kind, payload, handler, task
+
+
+async def _execute(task_id, token):
+    """Run one claimed task. Returns True when the handler already completed it."""
+    from vendoo_studio.database import in_worker_session
+    from vendoo_studio.routes.chat import ChatMessage, generate_listing, run_message
+
+    context = current()
+    if context is None:
+        raise RuntimeError("Hosted draft work requires a seller context")
+    await asyncio.to_thread(context.settings.read)
+    conversation_id, kind, payload, handler, task = await in_worker_session(_claimed_task, task_id, token)
+    if handler is not None:
+        return await handler(task_id, token, task)
+    assert conversation_id is not None  # a draft task without one was refused above
     if kind == 'generate':
         response = await generate_listing(conversation_id)
     elif kind == 'chat':

@@ -26,6 +26,12 @@ fi
   exit 1
 }
 
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required to install the locked Python packages." >&2
+  echo "On macOS: brew install uv (or see https://docs.astral.sh/uv/getting-started/installation/)" >&2
+  exit 1
+fi
+
 if ! find_chrome >/dev/null; then
   echo "Google Chrome is required. Install it from https://www.google.com/chrome then run setup again." >&2
   exit 1
@@ -36,8 +42,8 @@ if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
   "$PYTHON" -m venv "$ROOT/.venv"
 fi
 VENV="$ROOT/.venv/bin/python"
-"$VENV" -m pip install --upgrade pip
-"$VENV" -m pip install -e "$ROOT[dev]"
+# The exact, hash-checked packages uv.lock pins, as CI and the Mac app install them.
+"$ROOT/scripts/install-locked.sh" "$VENV" dev
 
 if [[ ! -d "$ROOT/node_modules" ]]; then
   echo "Installing frontend packages"

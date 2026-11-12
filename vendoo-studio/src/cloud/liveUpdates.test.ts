@@ -2,7 +2,8 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IDLE_POLL_MS, LIVE_IDLE_POLL_MS, pollMs, setLiveUpdates } from "../api/polling";
 import { createStudioQueryClient, LIVE_STALE_MS, STALE_MS } from "../api/queryClient";
-import { followSellerChanges, INVENTORY_REFRESH_MS, invalidateTopics, queryKeyMatchesTopic, TOPIC_QUERY_KEYS } from "./liveUpdates";
+import { INVENTORY_REFRESH_MS } from "../api/inventoryRefresh";
+import { followSellerChanges, invalidateTopics, queryKeyMatchesTopic, TOPIC_QUERY_KEYS } from "./liveUpdates";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -177,12 +178,13 @@ describe("followSellerChanges", () => {
     fake.change("jobs");
     fake.change(42);
     expect(invalidate).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(300);
-    expect(invalidate).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300);
+    // The topic's screens, then the inventory list on the schedule it shares with the app's own saves.
+    expect(invalidate).toHaveBeenCalledTimes(2);
     stop();
     fake.change("jobs");
-    vi.advanceTimersByTime(300);
-    expect(invalidate).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(invalidate).toHaveBeenCalledTimes(2);
   });
 
   it("re-reads the inventory list at most once per window while a job streams changes", async () => {

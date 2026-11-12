@@ -168,12 +168,35 @@ final class AnteroomAPITests: XCTestCase {
         XCTAssertEqual(signIn.signOutCount, 0)
     }
 
-    func testASignInThatCantBeRenewedSignsOut() async {
-        signIn.refreshFailure = SignInGone()
+    func testASignInTheServerRefusesToRenewSignsOut() async {
+        signIn.refreshFailure = SignInRejected()
         StubProtocol.answer(.init(status: 401, body: #"{"detail":"A valid seller session is required"}"#))
         await assertMessage(APIError.signInEnded) { _ = try await self.api.listings() }
         XCTAssertEqual(signIn.signOutCount, 1)
         XCTAssertEqual(StubProtocol.requests.count, 1)
+    }
+
+    func testARenewalTheSignInServerFailedKeepsTheSignIn() async {
+        signIn.refreshFailure = SignInServerFailed()
+        StubProtocol.answer(.init(status: 401, body: #"{"detail":"A valid seller session is required"}"#))
+        await assertMessage(APIError.signInNotRenewed) { _ = try await self.api.listings() }
+        XCTAssertEqual(signIn.signOutCount, 0, "A 5xx or rate limit from the sign-in server must not delete the saved sign-in")
+    }
+
+    func testAnExpiredTokenTheServerRefusesSignsOutBeforeSending() async {
+        signIn.accessFailure = SignInRejected()
+        StubProtocol.answer(.init(status: 200, body: "[]"))
+        await assertMessage(APIError.signInEnded) { _ = try await self.api.listings() }
+        XCTAssertEqual(signIn.signOutCount, 1)
+        XCTAssertEqual(StubProtocol.requests.count, 0)
+    }
+
+    func testAnExpiredTokenThatCouldntBeRenewedKeepsTheSignIn() async {
+        signIn.accessFailure = SignInServerFailed()
+        StubProtocol.answer(.init(status: 200, body: "[]"))
+        await assertMessage(APIError.signInNotRenewed) { _ = try await self.api.listings() }
+        XCTAssertEqual(signIn.signOutCount, 0)
+        XCTAssertEqual(StubProtocol.requests.count, 0)
     }
 
     func testOfflineRenewalKeepsTheSellerSignedIn() async {

@@ -1,3 +1,4 @@
+import AuthenticationServices
 import PhotosUI
 import SwiftUI
 
@@ -22,7 +23,6 @@ struct MarketplacesView: View {
 /// listings and performance read with the seller's own eBay account.
 struct EbayWorkspaceView: View {
     let api: AnteroomAPI
-    @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @State private var connection: DirectConnections.Account?
     @State private var loaded = false
@@ -94,8 +94,7 @@ struct EbayWorkspaceView: View {
         }
         .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await loadConnection() } } }
         .sheet(isPresented: $showingConnection) {
-            EbayConnectionSheet(api: api, account: connection) { url in
-                openURL(url)
+            EbayConnectionSheet(api: api, account: connection) {
                 Task { await loadConnection() }
             }
         }
@@ -156,12 +155,16 @@ struct EbayWorkspaceView: View {
     }
 }
 
-/// Which eBay tools to authorize. Sign-in opens on eBay's own page.
+/// Which eBay tools to authorize. Sign-in opens eBay's own page in a web
+/// authentication sheet that closes when eBay sends the seller back.
 private struct EbayConnectionSheet: View {
     let api: AnteroomAPI
     let account: DirectConnections.Account?
-    let onAuthorize: (URL) -> Void
+    /// The sign-in sheet closed: read the connection again.
+    let onSignInEnded: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @Environment(SessionStore.self) private var session
     @State private var chosen = Set(EbayWorkspaceFormat.features.map(\.id))
     @State private var working = false
     @State private var error: String?
@@ -185,9 +188,16 @@ private struct EbayConnectionSheet: View {
                 }
                 if account?.pending == true {
                     Section {
-                        Text("Finish sign-in in your browser.")
+                        Text("Finish signing in to eBay.")
                         if let link = account?.authorizeURL.flatMap(URL.init(string:)) {
-                            Link("Open eBay sign-in", destination: link)
+                            Button("Open eBay sign-in") {
+                                working = true
+                                Task {
+                                    await signIn(at: link)
+                                    working = false
+                                }
+                            }
+                            .disabled(working)
                         }
                     }
                 }
@@ -214,12 +224,17 @@ private struct EbayConnectionSheet: View {
             defer { working = false }
             do {
                 let url = try await api.connectEbay(features: EbayWorkspaceFormat.features.map(\.id).filter(chosen.contains))
-                onAuthorize(url)
-                dismiss()
+                await signIn(at: url)
             } catch {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    private func signIn(at url: URL) async {
+        await MarketplaceWebSignIn.run(url, using: webAuthenticationSession, session: session)
+        onSignInEnded()
+        dismiss()
     }
 }
 

@@ -16,7 +16,7 @@ def _post_invoke(app, owner, extra_headers):
         async with httpx.AsyncClient(transport=transport, base_url='http://internal') as client:
             return await client.post('/internal/mac-inference/invoke', headers={
                 'Authorization': 'Bearer process-token', **extra_headers,
-            }, json={'user_id': owner, 'operation': 'quick_chat', 'args': [1], 'kwargs': {}})
+            }, json={'user_id': owner, 'provider': 'chatgpt', 'operation': 'quick_chat', 'args': [1], 'kwargs': {}})
     return asyncio.run(run())
 
 
@@ -24,22 +24,22 @@ def test_internal_routes_refuse_requests_from_the_public_edge(monkeypatch):
     monkeypatch.setenv('ANTEROOM_PROCESS_TOKEN', 'process-token')
     owner = str(uuid.uuid4())
     relay = relay_for(owner)
-    relay.poll('a' * 32, {'vision_model': 'v', 'listing_model': 'l'}, timeout=0)
+    relay.poll('a' * 32, {'chatgpt': {'vision_model': 'v', 'listing_model': 'l'}}, timeout=0)
     # Fly's proxy adds Fly-Client-IP; even the right token does not get through.
     refused = _post_invoke(create_app(), owner, {'Fly-Client-IP': '203.0.113.9'})
     assert refused.status_code == 404
-    assert relay.poll('a' * 32, {'vision_model': 'v', 'listing_model': 'l'}, timeout=0) is None
+    assert relay.poll('a' * 32, {'chatgpt': {'vision_model': 'v', 'listing_model': 'l'}}, timeout=0) is None
 
 
 def test_internal_routes_still_answer_on_the_private_network(monkeypatch):
     monkeypatch.setenv('ANTEROOM_PROCESS_TOKEN', 'process-token')
     owner = str(uuid.uuid4())
     # No Mac is polling, so the call reaches the route and reports it unavailable.
-    monkeypatch.setattr('vendoo_studio.services.mac_inference.MacInference.invoke',
-                        lambda *args, **kwargs: asyncio.sleep(0, {'answer': 7}))
+    monkeypatch.setattr('vendoo_studio.services.mac_inference.MacInference.call',
+                        lambda *args, **kwargs: asyncio.sleep(0, ({'answer': 7}, 'mac-listing')))
     allowed = _post_invoke(create_app(), owner, {})
     assert allowed.status_code == 200
-    assert allowed.json() == {'ok': True, 'result': {'answer': 7}}
+    assert allowed.json() == {'ok': True, 'result': {'answer': 7}, 'model': 'mac-listing'}
 
 
 class Lines(logging.Handler):

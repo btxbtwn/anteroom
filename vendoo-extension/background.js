@@ -2,6 +2,11 @@ var STUDIO_EXTENSION_BUILD = null;
 try { importScripts('studio-build.js'); } catch {}
 const STUDIO_URL = typeof STUDIO_API_ORIGIN === 'string' ? STUDIO_API_ORIGIN : 'http://127.0.0.1:4318';
 if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(STUDIO_URL)) throw new Error('Anteroom Bridge requires a loopback API address.');
+// chrome.storage.local holds the pairing token, the web approvals and the action journals.
+// Chrome lets content scripts read it by default; only the worker and the extension's own
+// page need it, so keep it to them (storage.session already is).
+chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
+  .catch(err => console.error(`[BG-Studio] Could not restrict storage: ${err?.message || err}`));
 // What this Bridge can run, sent when it connects. Anteroom checks these rather
 // than the exact build, so an older copy keeps working until a change needs
 // something new. Add a name here when the Bridge gains a command an older copy
@@ -366,11 +371,6 @@ async function handleStudioMessage(msg) {
     case 'marketplace.import.page':
     case 'marketplace.import.listing': {
       await handleMarketplaceImport(msg);
-      break;
-    }
-
-    case 'marketplace.record': {
-      await handleMarketplaceRecord(msg);
       break;
     }
 

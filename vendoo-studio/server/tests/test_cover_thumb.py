@@ -50,7 +50,10 @@ def test_a_public_cover_is_cached_as_a_small_jpeg(tmp_path, monkeypatch):
         return source, "image/jpeg", url
 
     monkeypatch.setattr(cover_thumb, "fetch_public", fake_fetch)
-    monkeypatch.setattr(cover_thumb, "resolve_fetch_target", lambda url, allow_http=False: (url, ["1.2.3.4"]))
+    async def resolved(url, allow_http=False):
+        return url, ["1.2.3.4"]
+
+    monkeypatch.setattr(cover_thumb, "resolve_fetch_target", resolved)
 
     client = _client()
     url = "https://images.vendoo.co/abc.jpg"

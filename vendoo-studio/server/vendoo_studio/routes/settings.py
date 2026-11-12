@@ -121,7 +121,7 @@ def _chatgpt_status() -> ChatGPTStatus:
     from vendoo_studio.services.service_context import current
     if (context := current()) is not None:
         from vendoo_studio.services.mac_inference import relay_for
-        return ChatGPTStatus(signed_in=relay_for(context.seller_id).connected)
+        return ChatGPTStatus(signed_in=relay_for(context.seller_id).ready('chatgpt'))
     from vendoo_studio.services import chatgpt_oauth
     from vendoo_studio.services.keychain import get_chatgpt_tokens
 
@@ -138,6 +138,11 @@ def _chatgpt_status() -> ChatGPTStatus:
 
 @router.get("/provider")
 def get_provider():
+    from vendoo_studio.services.service_context import current
+    if current() is not None:
+        from vendoo_studio.routes.mac_inference import _pinned
+        if pinned := _pinned('mac', claim_route=False):
+            return pinned
     from vendoo_studio.services.keychain import get_api_key, get_cursor_api_key, mask_secret
     from vendoo_studio.services.listing_provider import get_listing_provider
     from vendoo_studio.services.user_settings import get_listing_provider_order, get_photo_provider_choice
@@ -145,9 +150,11 @@ def get_provider():
     from vendoo_studio.services import claude_auth
 
     chatgpt = _chatgpt_status()
-    from vendoo_studio.services.service_context import current
-    claude = (ClaudeStatus(installed=False, signed_in=False, install_command="")
-              if current() is not None else ClaudeStatus(**claude_auth.status()))
+    if (context := current()) is not None:
+        from vendoo_studio.services.mac_inference import relay_for
+        claude = ClaudeStatus(installed=True, signed_in=relay_for(context.seller_id).ready('claude'), install_command="")
+    else:
+        claude = ClaudeStatus(**claude_auth.status())
     photo_provider = get_photo_provider_choice()
     key = get_api_key()
     masked = mask_secret(key)

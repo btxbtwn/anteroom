@@ -4,12 +4,9 @@ from vendoo_studio.services import model_usage
 
 from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
 
-import asyncio
 import json
 import ssl
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 
 import httpx
 
@@ -22,6 +19,7 @@ from vendoo_studio.providers.xiaomi_mimo import (
 )
 from vendoo_studio.services.chatgpt_oauth import RESOURCE, refresh_chatgpt_tokens
 from vendoo_studio.services import live_trace
+from vendoo_studio.services.shared_http import http_client
 from vendoo_studio.services.keychain import get_chatgpt_models
 
 # Sign in with ChatGPT tokens reach the public API, where the seller's plan pays.
@@ -336,37 +334,6 @@ def _messages_to_input(messages: list[dict]) -> tuple[str, list[dict]]:
     return combined, items
 
 
-_shared_http: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
-
-
-def keep_connection_on_this_loop() -> None:
-    """Share one HTTP client, and its open connections, on the server's loop.
-
-    A fresh client per call paid a TLS handshake every time: about 10 ms of
-    CPU and 120 ms of waiting, ten-odd times per listing. A client is tied to
-    the loop it ran on, so calls on any other loop still get their own.
-    """
-    global _shared_http
-    _shared_http = (asyncio.get_running_loop(), httpx.AsyncClient())
-
-
-async def close_connection() -> None:
-    global _shared_http
-    shared, _shared_http = _shared_http, None
-    if shared is not None:
-        await shared[1].aclose()
-
-
-@asynccontextmanager
-async def _http_client() -> AsyncIterator[httpx.AsyncClient]:
-    shared = _shared_http
-    if shared is not None and shared[0] is asyncio.get_running_loop():
-        yield shared[1]
-        return
-    async with httpx.AsyncClient() as client:
-        yield client
-
-
 async def _chatgpt_headers() -> dict[str, str]:
     record = await refresh_chatgpt_tokens()
     if not record:
@@ -386,7 +353,7 @@ async def fetch_chatgpt_models(*, force: bool = False) -> list[str]:
         return list(_catalog_slugs)
     headers = await _chatgpt_headers()
     headers.pop("Accept", None)
-    async with _http_client() as client:
+    async with http_client() as client:
         resp = await client.get(f"{OPENAI_BASE_URL}/models", headers=headers, timeout=20)
     if resp.status_code >= 400:
         raise RuntimeError(_http_error(resp))
@@ -534,7 +501,7 @@ class ChatGPTCodexProvider:
     async def _stream(self, messages: list[dict], model: str, **payload_kwargs):
         with model_usage.observe(self.name, model) as call:
             headers = await self._headers()
-            async with _http_client() as client:
+            async with http_client() as client:
                 async with client.stream(
                     "POST",
                     f"{self.base_url}/responses",
@@ -652,7 +619,7 @@ class ChatGPTCodexProvider:
     async def _stream_search(self, messages: list[dict], **payload_kwargs):
         with model_usage.observe(self.name, self.listing_model) as call:
             headers = await self._headers()
-            async with _http_client() as client:
+            async with http_client() as client:
                 async with client.stream(
                     "POST",
                     f"{self.base_url}/responses",

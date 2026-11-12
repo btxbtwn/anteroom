@@ -9,6 +9,7 @@ struct BulkListingPlan: Equatable {
         /// Photo ids in listing order; the first is the cover.
         var photos: [UUID]
         var sku = ""
+        var sizeTag = ""
         var garment: SellerInputs.Garment = .top
         /// Typed or read values, keyed like the garment's fields.
         var measurements: [String: String] = [:]
@@ -107,6 +108,10 @@ struct BulkListingPlan: Equatable {
         update(id) { $0.sku = sku }
     }
 
+    mutating func setSizeTag(_ sizeTag: String, for id: Item.ID) {
+        update(id) { $0.sizeTag = sizeTag }
+    }
+
     mutating func setGarment(_ garment: SellerInputs.Garment, for id: Item.ID) {
         update(id) { $0.garment = garment }
     }
@@ -170,13 +175,15 @@ struct BulkListingPlan: Equatable {
     }
 
     /// The same Item Details notes the web's bulk upload writes
-    /// (bulkListingNotes): shared cost and labels, the item's SKU, and its
+    /// (bulkListingNotes): shared cost and labels, the item's SKU and size-tag note, and its
     /// garment and measurements when any were typed. Nil when there is nothing to write.
     static func notes(cog: String, labels: String, item: Item) throws -> String? {
         var inputs = SellerInputs()
         inputs.cog = cog.trimmingCharacters(in: .whitespacesAndNewlines)
         inputs.addLabel(labels)
         inputs.sku = item.sku.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sizeTag = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sizeTag.isEmpty { inputs.sellerNotes = "Size tag: \(sizeTag)" }
         let measured = item.typedMeasurements
         if !measured.isEmpty {
             inputs.garment = item.garment

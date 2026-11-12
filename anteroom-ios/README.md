@@ -48,7 +48,7 @@ Stage Manager) it falls back to the iPhone's push navigation, and the open
 listing stays open across the switch. An editor that closes without Save or
 Discard (another listing opened, a layout switch, a tab switch) keeps its
 unsaved edits on the device, and they come back when that listing reopens.
-CI runs `IPadSandboxTests` on an iPad simulator.
+The local release checks run `IPadSandboxTests` on an iPad simulator.
 
 Fields expose their labels to VoiceOver; price/cost and photo controls stack
 at accessibility text sizes. Photo deletion is a visible action with
@@ -96,23 +96,23 @@ iPhone that asked for it.
 
 ## CI and TestFlight
 
-`.github/workflows/ios.yml` builds for the Simulator on every change under
-`anteroom-ios/` and runs every test: the small executable checks under
-`Tests/`, the XCTest unit tests under `UnitTests/` and the hosted sandbox UI
-tests under `UITests/`. Only on `main`, and only after the build and all tests
-pass, it archives, signs and uploads the build to TestFlight, numbered by the
-workflow run. A run started by hand on another branch never uploads. Install
-it on the iPhone from the TestFlight app.
+Xcode Cloud builds and tests the `AnteroomCloud` scheme. Its post-clone hook
+installs pinned XcodeGen, runs the standalone Swift checks under `Tests/`,
+generates the project, and sets the cloud build number. The cloud scheme runs
+the XCTest unit tests under `UnitTests/` without requiring the Python sandbox.
+The `Anteroom` scheme retains all unit and UI tests for local verification.
+See [Xcode Cloud setup](../docs/xcode-cloud.md) for account activation and the
+required local iPhone/iPad checks before a manually started TestFlight release.
 
 The unit tests stub the network with `URLProtocol`: request building, error
 messages, the seller-confirmation requirement, the 401 handling below, photo
 upload failure counting and kept unsaved edits.
 
-Signing uses an App Store Connect API key (Admin role) stored as the
-repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_P8`; Xcode
-creates and renews the certificate and profile with it. The publishable key
-comes from the repository variable `SUPABASE_PUBLISHABLE_KEY`. Pull requests
-never run the upload job.
+Apple manages cloud signing. Set `SUPABASE_PUBLISHABLE_KEY` in the cloud release
+workflow's environment; release archives fail if it is missing. PR verification
+has no distribution post-action. GitHub's former `ASC_*` signing secrets are
+no longer consumed by an iOS workflow; remove them after a successful cloud
+release if nothing else uses them.
 
 ## Shared backend port
 
@@ -278,10 +278,24 @@ and records screenshots in the `iphone-sandbox-results` artifact.
 When the hosted API refuses the seller's token (401), the app renews the
 sign-in once. A read is then sent again; a write is not, because it may have
 already run, so the seller sees "Your sign-in was renewed. Try that again."
-When the sign-in can't be renewed, the app signs out to the sign-in screen. A
-401 that names a marketplace (eBay signed Anteroom out) keeps its own message
-and the sign-in. Signing out also deletes exported CSVs, cached photos and kept
-editor edits from the phone.
+Only a refusal from Supabase signs out: no saved session, or a refresh answered
+400/401/403 with `refresh_token_not_found`, `refresh_token_already_used`,
+`session_not_found`, `session_expired`, `user_not_found`, `user_banned` or
+OAuth's `invalid_grant` (`Sources/Session/SignInRenewal.swift`). The app then
+returns to the sign-in screen. Any other failure to renew (offline, a 5xx, rate
+limiting) keeps the saved sign-in and shows an error to try again. Opening the
+app shows the saved session straight away, even expired or offline; requests
+renew it when they can. A 401 that names a marketplace (eBay signed Anteroom
+out) keeps its own message and the sign-in. Signing out also deletes exported
+CSVs, cached photos and kept editor edits from the phone.
+
+## Marketplace sign-in
+
+Connecting eBay opens eBay's page in a web authentication sheet
+(`ASWebAuthenticationSession` through SwiftUI's `webAuthenticationSession`)
+that shares Safari's cookies. The relay finishes by redirecting to
+`anteroom://marketplace-signin` with a one-time claim; the sheet catches that
+address, closes, and the app trades the claim for the connection.
 
 ## When the server is briefly unavailable
 

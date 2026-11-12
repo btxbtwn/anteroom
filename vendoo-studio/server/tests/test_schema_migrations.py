@@ -47,6 +47,20 @@ def test_head_revision_is_resolvable():
     assert schema_migrations.migrations_dir().is_dir()
 
 
+def test_operator_email_upgrade_preserves_previous_release_data(engine, snapshots):
+    from alembic import command
+    from vendoo_studio.repositories.error_email import EmailStore
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, 'a12a51c75c22')
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO conversations (id, title) VALUES ('keep-email-test', 'Keep me')"))
+    command.upgrade(config, 'head')
+    assert EmailStore(engine).read() == {}
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT title FROM conversations WHERE id='keep-email-test'")) == 'Keep me'
+
+
 def test_recent_like_upgrade_preserves_rules_and_requires_faster_offer_approval(engine, snapshots):
     from alembic import command
 

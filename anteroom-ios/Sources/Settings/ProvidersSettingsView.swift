@@ -1,8 +1,7 @@
 import SwiftUI
 
 /// Settings → Providers for the hosted workspace (ProvidersSettings.tsx):
-/// API-key providers only. Keys are encrypted in the account's private vault
-/// and never sent back to this iPhone.
+/// API keys and subscriptions connected through the seller's Mac.
 struct ProvidersSettingsView: View {
     let api: AnteroomAPI
 
@@ -41,10 +40,18 @@ struct ProvidersSettingsView: View {
                         Text("Listing AI")
                     } footer: {
                         Text(configured.isEmpty
-                             ? "Add an API key below, then choose it here to write listings in the web app and on this iPhone."
+                             ? "Connect a subscription on your computer or add an API key below, then choose it here."
                              : "The primary writes your listings; the fallback takes over if it fails. Photos can use a different provider.")
                     }
                     .disabled(saving)
+                    Section {
+                        subscriptionRow("ChatGPT", ready: order?.chatgpt?.signedIn == true)
+                        subscriptionRow("Claude", ready: order?.claude?.signedIn == true)
+                    } header: {
+                        Text("Subscriptions on your computer")
+                    } footer: {
+                        Text("In Anteroom on your computer, choose Account → This Mac’s Listings → Settings → Providers to sign into ChatGPT or Claude. Return to Account → My Account and sign into this Anteroom account. Keep the computer awake, online, and Anteroom running while generating. Subscription credentials stay on your computer. Pull to refresh connection status.")
+                    }
                     Section {
                         NavigationLink {
                             MimoKeyView(api: api, maskedKey: order?.mimoMaskedKey) { Task { await load() } }
@@ -94,7 +101,19 @@ struct ProvidersSettingsView: View {
     private var configured: [Choice] {
         var choices = providers.filter(\.configured).map { Choice(id: $0.id, label: $0.label) }
         if order?.mimoConfigured == true { choices.append(Choice(id: "mimo", label: "Xiaomi MiMo")) }
+        if order?.chatgpt?.signedIn == true { choices.append(Choice(id: "chatgpt", label: "ChatGPT (Mac)")) }
+        if order?.claude?.signedIn == true { choices.append(Choice(id: "claude", label: "Claude (Mac)")) }
         return choices
+    }
+
+    private func subscriptionRow(_ title: String, ready: Bool) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(ready ? "Connected" : "Not connected")
+                .font(.footnote)
+                .foregroundStyle(ready ? WorkspaceStyle.success : .secondary)
+        }
     }
 
     private struct Choice: Identifiable {

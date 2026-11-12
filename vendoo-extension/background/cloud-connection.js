@@ -9,12 +9,15 @@
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
   const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);
-  // What a relaying Bridge runs: marketplace actions, and each named read under its own name.
-  const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts'];
+  // What a relaying Bridge runs: marketplace actions, and each named read under its own name,
+  // and how it checks them: a signed approval on every relayed command, binding the photos
+  // relayed with it (background/cloud-approvals.js). It no longer declares the writes-only
+  // `marketplace.signed_approvals` of Bridges 0.2.56 to 0.2.67, which the server drops later.
+  const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands'];
 
   function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null, runCommand = null,
     verifyApproval = null } = {}) {
-    // A Bridge that runs relayed writes must check the hosted API's signature on each one.
+    // A Bridge that runs relayed commands must check the hosted API's signature on each one.
     if (runCommand && !verifyApproval) throw new Error('Relayed commands need an approval check.');
     // Serializing state changes prevents two tabs from overwriting each other's
     // session records across asynchronous chrome.storage operations.
@@ -30,7 +33,7 @@
     const page = sender => sender.id === api.runtime.id && Number.isInteger(sender.tab?.id)
       && sender.frameId === 0 && typeof sender.documentId === 'string'
       && site(sender.url) && site(sender.tab.url) && (!sender.origin || sender.origin === ORIGIN);
-    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? [...RELAY_CAPABILITIES, 'marketplace.signed_approvals'] : [])] });
+    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? RELAY_CAPABILITIES : [])] });
     async function read() { return (await api.storage.session.get(KEY))[KEY] || {}; }
     async function write(records) { await api.storage.session.set({ [KEY]: records }); }
     async function readApprovals() { return (await api.storage.local.get(APPROVALS_KEY))[APPROVALS_KEY] || {}; }
@@ -193,9 +196,10 @@
       const current = await approvedPage(message, sender);
       if (!current) return { ok: false, error_code: 'not_connected' };
       if (!await current()) return { ok: false, error_code: 'account_changed' };
-      // A write runs only with the hosted API's signed approval for this account and
-      // exactly this command. The refusal goes back to the hosted API, which shows it.
-      const refusal = await verifyApproval(command, message.accountId);
+      // A command runs only with the hosted API's signed approval for this account,
+      // exactly this command and exactly these photos. The refusal goes back to the
+      // hosted API, which shows it.
+      const refusal = await verifyApproval(command, message.accountId, photos);
       if (refusal) return { ok: true, reply: refusal };
       const { approval: _approval, ...payload } = command.payload;
       // The marketplace call runs outside the state queue, like a form read. Its
@@ -220,7 +224,7 @@
       }),
     };
   }
-  if (typeof module !== 'undefined') module.exports = { createCloudConnection, ORIGIN };
+  if (typeof module !== 'undefined') module.exports = { createCloudConnection, ORIGIN, RELAY_CAPABILITIES };
   else {
     const bridge = createCloudConnection(chrome, { readForm: readCloudPoshmarkForm, runCommand: runCloudMarketplaceCommand,
       verifyApproval: CloudApprovals.createApprovalVerifier(chrome).verify });

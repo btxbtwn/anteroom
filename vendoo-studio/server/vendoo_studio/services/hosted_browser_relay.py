@@ -9,8 +9,8 @@ started it.
 Only the marketplace commands a seller starts go through here: an approved
 List, Update or Save draft (``marketplace.execute``), reading what one did
 (``marketplace.result``), a confirmed Delist (``marketplace.delete``), and
-cancelling one (``job.cancel``). Each write carries a signed approval
-(``bridge_approvals``) that the Bridge checks before it runs it. Besides those, a few named commands do what
+cancelling one (``job.cancel``). Each command carries a signed approval
+(``bridge_approvals``) that the Bridge checks before it runs it (an older Bridge, writes only). Besides those, a few named commands do what
 the Mac does outside its listing actions: reads that fill the seller's editor
 the sign-in status and Sign in of Settings → Connections, and the Chrome
 inventory import's reads of the seller's own active listings. Each is a fixed
@@ -22,6 +22,7 @@ before it starts.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 import uuid
@@ -31,6 +32,8 @@ from vendoo_studio.services import bridge_approvals
 from vendoo_studio.services.marketplace_diagnostics import failure_context
 from vendoo_studio.services.marketplace_errors import report_exception, report_result
 from vendoo_studio.services.extension_connection import MARKETPLACE_ACTIONS, ReplyWaits
+
+logger = logging.getLogger(__name__)
 
 # Each named read has its own Bridge capability, so a later read never changes
 # what an existing name promises (docs/cloud-extension.md).
@@ -191,7 +194,16 @@ class BrowserRelay(ReplyWaits):
         if (sent := self._sent.get(str(command.get("message_id")))) is not None:
             sent["delivered"] = time.monotonic()
         # Signed as the page takes it, so the approval's few minutes start now.
-        return bridge_approvals.signed(self.owner, command, self._capabilities)
+        photos = None
+        if (bridge_approvals.signs_every_command(self._capabilities)
+                and command.get("type") in bridge_approvals.PHOTO_COMMANDS and command.get("job_id")):
+            try:
+                photos = await approved_photo_hashes(str(command["job_id"]))
+            except asyncio.CancelledError:
+                # The page went away while the photos were read: the next poll takes the command.
+                self._outbox.appendleft(command)
+                raise
+        return bridge_approvals.signed(self.owner, command, self._capabilities, photos)
 
     async def read_local(self, command: str, payload: dict, timeout: float) -> dict:
         """One named command other than a marketplace action, run in the seller's Chrome,
@@ -276,6 +288,21 @@ class BrowserRelay(ReplyWaits):
 
 class ChromeReadError(RuntimeError):
     pass
+
+
+async def approved_photo_hashes(job_id: str) -> list[dict]:
+    """The SHA-256 of each photo approved for ``job_id``, which the Bridge checks the relayed bytes against.
+
+    When the database cannot answer, the approval names no photos, so the Bridge
+    refuses the command if photos come with it and the seller can try again."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from vendoo_studio.database import in_worker_session
+    try:
+        return await in_worker_session(bridge_approvals.photo_hashes, job_id)
+    except SQLAlchemyError:
+        logger.warning("Could not read the approved photos of job %s to sign its command.", job_id, exc_info=True)
+        return []
 
 
 _relays: dict[str, BrowserRelay] = {}
