@@ -22,6 +22,10 @@ jobs:
   release-notes:
     name: Release notes
     runs-on: ubuntu-latest
+    # VERSION_PUSH_KEY can push to main past the ruleset, so it lives in the
+    # release environment, which only main may use; other branches' workflows
+    # cannot read it.
+    environment: release
     permissions:
       contents: read
     steps:
