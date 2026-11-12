@@ -59,10 +59,10 @@ chmod +x "$1/xcodegen/bin/xcodegen"
         self.assertFalse((self.ios / "generated-project").exists())
 
     def test_archive_writes_public_key(self):
-        self.env.update(CI_XCODEBUILD_ACTION="archive", SUPABASE_PUBLISHABLE_KEY="sb_publishable_test123")
+        self.env.update(CI_XCODEBUILD_ACTION="archive", SUPABASE_PUBLISHABLE_KEY="sb_publishable_aaaaaaaa")
         result = self.run_hook()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("SUPABASE_PUBLISHABLE_KEY = sb_publishable_test123", (self.ios / "Config/Cloud.xcconfig").read_text())
+        self.assertIn("SUPABASE_PUBLISHABLE_KEY = sb_publishable_aaaaaaaa", (self.ios / "Config/Cloud.xcconfig").read_text())
 
     def test_rejects_invalid_settings_before_running_tools(self):
         for name, value in (("CI_BUILD_NUMBER", "0"), ("CI_BUILD_NUMBER", "123\nBAD=1"),
