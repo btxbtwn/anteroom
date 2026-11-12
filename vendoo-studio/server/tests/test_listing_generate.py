@@ -1604,14 +1604,25 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_generate_persists_listing_and_skips_repeat_analysis(self):
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
-            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
-                async for _ in resp.aiter_text():
-                    pass
-            self.assertEqual(self.provider.analyze_calls, 1)
-            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
-                async for _ in resp.aiter_text():
-                    pass
+        finishing = []
+        def spawn_finish(coro):
+            task = streaming.spawn(coro)
+            finishing.append(task)
+            return task
+
+        with patch("vendoo_studio.services.listing_generation.spawn", side_effect=spawn_finish):
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    async for _ in resp.aiter_text():
+                        pass
+                # The shared in-memory connection cannot overlap the background finish.
+                await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
+                self.assertEqual(self.provider.analyze_calls, 1)
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    async for _ in resp.aiter_text():
+                        pass
+                # The shared in-memory connection cannot overlap the background finish.
+                await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
         self.assertEqual(self.provider.analyze_calls, 1)
         # Two generation streams; schema, category and repair calls may also run.
         initial = [messages for messages in self.provider.chat_history
@@ -1677,14 +1688,25 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_generate_reads_photos_added_after_the_previous_analysis(self):
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
-            first = await client.post(f"/api/conversations/{self.conv_id}/generate")
-            self.assertNotIn("Error:", first.text)
-            db = self.Session()
-            listing_persistence.add_photo(db, self.conv_id, "b.jpg", "b.jpg", "image/jpeg", 10)
-            db.close()
-            second = await client.post(f"/api/conversations/{self.conv_id}/generate")
-            self.assertNotIn("Error:", second.text)
+        finishing = []
+        def spawn_finish(coro):
+            task = streaming.spawn(coro)
+            finishing.append(task)
+            return task
+
+        with patch("vendoo_studio.services.listing_generation.spawn", side_effect=spawn_finish):
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                first = await client.post(f"/api/conversations/{self.conv_id}/generate")
+                self.assertNotIn("Error:", first.text)
+                # Finish native fields before mutating photos or tearing down this DB.
+                await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
+                db = self.Session()
+                listing_persistence.add_photo(db, self.conv_id, "b.jpg", "b.jpg", "image/jpeg", 10)
+                db.close()
+                second = await client.post(f"/api/conversations/{self.conv_id}/generate")
+                self.assertNotIn("Error:", second.text)
+                # Finish native fields before mutating photos or tearing down this DB.
+                await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
         self.assertEqual(self.provider.analyze_calls, 2)
 
     async def test_generate_does_not_save_if_photos_change_during_the_model_reply(self):
