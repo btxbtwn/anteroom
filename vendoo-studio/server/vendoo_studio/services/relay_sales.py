@@ -249,12 +249,18 @@ async def handle_event(
         order_id = _first(event.get("ids") or {}, "orderId")
         return await recover_ebay_notification(order_id, session_factory=session_factory) if order_id else []
     lines = await etsy_lines(event, read_etsy_receipt)
+    # The sales are written on a worker thread: a commit on the event loop
+    # would stop every other request while it waits for the database.
+    return await asyncio.to_thread(_record_lines, session_factory, str(source), lines)
+
+
+def _record_lines(session_factory: Callable[[], Session], marketplace: str, lines: list[dict]) -> list[str]:
     created = []
     with session_factory() as db:
         for line in lines:
             sale = record_sale(
                 db,
-                marketplace=source,
+                marketplace=marketplace,
                 order_id=line["order_id"],
                 line_id=line["line_id"],
                 listing_id=line.get("listing_id"),

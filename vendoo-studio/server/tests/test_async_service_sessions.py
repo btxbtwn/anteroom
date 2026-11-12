@@ -18,12 +18,10 @@ STILL_ON_THE_LOOP = {
     "services/native_marketplaces.py:_execute_step",
     "services/native_marketplaces.py:_wait_for_chrome",
     "services/native_marketplaces.py:run_job",
-    "services/order_amounts.py:backfill",
     "services/promotion_automations.py:_timer",
     "services/promotion_automations.py:check_new_likes",
     "services/promotion_automations.py:run_round",
     "services/promotion_automations.py:tick",
-    "services/relay_sales.py:handle_event",
     "services/vendoo_drafts.py:_ops",
     "services/vendoo_drafts.py:run",
 }
