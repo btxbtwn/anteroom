@@ -228,16 +228,16 @@ async def handle_event(
 ) -> list[str]:
     """Record the sales in one relay event. Returns the new sale IDs.
 
-    Other events (listing changes, account deletion) are acknowledged and
-    left alone for now.
+    eBay's account deletion deletes that account's data (``ebay_account_deletion``).
+    Other events (listing changes) are acknowledged and left alone for now.
     """
     source, kind = event.get("source"), event.get("eventType")
     if (source, kind) not in SALE_EVENTS:
         if (source, kind) == ("ebay", "MARKETPLACE_ACCOUNT_DELETION"):
-            from vendoo_studio.services.marketplace_accounts import forget_deleted_ebay_account
+            from vendoo_studio.services import ebay_account_deletion
 
-            # On the web the account is a Vault read and delete: keep it off the event loop.
-            await asyncio.to_thread(forget_deleted_ebay_account, _first(event.get("ids") or {}, "userId"))
+            # Vault or Keychain reads and database deletes: keep them off the event loop.
+            await asyncio.to_thread(ebay_account_deletion.purge, _first(event.get("ids") or {}, "userId"), session_factory)
         return []
     from vendoo_studio.services.user_settings import sale_detection_enabled
 

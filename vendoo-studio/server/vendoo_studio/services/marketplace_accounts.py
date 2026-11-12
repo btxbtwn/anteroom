@@ -236,14 +236,6 @@ async def disconnect(marketplace: str) -> None:
         relay_client.stop_stream()
 
 
-def forget_deleted_ebay_account(user_id: str | None) -> None:
-    """eBay said this account was closed: drop its tokens (the relay already unlinked it)."""
-    account = get_marketplace_accounts().get("ebay")
-    if user_id and account and account.get("accountId") == user_id:
-        log.warning("eBay reported the connected account closed; forgetting it")
-        delete_marketplace_account("ebay")
-
-
 class SignInRequired(RuntimeError):
     pass
 
