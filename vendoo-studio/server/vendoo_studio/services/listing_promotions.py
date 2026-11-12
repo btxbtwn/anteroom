@@ -262,6 +262,9 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
         raise PromotionError(502, str(exc), "network") from exc
     if facts.get("ok") is not True:
         row.marketplace_message = scrub(facts.get("marketplace_message"))
+        # A refusal can still say how many likers could get an offer (Depop's "nobody to offer to").
+        if isinstance(facts.get("like_count"), int):
+            row.like_count = facts["like_count"]
         log.error("%s %s preview rejected for listing %s, automation %s: %s; %s",
                   row.marketplace, row.action, listing_id, row.automation_id,
                   scrub(str(facts.get("error") or "The marketplace did not answer.")), row.marketplace_message or "-",

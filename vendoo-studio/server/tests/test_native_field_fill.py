@@ -7,8 +7,9 @@ import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from worker_sessions import memory_engine, worker_sessions
 
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
@@ -129,8 +130,9 @@ class WriteValueTest(unittest.TestCase):
 
 class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
+        self.engine = memory_engine()
         Base.metadata.create_all(self.engine)
+        self.enterContext(worker_sessions(self.engine))
         self.db = sessionmaker(bind=self.engine)()
         self.conv = ConversationRepo(self.db).create(title="Jeans")
         self.repo = ListingRepo(self.db)
@@ -141,6 +143,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.engine.dispose()
 
     def _current(self):
+        self.db.expire_all()
         saved = self.repo.get_current(self.conv.id)
         return self.repo.get_revision(saved.current_revision_id)
 
@@ -155,7 +158,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         reply = json.dumps({"fields": {"ebay_specifics.Rise": {"value": "High", "evidence": "high rise"}}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})) as load, \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
-            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="Tag: high rise", markets={"ebay"})
+            saved = await fill_native_fields(self.conv.id, object(), evidence="Tag: high rise", markets={"ebay"})
         self.assertEqual(saved["ebay_specifics"]["Rise"], "High")
         self.assertEqual(native_contract.gaps(saved, "ebay"), [])
         # Category inspection, capture before filling, and final capture only.
@@ -175,9 +178,8 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         reply = json.dumps({"fields": {"ebay_specifics.Size": {"value": "M", "evidence": "size M"}}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": new_form})) as load, \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
-            saved = await native_field_fill._fill_native_fields(
-                self.db, self.conv.id, object(), evidence="Tag: size M", markets={"ebay"}, categories=False)
-        load.assert_awaited_once_with(self.db, self.conv.id, {"ebay"})
+            saved = await native_field_fill._fill_native_fields(self.conv.id, object(), evidence="Tag: size M", markets={"ebay"}, categories=False)
+        load.assert_awaited_once_with(self.conv.id, {"ebay"})
         self.assertIn("choices: M", ask.call_args.args[1][1]["content"])
         self.assertNotIn("choices: S", ask.call_args.args[1][1]["content"])
         self.assertEqual(saved["ebay_specifics"]["Size"], "M")
@@ -196,7 +198,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             "value": "Relaxed straight", "evidence": "Sawyer relaxed straight"}}})]
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)) as ask:
-            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="Tag: Sawyer relaxed straight")
+            saved = await fill_native_fields(self.conv.id, object(), evidence="Tag: Sawyer relaxed straight")
         self.assertEqual(ask.await_count, 2)
         repair_prompt = ask.call_args_list[1].args[1][1]["content"]
         self.assertIn("Style | required | free-text", repair_prompt)
@@ -214,7 +216,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields":{}}')) as ask:
-            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="No style evidence")
+            saved = await fill_native_fields(self.conv.id, object(), evidence="No style evidence")
         # One full pass and one focused repair. A second repair would resend the
         # same fields, evidence and choices, so it only adds wait time.
         self.assertEqual(ask.await_count, 2)
@@ -234,7 +236,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             "value": "Relaxed straight", "evidence": "Sawyer relaxed straight"}}}), '{"fields":{}}']
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)) as ask:
-            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence=evidence)
+            saved = await fill_native_fields(self.conv.id, object(), evidence=evidence)
         self.assertEqual(ask.await_count, 2)
         self.assertEqual(saved["ebay_specifics"]["Style"], "Relaxed straight")
         self.assertTrue(any(gap["field"] == "ebay_specifics.Rise" for gap in native_contract.gaps(saved, "ebay")))
@@ -250,7 +252,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields":{}}')):
-            saved = await fill_native_fields(self.db, self.conv.id, object(), evidence="Raglan tee", markets={"ebay"})
+            saved = await fill_native_fields(self.conv.id, object(), evidence="Raglan tee", markets={"ebay"})
         # A guess the photos cannot prove is dropped, not stored as a blank
         # that would read as the seller clearing the row.
         self.assertNotIn("Size", saved.get("ebay_specifics") or {})
@@ -275,7 +277,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             json.dumps({"fields": {"ebay_specifics.Player": {"value": "5000", "evidence": evidence}}}),
         ])
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})):
-            await fill_native_fields(self.db, self.conv.id, provider, evidence=evidence, markets={"ebay"})
+            await fill_native_fields(self.conv.id, provider, evidence=evidence, markets={"ebay"})
         saved = self._current().listing_json
         self.assertEqual(saved["ebay_specifics"]["Player"], "5000")
         self.assertEqual(saved[native_contract.EVIDENCE_KEY]["ebay_specifics.Player"]["quote"], evidence)
@@ -305,7 +307,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                                        for key, value in values.items()}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
-            await fill_native_fields(self.db, self.conv.id, object(), evidence=evidence, markets={"depop"})
+            await fill_native_fields(self.conv.id, object(), evidence=evidence, markets={"depop"})
         saved = self._current().listing_json
         self.assertNotIn("occasion", saved["depop_specifics"])
         self.assertEqual(saved["depop_specifics"]["nativeSizeId"], "103")
@@ -324,7 +326,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         reply = json.dumps({"fields": {"mercari_specifics.material": {"value": "Wool", "evidence": "100% wool"}}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"mercari": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
-            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Tag reads 100% cotton.")
+            updated = await fill_native_fields(self.conv.id, object(), evidence="Tag reads 100% cotton.")
         self.assertNotIn("material", updated["mercari_specifics"])
         self.assertTrue(any(item["field"] == "mercari_specifics.material" for item in native_contract.gaps(updated, "mercari")))
 
@@ -346,7 +348,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         reply = json.dumps({"fields": {"depop_specifics.source": {"value": ["Preloved"], "evidence": "Preloved shirt"}}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
-            await fill_native_fields(self.db, self.conv.id, object(), evidence=evidence, markets={"depop"})
+            await fill_native_fields(self.conv.id, object(), evidence=evidence, markets={"depop"})
         saved = self._current().listing_json
         self.assertEqual(saved["depop_specifics"]["age"], ["modern"])
         self.assertEqual(saved["depop_specifics"]["source"], ["preloved"])
@@ -366,7 +368,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         reply = json.dumps({"fields": {"ebay_specifics.Rise": {"value": "High", "evidence": "high rise"}}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
-            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="100% cotton, high rise")
+            updated = await fill_native_fields(self.conv.id, object(), evidence="100% cotton, high rise")
             self.assertEqual(updated["ebay_specifics"], {"Material": "Cotton", "Rise": "High"})
             self.assertEqual(native_contract.gaps(updated, "ebay"), [])
             self.assertNotIn("ebay_specifics.Material |", ask.call_args.args[1][1]["content"])
@@ -375,7 +377,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("sizeType = Regular", ask.call_args.args[1][0]["content"])
             ask.reset_mock()
             revision_id = self._current().id
-            await fill_native_fields(self.db, self.conv.id, object(), evidence="100% cotton, high rise")
+            await fill_native_fields(self.conv.id, object(), evidence="100% cotton, high rise")
             ask.assert_not_called()
             self.assertEqual(self._current().id, revision_id)
 
@@ -391,8 +393,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                     patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                     patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
                 revision_id = self._current().id
-                await native_field_fill._fill_native_fields(
-                    self.db, self.conv.id, object(), evidence="high rise", markets={"ebay"}, categories=False)
+                await native_field_fill._fill_native_fields(self.conv.id, object(), evidence="high rise", markets={"ebay"}, categories=False)
                 self.assertEqual(self._current().id, revision_id)
                 self.assertEqual(self._current().listing_json["ebay_specifics"]["Rise"], "High")
 
@@ -415,7 +416,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                                           "ebay_specifics.Size": {"value": "M", "evidence": "size M"}}})]
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)) as ask:
-            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Earlier size S. Tag: Petites, size M.")
+            updated = await fill_native_fields(self.conv.id, object(), evidence="Earlier size S. Tag: Petites, size M.")
         self.assertEqual(updated["ebay_specifics"]["Size"], "M")
         self.assertEqual(ask.await_count, 2)
         first_prompt = ask.call_args_list[0].args[1][1]["content"]
@@ -427,7 +428,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         reply = json.dumps({"fields": {"depop_specifics.attributes.bottom-fit": ["Ripped", "Torn"], "ebay_specifics.Rise": "High"}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": DEPOP, "ebay": EBAY})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
-            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Ripped knees, high rise")
+            updated = await fill_native_fields(self.conv.id, object(), evidence="Ripped knees, high rise")
         prompt = ask.call_args.args[1][1]["content"]
         self.assertIn("depop_specifics.attributes.bottom-fit | Type | optional | selection-only | pick up to 2 | choices: Ripped; Faded; Acid-washed", prompt)
         self.assertNotIn("Package size", prompt)
@@ -455,7 +456,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                    json.dumps({"fields": {"mercari_specifics.nativeSizeId": "4"}})]
         with patch.object(native_field_fill, "load_forms", forms), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)):
-            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Women's dress pants, size 4")
+            updated = await fill_native_fields(self.conv.id, object(), evidence="Women's dress pants, size 4")
         self.assertEqual(updated["direct_category_ids"]["mercari"], "12")
         self.assertEqual(updated["mercari_specifics"]["nativeSizeId"], "4")
 
@@ -464,17 +465,17 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         ask = AsyncMock(return_value=json.dumps({"fields": {"ebay_specifics.Rise": "Sky high"}}))
         with patch("vendoo_studio.services.listing_generate.collect_provider_text", ask):
             with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={})):
-                self.assertIsNone(await fill_native_fields(self.db, self.conv.id, object(), evidence=""))
+                self.assertIsNone(await fill_native_fields(self.conv.id, object(), evidence=""))
             ask.assert_not_called()
             with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": EBAY})):
-                self.assertIsNone(await fill_native_fields(self.db, self.conv.id, object(), evidence=""))
+                self.assertIsNone(await fill_native_fields(self.conv.id, object(), evidence=""))
         self.assertEqual(self._current().id, before)
 
     async def test_provider_failure_is_reported_without_changing_the_listing(self):
         before = self._current().id
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": EBAY})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=RuntimeError("ChatGPT HTTP 503"))):
-            self.assertIsNone(await fill_native_fields(self.db, self.conv.id, object(), evidence="High rise"))
+            self.assertIsNone(await fill_native_fields(self.conv.id, object(), evidence="High rise"))
         self.assertEqual(self._current().id, before)
         messages = [message.text for message in ConversationRepo(self.db).get_messages(self.conv.id)]
         self.assertTrue(any("Could not fill marketplace category fields" in text for text in messages))
@@ -483,7 +484,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         before = self._current().id
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": EBAY})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value="Not JSON")):
-            self.assertIsNone(await fill_native_fields(self.db, self.conv.id, object(), evidence="High rise"))
+            self.assertIsNone(await fill_native_fields(self.conv.id, object(), evidence="High rise"))
         self.assertEqual(self._current().id, before)
         messages = [message.text for message in ConversationRepo(self.db).get_messages(self.conv.id)]
         self.assertTrue(any("unreadable marketplace field response" in text for text in messages))
@@ -492,7 +493,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         ask = AsyncMock(side_effect=["Not JSON", json.dumps({"fields": {"ebay_specifics.Rise": "High"}})])
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": EBAY})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", ask):
-            result = await fill_native_fields(self.db, self.conv.id, object(), evidence="High rise")
+            result = await fill_native_fields(self.conv.id, object(), evidence="High rise")
         self.assertEqual(result["ebay_specifics"]["Rise"], "High")
         self.assertEqual(ask.await_count, 2)
 
@@ -503,7 +504,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": EBAY})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", edit_then_reply):
-            self.assertIsNone(await fill_native_fields(self.db, self.conv.id, object(), evidence=""))
+            self.assertIsNone(await fill_native_fields(self.conv.id, object(), evidence=""))
         self.assertEqual(self._current().listing_json, {"title": "Seller's title"})
 
 
@@ -511,7 +512,7 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
     """A category the seller picks later gets the same fill, for that marketplace only."""
 
     async def asyncSetUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
+        self.engine = memory_engine()
         Base.metadata.create_all(self.engine)
         self.db = sessionmaker(bind=self.engine)()
         self.conv = ConversationRepo(self.db).create(title="Jeans")
@@ -666,8 +667,9 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
 
 class CategoryFillLocksTest(unittest.IsolatedAsyncioTestCase):
     async def test_only_the_changed_marketplace_form_is_read_and_locks_hold(self):
-        engine = create_engine("sqlite:///:memory:")
+        engine = memory_engine()
         Base.metadata.create_all(engine)
+        self.enterContext(worker_sessions(engine))
         db = sessionmaker(bind=engine)()
         conv = ConversationRepo(db).create(title="Jeans")
         listing_persistence.save_revision(db, conv.id, {"title": "Levi's", "seller_fields": ["depop_specifics.attributes.bottom-fit"]},
@@ -677,8 +679,8 @@ class CategoryFillLocksTest(unittest.IsolatedAsyncioTestCase):
         loaded = AsyncMock(return_value={"depop": DEPOP})
         with patch.object(native_field_fill, "load_forms", loaded), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
-            updated = await fill_native_fields(db, conv.id, object(), evidence="", markets={"depop"})
-        self.assertEqual(loaded.call_args.args[2], {"depop"})
+            updated = await fill_native_fields(conv.id, object(), evidence="", markets={"depop"})
+        self.assertEqual(loaded.call_args.args[1], {"depop"})
         self.assertNotIn("bottom-fit", updated.get("depop_specifics", {}).get("attributes", {}))
         self.assertEqual(updated["depop_specifics"]["age"], ["90s"])
         self.assertNotIn("ebay_specifics", updated)

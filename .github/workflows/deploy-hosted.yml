@@ -1,7 +1,9 @@
 name: Deploy hosted
 
-# Ships main to production once CI has passed on it and on the merge it
-# releases: builds and pushes the image first, so a build failure stops before the database changes; then
+# Ships the newest commit on main that passed CI (never older than the commit
+# whose CI started the run), once CI passed on every merge since the commit
+# production runs: builds and pushes the image first, so a build failure stops
+# before the database changes; then
 # applies pending Alembic revisions to Supabase with the migration login,
 # refreshes the shared category trees when their seed changed, deploys that
 # image to Fly.io and confirms the live version. See deploy/fly/README.md and
@@ -12,11 +14,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-
-# One deploy at a time and never cancelled mid-migration or mid-rollout.
-concurrency:
-  group: deploy-hosted
-  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -36,35 +33,44 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push')
+    # One deploy at a time and never cancelled mid-migration or mid-rollout.
+    # On the job, not the workflow: a run whose job is skipped above (failed or
+    # pull request CI) must not join the group and replace a queued deploy.
+    concurrency:
+      group: deploy-hosted
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # Secrets live in this environment, which only main may use.
     environment: production
     timeout-minutes: 45
     steps:
+      # All of main: the gate picks the newest tested commit from the trigger
+      # up. CI runs finish out of order and a queued deploy can replace
+      # another, so shipping the trigger itself could put older code over
+      # newer code and a database already migrated past it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: main
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Wait for the release commit
+      - name: Choose the newest tested commit on main
         id: gate
-        run: |
-          # A merge with pending notes is followed by a "Release Anteroom" commit
-          # from the Version workflow; deploy that one instead of both.
-          if find changelog.d -type f ! -name README.md | grep -q .; then
-            echo "Pending changelog notes; the release commit will deploy."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "version=$(cat vendoo-studio/VERSION)" >> "$GITHUB_OUTPUT"
-          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER: ${{ github.event.workflow_run.head_sha || github.sha }}
+        # Checks out the newest first-parent commit from the trigger to main's
+        # tip that passed CI and has no pending changelog.d/ notes (their
+        # "Release Anteroom" commit ships that code). Skips when there is none.
+        run: python3 .github/scripts/deploy-gate.py --repo "$GITHUB_REPOSITORY" --trigger "$TRIGGER"
 
       - name: Wait for CI on the code being shipped
         if: steps.gate.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        # A release commit's CI skips the component checks; the merge before it
-        # holds the code, and its CI may still be running.
+        # Every merge since the commit production runs (the last "Deployed
+        # commit" notice) must have passed CI: CI on main checks only what each
+        # merge changed. A release commit's merge may still be running.
         run: python3 .github/scripts/wait-for-tested-code.py --repo "$GITHUB_REPOSITORY"
 
       - name: Check deploy secrets
@@ -93,7 +99,7 @@ jobs:
         with:
           version: "0.12.13"
 
-      - uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
         if: steps.gate.outputs.skip != 'true'
 
       - name: Build the image
@@ -108,14 +114,13 @@ jobs:
           flyctl deploy . --config deploy/fly/fly.toml --remote-only --build-only --push \
             --image-label "$label" \
             --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="$VITE_SUPABASE_PUBLISHABLE_KEY"
+          echo "label=${label}" >> "$GITHUB_OUTPUT"
           echo "ref=registry.fly.io/${FLY_APP}:${label}" >> "$GITHUB_OUTPUT"
 
       - name: Install the hosted server
         if: steps.gate.outputs.skip != 'true'
         working-directory: vendoo-studio
-        run: |
-          python -m pip install -U pip
-          ./scripts/install-locked.sh python hosted
+        run: ./scripts/install-locked.sh python hosted
 
       - name: Apply pending migrations
         if: steps.gate.outputs.skip != 'true'
@@ -142,20 +147,12 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         working-directory: vendoo-studio
         env:
-          GH_TOKEN: ${{ github.token }}
           ANTEROOM_MIGRATION_DATABASE_URL: ${{ secrets.ANTEROOM_MIGRATION_DATABASE_URL }}
           PGSSLMODE: verify-full
           PGSSLROOTCERT: ${{ github.workspace }}/deploy/fly/supabase-prod-ca-2021.crt
-        run: |
-          seed=vendoo-studio/data/category-trees-seed.json.gz
-          previous="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-hosted.yml \
-            --status success --limit 1 --json headSha --jq '.[0].headSha // empty')"
-          if [ -n "$previous" ] && git cat-file -e "$previous^{commit}" 2>/dev/null \
-            && git diff --quiet "$previous" HEAD -- "../$seed"; then
-            echo "Category tree seed unchanged since $previous."
-            exit 0
-          fi
-          ./scripts/category-trees.sh import --database-url-env ANTEROOM_MIGRATION_DATABASE_URL
+        # Compares the trees in the database with the seed row for row, so a
+        # refresh never depends on which earlier deploy imported what.
+        run: ./scripts/category-trees.sh import --if-changed --database-url-env ANTEROOM_MIGRATION_DATABASE_URL
 
       - name: Deploy to Fly.io
         if: steps.gate.outputs.skip != 'true'
@@ -182,3 +179,26 @@ jobs:
           done
           echo "::error::Production did not report version $VERSION as ready."
           exit 1
+
+      # The public URL reaches only the web Machines; this also covers process
+      # groups without a public service, such as a background worker.
+      - name: Confirm every Machine runs the new image
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          LABEL: ${{ steps.image.outputs.label }}
+        run: |
+          for attempt in $(seq 1 12); do
+            flyctl machines list --app "$FLY_APP" --json > "$RUNNER_TEMP/machines.json"
+            python3 .github/scripts/check-fly-machines.py --label "$LABEL" "$RUNNER_TEMP/machines.json" && exit 0
+            echo "Not every Machine is started on $LABEL yet (attempt $attempt)."
+            sleep 10
+          done
+          echo "::error::Not every Machine is running $LABEL."
+          exit 1
+
+      # The next deploy reads this notice to find the commit production runs
+      # (.github/scripts/wait-for-tested-code.py).
+      - name: Record the deployed commit
+        if: steps.gate.outputs.skip != 'true'
+        run: echo "::notice title=Deployed commit::$(git rev-parse HEAD)"

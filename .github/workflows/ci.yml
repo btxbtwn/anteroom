@@ -60,6 +60,7 @@ jobs:
         with:
           # Include the tested merge's parents for the PR comparison.
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
@@ -236,7 +237,6 @@ jobs:
       - name: Install
         run: |
           python -m venv .venv
-          .venv/bin/python -m pip install -U pip
           ./scripts/install-locked.sh .venv/bin/python dev
           npm ci
           npx playwright install --with-deps chromium webkit
@@ -290,7 +290,6 @@ jobs:
       - name: Install
         run: |
           python -m venv .venv
-          .venv/bin/python -m pip install -U pip
           ./scripts/install-locked.sh .venv/bin/python dev
       - name: Types (new errors only; .basedpyright/baseline.json holds the old ones)
         run: .venv/bin/basedpyright
@@ -335,11 +334,9 @@ jobs:
           version: "0.12.13"
       - name: Install
         run: |
-          python -m pip install -U pip
+          # pytest-split (in the dev extra) divides the suite between the
+          # shards; the full suite still runs, each test exactly once per database.
           ./scripts/install-locked.sh python dev
-          # pytest-split divides the suite between the shards; the full suite
-          # still runs, each test exactly once per database.
-          python -m pip install "pytest-split==0.11.0"
       - run: python -m pytest -q -n auto --splits 2 --group ${{ matrix.group }}
         env:
           VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
@@ -355,7 +352,9 @@ jobs:
         group: [1, 2]
     services:
       postgres:
-        image: postgres:16
+        # Pinned by digest (the postgres:16 index on 2026-11-11); Dependabot
+        # proposes updates.
+        image: postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -382,11 +381,9 @@ jobs:
           version: "0.12.13"
       - name: Install
         run: |
-          python -m pip install -U pip
+          # pytest-split (in the dev extra) divides the suite between the
+          # shards; the full suite still runs, each test exactly once per database.
           ./scripts/install-locked.sh python dev
-          # pytest-split divides the suite between the shards; the full suite
-          # still runs, each test exactly once per database.
-          python -m pip install "pytest-split==0.11.0"
       # Each xdist worker creates its own database on this server.
       - run: python -m pytest -q -n auto --splits 2 --group ${{ matrix.group }}
         env:

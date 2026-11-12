@@ -1,4 +1,3 @@
-import asyncio
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -10,7 +9,7 @@ from vendoo_studio.models.job import Job
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.services.hosted_context import for_seller
 from vendoo_studio.services.hosted_database import SellerDatabaseSession
-from vendoo_studio.services.native_editor import editor_form
+from vendoo_studio.services.native_editor import read_form
 from vendoo_studio.services.service_context import use
 
 MARKETS = ('poshmark', 'depop', 'mercari', 'etsy')
@@ -55,7 +54,7 @@ def test_hosted_forms_match_desktop_catalogs_and_keep_owned_picks_without_jobs(c
         response = client.get(url + '?revision_id=' + revision, headers=alice)
         assert response.status_code == 200, response.text
         with use(for_seller(USER_ID)), SellerDatabaseSession(user_id=USER_ID, bind=engine) as db:
-            expected = asyncio.run(editor_form(identity, market, revision, db))
+            expected = read_form(db, identity, market, revision)
         assert with_choice_lists(client, response.json(), alice) == expected
         category = next(row for row in expected['fields'] if row['path'] == 'direct_category_ids.' + market)
         choice = next(iter(category['option_values'].values()))
@@ -130,7 +129,7 @@ def test_hosted_ebay_form_reads_the_sellers_own_schema_and_policies(cloud, signi
     response = client.get(url, headers=alice)
     assert response.status_code == 200, response.text
     with use(for_seller(USER_ID)), SellerDatabaseSession(user_id=USER_ID, bind=engine) as db:
-        assert response.json() == asyncio.run(editor_form(identity, 'ebay', saved.json()['revision_id'], db))
+        assert response.json() == read_form(db, identity, 'ebay', saved.json()['revision_id'])
     fields = {row['path']: row for row in response.json()['fields']}
     assert fields['ebay_specifics.fulfillmentPolicyId']['value'] == 'ship-1'
     assert 'ebay' in client.get('/api/runtime', headers=alice).json()['marketplace_forms']

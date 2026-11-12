@@ -55,7 +55,7 @@
     const p = value.payload;
     const id = /^[A-Za-z0-9-]{1,64}$/;
     if (typeof value.job_id !== 'string' || !id.test(value.job_id) || p.job_id !== value.job_id || size(value) > 10000) return false;
-    let keys = ['job_id', 'request_id'];
+    let keys = ['job_id', 'request_id', 'approval'];
     if (value.type === 'marketplace.promotion_result') {
       keys.push('action_id');
       if (!/^[A-Za-z0-9-]{6,64}$/.test(p.action_id || '')) return false;
@@ -73,7 +73,7 @@
           if (!Number.isInteger(p.discount_percent) || p.discount_percent < 1 || p.discount_percent > 99) return false;
         }
       } else {
-        keys.push('action_id', 'confirm', 'price_cents', 'offer_price_cents', 'floor_cents', 'shipping_discount_id', 'gap_ms', 'approval');
+        keys.push('action_id', 'confirm', 'price_cents', 'offer_price_cents', 'floor_cents', 'shipping_discount_id', 'gap_ms');
         const cents = n => Number.isInteger(n) && n > 0 && n <= 2147483647;
         if (p.confirm !== true || !/^[A-Za-z0-9-]{6,64}$/.test(p.action_id || '') || !cents(p.price_cents)) return false;
         if (p.action === 'offer' ? (!cents(p.offer_price_cents) || !cents(p.floor_cents) || p.offer_price_cents < p.floor_cents)
@@ -91,8 +91,8 @@
     if (!plain(value) || Object.keys(value).some(key => !['type', 'job_id', 'message_id', 'payload'].includes(key))) return null;
     const payload = value.payload;
     if (!/^[0-9a-f]{32}$/.test(value.message_id || '') || !plain(payload) || payload.request_id !== value.message_id) return null;
-    // The hosted API's signed approval of a write, checked by the worker before it runs.
-    if (Object.hasOwn(payload, 'approval') && (typeof payload.approval !== 'string' || payload.approval.length > 3000)) return null;
+    // The hosted API's signed approval of the command, checked by the worker before it runs.
+    if (Object.hasOwn(payload, 'approval') && (typeof payload.approval !== 'string' || payload.approval.length > 11000)) return null;
     if (value.type === 'job.vendoo_api') {
       if (payload.listing_mode !== 'vendoo' || !/^[a-f0-9-]{1,64}$/i.test(value.job_id || '')
           || size(value) > 2_000_000 || !Array.isArray(payload.ops) || !payload.ops.length) return null;
@@ -112,7 +112,7 @@
       if (value.type === 'marketplace.sales_history' && (!Object.hasOwn(payload, 'marketplace') || !Object.hasOwn(payload, 'settled'))) return null;
       const inputs = READS[value.type];
       for (const [key, item] of Object.entries(payload)) {
-        if (key === 'request_id' || (key === 'job_id' && item === null)) continue;
+        if (key === 'request_id' || key === 'approval' || (key === 'job_id' && item === null)) continue;
         if (!Object.hasOwn(inputs, key)) return null;
         const rule = inputs[key];
         if (rule === 'order_ids') {

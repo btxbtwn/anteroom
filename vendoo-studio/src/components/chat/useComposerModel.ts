@@ -3,6 +3,8 @@ import { api } from "../../api/client";
 import type { KeyProviderId, ListingProviderId, ModelFavorite, ProviderStatus } from "../../api/types";
 import { KEY_PROVIDER_IDS, KEY_PROVIDER_LABELS, isKeyProviderId, isListingProviderId } from "../keyProviders";
 import type { ModelEsque } from "./providerIconUtils";
+import { useWorkspaceRuntime } from "../../app/runtime";
+import { IDLE_POLL_MS, pollMs } from "../../api/polling";
 
 /**
  * The data behind the composer's model picker: every provider, its models,
@@ -157,8 +159,9 @@ export function useModelFavorites() {
 }
 
 export function useComposerModel() {
+  const { hosted } = useWorkspaceRuntime();
   const queryClient = useQueryClient();
-  const status = useQuery({ queryKey: ["settings-provider"], queryFn: api.settings.provider, staleTime: 30_000 });
+  const status = useQuery({ queryKey: ["settings-provider"], queryFn: api.settings.provider, staleTime: 30_000, refetchInterval: hosted ? () => pollMs(IDLE_POLL_MS) : false });
   const chatgptReady = Boolean(status.data?.chatgpt?.signed_in);
   const claudeReady = Boolean(status.data?.claude?.signed_in);
   const cursorReady = Boolean(status.data?.masked_cursor_key);
@@ -292,6 +295,7 @@ export function useComposerModel() {
 
   // Effort only offers what the chosen model supports.
   const effort: EffortChoice | null = (() => {
+    if (hosted && (active === "chatgpt" || active === "claude")) return null;
     if (active === "chatgpt" && chatgpt.data) {
       const values = chatgpt.data.reasoning_efforts?.length ? chatgpt.data.reasoning_efforts : FALLBACK_CHATGPT_EFFORTS;
       return { options: effortOptions(values, false), value: values.includes(chatgpt.data.reasoning_effort) ? chatgpt.data.reasoning_effort : values[0] };
@@ -325,6 +329,7 @@ export function useComposerModel() {
       if (status.data && provider !== active) {
         await api.settings.setPreferredProvider(providerOrderFor(provider, status.data));
       }
+      if (hosted && (provider === "chatgpt" || provider === "claude")) return;
       if (provider === "chatgpt") await api.settings.setChatGPTModels({ listing_model: next });
       else if (provider === "claude") await api.settings.setClaudeModels({ listing_model: next });
       else if (provider === "cursor") await api.settings.setCursorModels({ listing_model: next });

@@ -230,7 +230,7 @@ struct BulkListingView: View {
         } header: {
             Text("Items")
         } footer: {
-            Text("Tap an item to arrange or turn its photos and add its SKU and measurements. Reading fills only blank measurements from yardstick photos; check them before creating.")
+            Text("Tap an item to arrange or turn its photos and add its size tag, SKU and measurements. Reading fills only blank measurements from yardstick photos; check them before creating.")
         }
     }
 
@@ -258,6 +258,8 @@ struct BulkListingView: View {
 
     private func summary(_ item: BulkListingPlan.Item) -> String? {
         var parts: [String] = []
+        let sizeTag = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sizeTag.isEmpty { parts.append("Size tag: \(sizeTag)") }
         let sku = item.sku.trimmingCharacters(in: .whitespacesAndNewlines)
         if !sku.isEmpty { parts.append("SKU \(sku)") }
         let measured = item.typedMeasurements
@@ -514,6 +516,16 @@ private struct BulkItemEditor: View {
                 List {
                     Group {
                         photosSection(item)
+                        Section("Size tag") {
+                            TextField("e.g. XL, 32 × 30", text: Binding(
+                                get: { item.sizeTag },
+                                set: { plan.setSizeTag($0, for: itemID) }
+                            ))
+                            .autocorrectionDisabled()
+                            .frame(minHeight: 44)
+                            .accessibilityLabel("Size tag")
+                            .accessibilityIdentifier("bulk-size-tag")
+                        }
                         Section("SKU") {
                             TextField("SKU (optional)", text: Binding(
                                 get: { item.sku },

@@ -6,7 +6,7 @@ Monorepo combining the `list-this` skill family, the Bridge Chrome extension, an
 
 **Merging is a release.** A merge to `main` runs the **Version** workflow (one
 patch bump per merged PR with a `changelog.d/` note), the macOS release build,
-an iPhone TestFlight upload when `anteroom-ios/` changed, and `deploy-hosted.yml`,
+and `deploy-hosted.yml`,
 which runs `alembic upgrade head` on the production database and deploys the
 hosted API to Fly.io. Agents queue every PR they open for auto-merge
 (`gh pr merge <n> --auto --merge`) right after opening it, then stay with it
@@ -222,7 +222,7 @@ mix it with a fix or a feature.
 - **Anteroom frontend lint and tests:** `cd vendoo-studio && npm run lint && npm test`
 - **Anteroom backend lint and tests:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
 - **Anteroom backend tests on Postgres:** set `ANTEROOM_TEST_DATABASE_URL` to any database on a Postgres 16 server (each test worker creates its own). Without a local server, `pip install pgserver` gives one. Mark tests that need the SQLite file `@pytest.mark.sqlite_only("why")`.
-- **iPhone app (macOS only):** `cd anteroom-ios && xcodegen && open Anteroom.xcodeproj`; `./anteroom-ios/test-sandbox.sh` runs its XCUITest against the hosted sandbox. CI builds it for the Simulator (`.github/workflows/ios.yml`).
+- **iPhone app (macOS only):** `cd anteroom-ios && xcodegen && open Anteroom.xcodeproj`; Xcode Cloud runs the `AnteroomCloud` scheme. Run `anteroom-ios/tools/verify-release.sh` locally before manually starting TestFlight; see `docs/xcode-cloud.md`.
 - **Extension tests:** `node --test 'vendoo-extension/tests/*.test.js'`
 - **Webhook relay tests and deploy:** `cd webhook-relay && npm test`; `npx wrangler deploy` only when the seller asks.
 - **Extension:** **Connect Chrome** opens everyday Chrome. Load unpacked from `vendoo-extension/` in `chrome://extensions/` with Developer mode enabled.
@@ -255,7 +255,7 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 - **Anteroom backend:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
 - **Anteroom code health:** knip (in the frontend job) and basedpyright, import-linter and the dead-code check (in **Studio code health**). Commands above; details in `vendoo-studio/AGENTS.md`.
 - **Anteroom browser tests:** `cd vendoo-studio && npx playwright install chromium && npm run e2e`. They run against the sandbox at desktop and phone sizes; on failure, the report, screenshots and traces are in `vendoo-studio/e2e/report` and `e2e/results`, and CI uploads them as an artifact.
-- **iPhone app:** `.github/workflows/ios.yml` runs on macOS only, for PRs touching `anteroom-ios/` or `vendoo-studio/server/`: the contract test scripts, a Simulator build, and XCUITest against the hosted sandbox (`./anteroom-ios/test-sandbox.sh`). On Linux, `./check.sh` skips these and CI is the check.
+- **iPhone app:** Xcode Cloud runs standalone Swift checks and unit tests with the `AnteroomCloud` scheme. Full iPhone/iPad sandbox UI tests run locally before manual TestFlight releases; see `docs/xcode-cloud.md`. Linux cannot run these native checks.
 - **Extension:** `vendoo-studio/node_modules/.bin/oxlint -c vendoo-extension/.oxlintrc.json --deny-warnings vendoo-extension`, `node --check` on changed JS files, `node --test 'vendoo-extension/tests/*.test.js'`, and `python -m json.tool vendoo-extension/manifest.json`. Then reload the unpacked extension and test affected marketplace flows manually. Use platform-prefixed console logs (`[EBAY]`, `[POSHMARK]`, etc.), the marketplace form-sweep tools for live form structure, and Anteroom’s fill results for per-field outcomes.
 - **Skills:** Confirm `skills/list-this/SKILL.md` exists and `python -m json.tool skills/list-this/references/vendoo-dropdown-options.json` succeeds.
 - **Marketplace forms (not in CI, needs a signed-in browser):** after changing a native form builder, or to check whether a marketplace changed its sell page, run `vendoo-extension/tools/form-sweep/<marketplace>/sweep.js` on that marketplace's sell page (Depop, Mercari, Poshmark), then `node vendoo-extension/tools/form-sweep/<marketplace>/compare.js <downloads folder>`. Each script's header says how; the compare exits 1 on any difference.

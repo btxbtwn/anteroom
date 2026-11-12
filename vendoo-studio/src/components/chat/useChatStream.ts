@@ -1,3 +1,4 @@
+import { StreamIdleError } from "../../api/sse";
 import { studioFetch } from "../../api/transport";
 import { photosUploading } from "../../photoUploads";
 import React, { useCallback, useEffect, useState } from "react";
@@ -80,6 +81,7 @@ export function useChatStream({
       };
     };
     const isNetworkFailure = (err: unknown) => {
+      if (err instanceof StreamIdleError) return true;
       const msg = err instanceof Error ? err.message : String(err || "");
       return /^(load failed|failed to fetch|networkerror when attempting to fetch resource|network request failed|the internet connection appears to be offline\.?)$/i.test(msg.trim())
         || /failed to fetch|networkerror|load failed/i.test(msg);
@@ -100,7 +102,6 @@ export function useChatStream({
           body: err,
         });
       }
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
       const { parts, sawDone } = await consumeResponseSse(
         res,
         (event, nextParts) => applySseToLive(convId, event, nextParts),
@@ -300,7 +301,6 @@ export function useChatStream({
         }
         return true;
       }
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
       const { parts } = await consumeResponseSse(res, (event, nextParts) => applySseToLive(convId, event, nextParts));
       const assembled = parts.content;
       if (stillMine() && isStreamError(assembled)) patchLive(convId, { failedAction: "send" });

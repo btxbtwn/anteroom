@@ -76,6 +76,12 @@ def _stalled(provider: Any, step: str, seconds: float) -> ProviderStalled:
     return ProviderStalled(f"{label} stopped responding while {step}: nothing came back for {_span(seconds)}.")
 
 
+def operation_stalled(label: str, operation: str, seconds: float) -> ProviderStalled:
+    """``ProviderStalled`` for ``label`` (as the seller knows it) doing ``operation``."""
+    step = _STREAM_STEPS.get(operation) or _CALL_STEPS.get(operation) or "answering"
+    return ProviderStalled(f"{label} stopped responding while {step}: nothing came back for {_span(seconds)}.")
+
+
 class DeadlineProvider:
     """``provider`` with a deadline on each call; everything else passes through."""
 

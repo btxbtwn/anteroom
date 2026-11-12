@@ -11,6 +11,25 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## Desktop subscription relay verification
+
+The subscription relay test holds 48 simulated model calls open across two
+sellers (24 per seller, split between ChatGPT and Claude) while both sellers
+read provider settings and save photo-provider preferences. In a local
+in-process HTTP run, 20 reads measured p50 3.1 ms / p95 37.5 ms and 20 saves
+measured p50 2.9 ms / p95 6.3 ms, with zero errors. Calls and saved preferences
+remained scoped to their seller. Run
+`pytest -q -s server/tests/test_mac_inference.py -k two_sellers` to repeat it.
+
+These measurements use memory-backed seller settings and simulated pending
+inference, not a live model, remote Postgres, or a browser. They establish
+that pending subscription calls do not gate ordinary settings requests;
+they do not establish the 100 ms input or 200 ms cached-navigation targets.
+Live subscription throughput and production interaction latency still need
+measurement with connected Macs. The relay tests also cover cancellation,
+Claude without ChatGPT, stale connections, and account isolation; hosted
+browser tests cover connected/disconnected guidance at desktop and phone sizes.
+
 ## References
 
 - [McMaster-Carr](https://www.mcmaster.com/): use its persistent workspace,

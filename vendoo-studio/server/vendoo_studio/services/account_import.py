@@ -118,39 +118,43 @@ def pending_photos(db) -> list[dict]:
             for row in rows]
 
 
-def import_photo(db, photo_id: str, field: str, data: bytes, token: str) -> dict:
-    """Convert one Mac photo file to the account's JPEG format and store it privately."""
+def _check_field(field: str) -> str:
+    if field not in {'stored', 'source'}:
+        raise HTTPException(422, 'Choose the photo or its original')
+    return 'stored_filename' if field == 'stored' else 'source_filename'
+
+
+def photo_to_import(db, photo_id: str, field: str) -> str | None:
+    """The listing a Mac photo file belongs to, or None when the account already has the file."""
+    from vendoo_studio.models.conversation import Photo
+    attribute = _check_field(field)
+    photo = db.get(Photo, photo_id)
+    if photo is None:
+        raise HTTPException(404, 'Photo not found')
+    current = getattr(photo, attribute)
+    if current is None or current.startswith(db.user_id + '/'):
+        return None
+    return photo.conversation_id
+
+
+def save_imported_photo(db, photo_id: str, field: str, key: str, data: bytes, width: int, height: int) -> bool:
+    """Point the photo at its uploaded copy. False when another upload saved it first."""
     import hashlib
 
     from vendoo_studio.models.conversation import Photo
-    from vendoo_studio.services import hosted_photos
-    if field not in {'stored', 'source'}:
-        raise HTTPException(422, 'Choose the photo or its original')
+    attribute = _check_field(field)
     photo = db.scalar(select(Photo).where(Photo.id == photo_id).with_for_update())
     if photo is None:
         raise HTTPException(404, 'Photo not found')
-    attribute = 'stored_filename' if field == 'stored' else 'source_filename'
     current = getattr(photo, attribute)
     if current is None or current.startswith(db.user_id + '/'):
-        return {'copied': False}
-    data, width, height = hosted_photos.normalize(data)
-    key = hosted_photos.new_key(db.user_id, photo.conversation_id)
+        return False
     setattr(photo, attribute, key)
     if field == 'stored':
         photo.mime_type, photo.size_bytes = 'image/jpeg', len(data)
         photo.checksum, photo.width, photo.height = hashlib.sha256(data).hexdigest(), width, height
-    db.flush()
-    hosted_photos.storage_call('POST', key, token, data)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        try:
-            hosted_photos.storage_call('DELETE', key, token)
-        except HTTPException:
-            pass
-        raise
-    return {'copied': True}
+    db.commit()
+    return True
 
 
 def import_settings(values: dict) -> list[str]:

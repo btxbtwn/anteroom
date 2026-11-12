@@ -5,8 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
+from worker_sessions import memory_engine, worker_sessions
 
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, load_models
@@ -17,9 +18,9 @@ from vendoo_studio.services import listing_field_gaps, listing_generate
 @pytest.fixture
 def draft():
     load_models()
-    engine = create_engine("sqlite://")
+    engine = memory_engine()
     Base.metadata.create_all(engine)
-    with Session(engine) as db:
+    with worker_sessions(engine), Session(engine) as db:
         conv = ConversationRepo(db).create(title="Original")
         yield db, conv.id
     engine.dispose()
@@ -75,7 +76,7 @@ def test_gap_fill_cannot_overwrite_an_edit_made_during_model_call(draft, monkeyp
     monkeypatch.setattr(listing_field_gaps, "_request_missing_field_values", reply)
     with pytest.raises(RevisionConflict):
         asyncio.run(listing_field_gaps.fill_listing_field_gaps(
-            db, conv_id, original, object(), evidence="Solid"))
+            conv_id, original, object(), evidence="Solid"))
     assert listings.get_revisions(conv_id)[0].listing_json == seller
     assert len(listings.get_revisions(conv_id)) == 2
 
@@ -93,7 +94,7 @@ def test_validation_repair_cannot_overwrite_a_newer_seller_edit(draft, monkeypat
     monkeypatch.setattr(listing_generate, "fill_validation_gaps", repair)
     with pytest.raises(RevisionConflict):
         asyncio.run(listing_generate.persist_generated_listing_with_repair(
-            db, conv_id, '{"title":"Original","price":20}', object()))
+            conv_id, '{"title":"Original","price":20}', object()))
     assert listings.get_revisions(conv_id)[0].listing_json == seller
 
 
@@ -129,7 +130,7 @@ def test_native_fill_discards_evidence_if_photos_change_while_loading_forms(draf
     monkeypatch.setattr(listing_generate, "collect_provider_text", AsyncMock(
         return_value='{"fields":{"ebay_specifics.Closure":"Zip"}}'))
     result = asyncio.run(native_field_fill._fill_native_fields(
-        db, conv_id, object(), evidence="Zip", markets=["ebay"], categories=False))
+        conv_id, object(), evidence="Zip", markets=["ebay"], categories=False))
     assert result is None
     assert listings.get_revisions(conv_id)[0].listing_json == original
     assert len(listings.get_revisions(conv_id)) == 1
@@ -151,7 +152,7 @@ def test_category_selection_cannot_overwrite_a_newer_seller_edit(draft, monkeypa
     monkeypatch.setattr("vendoo_studio.services.marketplaces.selected_fillable_platforms", lambda: [])
     monkeypatch.setattr("vendoo_studio.services.direct_categories.attach_direct_categories", AsyncMock())
     with pytest.raises(RevisionConflict):
-        asyncio.run(generation_schema.prepare_generation_schema(db, conv_id, object(), "Cotton tee", ""))
+        asyncio.run(generation_schema.prepare_generation_schema(conv_id, object(), "Cotton tee", ""))
     assert listings.get_revisions(conv_id)[0].listing_json == seller
     assert len(listings.get_revisions(conv_id)) == 2
 

@@ -108,6 +108,58 @@ test('Depop reads older unsettled orders beyond a page of settled orders', async
   assert.equal(calls.some(call => call.url.includes('receipts/1/')), false);
 });
 
+function rememberingStorage(c, initial = {}) {
+  const store = { ...initial };
+  c.chrome.storage.local.get = async key => (Object.hasOwn(store, key) ? { [key]: store[key] } : {});
+  c.chrome.storage.local.set = async values => { Object.assign(store, JSON.parse(JSON.stringify(values))); };
+  return store;
+}
+
+function depopTwoPages() {
+  return worker({
+    'receipts/?role=seller': key => key.includes('after=next')
+      ? [200, { objects: [{ purchase_id: 479150329953 }], page_info: { has_more: false } }]
+      : [200, { objects: [{ purchase_id: 1 }], page_info: { has_more: true, last: 'next' } }],
+    'receipts/479150329953/': [200, depopReceipt],
+  }, { access_token: 'token' });
+}
+
+test('between full walks, Depop stops at the first page of settled orders', async () => {
+  const { c, calls } = depopTwoPages();
+  rememberingStorage(c, { orderHistoryFullWalks: { depop: Date.now() - 60 * 1000 } });
+  const result = await read(c, 'depop', ['1']);
+  assert.deepEqual([result.ok, result.orders.length, result.more], [true, 0, false]);
+  assert.equal(calls.filter(call => call.url.includes('role=seller')).length, 1);
+});
+
+test('a due full walk reads every page and records when it finished', async () => {
+  const { c, calls } = depopTwoPages();
+  const store = rememberingStorage(c, { orderHistoryFullWalks: { depop: Date.now() - 7 * 60 * 60 * 1000, poshmark: 5 } });
+  const before = Date.now();
+  assert.equal((await read(c, 'depop', ['1'])).orders.length, 1);
+  assert.equal(calls.filter(call => call.url.includes('role=seller')).length, 2);
+  assert.ok(store.orderHistoryFullWalks.depop >= before);
+  assert.equal(store.orderHistoryFullWalks.poshmark, 5);
+});
+
+test('between full walks, a page with an unsettled order is still followed by the next page', async () => {
+  const { c, calls } = depopTwoPages();
+  rememberingStorage(c, { orderHistoryFullWalks: { depop: Date.now() } });
+  await read(c, 'depop', []);
+  assert.equal(calls.filter(call => call.url.includes('role=seller')).length, 2);
+});
+
+test('a pass that leaves orders unread makes the next pass a full walk', async () => {
+  const { c } = worker({
+    'receipts/?role=seller': [200, { objects: [{ purchase_id: 2 }], page_info: { has_more: true, last: 'next' } }],
+    'receipts/2/': [200, { ...depopReceipt, purchase_id: 2 }],
+  }, { access_token: 'token' });
+  const store = rememberingStorage(c, { orderHistoryFullWalks: { depop: Date.now() } });
+  // Every page holds an unsettled order, so the pass runs into the page limit.
+  assert.equal((await read(c, 'depop', [])).more, true);
+  assert.equal(Object.hasOwn(store.orderHistoryFullWalks, 'depop'), false);
+});
+
 test('Depop marks a page-limited history incomplete', async () => {
   const { c } = worker({
     'receipts/?role=seller': [200, { objects: [{ purchase_id: 1 }], page_info: { has_more: true, last: 'next' } }],
@@ -221,4 +273,28 @@ test('Mercari reports an order whose amounts do not add up as unreadable', async
   }));
   const result = await read(c, 'mercari');
   assert.deepEqual([result.orders.length, result.unreadable], [0, 1]);
+});
+
+test('between full walks, Poshmark and Mercari stop at the first page of settled orders', async () => {
+  const seller = 'cccccccccccccccccccccccc';
+  const posh = worker({
+    [`/vm-rest/users/${seller}/orders/sales`]: [200, { data: { sales_summary: [{ id: 'aaaaaaaaaaaaaaaaaaaaaaaa' }] },
+      meta: { next_max_id: 'older' } }],
+  }, { jwt: poshmarkJwt(seller) });
+  rememberingStorage(posh.c, { orderHistoryFullWalks: { poshmark: Date.now() } });
+  assert.equal((await read(posh.c, 'poshmark', ['aaaaaaaaaaaaaaaaaaaaaaaa'])).more, false);
+  assert.equal(posh.calls.filter(call => call.url.includes('/orders/sales')).length, 1);
+
+  const pages = [];
+  const merc = worker(mercariRoutes({
+    'userItemsQuery': key => {
+      pages.push(key);
+      return [200, { data: { userItems: { pagination: { hasNext: true },
+        items: [{ id: 'm42804244988', price: 2625, itemType: null, activeOrder: { orderId: 'o-1' } }] } } }];
+    },
+  }));
+  rememberingStorage(merc.c, { orderHistoryFullWalks: { mercari: Date.now() } });
+  assert.equal((await read(merc.c, 'mercari', ['o-1'])).more, false);
+  // One page each for orders in progress and sold items.
+  assert.equal(pages.length, 2);
 });

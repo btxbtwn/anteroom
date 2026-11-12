@@ -27,7 +27,8 @@ struct PhotoStrip: View {
     @State private var uploadFailures = 0
     @State private var photoToDelete: ListingPhoto?
 
-    private static let limit = 30
+    /// The server keeps at most 20 photos per item (`MAX_PHOTO_COUNT`).
+    private static let limit = 20
     @State private var showAll = false
     @State private var viewing: String?
     @State private var arranging = false
@@ -240,11 +241,15 @@ struct PhotoStrip: View {
     /// apps, then says how many didn't make it.
     private func send<Source>(_ sources: [Source], prepare: @MainActor (Source) async -> Data?) async {
         uploading += sources.count
+        PhotoUploadTracker.shared.begin(listingID, count: sources.count)
         let report = await withBackgroundTime("Upload photos") {
             await PhotoUploadReport.run(sources, prepare: prepare,
                                         upload: { try await api.uploadPhoto(listingID: listingID, jpeg: $0) },
                                         uploaded: { photos.append($0) },
-                                        finished: { uploading -= 1 })
+                                        finished: {
+                                            uploading -= 1
+                                            PhotoUploadTracker.shared.end(listingID)
+                                        })
         }
         failedUploads += report.failed
         uploadMessage = report.message

@@ -155,17 +155,28 @@ class ConversationActivityRouteTest(unittest.TestCase):
         activity.begin(self.conv.id, "Filling discovered fields…")
         body = self.activity()
         self.assertTrue(body["busy"])
+        self.assertTrue(body["writing"])
         self.assertEqual(body["items"], ["Filling discovered fields…"])
 
     def test_an_active_vendoo_job_keeps_the_listing_busy(self):
         self.add_job("dispatched")
         self.assertTrue(self.activity()["busy"])
+        self.assertTrue(self.activity()["writing"])
 
     def test_direct_actions_name_the_marketplace_and_action(self):
         job = self.add_job("dispatched")
         job.current_step = "native_poshmark_save_draft"
         self.db.commit()
         self.assertEqual(self.activity()["items"], ["Poshmark: Saving the listing…"])
+
+    def test_a_direct_marketplace_action_leaves_the_other_marketplaces_free(self):
+        """Listing on one marketplace never locks List on the others."""
+        job = self.add_job("dispatched")
+        job.current_step = "native_poshmark_list"
+        self.db.commit()
+        body = self.activity()
+        self.assertTrue(body["busy"])
+        self.assertFalse(body["writing"])
 
     def test_finished_jobs_do_not(self):
         self.add_job("completed")

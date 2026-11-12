@@ -61,8 +61,23 @@ def start(check_id: str) -> None:
     task.add_done_callback(_tasks.discard)
 
 
+def _check_photos(db: Session, check_id: str) -> list[str] | None:
+    check = db.get(ScoutCheck, check_id)
+    return list(check.photos) if check is not None else None
+
+
+def _record(db: Session, check_id: str, values: dict[str, Any]) -> None:
+    check = db.get(ScoutCheck, check_id)
+    if check is None:
+        return
+    for name, value in values.items():
+        setattr(check, name, value)
+    db.commit()
+
+
 async def run_check(check_id: str) -> None:
-    from vendoo_studio.database import SessionLocal
+    """Read the photos and sold comps. Each save is a short session on a worker thread."""
+    from vendoo_studio.database import in_worker_session
     from vendoo_studio.services.brave_search import item_fields, sold_comps_query
     from vendoo_studio.services.comp_research import research_sold_comps
     from vendoo_studio.services.listing_generate import (
@@ -74,36 +89,32 @@ async def run_check(check_id: str) -> None:
     from vendoo_studio.services.price_drop import market_midpoint
     from vendoo_studio.services.sold_comps import parse_sold_comps
 
-    db = SessionLocal()
+    photos = await in_worker_session(_check_photos, check_id)
+    if photos is None:
+        return
     try:
-        check = db.get(ScoutCheck, check_id)
-        if check is None:
-            return
+        provider = get_photo_provider()
+        if provider is None:
+            raise RuntimeError("Connect ChatGPT, Cursor or MiMo in Settings to check items.")
+        paths = [str(path) for path in photo_store().local_paths(photos)]
         try:
-            provider = get_photo_provider()
-            if provider is None:
-                raise RuntimeError("Connect ChatGPT, Cursor or MiMo in Settings to check items.")
-            paths = [str(path) for path in photo_store().local_paths(list(check.photos))]
-            try:
-                evidence, analysis = require_photo_analysis(await analyze_photos_with_tag_retry(provider, paths))
-            except PhotoAnalysisError as exc:
-                raise RuntimeError("Anteroom couldn't make out the item. Try a clearer photo of the tag.") from exc
-            check.analysis = analysis
-            check.title = sold_comps_query(item_fields(analysis, evidence)) or None
-            db.commit()
-            comps = await research_sold_comps(analysis, evidence)
-            report = parse_sold_comps(comps)
-            check.comps = comps
-            check.comps_count = len([comp for comp in report.comps if comp.price > 0]) if report else 0
-            check.estimate = market_midpoint(report)
-            check.status = "done"
-        except Exception as exc:
-            log.exception("scout check %s failed", check_id)
-            check.status = "failed"
-            check.error = str(exc) or "The check failed. Try again."
-        db.commit()
-    finally:
-        db.close()
+            evidence, analysis = require_photo_analysis(await analyze_photos_with_tag_retry(provider, paths))
+        except PhotoAnalysisError as exc:
+            raise RuntimeError("Anteroom couldn't make out the item. Try a clearer photo of the tag.") from exc
+        await in_worker_session(_record, check_id, {
+            "analysis": analysis, "title": sold_comps_query(item_fields(analysis, evidence)) or None})
+        comps = await research_sold_comps(analysis, evidence)
+        report = parse_sold_comps(comps)
+        values: dict[str, Any] = {
+            "comps": comps,
+            "comps_count": len([comp for comp in report.comps if comp.price > 0]) if report else 0,
+            "estimate": market_midpoint(report),
+            "status": "done",
+        }
+    except Exception as exc:
+        log.exception("scout check %s failed", check_id)
+        values = {"status": "failed", "error": str(exc) or "The check failed. Try again."}
+    await in_worker_session(_record, check_id, values)
 
 
 def verdict(estimate: float | None, asking: float | None) -> dict[str, Any]:

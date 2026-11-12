@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from vendoo_studio.config import MAX_PHOTO_SIZE_MB
 from vendoo_studio.database import get_db, in_worker_session
 from vendoo_studio.models.scout import ScoutCheck
 from vendoo_studio.services import scout
@@ -83,12 +85,18 @@ async def create_check(
 ):
     if len(files) > scout.MAX_PHOTOS:
         raise HTTPException(400, f"Up to {scout.MAX_PHOTOS} photos per check")
-    photos = []
     from vendoo_studio.models.conversation import new_id
     collection_id = 'scout-' + new_id()
     for upload in files:
+        if upload.size is not None and upload.size > MAX_PHOTO_SIZE_MB * 1024 * 1024:
+            raise HTTPException(413, f"{upload.filename or 'Photo'}: File too large. Max {MAX_PHOTO_SIZE_MB}MB")
+    photos = []
+    for upload in files:
         try:
-            photos.append(process_bytes(await upload.read(), upload.filename, upload.content_type, collection_id=collection_id))
+            # Decoding, hashing and storing a photo run on a worker thread, never the event loop.
+            photos.append(await asyncio.to_thread(
+                process_bytes, await upload.read(), upload.filename, upload.content_type, collection_id=collection_id,
+            ))
         except ValueError as exc:
             raise HTTPException(400, f"{upload.filename or 'Photo'}: {exc}") from exc
     check_id, response = await in_worker_session(_create, photos, asking_price)

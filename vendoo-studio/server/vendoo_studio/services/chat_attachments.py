@@ -12,13 +12,11 @@ import base64
 import binascii
 import re
 import uuid
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from PIL import Image
-
 from vendoo_studio.config import user_data_root
+from vendoo_studio.services import image_decode
 from vendoo_studio.services.photos import (
     HEIC_MIME,
     THUMBNAIL_SIZES,
@@ -87,10 +85,8 @@ def save_attachment(name: str, data_url: str, *, collection_id: str | None = Non
         contents = _heic_to_jpeg(contents)
         mime = "image/jpeg"
     try:
-        with Image.open(BytesIO(contents)) as image:
-            image.load()
-            width, height = image.size
-    except Exception as exc:
+        _image, (width, height) = image_decode.decode(contents, max_side=max(THUMBNAIL_SIZES))
+    except ValueError as exc:
         raise ValueError(f"{name or 'That file'} is not a valid image.") from exc
     attachment_id = f"{uuid.uuid4().hex}{STORED_EXTENSIONS[mime]}"
     (attachments_dir() / attachment_id).write_bytes(contents)

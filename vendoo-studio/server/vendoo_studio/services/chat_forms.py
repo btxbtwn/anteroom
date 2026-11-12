@@ -14,15 +14,22 @@ from vendoo_studio.services.marketplaces import get_selected_marketplaces
 from vendoo_studio.services.seller_overrides import get_path
 
 
-async def forms_prompt(db: Session, conv_id: str, option_catalog=None) -> str:
+def _latest_listing(db: Session, conv_id: str) -> dict | None:
     revisions = ListingRepo(db).get_revisions(conv_id)
     if not revisions or not isinstance(revisions[0].listing_json, dict):
+        return None
+    return copy.deepcopy(revisions[0].listing_json)
+
+
+async def forms_prompt(conv_id: str, option_catalog=None) -> str:
+    from vendoo_studio.database import in_worker_session
+
+    listing = await in_worker_session(_latest_listing, conv_id)
+    if listing is None:
         return ""
-    listing = copy.deepcopy(revisions[0].listing_json)
     definitions = json.loads((skills_dir() / "list-this/references/listing-editor-fields.json").read_text())
     markets = set(get_selected_marketplaces()) | set(listing.get(native_contract.KEY) or {})
-    db.commit()
-    native = await native_field_fill.load_forms(db, conv_id, markets)
+    native = await native_field_fill.load_forms(conv_id, markets)
     forms: dict[str, dict] = {"general": {"fields": _values(definitions["general"], listing, "general")}}
     for market in sorted(markets):
         if market in native_field_fill.MARKETS:

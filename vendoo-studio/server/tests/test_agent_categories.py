@@ -6,8 +6,9 @@ import inspect
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from worker_sessions import memory_engine, worker_sessions
 
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base
@@ -151,7 +152,7 @@ class AgentCategoryChoiceTest(unittest.TestCase):
 
 
 def _database():
-    engine = create_engine("sqlite:///:memory:")
+    engine = memory_engine()
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()
     db.add(CategoryTree(marketplace="ebay", status="complete", roots_loaded=True))
@@ -174,6 +175,7 @@ def _no_network():
 class AgentCategorySaveTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.engine, self.db = _database()
+        self.enterContext(worker_sessions(self.engine))
         self.conv = ConversationRepo(self.db).create(title="Tee")
         self.repo = ListingRepo(self.db)
 
@@ -194,7 +196,7 @@ class AgentCategorySaveTest(unittest.IsolatedAsyncioTestCase):
                     "poshmark_specifics": {"subcategory": "Tees", "nativeSizeId": "M"}}, parent.id)
         ebay, etsy = _no_network()
         with ebay, etsy:
-            await apply_saved_agent_category(self.db, self.conv.id, operations=[
+            await apply_saved_agent_category(self.conv.id, operations=[
                 {"op": "replace", "path": "/category_path", "value": GENERAL_TEE},
             ])
         saved = self.repo.get_revisions(self.conv.id)[0].listing_json
@@ -215,7 +217,7 @@ class AgentCategorySaveTest(unittest.IsolatedAsyncioTestCase):
         etsy = AsyncMock(return_value=None)
         with patch("vendoo_studio.services.direct_categories._ebay_leaf", new=AsyncMock(return_value=None)), \
                 patch("vendoo_studio.services.direct_categories._etsy_leaf", new=etsy):
-            await apply_saved_agent_category(self.db, self.conv.id, operations=[
+            await apply_saved_agent_category(self.conv.id, operations=[
                 {"op": "replace", "path": "/category_path", "value": GENERAL_GAMES},
             ])
         saved = self.repo.get_revisions(self.conv.id)[0].listing_json
@@ -229,7 +231,7 @@ class AgentCategorySaveTest(unittest.IsolatedAsyncioTestCase):
         suggestion = AsyncMock(return_value={"id": "11498", "path": "Men > Men's Shoes > Boots"})
         with patch("vendoo_studio.services.direct_categories._ebay_leaf", new=suggestion), \
                 patch("vendoo_studio.services.direct_categories._etsy_leaf", new=AsyncMock(return_value=None)):
-            await apply_saved_agent_category(self.db, self.conv.id, operations=[
+            await apply_saved_agent_category(self.conv.id, operations=[
                 {"op": "replace", "path": "/category_path", "value": "Clothing, Shoes & Accessories > Men > Men's Shoes > Boots"},
             ])
         saved = self.repo.get_revisions(self.conv.id)[0].listing_json
@@ -241,7 +243,7 @@ class AgentCategorySaveTest(unittest.IsolatedAsyncioTestCase):
         parent = self._save({"title": "Tee", "category_path": "Men > Shoes", "price": 10})
         self._save({"title": "Tee", "category_path": "Men > Shoes", "price": 12}, parent.id)
         with patch("vendoo_studio.services.agent_categories.native_rows", side_effect=AssertionError("rows")):
-            await apply_saved_agent_category(self.db, self.conv.id, operations=[
+            await apply_saved_agent_category(self.conv.id, operations=[
                 {"op": "replace", "path": "/price", "value": 12},
             ])
         self.assertEqual(len(self.repo.get_revisions(self.conv.id)), 2)

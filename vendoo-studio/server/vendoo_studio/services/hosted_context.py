@@ -15,7 +15,6 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from vendoo_studio.models.user_preference import UserPreference
-from vendoo_studio.models.user_secret import UserSecretReference
 from vendoo_studio.services.hosted_database import SellerDatabaseSession, note_changes
 from vendoo_studio.services.service_context import ServiceContext
 
@@ -31,12 +30,19 @@ class HostedSettingsStore:
         self.sessions = sessions
         self._snapshot = None
 
-    def read(self):
-        if self._snapshot is None:
+    def read(self) -> dict:
+        snapshot = self._snapshot
+        if snapshot is None:
             with self.sessions() as db:
-                value = db.scalar(select(UserPreference.value).where(UserPreference.key == 'settings'))
-                self._snapshot = value if isinstance(value, dict) else {}
-        return copy.deepcopy(self._snapshot)
+                snapshot = self.load(db)
+        return copy.deepcopy(snapshot)
+
+    def load(self, db) -> dict:
+        """Take the snapshot through a session the caller already holds, unless it is taken."""
+        if self._snapshot is None:
+            value = db.scalar(select(UserPreference.value).where(UserPreference.key == 'settings'))
+            self._snapshot = value if isinstance(value, dict) else {}
+        return self._snapshot
 
     def write(self, payload):
         def replace(current):
@@ -67,8 +73,11 @@ class VaultSecretStore:
 
     @staticmethod
     def _read(db, account):
-        exists = db.scalar(select(UserSecretReference.id).where(UserSecretReference.account == account))
-        return db.scalar(text('SELECT anteroom_private.secret_read(:slot)'), {'slot': account}) if exists else None
+        # One round trip. Vault is reached only for a slot that has a secret,
+        # so a database without Vault still works while none is saved.
+        return db.scalar(text(
+            'SELECT CASE WHEN EXISTS (SELECT 1 FROM user_secret_references WHERE account = :slot)'
+            ' THEN anteroom_private.secret_read(:slot) END'), {'slot': account})
 
     def get(self, account):
         if account not in self._cache:
@@ -91,7 +100,12 @@ class VaultSecretStore:
             with self.sessions() as db:
                 db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))'),
                            {'identity': f'anteroom-secret:{self.owner}:{account}'})
-                value = mutator(self._read(db, account))
+                previous = self._read(db, account)
+                value = mutator(previous)
+                if value == previous:
+                    # Nothing changed: no write, and no change for other devices to re-read.
+                    self._cache[account] = value
+                    return
                 db.execute(text('SELECT anteroom_private.secret_write(:slot, :value)'), {'slot': account, 'value': value})
                 # The function writes outside the ORM; announce it like any settings change.
                 note_changes(db, 'user_secret_references')

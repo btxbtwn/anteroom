@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
-const { ORIGIN } = require('../background/cloud-connection');
+const { ORIGIN, RELAY_CAPABILITIES } = require('../background/cloud-connection');
 const ACCOUNT = '11111111-1111-4111-8111-111111111111';
 const REQUEST = '22222222-2222-4222-8222-222222222222';
 const code = fs.readFileSync(path.join(__dirname, '../content-scripts/cloud-connection.js'), 'utf8');
@@ -36,6 +36,18 @@ test('content script preserves the sales history capability without admitting un
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(JSON.parse(JSON.stringify(s.replies[0][0].supportedActions)),
     ['marketplace.actions', 'marketplace.sales_history']);
+});
+
+test('content script passes every capability the Bridge declares, signed commands included', async () => {
+  // A capability dropped here never reaches the hosted API: without `marketplace.signed_commands`
+  // it sends commands unsigned, and the Bridge refuses every one of them.
+  const declared = ['poshmark.form.read', ...RELAY_CAPABILITIES];
+  const s = setup(() => ({ ok: true, state: 'connected', extensionVersion: '0.2.71', supportedActions: declared }));
+  const status = { ...s.data, action: 'status' }; delete status.email;
+  s.emit({ data: status });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(RELAY_CAPABILITIES.includes('marketplace.signed_commands'));
+  assert.deepEqual(JSON.parse(JSON.stringify(s.replies[0][0].supportedActions)), declared);
 });
 
 test('page cannot send credentials, marketplace commands or embedded/cross-origin requests', async () => {

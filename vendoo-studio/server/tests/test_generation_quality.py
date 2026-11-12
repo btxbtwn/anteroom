@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from vendoo_studio.services import listing_persistence
@@ -16,6 +15,7 @@ from vendoo_studio.services import chat_prompts, item_context, listing_generate,
 from vendoo_studio.services.catalog_index import relevant_skill_rules
 from vendoo_studio.services.generation_eval import evaluate_outputs
 from vendoo_studio.services.text_retrieval import rank_texts
+from worker_sessions import memory_engine, worker_sessions
 
 BASE = {
     "title": "Fixture M Casual T-Shirt Blue Regular",
@@ -30,9 +30,9 @@ BASE = {
 @pytest.fixture
 def db():
     load_models()
-    engine = create_engine("sqlite://")
+    engine = memory_engine()
     Base.metadata.create_all(engine)
-    with Session(engine) as db:
+    with worker_sessions(engine), Session(engine) as db:
         yield db
     engine.dispose()
 
@@ -97,7 +97,7 @@ def test_chat_keeps_old_relevant_seller_evidence_and_saved_clears(db):
         repo.add_message(conv.id, "system", f"Background status {index}")
     listing_persistence.save_revision(db, conv.id, {**BASE, "depop_specifics": {"style": []},
                                           "seller_fields": ["depop_specifics.style", "price"]}, source="user_form")
-    messages = asyncio.run(chat_prompts.build_chat_messages(conv.id, db, "Describe the hem stain"))
+    messages = asyncio.run(chat_prompts.build_chat_messages(conv.id, "Describe the hem stain"))
     assert any(message["content"] == old.text for message in messages)
     assert '"depop_specifics.style": []' in messages[0]["content"]
     assert '"price": 29' in messages[0]["content"]

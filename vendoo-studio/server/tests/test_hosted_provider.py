@@ -25,6 +25,21 @@ def test_hosted_selection_never_reads_desktop_signins(monkeypatch):
         assert listing_provider.get_listing_provider() is None
 
 
+@pytest.mark.parametrize('subscription', ['chatgpt', 'claude'])
+def test_selected_offline_subscription_does_not_charge_an_api_key_fallback(subscription):
+    from vendoo_studio.services.mac_inference import MacUnavailable
+    from vendoo_studio.services.user_settings import set_listing_provider_order
+
+    seller = replace(runtime('offline-' + subscription), provider_factory=provider_for)
+    with service_context.use(seller):
+        keychain.set_ai_key('openai', 'fake-fallback-key')
+        set_listing_provider_order(primary=subscription, fallback='openai')
+        provider = listing_provider.get_listing_provider()
+        assert provider.name == subscription
+        with pytest.raises(MacUnavailable):
+            asyncio.run(provider.test_connection())
+
+
 class FailingProvider:
     name, vision_model, listing_model = 'fake', 'vision', 'listing'
     api_key = 'fake-private-key'

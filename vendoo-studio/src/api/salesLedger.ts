@@ -1,8 +1,9 @@
 const FINANCIAL_FIELDS = ["item_revenue", "shipping_credit", "refunds", "fees", "shipping_cost", "item_cost"] as const;
 export type FinancialField = (typeof FINANCIAL_FIELDS)[number];
-/** The amounts Mark as sold asks for, in its order and words. A sale record asks for the same. */
+/** Editable amounts needed to complete a sale record. */
 export const SALE_FORM_FIELDS = [
   ["item_revenue", "Sale price"], ["shipping_credit", "Shipping the buyer paid"], ["fees", "Fees"], ["shipping_cost", "Shipping you paid"],
+  ["item_cost", "Cost of goods"],
 ] as const satisfies readonly (readonly [FinancialField, string])[];
 export type SaleFormField = (typeof SALE_FORM_FIELDS)[number][0];
 export type FinancialEntry = { currency: string } & Record<FinancialField, string | null>;

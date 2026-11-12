@@ -467,15 +467,7 @@ def _model_picks(
     return picks, failed
 
 
-async def select_categories(
-    db,
-    provider,
-    analysis: str,
-    notes: str,
-    platforms: list[str],
-    override: str = "",
-) -> dict:
-    marketplaces = ["general", *platforms]
+def _first_choices(db, marketplaces: list[str], analysis: str, notes: str, override: str):
     missing = [mp for mp in marketplaces if not (tree := db.get(CategoryTree, mp)) or tree.status != "complete"]
     if missing:
         raise RuntimeError("Finish category-tree extraction before generating: " + ", ".join(missing))
@@ -496,9 +488,23 @@ async def select_categories(
         db, marketplaces, query, selected, path_prefix,
         analysis=analysis, notes=notes, override=override,
     )
-    # Candidates are fully loaded values; model latency must not occupy a
-    # connection from the hosted pool. The session can reopen for a retry.
-    db.close()
+    return selected, path_prefix, query, choices, nodes_by_marketplace
+
+
+async def select_categories(
+    provider,
+    analysis: str,
+    notes: str,
+    platforms: list[str],
+    override: str = "",
+) -> dict:
+    from vendoo_studio.database import in_worker_session
+
+    marketplaces = ["general", *platforms]
+    # Candidates are fully loaded values, read in a short session of their
+    # own: model latency must not occupy a connection from the hosted pool.
+    selected, path_prefix, query, choices, nodes_by_marketplace = await in_worker_session(
+        _first_choices, marketplaces, analysis, notes, override)
 
     if not choices:
         return selected
@@ -512,11 +518,10 @@ async def select_categories(
     retry_hint = _search_retry_hint(str(response.get("question") or ""))
     if failed and retry_hint and retry_hint.casefold() != query.casefold():
         confirmed = {**selected, **selected_from_model}
-        retry_choices, retry_nodes = _collect_choices(
+        retry_choices, retry_nodes = await in_worker_session(lambda db: _collect_choices(
             db, marketplaces, retry_hint, confirmed, path_prefix,
             analysis=analysis, notes=notes, override=override,
-        )
-        db.close()
+        ))
         response = await _ask_model(provider, analysis, notes, retry_choices)
         pending.update(retry_choices)
         nodes_by_marketplace.update(retry_nodes)

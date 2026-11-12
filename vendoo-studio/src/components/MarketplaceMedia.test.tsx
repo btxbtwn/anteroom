@@ -5,6 +5,7 @@ const { useQuery } = vi.hoisted(() => ({ useQuery: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({ useQuery, useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
 
 const { MarketplaceMedia } = await import("./MarketplaceMedia");
+const { desktopRuntime, WorkspaceRuntimeProvider } = await import("../app/runtime");
 
 const photo = (id: string, marketplace: string | null = null) => ({ id, marketplace, url: `/api/photos/${id}`, original_filename: `${id}.jpg` });
 const RULES = {
@@ -16,9 +17,10 @@ const VIDEOS = { videos: [
   { id: "long", original_filename: "long.mp4", duration_seconds: 20, size_bytes: 10, mime_type: "video/mp4", url: "/api/videos/long" },
 ] };
 
-function serve(item: object[], own: object[] = []) {
+function serve(item: object[], own: object[] = [], status = "draft") {
   useQuery.mockImplementation(({ queryKey }: { queryKey: unknown[] }) => ({
     data: queryKey[0] === "marketplace-media" ? RULES
+      : queryKey[0] === "conversation" ? { id: "c1", status }
       : queryKey[0] === "listing-videos" ? VIDEOS
         : queryKey.length === 3 ? own : item,
   }));
@@ -113,4 +115,22 @@ it("says the photo limit once when preflight also reports it", () => {
     expect(html.match(/Check the cover photo/g)).toHaveLength(1);
     expect(html).not.toContain("Untick photos");
   }
+});
+
+it("on the website, a listing that is no longer a draft keeps its photo pick but offers no upload", () => {
+  serve([photo("front")], [], "sold");
+  const hosted = { ...desktopRuntime, hosted: true };
+  for (const page of [undefined, { hint: "Add up to 8 photos." }]) {
+    const html = renderToStaticMarkup(<WorkspaceRuntimeProvider value={hosted}>
+      <MarketplaceMedia convId="c1" marketplace="depop" listing={{}} onChange={vi.fn()} page={page} />
+    </WorkspaceRuntimeProvider>);
+    expect(html).toContain('data-sortable-photo="front"');
+    expect(html).not.toContain("Add photos");
+    expect(html).not.toContain('type="file"');
+    expect(html).toContain("New photos can be added while this listing is a draft.");
+  }
+  // The Mac adds photos to any listing.
+  const html = renderToStaticMarkup(<MarketplaceMedia convId="c1" marketplace="depop" listing={{}} onChange={vi.fn()} />);
+  expect(html).toContain("Add photos");
+  expect(html).not.toContain("while this listing is a draft");
 });

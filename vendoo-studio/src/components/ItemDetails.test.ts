@@ -1,16 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { changedDetails, mergeDetailNotes, parseNotes, savedGarment } from "./itemDetailsData";
+import { changedDetails, detailNoteChanges, parseNotes, savedGarment } from "./itemDetailsData";
 describe("saved seller notes", () => {
   it("keeps measurements that arrive after typing into a different measurement", () => {
     const before = parseNotes(null);
     const patch = changedDetails(before, { ...before, measurements: { top: { pitToPit: "22" }, pants: {}, skirt: {} } });
     const notes = JSON.stringify({ measurements: { top: { length: "30" }, pants: { waist: "16" } } });
-    expect(JSON.parse(mergeDetailNotes(notes, patch, "15x12x4")).measurements).toMatchObject({ top: { pitToPit: "22", length: "30" }, pants: { waist: "16" } });
+    // The server merges these per field into the stored measurements.
+    expect(detailNoteChanges(notes, patch, "15x12x4").measurements).toEqual({ top: { pitToPit: "22" } });
   });
   it("overlays only edited fields and preserves stored metadata", () => {
-    const result = JSON.parse(mergeDetailNotes(JSON.stringify({ sellerNotes: "Original", sku: "KEEP-123", knownFlaws: "Mark", categoryOverride: "Shirts" }),
-      { sellerNotes: "Typed before loading finished" }, "15x12x4"));
-    expect(result).toMatchObject({ sellerNotes: "Typed before loading finished", sku: "KEEP-123", knownFlaws: "Mark", categoryOverride: "Shirts", packageDimensions: "15x12x4" });
+    const result = detailNoteChanges(JSON.stringify({ sellerNotes: "Original", sku: "KEEP-123", knownFlaws: "Mark", categoryOverride: "Shirts" }),
+      { sellerNotes: "Typed before loading finished" }, "15x12x4");
+    expect(result).toMatchObject({ sellerNotes: "Typed before loading finished", packageDimensions: "15x12x4" });
+    for (const key of ["sku", "knownFlaws", "categoryOverride"]) expect(result).not.toHaveProperty(key);
+  });
+  it("writes a legacy shorts set whole when it is first saved as pants", () => {
+    const notes = JSON.stringify({ sku: "A1", measurements: { shorts: { waist: "15", inseam: "5" } } });
+    expect(detailNoteChanges(notes, { measurements: { top: {}, pants: { inseam: "6" }, skirt: {} } }, "13x10x3").measurements)
+      .toEqual({ pants: { waist: "15", inseam: "6" } });
+  });
+  it("keeps seller text notes as seller notes on the first save", () => {
+    expect(detailNoteChanges("Stain on cuff", { sku: "A1" }, "13x10x3")).toMatchObject({ sellerNotes: "Stain on cuff", sku: "A1" });
   });
   it("preserves text from existing cloud drafts when opening and saving the full editor", () => {
     for (const notes of ["Keep measurements\nDo not remove", '"quoted text"', "42", "[1,2]", '{"note":"Keep this too"}']) {
@@ -65,7 +75,7 @@ describe("the garment measured", () => {
     const before = parseNotes(null, undefined, jeans);
     const patch = changedDetails(before, { ...before, measurements: { top: {}, pants: { waist: "14" }, skirt: {} } }, null);
     expect(patch.garment).toBe("pants");
-    expect(JSON.parse(mergeDetailNotes(null, patch, "13x10x3")).garment).toBe("pants");
+    expect(detailNoteChanges(null, patch, "13x10x3").garment).toBe("pants");
     expect(changedDetails(before, before, null)).toEqual({});
   });
   it("reports whether a garment was saved", () => {

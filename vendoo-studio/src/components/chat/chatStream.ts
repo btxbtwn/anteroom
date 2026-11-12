@@ -1,3 +1,4 @@
+import { readWithin } from "../../api/sse";
 import { coalesceSseEvents, emptySseParts, type SseParts } from "../sseCoalesce";
 import { appendLiveTrace, applyAgentEvent, parseAgentEvent } from "../liveTrace";
 
@@ -190,7 +191,7 @@ async function consumeSse(
   const emit = (event: string, parts: SseParts) => batch.push(event, parts);
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithin(reader);
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");

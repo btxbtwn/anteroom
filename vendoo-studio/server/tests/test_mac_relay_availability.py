@@ -39,7 +39,7 @@ def test_mac_heartbeat_status_and_reply_survive_a_full_request_thread_pool(monke
 
         def mac_requests():
             heartbeat = client.post('/api/mac-ai/next', headers=headers, json={
-                'worker': worker, 'vision_model': 'vision', 'listing_model': 'text', 'available': False})
+                'worker': worker, 'providers': {'chatgpt': {'vision_model': 'vision', 'listing_model': 'text'}}, 'available': False})
             status = client.get('/api/mac-ai/status', headers=headers)
             reply = client.post('/api/mac-ai/reply', headers=headers, json={
                 'worker': worker, 'identity': 'b' * 32, 'result': [], 'failed': False})

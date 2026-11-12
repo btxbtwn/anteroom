@@ -20,7 +20,9 @@ These override everything below.
 - Never publish, delist, update or delete a live listing. The sandbox refuses
   those routes, and the audit confirms that it does. Never call a real
   marketplace, eBay or Etsy API.
-- Never deploy, release, bump the version, edit `CHANGELOG.md`, or merge a PR.
+- Never deploy, release, bump the version or edit `CHANGELOG.md`. Merge
+  only through the rule in **Fixing bugs**; leave every other PR for the
+  seller.
 - Work in your own worktree off a fresh `origin/main`:
   `git fetch origin && git worktree add -b audit/<YYYY-MM-DD> ../anteroom-audit-<YYYY-MM-DD> origin/main`.
   Other sessions share the main checkout. Remove the worktree at the end unless
@@ -46,9 +48,17 @@ These override everything below.
    **New features**).
 4. **Deep rotation.** Test today's area from **Rotation** (weekday by local
    date).
-5. **Fix.** Open a PR for each bug you can fix (see **Fixing bugs**).
-6. **Report.** File one issue (see **Report**).
-7. **Update this file** when a run teaches something (see **Keeping this file
+5. **Review.** Read the diff of every PR merged since the last run, split by
+   area among subagents when there are many. This finds more bugs than the
+   hand checks. Confirm each suspected bug with a failing test or a sandbox
+   reproduction before reporting it, and give its confidence.
+6. **Fix.** Open a PR for each bug you can fix (see **Fixing bugs**).
+7. **Grow the tests.** Turn one hand check from today into a Playwright,
+   XCUITest or pytest test in CI, and fix one test from **Flaky tests**. Each
+   goes in its own PR.
+8. **Report.** File one issue, and one `audit-finding` issue per unfixed bug
+   (see **Report**).
+9. **Update this file** when a run teaches something (see **Keeping this file
    current**).
 
 If a step cannot run (Xcode missing, Simulator broken, sandbox will not start),
@@ -66,7 +76,11 @@ Every run, in this order:
    This also runs `npm run e2e` (local web, desktop and phone),
    `npm run e2e:hosted` (hosted web, two sellers) and, on macOS,
    `./anteroom-ios/test-sandbox.sh`, so steps 2 to 4 need no separate run
-   when it covered them. On macOS, **Anteroom types** fails on PyObjC symbols
+   when it covered them. The whole run takes about 40 minutes on the
+   seller's Mac. `hosted-e2e/signin.e2e.ts` "in the Mac app, password resets
+   open in the browser" fails about one run in three at its Account menu step
+   (the menu is not open); rerun it alone before reporting it.
+   On macOS, **Anteroom types** fails on PyObjC symbols
    in `desktop.py`, `macos_keychain.py` and `photo_edits.py` that CI's Linux
    job never sees; report any other type error. Do not run `basedpyright` on
    single files: it rewrites `.basedpyright/baseline.json`.
@@ -76,19 +90,29 @@ Every run, in this order:
    it while nothing else heavy runs: under load its 5 to 30 second waits time
    out on different tests each run. Before reporting a failure, rerun it alone
    and compare with the latest iPhone job on `main` (`gh run list --workflow ios.yml --branch main`).
+   If several tests fail at their first step and the UI hierarchy shows the
+   app still on the Assistant tab, the launch helper's tab tap was dropped
+   (fixed by #1417); check that fix is on `main` before reporting them.
 5. Mac app:
    `vendoo-studio/.venv/bin/python vendoo-studio/scripts/smoke-packaged-sandbox.py /Applications/Anteroom.app`.
    This checks the installed release in sandbox mode on a temporary data
    folder. Note its version. The release may be behind `main`; that is expected.
    Before and after, check that
    `~/Library/Application Support/Anteroom/logs/Anteroom.log` was not created
-   or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). Unset
+   or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). The
+   seller's own app may be running and writing that log, so compare its size
+   and time with `stat` and look for sandbox paths in any new lines. Unset
    any leftover `VENDOO_STUDIO_PORT` / `ANTEROOM_SANDBOX` from that run before
    starting `./sandbox.sh --hosted` (hosted defaults to 4320; an inherited
    `4321` makes it fail to bind).
-6. One hand-driven core journey on each surface: create a draft, add photos,
-   generate, edit a field, save, reopen, and try to publish (it must be
-   refused). Surfaces:
+6. One core journey on each surface: create a draft, add photos, generate,
+   edit a field, save, reopen, and try to publish (it must be refused).
+   `node docs/audit/journey.mjs <local|hosted> <desktop|phone> <out-dir>` runs
+   it on web against the running sandbox. It prints one JSON line (edit kept,
+   publish statuses, Bob's isolation on hosted, page errors) and saves a
+   screenshot per step. Run it from a worktree with `vendoo-studio/node_modules`
+   installed. Fix the script when the UI changes, in the same PR as the
+   change if you can. Drive by hand only what it doesn't cover. Surfaces:
    - local web (`./sandbox.sh`, UI 5174) at desktop and phone sizes. If the
      browser tools cannot connect, drive it with a Playwright script kept
      outside `e2e/` (a running suite would pick it up) and its own config;
@@ -101,15 +125,32 @@ Every run, in this order:
      a scripted reload skips the unsaved-edits prompt and drops the edit.
      The sandbox's fake model can't answer the marketplace field fill, so
      "The agent returned an unreadable marketplace field response" in the
-     chat is expected there;
-   - hosted web (`./sandbox.sh --hosted`, UI 5175, sign in as
-     `alice@sandbox.test` / `sandbox`);
+     chat is expected there. Find the New listing button with an exact name:
+     a blank "New Listing" draft's row menu also matches it. After a reload
+     the editor's fields are empty until the listing loads, so poll the Title
+     box for the edited value before calling the edit lost, and confirm with
+     `GET /api/conversations/<id>/listing`. On a phone the first
+     `input[type=file]` on the page is the chat composer's (6 images at
+     most), not the photo tray's;
+   - hosted web (`./sandbox.sh --hosted`, UI 5175, API 4320, sign in as
+     `alice@sandbox.test` / `sandbox`). On a phone a new draft opens on its
+     Listing tab; switch to Chat before staging photos in the composer.
+     Hosted API calls need a bearer token: a `fetch` from the page has none
+     and gets 401. Get one with `POST /local/auth/v1/token?grant_type=password`
+     and the same email and password, then call the publish routes at
+     `/api/conversations/<id>/native-marketplaces/<m>/list|update` and
+     `/marketplace-listings/delist` (403 expected). Sign in as
+     `bob@sandbox.test` the same way to check he gets 404 on Alice's draft;
    - iPhone in the Simulator against the hosted sandbox, driven with the T3
      device tools (`device_list`, `device_open`, `device_screenshot`), never
      raw `simctl` input. If `device_list` reports `simctl` missing even when
      `xcode-select -p` points at Xcode.app, record the hand-driven Simulator
-     journey as **not run** with that error; still run
-     `./anteroom-ios/test-sandbox.sh`.
+     journey as **not run** with that error, and ask the seller to fix the
+     device hub. Run the scripted iPhone journey instead:
+     `ANTEROOM_TEST_ONLY=AnteroomUITests/CoreFlowSandboxTests ANTEROOM_TEST_RESULTS=<out>/iphone.xcresult ./anteroom-ios/test-sandbox.sh`,
+     then export its screenshots with
+     `xcrun xcresulttool export attachments --path <out>/iphone.xcresult --output-path <out>/iphone`
+     and link them in the report.
 
 ## New features
 
@@ -135,7 +176,7 @@ list remembers.
 | Day | Area | Where to look |
 |---|---|---|
 | Monday | Listing editor, every marketplace tab (the list is `FORM_ORDER` in `src/components/editorTabs.ts`), category selection, item details, variations. Neither sandbox can load eBay's category fields once a listing has a category (they come from eBay's API), so the eBay tab shows "could not be loaded" there; record eBay item specifics and variations as **not run** until the sandbox seeds them | `src/components/ListingEditor.tsx`, `NativeInventoryEditor.tsx`, `editorTabs.ts`, `anteroom-ios/Sources/Editor/` |
-| Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
+| Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import. Closing any bulk dialog, Cancel included, leaves selection mode, so select again before the next dialog. Hosted web has no bulk Marketplaces button | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
 | Wednesday | Photos: upload, drop, reorder, crop and edit, thumbnails, camera on iPhone, measurements from ruler photos | `src/components/Photo*`, `anteroom-ios/Sources/Photos/` |
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |
 | Friday | Settings, providers, labels, sign-in, sign-up, password reset, account menu, analytics, sales records, mark sold; Mac app first run, backups and restore, migration of a database from the previous release | `src/components/SettingsPage.tsx`, `src/components/settings/`, `src/cloud/`, `anteroom-ios/Sources/Settings/`, `Session/`, `Analytics/`, `services/backups.py` |
@@ -149,6 +190,28 @@ to check, on which platforms, and the date it was added. Remove a line once a
 test in CI covers it.
 
 - (none yet)
+
+## Flaky tests
+
+Tests that fail some runs and pass on rerun. Each line says the test, how it
+fails and the likely cause. Fix one per run (see **Each run**), then delete
+its line. Before calling a failure flaky, rerun it alone and check it fails in
+code the PR didn't change.
+
+- `anteroom-ios/UITests/SandboxTests.swift` `launchSandbox`: "Multiple
+  matching elements found" for `app.tabBars.buttons[tab]` (2026-11-11). Use
+  `.firstMatch`.
+- `CoreFlowSandboxTests.testGenerateFromTheEditorShowsASummary` at the
+  `staticTexts.matching(...)` check after the reply: "Timed out while
+  evaluating UI query" on GitHub's macOS runners (2026-11-10, 2026-11-11).
+  Query a narrower element.
+- `PolishScreenshotTests.testPolishedScreensInLightAndDark`: the Inventory
+  list didn't appear within 30 s after a theme change, on CI (2026-11-11).
+- `hosted-e2e/signin.e2e.ts` "in the Mac app, password resets open in the
+  browser": the Account menu isn't open when the test looks for Sign out,
+  about one run in two (2026-11-11). Likely the Assistant composer's
+  `autoFocus` (`AssistantPage.tsx`) takes focus after the click and closes the
+  popover; unproven.
 
 ## Fixing bugs
 
@@ -164,27 +227,51 @@ Follow **How to Work on a Change** in `AGENTS.md` for each bug:
   bug with reproduction steps instead.
 - Before opening a PR, check open PRs and issues for the same bug. Do not
   duplicate one.
-- Never merge.
+- Queue a fix PR to merge itself (`gh pr merge <n> --auto --merge`) only
+  when all of these hold:
+  - it has a test that failed before the fix and passes after, both runs
+    recorded in the PR;
+  - it changes nothing in publishing, delisting or marketplace actions
+    (`routes/native_marketplaces.py`, `routes/marketplace_listings.py`,
+    `vendoo-extension/background/`), in deploys or releases (`.github/`,
+    `deploy/`, `fly.toml`), or in the database schema (`migrations/`, models);
+  - `./check.sh` passed locally.
+
+  Leave every other PR, including `Update daily audit instructions`, for the
+  seller. Never merge by hand, never bypass a check.
 
 ## Report
 
-File one issue per run, labelled `audit`, titled
-`Daily audit <YYYY-MM-DD>`. Close the previous run's issue once its open items
-are carried over. The issue contains:
+File one issue per run, labelled `audit`, titled `Daily audit <YYYY-MM-DD>`,
+and close the previous run's issue. Keep it to about a page: details live in
+the finding issues and PRs.
 
+**Findings.** Each bug that has no merged fix gets its own issue, labelled
+`audit-finding`, titled with the symptom in the seller's words. It holds the
+platform, steps, expected and actual results, root cause or best guess with
+confidence, `file:line`, and a screenshot path. Before filing, search open
+`audit-finding` issues and update the one that matches instead. A fix PR says
+`Fixes #<n>` so merging closes it. The daily issue links findings; it doesn't
+repeat them or carry them over.
+
+The daily issue contains, in this order:
+
+- **Decisions for the seller:** each open question as one line with the
+  options and a recommendation, linked to its finding. Put these first; they
+  are what blocks the most work.
 - **Audited:** the `origin/main` commit SHA, the installed Mac app version, and
   the rotation area.
 - **Summary:** passed, failed, not run, in one or two lines.
-- **Failures:** each with platform, steps, expected and actual results, and a
-  screenshot path or attachment, linked to its fix PR or marked "no fix yet".
+- **New findings** and **fixed today**: links, one line each.
 - **New features tested**, with their PRs and results per platform.
-- **Measurements**, when taken: load, p50/p95, errors.
-- **Recommendations:** UX friction, slow screens, gaps between web and iPhone,
-  missing tests. Keep each one to a sentence with where it is.
+- **Rotation:** what was checked and what it found, linked to findings.
+- **Measurements** on Saturdays only: load, p50/p95, errors.
 - **Not run**, with the reason.
 - **Needs the seller:** things only the seller can do (extension form sweeps
   on a signed-in Chrome, real model quality with
-  `scripts/evaluate-generation.py`, live Supabase and Fly checks).
+  `scripts/evaluate-generation.py`, live Supabase and Fly checks, merging the
+  PRs the merge rule leaves out).
+- **PRs from this run** and their CI state.
 
 ## Keeping this file current
 

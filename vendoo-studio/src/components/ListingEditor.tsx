@@ -6,7 +6,7 @@ import editorFields from "../../../skills/list-this/references/listing-editor-fi
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { EbayVariationAspect, EbayVariations, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
+import type { EbayVariationAspect, EbayVariations, ListingData, ListingDocument, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { listingEdits } from "../api/listingEdits";
 import { registerUnsavedWork } from "../lib/unsavedWork";
@@ -222,6 +222,8 @@ export function ListingEditor({
     refetchInterval: (query) => (sessionActive ? activityPollMs(Boolean(query.state.data?.busy)) : false),
   });
   const generating = chatBusy || Boolean(activity?.busy);
+  // A List running on one marketplace locks only that marketplace's row, not the others.
+  const writing = chatBusy || Boolean(activity?.writing);
   // While chat is busy an Ask chat joins its queue and runs next.
   const askChat = runtime.features.has("generation") ? onAskChat : undefined;
 
@@ -267,7 +269,7 @@ export function ListingEditor({
           </AlertDescription>
         </Alert> :
       <Layout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
-        disabled={generating || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
+        disabled={writing || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
           if (vendoo) return;
           if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
@@ -275,7 +277,7 @@ export function ListingEditor({
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
         railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}
         railMenu={<ListingActionsMenu convId={convId} onCleared={onCleared} />}
-        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">Saving…</span> : undefined}
+        railStatus={editState.saving ? <span role="status" className="text-xs text-muted-foreground">{generating ? "Edits kept. Waiting for chat to finish before saving…" : "Saving…"}</span> : undefined}
         onSelect={(id) => {
           setFieldTarget(null);
           setEditTab(id);
@@ -633,7 +635,12 @@ export function StructuredEditor({
     if (!key) return;
     const row = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-row]") || [])].find((element) => element.dataset.listingRow === key);
     if (!row) return;
-    const input = row.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex="0"]');
+    // The label row puts "Save as default" and "Ask chat" before the control, so
+    // look for the field's own control first.
+    const focusable = 'input:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex="0"]';
+    const control = row.querySelector<HTMLElement>("[data-listing-field]");
+    const input = (control?.matches(focusable) ? control : control?.querySelector<HTMLElement>(focusable))
+      ?? row.querySelector<HTMLElement>(focusable);
     reachedTarget.current = target.sequence;
     row.scrollIntoView({ block: "center" });
     (input ?? row).focus({ preventScroll: true });
@@ -739,6 +746,26 @@ export function StructuredEditor({
   };
   const commitDraftsRef = React.useRef(commitDrafts);
   const hasDrafts = Object.keys(drafts).length > 0;
+  const reloadFields = useMutation({
+    mutationFn: ({ market, revision }: { market: string; revision: string }) =>
+      api.nativeMarketplaces.refreshForm(convId, market, revision),
+    onSuccess: async (result, { market }) => {
+      await queryClient.invalidateQueries({ queryKey: ["listing", convId] });
+      // Use the returned revision even before React renders it. This also
+      // refreshes notes when rebuilding did not change the saved definition.
+      const current = queryClient.getQueryData<ListingDocument>(["listing", convId]);
+      if (current?.current_revision_id === result.revision_id) {
+        await queryClient.fetchQuery({
+          ...nativeFormOptions(convId, market, current.listing, result.revision_id), staleTime: 0,
+        });
+      }
+      await Promise.all(["native-preflight", "revisions"].map(key =>
+        queryClient.invalidateQueries({ queryKey: [key, convId] })));
+    },
+    onError: (err: Error) => {
+      toastManager.add({ type: "error", title: "Could not reload fields", description: err.message });
+    },
+  });
   React.useLayoutEffect(() => {
     commitDraftsRef.current = commitDrafts;
   });
@@ -1009,6 +1036,12 @@ export function StructuredEditor({
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
     <fieldset ref={formRef} key={tab} disabled={disabled} aria-busy={disabled || undefined}
       aria-label={`${marketplaceName(tab)} listing fields`} className="@container flex min-w-0 flex-col border-0 p-0">
+      {nativeTab && <div className="flex justify-end py-2">
+        <Button size="xs" variant="ghost" disabled={disabled || saving || hasDrafts || !revisionId || reloadFields.isPending}
+          onClick={() => { if (revisionId) reloadFields.mutate({ market: tab, revision: revisionId }); }}>
+          {reloadFields.isPending ? "Reloading fields…" : "Reload fields"}
+        </Button>
+      </div>}
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {formNotes.length > 0 && onAskChat && <div className="pb-2">

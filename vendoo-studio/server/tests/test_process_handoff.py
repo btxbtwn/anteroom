@@ -64,7 +64,7 @@ def run_lead(holds, *, until):
     events = []
     answers = iter(holds)
 
-    def hold(_engine):
+    def hold(_engine, _name='schedulers'):
         answer = next(answers, holds[-1])
         events.append(('hold', answer))
         return answer
@@ -74,7 +74,7 @@ def run_lead(holds, *, until):
         return lambda: events.append('stop')
 
     async def exercise():
-        task = asyncio.create_task(process_handoff.lead('engine', start, lambda: events.append('drain')))
+        task = asyncio.create_task(process_handoff.lead('engine', {'schedulers': start}, lambda: events.append('drain')))
         for _ in range(500):
             if until(events):
                 break
@@ -108,7 +108,7 @@ def test_a_machine_without_background_work_still_releases_its_devices():
     events = []
 
     async def exercise():
-        task = asyncio.create_task(process_handoff.lead('engine', None, lambda: events.append('drain')))
+        task = asyncio.create_task(process_handoff.lead('engine', {}, lambda: events.append('drain')))
         await asyncio.sleep(0.05)
         process_handoff.begin_draining()
         await asyncio.wait_for(task, 2)
@@ -128,7 +128,7 @@ def test_a_machine_waiting_for_the_lease_runs_drafts_and_offers_every_feature(mo
     from vendoo_studio.services import background_worker
 
     monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
-    monkeypatch.setattr(process_handoff, 'hold', lambda _engine: False)
+    monkeypatch.setattr(process_handoff, 'hold', lambda _engine, _name='schedulers': False)
     monkeypatch.setattr(process_handoff, 'release', lambda _engine: None)
     drafts = threading.Event()
 
@@ -185,3 +185,46 @@ def test_a_stop_signal_starts_the_handoff_before_requests_drain():
     server.handle_exit(signal.SIGTERM, None)
     assert process_handoff.draining()
     assert server.should_exit
+
+
+SCHEDULERS = ('hosted_automation_scheduler', 'hosted_offer_scheduler', 'hosted_job_watchdog',
+              'hosted_sourcing_scheduler', 'hosted_sales_scheduler')
+CHROME_SCHEDULERS = ('hosted_sale_checks', 'hosted_promotion_scheduler')
+
+
+@pytest.mark.parametrize('role,jobs', [
+    # Chrome tabs connect to the web Machine, and only it knows which are connected.
+    ('web', {'chrome': set(CHROME_SCHEDULERS)}),
+    ('worker', {'schedulers': set(SCHEDULERS)}),
+    ('all', {'schedulers': set(SCHEDULERS), 'chrome': set(CHROME_SCHEDULERS)}),
+])
+def test_each_role_runs_the_schedulers_its_connections_need(monkeypatch, role, jobs):
+    from vendoo_studio.hosted import create_app
+    from vendoo_studio.services import background_worker
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', role)
+    captured, led = {}, threading.Event()
+
+    async def lead(_engine, starts, _on_drain):
+        captured.update(starts)
+        led.set()
+
+    async def idle(*_args):
+        return None
+
+    monkeypatch.setattr(process_handoff, 'lead', lead)
+    monkeypatch.setattr(background_worker, 'serve', idle)
+    ran = set()
+    for name in SCHEDULERS + CHROME_SCHEDULERS:
+        def serve(*_args, _name=name):
+            ran.add(_name)
+            return idle()
+        monkeypatch.setattr(f'vendoo_studio.services.{name}.serve', serve)
+    with TestClient(create_app('https://example.supabase.co')):
+        assert led.wait(2)
+    assert set(captured) == set(jobs)
+    for lease, start in captured.items():
+        ran.clear()
+        start()()
+        assert ran == jobs[lease], lease

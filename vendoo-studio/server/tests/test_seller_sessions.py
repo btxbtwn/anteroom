@@ -246,6 +246,7 @@ def test_web_page_carries_security_headers(jwks, tmp_path):
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
 
 

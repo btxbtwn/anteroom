@@ -542,7 +542,7 @@ def test_openrouter_routes_every_request_to_its_fastest_host(fake_http):
     run(collect(provider.structured_chat([{"role": "user", "content": "hi"}], {"type": "object"})))
     for call in calls:
         body = json.loads(call.content)
-        assert body["provider"] == {"sort": "throughput"}
+        assert body["provider"]["sort"] == "throughput"
         assert body["model"] in {"vision-m", "listing-m"}
 
 
@@ -551,3 +551,114 @@ def test_other_chat_completions_providers_get_no_openrouter_routing(fake_http):
     provider = ChatCompletionsProvider(KEY_PROVIDERS["xai"], "xai-key", "grok-vision", "grok-listing")
     run(collect(provider.quick_chat([{"role": "user", "content": "hi"}])))
     assert "provider" not in json.loads(calls[0].content)
+
+
+@pytest.fixture
+def no_wait(monkeypatch):
+    """Record retry waits instead of sleeping through them."""
+    from vendoo_studio.providers import http_retry
+
+    waits: list[float] = []
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(http_retry.asyncio, "sleep", sleep)
+    return waits
+
+
+@pytest.mark.parametrize("status", [408, 429, 500, 503, 529])
+def test_anthropic_retries_a_busy_or_failed_request(fake_http, no_wait, status):
+    replies = iter([
+        httpx.Response(status, json={"error": {"message": "busy"}}, headers={"retry-after": "2"}),
+        httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn"}),
+    ])
+    calls = fake_http(lambda request: next(replies))
+    provider = AnthropicAPIProvider("k", "m", "m")
+    assert run(collect(provider.quick_chat([{"role": "user", "content": "hi"}]))) == ["ok"]
+    assert len(calls) == 2
+    assert no_wait == [2.0]
+
+
+def test_retries_stop_after_two_and_never_wait_out_a_long_retry_after(fake_http, no_wait):
+    calls = fake_http(lambda request: httpx.Response(529, json={"error": {"message": "Overloaded"}}))
+    provider = ChatCompletionsProvider(KEY_PROVIDERS["gemini"], "g", "m", "m")
+    with pytest.raises(RuntimeError, match="HTTP 529: Overloaded"):
+        run(collect(provider.quick_chat([{"role": "user", "content": "hi"}])))
+    assert len(calls) == 3
+    assert len(no_wait) == 2 and all(0 <= wait <= 8 for wait in no_wait)
+
+    calls.clear()
+    fake_http(lambda request: httpx.Response(429, json={"error": {"message": "Slow down"}}, headers={"retry-after": "600"}))
+    with pytest.raises(RuntimeError, match="HTTP 429"):
+        run(collect(provider.quick_chat([{"role": "user", "content": "hi"}])))
+    assert len(calls) == 1
+
+
+def test_connection_failures_are_retried(fake_http, no_wait):
+    attempts = iter([httpx.ConnectError("refused"), None])
+
+    def handler(request):
+        failure = next(attempts)
+        if failure is not None:
+            raise failure
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    calls = fake_http(handler)
+    provider = ChatCompletionsProvider(KEY_PROVIDERS["gemini"], "g", "m", "m")
+    assert run(collect(provider.quick_chat([{"role": "user", "content": "hi"}]))) == ["ok"]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("provider", [
+    lambda: AnthropicAPIProvider("k", "m", "m"),
+    lambda: ChatCompletionsProvider(KEY_PROVIDERS["gemini"], "g", "m", "m"),
+])
+def test_a_rejected_stream_is_not_sent_again_without_streaming(fake_http, no_wait, provider):
+    calls = fake_http(lambda request: httpx.Response(400, json={"error": {"message": "Bad request"}}))
+    with pytest.raises(RuntimeError, match="HTTP 400: Bad request"):
+        run(collect(provider().chat([{"role": "user", "content": "hi"}])))
+    assert len(calls) == 1
+
+
+def test_a_stream_that_breaks_before_answering_falls_back_to_one_plain_request(fake_http, no_wait):
+    def handler(request):
+        if json.loads(request.content).get("stream"):
+            return httpx.Response(200, content=b'data: {"type": "error", "error": {"message": "stream broke"}}\n\n')
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "plain"}]})
+
+    calls = fake_http(handler)
+    assert run(collect(AnthropicAPIProvider("k", "m", "m").chat([{"role": "user", "content": "hi"}]))) == ["plain"]
+    assert len(calls) == 2
+
+
+def test_anthropic_requests_cache_their_prompt(fake_http):
+    calls = fake_http(lambda request: httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]}))
+    run(collect(AnthropicAPIProvider("k", "m", "m").quick_chat([{"role": "system", "content": "Rules"}, {"role": "user", "content": "hi"}])))
+    body = json.loads(calls[0].content)
+    assert body["cache_control"] == {"type": "ephemeral"}
+    assert body["system"] == "Rules"
+
+
+@pytest.mark.parametrize(("model", "tool"), [
+    ("claude-sonnet-5-5", "web_search_20260209"),
+    ("claude-opus-4-6", "web_search_20260209"),
+    ("claude-fable-5-2", "web_search_20260209"),
+    ("claude-sonnet-4-5-20250929", "web_search_20250305"),
+    ("claude-opus-4-20250514", "web_search_20250305"),
+    ("claude-haiku-5-5", "web_search_20250305"),
+    ("claude-3-5-haiku-latest", "web_search_20250305"),
+])
+def test_anthropic_web_search_uses_the_newest_tool_the_model_takes(fake_http, model, tool):
+    calls = fake_http(lambda request: httpx.Response(200, json={"stop_reason": "end_turn", "content": [{"type": "text", "text": "About $40"}]}))
+    run(AnthropicAPIProvider("k", model, model).web_search([{"role": "user", "content": "comps"}]))
+    assert json.loads(calls[0].content)["tools"][0]["type"] == tool
+
+
+def test_openrouter_sends_strict_schemas_only_to_hosts_that_honour_them(fake_http):
+    calls = fake_http(lambda request: httpx.Response(200, json={"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]}))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "openrouter/auto", "openrouter/auto")
+    run(collect(provider.structured_chat([{"role": "user", "content": "JSON"}], {"type": "object"})))
+    run(collect(provider.quick_chat([{"role": "user", "content": "hi"}])))
+    assert json.loads(calls[0].content)["provider"] == {"sort": "throughput", "require_parameters": True}
+    assert json.loads(calls[1].content)["provider"] == {"sort": "throughput"}

@@ -9,6 +9,7 @@ waits for the seller.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -227,15 +228,16 @@ async def handle_event(
 ) -> list[str]:
     """Record the sales in one relay event. Returns the new sale IDs.
 
-    Other events (listing changes, account deletion) are acknowledged and
-    left alone for now.
+    eBay's account deletion deletes that account's data (``ebay_account_deletion``).
+    Other events (listing changes) are acknowledged and left alone for now.
     """
     source, kind = event.get("source"), event.get("eventType")
     if (source, kind) not in SALE_EVENTS:
         if (source, kind) == ("ebay", "MARKETPLACE_ACCOUNT_DELETION"):
-            from vendoo_studio.services.marketplace_accounts import forget_deleted_ebay_account
+            from vendoo_studio.services import ebay_account_deletion
 
-            forget_deleted_ebay_account(_first(event.get("ids") or {}, "userId"))
+            # Vault or Keychain reads and database deletes: keep them off the event loop.
+            await asyncio.to_thread(ebay_account_deletion.purge, _first(event.get("ids") or {}, "userId"), session_factory)
         return []
     from vendoo_studio.services.user_settings import sale_detection_enabled
 
@@ -247,12 +249,18 @@ async def handle_event(
         order_id = _first(event.get("ids") or {}, "orderId")
         return await recover_ebay_notification(order_id, session_factory=session_factory) if order_id else []
     lines = await etsy_lines(event, read_etsy_receipt)
+    # The sales are written on a worker thread: a commit on the event loop
+    # would stop every other request while it waits for the database.
+    return await asyncio.to_thread(_record_lines, session_factory, str(source), lines)
+
+
+def _record_lines(session_factory: Callable[[], Session], marketplace: str, lines: list[dict]) -> list[str]:
     created = []
     with session_factory() as db:
         for line in lines:
             sale = record_sale(
                 db,
-                marketplace=source,
+                marketplace=marketplace,
                 order_id=line["order_id"],
                 line_id=line["line_id"],
                 listing_id=line.get("listing_id"),

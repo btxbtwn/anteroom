@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from worker_sessions import worker_sessions
 from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.services import listing_persistence
@@ -20,6 +22,85 @@ from vendoo_studio.services.vendoo_import import merge_notes
 
 
 class NativeEditorTest(unittest.TestCase):
+    def test_every_marketplace_can_reload_and_save_its_stale_definition(self):
+        from vendoo_studio.services import native_contract
+
+        for market in ("ebay", "poshmark", "mercari", "depop", "etsy"):
+            with self.subTest(market=market):
+                snapshot = copy.deepcopy(self.listing)
+                snapshot[f"{market}_specifics"] = {"sellerNote": "Keep my answer"}
+                form = {"marketplace": market, "native": True, "known": True, "fields": [
+                    {"path": f"direct_category_ids.{market}", "label": "Category", "value": "new"},
+                ], "category_id": "new"}
+                snapshot[native_contract.KEY] = native_contract.capture(snapshot, {market: form}, [market])
+                other = "etsy" if market != "etsy" else "ebay"
+                snapshot[native_contract.KEY][other] = {"unavailable": True}
+                snapshot["direct_category_ids"][market] = "new"
+                revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
+                self.assertTrue(native_contract.gaps(snapshot, market))
+                with patch.object(native_editor, "build_form", new_callable=AsyncMock, return_value=form) as build:
+                    answer = self.client.post(f"{self.url}/{market}/form/refresh", json={"revision_id": revision.id})
+                self.assertEqual(answer.status_code, 200, answer.text)
+                build.assert_awaited_once()
+                self.assertEqual(build.await_args.args[2], market)
+                self.assertEqual(build.await_args.kwargs, {"refresh": True})
+                saved = ListingRepo(self.db).get_revision(answer.json()["revision_id"]).listing_json
+                self.assertFalse(any(gap["blocking"] for gap in native_contract.gaps(saved, market)))
+                self.assertEqual(saved[f"{market}_specifics"], snapshot[f"{market}_specifics"])
+                self.assertEqual(saved["title"], snapshot["title"])
+                self.assertEqual(saved[native_contract.KEY][other], snapshot[native_contract.KEY][other])
+                self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+                self.bridge.assert_not_called()
+
+    def test_reload_uses_current_catalogs_for_local_marketplaces(self):
+        from vendoo_studio.services import native_contract
+
+        for market in ("poshmark", "mercari", "depop"):
+            revision = ListingRepo(self.db).get_current(self.conv.id).current_revision_id
+            answer = self.client.post(f"{self.url}/{market}/form/refresh", json={"revision_id": revision})
+            self.assertEqual(answer.status_code, 200, answer.text)
+            saved = ListingRepo(self.db).get_revision(answer.json()["revision_id"]).listing_json
+            self.assertTrue(saved[native_contract.KEY][market]["fields"])
+            self.assertNotIn("Reload its fields", str(native_contract.gaps(saved, market)))
+            again = self.client.post(f"{self.url}/{market}/form/refresh", json={"revision_id": answer.json()["revision_id"]})
+            self.assertEqual(again.status_code, 200, again.text)
+            self.assertEqual(again.json()["revision_id"], answer.json()["revision_id"])
+        self.bridge.assert_not_called()
+
+    def test_reload_does_not_replace_an_edit_made_while_fields_load(self):
+        async def build(*args, **kwargs):
+            listing_persistence.save_revision(self.db, self.conv.id, {**self.listing, "title": "New seller edit"}, "user_form")
+            return {"known": True, "fields": [{"path": "title", "label": "Title"}]}
+
+        with patch.object(native_editor, "build_form", side_effect=build):
+            answer = self.client.post(f"{self.url}/mercari/form/refresh", json={"revision_id": self.rev.id})
+        self.assertEqual(answer.status_code, 409, answer.text)
+        current = ListingRepo(self.db).get_current(self.conv.id)
+        self.assertEqual(ListingRepo(self.db).get_revision(current.current_revision_id).listing_json["title"], "New seller edit")
+
+    def test_reload_failure_keeps_the_saved_revision(self):
+        for form in ({"known": False, "fields": []}, {"known": True, "fields": []}):
+            with patch.object(native_editor, "build_form", new_callable=AsyncMock, return_value=form):
+                answer = self.client.post(f"{self.url}/mercari/form/refresh", json={"revision_id": self.rev.id})
+            self.assertEqual(answer.status_code, 502, answer.text)
+            self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, self.rev.id)
+
+    def test_stale_ebay_form_rebuilds_current_choices(self):
+        from vendoo_studio.services import native_contract
+
+        snapshot = copy.deepcopy(self.listing)
+        snapshot[native_contract.KEY] = {"ebay": {"page_labels": True, "fields": []}}
+        revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
+        fresh = {"marketplace": "ebay", "fields": [], "page_labels": True}
+        with patch.object(native_contract, "editor_form", return_value=None), \
+             patch.object(native_editor, "ebay_form", new=AsyncMock(return_value=fresh)) as rebuild:
+            answer = self.client.get(f"{self.url}/ebay/form?revision_id={revision.id}")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(answer.json(), fresh)
+        rebuild.assert_awaited_once()
+        self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+
     def test_chat_reads_real_native_catalogs_and_saves_an_optional_field_without_a_job(self):
         import asyncio
         import json
@@ -31,7 +112,7 @@ class NativeEditorTest(unittest.TestCase):
         listing_persistence.save_revision(self.db, self.conv.id, snapshot, "category_analysis")
         before = len(JobRepo(self.db).list_by_conversation(self.conv.id))
         with patch("vendoo_studio.services.chat_forms.get_selected_marketplaces", return_value=["poshmark", "depop"]):
-            data = json.loads(asyncio.run(forms_prompt(self.db, self.conv.id)).split('\n')[-1])
+            data = json.loads(asyncio.run(forms_prompt(self.conv.id)).split('\n')[-1])
         posh = {row["path"]: row for row in data["poshmark"]["fields"]}
         depop = {row["path"]: row for row in data["depop"]["fields"]}
         self.assertEqual(posh["direct_category_ids.poshmark"]["options_lookup"]["count"], 747)
@@ -72,7 +153,7 @@ class NativeEditorTest(unittest.TestCase):
 
         with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
             answer = self.client.get(f"{self.url}/poshmark/form")
-            generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"poshmark"}))
+            generation_forms = asyncio.run(load_forms(self.conv.id, {"poshmark"}))
         self.assertEqual(answer.status_code, 200, answer.text)
         fields = {row["path"]: row for row in self.with_choice_lists(answer.json())["fields"]}
         self.assertEqual(len(fields["direct_category_ids.poshmark"]["options"]), 747)
@@ -89,7 +170,7 @@ class NativeEditorTest(unittest.TestCase):
         revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "category_analysis")
         with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
             answer = self.client.get(f"{self.url}/depop/form")
-            generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"depop"}))
+            generation_forms = asyncio.run(load_forms(self.conv.id, {"depop"}))
         self.assertEqual(answer.status_code, 200, answer.text)
         fields = {row["path"]: row for row in self.with_choice_lists(answer.json())["fields"]}
         self.assertEqual(len(fields["direct_category_ids.depop"]["option_values"]), 281)
@@ -211,6 +292,7 @@ class NativeEditorTest(unittest.TestCase):
         load_models()
         self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         Base.metadata.create_all(self.engine)
+        self.enterContext(worker_sessions(self.engine))
         self.db = sessionmaker(bind=self.engine)()
         self.conv = ConversationRepo(self.db).create(title="Private native form test")
         self.listing = {"title": "Nike L Tee", "description": "Details", "brand": "Nike", "size": "L", "price": 20,
@@ -240,7 +322,6 @@ class NativeEditorTest(unittest.TestCase):
     def test_a_form_reads_the_database_a_handful_of_times(self):
         """On the hosted database every query is a network round trip. A form once made
         one per saved marketplace detail (about 60), which took eight seconds to open."""
-        import asyncio
 
         from sqlalchemy import event
 
@@ -253,7 +334,7 @@ class NativeEditorTest(unittest.TestCase):
         try:
             for market in ("poshmark", "mercari", "depop"):
                 queries.clear()
-                asyncio.run(native_editor.editor_form(self.conv.id, market, rev.id, self.db))
+                native_editor.read_form(self.db, self.conv.id, market, rev.id)
                 # A handful of reads to build the snapshot, then the session is
                 # released before marketplace network waits (not one query per detail).
                 self.assertLessEqual(len(queries), 8, (market, queries))
@@ -263,7 +344,6 @@ class NativeEditorTest(unittest.TestCase):
     def test_forms_name_shared_catalogs_that_download_once(self):
         """A listing's form carries its own values. The marketplace's brand and category
         lists are the same for every listing, so the form names them and the client keeps them."""
-        import asyncio
 
         for market in ("mercari", "depop", "poshmark"):
             answer = self.client.get(f"{self.url}/{market}/form?revision_id={self.rev.id}")
@@ -278,7 +358,7 @@ class NativeEditorTest(unittest.TestCase):
                 self.assertEqual(listed.status_code, 200, listed.text)
                 self.assertIn("immutable", listed.headers["cache-control"])
                 row.update(listed.json())
-            self.assertEqual(form, asyncio.run(native_editor.editor_form(self.conv.id, market, self.rev.id, self.db)))
+            self.assertEqual(form, native_editor.read_form(self.db, self.conv.id, market, self.rev.id))
         self.assertEqual(self.client.get("/api/catalog/choice-lists/unknown?v=1").status_code, 404)
 
     def test_building_a_form_leaves_other_requests_answering(self):
@@ -290,12 +370,12 @@ class NativeEditorTest(unittest.TestCase):
         import httpx
 
         started = threading.Event()
-        build = native_editor.editor_form
+        build = native_editor.read_form
 
-        async def slow(*args, **kwargs):
+        def slow(*args, **kwargs):
             started.set()
             time.sleep(1.5)  # a database or Chrome wait that does not yield
-            return await build(*args, **kwargs)
+            return build(*args, **kwargs)
 
         async def run():
             transport = httpx.ASGITransport(app=app)
@@ -308,7 +388,7 @@ class NativeEditorTest(unittest.TestCase):
                 health = await client.get("/api/health")
                 return health, time.monotonic() - began, await form
 
-        with patch.object(native_editor, "editor_form", new=slow):
+        with patch.object(native_editor, "read_form", new=slow):
             health, waited, form = asyncio.run(run())
         self.assertEqual(health.status_code, 200)
         self.assertLess(waited, 0.75)
@@ -358,7 +438,7 @@ class NativeEditorTest(unittest.TestCase):
 
         with patch("vendoo_studio.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
             answer = self.client.get(f"{self.url}/mercari/form")
-            generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"mercari"}))
+            generation_forms = asyncio.run(load_forms(self.conv.id, {"mercari"}))
         self.assertEqual(answer.status_code, 200, answer.text)
         fields = {row["path"]: row for row in self.with_choice_lists(answer.json())["fields"]}
         self.assertIn("Nike", fields["mercari_specifics.brand"]["options"])

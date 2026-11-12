@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -14,13 +13,8 @@ INSTALLER = Path(__file__).resolve().parents[3] / "anteroom-ios/tools/install-xc
 SHA256 = "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
 
 
-def test_ci_passes_job_token_to_every_xcodegen_install():
-    workflow = INSTALLER.parents[2] / ".github/workflows/ios.yml"
-    steps = re.findall(r"      - name: Install the pinned XcodeGen\n(.*?)(?=      - |\Z)",
-                       workflow.read_text(), re.DOTALL)
-    assert len(steps) == 3
-    for step in steps:
-        assert step.count("GITHUB_TOKEN: ${{ github.token }}") == 1
+def test_cloud_setup_handles_failures_and_release_settings():
+    subprocess.run([sys.executable, str(INSTALLER.parent / "test_cloud_setup.py")], check=True)
 
 
 def install(tmp_path, *, fail_download=False, fail_checksum=False, github_token: str | None = None):
@@ -103,15 +97,3 @@ def test_xcodegen_installer_never_unpacks_or_adds_failed_download_to_path(tmp_pa
     assert [call["tool"] for call in calls] == expected
     assert not (destination / "xcodegen/bin/xcodegen").exists()
     assert not path_file.exists()
-
-
-def test_ios_workflow_passes_read_only_token_only_to_installer():
-    workflow = INSTALLER.parents[2] / ".github/workflows/ios.yml"
-    text = workflow.read_text()
-    assert "permissions:\n  contents: read" in text
-    steps = text.split("      - name: Install the pinned XcodeGen\n")[1:]
-    assert len(steps) == 3
-    for step in steps:
-        installer_step = step.split("      - ", 1)[0]
-        assert "GITHUB_TOKEN: ${{ github.token }}" in installer_step
-    assert text.count("GITHUB_TOKEN: ${{ github.token }}") == 3

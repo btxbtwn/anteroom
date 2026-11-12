@@ -18,6 +18,7 @@ struct ListingEditorView: View {
     @State private var tab = "general"
     @State private var confirmGenerate = false
     private var photoCount: Int { model.photos.count }
+    private var photosUploading: Bool { PhotoUploadTracker.shared.isUploading(model.listingID) }
     /// A field to scroll to once its tab is on screen.
     @State private var focusPath: String?
     @State private var saves = 0
@@ -311,9 +312,10 @@ struct ListingEditorView: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .workspaceProminentButton()
-            .disabled(model.hasChanges)
+            .disabled(model.hasChanges || photosUploading)
             .accessibilityIdentifier("generate-listing")
-            Text(model.hasChanges ? "Save your changes first, then generate."
+            Text(photosUploading ? "Wait for your photos to finish uploading."
+                 : model.hasChanges ? "Save your changes first, then generate."
                  : "Writes the title, description and item details from your photos. You review them before anything is listed.")
                 .font(.footnote).foregroundStyle(WorkspaceStyle.mutedText)
         }

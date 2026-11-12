@@ -396,13 +396,6 @@ class SignInTest(unittest.TestCase):
              self.assertRaises(marketplace_accounts.SignInRequired):
             asyncio.run(marketplace_accounts.access_token("ebay"))
 
-    def test_account_deletion_forgets_only_that_account(self):
-        keychain.set_marketplace_account("ebay", {"accountId": "seller-a"})
-        marketplace_accounts.forget_deleted_ebay_account("someone-else")
-        self.assertIn("ebay", keychain.get_marketplace_accounts())
-        marketplace_accounts.forget_deleted_ebay_account("seller-a")
-        self.assertNotIn("ebay", keychain.get_marketplace_accounts())
-
 
 class StreamTest(unittest.TestCase):
     def test_events_are_recorded_then_acknowledged(self):

@@ -198,7 +198,7 @@ function FinancialEditor({ row, onClose, onSaved, onReload }: { row: SalesLedger
   const [soldOn, setSoldOn] = useState(row.sold_at?.slice(0, 10) || "");
   const currency = row.financials?.currency || "USD";
   const [values, setValues] = useState<Record<SaleFormField, string>>(() => Object.fromEntries(SALE_FORM_FIELDS.map(([field]) => [field, row.financials?.[field] || ""])) as Record<SaleFormField, string>);
-  // The same amounts Mark as sold takes. Refunds and the item's cost are left as they are.
+  // Refunds stay as recorded by the marketplace.
   const save = useMutation({ mutationFn: () => api.salesLedger.save(row.id, {
     sold_on: soldOn || null, currency,
     ...Object.fromEntries(SALE_FORM_FIELDS.map(([field]) => [field, values[field].trim().replace(/^\$/, "") || null])),
@@ -215,7 +215,7 @@ function FinancialEditor({ row, onClose, onSaved, onReload }: { row: SalesLedger
           <label className="space-y-1 text-xs">Date<Input nativeInput type="date" min="1970-01-01" max={today} value={soldOn} disabled={busy} onChange={event => setSoldOn(event.target.value)} /></label>
           {SALE_FORM_FIELDS.map(([field, label]) => <label key={field} className="space-y-1 text-xs">{label}<Input inputMode="decimal" value={values[field]} placeholder="0.00" disabled={busy} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}
         </div>
-        <PageNote>Cost of goods: {ledgerMoney(row.financials?.item_cost, currency)}, from the item's form.{refunds != null && Number(refunds) !== 0 ? ` Refunded: ${ledgerMoney(refunds, currency)}.` : ""} Leave an amount blank if you don't know it. Nothing changes on any marketplace.</PageNote>
+        <PageNote>Cost of goods applies to this sale.{refunds != null && Number(refunds) !== 0 ? ` Refunded: ${ledgerMoney(refunds, currency)}.` : ""} Leave an amount blank if you don't know it. Nothing changes on any marketplace.</PageNote>
         {save.error ? <PageError message={save.error.message} /> : null}{reload.error ? <PageError message={reload.error.message} /> : null}
       </DialogPanel><DialogFooter className="shrink-0"><Button type="button" variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Reload record</Button><Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" disabled={busy}>{save.isPending ? "Saving…" : "Save amounts"}</Button></DialogFooter></form>
     </DialogPopup>
