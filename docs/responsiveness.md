@@ -74,6 +74,104 @@ shutdown and Mac inference overlap beyond the former 16-call cap. Native iPhone
 bulk changes require an app build and native runtime testing; a phone browser
 test alone does not verify SwiftUI behavior.
 
+## Hosted load test, 2026-11-12
+
+`vendoo-studio/scripts/hosted-load-test.py` (how to run it: "Hosted load
+test" in `vendoo-studio/README.md`) drives the local hosted sandbox at main
+`cd9a9176` (0.1.951). Conditions:
+
+- Web and worker in separate processes (`ANTEROOM_SANDBOX_WORKER_PROCESS=1`),
+  each with the production pool (`ANTEROOM_HOSTED=1`: 8 plus 4, 3 s wait), on
+  local Postgres 16. The database round trip was either local (about 0) or
+  24 ms through the sandbox's delay proxy (`ANTEROOM_SANDBOX_DB_RTT_MS=24`),
+  production's measured San Jose to Oregon distance.
+- The fake model answered each call after 5 s, so one generation took
+  80–140 s.
+- Each seller had two browsing tabs (inventory, open a draft, open a
+  generating draft, save a listing field, save the notes, suggestions,
+  analytics, sales, status; 0.5 s mean pause) and 40 extra drafts. In the
+  load phase each seller also kept three drafts generating, each followed by a
+  second open stream. 150 s per phase, one run per configuration.
+- Host: a shared Linux VM, 6 vCPU (Haswell), 11 GB, also running other
+  agents' work; one-minute load 0.3–3.4 during the runs. Processes were not
+  CPU-capped: the web process peaked at 0.9 CPU and the worker at 1.6, where
+  production gives each one vCPU.
+
+Client-measured full-response time, p50/p95 ms, with the 24 ms round trip:
+
+| Request | 2 sellers, idle | 2 sellers, 6 drafts generating | 5 sellers, idle | 5 sellers, 15 drafts generating |
+| --- | --- | --- | --- | --- |
+| Status | 173/284 | 177/208 | 178/196 | 195/286 |
+| Open a draft (`/screen`) | 375/390 | 384/444 | 387/433 | 425/672 |
+| Open a generating draft | 373/388 | 496/593 | 392/439 | 543/722 |
+| Save notes | 397/409 | 413/465 | 411/472 | 456/620 |
+| Save a listing field | 570/584 | 591/667 | 592/667 | 658/1,110 |
+| Inventory | 926/1,340 | 980/1,853 | 961/1,581 | 1,076/4,884 |
+| Suggestions | 641/705 | 666/837 | 673/812 | 735/1,079 |
+| Analytics | 511/685 | 519/618 | 610/929 | 701/1,052 |
+| Sales | 443/560 | 455/569 | 491/884 | 548/884 |
+| Samples / errors | 612 / 0 | 612 / 0 | 1,530 / 0 | 1,348 / 2 (inventory 503) |
+
+In the 5-seller load phase, 9 of 39 generate submissions answered 500, 5
+generations ended in an error event, and the server logged 24 pool timeouts.
+Submission acknowledgement (response headers) was p50/p95 837/4,379 ms; with
+2 sellers 946/1,075 ms. The first progress event arrived 6.3–8.5 s after
+submission (p50), 4.3 s even with no added latency; this is not yet
+explained.
+
+Without added latency, all requests together measured p50/p95 29/68 ms idle
+and 38/126 ms generating for 2 sellers (no errors), and 37/101 ms idle and
+56/250 ms generating for 5 sellers. The 5-seller run still had 18 pool
+timeouts, 4 inventory 503s and 5 generate 500s, and 15 of 44 generations ended
+in an error event: pool exhaustion is not caused by distance alone.
+
+Postgres statements per request (`log_statement = all`, idle, no added
+latency): status 6, open a draft 13, save notes 14, save a field 20, sales 16,
+analytics 18, inventory 8 while its snapshot is current and 34 after a save,
+suggestions 7 and 23. At 24 ms a round trip those alone are 140–820 ms, which
+is the measured idle latency: at production's distance the floor is set by
+round trips, not by contention. No server-confirmed request met the 100 ms
+input target, and no editor read met 200 ms. The browser's optimistic
+acknowledgement and cached navigation were not measured here.
+
+What held the pool, from the pool's own snapshot at each timeout (printed
+with a diagnostic `sitecustomize`, not committed) and `pg_stat_activity`
+sampled four times a second:
+
+1. **Nested checkout in `POST /api/conversations/{id}/generate` (web).**
+   `routes/hosted_tasks.py` `generate` holds a seller session and `submit`
+   calls `get_listing_provider()`, which reads settings
+   (`user_settings.read_settings` → `hosted_context.load`) on a second pooled
+   connection. When about a dozen submissions overlap, every connection is held
+   by an outer session waiting for an inner one, so all wait out the 3 s pool
+   timeout. At the timeouts, `generate` held on average 7 of the web
+   process's 12 connections for 3.0 s, and 18 of the 24 timeout tracebacks
+   were that settings read; the others were page reads in the same window.
+   `message` → `enqueue` → `submit` has the same shape.
+2. **Long worker transactions in category selection.** With 15 drafts in one
+   worker, `services/category_selection.py` `_first_choices` held about 3 of
+   12 connections for 3.7 s each, the catalog index's `fingerprint` (rebuilt
+   after the worker starts) about 1 for 3.2 s, and `agent_categories.tree_leaves`
+   more. Draft lease renewal (`background_tasks.renew`) and progress writes
+   (`append_events`) share that pool, time out, and fail their drafts
+   (`Draft task failed (TimeoutError at ... heartbeat > ... renew)`).
+3. **Round trips per request**, above. Every seller transaction starts with
+   `BEGIN` and the seller `set_config`; in the load phase 2.8 connections on
+   average sat `idle in transaction` on those two alone.
+
+Also seen: opening a generating draft took 4–5 times as long during
+generation without added latency (p50 24 → 111 ms). One Cancel
+(`hosted_tasks.cancel` → `background_tasks.cancel`) deadlocked with the worker
+finishing the same draft (`deadlock detected ... locking tuple in relation
+"background_tasks"`). The two processes used up to 26 database connections.
+
+Not covered: Supabase's transaction pooler, TLS and its connection costs; a
+CPU cap like production's; the phone network and the browser; production's
+inventory size (about 1,300 drafts for one seller); real model timing and
+output. The default `./sandbox.sh --hosted` does not set `ANTEROOM_HOSTED=1`
+and therefore opens a new connection per checkout, so its browser tests
+cannot show pool exhaustion.
+
 ## Remaining latency work
 
 After transaction pooling was deployed in web release 0.1.683, three sequential

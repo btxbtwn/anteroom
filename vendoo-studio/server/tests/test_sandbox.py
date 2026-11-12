@@ -103,6 +103,22 @@ def test_sandbox_provider_answers_the_same_way_every_time():
     assert asyncio.run(provider.analyze_photos([]))["evidence"]["brand"]["value"] == "Levi's"
 
 
+def test_sandbox_provider_can_take_as_long_as_a_model(monkeypatch):
+    import time
+    monkeypatch.setenv("ANTEROOM_SANDBOX_MODEL_SECONDS", "0.2")
+    provider = SandboxProvider()
+
+    async def answer():
+        started = time.perf_counter()
+        await provider.analyze_photos([])
+        reply = "".join([chunk async for chunk in provider.chat([{"role": "user", "content": "hi"}])])
+        return time.perf_counter() - started, reply
+
+    elapsed, reply = asyncio.run(answer())
+    assert reply == REPLY
+    assert elapsed >= 0.4
+
+
 def test_install_blocks_outbound_connections_but_not_loopback():
     # install() patches httpx and socket for the whole process, so it runs in its own.
     script = """

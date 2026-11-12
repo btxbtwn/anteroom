@@ -344,6 +344,38 @@ PYTHONPATH=server .venv/bin/python -m pytest -q server/tests
 
 Set `VENDOO_STUDIO_DEV=1` if you start the backend yourself and want auto-reload.
 
+### Hosted load test
+
+`scripts/hosted-load-test.py` measures page reads and saves while several
+sellers generate drafts, against the local hosted sandbox only (it refuses
+anything that is not a loopback sandbox). Start the sandbox API shaped like
+production, then run the test from another terminal:
+
+```bash
+cd vendoo-studio
+# Production pool (8 + 4), separate web and worker processes, 24 ms database
+# round trip, five sellers, and a fake model that takes 5 s per call.
+ANTEROOM_HOSTED=1 ANTEROOM_SANDBOX_WORKER_PROCESS=1 ANTEROOM_SANDBOX_DB_RTT_MS=24 \
+ANTEROOM_SANDBOX_SELLERS=5 ANTEROOM_SANDBOX_MODEL_SECONDS=5 VENDOO_STUDIO_PORT=4340 \
+PYTHONPATH=server .venv/bin/python -m vendoo_studio.hosted_sandbox
+# When it prints "Sandbox database: <url>; API process <pid>, worker process <pid>":
+.venv/bin/python scripts/hosted-load-test.py --base-url http://127.0.0.1:4340 \
+  --sellers 5 --seconds 150 --inventory 40 --database-url '<url>' \
+  --pid web=<pid> --pid worker=<pid> --out load.json
+```
+
+Each seller gets drafts to generate, drafts to edit and extra inventory. An
+idle phase then runs every seller's browsing tabs (inventory, open a draft,
+save a field and the notes, suggestions, analytics, sales, status); a load
+phase repeats it while each seller keeps three drafts generating, each with a
+second open stream. The report gives p50/p95/max per request and phase, HTTP
+errors, generation acknowledgement, database connections and transactions per
+second, process CPU and the host's load average. Check the sandbox's own log
+for pool or statement timeouts. Leave out `ANTEROOM_HOSTED=1` and the sandbox
+uses a new database connection per checkout, as the plain `./sandbox.sh
+--hosted` does. Results and their caveats are recorded in
+[docs/responsiveness.md](../docs/responsiveness.md).
+
 The extension connects to `ws://127.0.0.1:4318/api/extension/ws`. **Connect Chrome** opens everyday Chrome and reloads Anteroom's listing extension. Load unpacked from the folder shown in Settings → Connections (`data/vendoo-extension/` in development).
 
 ## Database

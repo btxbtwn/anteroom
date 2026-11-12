@@ -1,0 +1,1 @@
+- Add a load test that measures how quickly pages open and edits save while several sellers generate drafts, run against the local sandbox only.
