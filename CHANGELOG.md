@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.953 — 2026-11-12
+
+- Anteroom and Anteroom Connector are now notarized by Apple, so a fresh download opens without Control-clicking.
+- The first time the new version starts, macOS may ask once for your Mac password so Anteroom can keep your saved sign-ins. Choose Always Allow; later updates won't ask.
+- If Anteroom 0.1.947 or earlier says an update does not match its signing identity, open Settings → About → Previous versions and install the update marked for 0.1.947 and earlier. After that, updates install normally.
+
 ## 0.1.952 — 2026-11-12
 
 - Generation timings now include each ChatGPT or Claude call made through your computer, so slow steps can be found and fixed.
