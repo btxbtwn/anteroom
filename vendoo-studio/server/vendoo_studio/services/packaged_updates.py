@@ -27,11 +27,16 @@ RELEASE_TAG = os.environ.get("VENDOO_STUDIO_RELEASE_TAG", "studio-macos")
 # Every build is also published under its own tag, "studio-macos-v<version>-<sha>",
 # so a build that turns out broken can be swapped for an earlier one.
 VERSIONED_TAG_PREFIX = f"{RELEASE_TAG}-v"
-# The notarized build, signed with Anteroom's Developer ID certificate.
-ZIP_NAME = "Anteroom-for-Mac.zip"
-# Builds published before notarization only have this zip. Remove it with
+# Builds signed with the older self-signed certificate (through 0.1.947) only
+# accept an update signed with that certificate. Until 2027-02-12 each release
+# that can be signed with it is also published under
+# "studio-macos-v<version>-oldcert<sha>": the same build signed with the old
+# certificate, which those installs pick in Settings → About → Previous
+# versions. Its updater then accepts the Developer ID builds. Builds that run
+# this code never need it, so they leave it out of the list. Remove with
 # _OLD_CERTIFICATE after 2027-02-12.
-PRE_NOTARIZATION_ZIP_NAME = "Anteroom-macos.zip"
+BRIDGE_SUFFIX_PREFIX = "oldcert"
+ZIP_NAME = "Anteroom-macos.zip"
 BUNDLE_IDENTIFIER = "local.listthis.studio"
 # Anteroom's Developer ID Application certificate, by its Apple Team ID: the
 # designated requirement codesign gives every app signed with it.
@@ -44,9 +49,9 @@ _DEVELOPER_ID = (
 # The self-signed certificate releases used before Developer ID (through
 # 0.1.947). Accepting it lets an install of such a build update through the
 # copy signed with it, and lets a newer install go back to one of those builds.
-# Transition window: remove this, PRE_NOTARIZATION_ZIP_NAME and the
-# transition zip in scripts/package-macos-app.sh after 2027-02-12; from then
-# on only _DEVELOPER_ID is accepted.
+# Transition window: remove this, BRIDGE_SUFFIX_PREFIX and the bridge
+# release in scripts/package-macos-app.sh and publish-macos-release.sh after
+# 2027-02-12; from then on only _DEVELOPER_ID is accepted.
 _OLD_CERTIFICATE = 'certificate leaf = H"bf5bb813af4efd5e4d73209a2ee50f669ee28bbb"'
 UPDATE_REQUIREMENT = f'identifier "{BUNDLE_IDENTIFIER}" and (({_DEVELOPER_ID}) or ({_OLD_CERTIFICATE}))'
 INFO_NAME = "build_info.json"
@@ -172,8 +177,7 @@ def _normalize_build_info(payload: dict) -> dict:
     zips = payload.get("zips")
     if not isinstance(zips, dict):
         zips = {}
-    zip_name = next((name for name in (ZIP_NAME, PRE_NOTARIZATION_ZIP_NAME) if zips.get(name)), ZIP_NAME)
-    zip_sha = str(zips.get(zip_name) or "").strip().lower()
+    zip_sha = str(zips.get(ZIP_NAME) or "").strip().lower()
     if zip_sha.startswith("sha256:"):
         zip_sha = zip_sha.split(":", 1)[1].strip().lower()
     title = str(payload.get("title") or payload.get("summary") or "").strip()
@@ -206,7 +210,6 @@ def _normalize_build_info(payload: dict) -> dict:
         "sha": sha,
         "short_sha": payload.get("short_sha") or (sha[:7] if isinstance(sha, str) and sha else None),
         "ref": payload.get("ref"),
-        "zip_name": zip_name,
         "zip_sha256": zip_sha or None,
         "schema_revision": str(payload.get("schema_revision") or "").strip() or None,
         "title": title,
@@ -485,7 +488,7 @@ def check_for_packaged_update() -> dict:
         "dirty": [],
         "error": None,
         "short_sha": remote.get("short_sha"),
-        "download_url": release_asset_url(remote.get("zip_name") or ZIP_NAME),
+        "download_url": release_asset_url(ZIP_NAME),
         "sha256": remote.get("zip_sha256"),
         "release_url": release_page_url(),
     }
@@ -744,6 +747,8 @@ def list_published_versions(client: httpx.Client | None = None) -> list[dict]:
         if not parsed or release.get("draft"):
             continue
         version, short_sha = parsed
+        if short_sha.startswith(BRIDGE_SUFFIX_PREFIX):
+            continue
         versions.append({
             "tag": tag,
             "version": version,
@@ -782,7 +787,7 @@ def install_packaged_version(
     if not remote.get("zip_sha256"):
         raise PackagedUpdateError("That build does not include a SHA-256 digest for the Mac zip.")
     _staging, new_app = _stage_app(
-        release_asset_url(remote.get("zip_name") or ZIP_NAME, tag), remote["zip_sha256"], report, progress_callback
+        release_asset_url(ZIP_NAME, tag), remote["zip_sha256"], report, progress_callback
     )
     script = _write_replacer(app_path, new_app, os.getpid(), restore_database=restore_database)
     subprocess.Popen(

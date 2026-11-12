@@ -3,19 +3,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$ROOT/.." && pwd)"
-ZIP="$ROOT/release/Anteroom-for-Mac.zip"
-# Installs signed with the older self-signed certificate update from this
-# asset until 2027-02-12; see package-macos-app.sh.
-TRANSITION_ZIP="$ROOT/release/Anteroom-macos.zip"
+ZIP="$ROOT/release/Anteroom-macos.zip"
 # Builds from before the rename update from this asset; see package-macos-app.sh.
 LEGACY_ZIP="$ROOT/release/List-This-Studio-macos.zip"
 CONNECTOR_ZIP="$ROOT/release/Anteroom-Connector-macos.zip"
 INFO="$ROOT/release/build_info.json"
+# The same build signed with the older self-signed certificate, when the
+# release job could sign one. See scripts/legacy_bridge.py.
+BRIDGE_ZIP="$ROOT/release/bridge/Anteroom-macos.zip"
+BRIDGE_INFO="$ROOT/release/bridge/build_info.json"
 TAG="${VENDOO_STUDIO_RELEASE_TAG:-studio-macos}"
 DEFAULT_TITLE="Anteroom (macOS)"
 GITHUB_REPO="${VENDOO_STUDIO_GITHUB_REPO:-btxbtwn/anteroom}"
 
-for archive in "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP"; do
+for archive in "$ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP"; do
   if [[ ! -f "$archive" ]]; then
     echo "Missing $archive. Run scripts/package-macos-app.sh first." >&2
     exit 1
@@ -96,7 +97,7 @@ PY
 # refreshes it, so the page can read months old beside a zip built minutes ago.
 # State the build date in the notes, where it is accurate.
 CHANGES="$(python3 -c 'import json,sys; print("\n".join("- [#{number}]({url}) {title}".format(**p) for p in json.loads(sys.argv[1])))' "$PULL_REQUESTS_JSON")"
-NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull requests\n%s\n\nInstall\n1. Download and unzip Anteroom-for-Mac.zip\n2. Move Anteroom.app into Applications and open it\n3. In Settings, sign in with ChatGPT or add a MiMo API key\n4. Click Connect Chrome, load the listing extension once, and sign in to the marketplaces you sell on\n\nNeeds macOS 13+ and Google Chrome. Listing data stays on this Mac. Anteroom-macos.zip and List-This-Studio-macos.zip are for automatic updates of older installs; download Anteroom-for-Mac.zip instead.\n' "${VERSION:-unknown}" "$BUILT_AT" "$SHA" "$REF" "${CHANGES:-- None detected}")
+NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull requests\n%s\n\nInstall\n1. Unzip Anteroom-macos.zip\n2. Move Anteroom.app into Applications\n3. Open it. It is notarized by Apple, so no Control-click is needed\n4. In Settings, sign in with ChatGPT or add a MiMo API key\n5. Click Connect Chrome, load the listing extension once, and sign in to the marketplaces you sell on\n\nNeeds macOS 13+ and Google Chrome. Listing data stays on this Mac.\n' "${VERSION:-unknown}" "$BUILT_AT" "$SHA" "$REF" "${CHANGES:-- None detected}")
 
 # Keep this build under its own tag as well, so Settings → About can go back to
 # it if a later build turns out broken. The rolling tag above is what updates
@@ -104,9 +105,9 @@ NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull reques
 VERSIONED_TAG="${TAG}-v${VERSION:-unknown}-${SHORT}"
 NOTES+=$'\n\nConnector only\nDownload Anteroom-Connector-macos.zip to use your ChatGPT and Claude subscriptions from the web or iPhone without the full desktop app. Keep the connector running and the Mac awake and online. Claude subscription sign-in requires Claude Code.\n'
 if gh release view "$VERSIONED_TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
-  gh release upload "$VERSIONED_TAG" "$ZIP" "$TRANSITION_ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
+  gh release upload "$VERSIONED_TAG" "$ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
 else
-  gh release create "$VERSIONED_TAG" "$ZIP" "$TRANSITION_ZIP" "$CONNECTOR_ZIP" "$INFO" \
+  gh release create "$VERSIONED_TAG" "$ZIP" "$CONNECTOR_ZIP" "$INFO" \
     --latest=false \
     --title "Anteroom ${VERSION:-unknown} (${SHORT}): ${TITLE}" \
     --notes "$NOTES" \
@@ -115,10 +116,10 @@ else
 fi
 
 if [[ "$RELEASE_EXISTS" == 1 ]]; then
-  gh release upload "$TAG" "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
+  gh release upload "$TAG" "$ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
   gh release edit "$TAG" --title "$TITLE" --notes "$NOTES" --latest --repo "$GITHUB_REPO"
 else
-  gh release create "$TAG" "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" \
+  gh release create "$TAG" "$ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" \
     --latest \
     --title "$TITLE" \
     --notes "$NOTES" \
@@ -140,12 +141,52 @@ if [[ "$TAG_SHA" != "$SHA" ]]; then
   fi
 fi
 
-# Each build is about 90 MB. Keep the newest few dozen; older ones go with their tags.
+# Installs signed with the older self-signed certificate (0.1.947 and earlier)
+# refuse this Developer ID build. They can pick this bridge, the same build
+# signed with their certificate, in Settings → About → Previous versions; its
+# updater then accepts the Developer ID builds. Remove after 2027-02-12.
+if [[ -f "$BRIDGE_ZIP" && -f "$BRIDGE_INFO" ]]; then
+  BRIDGE_TAG="$(python3 "$ROOT/scripts/legacy_bridge.py" tag "$TAG" "${VERSION:-unknown}" "$SHORT")"
+  BRIDGE_TITLE="Update for Anteroom 0.1.947 and earlier (installs signed before Developer ID)"
+  python3 - "$BRIDGE_INFO" "$BRIDGE_TITLE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text(encoding="utf-8"))
+payload["title"] = sys.argv[2]
+payload["pull_requests"] = []
+path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+PY
+  BRIDGE_NOTES=$(printf 'Anteroom %s (%s), signed with the certificate Anteroom used through 0.1.947.\n\nOnly for a Mac whose Anteroom says an update does not match its signing identity: open Settings → About → Previous versions and install this one. After that, updates install normally. Everyone else: download Anteroom-macos.zip from the latest release.\n' "${VERSION:-unknown}" "$SHORT")
+  # Uploaded as Anteroom-macos.zip and build_info.json: the names those
+  # installs look for under a version tag.
+  BRIDGE_UPLOAD="$(mktemp -d)"
+  cp "$BRIDGE_ZIP" "$BRIDGE_UPLOAD/Anteroom-macos.zip"
+  cp "$BRIDGE_INFO" "$BRIDGE_UPLOAD/build_info.json"
+  if gh release view "$BRIDGE_TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
+    gh release upload "$BRIDGE_TAG" "$BRIDGE_UPLOAD/Anteroom-macos.zip" "$BRIDGE_UPLOAD/build_info.json" --clobber --repo "$GITHUB_REPO"
+  else
+    gh release create "$BRIDGE_TAG" "$BRIDGE_UPLOAD/Anteroom-macos.zip" "$BRIDGE_UPLOAD/build_info.json" \
+      --latest=false \
+      --title "$BRIDGE_TITLE" \
+      --notes "$BRIDGE_NOTES" \
+      --target "$SHA" \
+      --repo "$GITHUB_REPO"
+  fi
+  rm -rf "$BRIDGE_UPLOAD"
+  echo "Published the bridge for older installs as https://github.com/${GITHUB_REPO}/releases/tag/$BRIDGE_TAG"
+fi
+
+# Each build is about 90 MB. Keep the newest few dozen; older ones go with
+# their tags. The newest bridge is kept whatever its age, and older bridges go,
+# so everything stays inside the first 100 releases the version list reads.
 KEEP_VERSIONS="${VENDOO_STUDIO_KEEP_VERSIONS:-30}"
 prune_old_versions() {
   gh api --paginate "repos/${GITHUB_REPO}/releases?per_page=100" \
-    --jq ".[] | select(.tag_name | startswith(\"${TAG}-v\")) | [.created_at, .tag_name] | @tsv" \
-    | sort -r | tail -n "+$((KEEP_VERSIONS + 1))" | cut -f2 \
+    --jq ".[] | [.created_at, .tag_name] | @tsv" \
+    | python3 "$ROOT/scripts/legacy_bridge.py" prune "$TAG" "$KEEP_VERSIONS" \
     | while read -r old_tag; do
         [[ -n "$old_tag" ]] || continue
         gh release delete "$old_tag" --cleanup-tag --yes --repo "$GITHUB_REPO"

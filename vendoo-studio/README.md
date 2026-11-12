@@ -14,7 +14,7 @@ pip install -e ".[package]"
 ./scripts/package-macos-app.sh
 ```
 
-That writes `vendoo-studio/release/Anteroom.app` and `vendoo-studio/release/Anteroom-for-Mac.zip`. The zip also includes **How to Open.txt**.
+That writes `vendoo-studio/release/Anteroom.app` and `vendoo-studio/release/Anteroom-macos.zip`. The zip also includes **How to Open.txt**.
 
 Publish the zip as the rolling GitHub release (`studio-macos`):
 
@@ -30,11 +30,13 @@ Release builds are signed with the **Developer ID Application** certificate in t
 
 Keychain recognises later builds by their Apple Team ID, which only an Apple-issued certificate carries. With Developer ID, macOS asks for the Mac password once when an install moves from the older self-signed certificate, then never again on update. To replace the certificate, follow the steps at the top of `scripts/setup-signing.sh` and run it with the exported `.p12`. Credentials are updated in place and are never rewritten at startup.
 
-The updater refuses any download that is ad-hoc signed, fails `codesign --verify --deep --strict`, or does not satisfy `UPDATE_REQUIREMENT` in `services/packaged_updates.py`: Anteroom's bundle identifier signed by Developer ID team `JWN57LH9PU`, or, until 2027-02-12, by the self-signed certificate releases used through 0.1.947. Those older installs check updates against their own self-signed certificate and refuse a Developer ID build, so until that date the release also publishes `Anteroom-macos.zip` (the asset they download) signed with the old certificate when `MACOS_LEGACY_SIGNING_CERT_P12_BASE64` and `MACOS_LEGACY_SIGNING_CERT_PASSWORD` are set in the `release` environment. Their next update installs that copy, whose updater then moves to the notarized `Anteroom-for-Mac.zip`. Without those secrets, `Anteroom-macos.zip` holds the Developer ID build and the release job warns that older installs have to download `Anteroom-for-Mac.zip` once by hand.
+The updater refuses any download that is ad-hoc signed, fails `codesign --verify --deep --strict`, or does not satisfy `UPDATE_REQUIREMENT` in `services/packaged_updates.py`: Anteroom's bundle identifier signed by Developer ID team `JWN57LH9PU`, or, until 2027-02-12, by the self-signed certificate releases used through 0.1.947. The rolling release's `Anteroom-macos.zip` is always the Developer ID build, so every Developer ID install keeps updating.
+
+Installs through 0.1.947 check an update against their own self-signed certificate and refuse every Developer ID build. Until 2027-02-12, when `MACOS_LEGACY_SIGNING_CERT_P12_BASE64` and `MACOS_LEGACY_SIGNING_CERT_PASSWORD` are in the `release` environment, each release also publishes a bridge: the same build signed with that certificate, as its own non-latest release `studio-macos-v<version>-oldcert<sha>` titled "Update for Anteroom 0.1.947 and earlier". Those installs pick it in Settings → About → Previous versions, which accepts a newer build and keeps the database (a newer build migrates it forward). The bridge's updater accepts Developer ID, so the next release installs normally. Pruning keeps the newest bridge and removes older ones, so every release stays within the first 100 that older builds list (`scripts/legacy_bridge.py`). Builds from this one on hide bridges from that list. Without those secrets no bridge is published, and the release job warns that older installs have to download `Anteroom-macos.zip` once by hand.
 
 The recipient:
 
-1. Unzips `Anteroom-for-Mac.zip`, moves **Anteroom** into Applications and opens it. It is notarized, so macOS opens it after one confirmation.
+1. Unzips `Anteroom-macos.zip`, moves **Anteroom** into Applications and opens it. It is notarized, so macOS opens it after one confirmation.
 2. Signs in with ChatGPT or enters a Xiaomi MiMo API key in Settings.
 3. Clicks **Connect Chrome**. Anteroom opens everyday Chrome and copies the listing extension into an Anteroom-managed folder. Load that unpacked folder once from Settings → Connections (`chrome://extensions/` → Developer mode → Load unpacked).
 

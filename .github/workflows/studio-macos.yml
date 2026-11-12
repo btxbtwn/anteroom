@@ -209,7 +209,7 @@ jobs:
         # requests, the two test certificates).
         working-directory: vendoo-studio
         run: |
-          for app in release/Anteroom.app release/legacy-signed/Anteroom.app; do
+          for app in release/Anteroom.app release/bridge/payload/Anteroom.app; do
             if [[ -d "$app" ]]; then
               echo "Smoke test: $app"
               .venv/bin/python scripts/smoke-packaged-sandbox.py "$app"
@@ -262,7 +262,8 @@ jobs:
         env:
           PYTHON: ${{ github.workspace }}/vendoo-studio/.venv/bin/python
         run: |
-          for archive in release/Anteroom-for-Mac.zip release/Anteroom-macos.zip release/List-This-Studio-macos.zip; do
+          for archive in release/Anteroom-macos.zip release/List-This-Studio-macos.zip release/bridge/Anteroom-macos.zip; do
+          [[ -f "$archive" ]] || continue
           "$PYTHON" - "$archive" <<'PY'
           import sys
           import tempfile
@@ -320,13 +321,18 @@ jobs:
           codesign --verify --deep --strict --verbose=1 "$APP"
           echo "OK: packaged app has an intact deep code signature with the hardened runtime"
           if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
-            # Release copies must install over both kinds of existing install.
-            for app in "$APP" release/legacy-signed/Anteroom.app; do
-              if [[ -d "$app" ]]; then
-                codesign --verify --deep --strict -R="$REQUIREMENT" "$app"
-                echo "OK: $app satisfies the updater's signing requirement"
-              fi
-            done
+            # What the updater in this build demands of the next one.
+            codesign --verify --deep --strict -R="$REQUIREMENT" "$APP"
+            echo "OK: $APP satisfies the updater's signing requirement"
+            BRIDGE_APP="release/bridge/payload/Anteroom.app"
+            if [[ -d "$BRIDGE_APP" ]]; then
+              codesign --verify --deep --strict -R="$REQUIREMENT" "$BRIDGE_APP"
+              # The designated requirement every install through 0.1.947
+              # checks a download against.
+              OLD_REQUIREMENT="$(.venv/bin/python -c 'from vendoo_studio.services.packaged_updates import BUNDLE_IDENTIFIER, _OLD_CERTIFICATE; print(f"identifier \"{BUNDLE_IDENTIFIER}\" and {_OLD_CERTIFICATE}")')"
+              codesign --verify --deep --strict -R="$OLD_REQUIREMENT" "$BRIDGE_APP"
+              echo "OK: the bridge copy satisfies what installs through 0.1.947 require"
+            fi
             xcrun stapler validate "$APP"
             xcrun stapler validate "release/Anteroom Connector.app"
           fi
@@ -336,11 +342,12 @@ jobs:
         with:
           name: studio-macos-release
           path: |
-            vendoo-studio/release/Anteroom-for-Mac.zip
             vendoo-studio/release/Anteroom-macos.zip
             vendoo-studio/release/List-This-Studio-macos.zip
             vendoo-studio/release/Anteroom-Connector-macos.zip
             vendoo-studio/release/build_info.json
+            vendoo-studio/release/bridge/Anteroom-macos.zip
+            vendoo-studio/release/bridge/build_info.json
           if-no-files-found: error
           retention-days: 1
       - name: Remove signing material

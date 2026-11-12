@@ -6,24 +6,22 @@ REPO="$(cd "$ROOT/.." && pwd)"
 PYTHON="${PYTHON:-$ROOT/.venv/bin/python}"
 RELEASE="$ROOT/release"
 APP="$RELEASE/Anteroom.app"
-# The notarized Developer ID build. People download it, and builds from this
-# one on update to it.
-ZIP="$RELEASE/Anteroom-for-Mac.zip"
-# Installed builds signed with the older self-signed certificate update from
-# this zip and refuse any app not signed with that certificate. Until
-# 2027-02-12 it holds the same build signed with that certificate
-# (MACOS_LEGACY_SIGNING_IDENTITY), whose updater then moves to ZIP. Remove it
-# and MACOS_LEGACY_SIGNING_IDENTITY after that date, with the matching
-# transition code in services/packaged_updates.py.
-TRANSITION_ZIP="$RELEASE/Anteroom-macos.zip"
+ZIP="$RELEASE/Anteroom-macos.zip"
 # Builds from before the rename download this zip and look for this bundle in
 # it. Publishing the same app under the old names lets them update once; after
 # that the updater moves the app to Anteroom.app. Drop both once no install
 # older than the rename is left.
 LEGACY_ZIP="$RELEASE/List-This-Studio-macos.zip"
 LEGACY_APP_NAME="List This Studio.app"
+# Installs signed with the older self-signed certificate (through 0.1.947)
+# refuse any build not signed with it. Until 2027-02-12, when that certificate
+# is available (MACOS_LEGACY_SIGNING_IDENTITY), the same build is also signed
+# with it into release/bridge/, which publish-macos-release.sh publishes as a
+# separate version those installs pick in Settings → About → Previous
+# versions. See scripts/legacy_bridge.py; remove all of it after that date.
 LEGACY_SIGN_IDENTITY="${MACOS_LEGACY_SIGNING_IDENTITY:-}"
-LEGACY_SIGNED_APP="$RELEASE/legacy-signed/Anteroom.app"
+BRIDGE="$RELEASE/bridge"
+LEGACY_SIGNED_APP="$BRIDGE/payload/Anteroom.app"
 
 SIGN_IDENTITY="${MACOS_SIGNING_IDENTITY:-}"
 if [[ -z "$SIGN_IDENTITY" || "$SIGN_IDENTITY" == "-" ]]; then
@@ -155,7 +153,7 @@ for name in ("httpx2", "httpcore2"):
 print("Bundled HTTP client runtime metadata verified")
 PY
 if [[ -n "$LEGACY_SIGN_IDENTITY" ]]; then
-  rm -rf "$(dirname "$LEGACY_SIGNED_APP")"
+  rm -rf "$BRIDGE"
   mkdir -p "$(dirname "$LEGACY_SIGNED_APP")"
   ditto "$APP" "$LEGACY_SIGNED_APP"
 fi
@@ -213,46 +211,44 @@ fi
 "$ROOT/scripts/notarize-macos-app.sh" "$APP"
 
 if [[ -n "$LEGACY_SIGN_IDENTITY" ]]; then
-  echo "Signing the transition copy with the older self-signed certificate"
+  echo "Signing the bridge copy with the older self-signed certificate"
   "$PYTHON" "$ROOT/scripts/sign_macos_bundle.py" "$LEGACY_SIGNED_APP" "$LEGACY_SIGN_IDENTITY"
   check_signature "$LEGACY_SIGNED_APP"
-  TRANSITION_APP="$LEGACY_SIGNED_APP"
-else
-  TRANSITION_APP="$APP"
-  if [[ -n "$TEAM_ID" ]]; then
-    MESSAGE="MACOS_LEGACY_SIGNING_CERT_P12_BASE64 is not set, so $(basename "$TRANSITION_ZIP") holds the Developer ID build. Installs signed with the older self-signed certificate refuse it and have to download $(basename "$ZIP") once by hand."
-    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-      echo "::warning title=Older installs cannot update automatically::$MESSAGE"
-    else
-      echo "Warning: $MESSAGE" >&2
-    fi
+elif [[ -n "$TEAM_ID" ]]; then
+  MESSAGE="MACOS_LEGACY_SIGNING_CERT_P12_BASE64 is not set, so no bridge release is built. Installs signed with the older self-signed certificate (0.1.947 and earlier) cannot update in the app and have to download Anteroom-macos.zip once by hand."
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "::warning title=No bridge for older installs::$MESSAGE"
+  else
+    echo "Warning: $MESSAGE" >&2
   fi
 fi
 
 PAYLOAD="$RELEASE/payload"
-TRANSITION_PAYLOAD="$RELEASE/transition-payload"
 LEGACY_PAYLOAD="$RELEASE/legacy-payload"
-rm -rf "$PAYLOAD" "$TRANSITION_PAYLOAD" "$LEGACY_PAYLOAD" "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP"
-mkdir -p "$PAYLOAD" "$TRANSITION_PAYLOAD" "$LEGACY_PAYLOAD"
+rm -rf "$PAYLOAD" "$LEGACY_PAYLOAD" "$ZIP" "$LEGACY_ZIP"
+mkdir -p "$PAYLOAD" "$LEGACY_PAYLOAD"
 ditto "$APP" "$PAYLOAD/Anteroom.app"
 cp "$ROOT/desktop/HowToOpen.txt" "$PAYLOAD/How to Open.txt"
 (
   cd "$PAYLOAD"
   ditto -c -k . "$ZIP"
 )
-ditto "$TRANSITION_APP" "$TRANSITION_PAYLOAD/Anteroom.app"
-(
-  cd "$TRANSITION_PAYLOAD"
-  ditto -c -k . "$TRANSITION_ZIP"
-)
 # The bundle's directory name is not part of its code signature, so the
 # renamed copy is the same signed app.
-ditto "$TRANSITION_APP" "$LEGACY_PAYLOAD/$LEGACY_APP_NAME"
+ditto "$APP" "$LEGACY_PAYLOAD/$LEGACY_APP_NAME"
 (
   cd "$LEGACY_PAYLOAD"
   ditto -c -k . "$LEGACY_ZIP"
 )
-for archive in "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP"; do
+ARCHIVES=("$ZIP" "$LEGACY_ZIP")
+if [[ -n "$LEGACY_SIGN_IDENTITY" ]]; then
+  (
+    cd "$BRIDGE/payload"
+    ditto -c -k . "$BRIDGE/Anteroom-macos.zip"
+  )
+  ARCHIVES+=("$BRIDGE/Anteroom-macos.zip")
+fi
+for archive in "${ARCHIVES[@]}"; do
 "$PYTHON" - "$archive" <<'PY'
 import sys
 import tempfile
@@ -273,7 +269,7 @@ print("Update zip symlinks are safe in-bundle relative links")
 PY
 done
 cp "$ROOT/desktop/build_info.json" "$RELEASE/build_info.json"
-"$PYTHON" - "$RELEASE/build_info.json" "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP" <<'PY'
+"$PYTHON" - "$RELEASE/build_info.json" "$ZIP" "$LEGACY_ZIP" <<'PY'
 import hashlib
 import json
 import sys
@@ -289,15 +285,19 @@ def sha256(path: Path) -> str:
 
 
 info_path = Path(sys.argv[1])
-current, transition, legacy = Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4])
+current, legacy = Path(sys.argv[2]), Path(sys.argv[3])
 payload = json.loads(info_path.read_text(encoding="utf-8"))
-payload["zips"] = {path.name: sha256(path) for path in (current, transition, legacy)}
+payload["zips"] = {current.name: sha256(current), legacy.name: sha256(legacy)}
 # Builds from before the rename read only this key, and download the legacy zip.
 payload["zip_sha256"] = payload["zips"][legacy.name]
 info_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 for name, digest in payload["zips"].items():
     print(f"Release build_info {name} sha256={digest}")
 PY
+if [[ -n "$LEGACY_SIGN_IDENTITY" ]]; then
+  "$PYTHON" "$ROOT/scripts/legacy_bridge.py" info "$RELEASE/build_info.json" \
+    "$BRIDGE/Anteroom-macos.zip" "$BRIDGE/build_info.json"
+fi
 echo "Built $APP"
 echo "Share $ZIP"
 echo "Publish with: $ROOT/scripts/publish-macos-release.sh"

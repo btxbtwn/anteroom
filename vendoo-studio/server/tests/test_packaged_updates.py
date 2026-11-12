@@ -88,27 +88,22 @@ class PackagedUpdateTest(unittest.TestCase):
             {
                 "sha": "bbb2222",
                 "zip_sha256": "aa" * 32,
-                "zips": {
-                    "Anteroom-for-Mac.zip": "CC" * 32,
-                    "Anteroom-macos.zip": "BB" * 32,
-                    "List-This-Studio-macos.zip": "aa" * 32,
-                },
-            }
-        )
-        self.assertEqual(info["zip_name"], "Anteroom-for-Mac.zip")
-        self.assertEqual(info["zip_sha256"], "cc" * 32)
-        self.assertIsNone(packaged_updates._normalize_build_info({"sha": "b", "zip_sha256": "aa" * 32})["zip_sha256"])
-
-    def test_build_from_before_notarization_installs_from_its_own_zip(self):
-        # Going back to a build published before the notarized zip existed.
-        info = packaged_updates._normalize_build_info(
-            {
-                "sha": "bbb2222",
                 "zips": {"Anteroom-macos.zip": "BB" * 32, "List-This-Studio-macos.zip": "aa" * 32},
             }
         )
-        self.assertEqual(info["zip_name"], "Anteroom-macos.zip")
         self.assertEqual(info["zip_sha256"], "bb" * 32)
+        self.assertIsNone(packaged_updates._normalize_build_info({"sha": "b", "zip_sha256": "aa" * 32})["zip_sha256"])
+
+    def test_version_list_leaves_out_the_bridge_for_older_installs(self):
+        releases = [
+            {"tag_name": "studio-macos-v0.1.953-oldcert1793526", "published_at": "2026-11-12T05:00:00Z"},
+            {"tag_name": "studio-macos-v0.1.953-1793526", "published_at": "2026-11-12T05:00:00Z"},
+            {"tag_name": "studio-macos", "published_at": "2026-11-12T05:00:00Z"},
+        ]
+        response = httpx.Response(200, json=releases, request=httpx.Request("GET", "https://api.github.com/x"))
+        client = type("Client", (), {"get": lambda self, *a, **k: response})()
+        versions = packaged_updates.list_published_versions(client=client)
+        self.assertEqual([item["tag"] for item in versions], ["studio-macos-v0.1.953-1793526"])
 
     def test_api_headers_include_optional_token(self):
         with patch.dict(os.environ, {"GITHUB_TOKEN": "secret-token"}, clear=False):
@@ -137,7 +132,7 @@ class PackagedUpdateTest(unittest.TestCase):
         self.assertEqual(status["remote_sha"], "bbb2222")
         self.assertEqual(
             status["download_url"],
-            "https://github.com/btxbtwn/anteroom/releases/download/studio-macos/Anteroom-for-Mac.zip",
+            "https://github.com/btxbtwn/anteroom/releases/download/studio-macos/Anteroom-macos.zip",
         )
         self.assertEqual(status["sha256"], "ab" * 32)
         self.assertEqual(status["summary"], "")
