@@ -18,14 +18,19 @@ left in `changelog.d/` (the `Release Anteroom` commit the Version workflow
 pushes next ships that code with its version). A later run never picks an
 older commit, so CI runs that finish out of order or a re-run can never put
 older code over newer code, and a busy stream of merges still deploys the
-newest tested one (`.github/scripts/deploy-gate.py`). When no such commit
-exists it skips, successfully and with a notice.
+newest tested one (`.github/scripts/deploy-gate.py`). A manual run checks
+CI on the tip the same way. When no such commit exists it skips, successfully
+and with a notice. Only runs that will deploy queue for the one-at-a-time
+deploy slot, so a failed CI on `main` never displaces a waiting deploy.
 
 Then, in order, it:
 
-1. when the commit is a `Release Anteroom` commit, waits for CI to pass on
-   the merge before it, whose code it ships
-   (`.github/scripts/wait-for-tested-code.py`);
+1. waits for CI to pass on every merge on `main` since the commit production
+   runs, since CI on `main` checks only what each merge changed
+   (`.github/scripts/wait-for-tested-code.py`). Production's commit is the
+   last successful run's `Deployed commit` notice; without one it checks the
+   nearest merge only. A failed merge stops every deploy until its CI passes
+   on a re-run or the failure is fixed;
 2. builds the image on Fly's remote builder and pushes it with the label
    `v<version>-<commit>` (`flyctl deploy --build-only --push`);
 3. applies pending Alembic revisions with the migration login
@@ -40,9 +45,10 @@ Then, in order, it:
    and `/api/ready` to confirm the schema;
 7. checks that every Machine in every process group (`flyctl machines list`)
    is started on the new image label, since the public URL reaches only the
-   web Machines (`.github/scripts/check-fly-machines.py`).
+   web Machines (`.github/scripts/check-fly-machines.py`);
+8. records the commit it shipped as a `Deployed commit` notice.
 
-Failed CI on that merge or a failed build stops the run before the database
+Failed CI on any of those merges or a failed build stops the run before the database
 changes, and a failed migration stops it before Fly is touched. Run it by hand from the Actions tab
 (**Deploy hosted → Run workflow**) to redeploy `main`.
 
