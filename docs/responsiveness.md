@@ -217,13 +217,18 @@ inventory 503s. After: 1,530 idle and 1,368 load requests, all successful.
 | Submission headers p50/p95/max, ms | 1,207/4,508/4,802 | 984/2,519/2,838 |
 | First progress p50/p95, ms | 7,953/13,085 | 9,158/13,475 |
 | Completed duration p50/p95, s | 131.9/139.6 | 138.2/139.2 |
-| Web pool-timeout tracebacks | 22 (16 nested settings, 6 ownership reads) | 0 |
+| Logged web pool-timeout tracebacks (include duplicate reports) | 22 | 0 |
 
 **Remaining worker bottleneck:** the rerun is not clean end to end. Four worker
 tasks failed with pool timeouts in `append_events` → `check_write_lease`; one
 listing-generation log also reported a QueuePool timeout (not necessarily a
-different task). The baseline had one worker generation error. Its other 22
-pool-timeout tracebacks were web requests. The fix removes web nesting, not
+different task). The baseline had one worker generation error. Its 22 web
+pool-timeout tracebacks comprise 14 nested provider-settings reports, six
+ownership-read reports and two inventory-snapshot settings reports. Each
+generation failure was logged twice (application and ASGI server): these are
+seven distinct nested-provider failures, three distinct ownership-read failures
+and two inventory failures, not 22 distinct exceptions. After: zero of these
+web failures. The fix removes web nesting, not
 worker contention. The DB sampler still observed category-tree transactions
 (mean 0.75 connections before, 0.72 after), but it records last statements,
 not the holders' Python stacks or transaction durations. It does not establish
