@@ -1,0 +1,1 @@
+- Keep an item photo as the listing's cover after you add a photo on one marketplace's form.

@@ -9,6 +9,7 @@ from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.routes import hosted_photos
+from vendoo_studio.services import similar_items
 
 
 def _session():
@@ -62,3 +63,20 @@ def test_hosted_photo_added_after_one_delete_does_not_tie():
     _delete(db, conv_id, ["A.jpg"])
     hosted_photos.save_photo(db, conv_id, "D.jpg", b"x", 10, 10)
     assert _names(db, conv_id) == ["B.jpg", "C.jpg", "D.jpg"]
+
+
+def test_cover_stays_an_item_photo_when_a_marketplace_photo_is_added():
+    # A marketplace's first photo is numbered 0 within its own group, so it
+    # sorted ahead of an item photo left at 1 after the cover was deleted.
+    db, conv_id = _session()
+    repo = ConversationRepo(db)
+    for name in ("A.jpg", "B.jpg"):
+        repo.insert_photo(conv_id, name, name, "image/jpeg", 10, checksum=name)
+        db.commit()
+    _delete(db, conv_id, ["A.jpg"])
+    repo.insert_photo(conv_id, "M.jpg", "M.jpg", "image/jpeg", 10, checksum="M.jpg", marketplace="ebay")
+    db.commit()
+    cover = db.scalar(select(Photo.id).where(Photo.stored_filename == "B.jpg"))
+    assert repo.cover_photo(conv_id) == (cover, "B.jpg")
+    assert repo.cover_photos([conv_id])[conv_id] == (cover, "B.jpg")
+    assert similar_items._load(db)[conv_id].cover_id == cover
