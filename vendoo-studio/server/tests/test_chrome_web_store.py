@@ -136,3 +136,88 @@ def test_sign_in_sends_a_service_account_assertion_google_can_verify(monkeypatch
     assert claims["iss"] == "bridge@example.iam.gserviceaccount.com"
     assert (claims["scope"], claims["aud"]) == (store.SCOPE, store.TOKEN_URL)
     assert 0 < claims["exp"] - claims["iat"] <= 3600
+
+
+@pytest.mark.parametrize("state", [None, "REJECTED", "CANCELLED", "ITEM_STATE_UNSPECIFIED", "unknown"])
+def test_release_fails_closed_without_confirmed_submission(tmp_path, monkeypatch, state):
+    replies = {":fetchStatus": status(), ":upload": {"uploadState": "SUCCEEDED"},
+               ":publish": {} if state is None else {"state": state}}
+    monkeypatch.setattr(store, "_call", lambda method, url, **_: replies[url[url.rindex(":"):]])
+    zip_path = tmp_path / "bridge.zip"
+    zip_path.write_bytes(b"zip")
+    with pytest.raises(store.StoreError, match="did not confirm submission"):
+        store.release(zip_path, "0.2.71", token="t", publisher="pub")
+
+
+@pytest.mark.parametrize("state", ["PENDING_REVIEW", "STAGED", "PUBLISHED", "PUBLISHED_TO_TESTERS"])
+def test_release_accepts_only_documented_success_states(tmp_path, monkeypatch, state):
+    replies = {":fetchStatus": status(), ":upload": {"uploadState": "SUCCEEDED"},
+               ":publish": {"state": state}}
+    monkeypatch.setattr(store, "_call", lambda method, url, **_: replies[url[url.rindex(":"):]])
+    zip_path = tmp_path / "bridge.zip"
+    zip_path.write_bytes(b"zip")
+    assert store.release(zip_path, "0.2.71", token="t", publisher="pub") == state
+
+
+def ci_run(**changes):
+    return {"id": 1, "head_sha": "abc", "head_branch": "main", "event": "push",
+            "path": ".github/workflows/ci.yml", "status": "completed", "conclusion": "success", **changes}
+
+
+@pytest.mark.parametrize("runs", [
+    [], [ci_run(head_sha="other")], [ci_run(head_branch="feature")],
+    [ci_run(event="pull_request")], [ci_run(path=".github/workflows/other.yml")],
+    [ci_run(status="in_progress")], [ci_run(conclusion="failure")],
+    [ci_run(), ci_run(id=2, conclusion="failure")],
+])
+def test_ci_gate_rejects_unverified_commit(monkeypatch, runs):
+    monkeypatch.setattr(store.subprocess, "run", lambda *_args, **_kwargs:
+                        subprocess.CompletedProcess([], 0, stdout=json.dumps({"workflow_runs": runs})))
+    with pytest.raises(store.StoreError, match="exact commit"):
+        store.verify_ci("owner/repo", "abc")
+
+
+def test_ci_gate_accepts_exact_main_success_and_checks_ancestry(monkeypatch):
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps({"workflow_runs": [ci_run()]}))
+
+    monkeypatch.setattr(store.subprocess, "run", run)
+    store.verify_ci("owner/repo", "abc")
+    assert calls[0] == ["git", "merge-base", "--is-ancestor", "abc", "origin/main"]
+    assert calls[1][:3] == ["gh", "api", "repos/owner/repo/actions/workflows/ci.yml/runs"]
+
+
+def test_ci_gate_rejects_commit_outside_main_before_api(monkeypatch):
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr(store.subprocess, "run", run)
+    with pytest.raises(subprocess.CalledProcessError):
+        store.verify_ci("owner/repo", "abc")
+    assert len(calls) == 1
+
+
+def test_missing_credentials_fail_before_any_network_request(tmp_path, monkeypatch):
+    archive = tmp_path / "bridge.zip"
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("manifest.json", json.dumps({"version": "1.0.0"}))
+    monkeypatch.delenv("CHROME_WEB_STORE_SERVICE_ACCOUNT", raising=False)
+    monkeypatch.delenv("CHROME_WEB_STORE_PUBLISHER_ID", raising=False)
+    monkeypatch.setattr(store, "_call", lambda *_args, **_kwargs: pytest.fail("must not access network"))
+    assert store.main(["release", "--package", str(archive)]) == 1
+
+
+def test_workflow_checks_out_and_gates_the_same_commit_before_credentials():
+    workflow = (ROOT / ".github/workflows/chrome-web-store.yml").read_text()
+    assert "github.ref == 'refs/heads/main'" in workflow
+    assert "github.event.workflow_run.event == 'push'" in workflow
+    assert "github.event.workflow_run.head_repository.full_name == github.repository" in workflow
+    assert "ref: ${{ github.event.workflow_run.head_sha || github.sha }}" in workflow
+    assert "TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}" in workflow
+    assert workflow.index("verify-ci --repo") < workflow.index("CHROME_WEB_STORE_SERVICE_ACCOUNT:")

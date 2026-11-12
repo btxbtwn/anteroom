@@ -48,6 +48,8 @@ SKIP = frozenset({"AGENTS.md", ".git", ".gitignore", ".playwright-mcp", "README.
 OPTIONAL = frozenset({"studio-build.js"})
 TIMEOUT_S = 120
 UPLOAD_WAIT_S = 300
+# PublishItemResponse states that confirm review, staging, or publication.
+SUBMITTED_STATES = frozenset({"PENDING_REVIEW", "STAGED", "PUBLISHED", "PUBLISHED_TO_TESTERS"})
 
 
 class StoreError(RuntimeError):
@@ -175,8 +177,29 @@ def release(zip_path: Path, version: str, *, token: str, publisher: str) -> str:
         raise StoreError(f"The store did not accept the package (upload state {state}): {json.dumps(upload)}")
     published = _call("POST", f"{API}/v2/{item}:publish", token=token, data=b"{}",
                       headers={"Content-Type": "application/json"})
+    state = published.get("state")
+    if state not in SUBMITTED_STATES:
+        raise StoreError(f"The store did not confirm submission (state {state}): {json.dumps(published)}")
     print(f"Submitted Anteroom Bridge {version}: {json.dumps(published)}")
-    return published.get("state", "")
+    return state
+
+
+def verify_ci(repo: str, sha: str) -> None:
+    """Require a successful push CI run for this exact commit on main."""
+    subprocess.run(["git", "merge-base", "--is-ancestor", sha, "origin/main"], check=True)
+    result = subprocess.run(
+        ["gh", "api", f"repos/{repo}/actions/workflows/ci.yml/runs",
+         "--method", "GET", "-f", f"head_sha={sha}", "-f", "branch=main",
+         "-f", "event=push", "-f", "per_page=100"],
+        check=True, capture_output=True, text=True,
+    )
+    runs = json.loads(result.stdout).get("workflow_runs", [])
+    matching = [run for run in runs if run.get("head_sha") == sha
+                and run.get("head_branch") == "main" and run.get("event") == "push"
+                and run.get("path") == ".github/workflows/ci.yml"]
+    latest = max(matching, key=lambda run: run["id"], default={})
+    if latest.get("status") != "completed" or latest.get("conclusion") != "success":
+        raise StoreError(f"No successful completed main push CI for exact commit {sha}.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -184,8 +207,14 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("package").add_argument("--out", type=Path, required=True)
     commands.add_parser("release").add_argument("--package", type=Path, required=True)
+    gate = commands.add_parser("verify-ci")
+    gate.add_argument("--repo", required=True)
+    gate.add_argument("--sha", required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "verify-ci":
+            verify_ci(args.repo, args.sha)
+            return 0
         if args.command == "package":
             print(package(args.out))
             return 0

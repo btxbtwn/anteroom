@@ -1,24 +1,28 @@
 name: Chrome Web Store
 
-# Submits Anteroom Bridge to the Chrome Web Store when a merge to main raises
-# its manifest version. CI requires that raise for every Bridge code change
-# (vendoo-extension/tools/version-bump/check.js), and main only takes PRs that
-# passed CI. The script submits only a version newer than every one the store
-# has, so a rerun or a manual run never resubmits the same build. The store
-# reviews each version before sellers get it, under the item's own visibility.
-# See vendoo-extension/README.md, **Chrome Web Store**.
+# Submit only the exact main commit whose push CI succeeded. Manual runs
+# use the same exact-commit check, and never run from another branch.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths: [vendoo-extension/manifest.json]
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   submit:
     name: Package and submit
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     # One submission at a time, never cancelled midway.
     concurrency:
       group: chrome-web-store
@@ -30,11 +34,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Require successful CI for the exact main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: python3 .github/scripts/chrome-web-store.py verify-ci --repo "$GITHUB_REPOSITORY" --sha "$TARGET_SHA"
 
       - name: Package the Bridge
         id: package
-        run: echo "version=$(python3 .github/scripts/chrome-web-store.py package --out "$RUNNER_TEMP/anteroom-bridge.zip")" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(python3 .github/scripts/chrome-web-store.py package --out "$RUNNER_TEMP/anteroom-bridge.zip")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Keep the package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
