@@ -27,7 +27,33 @@ RELEASE_TAG = os.environ.get("VENDOO_STUDIO_RELEASE_TAG", "studio-macos")
 # Every build is also published under its own tag, "studio-macos-v<version>-<sha>",
 # so a build that turns out broken can be swapped for an earlier one.
 VERSIONED_TAG_PREFIX = f"{RELEASE_TAG}-v"
+# Builds signed with the older self-signed certificate (through 0.1.947) only
+# accept an update signed with that certificate. Until 2027-02-12 each release
+# that can be signed with it is also published under
+# "studio-macos-v<version>-oldcert<sha>": the same build signed with the old
+# certificate, which those installs pick in Settings → About → Previous
+# versions. Its updater then accepts the Developer ID builds. Builds that run
+# this code never need it, so they leave it out of the list. Remove with
+# _OLD_CERTIFICATE after 2027-02-12.
+BRIDGE_SUFFIX_PREFIX = "oldcert"
 ZIP_NAME = "Anteroom-macos.zip"
+BUNDLE_IDENTIFIER = "local.listthis.studio"
+# Anteroom's Developer ID Application certificate, by its Apple Team ID: the
+# designated requirement codesign gives every app signed with it.
+_DEVELOPER_ID = (
+    "anchor apple generic"
+    " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+    " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+    ' and certificate leaf[subject.OU] = "JWN57LH9PU"'
+)
+# The self-signed certificate releases used before Developer ID (through
+# 0.1.947). Accepting it lets an install of such a build update through the
+# copy signed with it, and lets a newer install go back to one of those builds.
+# Transition window: remove this, BRIDGE_SUFFIX_PREFIX and the bridge
+# release in scripts/package-macos-app.sh and publish-macos-release.sh after
+# 2027-02-12; from then on only _DEVELOPER_ID is accepted.
+_OLD_CERTIFICATE = 'certificate leaf = H"bf5bb813af4efd5e4d73209a2ee50f669ee28bbb"'
+UPDATE_REQUIREMENT = f'identifier "{BUNDLE_IDENTIFIER}" and (({_DEVELOPER_ID}) or ({_OLD_CERTIFICATE}))'
 INFO_NAME = "build_info.json"
 APP_BUNDLE_NAME = f"{APP_NAME}.app"
 USER_AGENT = f"Anteroom/{app_version()}"
@@ -246,12 +272,16 @@ def _verify_archive_digest(archive: Path, expected: str | None) -> None:
 
 
 def _verify_app_signature(app_path: Path) -> None:
-    """Require an intact signature from a signing certificate.
+    """Require an intact signature from Anteroom's own certificate.
 
-    Keychain lets an update keep the saved sign-ins only when it is signed by
-    the same certificate as the installed app. An ad-hoc or broken signature
-    would lose that access, so such a download is refused rather than
-    installed. The zip's SHA-256 digest from the release is checked separately.
+    The download must satisfy UPDATE_REQUIREMENT: Anteroom's bundle identifier,
+    signed with its Developer ID certificate (or, during the transition, the
+    self-signed certificate earlier releases used). The requirement is fixed
+    here rather than read from the installed app, so an install signed with
+    either certificate accepts a build signed with the other. An ad-hoc or
+    broken signature would lose Keychain access, so such a download is
+    refused rather than installed. The zip's SHA-256 digest from the release
+    is checked separately.
     """
     if os.environ.get("VENDOO_STUDIO_SKIP_CODESIGN") == "1":
         return
@@ -265,26 +295,13 @@ def _verify_app_signature(app_path: Path) -> None:
         raise PackagedUpdateError("The update is not signed by a trusted identity.")
     if "Signature=adhoc" in detail:
         raise PackagedUpdateError("The update is not signed with Anteroom's certificate.")
-    installed = subprocess.run(
-        ["/usr/bin/codesign", "-dr", "-", str(installed_app_path())],
-        capture_output=True,
-        text=True,
-    )
-    # codesign writes the requirement to stdout and only the executable path to
-    # stderr, so both streams are read.
-    requirement = next((line.split("designated =>", 1)[1].strip()
-                        for line in (raw.lstrip("# ") for raw in
-                                     (installed.stdout + "\n" + installed.stderr).splitlines())
-                        if line.startswith("designated =>")), "")
-    if installed.returncode != 0 or not requirement:
-        raise PackagedUpdateError("The installed app's signing identity could not be verified. Reinstall a trusted signed copy.")
     # The requirement is passed as its own argument with -R=. codesign does not
     # take a separate value here: "-R <requirement> <app>" is read as a
     # requirement naming a file, so it fails with "No such file or directory /
     # invalid requirement specification" and every update is refused.
     verify = subprocess.run(
         ["/usr/bin/codesign", "--verify", "--deep", "--strict",
-         f"-R={requirement}", str(app_path)],
+         f"-R={UPDATE_REQUIREMENT}", str(app_path)],
         capture_output=True,
         text=True,
     )
@@ -730,6 +747,8 @@ def list_published_versions(client: httpx.Client | None = None) -> list[dict]:
         if not parsed or release.get("draft"):
             continue
         version, short_sha = parsed
+        if short_sha.startswith(BRIDGE_SUFFIX_PREFIX):
+            continue
         versions.append({
             "tag": tag,
             "version": version,

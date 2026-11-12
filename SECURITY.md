@@ -16,6 +16,8 @@ Automation stops at saved drafts. Listing, updating and delisting run only when 
 
 Anteroom binds only to `127.0.0.1`. Optional Tailscale Serve may proxy the seller's private tailnet to that port; Funnel is never used. Requests through Serve are accepted only from the Tailscale login that owns the Mac. Only Anteroom Bridge's extension IDs (the store item and the unpacked folders Anteroom knows, plus `ANTEROOM_BRIDGE_EXTENSION_IDS`) count as a trusted extension origin.
 
+Release builds of the app and the subscription connector are signed with Anteroom's Developer ID Application certificate (team `JWN57LH9PU`) with the hardened runtime, notarized by Apple and stapled, so Gatekeeper opens them without workarounds. Entitlements are limited to what the bundled Python and Node runtimes need (see `vendoo-studio/scripts/sign_macos_bundle.py`). The in-app updater installs only a download whose SHA-256 matches the release and whose signature satisfies a fixed requirement: Anteroom's bundle identifier signed by that team, or, until 2027-02-12, by the self-signed certificate earlier releases used. Moving from that certificate to Developer ID makes macOS ask once for the Mac password before Anteroom can read its Keychain items again.
+
 The extension pairs with the local app through a token served at `GET /api/extension/pairing-token`. That endpoint has no authentication. Browser pages on other origins cannot read it because of CORS, but any process running as the same user on the Mac can. The token only lets a client act as the extension over the loopback websocket on port 4318. It never grants access to API keys.
 
 ## Hosted API
