@@ -38,6 +38,7 @@ export type BulkPriceChoice =
   | { kind: "suggested" };
 
 export type BulkPriceDrop = {
+  expected_revision_id: string;
   price: number;
   percent: number;
   mode: "percent" | "comps" | "custom";
@@ -49,6 +50,7 @@ export type BulkRegenerateListing = {
   id: string;
   title: string;
   price: number | null;
+  revision_id?: string;
 };
 
 /**
@@ -67,7 +69,7 @@ export function effectiveDropPercent(current: number, price: number): number {
 
 /** The drops to save before rewriting. Keep, and any price that would not fall, are omitted. */
 export function bulkPriceDrops(
-  listings: readonly Pick<BulkRegenerateListing, "id" | "price">[],
+  listings: readonly Pick<BulkRegenerateListing, "id" | "price" | "revision_id">[],
   choice: BulkPriceChoice,
   suggestions: ReadonlyMap<string, BulkPriceSuggestion | null> = new Map(),
 ): Map<string, BulkPriceDrop> {
@@ -75,11 +77,12 @@ export function bulkPriceDrops(
   if (choice.kind === "keep") return drops;
   for (const listing of listings) {
     const current = listing.price;
-    if (current == null || !(current > 0)) continue;
+    if (current == null || !(current > 0) || !listing.revision_id) continue;
     if (choice.kind === "percent") {
       const price = priceAfterPercent(current, choice.percent);
       if (price >= current) continue;
       drops.set(listing.id, {
+        expected_revision_id: listing.revision_id,
         price,
         percent: effectiveDropPercent(current, price),
         mode: "percent",
@@ -87,7 +90,7 @@ export function bulkPriceDrops(
       continue;
     }
     const suggested = suggestions.get(listing.id);
-    if (!suggested || !(suggested.price > 0) || suggested.price >= current) continue;
+    if (!suggested || suggested.expected_revision_id !== listing.revision_id || !(suggested.price > 0) || suggested.price >= current) continue;
     drops.set(listing.id, suggested);
   }
   return drops;

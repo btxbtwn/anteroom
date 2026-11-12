@@ -60,7 +60,7 @@ describe("Listing action deadlines", () => {
 
   it.each([
     ["reset", () => api.conversations.reset("listing1", { keepInputs: true })],
-    ["price confirmation", () => api.listings.applyPriceDrop("listing1", { price: 20, mode: "custom" })],
+    ["price confirmation", () => api.listings.applyPriceDrop("listing1", { price: 20, mode: "custom", expected_revision_id: "reviewed" })],
   ] as const)("releases a stalled %s without starting another write", async (_label, action) => {
     vi.useFakeTimers();
     const fetch = vi.fn().mockImplementation((_url: string, options: RequestInit) =>

@@ -1,0 +1,1 @@
+- Keep newer price edits when an older markdown is confirmed. Review the listing again before lowering a price that changed on another screen.

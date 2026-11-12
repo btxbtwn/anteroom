@@ -61,9 +61,13 @@ def test_regenerate_and_clear_wipe_only_owned_idle_items(cloud, signing_keys, mo
     assert client.post(path + '/price-drop/comps', headers=bob).status_code == 404
     assert client.post(path + '/price-drop/comps').status_code == 401
 
-    assert client.post(path + '/price-drop', headers=bob, json={'price': 30, 'mode': 'custom'}).status_code == 404
-    dropped = client.post(path + '/price-drop', headers=alice, json={'price': 30, 'mode': 'custom'})
+    price_body = {'price': 30, 'mode': 'custom', 'expected_revision_id': preview.json()['revision_id']}
+    assert client.post(path + '/price-drop', headers=bob, json=price_body).status_code == 404
+    assert client.post(path + '/price-drop', headers=alice, json={'price': 30}).status_code == 422
+    dropped = client.post(path + '/price-drop', headers=alice, json=price_body)
     assert dropped.status_code == 200, dropped.text
+    assert client.get(path + '/listing', headers=alice).json()['listing']['price'] == 30
+    assert client.post(path + '/price-drop', headers=alice, json={**price_body, 'price': 20}).status_code == 409
     assert client.get(path + '/listing', headers=alice).json()['listing']['price'] == 30
 
     # The bulk review shows what Regenerate keeps from the listing, without saving it.
