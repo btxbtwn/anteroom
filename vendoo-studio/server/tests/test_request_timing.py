@@ -66,11 +66,14 @@ def test_empty_relay_poll_allows_the_route_wait_but_not_excess_delay(caplog):
 
     for method, path, status, duration, warns in [
         ('GET', '/api/browser-relay/next', 204, WAIT_S + 0.079, False),
+        ('GET', '/api/browser-relay/next', 204, WAIT_S + 4.999, False),
         ('GET', '/api/browser-relay/next', 204, WAIT_S + 5, True),
+        ('GET', '/api/browser-relay/next', 204, WAIT_S + 6, True),
         ('GET', '/api/browser-relay/next', 503, 6, True),
         ('GET', '/api/browser-relay/next', 200, 6, True),
         ('POST', '/api/browser-relay/next', 204, 6, True),
         ('GET', '/api/other', 204, 6, True),
+        ('GET', '/api/browser-relay/next/other', 204, 6, True),
     ]:
         caplog.clear()
 
