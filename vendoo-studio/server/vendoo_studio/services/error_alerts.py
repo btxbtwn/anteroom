@@ -53,6 +53,7 @@ _SQL_STATEMENT = re.compile(r"\[SQL: .*?\](?=\s*(?:\[parameters|\(Background|$))
 # they must not split one failure into a group per job or field.
 _VOLATILE = re.compile(
     r"0x[0-9a-f]+|\b[0-9a-f]{8}-[0-9a-f-]{27}\b|\b(?=[0-9a-f]*\d)[0-9a-f]{12,32}\b|\d+", re.IGNORECASE)
+_PROMOTION_PREVIEW = re.compile(r"^(\S+ \S+ preview rejected) for listing [^,\n]+, automation [^:\n]+:")
 
 # Set per request by the hosted access middleware: {"scope": ..., "request_id": ...}.
 request_context: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("request_context", default=None)
@@ -103,7 +104,13 @@ def build_report(record: logging.LogRecord) -> dict[str, Any]:
     exc_type = exc_message = stack = None
     database_pool = None
     location = f"{Path(record.pathname).name}:{record.lineno} in {record.funcName}"
-    identity: tuple = (record.name, location, _VOLATILE.sub("#", scrub(record.getMessage(), MAX_MESSAGE)))
+    identity_message = scrub(record.getMessage(), MAX_MESSAGE)
+    if record.name == "vendoo_studio.listing_promotions":
+        # Listing slugs and automation IDs identify attempts, not different
+        # failures. Keep marketplace, action and refusal text in the identity;
+        # retain the original details in the report below.
+        identity_message = _PROMOTION_PREVIEW.sub(r"\1 for listing #, automation #:", identity_message)
+    identity: tuple = (record.name, location, _VOLATILE.sub("#", identity_message))
     if record.exc_info and record.exc_info[0] and record.exc_info[1]:
         etype, value, tb = record.exc_info
         assert etype is not None

@@ -1,0 +1,1 @@
+- Group repeated marketplace offer-preview refusals across listings so one problem does not flood error emails. Keep the listing details and failure reason in each report.
