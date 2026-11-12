@@ -1,0 +1,1 @@
+- On the web, one seller's long automation, such as regenerating many drafts, no longer delays other sellers' scheduled automations.
