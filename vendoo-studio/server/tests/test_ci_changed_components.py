@@ -118,7 +118,7 @@ def test_without_a_known_base_everything_runs(repository: tuple[Path, str]) -> N
         ("vendoo-extension/manifest.json\n", flags("frontend", "backend", "browser", "health", "extension")),
         # test_xcodegen_installer.py reads the installer and the iPhone workflow.
         ("anteroom-ios/tools/install-xcodegen.sh\n", flags("backend", "health")),
-        (".github/workflows/ios.yml\n", flags("backend", "health")),
+        ("anteroom-ios/ci_scripts/ci_post_clone.sh\n", flags("backend", "health")),
         (".github/workflows/ci.yml\n", flags(*GROUPS)),
         (".github/workflows/dependency-audit.yml\n", flags(*GROUPS)),
         ("check.sh\n", flags(*GROUPS)),

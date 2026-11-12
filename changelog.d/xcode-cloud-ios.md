@@ -1,0 +1,1 @@
+- iPhone builds and unit tests use Xcode Cloud, with TestFlight releases started manually after local iPhone and iPad checks.

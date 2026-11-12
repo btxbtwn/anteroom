@@ -48,7 +48,7 @@ Stage Manager) it falls back to the iPhone's push navigation, and the open
 listing stays open across the switch. An editor that closes without Save or
 Discard (another listing opened, a layout switch, a tab switch) keeps its
 unsaved edits on the device, and they come back when that listing reopens.
-CI runs `IPadSandboxTests` on an iPad simulator.
+The local release checks run `IPadSandboxTests` on an iPad simulator.
 
 Fields expose their labels to VoiceOver; price/cost and photo controls stack
 at accessibility text sizes. Photo deletion is a visible action with
@@ -96,23 +96,23 @@ iPhone that asked for it.
 
 ## CI and TestFlight
 
-`.github/workflows/ios.yml` builds for the Simulator on every change under
-`anteroom-ios/` and runs every test: the small executable checks under
-`Tests/`, the XCTest unit tests under `UnitTests/` and the hosted sandbox UI
-tests under `UITests/`. Only on `main`, and only after the build and all tests
-pass, it archives, signs and uploads the build to TestFlight, numbered by the
-workflow run. A run started by hand on another branch never uploads. Install
-it on the iPhone from the TestFlight app.
+Xcode Cloud builds and tests the `AnteroomCloud` scheme. Its post-clone hook
+installs pinned XcodeGen, runs the standalone Swift checks under `Tests/`,
+generates the project, and sets the cloud build number. The cloud scheme runs
+the XCTest unit tests under `UnitTests/` without requiring the Python sandbox.
+The `Anteroom` scheme retains all unit and UI tests for local verification.
+See [Xcode Cloud setup](../docs/xcode-cloud.md) for account activation and the
+required local iPhone/iPad checks before a manually started TestFlight release.
 
 The unit tests stub the network with `URLProtocol`: request building, error
 messages, the seller-confirmation requirement, the 401 handling below, photo
 upload failure counting and kept unsaved edits.
 
-Signing uses an App Store Connect API key (Admin role) stored as the
-repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_P8`; Xcode
-creates and renews the certificate and profile with it. The publishable key
-comes from the repository variable `SUPABASE_PUBLISHABLE_KEY`. Pull requests
-never run the upload job.
+Apple manages cloud signing. Set `SUPABASE_PUBLISHABLE_KEY` in the cloud release
+workflow's environment; release archives fail if it is missing. PR verification
+has no distribution post-action. GitHub's former `ASC_*` signing secrets are
+no longer consumed by an iOS workflow; remove them after a successful cloud
+release if nothing else uses them.
 
 ## Shared backend port
 
