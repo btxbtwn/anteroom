@@ -99,7 +99,7 @@ jobs:
         with:
           version: "0.12.13"
 
-      - uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
         if: steps.gate.outputs.skip != 'true'
 
       - name: Build the image
