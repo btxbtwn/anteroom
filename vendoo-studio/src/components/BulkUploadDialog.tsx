@@ -26,6 +26,7 @@ type DragSpot = { group: number; photo: number };
 
 type Row = {
   sku: string;
+  sizeTag: string;
   garment: Garment;
   measurements: Record<string, string>;
   /** Fields filled from the photos and not yet touched by the seller. */
@@ -37,7 +38,7 @@ type Row = {
 /**
  * Everything a bulk upload needs in one window, before anything is created:
  * photo order, the box, COG and labels every draft shares, and each item's
- * own SKU and measurements. Click a photo to read the tape in it, or to turn
+ * own size tag, SKU and measurements. Click a photo to read the tape in it, or to turn
  * it the right way up. Only the x and Cancel close it, so a stray click
  * outside cannot throw away what was typed.
  */
@@ -55,6 +56,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   const [groups, setGroups] = useState(initialGroups);
   const [rows, setRows] = useState<Row[]>(() => initialGroups.map((group) => ({
     sku: "",
+    sizeTag: "",
     garment: guessGarment(listingTitleForFolder(group.folder)),
     measurements: {},
     suggested: [],
@@ -157,8 +159,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
         const degrees = rotationForTurns(turns.get(file) || 0);
         if (degrees) rotations.set(file, degrees);
       }
-      const { sku, garment, measurements } = rows[index]!;
-      return { ...group, sku, garment, measurements, rotations };
+      const { sku, sizeTag, garment, measurements } = rows[index]!;
+      return { ...group, sku, sizeTag, garment, measurements, rotations };
     }), generate && runtime.features.has("generation"));
   };
 
@@ -194,10 +196,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             Set details for {count} listings
           </h2>
           <p className="confirm-dialog-description">
-            Box, COG and labels go on every draft. Drag photos to set their order; the first one is
-            the cover, and a click enlarges one. Rotate or remove a photo from its corners. Type each item's SKU and measurements in inches, or
-            leave them blank: a typed SKU is kept as is, a blank one is made up from the brand and size.
-            Read measurements fills blank measurements from yardstick photos; check them before creating.
+            Box, COG and labels go on every draft. Add each item's size tag, SKU and measurements
+            below; check any measurements read from photos before creating.
           </p>
         </div>
         <div className="bulk-upload-fields">
@@ -251,7 +251,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             <span className="bulk-upload-help">Separate multiple labels with commas.</span>
           </label>
         </div>
-        <ul className="bulk-upload-groups" aria-label="Each listing's photos, SKU and measurements">
+        <ul className="bulk-upload-groups" aria-label="Each listing's photos, size tag, SKU and measurements">
           {groups.map((group, groupIndex) => {
             const title = listingTitleForFolder(group.folder);
             const row = rows[groupIndex]!;
@@ -262,6 +262,19 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                     {title}
                     <span className="photo-tray-meta"> · {group.files.length} photos</span>
                   </span>
+                  <label className="bulk-measure-size">
+                    <span className="label">Size tag</span>
+                    <input
+                      className="input"
+                      type="text"
+                      autoComplete="off"
+                      placeholder="e.g. XL, 32 × 30"
+                      aria-label={`Size tag for ${title}`}
+                      value={row.sizeTag}
+                      onChange={(event) => setRow(groupIndex, { sizeTag: event.target.value })}
+                      onKeyDown={onInputKeyDown}
+                    />
+                  </label>
                   <label className="bulk-measure-sku">
                     <span className="label">SKU</span>
                     <input
