@@ -12,7 +12,7 @@ test("a reviewed markdown cannot overwrite a newer price", async ({ page, phone,
     await openListing(page, phone, title);
     if (phone) await page.getByRole("tab", { name: "Chat" }).click();
     await page.getByRole("button", { name: "Regenerate…", exact: true }).click();
-    const dialog = page.getByRole("dialog").or(page.getByRole("alertdialog"));
+    const dialog = page.getByRole("dialog", { name: "Regenerate", exact: true });
     const confirm = dialog.getByRole("button", { name: "Confirm", exact: true });
     await expect(confirm).toBeEnabled({ timeout: 30_000 });
     const before = await (await request.get(`/api/conversations/${id}/listing`)).json();
