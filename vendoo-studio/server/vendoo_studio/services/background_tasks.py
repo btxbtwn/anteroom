@@ -3,19 +3,20 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, func, insert, select, text, update
 from fastapi import HTTPException
 
 from vendoo_studio.models.background_task import BackgroundTask, BackgroundTaskEvent
-from vendoo_studio.models.conversation import Conversation
+from vendoo_studio.models.conversation import Conversation, new_id
 from vendoo_studio.services.service_context import current
 
 DRAFT_KINDS = frozenset({'generate', 'chat'})
 ASSISTANT = 'assistant'
 ACTIVE = ('queued', 'running')
-# How often a running task stores its progress and an open stream reads it.
-# Each store is a short transaction on a shared pooled connection, so writing
-# more often than readers poll only takes connections from the seller's pages.
+# How often a running task stores its progress. Each store is a short
+# transaction on a shared pooled connection, and wakes every open stream on the
+# task (services/task_signals.py), which then reads it. Streams also read this
+# often while that notice listener is down.
 EVENT_INTERVAL = .5
 # A worker claims a queued task within seconds. One still queued after this
 # long has no worker to run it, and would otherwise keep its draft busy.
@@ -164,17 +165,31 @@ def check_write_lease(db, task_id, token):
         raise _lost(db, task_id)
 
 
+def _add_events(db, task_id, frames):
+    """Insert ``frames`` after the task's last event, in one statement.
+
+    The caller holds the task's row lock (check_write_lease), so no other
+    writer numbers events for it meanwhile. A Core insert does not flush, so
+    SellerDatabaseSession.before_flush neither checks the lease nor assigns
+    the owner here: the caller checks the lease, and row security checks the
+    owner given below.
+    """
+    if not frames:
+        return
+    last = (select(func.coalesce(func.max(BackgroundTaskEvent.sequence), 0))
+            .where(BackgroundTaskEvent.task_id == task_id).scalar_subquery())
+    db.execute(insert(BackgroundTaskEvent).values([
+        {'id': new_id(), 'user_id': db.user_id, 'task_id': task_id, 'sequence': last + offset, 'data': frame}
+        for offset, frame in enumerate(frames, 1)
+    ]))
+
+
 def append_events(task_id, token, frames):
     if not frames:
         return
     with _sessions()() as db:
-        # A worker's session checks its lease when the events flush (before_flush).
-        if db.info.get('background_lease') != (task_id, token):
-            check_write_lease(db, task_id, token)
-        sequence = db.scalar(select(func.max(BackgroundTaskEvent.sequence))
-                             .where(BackgroundTaskEvent.task_id == task_id)) or 0
-        for offset, frame in enumerate(frames, 1):
-            db.add(BackgroundTaskEvent(task_id=task_id, sequence=sequence + offset, data=frame))
+        check_write_lease(db, task_id, token)
+        _add_events(db, task_id, frames)
         db.commit()
 
 
@@ -215,11 +230,7 @@ def complete_in(db, task_id, token, frames=()):
     that commit, so a Stop cannot slip in between.
     """
     check_write_lease(db, task_id, token)
-    sequence = db.scalar(select(func.max(BackgroundTaskEvent.sequence))
-                         .where(BackgroundTaskEvent.task_id == task_id)) or 0
-    for offset, frame in enumerate(frames, 1):
-        db.add(BackgroundTaskEvent(task_id=task_id, sequence=sequence + offset, data=frame))
-    db.flush()
+    _add_events(db, task_id, frames)
     db.execute(update(BackgroundTask).where(BackgroundTask.id == task_id).values(
         status='completed', lease_token=None, leased_until=None, updated_at=func.now()))
     # Later flushes in this transaction belong to the completed task.

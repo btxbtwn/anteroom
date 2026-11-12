@@ -15,7 +15,7 @@ from sqlalchemy import select
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.background_task import BackgroundTask, BackgroundTaskEvent
 from vendoo_studio.repositories.queries import ConversationRepo
-from vendoo_studio.services import background_tasks as queue
+from vendoo_studio.services import background_tasks as queue, task_signals
 from vendoo_studio.services.hosted_database import get_seller_db
 from vendoo_studio.services.listing_provider import get_listing_provider
 from vendoo_studio.services.service_context import current
@@ -81,20 +81,24 @@ def task_stream(task_id):
     async def stream():
         sequence = 0
         yield KEEPALIVE
-        while True:
-            rows, status, error = await asyncio.to_thread(poll, sequence)
-            for number, frame in rows:
-                sequence = number
-                yield frame
-            if len(rows) == 200:
-                continue
-            if status not in queue.ACTIVE:
-                if status == 'failed':
-                    yield sse_event('error', error or 'Review the saved draft before retrying.')
-                yield 'data: [DONE]\n\n'
-                return
-            yield KEEPALIVE
-            await asyncio.sleep(queue.EVENT_INTERVAL)
+        # Read only when Postgres announces new progress or a status change for
+        # this task, or after task_signals' fallback; see services/task_signals.py.
+        with task_signals.subscribe(task_id) as signal:
+            while True:
+                signal.clear()
+                rows, status, error = await asyncio.to_thread(poll, sequence)
+                for number, frame in rows:
+                    sequence = number
+                    yield frame
+                if len(rows) == 200:
+                    continue
+                if status not in queue.ACTIVE:
+                    if status == 'failed':
+                        yield sse_event('error', error or 'Review the saved draft before retrying.')
+                    yield 'data: [DONE]\n\n'
+                    return
+                yield KEEPALIVE
+                await signal.wait()
     return StreamingResponse(stream(), media_type='text/event-stream', headers=SSE_HEADERS)
 
 

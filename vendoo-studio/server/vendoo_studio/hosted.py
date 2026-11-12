@@ -261,6 +261,10 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         watching_chrome_waits = chrome_wait_connections.watch(database_engine)
         from vendoo_studio.services import process_handoff
         process_handoff.reset()
+        from vendoo_studio.services import task_signals
+        if app.state.process_role != 'worker' and database_engine.dialect.name == 'postgresql':
+            # Open draft and assistant streams wait for Postgres to announce new progress.
+            task_signals.start(database_engine.url)
         worker = None
         # Lease name -> what starts that set of schedulers (process_handoff.lead).
         starts: dict[str, Callable[[], Callable[[], None]]] = {}
@@ -353,6 +357,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 logging.getLogger(__name__).warning('Draft worker stopped before shutdown completed')
             finally:
                 await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
+                await asyncio.to_thread(task_signals.stop)
                 await asyncio.to_thread(uninstall_alerts)
 
     app = FastAPI(
@@ -502,11 +507,14 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
 
     @app.get("/api/health")
     def health():
+        from vendoo_studio.services import task_signals
         worker = getattr(app.state, "background_worker", None)
         running = bool(app.state.background_worker_enabled and worker is not None and not worker.done())
         body = {
             "status": "ok", "version": app_version(), "service": "anteroom-hosted",
             "role": app.state.process_role, "background_worker": running,
+            # Whether open streams hear about new progress, or read on a timer meanwhile.
+            "progress_listener": task_signals.health(),
         }
         if app.state.background_worker_enabled and worker is not None and worker.done():
             # The draft loop died: fail the check so Fly restarts this Machine

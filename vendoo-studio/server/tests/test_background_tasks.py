@@ -169,9 +169,12 @@ def test_progress_events_check_the_lease_once_per_write(storage, leased_session)
             session.info['background_lease'] = (task_id, token)
         return session
 
-    lease_checks = []
+    lease_checks, statements = [], []
 
     def count(_conn, _cursor, statement, *_args):
+        # The isolation check runs once per pooled connection, not per write (NullPool here).
+        if 'rolsuper' not in statement and 'pg_policy' not in statement:
+            statements.append(statement)
         if 'FROM background_tasks' in statement and 'lease_token' in statement:
             lease_checks.append(statement)
 
@@ -183,6 +186,8 @@ def test_progress_events_check_the_lease_once_per_write(storage, leased_session)
     finally:
         event.remove(engine, 'before_cursor_execute', count)
     assert len(lease_checks) == 2
+    # Per write: the seller scope, the lease check, and one insert that numbers its own events.
+    assert len(statements) == 6, "\n".join(s[:90] for s in statements)
     with sessions(owner)() as db:
         assert queue.journal(db, task_id) == ['data: one\n\n', 'data: two\n\n', 'data: three\n\n']
         queue.cancel(db, task_id)
