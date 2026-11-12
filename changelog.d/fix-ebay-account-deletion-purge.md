@@ -1,1 +1,0 @@
-- When eBay tells Anteroom your eBay account was deleted, Anteroom now deletes what it kept from that account (sign-in, saved eBay policies, eBay listing links, eBay offer rules and action receipts). Your items, photos and sales records stay.

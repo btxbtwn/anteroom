@@ -6,6 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.947 — 2026-11-12
+
+- On the web, a draft or assistant answer you are watching no longer checks the cloud database twice a second while nothing is happening, which leaves more room for your pages to load while drafts generate.
+- Saving draft progress takes one fewer trip to the database.
+
+## 0.1.946 — 2026-11-12
+
+- When eBay tells Anteroom your eBay account was deleted, Anteroom now deletes what it kept from that account (sign-in, saved eBay policies, eBay listing links, eBay offer rules and action receipts). Your items, photos and sales records stay.
+
 ## 0.1.945 — 2026-11-12
 
 - Moving a Mac into an online account no longer keeps a photo locked while it uploads, so the account stays responsive during a move.
