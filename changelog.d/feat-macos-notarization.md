@@ -1,0 +1,3 @@
+- Anteroom and Anteroom Connector are now notarized by Apple, so a fresh download opens without Control-clicking. Download Anteroom-for-Mac.zip from the release page.
+- The first time the new version starts, macOS may ask once for your Mac password so Anteroom can keep your saved sign-ins. Choose Always Allow; later updates won't ask.
+- Going back to an earlier version from Settings keeps working across the change of signing certificate.

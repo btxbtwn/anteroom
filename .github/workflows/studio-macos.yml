@@ -13,6 +13,9 @@ on:
     paths:
       - "vendoo-studio/scripts/package-macos-app.sh"
       - "vendoo-studio/scripts/package-connector.sh"
+      - "vendoo-studio/scripts/sign_macos_bundle.py"
+      - "vendoo-studio/scripts/notarize-macos-app.sh"
+      - "vendoo-studio/server/vendoo_studio/services/packaged_updates.py"
       - "vendoo-studio/server/vendoo_studio/connector.py"
       - "vendoo-studio/server/vendoo_studio/services/connector.py"
       - "vendoo-studio/server/vendoo_studio/sandbox.py"
@@ -66,6 +69,10 @@ jobs:
     environment: ${{ github.event_name != 'pull_request' && 'release' || '' }}
     permissions:
       contents: read
+    env:
+      # Release builds must come out notarized; pull requests have no
+      # notarization key, sign with the hardened runtime and skip it.
+      MACOS_REQUIRE_NOTARIZATION: ${{ github.event_name != 'pull_request' && '1' || '0' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,21 +88,31 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.12.13"
-      - name: Import signing certificate
+      - name: Import signing certificates
         # PR runners have no signing secrets. Only main produces an installable
-        # release; PRs below check packaging with an ephemeral test certificate.
+        # release; PRs below check packaging with ephemeral test certificates,
+        # one in place of each release certificate.
         env:
           CERT_P12_BASE64: ${{ secrets.MACOS_SIGNING_CERT_P12_BASE64 }}
           CERT_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
+          # The self-signed certificate releases used before Developer ID.
+          # Until 2027-02-12 the zip older installs update from is signed with
+          # it (see scripts/package-macos-app.sh). Optional; remove after then.
+          LEGACY_CERT_P12_BASE64: ${{ secrets.MACOS_LEGACY_SIGNING_CERT_P12_BASE64 }}
+          LEGACY_CERT_PASSWORD: ${{ secrets.MACOS_LEGACY_SIGNING_CERT_PASSWORD }}
         run: |
-          if [[ -z "$CERT_P12_BASE64" ]]; then
-            if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
-              echo "MACOS_SIGNING_CERT_P12_BASE64 is required to preserve Keychain access across releases." >&2
-              exit 1
-            fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          identities() {
+            security find-identity -p codesigning "$KEYCHAIN" | awk '/^ *[0-9]+\) [0-9A-F]{40} /{print $2}' | sort -u
+          }
+          test_certificate() {
             # Exercise certificate signing on PRs without a production key.
             openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
-              -subj "/CN=Anteroom Test Signing/" \
+              -subj "/CN=$1/" \
               -addext "extendedKeyUsage=codeSigning" \
               -addext "keyUsage=digitalSignature" \
               -keyout "$RUNNER_TEMP/signing.key" -out "$RUNNER_TEMP/signing.crt"
@@ -103,43 +120,107 @@ jobs:
               -in "$RUNNER_TEMP/signing.crt" -out "$RUNNER_TEMP/signing.p12" \
               -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 -passout pass:
             rm -f "$RUNNER_TEMP/signing.key" "$RUNNER_TEMP/signing.crt"
+          }
+          # Imports one .p12 and prints the hash of the identity it added.
+          import_certificate() {
+            local before after added
+            before="$(identities)"
+            security import "$RUNNER_TEMP/signing.p12" -k "$KEYCHAIN" -P "$1" -T /usr/bin/codesign >/dev/null
+            rm -f "$RUNNER_TEMP/signing.p12"
+            after="$(identities)"
+            added="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | grep . || true)"
+            if [[ "$(printf '%s\n' "$added" | grep -c .)" != "1" ]]; then
+              echo "$2 must hold exactly one code-signing certificate with its private key." >&2
+              exit 1
+            fi
+            printf '%s\n' "$added"
+          }
+
+          if [[ -z "$CERT_P12_BASE64" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+              echo "MACOS_SIGNING_CERT_P12_BASE64 is required to preserve Keychain access across releases." >&2
+              exit 1
+            fi
+            test_certificate "Anteroom Test Signing"
             CERT_PASSWORD=""
           else
             echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
           fi
-          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 3600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/signing.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          # Sign with whatever certificate the secret holds, by hash so the
+          # name never has to match.
+          IDENTITY="$(import_certificate "$CERT_PASSWORD" MACOS_SIGNING_CERT_P12_BASE64)"
+
+          LEGACY_IDENTITY=""
+          if [[ -n "$LEGACY_CERT_P12_BASE64" ]]; then
+            echo "$LEGACY_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+            LEGACY_IDENTITY="$(import_certificate "$LEGACY_CERT_PASSWORD" MACOS_LEGACY_SIGNING_CERT_P12_BASE64)"
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            # Exercise the second signing pass too.
+            test_certificate "Anteroom Test Legacy Signing"
+            LEGACY_IDENTITY="$(import_certificate "" "The legacy test certificate")"
+          fi
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # One argument per keychain already in the search list.
+          # shellcheck disable=SC2046
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          rm -f "$RUNNER_TEMP/signing.p12"
-          # Sign with whatever certificate the secret holds (a Developer ID
-          # Application certificate, or the older self-signed one), by hash so
-          # the name never has to match.
           security find-identity -p codesigning "$KEYCHAIN"
-          IDENTITIES="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/^ *[0-9]+\) [0-9A-F]{40} /{print $2}' | sort -u)"
-          if [[ "$(printf '%s\n' "$IDENTITIES" | grep -c .)" != "1" ]]; then
-            echo "MACOS_SIGNING_CERT_P12_BASE64 must hold exactly one code-signing certificate with its private key." >&2
+          echo "MACOS_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          if [[ -n "$LEGACY_IDENTITY" ]]; then
+            echo "MACOS_LEGACY_SIGNING_IDENTITY=$LEGACY_IDENTITY" >> "$GITHUB_ENV"
+          fi
+      - name: Write the notarization key
+        # App Store Connect API key for notarytool. Release runs only; it is
+        # deleted in the last step whatever happens.
+        if: github.event_name != 'pull_request'
+        env:
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+        run: |
+          if [[ -z "$NOTARY_API_KEY_P8" ]]; then
+            echo "::error title=No notarization key::Add NOTARY_API_KEY_P8, NOTARY_API_KEY_ID and NOTARY_API_ISSUER_ID to the release environment, then re-run this workflow."
             exit 1
           fi
-          echo "MACOS_SIGNING_IDENTITY=$IDENTITIES" >> "$GITHUB_ENV"
+          umask 077
+          mkdir -p "$RUNNER_TEMP/notary"
+          printf '%s\n' "$NOTARY_API_KEY_P8" > "$RUNNER_TEMP/notary/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/notary/AuthKey.p8"
+          echo "NOTARY_API_KEY_PATH=$RUNNER_TEMP/notary/AuthKey.p8" >> "$GITHUB_ENV"
       - name: Package app
         working-directory: vendoo-studio
         env:
           PYTHON: ${{ github.workspace }}/vendoo-studio/.venv/bin/python
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
         run: |
           python -m venv .venv
           "$PYTHON" -m pip install -U pip
           ./scripts/package-macos-app.sh
       - name: Package standalone subscription connector
         working-directory: vendoo-studio
+        env:
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
         run: ./scripts/package-connector.sh
       - name: Exercise the packaged app on sandbox data
+        # Both signed copies run under the hardened runtime: the Developer ID
+        # one, and the one signed with the older certificate (or, on pull
+        # requests, the two test certificates).
         working-directory: vendoo-studio
-        run: .venv/bin/python scripts/smoke-packaged-sandbox.py release/Anteroom.app
+        run: |
+          for app in release/Anteroom.app release/legacy-signed/Anteroom.app; do
+            if [[ -d "$app" ]]; then
+              echo "Smoke test: $app"
+              .venv/bin/python scripts/smoke-packaged-sandbox.py "$app"
+            fi
+          done
+          # cursor_sdk starts its own Node, whose V8 needs allow-jit under the
+          # hardened runtime; without it Node dies before running any script.
+          NODE="$(find release/Anteroom.app -type f -name node -path '*cursor_sdk*' | head -1)"
+          if [[ -z "$NODE" ]]; then
+            echo "Expected cursor_sdk's Node runtime in the app." >&2
+            exit 1
+          fi
+          codesign -d --entitlements - "$NODE"
+          "$NODE" -e 'let total = 0; for (let i = 0; i < 5e7; i++) total += i % 7; console.log("Bundled Node runs JIT code:", total)'
       - name: Verify native Keychain updates preserve the existing item
         working-directory: vendoo-studio
         run: |
@@ -178,7 +259,7 @@ jobs:
         env:
           PYTHON: ${{ github.workspace }}/vendoo-studio/.venv/bin/python
         run: |
-          for archive in release/Anteroom-macos.zip release/List-This-Studio-macos.zip; do
+          for archive in release/Anteroom-for-Mac.zip release/Anteroom-macos.zip release/List-This-Studio-macos.zip; do
           "$PYTHON" - "$archive" <<'PY'
           import sys
           import tempfile
@@ -225,21 +306,45 @@ jobs:
               exit 1
             fi
           fi
-          # Same check the updater runs before it installs a download.
+          if [[ "$DETAIL" != *"(runtime)"* ]]; then
+            echo "The app is not signed with the hardened runtime." >&2
+            exit 1
+          fi
+          # Same check the updater runs before it installs a download, with the
+          # requirement it demands.
+          REQUIREMENT="$(.venv/bin/python -c 'from vendoo_studio.services.packaged_updates import UPDATE_REQUIREMENT; print(UPDATE_REQUIREMENT)')"
+          csreq -r="$REQUIREMENT" -b "$RUNNER_TEMP/update-requirement.bin"
           codesign --verify --deep --strict --verbose=1 "$APP"
-          echo "OK: packaged app has an intact deep code signature"
+          echo "OK: packaged app has an intact deep code signature with the hardened runtime"
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            # Release copies must install over both kinds of existing install.
+            for app in "$APP" release/legacy-signed/Anteroom.app; do
+              if [[ -d "$app" ]]; then
+                codesign --verify --deep --strict -R="$REQUIREMENT" "$app"
+                echo "OK: $app satisfies the updater's signing requirement"
+              fi
+            done
+            xcrun stapler validate "$APP"
+            xcrun stapler validate "release/Anteroom Connector.app"
+          fi
       - name: Keep the release files for publishing
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: studio-macos-release
           path: |
+            vendoo-studio/release/Anteroom-for-Mac.zip
             vendoo-studio/release/Anteroom-macos.zip
             vendoo-studio/release/List-This-Studio-macos.zip
             vendoo-studio/release/Anteroom-Connector-macos.zip
             vendoo-studio/release/build_info.json
           if-no-files-found: error
           retention-days: 1
+      - name: Remove signing material
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/notary"
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
 
   publish:
     name: Publish GitHub release

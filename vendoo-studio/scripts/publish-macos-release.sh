@@ -3,7 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$ROOT/.." && pwd)"
-ZIP="$ROOT/release/Anteroom-macos.zip"
+ZIP="$ROOT/release/Anteroom-for-Mac.zip"
+# Installs signed with the older self-signed certificate update from this
+# asset until 2027-02-12; see package-macos-app.sh.
+TRANSITION_ZIP="$ROOT/release/Anteroom-macos.zip"
 # Builds from before the rename update from this asset; see package-macos-app.sh.
 LEGACY_ZIP="$ROOT/release/List-This-Studio-macos.zip"
 CONNECTOR_ZIP="$ROOT/release/Anteroom-Connector-macos.zip"
@@ -12,7 +15,7 @@ TAG="${VENDOO_STUDIO_RELEASE_TAG:-studio-macos}"
 DEFAULT_TITLE="Anteroom (macOS)"
 GITHUB_REPO="${VENDOO_STUDIO_GITHUB_REPO:-btxbtwn/anteroom}"
 
-for archive in "$ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP"; do
+for archive in "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP"; do
   if [[ ! -f "$archive" ]]; then
     echo "Missing $archive. Run scripts/package-macos-app.sh first." >&2
     exit 1
@@ -93,7 +96,7 @@ PY
 # refreshes it, so the page can read months old beside a zip built minutes ago.
 # State the build date in the notes, where it is accurate.
 CHANGES="$(python3 -c 'import json,sys; print("\n".join("- [#{number}]({url}) {title}".format(**p) for p in json.loads(sys.argv[1])))' "$PULL_REQUESTS_JSON")"
-NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull requests\n%s\n\nInstall\n1. Unzip Anteroom-macos.zip\n2. Move Anteroom.app into Applications\n3. Control-click the app and choose Open (first launch only)\n4. In Settings, sign in with ChatGPT or add a MiMo API key\n5. Click Connect Chrome, load the listing extension once, and sign in to the marketplaces you sell on\n\nNeeds macOS 13+ and Google Chrome. Listing data stays on this Mac.\n' "${VERSION:-unknown}" "$BUILT_AT" "$SHA" "$REF" "${CHANGES:-- None detected}")
+NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull requests\n%s\n\nInstall\n1. Download and unzip Anteroom-for-Mac.zip\n2. Move Anteroom.app into Applications and open it\n3. In Settings, sign in with ChatGPT or add a MiMo API key\n4. Click Connect Chrome, load the listing extension once, and sign in to the marketplaces you sell on\n\nNeeds macOS 13+ and Google Chrome. Listing data stays on this Mac. Anteroom-macos.zip and List-This-Studio-macos.zip are for automatic updates of older installs; download Anteroom-for-Mac.zip instead.\n' "${VERSION:-unknown}" "$BUILT_AT" "$SHA" "$REF" "${CHANGES:-- None detected}")
 
 # Keep this build under its own tag as well, so Settings → About can go back to
 # it if a later build turns out broken. The rolling tag above is what updates
@@ -101,9 +104,9 @@ NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull reques
 VERSIONED_TAG="${TAG}-v${VERSION:-unknown}-${SHORT}"
 NOTES+=$'\n\nConnector only\nDownload Anteroom-Connector-macos.zip to use your ChatGPT and Claude subscriptions from the web or iPhone without the full desktop app. Keep the connector running and the Mac awake and online. Claude subscription sign-in requires Claude Code.\n'
 if gh release view "$VERSIONED_TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
-  gh release upload "$VERSIONED_TAG" "$ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
+  gh release upload "$VERSIONED_TAG" "$ZIP" "$TRANSITION_ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
 else
-  gh release create "$VERSIONED_TAG" "$ZIP" "$CONNECTOR_ZIP" "$INFO" \
+  gh release create "$VERSIONED_TAG" "$ZIP" "$TRANSITION_ZIP" "$CONNECTOR_ZIP" "$INFO" \
     --latest=false \
     --title "Anteroom ${VERSION:-unknown} (${SHORT}): ${TITLE}" \
     --notes "$NOTES" \
@@ -112,10 +115,10 @@ else
 fi
 
 if [[ "$RELEASE_EXISTS" == 1 ]]; then
-  gh release upload "$TAG" "$ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
+  gh release upload "$TAG" "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
   gh release edit "$TAG" --title "$TITLE" --notes "$NOTES" --latest --repo "$GITHUB_REPO"
 else
-  gh release create "$TAG" "$ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" \
+  gh release create "$TAG" "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" \
     --latest \
     --title "$TITLE" \
     --notes "$NOTES" \

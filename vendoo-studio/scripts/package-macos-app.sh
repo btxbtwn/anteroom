@@ -6,13 +6,24 @@ REPO="$(cd "$ROOT/.." && pwd)"
 PYTHON="${PYTHON:-$ROOT/.venv/bin/python}"
 RELEASE="$ROOT/release"
 APP="$RELEASE/Anteroom.app"
-ZIP="$RELEASE/Anteroom-macos.zip"
+# The notarized Developer ID build. People download it, and builds from this
+# one on update to it.
+ZIP="$RELEASE/Anteroom-for-Mac.zip"
+# Installed builds signed with the older self-signed certificate update from
+# this zip and refuse any app not signed with that certificate. Until
+# 2027-02-12 it holds the same build signed with that certificate
+# (MACOS_LEGACY_SIGNING_IDENTITY), whose updater then moves to ZIP. Remove it
+# and MACOS_LEGACY_SIGNING_IDENTITY after that date, with the matching
+# transition code in services/packaged_updates.py.
+TRANSITION_ZIP="$RELEASE/Anteroom-macos.zip"
 # Builds from before the rename download this zip and look for this bundle in
 # it. Publishing the same app under the old names lets them update once; after
 # that the updater moves the app to Anteroom.app. Drop both once no install
 # older than the rename is left.
 LEGACY_ZIP="$RELEASE/List-This-Studio-macos.zip"
 LEGACY_APP_NAME="List This Studio.app"
+LEGACY_SIGN_IDENTITY="${MACOS_LEGACY_SIGNING_IDENTITY:-}"
+LEGACY_SIGNED_APP="$RELEASE/legacy-signed/Anteroom.app"
 
 SIGN_IDENTITY="${MACOS_SIGNING_IDENTITY:-}"
 if [[ -z "$SIGN_IDENTITY" || "$SIGN_IDENTITY" == "-" ]]; then
@@ -111,7 +122,7 @@ fi
 
 # macOS only draws the current (larger) traffic lights for binaries linked
 # against the macOS 26 SDK. PyInstaller's bootloader reports a much older SDK;
-# stamp the executable before deep-signing so the shipped app matches T3 Code.
+# stamp the executable before signing so the shipped app matches T3 Code.
 EXE="$APP/Contents/MacOS/Anteroom"
 if command -v vtool >/dev/null 2>&1 && [[ -f "$EXE" ]]; then
   MINOS="$(vtool -show-build "$EXE" 2>/dev/null | awk '/minos/{print $2; exit}')"
@@ -121,10 +132,10 @@ if command -v vtool >/dev/null 2>&1 && [[ -f "$EXE" ]]; then
 fi
 
 # Keep PyInstaller framework symlinks. Flattening them breaks the .app layout.
-# Nested Python.framework is often still signed with a different Team ID than the
-# app executable; dyld then refuses to load it ("different Team IDs"). Deep-sign
-# the whole bundle with one identity. Preserve distribution metadata: HTTP
-# clients used by catalog/photo analysis read it when they are imported.
+# Every binary inside, Python.framework included, is re-signed with one
+# identity, or dyld refuses to load code with a different Team ID. Preserve
+# distribution metadata: HTTP clients used by catalog/photo analysis read it
+# when they are imported.
 if ! command -v codesign >/dev/null 2>&1; then
   echo "codesign is required to package Anteroom.app" >&2
   exit 1
@@ -143,31 +154,50 @@ for name in ("httpx2", "httpcore2"):
         raise SystemExit(f"Bundled {name} metadata is missing or differs from {expected}")
 print("Bundled HTTP client runtime metadata verified")
 PY
-echo "Deep-signing app with identity: $SIGN_IDENTITY"
-codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
-CODESIGN_DV="$(codesign -dv "$APP" 2>&1)" || {
-  echo "$CODESIGN_DV" >&2
-  exit 1
+if [[ -n "$LEGACY_SIGN_IDENTITY" ]]; then
+  rm -rf "$(dirname "$LEGACY_SIGNED_APP")"
+  mkdir -p "$(dirname "$LEGACY_SIGNED_APP")"
+  ditto "$APP" "$LEGACY_SIGNED_APP"
+fi
+
+check_signature() {
+  local app="$1" detail requirement
+  detail="$(codesign -dv "$app" 2>&1)" || {
+    echo "$detail" >&2
+    exit 1
+  }
+  echo "$detail"
+  if [[ "$detail" == *"not signed at all"* ]]; then
+    echo "Packaged app is unsigned." >&2
+    exit 1
+  fi
+  if [[ "$detail" != *"(runtime)"* ]]; then
+    echo "$app is not signed with the hardened runtime, which notarization requires." >&2
+    exit 1
+  fi
+  # The updater refuses any download that fails this same check.
+  codesign --verify --deep --strict --verbose=1 "$app"
+  requirement="$(codesign -d -r- "$app" 2>&1)"
+  echo "$requirement"
+  if [[ "$detail" == *"Signature=adhoc"* ]] || \
+     [[ "$requirement" != *"certificate leaf"* && "$requirement" != *"anchor "* ]]; then
+    echo "Signed app has no certificate-based designated requirement." >&2
+    exit 1
+  fi
 }
-echo "$CODESIGN_DV"
-if [[ "$CODESIGN_DV" == *"not signed at all"* ]]; then
-  echo "Packaged app is unsigned." >&2
-  exit 1
-fi
-# The updater refuses any download that fails this same check.
-codesign --verify --deep --strict --verbose=1 "$APP"
-REQUIREMENT="$(codesign -d -r- "$APP" 2>&1)"
-echo "$REQUIREMENT"
-if [[ "$CODESIGN_DV" == *"Signature=adhoc"* ]] || \
-   [[ "$REQUIREMENT" != *"certificate leaf"* && "$REQUIREMENT" != *"anchor "* ]]; then
-  echo "Signed app has no certificate-based designated requirement." >&2
-  exit 1
-fi
+
+# Inside-out, with the hardened runtime and a secure timestamp; see the script.
+"$PYTHON" "$ROOT/scripts/sign_macos_bundle.py" "$APP" "$SIGN_IDENTITY"
+check_signature "$APP"
+CODESIGN_DV="$(codesign -dv "$APP" 2>&1)"
 # Keychain only trusts later builds by their Apple Team ID. A certificate that
 # Apple did not issue has none, so macOS ties saved sign-ins to this exact
 # build and asks for the Mac password once after every update.
 TEAM_ID="$(printf '%s\n' "$CODESIGN_DV" | sed -n 's/^TeamIdentifier=//p' | head -1)"
-if [[ -z "$TEAM_ID" || "$TEAM_ID" == "not set" ]]; then
+if [[ "$TEAM_ID" == "not set" ]]; then
+  TEAM_ID=""
+fi
+if [[ -z "$TEAM_ID" ]]; then
   MESSAGE="Signed without an Apple Team ID: macOS will ask for the Keychain password once after this update. Run scripts/setup-signing.sh with a Developer ID Application certificate to stop that."
   if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
     echo "::warning title=Keychain prompt on update::$MESSAGE"
@@ -177,25 +207,52 @@ if [[ -z "$TEAM_ID" || "$TEAM_ID" == "not set" ]]; then
 else
   echo "Signed with Apple Team ID $TEAM_ID: updates keep Keychain access."
 fi
+# Apple checks the app and staples a ticket to it, so Gatekeeper opens a fresh
+# download without the Control-click workaround. Skipped (with a log line)
+# without an App Store Connect key; release builds require one.
+"$ROOT/scripts/notarize-macos-app.sh" "$APP"
+
+if [[ -n "$LEGACY_SIGN_IDENTITY" ]]; then
+  echo "Signing the transition copy with the older self-signed certificate"
+  "$PYTHON" "$ROOT/scripts/sign_macos_bundle.py" "$LEGACY_SIGNED_APP" "$LEGACY_SIGN_IDENTITY"
+  check_signature "$LEGACY_SIGNED_APP"
+  TRANSITION_APP="$LEGACY_SIGNED_APP"
+else
+  TRANSITION_APP="$APP"
+  if [[ -n "$TEAM_ID" ]]; then
+    MESSAGE="MACOS_LEGACY_SIGNING_CERT_P12_BASE64 is not set, so $(basename "$TRANSITION_ZIP") holds the Developer ID build. Installs signed with the older self-signed certificate refuse it and have to download $(basename "$ZIP") once by hand."
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+      echo "::warning title=Older installs cannot update automatically::$MESSAGE"
+    else
+      echo "Warning: $MESSAGE" >&2
+    fi
+  fi
+fi
 
 PAYLOAD="$RELEASE/payload"
+TRANSITION_PAYLOAD="$RELEASE/transition-payload"
 LEGACY_PAYLOAD="$RELEASE/legacy-payload"
-rm -rf "$PAYLOAD" "$LEGACY_PAYLOAD" "$ZIP" "$LEGACY_ZIP"
-mkdir -p "$PAYLOAD" "$LEGACY_PAYLOAD"
+rm -rf "$PAYLOAD" "$TRANSITION_PAYLOAD" "$LEGACY_PAYLOAD" "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP"
+mkdir -p "$PAYLOAD" "$TRANSITION_PAYLOAD" "$LEGACY_PAYLOAD"
 ditto "$APP" "$PAYLOAD/Anteroom.app"
 cp "$ROOT/desktop/HowToOpen.txt" "$PAYLOAD/How to Open.txt"
 (
   cd "$PAYLOAD"
   ditto -c -k . "$ZIP"
 )
+ditto "$TRANSITION_APP" "$TRANSITION_PAYLOAD/Anteroom.app"
+(
+  cd "$TRANSITION_PAYLOAD"
+  ditto -c -k . "$TRANSITION_ZIP"
+)
 # The bundle's directory name is not part of its code signature, so the
 # renamed copy is the same signed app.
-ditto "$APP" "$LEGACY_PAYLOAD/$LEGACY_APP_NAME"
+ditto "$TRANSITION_APP" "$LEGACY_PAYLOAD/$LEGACY_APP_NAME"
 (
   cd "$LEGACY_PAYLOAD"
   ditto -c -k . "$LEGACY_ZIP"
 )
-for archive in "$ZIP" "$LEGACY_ZIP"; do
+for archive in "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP"; do
 "$PYTHON" - "$archive" <<'PY'
 import sys
 import tempfile
@@ -216,7 +273,7 @@ print("Update zip symlinks are safe in-bundle relative links")
 PY
 done
 cp "$ROOT/desktop/build_info.json" "$RELEASE/build_info.json"
-"$PYTHON" - "$RELEASE/build_info.json" "$ZIP" "$LEGACY_ZIP" <<'PY'
+"$PYTHON" - "$RELEASE/build_info.json" "$ZIP" "$TRANSITION_ZIP" "$LEGACY_ZIP" <<'PY'
 import hashlib
 import json
 import sys
@@ -232,9 +289,9 @@ def sha256(path: Path) -> str:
 
 
 info_path = Path(sys.argv[1])
-current, legacy = Path(sys.argv[2]), Path(sys.argv[3])
+current, transition, legacy = Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4])
 payload = json.loads(info_path.read_text(encoding="utf-8"))
-payload["zips"] = {current.name: sha256(current), legacy.name: sha256(legacy)}
+payload["zips"] = {path.name: sha256(path) for path in (current, transition, legacy)}
 # Builds from before the rename read only this key, and download the legacy zip.
 payload["zip_sha256"] = payload["zips"][legacy.name]
 info_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -244,5 +301,5 @@ PY
 echo "Built $APP"
 echo "Share $ZIP"
 echo "Publish with: $ROOT/scripts/publish-macos-release.sh"
-echo "Recipients: unzip, read How to Open.txt, move Anteroom.app to Applications."
+echo "Recipients: unzip, move Anteroom.app to Applications and open it; How to Open.txt has the rest."
 echo "They need macOS 13+, Google Chrome, and a ChatGPT account or Xiaomi MiMo API key. Python is included; the frontend is prebuilt."
