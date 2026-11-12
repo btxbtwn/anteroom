@@ -63,6 +63,8 @@ CONTRACT = ("type", "job_id", "message_id", "payload")
 # How long a tab stays connected after it last asked or beat. A background tab's
 # timers can run as rarely as once a minute in Chrome, so this outlasts that.
 SEEN_FOR_S = 90.0
+# Empty /next requests deliberately wait this long for a command.
+WAIT_S = 20.0
 # Commands whose timing is kept until their reply; older ones are dropped.
 SENT_KEPT = 200
 

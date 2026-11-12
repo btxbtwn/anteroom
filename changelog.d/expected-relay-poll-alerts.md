@@ -1,0 +1,1 @@
+- Keep normal empty Chrome relay polls out of slow-response error emails, while still reporting failures and excessive waits.
