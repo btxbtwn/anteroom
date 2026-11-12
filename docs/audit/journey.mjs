@@ -109,6 +109,9 @@ try {
 
   // Publishing must be refused (403), with confirm and without.
   const alice = hosted ? { Authorization: `Bearer ${await token("alice@sandbox.test")}` } : {};
+  // The three photos must be the listing's photos, not only chat attachments (#1517).
+  const photoList = await (await fetch(`${api}/api/${hosted ? "drafts" : "conversations"}/${result.id}/photos`, { headers: alice })).json();
+  result.listingPhotos = (Array.isArray(photoList) ? photoList : photoList.photos || []).length;
   result.publish = {};
   for (const path of ["native-marketplaces/ebay/list", "native-marketplaces/poshmark/update", "marketplace-listings/delist"]) {
     for (const body of [{ marketplaces: ["ebay"], confirm: true }, {}]) {

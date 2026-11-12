@@ -36,6 +36,13 @@ These override everything below.
   (`VENDOO_STUDIO_PORT`, `VENDOO_STUDIO_WEB_PORT`). The iPhone script always uses
   4320, so stop the hosted sandbox before running it. If a developer's sandbox
   already holds a port, pick other ports; do not stop their process.
+- Run heavy suites one at a time. On 2026-11-12, four fix branches running
+  `./check.sh --fast` alongside `./check.sh --all` pushed the load past 19:
+  Playwright's web server missed its 120 s start, every iPhone test timed
+  out, and the backend run took two hours. Finish the smoke first, then
+  check fix branches one after another. Keep fix worktrees on a short path
+  (`../anteroom-fix-<name>`), not the scratchpad: macOS caps Unix socket
+  paths at 104 bytes.
 
 ## Each run
 
@@ -198,9 +205,11 @@ fails and the likely cause. Fix one per run (see **Each run**), then delete
 its line. Before calling a failure flaky, rerun it alone and check it fails in
 code the PR didn't change.
 
-- `anteroom-ios/UITests/SandboxTests.swift` `launchSandbox`: "Multiple
-  matching elements found" for `app.tabBars.buttons[tab]` (2026-11-11). Use
-  `.firstMatch`.
+- `server/tests/test_hosted_edge.py`
+  `test_access_log_names_the_route_but_never_the_url_query_or_headers`
+  fails when run alone (`IndexError` on `lines.lines[0]`: no access log
+  lines) and passes in the full suite (2026-11-12). Likely the access
+  logger's level is only set by another test; set it in the test.
 - `CoreFlowSandboxTests.testGenerateFromTheEditorShowsASummary` at the
   `staticTexts.matching(...)` check after the reply: "Timed out while
   evaluating UI query" on GitHub's macOS runners (2026-11-10, 2026-11-11).
