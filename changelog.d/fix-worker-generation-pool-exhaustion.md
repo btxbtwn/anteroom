@@ -1,0 +1,1 @@
+- Keep concurrent draft generation from tying up database connections with repeated category work, so progress and draft saves can keep moving.
