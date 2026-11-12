@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.949 — 2026-11-12
+
+- Drafts no longer fail with a database timeout while looking up your past items of the same brand.
+
 ## 0.1.948 — 2026-11-12
 
 - Sign into ChatGPT from My Account → Settings → Providers in the desktop app, without switching to This Mac's Listings.
