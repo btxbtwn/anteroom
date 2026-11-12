@@ -243,7 +243,7 @@ async def _etsy_leaf(query: str) -> dict[str, str] | None:
     return hit
 
 
-async def attach_direct_categories(db, listing: dict, evidence: str = "") -> dict[str, Any]:
+async def attach_direct_categories(listing: dict, evidence: str = "") -> dict[str, Any]:
     """Choose the live leaves and remember them on the listing. Vendoo's category ids stay as they are."""
     current = listing.get("direct_category_ids")
     current = dict(current) if isinstance(current, dict) else {}
@@ -262,16 +262,16 @@ async def attach_direct_categories(db, listing: dict, evidence: str = "") -> dic
     markets = {market for market in ("ebay", "poshmark", "depop", "mercari")
                if not direct_category_id({"direct_category_ids": chosen}, market)}
     if markets:
+        from vendoo_studio.database import in_worker_session
         from vendoo_studio.services.agent_categories import apply_agent_categories, tree_leaves
         from vendoo_studio.services.native_category_match import native_rows
 
         # Each form's own options, matched the same way as a category change in
         # the editor. A known eBay leaf needs no network search.
         # A copy, so filling a category here does not clear the sizes generation wrote.
+        ebay = await in_worker_session(tree_leaves, "ebay")
         apply_agent_categories({**copy.deepcopy(listing), "direct_category_ids": chosen},
-                               {**native_rows(), "ebay": tree_leaves(db, "ebay")}, markets=markets)
-    # Tree reads are complete. Live API/token lookups must have the pool free.
-    db.close()
+                               {**native_rows(), "ebay": ebay}, markets=markets)
     if not direct_category_id({"direct_category_ids": chosen}, "ebay"):
         try:
             hit = await _ebay_leaf(query)

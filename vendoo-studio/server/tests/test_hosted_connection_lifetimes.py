@@ -201,10 +201,11 @@ def test_category_model_does_not_hold_the_catalog_connection(single_connection, 
                 assert other.get(CategoryTree, 'general').status == 'complete'
             return {'categories': {'general': '1'}}
 
-        monkeypatch.setattr(category_selection, '_collect_choices', choices)
-        monkeypatch.setattr(category_selection, '_ask_model', model)
-        result = asyncio.run(category_selection.select_categories(db, object(), 'Tee', '', []))
-        assert result == {'general': 'Men > Tees'}
+    monkeypatch.setattr(category_selection, '_collect_choices', choices)
+    monkeypatch.setattr(category_selection, '_ask_model', model)
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
+    result = asyncio.run(category_selection.select_categories(object(), 'Tee', '', []))
+    assert result == {'general': 'Men > Tees'}
 
 
 def test_live_category_lookup_does_not_hold_the_tree_connection(single_connection, monkeypatch):
@@ -222,8 +223,8 @@ def test_live_category_lookup_does_not_hold_the_tree_connection(single_connectio
     monkeypatch.setattr(native_category_match, 'native_rows', lambda: {})
     monkeypatch.setattr(direct_categories, '_ebay_leaf', lookup)
     monkeypatch.setattr(direct_categories, '_etsy_leaf', lookup)
-    with single_connection() as db:
-        asyncio.run(direct_categories.attach_direct_categories(db, {'title': 'Black cotton tee'}))
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
+    asyncio.run(direct_categories.attach_direct_categories({'title': 'Black cotton tee'}))
     assert len(completed) == 2
 
 
@@ -551,7 +552,8 @@ def test_native_editor_form_releases_the_connection_before_marketplace_waits(sin
     with single_connection() as db:
         db.add(Conversation(id='form-tee', title='Cotton tee'))
         db.commit()
-        form = asyncio.run(native_editor.editor_form('form-tee', 'ebay', None, db, refresh=True))
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
+    form = asyncio.run(native_editor.editor_form('form-tee', 'ebay', None, refresh=True))
     assert form['marketplace'] == 'ebay'
     assert released == ['Cotton tee']
 
@@ -693,10 +695,10 @@ def test_generated_listing_repair_releases_the_connection_before_model_waits(sin
     with single_connection() as db:
         db.add(Conversation(id='repair-tee', title='Cotton tee'))
         db.commit()
-        # The generate run reads photos right before this call, leaving a transaction open.
         fingerprint = listing_generate.photo_fingerprint(ConversationRepo(db).get_photos('repair-tee'))
-        listing = asyncio.run(listing_generate.persist_generated_listing_with_repair(
-            db, 'repair-tee', '{"title": "Cotton tee",,', object(), final_announce=False,
-            expected_revision_id='', expected_photo_fingerprint=fingerprint))
+    monkeypatch.setattr('vendoo_studio.database.SessionLocal', single_connection)
+    listing = asyncio.run(listing_generate.persist_generated_listing_with_repair(
+        'repair-tee', '{"title": "Cotton tee",,', object(), final_announce=False,
+        expected_revision_id='', expected_photo_fingerprint=fingerprint))
     assert waits == ['repair', 'fill']
     assert listing['price'] == 25

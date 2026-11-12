@@ -99,7 +99,6 @@ def listing_chat(store, monkeypatch):
             session.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    monkeypatch.setattr(chat_route, "SessionLocal", factory)
     monkeypatch.setattr("vendoo_studio.database.SessionLocal", factory)
     with TestClient(app) as client:
         yield client, conv.id
@@ -126,7 +125,7 @@ def test_a_listing_chat_message_sends_its_images_and_keeps_them(listing_chat):
     loop_threads = []
     original_attach = chat_route.attach_to_last_user_turn
 
-    async def build(conv_id, db, text, option_catalog=None):
+    async def build(conv_id, text, option_catalog=None):
         loop_threads.append(get_ident())
         return [{"role": "system", "content": "rules"}, {"role": "user", "content": text}]
 

@@ -52,17 +52,17 @@ def async_session_handlers() -> set[str]:
             if isinstance(node, ast.AsyncFunctionDef) and _depends_on(node, sessions)}
 
 
-SESSION_FACTORIES = {"SessionLocal", "session_factory"}
+SESSION_FACTORIES = {"SessionLocal", "Session", "session_factory"}
 
 
 def _own_nodes(function: ast.AsyncFunctionDef):
     """The function's own statements, leaving out nested functions and lambdas (worker-thread steps)."""
-    stack: list[ast.AST] = list(function.body)
+    nested = ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef
+    stack: list[ast.AST] = [node for node in function.body if not isinstance(node, nested)]
     while stack:
         node = stack.pop()
         yield node
-        stack.extend(child for child in ast.iter_child_nodes(node)
-                     if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef))
+        stack.extend(child for child in ast.iter_child_nodes(node) if not isinstance(child, nested))
 
 
 def _is_session(annotation: ast.expr | None) -> bool:

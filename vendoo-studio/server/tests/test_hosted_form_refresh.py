@@ -1,5 +1,5 @@
 """Hosted editors expose the same fenced form refresh as desktop editors."""
-from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,14 +15,14 @@ def test_hosted_refresh_uses_seller_session_and_revision(monkeypatch):
     app.include_router(router)
     seller_db = object()
     app.dependency_overrides[get_seller_db] = lambda: seller_db
-    refresh = AsyncMock(return_value={"revision_id": "rebuilt"})
+    refresh = Mock(return_value={"revision_id": "rebuilt"})
     monkeypatch.setattr(native_editor, "refresh_form", refresh)
     with TestClient(app) as client:
         response = client.post('/api/conversations/draft/native-marketplaces/ebay/form/refresh',
                                json={"revision_id": "previous"})
     assert response.status_code == 200
     assert response.json() == {"revision_id": "rebuilt"}
-    refresh.assert_awaited_once_with('draft', 'ebay', 'previous', seller_db)
+    refresh.assert_called_once_with(seller_db, 'draft', 'ebay', 'previous')
 
 
 @pytest.mark.parametrize('status', [404, 409, 502])
@@ -33,7 +33,7 @@ def test_hosted_refresh_preserves_refusals(monkeypatch, status):
     app.include_router(router)
     app.dependency_overrides[get_seller_db] = lambda: object()
     monkeypatch.setattr(native_editor, 'refresh_form',
-                        AsyncMock(side_effect=NativeMarketplaceError(status, 'Reload refused')))
+                        Mock(side_effect=NativeMarketplaceError(status, 'Reload refused')))
     with TestClient(app) as client:
         response = client.post('/api/conversations/draft/native-marketplaces/ebay/form/refresh',
                                json={'revision_id': 'previous'})
