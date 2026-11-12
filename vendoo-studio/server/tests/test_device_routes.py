@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.exc import DBAPIError
@@ -50,6 +51,26 @@ def test_web_process_does_not_claim_background_work(monkeypatch):
     assert create_app().state.background_worker_enabled is False
     monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'worker')
     assert create_app().state.background_worker_enabled is True
+
+
+def test_web_process_queues_drafts_for_the_worker_machines(monkeypatch):
+    from vendoo_studio.routes.hosted_tasks import drafts_run, require_worker, schedules_run
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'web')
+    web = create_app()
+    # No draft worker or schedulers run here; the worker group runs them.
+    assert getattr(web.state, 'background_worker', None) is None
+    assert drafts_run(web) and schedules_run(web)
+    require_worker(SimpleNamespace(app=web))
+
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'all')
+    alone = create_app()
+    # A single process without a running worker still refuses work it cannot run.
+    assert not drafts_run(alone) and not schedules_run(alone)
+    with pytest.raises(HTTPException) as refused:
+        require_worker(SimpleNamespace(app=alone))
+    assert refused.value.status_code == 503
 
 
 def test_a_fresh_device_route_cannot_be_stolen_or_read_by_the_seller(storage, monkeypatch):  # noqa: F811
@@ -181,3 +202,21 @@ def test_chrome_read_looks_up_the_device_route_off_the_event_loop(monkeypatch):
 
     loop_thread = asyncio.run(run())
     assert threads and loop_thread not in threads
+
+
+def test_health_fails_when_the_draft_loop_has_stopped(monkeypatch):
+    from concurrent.futures import Future
+
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'worker')
+    app = create_app()
+    finished = Future()
+    finished.set_result(None)
+    client = TestClient(app)
+    app.state.background_worker = finished
+    response = client.get('/api/health')
+    assert response.status_code == 503 and response.json()['status'] == 'worker_stopped'
+    app.state.background_worker = Future()
+    assert client.get('/api/health').status_code == 200

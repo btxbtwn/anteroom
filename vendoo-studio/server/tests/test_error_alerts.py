@@ -13,6 +13,22 @@ from vendoo_studio.services.error_alerts import AlertHandler, build_report, rend
 FAKE_KEY = "-".join(("fake", "value", "123456789"))
 
 
+@pytest.fixture(autouse=True)
+def email_store(tmp_path, monkeypatch):
+    from sqlalchemy import create_engine
+    from vendoo_studio.repositories import error_email
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'email.db'}")
+    store = error_email.EmailStore(engine)
+    store.table.create(engine)
+    with engine.begin() as connection:
+        connection.execute(store.table.insert().values(id=1, payload={}))
+    monkeypatch.setattr(error_email, 'EmailStore', lambda _engine: store)
+    monkeypatch.setenv('ANTEROOM_ERROR_EMAIL_DAILY_LIMIT', '100')
+    yield store
+    engine.dispose()
+
+
 def record_with_exception(message="Draft save failed", error=None):
     try:
         raise error or RuntimeError(f"could not save listing api_key={FAKE_KEY}")
@@ -158,33 +174,63 @@ def test_handled_browser_failure_reaches_email_worker():
         h.close()
 
 
+@pytest.mark.parametrize('seller,operator,visible', [
+    ('seller', 'operator', False), ('operator', '', False), ('operator', 'operator', True),
+])
+def test_delivery_status_is_only_visible_to_the_configured_operator(monkeypatch, seller, operator, visible):
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+    from vendoo_studio.routes.error_reports import router
+
+    monkeypatch.setenv('ANTEROOM_OPERATOR_USER_ID', operator)
+    monkeypatch.setattr(error_alerts, '_handler', SimpleNamespace(
+        delivery=SimpleNamespace(status=lambda: {'state': 'quota_paused', 'pending': 3}), dropped=0))
+    app = FastAPI()
+
+    @app.middleware('http')
+    async def identify(request: Request, call_next):
+        request.state.seller = SimpleNamespace(user_id=seller)
+        return await call_next(request)
+
+    app.include_router(router)
+    response = TestClient(app).get('/api/error-reports/delivery')
+    assert response.status_code == 200
+    data = response.json()
+    assert data['visible'] == visible
+    assert ('pending' in data) == visible
+
+
 def handler(send, clock=lambda: 0.0):
-    # Tests drive process() directly; the idle daemon thread sees an empty queue.
-    return AlertHandler(send, sleep=lambda _s: None, clock=clock)
+    return AlertHandler(send, clock=clock)
 
 
 def test_repeats_are_grouped_then_counted_in_the_next_email():
     sent, now = [], [0.0]
     h = handler(lambda s, b: sent.append((s, b)), clock=lambda: now[0])
     for _ in range(5):
-        h.process(build_report(record_with_exception()))
+        h.delivery.add(build_report(record_with_exception()))
+        h.delivery.tick()
     assert len(sent) == 1
-    now[0] = error_alerts.REPEAT_WINDOW + 1
-    h.process(build_report(record_with_exception()))
+    now[0] = 901
+    h.delivery.add(build_report(record_with_exception()))
+    h.delivery.tick()
     assert len(sent) == 2 and "(+4 more)" in sent[1][0]
     assert "Occurrences  5 since" in sent[1][1]
+    h.close()
 
 
-def test_repeats_left_at_shutdown_are_flushed():
+def test_shutdown_never_bypasses_budget_or_grouping():
     sent = []
     h = handler(lambda s, b: sent.append(s))
     for _ in range(3):
-        h.process(build_report(record_with_exception()))
-    h.flush_repeats()
-    assert len(sent) == 2 and "(+2 more)" in sent[1]
+        h.delivery.add(build_report(record_with_exception()))
+        h.delivery.tick()
+    h.close()
+    assert len(sent) == 1
+    assert h.delivery.status()['pending'] == 2
 
 
-def test_failed_delivery_is_retried():
+def test_failed_delivery_is_retained_for_later_retry():
     attempts = []
 
     def flaky(subject, body):
@@ -193,20 +239,26 @@ def test_failed_delivery_is_retried():
             raise OSError("relay down")
 
     h = handler(flaky)
-    h.process(build_report(record_with_exception()))
-    assert len(attempts) == 3
+    h.delivery.add(build_report(record_with_exception()))
+    h.delivery.tick()
+    assert len(attempts) == 1
+    assert h.delivery.status()['pending'] == 1
+    assert h.delivery.status()['state'] == 'delivery_failed'
+    h.close()
 
 
 def test_hourly_cap_stops_a_flood_and_says_so():
     sent, now = [], [0.0]
     h = handler(lambda s, b: sent.append(b), clock=lambda: now[0])
-    for i in range(error_alerts.HOURLY_CAP + 5):
+    for i in range(65):
         record = logging.LogRecord("vendoo_studio.x", logging.ERROR, f"/f{i}.py", i, "m", (), None)
-        h.process(build_report(record))
-    assert len(sent) == error_alerts.HOURLY_CAP
+        h.delivery.add(build_report(record))
+        h.delivery.tick()
+    assert len(sent) == 60
     now[0] = 3601
-    h.process(build_report(logging.LogRecord("vendoo_studio.x", logging.ERROR, "/new.py", 1, "m", (), None)))
-    assert "5 report(s) were not emailed" in sent[-1]
+    h.delivery.tick()
+    assert '5 occurrences' in sent[-1]
+    h.close()
 
 
 def test_reporter_ignores_its_own_logs_and_uvicorns_duplicate():
@@ -215,11 +267,13 @@ def test_reporter_ignores_its_own_logs_and_uvicorns_duplicate():
     dup = logging.LogRecord("uvicorn.error", logging.ERROR, __file__, 1, "Exception in ASGI application\n", (), None)
     other = logging.LogRecord("uvicorn.error", logging.ERROR, __file__, 1, "lifespan failed", (), None)
     assert not h.filter(own) and not h.filter(dup) and h.filter(other)
+    h.close()
 
 
 def test_warnings_are_emailed():
     h = handler(lambda s, b: None)
     assert h.level == logging.WARNING
+    h.close()
 
 
 @pytest.mark.parametrize("env", [{}, {"ANTEROOM_ERROR_EMAIL": "1", "ANTEROOM_SANDBOX": "1"}])
@@ -251,7 +305,7 @@ def test_enabled_install_reports_errors_and_uncaught_thread_exceptions(monkeypat
         worker.start()
         worker.join()
     finally:
-        monkeypatch.setattr(installed, "send", lambda s, b: None)
+        monkeypatch.setattr(installed.delivery, "send", lambda s, b: None)
         error_alerts.uninstall_alerts()
     assert (sys.excepthook, threading.excepthook) == hooks
     assert [r.getMessage() for r in queued] == ["boom", "handled failure", "Uncaught exception in thread broken"]

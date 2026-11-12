@@ -396,3 +396,118 @@ def test_two_sellers_can_read_and_save_settings_during_48_subscription_calls(mon
                 await asyncio.gather(*calls, return_exceptions=True)
 
         asyncio.run(run())
+
+
+@pytest.mark.parametrize(('error', 'kind'), [
+    (RuntimeError('ChatGPT HTTP 429: You have hit your usage limit'), 'rate_limited'),
+    (RuntimeError('Claude error: rate limit reached for your plan'), 'rate_limited'),
+    (TimeoutError(), 'stalled'),
+    (RuntimeError('Claude is signed out. Sign in with Claude in Settings.'), 'signed_out'),
+    (RuntimeError('ChatGPT HTTP 401: token expired'), 'signed_out'),
+    (RuntimeError('ChatGPT HTTP 400: bad schema'), 'rejected'),
+    (RuntimeError('ChatGPT HTTP 503: upstream'), 'unavailable'),
+    (RuntimeError('Claude returned an empty listing response'), 'failed'),
+])
+def test_the_mac_reports_why_a_call_failed_in_one_word(error, kind):
+    from vendoo_studio.services.mac_ai_worker import error_kind
+    assert error_kind(error) == kind
+
+
+def test_a_failed_mac_call_names_the_provider_and_the_reason():
+    from vendoo_studio.services.mac_inference import MacCallFailed
+
+    relay = MacInference()
+    relay.poll('mac', MODELS, timeout=0)
+
+    async def run():
+        work = asyncio.create_task(MacSubscriptionProvider(relay, 'chatgpt').web_search([]))
+        await asyncio.sleep(0)
+        command = relay.poll('mac', MODELS, timeout=0)
+        assert relay.reply('mac', command['id'], None, True, 'rate_limited')
+        with pytest.raises(MacCallFailed, match='ChatGPT on your Mac hit its usage limit') as failure:
+            await work
+        assert failure.value.kind == 'rate_limited'
+        assert 'keep the Mac awake' not in str(failure.value).lower()
+
+    asyncio.run(run())
+
+
+def test_a_mac_from_before_error_kinds_still_reads_as_unavailable():
+    # Removal note in services/mac_inference.py: drop with the fallback after 2027-02-01.
+    relay = MacInference()
+    relay.poll('mac', MODELS, timeout=0)
+
+    async def run():
+        work = asyncio.create_task(MacSubscriptionProvider(relay, 'chatgpt').web_search([]))
+        await asyncio.sleep(0)
+        command = relay.poll('mac', MODELS, timeout=0)
+        assert relay.reply('mac', command['id'], None, True)
+        with pytest.raises(MacUnavailable):
+            await work
+
+    asyncio.run(run())
+
+
+def test_a_call_the_mac_took_and_never_answered_is_a_stall_not_an_offline_mac(monkeypatch):
+    from vendoo_studio.services import mac_inference
+    from vendoo_studio.services.provider_deadlines import ProviderStalled
+
+    monkeypatch.setattr(mac_inference, 'INVOKE_DEADLINE_SEC', 0.05)
+    relay = MacInference()
+    relay.poll('mac', MODELS, timeout=0)
+
+    async def run():
+        work = asyncio.create_task(MacSubscriptionProvider(relay, 'chatgpt').web_search([]))
+        await asyncio.sleep(0)
+        assert relay.poll('mac', MODELS, timeout=0) is not None
+        with pytest.raises(ProviderStalled, match='ChatGPT on your Mac stopped responding while searching the web'):
+            await work
+        # A call the Mac never picked up still says to open the Mac.
+        with pytest.raises(MacUnavailable):
+            await MacSubscriptionProvider(relay, 'chatgpt').web_search([])
+
+    asyncio.run(run())
+
+
+def test_mac_calls_wait_as_long_as_the_provider_deadline():
+    from vendoo_studio.services.mac_inference import INVOKE_DEADLINE_SEC
+    from vendoo_studio.services.provider_deadlines import CALL_DEADLINE_SEC
+    assert INVOKE_DEADLINE_SEC > CALL_DEADLINE_SEC
+
+
+def test_mac_worker_sends_the_failure_kind(monkeypatch):
+    import httpx
+    from vendoo_studio.services.mac_ai_worker import MacAIWorker
+
+    worker = MacAIWorker()
+    worker._token = 'account-session'
+    replies = []
+
+    class Finished(Exception):
+        pass
+
+    class LimitedProvider(SandboxProvider):
+        async def web_search(self, messages):
+            raise RuntimeError('ChatGPT HTTP 429: secret account detail')
+
+    async def handle(request):
+        import json
+        body = json.loads(request.content)
+        if request.url.path.endswith('/reply'):
+            replies.append(body)
+            raise Finished()
+        if not replies and 'active_call' not in body:
+            return httpx.Response(200, json={'id': 'c' * 32, 'provider': 'chatgpt', 'operation': 'web_search', 'args': [[]], 'kwargs': {}})
+        await asyncio.sleep(.01)
+        return httpx.Response(204)
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr('vendoo_studio.services.chatgpt_oauth.chatgpt_signed_in', lambda: True)
+    monkeypatch.setattr('vendoo_studio.services.claude_auth.claude_signed_in', lambda: False)
+    monkeypatch.setattr('vendoo_studio.providers.chatgpt_codex.ChatGPTCodexProvider', LimitedProvider)
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs: original(transport=httpx.MockTransport(handle), **kwargs))
+    with pytest.raises(Finished):
+        asyncio.run(asyncio.wait_for(worker._run(), 5))
+    assert replies[0]['failed'] is True
+    assert replies[0]['error'] == 'rate_limited'
+    assert 'secret' not in str(replies[0])

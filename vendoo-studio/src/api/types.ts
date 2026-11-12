@@ -55,6 +55,8 @@ export interface ChatAttachmentUpload {
 /** Everything still running for a listing; chat is only done when ``busy`` is false. */
 export interface ConversationActivity {
   busy: boolean;
+  /** Something is changing the listing. A marketplace List or Update alone is busy, not writing. */
+  writing: boolean;
   items: string[];
   message_count: number;
   last_message_id: string | null;

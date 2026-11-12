@@ -9,6 +9,7 @@ waits for the seller.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -235,7 +236,8 @@ async def handle_event(
         if (source, kind) == ("ebay", "MARKETPLACE_ACCOUNT_DELETION"):
             from vendoo_studio.services.marketplace_accounts import forget_deleted_ebay_account
 
-            forget_deleted_ebay_account(_first(event.get("ids") or {}, "userId"))
+            # On the web the account is a Vault read and delete: keep it off the event loop.
+            await asyncio.to_thread(forget_deleted_ebay_account, _first(event.get("ids") or {}, "userId"))
         return []
     from vendoo_studio.services.user_settings import sale_detection_enabled
 

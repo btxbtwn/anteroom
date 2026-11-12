@@ -321,7 +321,8 @@ vendoo-studio/           Local web app (FastAPI + React)
 ## Security
 
 - Binds only to `127.0.0.1` (localhost).
-- Optional **Settings → Connections → Remote access** uses private Tailscale Serve to proxy HTTPS to that loopback port. Funnel stays off; only devices on your Tailnet can open the link. Same Anteroom process and data as on the Mac — not a second install.
+- Optional **Settings → Connections → Remote access** uses private Tailscale Serve to proxy HTTPS to that loopback port. Funnel stays off. Only the Tailscale account this Mac is signed in with can use the link (Serve names it in `Tailscale-User-Login`); other people on the tailnet and tagged devices are refused, and a tagged Mac admits no one. Same Anteroom process and data as on the Mac — not a second install.
+- Of Chrome extensions, only Anteroom Bridge may call the app: the Chrome Web Store copy, and an unpacked copy loaded from Anteroom's extension folder or this repository's `vendoo-extension/`. A developer loading it from anywhere else adds its ID to `ANTEROOM_BRIDGE_EXTENSION_IDS` (comma-separated).
 - API keys and ChatGPT tokens live in macOS Keychain, never in SQLite, browser storage, or logs.
 - Never sent to the React frontend or Chrome extension.
 - Photos are served only through the Anteroom origin (`GET /api/photos/{id}`).

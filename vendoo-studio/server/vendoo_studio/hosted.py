@@ -31,7 +31,7 @@ from vendoo_studio.services.seller_sessions import (
     SessionVerifier,
 )
 from vendoo_studio.version import app_version
-from vendoo_studio.services.background_loop import BackgroundLoop
+from vendoo_studio.services.background_loop import BackgroundLoop, give_threads
 
 
 def from_public_edge(scope) -> bool:
@@ -127,6 +127,8 @@ class ResponseHeadersMiddleware:
                 headers.setdefault("Cache-Control", "no-store")
                 headers["Referrer-Policy"] = "no-referrer"
                 headers["X-Content-Type-Options"] = "nosniff"
+                # Browsers honor this only over HTTPS, so local HTTP sandboxes are unaffected.
+                headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
                 # pywebview builds its native API methods with Function(). WebKit
                 # applies this policy to that bootstrap as well as to page scripts.
                 headers["Content-Security-Policy"] = (
@@ -227,6 +229,7 @@ class AccountResponse(BaseModel):
 def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, session_verifier: SessionVerifier | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        give_threads(asyncio.get_running_loop())
         from vendoo_studio.services.error_alerts import install_alerts, uninstall_alerts
         install_alerts()
         # ORM relationship names must resolve before a route constructs its
@@ -250,7 +253,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         from vendoo_studio.services import process_handoff
         process_handoff.reset()
         worker = None
-        start_schedulers: Callable[[], Callable[[], None]] | None = None
+        # Lease name -> what starts that set of schedulers (process_handoff.lead).
+        starts: dict[str, Callable[[], Callable[[], None]]] = {}
         stopping = threading.Event()
         backgrounds = []
 
@@ -259,40 +263,15 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             backgrounds.append(background)
             return background, background.run(coroutine)
 
-        if app.state.background_worker_enabled:
-            from vendoo_studio.database import engine
-            from vendoo_studio.services import (
-                background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler,
-                hosted_sourcing_scheduler, hosted_sale_checks, hosted_promotion_scheduler, hosted_sales_scheduler,
-            )
-            from vendoo_studio.services import background_tasks as queue
+        def scheduler_set(jobs):
             # Each service opens blocking database sessions. An offer or
             # watchdog read must not stop draft lease renewal, another service
             # or the request loop while it waits for the database.
-            from vendoo_studio.routes.assistant import answer_task
-            # Assistant answers share the draft worker; the route supplies how to answer one.
-            background_worker.register(queue.ASSISTANT, answer_task)
-            # Drafts are claimed row by row, so every Machine may run this worker.
-            _, worker = start_background(background_worker.serve(engine, stopping), 'anteroom-drafts')
-
-            def run_schedulers():
-                # Only the Machine holding the scheduler lease runs these.
-                schedulers = [
-                    # Automations still submit regenerations through the same durable queue.
-                    (hosted_automation_scheduler.serve(engine), 'anteroom-automations'),
-                    (hosted_offer_scheduler.serve(engine), 'anteroom-offers'),
-                    # Frees the marketplace slot a restart left held and reads unconfirmed results.
-                    (hosted_job_watchdog.serve(engine), 'anteroom-watchdog'),
-                    # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
-                    (hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing'),
-                    (hosted_sale_checks.serve(), 'anteroom-chrome-sales'),
-                    (hosted_promotion_scheduler.serve(), 'anteroom-promotions'),
-                    (hosted_sales_scheduler.serve(engine), 'anteroom-sales'),
-                ]
+            def start():
                 loops = []
-                for coroutine, name in schedulers:
+                for serve, name in jobs:
                     loop = BackgroundLoop(name)
-                    loop.run(coroutine)
+                    loop.run(serve())
                     loops.append(loop)
 
                 def stop():
@@ -302,12 +281,43 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                     for thread in threads:
                         thread.join()
                 return stop
-            start_schedulers = run_schedulers
+            return start
+
+        if app.state.background_worker_enabled:
+            from vendoo_studio.database import engine
+            from vendoo_studio.services import (
+                background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler,
+                hosted_sourcing_scheduler, hosted_sales_scheduler,
+            )
+            from vendoo_studio.services import background_tasks as queue
+            from vendoo_studio.routes.assistant import answer_task
+            # Assistant answers share the draft worker; the route supplies how to answer one.
+            background_worker.register(queue.ASSISTANT, answer_task)
+            # Drafts are claimed row by row, so every Machine may run this worker.
+            _, worker = start_background(background_worker.serve(engine, stopping), 'anteroom-drafts')
+            starts[process_handoff.LEASE] = scheduler_set([
+                # Automations still submit regenerations through the same durable queue.
+                (lambda: hosted_automation_scheduler.serve(engine), 'anteroom-automations'),
+                (lambda: hosted_offer_scheduler.serve(engine), 'anteroom-offers'),
+                # Frees the marketplace slot a restart left held and reads unconfirmed results.
+                (lambda: hosted_job_watchdog.serve(engine), 'anteroom-watchdog'),
+                # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
+                (lambda: hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing'),
+                (lambda: hosted_sales_scheduler.serve(engine), 'anteroom-sales'),
+            ])
+        if os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1' and app.state.process_role != 'worker':
+            from vendoo_studio.services import hosted_promotion_scheduler, hosted_sale_checks
+            # These act in sellers' Chrome tabs, which connect to the web
+            # Machine; only that process knows which tabs are connected.
+            starts[process_handoff.CHROME_LEASE] = scheduler_set([
+                (hosted_sale_checks.serve, 'anteroom-chrome-sales'),
+                (hosted_promotion_scheduler.serve, 'anteroom-promotions'),
+            ])
 
         from vendoo_studio.database import engine as handoff_engine
         # Hands the schedulers, Mac and Chrome to the next Machine when this one stops.
         _, handoff = start_background(
-            process_handoff.lead(handoff_engine, start_schedulers, stopping.set), 'anteroom-handoff',
+            process_handoff.lead(handoff_engine, starts, stopping.set), 'anteroom-handoff',
         )
         app.state.background_worker = worker
         app.state.handoff = handoff
@@ -342,8 +352,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     )
     app.state.web_dir = web_dir
     app.state.process_role = os.environ.get('ANTEROOM_PROCESS_ROLE', 'all')
-    # A web process serves sellers and device connections. Heavy scheduled work
-    # runs on a worker process once that split is deployed. One process keeps both.
+    # On Fly, `web` Machines serve sellers and device connections, and `worker`
+    # Machines run drafts and the schedulers (deploy/fly/fly.toml). The Mac, the
+    # sandbox and staging run both in one process (`all`).
     app.state.background_worker_enabled = (
         os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1' and app.state.process_role != 'web'
     )
@@ -481,11 +492,16 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     @app.get("/api/health")
     def health():
         worker = getattr(app.state, "background_worker", None)
-        return {
+        running = bool(app.state.background_worker_enabled and worker is not None and not worker.done())
+        body = {
             "status": "ok", "version": app_version(), "service": "anteroom-hosted",
-            "role": app.state.process_role,
-            "background_worker": bool(app.state.background_worker_enabled and worker is not None and not worker.done()),
+            "role": app.state.process_role, "background_worker": running,
         }
+        if app.state.background_worker_enabled and worker is not None and worker.done():
+            # The draft loop died: fail the check so Fly restarts this Machine
+            # instead of leaving queued drafts waiting on it.
+            return JSONResponse({**body, "status": "worker_stopped"}, status_code=503)
+        return body
 
     # Reading the revision scripts takes a while; they never change in a running build.
     from functools import cache

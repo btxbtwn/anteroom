@@ -20,6 +20,67 @@ from vendoo_studio.services.vendoo_import import merge_notes
 
 
 class NativeEditorTest(unittest.TestCase):
+    def test_every_marketplace_can_reload_and_save_its_stale_definition(self):
+        from vendoo_studio.services import native_contract
+
+        for market in ("ebay", "poshmark", "mercari", "depop", "etsy"):
+            with self.subTest(market=market):
+                snapshot = copy.deepcopy(self.listing)
+                snapshot[f"{market}_specifics"] = {"sellerNote": "Keep my answer"}
+                form = {"marketplace": market, "native": True, "known": True, "fields": [
+                    {"path": f"direct_category_ids.{market}", "label": "Category", "value": "new"},
+                ], "category_id": "new"}
+                snapshot[native_contract.KEY] = native_contract.capture(snapshot, {market: form}, [market])
+                other = "etsy" if market != "etsy" else "ebay"
+                snapshot[native_contract.KEY][other] = {"unavailable": True}
+                snapshot["direct_category_ids"][market] = "new"
+                revision = listing_persistence.save_revision(self.db, self.conv.id, snapshot, "native_schema")
+                self.assertTrue(native_contract.gaps(snapshot, market))
+                with patch.object(native_editor, "editor_form", new_callable=AsyncMock, return_value=form) as build:
+                    answer = self.client.post(f"{self.url}/{market}/form/refresh", json={"revision_id": revision.id})
+                self.assertEqual(answer.status_code, 200, answer.text)
+                build.assert_awaited_once_with(self.conv.id, market, revision.id, self.db, refresh=True)
+                saved = ListingRepo(self.db).get_revision(answer.json()["revision_id"]).listing_json
+                self.assertFalse(any(gap["blocking"] for gap in native_contract.gaps(saved, market)))
+                self.assertEqual(saved[f"{market}_specifics"], snapshot[f"{market}_specifics"])
+                self.assertEqual(saved["title"], snapshot["title"])
+                self.assertEqual(saved[native_contract.KEY][other], snapshot[native_contract.KEY][other])
+                self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+                self.bridge.assert_not_called()
+
+    def test_reload_uses_current_catalogs_for_local_marketplaces(self):
+        from vendoo_studio.services import native_contract
+
+        for market in ("poshmark", "mercari", "depop"):
+            revision = ListingRepo(self.db).get_current(self.conv.id).current_revision_id
+            answer = self.client.post(f"{self.url}/{market}/form/refresh", json={"revision_id": revision})
+            self.assertEqual(answer.status_code, 200, answer.text)
+            saved = ListingRepo(self.db).get_revision(answer.json()["revision_id"]).listing_json
+            self.assertTrue(saved[native_contract.KEY][market]["fields"])
+            self.assertNotIn("Reload its fields", str(native_contract.gaps(saved, market)))
+            again = self.client.post(f"{self.url}/{market}/form/refresh", json={"revision_id": answer.json()["revision_id"]})
+            self.assertEqual(again.status_code, 200, again.text)
+            self.assertEqual(again.json()["revision_id"], answer.json()["revision_id"])
+        self.bridge.assert_not_called()
+
+    def test_reload_does_not_replace_an_edit_made_while_fields_load(self):
+        async def build(*args, **kwargs):
+            listing_persistence.save_revision(self.db, self.conv.id, {**self.listing, "title": "New seller edit"}, "user_form")
+            return {"known": True, "fields": [{"path": "title", "label": "Title"}]}
+
+        with patch.object(native_editor, "editor_form", side_effect=build):
+            answer = self.client.post(f"{self.url}/mercari/form/refresh", json={"revision_id": self.rev.id})
+        self.assertEqual(answer.status_code, 409, answer.text)
+        current = ListingRepo(self.db).get_current(self.conv.id)
+        self.assertEqual(ListingRepo(self.db).get_revision(current.current_revision_id).listing_json["title"], "New seller edit")
+
+    def test_reload_failure_keeps_the_saved_revision(self):
+        for form in ({"known": False, "fields": []}, {"known": True, "fields": []}):
+            with patch.object(native_editor, "editor_form", new_callable=AsyncMock, return_value=form):
+                answer = self.client.post(f"{self.url}/mercari/form/refresh", json={"revision_id": self.rev.id})
+            self.assertEqual(answer.status_code, 502, answer.text)
+            self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, self.rev.id)
+
     def test_stale_ebay_form_rebuilds_current_choices(self):
         from vendoo_studio.services import native_contract
 

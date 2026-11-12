@@ -7,6 +7,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import { INVENTORY_KEY, refreshInventory, refreshMatching } from "../api/inventoryRefresh";
 import { setLiveUpdates } from "../api/polling";
 import { setLiveFreshness } from "../api/queryClient";
 
@@ -55,29 +56,8 @@ export async function invalidateTopics(queryClient: QueryClient, topics: Iterabl
     && wanted.some((topic) => queryKeyMatchesTopic(topic, queryKey)));
 }
 
-async function refreshMatching(queryClient: QueryClient, matches: (queryKey: QueryKey) => boolean): Promise<void> {
-  const filters = { predicate: (query: { queryKey: QueryKey }) => matches(query.queryKey) };
-  // Cancelling a browser query cannot stop synchronous work already running
-  // on the API. A change burst must not start a fresh inventory scan for each
-  // event while previous scans still occupy database connections. Wait for
-  // current reads, then fetch the change; overlapping refreshes share that
-  // next read. Merely sharing the current read could miss the newer change.
-  const running = queryClient.getQueryCache().findAll(filters)
-    .filter(query => query.state.fetchStatus === "fetching")
-    .flatMap(query => query.promise ? [query.promise] : []);
-  if (running.length) await Promise.allSettled(running);
-  await queryClient.invalidateQueries(filters, { cancelRefetch: false });
-}
-
 /** Bursts (a send writes many rows) arrive as one refresh. */
 const COALESCE_MS = 300;
-/**
- * The inventory list is the heaviest read and almost every topic covers it.
- * While a job writes changes every few hundred milliseconds, the list is
- * re-read at most this often; the last change in a burst is always fetched.
- */
-export const INVENTORY_REFRESH_MS = 5000;
-const INVENTORY_KEY = "conversations";
 const coversInventory = (topic: string) => (TOPIC_QUERY_KEYS[topic] ?? []).includes(INVENTORY_KEY);
 
 type ChannelStatus = "SUBSCRIBED" | "TIMED_OUT" | "CLOSED" | "CHANNEL_ERROR";
@@ -96,26 +76,13 @@ export function followSellerChanges(
   let pending = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let wasSubscribed = false;
-  let inventoryReadAt = -Infinity;
-  let inventoryTimer: ReturnType<typeof setTimeout> | undefined;
-  const refreshInventory = () => {
-    inventoryTimer = undefined;
-    inventoryReadAt = Date.now();
-    void refreshMatching(queryClient, (queryKey) => queryKey[0] === INVENTORY_KEY).catch(() => {});
-  };
   const flush = () => {
     timer = undefined;
     const topics = pending;
     pending = new Set();
-    const inventory = [...topics].some(coversInventory);
-    const wait = inventoryReadAt + INVENTORY_REFRESH_MS - Date.now();
-    if (!inventory || wait <= 0) {
-      if (inventory) inventoryReadAt = Date.now();
-      void invalidateTopics(queryClient, topics).catch(() => {});
-      return;
-    }
+    // The inventory list keeps the schedule it shares with the app's own saves.
     void invalidateTopics(queryClient, topics, INVENTORY_KEY).catch(() => {});
-    inventoryTimer ??= setTimeout(refreshInventory, wait);
+    if ([...topics].some(coversInventory)) refreshInventory(queryClient);
   };
   const channel = supabase.channel(`seller-changes:${userId}`).on(
     "postgres_changes",
@@ -146,7 +113,6 @@ export function followSellerChanges(
   return () => {
     stopped = true;
     if (timer) clearTimeout(timer);
-    if (inventoryTimer) clearTimeout(inventoryTimer);
     setLiveUpdates(false);
     setLiveFreshness(queryClient, false);
     void supabase.removeChannel(channel);

@@ -215,3 +215,39 @@ def test_stop_keeps_what_was_written_and_fences_the_workers_late_save(migration_
                     lambda db: background_tasks.complete_in(db, task_id, token))
         turns = client.get('/api/assistant/messages?thread_id=' + thread, headers=alice).json()
         assert [(row['role'], row['text']) for row in turns] == expected
+
+
+def test_a_queued_answer_runs_without_holding_a_database_connection(migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
+    """The answer waits minutes on a model; the claimed task row must not keep a pooled connection meanwhile."""
+    import asyncio
+    from sqlalchemy import event
+    from vendoo_studio.services import background_tasks, background_worker
+    from vendoo_studio.services.hosted_context import for_seller
+    from vendoo_studio.services.service_context import use
+
+    with _worker_client(migration_engine, monkeypatch) as client:
+        thread = client.post('/api/assistant/threads', headers=headers(signing_keys)).json()['id']
+    task_id, token = _seed_cut_off_answer(thread, lease_seconds=60)
+    active, seen = set(), []
+
+    def checkout(connection, *_args):
+        active.add(connection)
+
+    def checkin(connection, *_args):
+        active.discard(connection)
+
+    async def handler(_task_id, _token, task):
+        fields = (task.payload['question'], task.assistant_thread_id)
+        seen.append((fields, len(active)))
+        return True
+
+    monkeypatch.setitem(background_worker._handlers, background_tasks.ASSISTANT, handler)
+    event.listen(migration_engine, 'checkout', checkout)
+    event.listen(migration_engine, 'checkin', checkin)
+    try:
+        with use(for_seller(USER_ID, task_lease=(task_id, token))):
+            assert asyncio.run(background_worker._execute(task_id, token)) is True
+    finally:
+        event.remove(migration_engine, 'checkout', checkout)
+        event.remove(migration_engine, 'checkin', checkin)
+    assert seen == [(('What sold?', thread), 0)], 'The answer must not run with a database connection checked out'

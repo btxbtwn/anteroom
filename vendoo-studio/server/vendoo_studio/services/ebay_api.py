@@ -4,21 +4,31 @@ Tokens stay on the Mac. Never log request headers or persist buyer responses.
 """
 from __future__ import annotations
 
+import asyncio
 import xml.etree.ElementTree as ET
 from decimal import Decimal, InvalidOperation
 
 import httpx
 
-from vendoo_studio.services.ebay_client import TRADING_XML_DECLARATION
+from vendoo_studio.services.ebay_client import TRADING_XML_DECLARATION, _failure_for
 from vendoo_studio.services.marketplace_accounts import SignInRequired, access_token
+from vendoo_studio.services.listing_result import retry_after_seconds
 from vendoo_studio.services.marketplace_errors import marketplace_call
 
 API_URL = "https://api.ebay.com"
+# A rate-limited read waits out eBay's Retry-After this many times, when eBay
+# asks for at most MAX_WAIT_S; otherwise the seller sees the limit.
+RATE_LIMIT_RETRIES = 2
+MAX_WAIT_S = 30
 NS = {"e": "urn:ebay:apis:eBLBaseComponents"}
 
 
 class EbayError(RuntimeError):
     """A definite read failure or an explicitly rejected write."""
+
+    def __init__(self, message: str, *, retry_after_s: int | None = None):
+        super().__init__(message)
+        self.retry_after_s = retry_after_s
 
 
 class SendUnknown(RuntimeError):
@@ -42,10 +52,26 @@ def dollars(cents: int) -> str:
 
 def _check_response(response: httpx.Response) -> None:
     if response.status_code in (401, 403):
+        # eBay answers 403 when the token lacks the offers scope; reconnecting grants it.
         raise SignInRequired("Reconnect eBay to grant permission to manage offers.")
     if not response.is_success:
-        # Error bodies may contain seller or buyer details. Only expose the code.
-        raise EbayError("eBay did not accept the request. Check the listing in Seller Hub.")
+        # The same plain words as every other eBay call. Error bodies may hold
+        # seller or buyer details, so none of eBay's text goes into the message.
+        failure = _failure_for(response)
+        raise EbayError(str(failure), retry_after_s=failure.retry_after_s)
+
+
+async def _read(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    """A GET, retried after a rate limit as long as eBay asks for a short wait."""
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        response = await client.get(url, **kwargs)
+        if response.status_code != 429 or attempt == RATE_LIMIT_RETRIES:
+            return response
+        wait = retry_after_seconds(response.headers.get("retry-after"))
+        if wait is not None and wait > MAX_WAIT_S:
+            return response
+        await asyncio.sleep(wait if wait is not None else 2 ** attempt)
+    raise AssertionError("unreachable")
 
 
 @marketplace_call("ebay")
@@ -54,7 +80,8 @@ async def eligible_items() -> set[str]:
     ids: set[str] = set()
     async with httpx.AsyncClient(timeout=30) as client:
         for offset in range(0, 100000, 200):
-            response = await client.get(
+            response = await _read(
+                client,
                 f"{API_URL}/sell/negotiation/v1/find_eligible_items",
                 headers={"Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"},
                 params={"limit": 200, "offset": offset},

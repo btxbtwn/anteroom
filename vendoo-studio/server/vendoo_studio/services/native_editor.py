@@ -1,7 +1,8 @@
-"""Read-only editor definitions from the catalogs used by direct List."""
+"""Editor definitions and explicit reloads from the catalogs used by direct List."""
 from __future__ import annotations
 
 import asyncio
+import copy
 
 from sqlalchemy.orm import Session
 
@@ -52,6 +53,37 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     if marketplace == "ebay":
         return await ebay_form(snapshot)
     raise NativeMarketplaceError(404, "This marketplace has no native editor form.")
+
+
+async def refresh_form(conv_id: str, marketplace: str, revision_id: str, db: Session) -> dict:
+    """Rebuild one form and fence its saved definition against concurrent edits."""
+    from vendoo_studio.repositories.queries import RevisionConflict
+    from vendoo_studio.services import listing_persistence, native_contract
+
+    form = await editor_form(conv_id, marketplace, revision_id, db, refresh=True)
+    if form.get("known") is False or not form.get("fields"):
+        raise NativeMarketplaceError(502, "The marketplace fields could not be loaded. Your saved listing is unchanged.")
+    db.expire_all()
+    repo = ListingRepo(db)
+    current = repo.get_current(conv_id)
+    if current is None or current.current_revision_id != revision_id:
+        raise NativeMarketplaceError(409, "The listing changed while fields loaded. Reload its fields again.")
+    revision = repo.get_revision(revision_id)
+    if revision is None:
+        raise NativeMarketplaceError(404, "Listing revision not found")
+    listing = copy.deepcopy(revision.listing_json)
+    listing[native_contract.KEY] = {
+        **(listing.get(native_contract.KEY) or {}),
+        **native_contract.capture(listing, {marketplace: form}, [marketplace]),
+    }
+    if listing != revision.listing_json:
+        try:
+            revision = listing_persistence.save_revision(
+                db, conv_id, listing, "native_schema", parent_revision_id=revision_id, expected_revision_id=revision_id)
+        except RevisionConflict as exc:
+            db.rollback()
+            raise NativeMarketplaceError(409, "The listing changed while fields loaded. Reload its fields again.") from exc
+    return {"revision_id": revision.id}
 
 def field(path: str, label: str, value, **extra) -> dict:
     return {"key": path, "path": path, "label": label, "value": value if value is not None else "",

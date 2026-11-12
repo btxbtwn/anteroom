@@ -3,13 +3,13 @@ from __future__ import annotations
 import hashlib
 import os
 import uuid
-from io import BytesIO
 from pathlib import Path
 
 from fastapi import UploadFile
 from PIL import Image, ImageOps
 
 from vendoo_studio.config import ALLOWED_PHOTO_MIME, MAX_PHOTO_SIZE_MB
+from vendoo_studio.services import image_decode
 from vendoo_studio.services.photo_store import photo_store
 
 MIME_EXTENSIONS = {
@@ -41,15 +41,9 @@ def _normalize_mime(content_type: str | None, contents: bytes) -> str:
 def _heic_to_jpeg(contents: bytes) -> bytes:
     """Upright JPEG of a HEIC photo: AI models and marketplaces take JPEG, not HEIC."""
     try:
-        with Image.open(BytesIO(contents)) as img:
-            img = ImageOps.exif_transpose(img)
-            if img.mode not in ("RGB", "L"):
-                img = img.convert("RGB")
-            buf = BytesIO()
-            img.save(buf, format="JPEG", quality=HEIC_JPEG_QUALITY)
-    except Exception as exc:
+        return image_decode.jpeg(contents, quality=HEIC_JPEG_QUALITY)
+    except ValueError as exc:
         raise ValueError("File is not a valid image") from exc
-    return buf.getvalue()
 
 
 def process_bytes(contents: bytes, filename: str | None, content_type: str | None, *, collection_id: str) -> dict:
@@ -58,32 +52,26 @@ def process_bytes(contents: bytes, filename: str | None, content_type: str | Non
     if size_mb > MAX_PHOTO_SIZE_MB:
         raise ValueError(f"File too large ({size_mb:.1f}MB). Max {MAX_PHOTO_SIZE_MB}MB")
 
-    ext = os.path.splitext(filename or "image.jpg")[1].lower()
-    if mime_type in HEIC_MIME or ext in (".heic", ".heif"):
-        contents = _heic_to_jpeg(contents)
-        mime_type = "image/jpeg"
-        ext = ".jpg"
-    elif ext not in (".jpg", ".jpeg", ".png", ".webp"):
-        ext = MIME_EXTENSIONS.get(mime_type, ".jpg")
-
+    from vendoo_studio.services.hosted_photos import MAX_SIDE as HOSTED_MAX_SIDE
     from vendoo_studio.services.service_context import current
-    if current() is not None:
-        if mime_type != 'image/jpeg':
-            contents = _heic_to_jpeg(contents)
-        mime_type, ext = 'image/jpeg', '.jpg'
-    stored_name = photo_store().new_key(collection_id, ext)
-
-    checksum = hashlib.sha256(contents).hexdigest()
-
-    width = None
-    height = None
     try:
-        img = Image.open(BytesIO(contents))
-        img.load()
-        width, height = img.size
-    except Exception as exc:
-        if mime_type in {"image/jpeg", "image/png", "image/webp"}:
-            raise ValueError("File is not a valid image") from exc
+        if current() is not None:
+            # Hosted photos are stored as bounded JPEGs without EXIF or location data.
+            contents, width, height = image_decode.normalized_jpeg(contents, max_side=HOSTED_MAX_SIDE)
+            mime_type, ext = "image/jpeg", ".jpg"
+        else:
+            ext = os.path.splitext(filename or "image.jpg")[1].lower()
+            if mime_type in HEIC_MIME or ext in (".heic", ".heif"):
+                contents = _heic_to_jpeg(contents)
+                mime_type, ext = "image/jpeg", ".jpg"
+            elif ext not in (".jpg", ".jpeg", ".png", ".webp"):
+                ext = MIME_EXTENSIONS.get(mime_type, ".jpg")
+            # A small decode proves the file is a photo without holding it at full size.
+            _image, (width, height) = image_decode.decode(contents, max_side=COVER_THUMB_SIZE)
+    except ValueError as exc:
+        raise ValueError("File is not a valid image") from exc
+    stored_name = photo_store().new_key(collection_id, ext)
+    checksum = hashlib.sha256(contents).hexdigest()
 
     # Invalid downloads must not leave an untracked file behind.
     photo_store().put(stored_name, contents)
@@ -121,17 +109,11 @@ def cover_thumb_url(photo_id: str, checksum: str | None) -> str:
 
 def save_jpeg_thumbnail(contents: bytes, dest: Path, size: int) -> None:
     """Write a JPEG at most ``size`` px on a side. Readers never see a half-written file."""
-    with Image.open(BytesIO(contents)) as img:
-        img = ImageOps.exif_transpose(img)
-        img.thumbnail((size, size), Image.Resampling.LANCZOS)
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        payload = BytesIO()
-        img.save(payload, "JPEG", quality=82, optimize=True)
+    payload = image_decode.jpeg(contents, max_side=size, quality=82)
     dest.parent.mkdir(parents=True, exist_ok=True)
     partial = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.partial")
     try:
-        partial.write_bytes(payload.getvalue())
+        partial.write_bytes(payload)
         os.replace(partial, dest)
     except Exception:
         partial.unlink(missing_ok=True)

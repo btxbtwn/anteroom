@@ -466,9 +466,14 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.due(saved["id"])
         self.tick()
         self.assertEqual(len(self.promoted()), 1)
+        # A new like reaches the rule through the recent-like feed.
         self.likes[first_post] = 5
-        self.due(saved["id"])
-        self.tick()
+        row = self.db.get(PromotionAutomation, saved["id"])
+        at = _now() - timedelta(seconds=10)
+        row.like_events_since = at - timedelta(seconds=10)
+        self.db.commit()
+        self.like_feed([{"listing_id": first_post, "at": at.isoformat() + "Z"}])
+        self.check_likes()
         self.assertEqual(len(self.promoted()), 2)
 
     def test_offers_need_enough_likes_and_the_named_shipping_discount(self):
@@ -489,7 +494,11 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(self.promoted(), [])
 
     def test_bounded_offer_scans_rotate_skipped_listings_across_sessions(self):
-        saved = self.create({**OFFER, "min_likes": 10})
+        saved = self.create(OFFER)
+        # Skipped for a price floor, which a new like does not change, so every round checks again.
+        for conv, post in self.items:
+            self.db.add(MarketplaceOfferFloor(marketplace="poshmark", listing_id=post, conversation_id=conv.id, floor_cents=4900))
+        self.db.commit()
         self.enable(saved["id"])
         checked = []
         # An unlucky random order used to revisit the same two listings forever.
@@ -508,6 +517,95 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(checked, [posts[:2], [posts[2], posts[0]], posts[1:]])
         self.assertEqual(self.db.query(ListingPromotion).filter_by(state="skipped").count(), 6)
         self.assertEqual(self.db.query(ListingPromotion).filter(ListingPromotion.sent_at.is_not(None)).count(), 0)
+
+    def checked(self):
+        return [call.args[2]["listing_id"] for call in self.bridge.call_args_list if call.args[1] == "marketplace.promotion_check"]
+
+    def test_scan_waits_for_a_new_like_on_listings_with_nobody_to_offer_to(self):
+        (_c0, none), (_c1, few), (_c2, liked) = self.items
+        self.likes.update({none: 0, few: 1})
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(sorted(self.checked()), sorted([none, few, liked]))
+        self.assertEqual([sent["listing_id"] for sent in self.promoted()], [liked])
+        # Nothing new was liked: the next scans ask the marketplace nothing and journal nothing.
+        journaled = self.db.query(ListingPromotion).count()
+        for _ in range(2):
+            self.bridge.reset_mock()
+            self.due(saved["id"])
+            self.tick()
+            self.assertEqual(self.checked(), [])
+        self.assertEqual(self.db.query(ListingPromotion).count(), journaled)
+        self.assertIn("no new likes since the last check (2)", self.db.query(PromotionRun).order_by(PromotionRun.started_at.desc()).first().note)
+        # A like from the feed is checked and offered at once.
+        self.likes[none] = 3
+        row = self.db.get(PromotionAutomation, saved["id"])
+        at = _now() - timedelta(seconds=10)
+        row.like_events_since = at - timedelta(seconds=10)
+        self.db.commit()
+        self.like_feed([{"listing_id": none, "at": at.isoformat() + "Z"}])
+        self.bridge.reset_mock()
+        self.assertEqual(self.check_likes(), 1)
+        self.assertEqual(self.checked(), [none])
+        self.assertEqual([sent["listing_id"] for sent in self.promoted()], [none])
+        # A like the feed missed is still found by the weekly re-check.
+        self.db.query(ListingPromotion).filter_by(listing_id=few).update(
+            {"created_at": _now() - promotion_automations.LIKE_RECHECK["poshmark"] - timedelta(minutes=1)})
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [few])
+
+    def test_mercari_waits_a_day_before_re_checking_listings_nobody_liked(self):
+        items = self.mercari_items(3)
+        (_c0, none), (_c1, few), (_c2, liked) = items
+        self.likes.update({none: 0, few: 1})
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",
+                             "conversation_ids": [conv.id for conv, _item in items]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(sorted(self.checked()), sorted([none, few, liked]))
+        self.assertEqual([sent["listing_id"] for sent in self.promoted()], [liked])
+        # Within the day, the 15-minute scans ask Mercari nothing about them.
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [])
+        # A day later Mercari has no like feed to report new likes, so they are read again.
+        self.likes[none] = 3
+        self.db.query(ListingPromotion).filter(ListingPromotion.listing_id.in_([none, few])).update(
+            {"created_at": _now() - promotion_automations.LIKE_RECHECK["mercari"] - timedelta(minutes=1)},
+            synchronize_session=False)
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(sorted(self.checked()), sorted([none, few]))
+        self.assertEqual([sent["listing_id"] for sent in self.promoted()], [none])
+
+    def test_nobody_to_offer_to_refusal_waits_for_a_new_like(self):
+        conv, post = self.items[0]
+
+        async def refuse(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.promotion_check":
+                return {"ok": False, "error": "Depop has nobody to send an offer to on this listing.", "error_code": "rejected",
+                        "like_count": 0}
+            return await self.answer(job, message_type, payload, timeout)
+        self.bridge.side_effect = refuse
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [post])
+        self.assertEqual(self.db.query(ListingPromotion).one().like_count, 0)
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [])
 
     def test_offer_scan_uses_latest_check_for_this_rule_and_marketplace_only(self):
         saved = self.create(OFFER)

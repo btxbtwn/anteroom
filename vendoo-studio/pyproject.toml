@@ -1,6 +1,6 @@
 [project]
 name = "vendoo-studio"
-version = "0.1.909"
+version = "0.1.941"
 description = "Local web app for generating and automating Vendoo marketplace listings"
 requires-python = ">=3.12"
 dependencies = [
@@ -42,6 +42,8 @@ dev = [
     "pgserver==0.1.4",
     "pytest>=8.3",
     "pytest-xdist>=3.6",
+    # CI divides the backend suite between shards with it.
+    "pytest-split==0.11.0",
     "ruff>=0.15",
     "vulture>=2.16",
     "vendoo-studio[desktop]",
@@ -70,6 +72,12 @@ anteroom = "vendoo_studio.cli.main:main"
 # app install from it (scripts/locked-requirements.sh); `uv lock` refreshes it.
 [tool.uv]
 environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
+
+# The build backend, locked with its hash like everything else.
+# scripts/install-locked.sh installs it from the lock and builds the app
+# without build isolation, so nothing unpinned is fetched from PyPI.
+[dependency-groups]
+build = ["setuptools>=75.0"]
 
 [build-system]
 requires = ["setuptools>=75.0"]

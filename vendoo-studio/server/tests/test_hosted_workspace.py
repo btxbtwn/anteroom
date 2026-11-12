@@ -581,6 +581,8 @@ def test_activity_names_a_running_marketplace_action_for_the_seller(cloud, signi
         db.commit()
     activity = client.get(f'/api/conversations/{identity}/activity', headers=alice).json()
     assert activity['busy'] is True
+    # Listing on one marketplace never locks List on the others.
+    assert activity['writing'] is False
     assert activity['items'] == ['Poshmark: Listing…']
 
 

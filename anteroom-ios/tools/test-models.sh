@@ -83,6 +83,10 @@ echo "Test sign-in messages"
 xcrun swiftc Sources/Session/SignInMessages.swift Tests/SignInMessagesTests.swift -o "$RUNNER_TEMP/sign-in-tests"
 "$RUNNER_TEMP/sign-in-tests"
 
+echo "Test which failed sign-in renewals sign out"
+xcrun swiftc Sources/Session/SignInRenewal.swift Tests/SignInRenewalTests.swift -o "$RUNNER_TEMP/sign-in-renewal-tests"
+"$RUNNER_TEMP/sign-in-renewal-tests"
+
 echo "Test eBay and Etsy sign-in return links"
 xcrun swiftc Sources/Session/MarketplaceSignInReturn.swift Tests/MarketplaceSignInReturnTests.swift -o "$RUNNER_TEMP/marketplace-sign-in-tests"
 "$RUNNER_TEMP/marketplace-sign-in-tests"

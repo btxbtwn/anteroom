@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from vendoo_studio.services import browser_bridge
 RECORDABLE = {"draft": {"mercari"}, "offers": {"mercari", "depop"}}
 RECORDINGS_DIR = Path(DATA_DIR) / "recordings"
 _tasks: dict[tuple[str, str], asyncio.Task] = {}
+log = logging.getLogger(__name__)
 
 
 def _path(marketplace: str, goal: str) -> Path:
@@ -32,6 +34,11 @@ async def _run(marketplace: str, goal: str) -> None:
         )
     except browser_bridge.BrowserBridgeError as exc:
         result = {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        # Nobody awaits this task: an unexpected failure is logged and saved
+        # as the result, or the seller would only see the recording stop.
+        log.exception("%s %s recording failed", marketplace, goal)
+        result = {"ok": False, "error": f"The recording failed: {exc}"}
     RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
     saved = {**(result if isinstance(result, dict) else {"ok": False, "error": "Chrome sent no recording."}),
              "started_at": started_at, "finished_at": datetime.now(UTC).isoformat()}

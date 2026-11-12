@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import inspect
+import re
 import tempfile
 import threading
 import uuid
@@ -14,6 +15,9 @@ import httpx
 
 from vendoo_studio.config import HOSTED_URL
 from vendoo_studio.services.mac_inference import OPERATIONS
+from vendoo_studio.services.provider_deadlines import ProviderStalled, with_deadlines
+
+_STATUS = re.compile(r'\bHTTP (\d{3})\b')
 
 
 async def subscription_providers():
@@ -24,13 +28,35 @@ async def subscription_providers():
 
     providers = {}
     if await asyncio.to_thread(chatgpt_signed_in):
-        providers['chatgpt'] = ChatGPTCodexProvider()
+        providers['chatgpt'] = with_deadlines(ChatGPTCodexProvider())
     if await asyncio.to_thread(claude_signed_in):
-        providers['claude'] = ClaudeProvider()
+        providers['claude'] = with_deadlines(ClaudeProvider())
     return providers
 
 
+def error_kind(exc):
+    """Why a call failed, as one word the server can show; never the provider's text."""
+    if isinstance(exc, (ProviderStalled, TimeoutError, httpx.TimeoutException)):
+        return 'stalled'
+    text = str(exc)
+    status = getattr(exc, 'status', None)
+    if status is None and (match := _STATUS.search(text)):
+        status = int(match.group(1))
+    lowered = text.lower()
+    if status == 429 or 'rate limit' in lowered or 'usage limit' in lowered:
+        return 'rate_limited'
+    if status in (401, 403) or 'signed out' in lowered or 'not signed in' in lowered:
+        return 'signed_out'
+    if isinstance(exc, httpx.TransportError) or (status is not None and status >= 500):
+        return 'unavailable'
+    if isinstance(exc, ValueError) or (status is not None and 400 <= status < 500):
+        return 'rejected'
+    return 'failed'
+
+
 async def execute(command, provider):
+    if provider is None:
+        raise RuntimeError('Not signed in to this subscription on this Mac')
     operation = command.get('operation')
     if operation not in OPERATIONS:
         raise ValueError('Unsupported inference operation')
@@ -71,16 +97,52 @@ class MacAIWorker:
         self._owner = None
         self._lock = threading.Lock()
         self._thread = None
+        self._loop = None
+        self._task = None
+        self._closed = False
+        self._paused = False
+        self._connection = 'signed_out'
+        self._active_calls = 0
+
+    def status(self):
+        with self._lock:
+            return {'connection': self._connection, 'paused': self._paused, 'active_calls': self._active_calls}
+
+    def set_paused(self, paused):
+        with self._lock:
+            self._paused = bool(paused)
+
+    def close(self):
+        with self._lock:
+            self._closed = True
+            self._token = self._owner = None
+            loop, task, thread = self._loop, self._task, self._thread
+        if loop is not None and task is not None and not loop.is_closed():
+            loop.call_soon_threadsafe(task.cancel)
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=15)
 
     def session(self, token, owner):
         with self._lock:
+            if self._closed:
+                return
+            if owner != self._owner or not token:
+                self._connection = 'connecting' if token else 'signed_out'
             self._token = token
             self._owner = owner
             if token and (self._thread is None or not self._thread.is_alive()):
-                self._thread = threading.Thread(target=lambda: asyncio.run(self._run()), daemon=True, name='mac-subscription-worker')
+                self._thread = threading.Thread(target=self._thread_main, daemon=True, name='mac-subscription-worker')
                 self._thread.start()
 
+    def _thread_main(self):
+        try:
+            asyncio.run(self._run())
+        except asyncio.CancelledError:
+            pass
+
     async def _run(self):
+        with self._lock:
+            self._loop, self._task = asyncio.get_running_loop(), asyncio.current_task()
         worker = uuid.uuid4().hex
         active = {}
 
@@ -97,6 +159,9 @@ class MacAIWorker:
                     with self._lock:
                         token = self._token
                         owner = self._owner
+                        paused, closed = self._paused, self._closed
+                    if closed:
+                        return
                     await cancel([identity for identity, (account, _task) in active.items()
                                   if account != owner or not token])
                     if not token:
@@ -105,22 +170,38 @@ class MacAIWorker:
                     providers = await subscription_providers()
                     models = {name: {'vision_model': provider.vision_model, 'listing_model': provider.listing_model}
                               for name, provider in providers.items()}
+                    if paused:
+                        models = {}
                     headers = {'Authorization': 'Bearer ' + token}
                     for identity, (_account, task) in list(active.items()):
                         if task.done():
                             del active[identity]
                             task.result()
+                    with self._lock:
+                        self._active_calls = len(active)
                     try:
                         response = await client.post('/api/mac-ai/next', headers=headers, json={
                             'worker': worker, 'providers': models,
-                            'available': True,
+                            'available': not paused,
                         })
                         with self._lock:
                             unchanged = self._owner == owner and self._token is not None
                         if not unchanged:
                             continue
+                        with self._lock:
+                            self._connection = ('connected' if response.status_code in (200, 204) else
+                                                'in_use' if response.status_code == 409 else
+                                                'sign_in_required' if response.status_code in (401, 403) else 'offline')
                         if response.status_code == 200:
                             command = response.json()
+                            with self._lock:
+                                now_paused = self._paused
+                            if now_paused:
+                                await client.post('/api/mac-ai/reply', headers=headers, json={
+                                    'worker': worker, 'identity': command['id'], 'result': None, 'failed': True,
+                                    'error': 'paused',
+                                })
+                                continue
 
                             async def answer(command, provider, owner, models):
                                 async def watch():
@@ -152,12 +233,14 @@ class MacAIWorker:
                                         return
                                     result = work.result()
                                     body = {'result': result, 'failed': False}
-                                except Exception:
-                                    body = {'result': None, 'failed': True}
+                                except Exception as exc:
+                                    body = {'result': None, 'failed': True, 'error': error_kind(exc)}
                                 finally:
                                     for task in (work, pulse):
                                         task.cancel()
                                     await asyncio.gather(work, pulse, return_exceptions=True)
+                                    with self._lock:
+                                        self._active_calls = max(0, self._active_calls - 1)
                                 with self._lock:
                                     current_token = self._token if self._owner == owner else None
                                 if not current_token:
@@ -169,24 +252,36 @@ class MacAIWorker:
                                 except httpx.HTTPError:
                                     pass
                             active[command['id']] = (owner, asyncio.create_task(answer(command, providers.get(command.get('provider')), owner, models)))
+                            with self._lock:
+                                self._active_calls = len(active)
                         elif response.status_code != 204:
                             await asyncio.sleep(5)
+                        if paused:
+                            await asyncio.sleep(1)
                     except httpx.HTTPError:
+                        with self._lock:
+                            self._connection = 'offline'
                         await asyncio.sleep(5)
             finally:
                 await cancel(list(active))
+                with self._lock:
+                    self._active_calls = 0
+                    self._connection = 'signed_out'
 
 
 class MacAIAPI:
-    def __init__(self, window):
+    def __init__(self, window, worker=None):
         self._window = window
-        self._worker = MacAIWorker()
+        self._worker = worker if worker is not None else MacAIWorker()
 
-    def connect_chatgpt_worker(self, token=None, owner=None):
+    def _trusted_origin(self):
         window = self._window()
         origin = urlsplit(window.get_current_url() or '') if window is not None else None
         expected = urlsplit(HOSTED_URL)
-        if origin is None or (origin.scheme, origin.netloc) != (expected.scheme, expected.netloc):
+        return origin is not None and (origin.scheme, origin.netloc) == (expected.scheme, expected.netloc)
+
+    def connect_chatgpt_worker(self, token=None, owner=None):
+        if not self._trusted_origin():
             return {'ok': False}
         if token is not None and (not isinstance(token, str) or not 0 < len(token) <= 16384):
             return {'ok': False}

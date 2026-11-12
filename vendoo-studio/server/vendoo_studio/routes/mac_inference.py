@@ -7,7 +7,7 @@ from typing import Literal
 from sqlalchemy.exc import SQLAlchemyError
 
 from vendoo_studio.services.device_routes import claim, lookup, replay_instance
-from vendoo_studio.services.mac_inference import MacUnavailable, relay_for
+from vendoo_studio.services.mac_inference import ErrorKind, MacUnavailable, relay_for
 from vendoo_studio.services.service_context import current
 
 router = APIRouter(prefix='/api/mac-ai')
@@ -82,13 +82,16 @@ class Reply(BaseModel):
     identity: str = Field(pattern=r'^[0-9a-f]{32}$')
     result: dict | list | None = None
     failed: bool = False
+    # Why a failed call failed. Macs from before error kinds send none; see
+    # the removal note in services/mac_inference.py.
+    error: ErrorKind | None = None
 
 
 @router.post('/reply')
 async def reply(body: Reply):
     if pinned := await asyncio.to_thread(_pinned, 'mac', claim_route=False):
         return pinned
-    if not relay().reply(body.worker, body.identity, body.result, body.failed):
+    if not relay().reply(body.worker, body.identity, body.result, body.failed, body.error):
         raise HTTPException(404, 'This inference call is no longer active')
     return {'ok': True}
 

@@ -36,6 +36,10 @@ def test_queue_claim_is_private_and_submissions_remain_seller_scoped(storage):  
             queue.enqueue(db, identity, 'generate', {})
         assert error.value.status_code == 404
     with sessions(owner)() as db:
+        with pytest.raises(HTTPException) as busy:
+            queue.require_idle(db, identity)
+        assert busy.value.status_code == 409
+        assert busy.value.headers == {'X-Anteroom-Reason': 'draft_busy'}
         with pytest.raises(HTTPException) as error:
             queue.enqueue(db, identity, 'chat', {})
         assert error.value.status_code == 409

@@ -6,12 +6,13 @@ REPO="$(cd "$ROOT/.." && pwd)"
 ZIP="$ROOT/release/Anteroom-macos.zip"
 # Builds from before the rename update from this asset; see package-macos-app.sh.
 LEGACY_ZIP="$ROOT/release/List-This-Studio-macos.zip"
+CONNECTOR_ZIP="$ROOT/release/Anteroom-Connector-macos.zip"
 INFO="$ROOT/release/build_info.json"
 TAG="${VENDOO_STUDIO_RELEASE_TAG:-studio-macos}"
 DEFAULT_TITLE="Anteroom (macOS)"
 GITHUB_REPO="${VENDOO_STUDIO_GITHUB_REPO:-btxbtwn/anteroom}"
 
-for archive in "$ZIP" "$LEGACY_ZIP"; do
+for archive in "$ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP"; do
   if [[ ! -f "$archive" ]]; then
     echo "Missing $archive. Run scripts/package-macos-app.sh first." >&2
     exit 1
@@ -98,10 +99,11 @@ NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull reques
 # it if a later build turns out broken. The rolling tag above is what updates
 # follow; these are never marked latest.
 VERSIONED_TAG="${TAG}-v${VERSION:-unknown}-${SHORT}"
+NOTES+=$'\n\nConnector only\nDownload Anteroom-Connector-macos.zip to use your ChatGPT and Claude subscriptions from the web or iPhone without the full desktop app. Keep the connector running and the Mac awake and online. Claude subscription sign-in requires Claude Code.\n'
 if gh release view "$VERSIONED_TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
-  gh release upload "$VERSIONED_TAG" "$ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
+  gh release upload "$VERSIONED_TAG" "$ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
 else
-  gh release create "$VERSIONED_TAG" "$ZIP" "$INFO" \
+  gh release create "$VERSIONED_TAG" "$ZIP" "$CONNECTOR_ZIP" "$INFO" \
     --latest=false \
     --title "Anteroom ${VERSION:-unknown} (${SHORT}): ${TITLE}" \
     --notes "$NOTES" \
@@ -110,10 +112,10 @@ else
 fi
 
 if [[ "$RELEASE_EXISTS" == 1 ]]; then
-  gh release upload "$TAG" "$ZIP" "$LEGACY_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
+  gh release upload "$TAG" "$ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
   gh release edit "$TAG" --title "$TITLE" --notes "$NOTES" --latest --repo "$GITHUB_REPO"
 else
-  gh release create "$TAG" "$ZIP" "$LEGACY_ZIP" "$INFO" \
+  gh release create "$TAG" "$ZIP" "$LEGACY_ZIP" "$CONNECTOR_ZIP" "$INFO" \
     --latest \
     --title "$TITLE" \
     --notes "$NOTES" \

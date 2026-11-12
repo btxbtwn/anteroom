@@ -5,10 +5,23 @@ import asyncio
 import concurrent.futures
 import threading
 
+# asyncio sizes the pool behind ``asyncio.to_thread`` from the CPU count: five
+# threads on the one-vCPU hosted Machine. Every database step of an async route
+# and every photo copy to Storage shares it, so a few slow copies stalled every
+# other request. Give each loop the 40 threads FastAPI gives plain ``def`` routes.
+LOOP_THREADS = 40
+
+
+def give_threads(loop: asyncio.AbstractEventLoop) -> None:
+    """Size ``loop``'s ``asyncio.to_thread`` pool for waiting on I/O, not for the CPU count."""
+    loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(
+        max_workers=LOOP_THREADS, thread_name_prefix="anteroom-loop"))
+
 
 class BackgroundLoop:
     def __init__(self, name: str):
         self.loop = asyncio.new_event_loop()
+        give_threads(self.loop)
         self.thread = threading.Thread(target=self.loop.run_forever, name=name, daemon=True)
         self.thread.start()
 

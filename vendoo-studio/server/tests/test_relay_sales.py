@@ -213,6 +213,16 @@ class RecordSalesTest(unittest.TestCase):
         self.assertEqual(self.handle({"source": "etsy", "eventType": "listing.updated", "ids": {}}), [])
         self.assertEqual(self.handle({"source": "ebay", "eventType": "MARKETPLACE_ACCOUNT_DELETION", "ids": {"userId": ["x"]}}), [])
 
+    def test_account_deletion_runs_its_vault_work_off_the_event_loop(self):
+        import threading
+
+        threads = []
+        with mock.patch.object(marketplace_accounts, "forget_deleted_ebay_account",
+                               lambda user_id: threads.append(threading.current_thread())):
+            self.handle({"source": "ebay", "eventType": "MARKETPLACE_ACCOUNT_DELETION", "ids": {"userId": ["x"]}})
+        self.assertEqual(len(threads), 1)
+        self.assertIsNot(threads[0], threading.main_thread())
+
     def test_sale_detection_off_skips_the_sale(self):
         from vendoo_studio.services import user_settings
 

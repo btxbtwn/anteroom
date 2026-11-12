@@ -6,6 +6,158 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.941 — 2026-11-12
+
+- The website only updates once every change since the last update has passed its tests, and a queued update is no longer dropped.
+
+## 0.1.940 — 2026-11-11
+
+- Asking chat to set a SKU now saves it. Chat still can't make up a SKU on its own.
+
+## 0.1.939 — 2026-11-11
+
+- Renaming a listing in the same save as an Item Details change keeps the new name.
+
+## 0.1.938 — 2026-11-11
+
+- Reading eBay or Etsy stock after a sale no longer fails partway on the hosted app.
+
+## 0.1.937 — 2026-11-11
+
+- Chat on the Mac no longer drops a reply while it is still looking at your photos.
+
+## 0.1.936 — 2026-11-11
+
+- On the website, listings that are no longer drafts no longer offer Add Photos, which could not work there; they say photos can be added while a listing is a draft, as the iPhone app does.
+
+## 0.1.935 — 2026-11-11
+
+- A photo added after deleting others now goes at the end instead of jumping ahead and becoming the cover.
+
+## 0.1.934 — 2026-11-11
+
+- Keep pages fast while drafts generate: hosted drafts and scheduled work now run on their own server.
+
+## 0.1.933 — 2026-11-11
+
+- Anteroom Bridge checks that a Mercari listing is yours and still on sale before it delists it, and keeps its saved sign-in and approvals away from web pages.
+- Anteroom Bridge now needs Chrome 120 or later, asks for two fewer site permissions, and describes what it does more plainly in Chrome.
+
+## 0.1.932 — 2026-11-11
+
+- Keep the web app responsive while the assistant answers, photos upload or are deleted, and pages load.
+- Keep Etsy and eBay signed in when two parts of Anteroom refresh the sign-in at the same moment.
+- Tell you the draft worker is unavailable instead of waiting forever when a draft task never starts.
+
+## 0.1.931 — 2026-11-11
+
+- If eBay times out or reports a conflict while creating or publishing a listing, Anteroom now asks you to check eBay instead of treating it as safe to list again, so a listing is never doubled.
+- eBay offers wait out a short eBay rate limit instead of failing, and say plainly when eBay is limiting requests or having trouble.
+- An eBay account-closure notice no longer briefly holds up the web app while it forgets that account.
+- eBay and relay calls reuse open connections, so they start faster.
+
+## 0.1.930 — 2026-11-11
+
+- The web app stays smooth while drafts generate: it saves its offline copy of your inventory at most once a second instead of after every update.
+- A chat, assistant answer or listing generation whose connection silently dies now reconnects after 20 seconds instead of waiting forever.
+- Saving a field, starting a chat and finishing a send no longer reload your whole inventory each time. A saved price shows in the list right away.
+- The web app opens in your chosen light or dark theme again; the browser had been blocking the script that sets it.
+
+## 0.1.929 — 2026-11-11
+
+- Automations never offer to delist or relist an item on a marketplace where it may have just sold, even when its stock can't be read.
+- A marketplace recording that fails for an unexpected reason now shows what went wrong instead of stopping silently.
+- Online, category search no longer stays stuck when building its index hangs.
+- Fixing a garbled listing now follows your own title and description formulas from Settings.
+
+## 0.1.928 — 2026-11-11
+
+- Anteroom Bridge 0.2.68 runs only the photos Anteroom approved for a listing, and needs Anteroom's signed approval for every action from the web, including reading your sales, likes and imports and cancelling a listing.
+
+## 0.1.927 — 2026-11-11
+
+- Install the exact, verified package versions everywhere, including first-time setup.
+
+## 0.1.926 — 2026-11-11
+
+- Very large photos are turned away with a clear message instead of slowing Anteroom down, on the Mac and online.
+- Scout photo checks no longer pause the rest of the app while the photos are read.
+- Online, Scout photos are stored the same way as listing photos: resized and without location data.
+- An eBay message image that is too large to open now says so instead of failing with a server error.
+- Downloading photos from a link no longer freezes the app when the website's address is slow to look up.
+
+## 0.1.925 — 2026-11-11
+
+- When ChatGPT or Claude on your Mac can't finish a request, Anteroom now says why (usage limit, signed out, stopped responding, rejected) instead of always asking you to wake your Mac.
+- Web searches through ChatGPT or Claude on your Mac get the same ten minutes as other searches instead of stopping after five.
+- Claude, Gemini, xAI, Mistral and OpenRouter keys now retry a busy or briefly failing request a couple of times before giving up, and no longer resend a rejected request.
+- Claude keys reuse cached prompts, so repeated listing steps cost less and start faster, and Claude's web search uses its newer, more focused search on current models.
+- OpenRouter only sends listing requests to hosts that follow Anteroom's listing format.
+
+## 0.1.924 — 2026-11-11
+
+- Item details you type no longer undo a category or delist record Anteroom saved to the same listing a moment earlier.
+- Reloading for an update, or leaving the page, now saves item details you just typed instead of dropping them.
+
+## 0.1.923 — 2026-11-11
+
+- Offers to likers on Mercari no longer re-check listings nobody can get an offer on every 15 minutes. Anteroom re-checks them once a day, since Mercari has no likes feed to watch, which cuts thousands of daily Mercari requests.
+
+## 0.1.922 — 2026-11-11
+
+- Remote access over Tailscale now only lets in your own Tailscale account, not other people or tagged devices on your tailnet.
+- Only the Anteroom Bridge extension can talk to Anteroom; other Chrome extensions are refused.
+- The app only offers updates that are newer than the version you have.
+
+## 0.1.921 — 2026-11-11
+
+- Keep the web app from switching back to older code when updates finish out of order, and refresh category lists whenever they differ from the ones that ship.
+
+## 0.1.920 — 2026-11-11
+
+- Offers to likers on Depop and Poshmark no longer re-check listings nobody can get an offer on every 15 minutes. Anteroom waits for a new like (it watches the likes feed every minute) and re-checks those listings once a week in case a like was missed, which cuts thousands of daily Depop requests.
+
+## 0.1.919 — 2026-11-11
+
+- Sales checks on Depop, Poshmark and Mercari now stop at orders Anteroom already has, and re-read your whole order history every six hours, so they send far fewer requests.
+
+## 0.1.918 — 2026-11-11
+
+- Group warning emails into hourly digests, keep pending error reports across restarts, and pause delivery when Google rejects mail for exceeding its quota.
+- Show the operator when email delivery is paused and how much of the configured daily email budget has been used.
+
+## 0.1.917 — 2026-11-11
+
+- The app no longer stalls for everyone when you list one item on several marketplaces at once.
+
+## 0.1.916 — 2026-11-11
+
+- Keep edits made while chat is working and save them when it finishes, so field reloads are no longer blocked by a failed save.
+
+## 0.1.915 — 2026-11-11
+
+- List on another marketplace while one is still listing, instead of waiting for it to finish.
+
+## 0.1.914 — 2026-11-11
+
+- Depop offers to likers now say "Depop has nobody to send an offer to on this listing" for listings without likers, or whose likers already have an offer, instead of Depop's confusing "Does the product have variants" refusal.
+
+## 0.1.913 — 2026-11-11
+
+- Reloading marketplace fields on the website now saves the rebuilt form and clears outdated category warnings.
+
+## 0.1.912 — 2026-11-11
+
+- Use Anteroom Connector for Mac to connect your ChatGPT and Claude subscriptions to the web app and iPhone without installing the full desktop app. Pause new requests or quit from its menu-bar icon.
+
+## 0.1.911 — 2026-11-11
+
+- Listing generation leaves SKU blank unless you supply one, and chat keeps your existing SKU.
+
+## 0.1.910 — 2026-11-11
+
+- Reload fields on any marketplace tab to refresh its saved category choices without changing your answers.
+
 ## 0.1.909 — 2026-11-11
 
 - Use your Mac’s signed-in ChatGPT or Claude subscription to generate listings from the web app or iPhone. Keep your Mac awake, online, and Anteroom open; subscription credentials stay on your Mac.

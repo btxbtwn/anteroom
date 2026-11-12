@@ -36,7 +36,7 @@ Every permission in `manifest.json` has a caller. Remove a permission when its l
 | Permission | Why |
 |---|---|
 | `alarms` | Wakes the worker to reconnect to Anteroom. |
-| `storage` | Keeps the Anteroom pairing token and the journal of marketplace actions, so a lost reply is read back instead of repeated. |
+| `storage` | Keeps the Anteroom pairing token and the journal of marketplace actions, so a lost reply is read back instead of repeated. The worker limits it to itself and the extension's own page (`TRUSTED_CONTEXTS`), so content scripts cannot read it. |
 | `cookies` | Checks whether the seller is signed in to a marketplace. Cookie values stay in Chrome. |
 | `declarativeNetRequestWithHostAccess` | Sets the headers marketplace requests need. |
 | `scripting` | Runs marketplace requests inside the seller's signed-in marketplace tab. |

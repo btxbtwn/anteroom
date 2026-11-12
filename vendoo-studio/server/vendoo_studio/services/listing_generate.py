@@ -374,10 +374,9 @@ REPAIR_LISTING_PROMPT = (
     "- Output a single fenced ```json block with the listing object.\n"
     "- Keep every usable field from the broken output; fix syntax only.\n"
     "- Include title, description, and price when possible.\n"
-    "- Title order is Brand Size Vibe Item Color Fit (max 80 chars) when those fields exist.\n"
-    "- Description must keep Flaws:/Measurements: line structure when present.\n"
-    "- Do not rewrite formula-compliant title/description into freeform marketing copy.\n"
-    "- Do not add commentary outside the JSON fence."
+    "- Keep the title and description in the seller's formulas below; do not rewrite "
+    "formula-compliant title/description into freeform marketing copy.\n"
+    "- Do not add commentary outside the JSON fence.\n\n{formulas}"
 )
 
 FINALIZE_GAPS_PROMPT = (
@@ -428,11 +427,13 @@ async def repair_listing_json(provider, raw_text: str) -> dict | None:
     if provider is None or not looks_like_listing_attempt(raw_text):
         return None
 
+    from vendoo_studio.services.skill_formulas import listing_formula_rules
+
     clipped = (raw_text or "").strip()
     if len(clipped) > MAX_REPAIR_CHARS:
         clipped = clipped[:MAX_REPAIR_CHARS]
     messages = [
-        {"role": "system", "content": REPAIR_LISTING_PROMPT},
+        {"role": "system", "content": REPAIR_LISTING_PROMPT.format(formulas=listing_formula_rules())},
         {"role": "user", "content": clipped},
     ]
     try:
@@ -1430,6 +1431,10 @@ def persist_generated_listing(
             listing["sku"] = seller_sku
         else:
             listing.pop("sku", None)
+        # Marketplace copies from the model must not override the seller's SKU.
+        for key, value in listing.items():
+            if key.endswith("_specifics") and isinstance(value, dict):
+                value.pop("sku", None)
         package = str(seller.get("packageDimensions") or "").strip()
         if package:
             listing["package_dimensions_in"] = package

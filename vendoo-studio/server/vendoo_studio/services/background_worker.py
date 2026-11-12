@@ -40,22 +40,28 @@ async def _execute(task_id, token):
         queue.check_write_lease(db, task_id, token)
         if task is None:
             raise queue.TaskLeaseExpired()
-        if (handler := _handlers.get(task.kind)) is not None:
-            db.rollback()
-            return await handler(task_id, token, task)
         conversation_id, kind, payload = task.conversation_id, task.kind, task.payload
-        if conversation_id is None:
-            raise ValueError('A draft task needs its listing')
-        repo = ConversationRepo(db)
-        conversation = repo.get(conversation_id)
-        if (conversation is None
-                or (repo.current_revision_id(conversation_id) or '') != payload['revision_id']
-                or photo_fingerprint(repo.get_photos(conversation_id)) != payload['photos']
-                or (conversation.notes or '') != payload['notes']):
-            raise RuntimeError('The draft changed before this task started. Review it and retry.')
+        if (handler := _handlers.get(kind)) is not None:
+            # The handler runs after this session closes, with the row detached:
+            # reading an attribute a rollback expired would check a connection
+            # out again and hold it for the whole model answer.
+            db.expunge(task)
+        else:
+            if conversation_id is None:
+                raise ValueError('A draft task needs its listing')
+            repo = ConversationRepo(db)
+            conversation = repo.get(conversation_id)
+            if (conversation is None
+                    or (repo.current_revision_id(conversation_id) or '') != payload['revision_id']
+                    or photo_fingerprint(repo.get_photos(conversation_id)) != payload['photos']
+                    or (conversation.notes or '') != payload['notes']):
+                raise RuntimeError('The draft changed before this task started. Review it and retry.')
         # Release the lease lock before waiting for a provider. Every save
         # obtains it again through SellerDatabaseSession.before_flush.
         db.rollback()
+    if handler is not None:
+        return await handler(task_id, token, task)
+    assert conversation_id is not None  # a draft task without one was refused above
     if kind == 'generate':
         response = await generate_listing(conversation_id)
     elif kind == 'chat':

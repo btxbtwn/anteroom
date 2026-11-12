@@ -1,7 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import { mergeDetailNotes, mergeMeasurements, parseNotes, type ItemDetailsData } from "../components/itemDetailsData";
+import { detailNoteChanges, mergeMeasurements, parseNotes, type ItemDetailsData } from "../components/itemDetailsData";
 import { splitLabels } from "../components/itemLabels";
+import { notifyUnsavedWork, registerUnsavedWork } from "../lib/unsavedWork";
 
 class ItemDetailsEdits {
   private state: { patch: Partial<ItemDetailsData> | null; saving: boolean; error: string | null } = { patch: null, saving: false, error: null };
@@ -12,8 +13,15 @@ class ItemDetailsEdits {
 
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  /** Details waiting out the debounce, being saved, or kept after a failed save. */
+  get pending() {
+    return Boolean(this.state.patch) || this.flushing;
+  }
   private update(state: typeof this.state) {
     this.state = state;
+    if (this.pending) unsaved.add(this);
+    else unsaved.delete(this);
+    notifyUnsavedWork();
     this.listeners.forEach(listener => listener());
   }
 
@@ -28,6 +36,9 @@ class ItemDetailsEdits {
   };
 
   retry = () => { if (!this.flushing && this.state.patch) void this.flush(); };
+
+  /** Saves typing still waiting out the debounce, e.g. when the page is about to reload. */
+  commit = () => { if (this.timer) void this.flush(); };
 
   private async flush() {
     if (this.flushing || !this.state.patch) return;
@@ -44,8 +55,8 @@ class ItemDetailsEdits {
           api.conversations.get(this.id),
           this.client.ensureQueryData({ queryKey: ["settings-package-dimensions"], queryFn: api.settings.packageDimensions }),
         ]);
-        const notes = mergeDetailNotes(conversation.notes, submitted, `${dimensions.length}x${dimensions.width}x${dimensions.height}`);
-        const result = await api.conversations.update(this.id, { notes });
+        const changes = detailNoteChanges(conversation.notes, submitted, `${dimensions.length}x${dimensions.width}x${dimensions.height}`);
+        const result = await api.conversations.update(this.id, { note_changes: changes });
         await this.client.cancelQueries({ queryKey: ["conversation", this.id], exact: true });
         this.client.setQueryData(["conversation", this.id], result);
         const pending = Object.fromEntries(Object.entries(this.state.patch).filter(([key, value]) =>
@@ -63,9 +74,16 @@ class ItemDetailsEdits {
       this.update({ ...this.state, saving: false, error: error instanceof Error ? error.message : "Could not save seller details" });
     } finally {
       this.flushing = false;
+      this.update(this.state);
     }
   }
 }
+
+const unsaved = new Set<ItemDetailsEdits>();
+registerUnsavedWork({
+  pending: () => unsaved.size > 0,
+  commit: () => unsaved.forEach(edits => edits.commit()),
+});
 
 const queues = new WeakMap<QueryClient, Map<string, ItemDetailsEdits>>();
 export function itemDetailsEdits(client: QueryClient, id: string) {

@@ -252,6 +252,12 @@ describe("marketplaces section", () => {
     expect(row(orphan, "Depop")).toContain("Unconfirmed");
   });
 
+  it("keeps List open on another marketplace while one is listing", () => {
+    const html = render({ mercari: { state: "publishing", running: true } }, {}, { selected: "poshmark" });
+    expect(row(html, "Mercari")).toContain("Listing…");
+    expect(enabledButton(html, "List…")).toBe(true);
+  });
+
   it("shows a List that waits for a busy marketplace as Waiting, with Cancel instead of List", () => {
     waitlist.add({ convId: "item", title: "Tee", marketplace: "depop", kind: "list", revisionId: "current" });
     try {

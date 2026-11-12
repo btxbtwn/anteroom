@@ -1,14 +1,19 @@
 import gzip
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
+from vendoo_studio import category_trees_cli
 from vendoo_studio.services.category_tree import MARKETPLACES
 from vendoo_studio.services.category_tree_seed import (
     ensure_seeded_category_trees,
     export_seed,
     import_seed,
+    seed_matches,
     trees_complete,
 )
 
@@ -124,6 +129,39 @@ class CategoryTreeSeedTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(trees_complete(self.target))
         self.assertIsNone(ensure_seeded_category_trees(self.target, self.seed))
+
+    def test_seed_matches_compares_the_database_rows_with_the_seed(self):
+        import sqlite3
+
+        export_seed(self.source, self.seed)
+        self.assertFalse(seed_matches(self.target, self.seed))
+        import_seed(self.target, self.seed)
+        self.assertTrue(seed_matches(self.target, self.seed))
+
+        # A changed label, a changed tree timestamp or an extra node all count.
+        for statement in (
+            "UPDATE category_tree_nodes SET label='Renamed' WHERE marketplace='ebay'",
+            "UPDATE category_trees SET updated_at='2026-02-02 00:00:00.000000' WHERE marketplace='etsy'",
+            "INSERT INTO category_tree_nodes VALUES ('ebay', 'extra', '__root', 'Extra', 'Extra', 1, 0, 1)",
+        ):
+            import_seed(self.target, self.seed)
+            con = sqlite3.connect(self.target)
+            con.execute(statement)
+            con.commit()
+            con.close()
+            self.assertFalse(seed_matches(self.target, self.seed), statement)
+
+    def test_import_if_changed_leaves_a_matching_database_alone(self):
+        export_seed(self.source, self.seed)
+        argv = ["import", "--if-changed", "--db", str(self.target), "--seed", str(self.seed)]
+        with patch("vendoo_studio.category_trees_cli.import_seed", wraps=import_seed) as imported:
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(category_trees_cli.main(argv), 0)
+            self.assertEqual(imported.call_count, 1)
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(category_trees_cli.main(argv), 0)
+            self.assertEqual(imported.call_count, 1)
+        self.assertTrue(json.loads(out.getvalue())["unchanged"])
 
 
 if __name__ == "__main__":

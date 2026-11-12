@@ -185,6 +185,21 @@ class PackagedUpdateTest(unittest.TestCase):
         self.assertEqual(status["summary"], "")
         self.assertIsNone(status["error"])
 
+    def test_older_published_build_is_not_an_update(self):
+        for version in ("0.0.9", "not-a-version"):
+            remote = {"sha": "bbb2222", "short_sha": "bbb2222", "version": version, "ref": "main",
+                      "zip_sha256": "ab" * 32, "title": "Older build"}
+            with patch.object(packaged_updates, "fetch_remote_build_info", return_value=remote):
+                status = packaged_updates.check_for_packaged_update()
+            self.assertFalse(status["available"], version)
+            self.assertEqual(status["commits"], [])
+
+    def test_newer_version_is_an_update(self):
+        remote = {"sha": "bbb2222", "short_sha": "bbb2222", "version": "0.1.10", "ref": "main",
+                  "zip_sha256": "ab" * 32, "title": "Newer build"}
+        with patch.object(packaged_updates, "fetch_remote_build_info", return_value=remote):
+            self.assertTrue(packaged_updates.check_for_packaged_update()["available"])
+
     def test_check_surfaces_cdn_errors(self):
         with patch.object(
             packaged_updates,

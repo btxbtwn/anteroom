@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import httpx
 from jsonschema import Draft202012Validator
 
+from vendoo_studio.providers import http_retry
 from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM, PHOTO_EVIDENCE_SCHEMA
 from vendoo_studio.providers.xiaomi_mimo import (
     VISION_MAX_SIDE,
@@ -28,6 +29,7 @@ from vendoo_studio.providers.xiaomi_mimo import (
 )
 from vendoo_studio.services import live_trace
 from vendoo_studio.services.ai_key_catalog import KeyProvider
+from vendoo_studio.services.shared_http import http_client
 from vendoo_studio.version import app_version
 
 # OpenRouter shows the calling app on the seller's activity page.
@@ -148,7 +150,7 @@ class ChatCompletionsProvider:
             headers["X-Title"] = APP_TITLE
         return headers
 
-    def _http_error(self, resp: httpx.Response) -> str:
+    def _http_error(self, resp: httpx.Response) -> http_retry.ProviderHTTPError:
         try:
             payload = resp.json()
         except Exception:
@@ -161,13 +163,14 @@ class ChatCompletionsProvider:
             detail = payload.get("message") or payload.get("detail")
         text = " ".join(str(detail or resp.text or "").split())[:240]
         label = self.spec.label
-        return f"{label} HTTP {resp.status_code}: {text}" if text else f"{label} HTTP {resp.status_code}"
+        message = f"{label} HTTP {resp.status_code}: {text}" if text else f"{label} HTTP {resp.status_code}"
+        return http_retry.ProviderHTTPError(message, resp.status_code)
 
     async def list_model_entries(self) -> list[ModelEntry]:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(f"{self.base_url}/models", headers=self._headers())
+        async with http_client() as client:
+            resp = await http_retry.send(lambda: client.get(f"{self.base_url}/models", headers=self._headers(), timeout=20))
         if resp.status_code >= 400:
-            raise RuntimeError(self._http_error(resp))
+            raise self._http_error(resp)
         data = resp.json().get("data") or []
         entries: dict[str, ModelEntry] = {}
         for item in data:
@@ -241,6 +244,9 @@ class ChatCompletionsProvider:
             return
         except EmptyCompletionError as exc:
             first = exc
+        except (http_retry.ProviderHTTPError, httpx.TransportError):
+            # Already retried; the same request without streaming would only repeat it.
+            raise
         except Exception:
             if yielded:
                 raise
@@ -295,10 +301,11 @@ class ChatCompletionsProvider:
 
     async def _post(self, body: dict, timeout: float = 300, *, endpoint: str = "chat/completions") -> dict:
         with model_usage.observe(self.name, str(body.get("model") or "")) as call:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(f"{self.base_url}/{endpoint}", headers=self._headers(), json=body)
+            async with http_client() as client:
+                resp = await http_retry.send(lambda: client.post(
+                    f"{self.base_url}/{endpoint}", headers=self._headers(), json=body, timeout=timeout))
             if resp.status_code >= 400:
-                raise RuntimeError(self._http_error(resp))
+                raise self._http_error(resp)
             payload = resp.json()
             call.usage(payload.get("usage"), anthropic=False)
             return payload
@@ -323,13 +330,13 @@ class ChatCompletionsProvider:
     async def _stream(self, messages: list[dict], model: str, *, reasoning: bool = True):
         with model_usage.observe(self.name, model) as call:
             body = self._body(messages, model, reasoning=reasoning, stream=True, stream_options={"include_usage": True})
-            async with httpx.AsyncClient(timeout=300) as client:
-                async with client.stream(
-                    "POST", f"{self.base_url}/chat/completions", headers=self._headers(), json=body
+            async with http_client() as client:
+                async with http_retry.stream(
+                    client, "POST", f"{self.base_url}/chat/completions", headers=self._headers(), json=body, timeout=300,
                 ) as resp:
                     if resp.status_code >= 400:
                         await resp.aread()
-                        raise RuntimeError(self._http_error(resp))
+                        raise self._http_error(resp)
                     content_chars = 0
                     reasoning_chars = 0
                     finish = ""
@@ -393,7 +400,12 @@ class OpenRouterProvider(ChatCompletionsProvider):
         # field reply into an 81-second wait, so try the fastest host for the
         # same model first. Fallback to the other hosts stays on.
         # https://openrouter.ai/docs/guides/routing/provider-selection
-        return {**super()._body(messages, model, reasoning=reasoning, **extra), "provider": {"sort": "throughput"}}
+        provider: dict = {"sort": "throughput"}
+        if "response_format" in extra:
+            # Hosts that ignore a strict schema would return free text; send
+            # the request only to hosts that honour every parameter.
+            provider["require_parameters"] = True
+        return {**super()._body(messages, model, reasoning=reasoning, **extra), "provider": provider}
 
     async def web_search(self, messages: list[dict]) -> dict:
         from vendoo_studio.providers.chatgpt_codex import web_search_answer
