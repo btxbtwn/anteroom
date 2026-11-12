@@ -1,0 +1,1 @@
+- Keep starting generations and sending draft messages from tying up database connections while checking your AI provider.
