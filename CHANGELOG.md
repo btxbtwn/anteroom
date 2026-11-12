@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.958 — 2026-11-12
+
+- Group repeated marketplace offer-preview refusals across listings so one problem does not flood error emails. Keep the listing details and failure reason in each report.
+
 ## 0.1.957 — 2026-11-12
 
 - Add a load test that measures how quickly pages open and edits save while several sellers generate drafts, run against the local sandbox only.
