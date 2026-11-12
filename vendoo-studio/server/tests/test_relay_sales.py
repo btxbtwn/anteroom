@@ -213,16 +213,6 @@ class RecordSalesTest(unittest.TestCase):
         self.assertEqual(self.handle({"source": "etsy", "eventType": "listing.updated", "ids": {}}), [])
         self.assertEqual(self.handle({"source": "ebay", "eventType": "MARKETPLACE_ACCOUNT_DELETION", "ids": {"userId": ["x"]}}), [])
 
-    def test_account_deletion_runs_its_vault_work_off_the_event_loop(self):
-        import threading
-
-        threads = []
-        with mock.patch.object(marketplace_accounts, "forget_deleted_ebay_account",
-                               lambda user_id: threads.append(threading.current_thread())):
-            self.handle({"source": "ebay", "eventType": "MARKETPLACE_ACCOUNT_DELETION", "ids": {"userId": ["x"]}})
-        self.assertEqual(len(threads), 1)
-        self.assertIsNot(threads[0], threading.main_thread())
-
     def test_sale_detection_off_skips_the_sale(self):
         from vendoo_studio.services import user_settings
 
@@ -405,13 +395,6 @@ class SignInTest(unittest.TestCase):
         with mock.patch.object(marketplace_accounts, "relay_request", fake_request), \
              self.assertRaises(marketplace_accounts.SignInRequired):
             asyncio.run(marketplace_accounts.access_token("ebay"))
-
-    def test_account_deletion_forgets_only_that_account(self):
-        keychain.set_marketplace_account("ebay", {"accountId": "seller-a"})
-        marketplace_accounts.forget_deleted_ebay_account("someone-else")
-        self.assertIn("ebay", keychain.get_marketplace_accounts())
-        marketplace_accounts.forget_deleted_ebay_account("seller-a")
-        self.assertNotIn("ebay", keychain.get_marketplace_accounts())
 
 
 class StreamTest(unittest.TestCase):

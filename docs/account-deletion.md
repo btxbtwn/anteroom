@@ -76,3 +76,30 @@ Each function takes the owner from `anteroom_private.seller_id()`, the verified
 claim the API sets on the transaction, and refuses without one. On Supabase
 the migration runs as `postgres`, which may delete from `auth.users`. Where a
 table does not exist (CI's Postgres, the local sandboxes), that step is skipped.
+
+## When eBay deletes a seller's eBay account
+
+eBay's [Marketplace Account Deletion](https://developer.ebay.com/marketplace-account-deletion)
+policy asks every app to delete the data it holds about an eBay user once eBay
+reports the account closed. The relay (`webhook-relay/`) verifies the
+notification, unlinks the account and passes only the eBay user ID to the
+seller whose connected account it names; buyers' accounts never reach
+Anteroom, and Anteroom keeps no buyer names, addresses or messages from eBay.
+
+`services/ebay_account_deletion.py` runs on the Mac (SQLite, Keychain) and on
+the web (the seller's own database session under row security, Vault), in a
+worker thread. When the notice names the connected eBay account it deletes:
+
+- the eBay sign-in: tokens, eBay user ID and username;
+- the saved eBay business policies and item locations;
+- each item's eBay listing record (`marketplace_listings` rows for eBay:
+  listing, offer and SKU IDs, eBay photo URLs, eBay's messages);
+- eBay action receipts and eBay offer rules, approvals and sends kept under
+  that account's ID.
+
+It keeps the seller's own items, photos and listing text, and the sales ledger
+(order and line numbers, dates and amounts, no buyer details), which is the
+seller's record of their own income and which tax rules require them to keep.
+The sign-in is deleted last, so a failure part way is retried in full, and a
+replayed notice finds no matching account and does nothing. The log line counts
+what was deleted and names no account.
