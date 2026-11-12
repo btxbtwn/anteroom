@@ -136,7 +136,8 @@ Every run, in this order:
      a blank "New Listing" draft's row menu also matches it. After a reload
      the editor's fields are empty until the listing loads, so poll the Title
      box for the edited value before calling the edit lost, and confirm with
-     `GET /api/conversations/<id>/listing`. On a phone the first
+     `GET /api/conversations/<id>/listing`. The journey reports
+     `listingPhotos`: 3 is expected; 0 on a phone is #1517. On a phone the first
      `input[type=file]` on the page is the chat composer's (6 images at
      most), not the photo tray's;
    - hosted web (`./sandbox.sh --hosted`, UI 5175, API 4320, sign in as
