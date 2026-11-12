@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from datetime import UTC, datetime, timedelta
 
@@ -178,3 +179,29 @@ class GenerationHistoryTest(unittest.TestCase):
         self.assertIn("### PRICING Formula", rules)
         self.assertIn("### Seller History During Generation", rules)
         self.assertIn("Keep sales evidence, cost, profit, and pricing reasoning out", rules)
+
+
+class HistoryCandidatesReadSmallFieldsTest(GenerationHistoryTest):
+    def test_brand_candidates_are_chosen_without_reading_saved_forms(self):
+        """Saved forms make listing_json megabytes; filtering every listing on it timed out."""
+        from sqlalchemy import event
+
+        match = self.add_item()
+        self.add_item(brand="Adidas")
+        statements: list[str] = []
+
+        def record(_conn, _cursor, statement, *_args):
+            statements.append(statement)
+
+        event.listen(self.engine, "before_cursor_execute", record)
+        try:
+            result = self.context()
+        finally:
+            event.remove(self.engine, "before_cursor_execute", record)
+        self.assertEqual(result["sales"]["count"], 1)
+        self.assertEqual(result["sales"]["examples"][0]["title"], match.title)
+        filters = [clause for statement in statements
+                   for clause in re.split(r"\bWHERE\b", statement)[1:] if "lower(trim(" in clause]
+        self.assertTrue(filters)
+        for clause in filters:
+            self.assertNotIn("listing_json", clause)
