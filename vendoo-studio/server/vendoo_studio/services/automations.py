@@ -69,6 +69,7 @@ DOWN_STATE = "down, needs relist"
 WAITING_APPROVAL = "waiting for approval"
 FIELD_NAMES = {"title", "description", "brand", "condition", "size", "sku", "department", "category_path"}
 MAX_ATTEMPTS = 3
+UPDATE_FIELDS = ("schedule", "filters", "actions", "marketplaces", "price_repeat")
 RETRY_WAIT = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=15))
 BUSY_WAIT = timedelta(seconds=30)
 STALE_RUN = timedelta(minutes=20)
@@ -239,12 +240,15 @@ def proposal_from_block(db: Session, block: str, *, now: datetime | None = None)
         task = _find_named(db, data)
         if task is None:
             return {"op": "update", "ready": False, "issues": ["That automation was not found."], "actions": []}
-        body = {"prompt": data.get("prompt"), "timezone": data.get("timezone") or task.timezone, "name": data.get("name") or task.name}
-        for key in ("schedule", "filters", "actions", "marketplaces"):
-            if data.get(key) is not None:
-                body[key] = data[key]
-        if not data.get("prompt") and not any(data.get(key) is not None for key in ("schedule", "filters", "actions", "marketplaces")):
+        named = [key for key in UPDATE_FIELDS if data.get(key) is not None]
+        if not data.get("prompt") and not named:
             return {"op": "update", "id": task.id, "ready": False, "issues": ["Say what to change."], "actions": []}
+        body = {"prompt": data.get("prompt"), "timezone": data.get("timezone") or task.timezone, "name": data.get("name") or task.name}
+        if named:
+            # The proposal is the whole task after the change: what the model left out stays as saved.
+            body.update(schedule=task.schedule, filters=task.filters, actions=task.actions,
+                        marketplaces=task.marketplaces, price_repeat=task.price_repeat)
+            body.update({key: data[key] for key in named})
         spec = compile_spec(body, now=now, allow_incomplete=True)
         spec.update(op="update", id=task.id)
         return spec
@@ -260,7 +264,7 @@ def confirm_proposal(db: Session, proposal: dict, *, now: datetime | None = None
         return pause_automation(db, str(proposal.get("id") or ""))
     body = {key: proposal.get(key) for key in ("name", "prompt", "timezone", "schedule", "filters", "actions", "marketplaces", "price_repeat")}
     if op == "update":
-        body["activate"] = True
+        # Saves the task as the card showed it; a paused task stays paused.
         return update_automation(db, str(proposal["id"]), body, now=now)
     body["activate"] = True
     return create_automation(db, body, now=now)
